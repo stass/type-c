@@ -45,7 +45,8 @@ is unsigned int, not int. GCC spells the types in another order and reads
 the same target.
 
   $ case $(uname -m) in
-  >   x86_64) architecture=x86 char_signed=true wchar_type=int float128=1 ;;
+  >   x86_64|amd64) architecture=x86 char_signed=true wchar_type=int
+  >     float128=1 ;;
   >   aarch64) architecture=AArch64 char_signed=false
   >     wchar_type="unsigned int" float128=0 ;;
   >   *) echo "no expected model for $(uname -m)" ;;

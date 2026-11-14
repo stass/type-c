@@ -718,6 +718,11 @@ types (design 13.3).
   nodes that share a range is outermost, and it holds only because
   Clang writes a node's range before its children. A field with each
   record's depth among the expressions would state it.
+- [Low] test/run/target.t keys the expected plain-char signedness,
+  wchar_t and __float128 on `uname -m` (x86_64, amd64, aarch64), a hand
+  list that each new host spelling extends; take the expectations from
+  the backend's own macros (__CHAR_UNSIGNED__, __WCHAR_TYPE__,
+  __SIZEOF_FLOAT128__) instead.
 
 ## Design questions without a gate yet
 
