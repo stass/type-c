@@ -330,6 +330,8 @@ let constant_expressions () =
   evaluates_int "0 && 1 / 0" "0";
   evaluates_int "1 || (1 << 99)" "1";
   evaluates_int "0 ? (1, 2) : 3" "3";
+  evaluates_int "2 ?: 1 / 0" "2";
+  evaluates_int "0 ?: 3" "3";
   evaluates_int "sizeof(int) + sizeof(long) + sizeof(char *)" "20";
   evaluates_int ~target:ilp32 "sizeof(long) + sizeof(void (*)(void))" "8";
   evaluates_int "sizeof(_Complex double) + sizeof(long double)" "32";

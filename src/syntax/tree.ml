@@ -135,12 +135,16 @@ and expression_node =
   | Binary of binary_operator * expression * expression
   | Conditional of {
       condition : expression;
-      if_true : expression;
+      if_true : expression option;
+          (** [None] in GNU [a ?: b], whose value is [a]'s if it is not
+              zero; [a] is evaluated once *)
       if_false : expression;
     }
   | Assignment of assignment_operator * expression * expression
   | Comma of expression * expression
   | Statement_expression of block  (** GNU [(] compound-statement [)] *)
+  | Label_address of identifier
+      (** GNU [&&] label: the label's address, a [void *] *)
   | Va_arg of { list : expression; type_name : type_name }
       (** [__builtin_va_arg], which [va_arg] expands to *)
   | Offsetof of {
@@ -365,6 +369,7 @@ and statement_node =
       body : statement;
     }
   | Goto of identifier
+  | Computed_goto of expression  (** GNU [goto *] expression [;] *)
   | Continue
   | Break
   | Return of expression option
@@ -380,9 +385,19 @@ and label_node =
       (** GNU [case low ... high] *)
   | Default_label
 
-(** The braces of a compound statement and the block items between them
-    (C11 6.8.2). *)
-and block = block_item list spanned
+(** The braces of a compound statement and what is between them: the
+    GNU local label declarations, which come before everything else, and
+    the block items (C11 6.8.2). *)
+and block = block_node spanned
+
+and block_node = {
+  local_labels : local_label_declaration list;
+  items : block_item list;
+}
+
+(** GNU [__label__ a, b;]: at least one label whose scope is the block,
+    not the function. The span runs from [__label__] to the [;]. *)
+and local_label_declaration = identifier list spanned
 
 (** Declarations and statements in any order. *)
 and block_item = Block_declaration of declaration | Block_statement of statement

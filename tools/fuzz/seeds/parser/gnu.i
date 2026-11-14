@@ -11,6 +11,10 @@ int g(int n, va_list ap)
   __asm__ volatile ("" : "=r"(y) : "0"(y) : "memory");
   y += __builtin_va_arg(ap, int);
   y += __builtin_offsetof(struct p, i) + __alignof__(int);
+  y = y ?: ({ __label__ out; goto out; out: 1; });
+  static void *t[] = { &&a, &&b };
+  goto *t[y & 1];
+a: b:
   return y;
 }
 __complex__ double z;

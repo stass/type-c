@@ -1153,7 +1153,10 @@ scope boundaries would have to agree with the parser's at every point.
 **GNU profile.** The front end accepts the extensions that system headers
 and common code use: attributes, `__extension__`, alternate keyword
 spellings, assembler labels and statements, `typeof`, statement
-expressions, the variable-argument and `offsetof` builtins, a table of
+expressions, label addresses and computed goto (`&&label`, `goto *p`),
+local labels (`__label__`), the conditional without a middle operand
+(`a ?: b`, typed as `a ? a : b` with `a` evaluated once), the
+variable-argument and `offsetof` builtins, a table of
 builtin functions with their types, the typedef names that GCC and
 Clang declare before the first token (`__builtin_va_list`, and
 `__int128_t` and `__uint128_t` where the target has `__int128`),

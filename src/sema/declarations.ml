@@ -1069,7 +1069,10 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
       let condition = evaluate state ~evaluated condition in
       let truth = Integer_constant.truth condition in
       let if_true =
-        evaluate state ~evaluated:(evaluated && truth = Some true) if_true
+        match if_true with
+        | Some if_true ->
+            evaluate state ~evaluated:(evaluated && truth = Some true) if_true
+        | None -> condition
       in
       let if_false =
         evaluate state ~evaluated:(evaluated && truth = Some false) if_false
@@ -1100,7 +1103,7 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
   | Comma _ | String _ | Compound_literal _ | Subscript _ | Call _ | Member _
   | Pointer_member _ | Post_increment _ | Post_decrement _
   | Unary ((Address | Indirection | Pre_increment | Pre_decrement), _)
-  | Assignment _ | Statement_expression _ | Va_arg _ ->
+  | Assignment _ | Statement_expression _ | Label_address _ | Va_arg _ ->
       not_constant expression
 
 (* 6.6p6: a cast to an integer type, of an integer constant expression or

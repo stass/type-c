@@ -706,6 +706,35 @@ let gnu_statement_cases =
     statement_case "__extension__ in a block"
       "__extension__ int a = 1; __extension__ __extension__ (long)a++;"
       "(declaration (int) (init a 1)) (expr (cast (type long) (post++ a)))";
+    statement_case "a dispatch table and a computed goto"
+      "static void *t[] = { &&a, &&b }; goto *t[i]; a: ; b: ;"
+      "(declaration (static void) (init (pointer (array t)) ({} \
+       (label-address a) (label-address b)))) (goto* (index t i)) (label a \
+       ;) (label b ;)";
+    statement_case "a computed goto takes a comma expression" "goto *a, b;"
+      "(goto* (, a b))";
+    statement_case "label addresses are operands"
+      "x = &&b - &&a; y = a && &&b; z = (char *)&&a;"
+      "(expr (= x (- (label-address b) (label-address a)))) (expr (= y (&& a \
+       (label-address b)))) (expr (= z (cast (type char pointer) \
+       (label-address a))))";
+    case "labels are not in the scope of ordinary identifiers"
+      "typedef int T; void f(void) { __label__ T; void *p = &&T; T: ; T x; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (__label__ T) (declaration (void) (init (pointer p) \
+       (label-address T))) (label T ;) (declaration (T) x)))";
+    statement_case "local label declarations"
+      "__label__ a, b; __label__ c; int x; a: b: c: ;"
+      "(__label__ a b) (__label__ c) (declaration (int) x) (label a (label b \
+       (label c ;)))";
+    statement_case "local labels in a statement expression"
+      "x = ({ __label__ out; goto out; out: 1; });"
+      "(expr (= x (({}) (block (__label__ out) (goto out) (label out (expr \
+       1))))))";
+    expression_case "a conditional without a middle operand" "a ?: b"
+      "(?: a _ b)";
+    expression_case "conditionals without middle operands chain"
+      "a ?: b ? c : d ?: e" "(?: a _ (?: b c (?: d _ e)))";
   ]
 
 (* [__extension__] makes no node: the node around it holds it. *)
@@ -717,10 +746,33 @@ let gnu_span_cases =
     case "spans of attributes" "int f(void) __attribute__((a, b(1)));"
       "(declaration@0-16 (int@0-0) (declarator@1-15 (function@1-4 f@1-1 \
        (@3-3 void@3-3)) (attributes a@8-8 (b@10-13 ( 1 )@11-13))))";
+    case "spans of local labels and computed goto"
+      "void f(void) { __label__ a, b; goto *&&a; a: ; }"
+      "(define@0-19 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-19 (__label__@6-10 a@7-7 b@9-9) (goto*@11-15 \
+       (label-address@13-14 a@14-14)) (label@16-18 a@16-17 ;@18-18)))";
+    case "spans of a conditional without a middle operand" "int x = a ?: b;"
+      "(declaration@0-7 (int@0-0) (init@1-6 x@1-1 (?:@3-6 a@3-3 _ b@6-6)))";
   ]
 
 let gnu_error_cases =
   [
+    case "a label address of a constant" "void *p = && 1;"
+      "error: in.i:1: expected a label after `&&`, found `1`";
+    case "a label address takes no postfix" "void *p = &&a[0];"
+      "error: in.i:1: expected `;` after a declaration, found `[`";
+    case "a computed goto without a target" "void f(void) { goto *; }"
+      "error: in.i:1: expected an expression, found `;`";
+    case "a computed goto without its semicolon" "void f(void) { goto *p }"
+      "error: in.i:1: expected `;` after `goto *`, found `}`";
+    case "__label__ without a label" "void f(void) { __label__; }"
+      "error: in.i:1: expected a label name, found `;`";
+    case "__label__ with a trailing comma" "void f(void) { __label__ a,; }"
+      "error: in.i:1: expected a label name, found `;`";
+    case "__label__ after a statement" "void f(void) { ; __label__ a; }"
+      "error: in.i:1: expected an expression, found `__label__`";
+    case "__label__ at file scope" "__label__ a;"
+      "error: in.i:1: expected a declaration, found `__label__`";
     case "an attribute without its parentheses" "int x __attribute__(a);"
       "error: in.i:1: expected `((` after `__attribute__`, found `a`";
     case "unclosed attribute arguments" "int x __attribute__((a(1, 2;"
@@ -927,6 +979,7 @@ let failed_chain_cases () =
       ("binary operators", "int x = " ^ chain " + " ";");
       ("assignments", "int x = " ^ chain " = " ";");
       ("conditionals", "int x = " ^ chain " ? a : " ";");
+      ("omitted middle operands", "int x = " ^ chain " ?: " ";");
       ("comma operators", "int x = (" ^ chain ", " ");");
       ("sizeof", "int x = " ^ repeat length "sizeof " ^ "a;");
       ("unary operators", "int x = " ^ repeat length "- " ^ "a;");
@@ -964,6 +1017,7 @@ let failed_chain_cases () =
       ("nullability qualifiers", "int *" ^ repeat length "_Nonnull " ^ "p;");
       ("statement expressions in a row", in_body (repeat length "({ a; }); "));
       ("__extension__", "int x = " ^ repeat length "__extension__ " ^ "a;");
+      ("local label declarations", in_body (repeat length "__label__ a; "));
       ( "range designators",
         "int a[] = {" ^ repeat length "[0 ... 1] = 1, " ^ "};" );
       ( "offsetof designators",

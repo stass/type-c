@@ -314,7 +314,7 @@ let keyword_specifier_word state offset keyword =
   | Attribute -> Some Attribute_word
   | Break | Case | Continue | Default | Do | Else | For | Goto | If | Return
   | Sizeof | Switch | While | Alignof | Generic | Imaginary | Static_assert
-  | Asm | Extension | Builtin_va_arg | Builtin_offsetof ->
+  | Asm | Extension | Label | Builtin_va_arg | Builtin_offsetof ->
       None
 
 (* The specifier that the token [offset] places ahead begins. A typedef
@@ -468,17 +468,20 @@ let string_literal state =
   | [] -> fail_expected state "a string literal"
   | pieces -> pieces
 
+(* One or more items that commas separate. *)
+let one_or_more state read =
+  let rec loop items =
+    let items = read state :: items in
+    if accept state P.Comma then loop items else List.rev items
+  in
+  loop []
+
 (* Items that commas separate, none where a [:] or a [)] follows: the
    sections of extended assembler. *)
 let comma_separated state read =
   match peek state with
   | Punctuator_token (P.Colon | P.Right_paren) -> []
-  | _ ->
-      let rec loop items =
-        let items = read state :: items in
-        if accept state P.Comma then loop items else List.rev items
-      in
-      loop []
+  | _ -> one_or_more state read
 
 (* Consumes the tokens from an opening bracket to the one that closes it,
    unread, and returns their span; [expected] names the closer for the
@@ -653,7 +656,7 @@ let is_unary_expression expression =
   | Generic _ | Compound_literal _ | Subscript _ | Call _ | Member _
   | Pointer_member _ | Post_increment _ | Post_decrement _ | Unary _
   | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Statement_expression _
-  | Va_arg _ | Offsetof _ ->
+  | Label_address _ | Va_arg _ | Offsetof _ ->
       true
 
 (* Which declarators a context takes: a declaration names what it
@@ -1197,13 +1200,13 @@ and assignment_expression state =
     value targets
 
 (* Right-associative like assignment: [a ? b : c ? d : e] groups as
-   [a ? b : (c ? d : e)]. *)
+   [a ? b : (c ? d : e)]. GNU [a ?: b] omits the middle operand. *)
 and conditional_expression state =
   let rec collect branches =
     let start = state.position in
     let condition = binary_expression state lowest_precedence in
     if accept state P.Question then begin
-      let if_true = expression state in
+      let if_true = middle_operand state in
       expect state P.Colon "`:` in a conditional expression";
       collect ((start, condition, if_true) :: branches)
     end
@@ -1214,6 +1217,10 @@ and conditional_expression state =
     (fun if_false (start, condition, if_true) ->
       finish state start (Conditional { condition; if_true; if_false }))
     last branches
+
+and middle_operand state =
+  if peek state = Punctuator_token P.Colon then None
+  else Some (expression state)
 
 (* Precedence climbing. Each recursive call has a higher [minimum] than
    its caller, so the recursion is at most as deep as there are
@@ -1235,7 +1242,8 @@ and binary_expression state minimum =
    to, and the nodes are made from the innermost prefix out. After [++],
    [--] and [sizeof] comes a unary-expression, where [(] type-name [)]
    can only begin a compound literal; GNU [__extension__] makes no node
-   and takes a cast-expression. *)
+   and takes a cast-expression. GNU [&&] label, like [_Alignof], is a
+   whole unary-expression. *)
 and cast_expression state =
   let rec collect prefixes ~cast_allowed =
     let start = state.position in
@@ -1276,6 +1284,10 @@ and cast_expression state =
         advance state;
         let type_name = parenthesized_type_name state in
         (prefixes, finish state start (Alignof type_name))
+    | Punctuator_token P.Ampersand_ampersand ->
+        advance state;
+        let label = identifier state "a label after `&&`" in
+        (prefixes, finish state start (Label_address label))
     | lexeme -> (
         match unary_operator lexeme with
         | Some operator ->
@@ -1666,9 +1678,15 @@ and simple_statement state =
       finish state start Null_statement
   | Keyword_token Keyword.Goto ->
       advance state;
-      let target = identifier state "a label after `goto`" in
-      expect state P.Semicolon "`;` after `goto`";
-      finish state start (Goto target)
+      if accept state P.Star then begin
+        let target = expression state in
+        expect state P.Semicolon "`;` after `goto *`";
+        finish state start (Computed_goto target)
+      end
+      else
+        let target = identifier state "a label after `goto`" in
+        expect state P.Semicolon "`;` after `goto`";
+        finish state start (Goto target)
   | Keyword_token Keyword.Continue ->
       advance state;
       expect state P.Semicolon "`;` after `continue`";
@@ -1744,7 +1762,22 @@ and block state =
 and compound_statement state =
   let start = state.position in
   expect state P.Left_brace "`{`";
-  finish state start (block_items state)
+  let local_labels = local_label_declarations state in
+  let items = block_items state in
+  finish state start { local_labels; items }
+
+and local_label_declarations state =
+  let rec loop declarations =
+    let start = state.position in
+    if accept_keyword state Keyword.Label then
+      let labels =
+        one_or_more state (fun state -> identifier state "a label name")
+      in
+      expect state P.Semicolon "`;` after the labels of `__label__`";
+      loop (finish state start labels :: declarations)
+    else List.rev declarations
+  in
+  loop []
 
 (* After the [{], up to and including the [}]. *)
 and block_items state =

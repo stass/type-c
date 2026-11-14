@@ -10,8 +10,8 @@
     6.5, 6.7, 6.8, 6.9) and the GNU profile's (design 13.3). The body of
     a function that a system header defines is matched brace for brace
     and kept as a span, and so are the arguments of an attribute. A
-    construct outside them, such as the GNU conditional without a middle
-    operand, is an error that names the token where it starts.
+    construct outside them, such as a GNU block literal ([^{ ... }]), is
+    an error that names the token where it starts.
 
     Pragma tokens ([#pragma] lines, including those that [_Pragma] writes
     in the middle of an expression, and [#pragma typec] lines) are not

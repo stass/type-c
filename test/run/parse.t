@@ -151,8 +151,10 @@ is written for its own compiler and may use its extensions.
 The GNU profile: attributes, __extension__, alternate keywords, asm
 labels, assembler statements and file-scope assembler, typeof, statement
 expressions, case ranges, range designators, the GNU forms of empty
-structures, initialisers and declarations, _Float16, and the va_arg and
-offsetof builtins. Both backends compile the file without a warning.
+structures, initialisers and declarations, _Float16, the va_arg and
+offsetof builtins, label addresses and computed goto in a dispatch table
+as an interpreter writes it, local labels and the conditional without a
+middle operand. Both backends compile the file without a warning.
 
   $ cat > gnu.c <<'EOF'
   > __extension__ typedef long long wide;
@@ -204,7 +206,21 @@ offsetof builtins. Both backends compile the file without a warning.
   > done:
   >   return out + sum(2, 1, 2) + __extension__ 0;
   > }
-  > int main(void) { return statements(3) + offset + ranges[0]; }
+  > static const unsigned char program[] = { 0, 0, 1 };
+  > static int run(const unsigned char *code) {
+  >   __label__ step, stop;
+  >   static void *const table[] = { &&step, &&stop };
+  >   int total = 0;
+  >   goto *table[*code];
+  > step:
+  >   total += 1;
+  >   goto *table[*++code];
+  > stop:
+  >   return ({ __label__ out; goto out; out: total; }) ?: -1;
+  > }
+  > int main(void) {
+  >   return statements(3) + offset + ranges[0] + run(program);
+  > }
   > EOF
   $ "$clang" -std=gnu11 -fsyntax-only gnu.c
   $ "$gcc" -std=gnu11 -fsyntax-only gnu.c
@@ -237,6 +253,8 @@ offsetof builtins. Both backends compile the file without a warning.
   empty declaration
   function sum
   function statements
+  declaration program
+  function run
   function main
 
 The macOS SDK's Clang extensions: block pointers, nullability
@@ -261,10 +279,10 @@ list of `...` alone. GCC accepts none of them.
   declaration small
   declaration promote
 
-A parse error is reported at its presumed location. The conditional
-without a middle operand is GNU C outside the profile.
+A parse error is reported at its presumed location. A block literal is
+an extension outside the profile.
 
-  $ printf '# 1 "t.c"\nint x;\nint y = x ?: 1;\n' > bad.i
+  $ printf '# 1 "t.c"\nint x;\nvoid *y = ^{ };\n' > bad.i
   $ ./parse_check.exe bad.i
-  parse_check: t.c:2: expected an expression, found `:`
+  parse_check: t.c:2: expected an expression, found `^`
   [1]

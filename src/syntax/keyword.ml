@@ -55,6 +55,7 @@ type t =
   | Asm
   | Attribute
   | Extension
+  | Label
   | Typeof
   | Float16
   | Nonnull
@@ -135,6 +136,7 @@ let spellings =
     ("__attribute", Attribute);
     ("__attribute__", Attribute);
     ("__extension__", Extension);
+    ("__label__", Label);
     ("typeof", Typeof);
     ("__typeof", Typeof);
     ("__typeof__", Typeof);

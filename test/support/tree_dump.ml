@@ -233,11 +233,12 @@ let rec expression reader (e : expression) =
   | Binary (operator, left, right) ->
       here (binary_label operator) [ sub left; sub right ]
   | Conditional { condition; if_true; if_false } ->
-      here "?:" [ sub condition; sub if_true; sub if_false ]
+      here "?:" [ sub condition; optional sub if_true; sub if_false ]
   | Assignment (operator, left, right) ->
       here (assignment_label operator) [ sub left; sub right ]
   | Comma (left, right) -> here "," [ sub left; sub right ]
   | Statement_expression body -> here "({})" [ block reader body ]
+  | Label_address label -> here "label-address" [ identifier label ]
   | Va_arg { list; type_name = t } ->
       here "va_arg" [ sub list; type_name reader t ]
   | Offsetof { type_name = t; member; designators } ->
@@ -455,13 +456,19 @@ and statement reader (s : statement) =
           sub body;
         ]
   | Goto target -> here "goto" [ identifier target ]
+  | Computed_goto target -> here "goto*" [ value target ]
   | Continue -> here "continue" []
   | Break -> here "break" []
   | Return e -> here "return" (Option.to_list (Option.map value e))
   | Asm a -> here "asm" (assembler reader a)
 
 and block reader (b : block) =
-  node b.span "block" (List.map (block_item reader) b.node)
+  node b.span "block"
+    (List.map local_labels b.node.local_labels
+    @ List.map (block_item reader) b.node.items)
+
+and local_labels (d : local_label_declaration) =
+  node d.span "__label__" (List.map identifier d.node)
 
 and block_item reader = function
   | Block_declaration d -> declaration reader d
