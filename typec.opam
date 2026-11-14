@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: BSD-2-Clause
+# Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+opam-version: "2.0"
+synopsis: "Compiler for the Type-C programming language"
+maintainer: "Stanislav Sedov <stas@deglitch.com>"
+authors: "Stanislav Sedov <stas@deglitch.com>"
+license: "BSD-2-Clause"
+depends: [
+  "ocaml" {>= "5.0"}
+  "dune" {>= "3.0"}
+]
+build: [
+  ["dune" "build" "-p" name "-j" jobs]
+  ["dune" "runtest" "-p" name "-j" jobs] {with-test}
+]

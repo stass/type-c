@@ -20,6 +20,18 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Medium] Decide where the Linux and FreeBSD test hosts run, and create
   the repository that pins corpora and holds pilots.
 
+## Driver
+
+- [Medium] A backend that resolves to `typec` itself, such as a `cc`
+  symlink to `typec` first on `PATH`, makes the driver exec itself forever
+  with no message. Detect it, or document how to install `typec` as `cc`.
+- [Low] When `.tc` inputs are recognised, the driver must know which C
+  compiler options take a separate value, so that `-o --cc=x` or
+  `-o x.tc` is not misread; keep that table in one place.
+- [Low] `Unix.execvp` hands an executable without a `#!` line to
+  `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
+  a backend works on some hosts only. Document it or decide one behaviour.
+
 ## Design questions without a gate yet
 
 - [High] Write the formal model for checked-mode lifetimes before any
