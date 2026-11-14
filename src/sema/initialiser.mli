@@ -29,9 +29,10 @@ open Typec_syntax
     expression of the initialiser and gives its type, before the
     conversions of its context; [initialises] checks one that initialises
     a subobject, as an excess one does not; [source] gives the expression
-    whose value an expression is, through parentheses and generic
-    selections, or the unknown type a selection depends on; [index] gives
-    the value of the expression of an array designator, or the span of
+    whose value an expression is, through parentheses and the
+    selections of [_Generic] and [__builtin_choose_expr], or the unknown
+    type a selection depends on; [index] gives the value of the
+    expression of an array designator, or the span of
     what keeps it from being an integer constant expression; [fail] is as
     in {!Expressions.context}. *)
 type typing = {

@@ -25,6 +25,7 @@ type t = {
   intmax_type : Integer.t;
   uintmax_type : Integer.t;
   intptr_type : Integer.t;
+  uint64_type : Integer.t;
   char16_type : Integer.t;
   char32_type : Integer.t;
   byte_order : byte_order;
@@ -220,6 +221,7 @@ let model_of_macros macros backend =
     intmax_type = integer_type "__INTMAX_TYPE__";
     uintmax_type = integer_type "__UINTMAX_TYPE__";
     intptr_type = integer_type "__INTPTR_TYPE__";
+    uint64_type = integer_type "__UINT64_TYPE__";
     char16_type = integer_type "__CHAR16_TYPE__";
     char32_type = integer_type "__CHAR32_TYPE__";
     byte_order = read_byte_order macros;
@@ -282,8 +284,8 @@ let check_widths model =
 let check_typedefs model =
   let signed integer = is_signed model integer in
   let unsigned_types =
-    [ model.size_type; model.uintmax_type; model.char16_type;
-      model.char32_type ]
+    [ model.size_type; model.uintmax_type; model.uint64_type;
+      model.char16_type; model.char32_type ]
   in
   let signed_types =
     [ model.ptrdiff_type; model.intmax_type; model.intptr_type ]
@@ -293,6 +295,8 @@ let check_typedefs model =
     || not (List.for_all signed signed_types)
   in
   if wrong then unsupported "a typedef of the wrong signedness";
+  if integer_width model model.uint64_type <> 64 then
+    unsupported "a uint64_t that is not 64 bits wide";
   (* A code unit is an OCaml int when constants are evaluated. *)
   let character_types =
     [ model.wchar_type; model.char16_type; model.char32_type ]
@@ -360,6 +364,7 @@ let to_string target =
       ("intmax_type", Integer.name target.intmax_type);
       ("uintmax_type", Integer.name target.uintmax_type);
       ("intptr_type", Integer.name target.intptr_type);
+      ("uint64_type", Integer.name target.uint64_type);
       ("char16_type", Integer.name target.char16_type);
       ("char32_type", Integer.name target.char32_type);
       ("byte_order", byte_order_name target.byte_order);

@@ -142,7 +142,6 @@ let primaries () =
   types "__func__" "const char[2] lvalue";
   types "__FUNCTION__" "const char[2] lvalue";
   types "__PRETTY_FUNCTION__" "const char[<constant>] lvalue";
-  types "__builtin_expect(x, 0)" "<the builtin '__builtin_expect'>";
   rejects "y" "'y' is not declared (C11 6.5.1p2)";
   types
     ~declarations:
@@ -339,6 +338,80 @@ let gnu () =
   types ~parameters:"int n, int b[n]" "b" "int * lvalue";
   types ~parameters:"const int a[static 2]" "a" "const int * lvalue"
 
+(* The table of builtin functions (design 13.3). *)
+let builtins () =
+  (* With a prototype, the name has its function type. *)
+  types "__builtin_memcpy" "void *(void *, const void *, unsigned long)";
+  types "__builtin_expect(x, 0)" "long";
+  types "__builtin_strlen(p)" "unsigned long";
+  types ~target:ilp32 "__builtin_strlen(p)" "unsigned int";
+  types "__builtin_bswap64(ul)" "unsigned long";
+  types ~target:ilp32 "__builtin_bswap64(ul)" "unsigned long long";
+  rejects "__builtin_abs()" "6.5.2.2p2";
+  (* Of one compiler, or of each in its own way. *)
+  types ~target:lp64_gcc "__builtin_setjmp" "int (void *)";
+  types ~target:ilp32 "__builtin_setjmp" "int (void **)";
+  types ~target:lp64_gcc "__builtin_puts(p)" "int";
+  rejects ~target:ilp32 "__builtin_puts(p)"
+    "'__builtin_puts' is not a builtin of Clang, the backend";
+  rejects ~target:lp64_gcc "__c11_atomic_load(ip, 0)"
+    "'__c11_atomic_load' is not a builtin of GCC, the backend";
+  types ~target:ilp32 ~declarations:(prelude ^ "_Atomic int *ai; ")
+    "__c11_atomic_load(ai, 0)" "int";
+  rejects "__builtin_foo(1)" "'__builtin_foo' is not declared (C11 6.5.1p2)";
+  (* A declaration of the name hides the builtin. *)
+  types ~declarations:(prelude ^ "char *__builtin_isnan(int); ")
+    "__builtin_isnan(1)" "char *";
+  (* A rule types a call; the name alone has an unknown type. *)
+  types "__builtin_constant_p" "<the builtin '__builtin_constant_p'>";
+  types "__builtin_constant_p(ps)" "int";
+  types "__builtin_isnan(d)" "int";
+  types "__builtin_add_overflow(x, l, &x)" "_Bool";
+  types ~declarations:(prelude ^ "__builtin_va_list ap; ")
+    "__builtin_va_start(ap, x)" "void";
+  types "__atomic_load_n(ip, 0)" "int";
+  types "__atomic_load_n(cip, 0)" "<the result of '__atomic_load_n'>";
+  types "__atomic_fetch_add(&p, 1, 0)" "const char *";
+  rejects "__atomic_load_n(x, 0)"
+    "the first argument of '__atomic_load_n' is not a pointer";
+  rejects "__atomic_load_n()" "takes at least one argument";
+  (* GCC and Clang apply the rule through parentheses. *)
+  types "(__builtin_add_overflow)(x, x, &x)" "_Bool";
+  types "__builtin_complex(d, d)" "_Complex double";
+  types "__builtin_complex(1.0f, 2.0f)" "_Complex float";
+  rejects "__builtin_complex(x, x)" "is not of a real floating type";
+  (* A selection, as _Generic is. *)
+  types "__builtin_choose_expr(1, x, d)" "int lvalue";
+  types "__builtin_choose_expr(0, x, d)" "double lvalue";
+  types "__builtin_choose_expr(1, s.b, d)" "unsigned int lvalue :3";
+  types "__builtin_choose_expr(__builtin_choose_expr(1, 0, 1), x, d)"
+    "double lvalue";
+  types "x ? __builtin_choose_expr(1, (void *)0, 1) : ip" "int *";
+  types "x ? __builtin_choose_expr(0, (void *)0, vp) : ip" "void *";
+  types "__builtin_choose_expr(sizeof(struct s) == 8, x, d)"
+    "<the condition of __builtin_choose_expr>";
+  types "__builtin_choose_expr(__builtin_constant_p(x), x, d)"
+    "<the condition of __builtin_choose_expr>";
+  rejects "__builtin_choose_expr(x, x, d)" "not an integer constant expression";
+  rejects "__builtin_choose_expr(1 / 0, x, d)" "6.5.5p5";
+  (* A type that typec does not state (P21). *)
+  types ~target:lp64_gcc "__builtin_shuffle(x)"
+    "<the builtin '__builtin_shuffle'>";
+  types "__builtin_inff128()" "<the builtin '__builtin_inff128'>";
+  (* One entry for each name, of some compiler. *)
+  let names =
+    List.map
+      (fun (entry : Builtin_function.entry) -> entry.name)
+      Builtin_function.table
+  in
+  if List.length (List.sort_uniq String.compare names) <> List.length names
+  then fail_case "the table" "two entries of one name";
+  List.iter
+    (fun (entry : Builtin_function.entry) ->
+      if entry.gcc = None && entry.clang = None then
+        fail_case entry.name "an entry of no compiler")
+    Builtin_function.table
+
 (* 6.5.1.1: the selection has the type, the lvalue and the null pointer
    constant of the expression it selects. *)
 let generic () =
@@ -358,18 +431,20 @@ let generic () =
   types "_Generic(s.b, unsigned: 1L, default: 2)" "long";
   types "_Generic(s.b = 1, unsigned: 1L, default: 2)" "long";
   (* Unknown where the controlling type or a compatibility is. *)
-  types "_Generic(__builtin_foo, int: 1, default: 2)"
-    "<the builtin '__builtin_foo'>";
-  types "_Generic(x, typeof(__builtin_foo): 1, int: 2)"
-    "<the builtin '__builtin_foo'>";
+  types "_Generic(__builtin_inff128(), int: 1, default: 2)"
+    "<the builtin '__builtin_inff128'>";
+  types "_Generic(x, typeof(__builtin_inff128()): 1, int: 2)"
+    "<the builtin '__builtin_inff128'>";
   (* Whether an operand of unknown type is a null pointer constant is
      unknown. *)
-  types "x ? (void *)_Generic(__builtin_foo, int: 0, default: 0) : ip"
+  types "x ? (void *)_Generic(__builtin_inff128(), int: 0, default: 0) : ip"
     "<a null pointer constant of an opaque value>";
-  types "x ? (void *)__builtin_foo : ip"
+  types "x ? (void *)__builtin_inff128() : ip"
     "<a null pointer constant of an opaque value>";
-  types "_Generic(x, int *: 1, struct s *: 2, typeof(__builtin_foo) *: 3, \
-         default: 4L)" "long";
+  types
+    "_Generic(x, int *: 1, struct s *: 2, \
+     typeof(__builtin_inff128()) *: 3, default: 4L)"
+    "long";
   types "1 ? _Generic(0, int: (void *)0) : ip" "int *";
   types "1 ? _Generic(0, int: 0) : ip" "int *";
   types "1 ? _Generic(0, int: vp) : ip" "void *";
@@ -715,6 +790,7 @@ let () =
   binary ();
   conditional_and_assignment ();
   gnu ();
+  builtins ();
   generic ();
   bit_field_values ();
   bit_field_promotions ();

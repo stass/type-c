@@ -2,22 +2,68 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 typec agrees with its backends on the types of expressions. expression_probe
-reads the target model from a backend's predefined macros and the
-preprocessed expressions.c, and writes the text with static assertions of
-the type typec gives each expression statement of a body, and a use of
-the address of each that it calls an lvalue. The backend compiles the
-result only if it agrees on every one. The backends are those that
-backends.sh names, on an x86-64 host so that -m32 gives a second target;
-the warnings that these expressions draw are not of interest here.
+reads the target model from a backend's predefined macros and a
+preprocessed file, and writes the text with static assertions of the type
+typec gives each expression statement of a body, and a use of the address
+of each that it calls an lvalue. The backend compiles the result only if
+it agrees on every one. The files are expressions.c and builtins.c, which
+calls the builtins that a rule types or whose type is unknown, also in
+C23 for its va_start. The backends are those that backends.sh names, on
+an x86-64 host so that -m32 gives a second target; the warnings that
+these expressions draw are not of interest here.
 
+  $ check() {
+  >   std=$1 source=$2
+  >   shift 2
+  >   "$@" $std -dM -E -x c /dev/null > macros &&
+  >   "$@" $std -E $source.c > $source.i &&
+  >   ../expression_probe.exe macros $source.i > probe.c &&
+  >   "$@" $std -w -fsyntax-only probe.c
+  > }
   $ probe() {
-  >   "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
-  >   "$@" -std=gnu11 -E expressions.c > expressions.i &&
-  >   ../expression_probe.exe macros expressions.i > probe.c &&
-  >   "$@" -std=gnu11 -w -fsyntax-only probe.c
+  >   check -std=gnu11 expressions "$@" && check -std=gnu11 builtins "$@"
   > }
   $ . ../backends.sh
   $ probe "$clang"
   $ probe "$clang" -m32 -funsigned-char
   $ probe "$gcc"
   $ probe "$gcc" -m32 -funsigned-char
+  $ check -std=gnu23 builtins "$clang"
+  $ check -std=gnu23 builtins "$gcc"
+
+builtin_probe writes a call of each builtin of the table that has a
+prototype and that the backend has, with arguments of its parameter
+types, and a second call with an extra argument where it is variadic.
+A pointer parameter that the table gives a wrong referenced type, or a
+qualifier that the builtin's lacks, draws a warning, which the options
+make an error; one that lacks a qualifier of the builtin's, and a
+parameter of another type, draw none. expression_probe asserts the types
+of the calls. builtins.c calls each builtin of the table that has no
+prototype, and each that the table gives to the other compiler only is
+undeclared in the backend.
+
+  $ builtins() {
+  >   cc=$1 errors=$2
+  >   shift 2
+  >   "$cc" "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
+  >   ../builtin_probe.exe macros calls > calls.c &&
+  >   "$cc" "$@" -std=gnu11 -E calls.c > calls.i &&
+  >   ../expression_probe.exe macros calls.i > probe.c &&
+  >   "$cc" "$@" -std=gnu11 $errors -fsyntax-only probe.c 2> log ||
+  >     grep error: log
+  >   ../builtin_probe.exe macros others | while read -r name; do
+  >     grep -q -E "(^|[^A-Za-z0-9_])$name\(" builtins.c ||
+  >       echo "builtins.c does not call $name"
+  >   done
+  >   ../builtin_probe.exe macros unavailable | while read -r name; do
+  >     printf 'void f(void) { %s(); }\n' "$name" > one.c
+  >     LC_ALL=C "$cc" "$@" -std=gnu11 -fsyntax-only one.c 2>&1 |
+  >       grep -q -E 'unknown builtin|implicit declaration' ||
+  >       echo "$name is a builtin of the backend"
+  >   done
+  > }
+  $ builtins "$clang" -Werror=incompatible-pointer-types
+  $ builtins "$clang" -Werror=incompatible-pointer-types -m32
+  $ gcc_errors='-Werror=incompatible-pointer-types -Werror=discarded-qualifiers'
+  $ builtins "$gcc" "$gcc_errors"
+  $ builtins "$gcc" "$gcc_errors" -m32

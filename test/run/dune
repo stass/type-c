@@ -62,12 +62,21 @@
  (deps declaration_probe.exe))
 
 ; expressions.t and initialisers.t compile the output of expression_probe
-; with each backend.
+; with each backend; expressions.t also on the calls of the builtins that
+; builtin_probe writes from the table.
 
 (executable
  (name expression_probe)
  (libraries typec_cpp typec_syntax typec_sema))
 
+(executable
+ (name builtin_probe)
+ (libraries typec_sema))
+
 (cram
  (applies_to expressions initialisers)
  (deps expression_probe.exe))
+
+(cram
+ (applies_to expressions)
+ (deps builtin_probe.exe))

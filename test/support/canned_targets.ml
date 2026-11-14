@@ -40,6 +40,7 @@ let lp64_macros =
     ("__INTMAX_TYPE__", "long int");
     ("__UINTMAX_TYPE__", "long unsigned int");
     ("__INTPTR_TYPE__", "long int");
+    ("__UINT64_TYPE__", "long unsigned int");
     ("__CHAR16_TYPE__", "short unsigned int");
     ("__CHAR32_TYPE__", "unsigned int");
     ("__ORDER_LITTLE_ENDIAN__", "1234");
@@ -72,6 +73,7 @@ let ilp32_macros =
     ("__INTMAX_TYPE__", "long long int");
     ("__UINTMAX_TYPE__", "long long unsigned int");
     ("__INTPTR_TYPE__", "int");
+    ("__UINT64_TYPE__", "long long unsigned int");
     ("__CHAR16_TYPE__", "unsigned short");
     ("__CHAR32_TYPE__", "unsigned int");
     ("__BYTE_ORDER__", "__ORDER_BIG_ENDIAN__");

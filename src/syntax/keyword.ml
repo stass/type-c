@@ -66,6 +66,7 @@ type t =
   | Builtin_va_arg
   | Builtin_offsetof
   | Builtin_types_compatible_p
+  | Builtin_choose_expr
   | Real
   | Imag
   | Try
@@ -163,6 +164,7 @@ let spellings =
     ("__builtin_va_arg", Builtin_va_arg, Every_dialect);
     ("__builtin_offsetof", Builtin_offsetof, Every_dialect);
     ("__builtin_types_compatible_p", Builtin_types_compatible_p, Every_dialect);
+    ("__builtin_choose_expr", Builtin_choose_expr, Every_dialect);
     ("__real", Real, Every_dialect);
     ("__real__", Real, Every_dialect);
     ("__imag", Imag, Every_dialect);

@@ -290,6 +290,8 @@ let rec expression reader (e : expression) =
   | Types_compatible (first, second) ->
       here "types-compatible"
         [ type_name reader first; type_name reader second ]
+  | Choose { condition; first; second } ->
+      here "choose" [ sub condition; sub first; sub second ]
   | Block_literal { parameters = list; body } ->
       here "block-literal"
         (Option.fold ~none:[] ~some:(parameters reader) list

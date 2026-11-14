@@ -357,11 +357,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   (`noreturn(1)` is accepted).
 - [Medium] Unknown types (design 13.3, P21) for 0.7b to replace by
   types where a point needs them: block pointers, `_Float16`, the
-  builtins of the backend, and what an attribute outside the table
-  applies to. `typeof (__builtin_f) y;` at file scope is an error, since
-  whether `y` is a function depends on the type, though both backends
-  accept it. A block literal has an unknown type, as its body is not
-  typed. An attribute outside the
+  builtins that the table of builtin functions leaves unknown (those of
+  vector and optional floating types, `__builtin_apply`,
+  `__builtin_va_arg_pack`, `__builtin_tgmath`), and what an attribute
+  outside the table applies to. A block literal has an unknown type, as
+  its body is not typed. An attribute outside the
   table on a structure or union specifier makes the type of that
   specifier unknown, while a later `struct s` names the record as
   declared: right for its identity, members and completeness, the facts
@@ -478,11 +478,51 @@ is [type-c-language-design.md](type-c-language-design.md).
   `items` up with the tree by position. The id of each declaration is
   the token of its name; record the first in an entity when 0.9b or
   Stage 1 first needs it.
-- [Medium] An undeclared identifier that the implementation reserves
-  (two leading underscores, C11 7.1.3p1) is taken as a builtin of the
-  backend, of unknown type, wherever typing meets it but for `__func__`,
-  `__FUNCTION__` and `__PRETTY_FUNCTION__` in a function. Replace the
-  rule by the table of builtin functions (0.7b).
+- [Medium] Integer constant expressions do not evaluate a call, so a
+  builtin that GCC and Clang fold to a constant, such as
+  `__builtin_constant_p` or `__builtin_classify_type`, is an error where
+  an integer constant expression must be known: an enumerator, a
+  `_Static_assert` (the macOS SDK's `os_log` asserts
+  `__builtin_constant_p` of its format), a `case` label, a bit-field
+  width, a file-scope array length. A `__builtin_choose_expr` whose
+  condition is one has an unknown type. Fold them in typing where the
+  corpus shows code that needs it.
+- [Low] The table of builtin functions (design 13.3) gives the GCC
+  constants of `_Float32`, `_Float64`, `_Float32x` and `_Float64x`
+  (`__builtin_inff32` and the like) to every GCC target, as every target
+  of the test hosts has the types; on a target without one the backend
+  refuses the call. The run test checks the referenced types of pointer
+  parameters and the qualifiers that the table adds, not a qualifier that
+  the table lacks or the other parameter types, which the backends'
+  documentation alone states, as a call converts its arguments without a
+  warning.
+- [Low] The table of builtin functions was filled from the corpus and
+  from the macros of the all-headers unit in GNU C11 and ISO C11. Headers
+  outside that unit reach builtins it lacks, such as the macOS SDK's
+  `libunwind.h` (`__builtin_ptrauth_string_discriminator`), and so may
+  C23 headers (`__builtin_stdc_*` in glibc's `stdbit.h` under GCC 14).
+  Add each family where code reaches it.
+- [Low] An `__atomic` or `__sync` builtin whose first argument points
+  to a qualified type has an unknown type: Clang keeps a qualifier that
+  a typedef gives the referenced type (`typedef const int cint; cint *p;
+  __atomic_load_n(p, 0)` is `const int`) and drops one of the
+  declarator, and Ctype keeps no typedef to tell them apart.
+- [Medium] A `__builtin_choose_expr` whose condition depends on an
+  unknown type through a cast or a selection, such as one whose own
+  condition is `__builtin_constant_p(x)`, is an error rather than of
+  unknown type: the constant `Unevaluable` holds both an invalid
+  expression and one that depends on an unknown type. Give the second a
+  constant of its own, which `choice` maps to an unknown selection.
+- [Medium] `__builtin_bswap16` and `__builtin_bswap32` are of `unsigned
+  short` and `unsigned int` in the table, which GCC's `uint16_t` and
+  `uint32_t` are on every target of the test hosts but not on all that
+  the target model accepts (`unsigned long` on arm-none-eabi). Read the
+  exact-width types from `__UINT16_TYPE__` and `__UINT32_TYPE__` as
+  `uint64_t` is, or refuse such a target.
+- [Low] A call of a builtin that a rule types does not check its number
+  of arguments (`__builtin_isnan()` is `int`), which the backend
+  refuses; nor is a callee chosen by `_Generic` or
+  `__builtin_choose_expr` typed by the rule (it is unknown).
 - [Low] `specified.storage` holds a `Tree.storage_class`, which can say
   `_Thread_local` although `storage_class` never puts it there. Give it a
   type without that case.
@@ -654,12 +694,9 @@ types (design 13.3).
   `compare.exe`. The corpus runner (0.11) could run both on each unit
   it preprocesses with Clang and keep the counts in its run record.
 - [Medium] (0.7b) Types that `typec` does not compute, which the
-  comparison counts as unknown on the corpus: calls of builtin
-  functions (`__builtin_expect`, `__builtin_object_size`: 2327 records
-  with the expressions around them), the atomic builtins (39), `va_list`
-  parameters (31) and functions with the attribute `no_sanitize_thread`
-  (12). Reproducers:
-  `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/lua/clang/src/lvm.tc.ref.i` and `lapi.tc.ref.i`.
+  comparison counts as unknown on the corpus: `va_list` parameters and
+  functions with the attribute `no_sanitize_thread`. Reproducer:
+  `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/lua/clang/src/lapi.tc.ref.i`.
 - [Low] The order of the oracle's records is what shows which of the
   nodes that share a range is outermost, and it holds only because
   Clang writes a node's range before its children. A field with each

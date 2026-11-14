@@ -481,7 +481,8 @@ let keyword_specifier_word state offset keyword =
   | Break | Case | Continue | Default | Do | Else | For | Goto | If | Return
   | Sizeof | Switch | While | Alignof | Generic | Imaginary | Static_assert
   | Asm | Extension | Label | Builtin_va_arg | Builtin_offsetof
-  | Builtin_types_compatible_p | Real | Imag | Try | Defer ->
+  | Builtin_types_compatible_p | Builtin_choose_expr | Real | Imag | Try
+  | Defer ->
       None
 
 (* The specifier that the token [offset] places ahead begins. A typedef
@@ -1023,7 +1024,7 @@ let is_unary_expression expression =
   | Pointer_member _ | Post_increment _ | Post_decrement _ | Unary _
   | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Alignof_expression _
   | Statement_expression _ | Label_address _ | Va_arg _ | Offsetof _
-  | Types_compatible _ | Block_literal _ ->
+  | Types_compatible _ | Choose _ | Block_literal _ ->
       true
 
 (* Which declarators a context takes: a declaration names what it
@@ -1914,6 +1915,9 @@ and primary_expression state =
   | Keyword_token Keyword.Builtin_types_compatible_p ->
       advance state;
       types_compatible state start
+  | Keyword_token Keyword.Builtin_choose_expr ->
+      advance state;
+      choose state start
   | Punctuator_token P.Caret ->
       advance state;
       block_literal state start
@@ -1953,6 +1957,18 @@ and types_compatible state start =
   let second = type_name state in
   expect state P.Right_paren ("`)` after the type names of " ^ builtin);
   finish state start (Types_compatible (first, second))
+
+(* After the [__builtin_choose_expr]. *)
+and choose state start =
+  let builtin = "`__builtin_choose_expr`" in
+  expect state P.Left_paren ("`(` after " ^ builtin);
+  let condition = assignment_expression state in
+  expect state P.Comma ("`,` after the condition of " ^ builtin);
+  let first = assignment_expression state in
+  expect state P.Comma ("`,` after the second operand of " ^ builtin);
+  let second = assignment_expression state in
+  expect state P.Right_paren ("`)` after the operands of " ^ builtin);
+  finish state start (Choose { condition; first; second })
 
 (* After the [^]: the body, after the parameters if it has them. The
    body continues their scope, as a function's does (6.2.1p4). *)

@@ -25,6 +25,7 @@ let lp64 : Target.t =
     intmax_type = Long;
     uintmax_type = Unsigned_long;
     intptr_type = Long;
+    uint64_type = Unsigned_long;
     char16_type = Unsigned_short;
     char32_type = Unsigned_int;
     byte_order = Little_endian;
@@ -52,6 +53,7 @@ let ilp32 : Target.t =
     intmax_type = Long_long;
     uintmax_type = Unsigned_long_long;
     intptr_type = Int;
+    uint64_type = Unsigned_long_long;
     char16_type = Unsigned_short;
     char32_type = Unsigned_int;
     byte_order = Big_endian;
@@ -267,6 +269,11 @@ let error_cases =
       name = "signed size_t";
       dump = lp64_dump_with "__SIZE_TYPE__" "long int";
       expected = unsupported "a typedef of the wrong signedness";
+    };
+    {
+      name = "32-bit uint64_t";
+      dump = lp64_dump_with "__UINT64_TYPE__" "unsigned int";
+      expected = unsupported "a uint64_t that is not 64 bits wide";
     };
     {
       name = "64-bit char32_t";

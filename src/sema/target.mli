@@ -55,6 +55,7 @@ type t = {
   intmax_type : Integer.t;  (** [intmax_t] *)
   uintmax_type : Integer.t;  (** [uintmax_t] *)
   intptr_type : Integer.t;  (** [intptr_t] *)
+  uint64_type : Integer.t;  (** [uint64_t] *)
   char16_type : Integer.t;  (** [char16_t] *)
   char32_type : Integer.t;  (** [char32_t] *)
   byte_order : byte_order;  (** [__BYTE_ORDER__] *)
@@ -112,6 +113,9 @@ val integer_width : t -> Integer.t -> int
 
 val is_signed : t -> Integer.t -> bool
 (** Whether an integer type is signed; for plain [char], {!char_signed}. *)
+
+val compiler_name : compiler -> string
+(** The compiler's name in messages: [GCC] or [Clang]. *)
 
 val to_string : t -> string
 (** One [field: value] line per field of {!t}, in declaration order, with

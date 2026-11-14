@@ -219,6 +219,13 @@ and expression_node =
           and the member designators and subscripts after it *)
   | Types_compatible of type_name * type_name
       (** [__builtin_types_compatible_p] *)
+  | Choose of {
+      condition : expression;
+      first : expression;
+      second : expression;
+    }
+      (** [__builtin_choose_expr]: [first] where the integer constant
+          expression [condition] is not zero, else [second] *)
   | Block_literal of { parameters : parameters option; body : block }
       (** Clang's [^ (] parameters [) {] ... [}], which the macOS SDK's
           callbacks take, or [^{] ... [}] without parameters. Clang

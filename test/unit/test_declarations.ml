@@ -506,8 +506,8 @@ let constant_expressions () =
     "enumerator int = 2";
   rejects "int f(int); enum { V = _Generic(1, int: f(1), default: 2) };"
     "6.7.2.2p2";
-  rejects "enum { V = _Generic(__builtin_foo, int: 1, default: 2) };"
-    "the value of _Generic depends on the builtin '__builtin_foo'";
+  rejects "enum { V = _Generic(__builtin_shuffle(1), int: 1, default: 2) };"
+    "the value of _Generic depends on the builtin '__builtin_shuffle'";
   (* GCC types the value of a narrow bit-field otherwise than Clang. *)
   declares ~target:lp64_clang
     "struct { unsigned b : 3; } v; \
@@ -518,6 +518,10 @@ let constant_expressions () =
      enum { V = _Generic(v.b++, unsigned: 1, default: 2) };"
     "the value of _Generic depends on the value of a bit-field narrower \
      than its type at in.c:1, which GCC types otherwise than Clang";
+  evaluates_int "__builtin_choose_expr(1, 2, 3)" "2";
+  evaluates_int "__builtin_choose_expr(0, 2, (short)3)" "3";
+  rejects "int f(int); enum { V = __builtin_choose_expr(1, f(1), 2) };"
+    "6.7.2.2p2";
   evaluates_int "__builtin_types_compatible_p(int, int)" "1";
   evaluates_int "__builtin_types_compatible_p(int, long)" "0";
   evaluates_int "__builtin_types_compatible_p(const int, volatile int)" "1";
@@ -540,7 +544,8 @@ let constant_expressions () =
     "object int[<constant>] external static";
   rejects "enum { V = __builtin_types_compatible_p(_Atomic int, long) };"
     "does not evaluate";
-  declares "int a[__builtin_types_compatible_p(typeof(__builtin_foo), int)];"
+  declares
+    "int a[__builtin_types_compatible_p(typeof(__builtin_shuffle(1)), int)];"
     "a" "object int[<constant>] external static";
   declares "int a[__builtin_types_compatible_p(int, signed)];" "a"
     "object int[1] external static";
@@ -650,9 +655,12 @@ let gnu_profile () =
   declares "void f(int n, typeof(n) *p);" "f"
     "function void (int, int *) external";
   rejects "typeof(y) x;" "'y' is not declared (C11 6.5.1p2)";
-  (* A reserved name may be a builtin of the backend. *)
+  (* An undeclared name may be a builtin of the backend (design 13.3). *)
   declares "__typeof__(__builtin_memcpy) *p;" "p"
-    "object <the builtin '__builtin_memcpy'> * external static";
+    "object void *(*)(void *, const void *, unsigned long) external static";
+  declares "typeof(__builtin_shuffle) g;" "g"
+    "function <the builtin '__builtin_shuffle'> external";
+  rejects "typeof(__builtin_foo) y;" "'__builtin_foo' is not declared";
   (* typeof of an expression is its type, unconverted. *)
   declares "int x; typeof(x + 1) *p;" "p" "object int * external static";
   declares "int a[2]; typedef typeof((0, a)) t;" "t" "typedef int *";
@@ -685,9 +693,9 @@ let unknown_types () =
     "object <'_Float16'> * external static";
   declares "_Float16 h; typedef typeof(h * 2) t;" "t" "typedef <'_Float16'>";
   (* Whether the declaration declares a function depends on the type. *)
-  rejects "typeof(__builtin_f) y;"
+  rejects "typeof(*__builtin_shuffle(1)) y;"
     "whether 'y' is a function or an object depends on the builtin \
-     '__builtin_f' at in.c:1";
+     '__builtin_shuffle' at in.c:1";
   (* The size of an unknown type is the backend's, as an aggregate's is. *)
   declares "char c[sizeof(_Float16)];" "c"
     "object char[<constant>] external static";

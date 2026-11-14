@@ -59,6 +59,10 @@ let rec expression visit (e : Tree.expression) =
   | Types_compatible (left, right) ->
       type_name visit left;
       type_name visit right
+  | Choose { condition; first; second } ->
+      expression visit condition;
+      expression visit first;
+      expression visit second
 
 and generic_association visit (association : generic_association) =
   match association.node with

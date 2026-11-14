@@ -5,13 +5,14 @@ typec --print-target prints the target model that the backend reports in
 its predefined macros when it is run with the other arguments as options.
 The backends are those that backends.sh names, on an x86-64 host, whose
 release varies with the host, and so do the optional floating types of
-Clang, which are left out here: __float128 is one on Linux alone.
+Clang and uint64_t, which are left out here: __float128 is one on Linux
+alone, and uint64_t is unsigned long long on macOS.
 
   $ unset TYPEC_CC
   $ . ./backends.sh
 
   $ typec --cc=$clang --print-target |
-  >   sed -e '1s/ [0-9]*$//' -e '/^optional_floats:/d'
+  >   sed -e '1s/ [0-9]*$//' -e '/^optional_floats:/d' -e '/^uint64_type:/d'
   backend: Clang
   char_bit: 8
   char_signed: true

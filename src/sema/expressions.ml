@@ -408,11 +408,27 @@ let string_type context (literal : Tree.string_literal) =
 
 (* Identifiers (6.5.1p2, 6.4.2.2) *)
 
-(* An identifier that the implementation reserves (C11 7.1.3p1) may name
-   one of the backend's builtins without a declaration, such as
-   [__builtin_memcpy]; typec has no table of them yet (0.7b), so it takes
-   every such name as one, of unknown type. *)
-let may_be_builtin name = String.starts_with ~prefix:"__" name
+(* An undeclared identifier may name a builtin function of the backend
+   (design 13.3). One with a prototype has its function type; one that a
+   rule types has a type only where it is called, and one whose type
+   typec does not state has none (P21), so the name of either alone has
+   an unknown function type. *)
+let builtin context span name =
+  let target = context.target in
+  match Builtin_function.find target name with
+  | Builtin (Prototype prototype) ->
+      value (checked context span (Builtin_function.function_type target
+                                     prototype))
+  | Builtin (Rule _ | Unknown) ->
+      value (unknown context span ("the builtin " ^ quote name)
+               Unknown_function)
+  | Unavailable ->
+      context.fail span
+        (quote name ^ " is not a builtin of "
+        ^ Target.compiler_name target.backend.compiler
+        ^ ", the backend (design 13.3)")
+  | Not_builtin ->
+      context.fail span (quote name ^ " is not declared (C11 6.5.1p2)")
 
 let const_char context span =
   let const = { Ctype.no_qualifiers with const = true } in
@@ -433,10 +449,7 @@ let predefined context span name =
   | ("__func__" | "__FUNCTION__"), Some function_name ->
       name_array (Constant (String.length function_name + 1))
   | "__PRETTY_FUNCTION__", Some _ -> name_array Opaque
-  | _ when may_be_builtin name ->
-      value
-        (unknown context span ("the builtin " ^ quote name) Object_or_function)
-  | _ -> context.fail span (quote name ^ " is not declared (C11 6.5.1p2)")
+  | _ -> builtin context span name
 
 (* The parameters that Clang gives a use of a function whose composite
    type has [parameters], by the rule of
@@ -1252,15 +1265,16 @@ let comma_constant context span left right =
       Not_integer { kind = refused_or_backend kinds; first = span }
 
 (* The expression whose value [expression] is, through parentheses and
-   the generic selections that typing has made (6.5.1p5, 6.5.1.1p4). *)
+   the selections that typing has made, of _Generic and
+   __builtin_choose_expr (6.5.1p5, 6.5.1.1p4). *)
 let rec value_source context (expression : Tree.expression) =
   match expression.node with
   | Parenthesized inner -> value_source context inner
-  | Generic _ -> (
+  | Generic _ | Choose _ -> (
       match Hashtbl.find_opt context.typed.selections expression.span with
       | Some (Answer chosen) -> value_source context chosen
       | Some (Depends_on unknown) -> Ctype.Depends_on unknown
-      | None -> invalid_arg "Expressions: an untyped _Generic")
+      | None -> invalid_arg "Expressions: an untyped selection")
   | _ -> Answer expression
 
 let is_floating_constant context expression =
@@ -1296,6 +1310,15 @@ let cast_constant context span (cast_type : Ctype.t) operand =
   | Depends_on unknown ->
       Unevaluable { span; message = needing "the value of a cast" unknown }
 
+(* The constant of the selection at [span] of a [construct]. *)
+let selected_constant context span construct =
+  match Hashtbl.find_opt context.typed.selections span with
+  | Some (Answer chosen) -> operand_constant context chosen
+  | Some (Depends_on unknown) ->
+      let message = needing ("the value of " ^ construct) unknown in
+      Unevaluable { span; message }
+  | None -> invalid_arg "Expressions: an untyped selection"
+
 (* The class of an expression that has been typed, from those of its
    operands. *)
 let classify context (whole : Tree.expression) typed =
@@ -1323,14 +1346,10 @@ let classify context (whole : Tree.expression) typed =
       | Error error -> unevaluable error)
   | String _ -> itself (Designator { static_storage = true; named = false })
   | Parenthesized inner -> operand_constant context inner
-  (* 6.5.1.1p4: the class and value of the result expression. *)
-  | Generic _ -> (
-      match Hashtbl.find_opt context.typed.selections span with
-      | Some (Answer chosen) -> operand_constant context chosen
-      | Some (Depends_on unknown) ->
-          let message = needing "the value of _Generic" unknown in
-          Unevaluable { span; message }
-      | None -> invalid_arg "Expressions: an untyped _Generic")
+  (* 6.5.1.1p4: the class and value of the result expression, as of
+     the chosen operand of __builtin_choose_expr. *)
+  | Generic _ -> selected_constant context span "_Generic"
+  | Choose _ -> selected_constant context span "__builtin_choose_expr"
   | Types_compatible _ -> (
       let int = Integer.Int in
       match Hashtbl.find_opt context.typed.compatibilities span with
@@ -1392,6 +1411,96 @@ let require_constant context (expression : Tree.expression) =
       "an initialiser of an object with static or thread storage duration \
        is not a constant expression (C11 6.7.9p4)"
 
+(* The rule that types a call of [callee], where it names a builtin that
+   a rule types. *)
+let rec builtin_rule context (callee : Tree.expression) =
+  match callee.node with
+  | Identifier { name; resolution = Undeclared } -> (
+      match Builtin_function.find context.target name with
+      | Builtin (Rule rule) -> Some (name, rule)
+      | Builtin (Prototype _ | Unknown) | Unavailable | Not_builtin -> None)
+  | Parenthesized inner -> builtin_rule context inner
+  | _ -> None
+
+let fail_builtin_argument context span name requirement =
+  context.fail span
+    (Printf.sprintf "the first argument of %s is not %s (design 13.3)"
+       (quote name) requirement)
+
+(* Clang keeps a qualifier of the referenced type that a typedef gives
+   it and drops one written in the pointer's declarator; Ctype does not
+   tell them apart, so a qualified referenced type gives an unknown
+   result. _Atomic, which Clang's __c11 builtins drop, does not count. *)
+let pointee_of_first context span name first =
+  let qualified (qualifiers : Ctype.qualifiers) =
+    qualifiers.const || qualifiers.volatile || qualifiers.restrict
+  in
+  match operand context first with
+  | Pointer_operand { referenced; _ } when qualified referenced.qualifiers ->
+      value
+        (unknown context span ("the result of " ^ quote name)
+           Unknown_object)
+  | Pointer_operand { referenced; _ } -> value (Ctype.unqualified referenced)
+  | Unknown_operand unknown -> value (unknown_value unknown)
+  | Arithmetic_operand _ | Other_operand _ ->
+      fail_builtin_argument context span name "a pointer"
+
+let complex_of_first context span name first =
+  match operand context first with
+  | Arithmetic_operand { arithmetic = Real floating; _ } ->
+      value (arithmetic_type context span (Complex floating))
+  | Unknown_operand unknown -> value (unknown_value unknown)
+  | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
+      fail_builtin_argument context span name "of a real floating type"
+
+(* The operand that the condition of __builtin_choose_expr chooses,
+   unknown where typec leaves the condition's value to the backend, as
+   for a call of __builtin_constant_p. *)
+let choice context span condition first second =
+  let undecided () =
+    Ctype.Depends_on
+      (unknown_at context span "the condition of __builtin_choose_expr"
+         Object_or_function)
+  in
+  match operand_constant context condition with
+  | Integer_expression { value = { value = Known value; _ }; flaw = None } ->
+      if Exact_integer.equal value Exact_integer.zero then Ctype.Answer second
+      else Answer first
+  | Integer_expression { value = { value = Opaque; _ }; flaw = None }
+  | Integer_expression { flaw = Some (Comma_operator _); _ }
+  | Not_integer { kind = Backend_constant; _ } ->
+      undecided ()
+  | Integer_expression { flaw = Some (Invalid { span; message }); _ }
+  | Unevaluable { span; message } ->
+      context.fail span message
+  | Not_integer
+      { kind = Arithmetic_constant | Address_constant | Designator _
+             | Not_constant;
+        first } ->
+      context.fail first
+        "the condition of '__builtin_choose_expr' is not an integer \
+         constant expression (design 13.3)"
+
+(* A call of a builtin that a rule types, with the types of its
+   arguments. *)
+let rule_call context span name (rule : Builtin_function.rule) arguments =
+  match (rule, arguments) with
+  | Type_generic result, _ ->
+      value
+        (checked context span (Builtin_function.c_type context.target result))
+  | Pointee_of_first, first :: _ -> pointee_of_first context span name first
+  | Complex_of_first, first :: _ -> complex_of_first context span name first
+  | (Pointee_of_first | Complex_of_first), [] ->
+      context.fail span
+        (quote name ^ " takes at least one argument (design 13.3)")
+
+(* 6.5.2.2p5, or the rule of the builtin that [callee] names. *)
+let call context span callee (callee_typed : typed) arguments =
+  match builtin_rule context callee with
+  | Some (name, rule) -> rule_call context span name rule arguments
+  | None ->
+      value (call_type context span callee_typed (List.length arguments))
+
 (* Statements (6.8) and the expressions that hold them *)
 
 let rec expression context (expression : Tree.expression) =
@@ -1424,9 +1533,9 @@ and expression_node context (whole : Tree.expression) =
       let array = typed operand in
       subscript context span array (typed index)
   | Call { callee; arguments } ->
-      let callee = typed callee in
+      let callee_typed = typed callee in
       let arguments = List.map typed arguments in
-      value (call_type context span callee (List.length arguments))
+      call context span callee callee_typed arguments
   | Member { operand; member } ->
       direct_member context span (typed operand) member
   | Pointer_member { operand; member } ->
@@ -1474,6 +1583,8 @@ and expression_node context (whole : Tree.expression) =
       ignore (context.type_name type_name);
       List.iter (designator context) designators;
       value (size_type context span)
+  | Choose { condition; first; second } ->
+      choose context span condition first second
   | Types_compatible (first, second) ->
       let first = context.type_name first in
       let second = context.type_name second in
@@ -1519,6 +1630,19 @@ and generic context span controlling associations =
   Hashtbl.replace context.typed.selections span selection;
   match selection with
   | Answer result -> expression context result
+  | Depends_on unknown ->
+      value (Ctype.unknown { unknown with kind = Object_or_function })
+
+(* GCC and Clang give the chosen operand as it is, an lvalue or a
+   bit-field where it is one; both operands are typed. *)
+and choose context span condition first second =
+  ignore (expression context condition);
+  ignore (expression context first);
+  ignore (expression context second);
+  let selection = choice context span condition first second in
+  Hashtbl.replace context.typed.selections span selection;
+  match selection with
+  | Answer chosen -> expression context chosen
   | Depends_on unknown ->
       value (Ctype.unknown { unknown with kind = Object_or_function })
 
@@ -1602,18 +1726,15 @@ and pointer_conditional context span (second, a) (third, b) =
 (* 6.3.2.3p3: an integer constant expression of value 0, or one cast to
    void *. *)
 and null_pointer_constant context (candidate : Tree.expression) =
-  match candidate.node with
-  | Parenthesized inner -> null_pointer_constant context inner
-  | Generic _ -> (
-      match selection context.typed candidate with
-      | Some (Answer result) -> null_pointer_constant context result
-      | Some (Depends_on _) -> Opaque_constant
-      | None -> invalid_arg "Expressions: an untyped _Generic")
-  | Cast { operand; _ }
-    when is_plain_void_pointer (expression context candidate).expression_type
-    ->
-      zero_constant context operand
-  | _ -> zero_constant context candidate
+  match value_source context candidate with
+  | Depends_on _ -> Opaque_constant
+  | Answer source -> (
+      match source.node with
+      | Cast { operand; _ }
+        when is_plain_void_pointer (expression context source).expression_type
+        ->
+          zero_constant context operand
+      | _ -> zero_constant context source)
 
 (* An operation that fails gives an opaque value rather than an error:
    this is no constant expression context. Whether an operand of unknown

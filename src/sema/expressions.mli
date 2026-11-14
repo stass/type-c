@@ -144,7 +144,9 @@ val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
 (** The result expression of a generic selection (6.5.1.1p3), selected
     by the type that {!find} gives the controlling expression. The
     selection is unknown where that type is, or the compatibility of any
-    association with it. *)
+    association with it. That of [__builtin_choose_expr] is the operand
+    its condition chooses, unknown where the backend evaluates the
+    condition, as for a call of [__builtin_constant_p]. *)
 
 val types_compatible : t -> Tree.expression -> bool Ctype.answer option
 (** Whether the two types of [__builtin_types_compatible_p] are
