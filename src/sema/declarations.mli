@@ -34,6 +34,12 @@ type declared =
       linkage : linkage;
       inline : bool;  (** [inline] in some declaration *)
       noreturn : bool;  (** [_Noreturn] in some declaration *)
+      gnu_inline : bool;
+          (** The attribute [gnu_inline] in some [inline] declaration: the
+              GNU89 rule decides whether the inline definition is external,
+              which it is unless it says [extern inline], in place of
+              C11 6.7.4p7, which decides from every file-scope declaration
+              of the function. *)
     }
   | Typedef of Ctype.t
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }

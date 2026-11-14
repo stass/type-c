@@ -13,20 +13,29 @@ in it.
   $ mkdir tmp out
   $ export TMPDIR=$PWD/tmp
 
-x.tc declares what it uses in a header of its own: the system headers
-name GNU builtin types that the front end refuses (TODO.md, Corpus).
+x.tc includes system headers but declares atoi in a header of its own:
+Clang's <stdlib.h> declares block pointers, which the front end refuses
+(TODO.md, Corpus); <stdlib.h> is compiled on its own below.
 
   $ cat > x.h <<'EOF'
-  > int printf(const char *, ...);
   > int atoi(const char *);
   > EOF
   $ cat > x.tc <<'EOF'
+  > #include <stdarg.h>
+  > #include <stdio.h>
+  > #include <string.h>
   > #include "x.h"
   > int twice(int);
+  > static void say(const char *format, ...) {
+  >   va_list ap;
+  >   va_start(ap, format);
+  >   vprintf(format, ap);
+  >   va_end(ap);
+  > }
   > int main(int argc, char **argv) {
   >   int n = argc > 1 ? atoi(argv[1]) : 0;
-  >   printf("__TYPEC__ %d, twice(%d) = %d\n", __TYPEC__, n, twice(n));
-  >   return 0;
+  >   say("__TYPEC__ %d, twice(%d) = %d\n", __TYPEC__, n, twice(n));
+  >   return strcmp(argv[0], "") == 0;
   > }
   > EOF
   $ cat > twice.c <<'EOF'
@@ -48,6 +57,23 @@ typec selects (design 2.4).
   $ $gcc -x cpp-output -std=gnu11 -O2 -c gcc.i -o gcc-ref.o
   $ typec --cc=$gcc -O2 -c x.tc -o gcc.o
   $ cmp gcc-ref.o gcc.o
+  $ ls -A tmp
+
+<stdlib.h> compiles to the same object too, with Clang only under
+-fno-blocks, which leaves out the SDK's block pointers.
+
+  $ printf '#include <stdlib.h>\nint main(void) { return abs(0); }\n' > lib.tc
+  $ $gcc -E -x c -D__TYPEC__=1 -std=gnu11 lib.tc > lib-gcc.i
+  $ $gcc -x cpp-output -std=gnu11 -c lib-gcc.i -o lib-gcc-ref.o
+  $ typec --cc=$gcc -c lib.tc -o lib-gcc.o
+  $ cmp lib-gcc-ref.o lib-gcc.o
+  $ $clang -E -x c -D__TYPEC__=1 -std=gnu11 -fno-blocks lib.tc > lib-clang.i
+  $ $clang -x cpp-output -std=gnu11 -fno-blocks -c lib-clang.i \
+  >   -o lib-clang-ref.o
+  $ typec --cc=$clang -fno-blocks -c lib.tc -o lib-clang.o
+  $ cmp lib-clang-ref.o lib-clang.o
+  $ typec --cc=$clang -c lib.tc 2>&1 | grep -o 'a block pointer is not typed'
+  a block pointer is not typed
   $ ls -A tmp
 
 Without -o, the object is named after the input in the current
@@ -89,12 +115,14 @@ names it, and its target is the real output.
 
   $ typec --cc=$clang -MD -c x.tc -o out/x.o
   $ head -1 out/x.d
-  out/x.o: x.tc x.h
+  out/x.o: x.tc \
+  $ grep -c ' x.h' out/x.d
+  1
   $ typec --cc=$gcc -MMD -MF out/deps -MT target -c x.tc
   $ head -1 out/deps
   target: x.tc x.h
-  $ typec --cc=$clang -MD -c x.tc && head -1 x.d
-  x.o: x.tc x.h
+  $ typec --cc=$clang -MD -c x.tc && grep -c ' x.h' x.d
+  1
 
 The dialect is C11 or C17 (design 2.4), and options that would stop the
 backend at preprocessing or change the preprocessed text are refused

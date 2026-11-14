@@ -35,6 +35,7 @@ and shape =
   | Enum of enum_tag
   | Pointer of t
   | Record of record_tag
+  | Va_list
   | Array of { element : t; length : length }
   | Function of { return : t; parameters : parameters }
 
@@ -90,7 +91,7 @@ let parameter_types = function
 let total_size types = List.fold_left (fun size t -> size + t.size) 0 types
 
 let shape_size = function
-  | Void | Arithmetic _ | Enum _ | Record _ -> 1
+  | Void | Arithmetic _ | Enum _ | Record _ | Va_list -> 1
   | Pointer referenced -> referenced.size + 1
   | Array { element; _ } -> element.size + 1
   | Function { return; parameters } ->
@@ -104,12 +105,15 @@ let unqualified t = { t with qualifiers = no_qualifiers }
 let is_function t =
   match t.shape with
   | Function _ -> true
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Array _ -> false
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _ ->
+      false
 
 let is_array t =
   match t.shape with
   | Array _ -> true
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Function _ -> false
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Function _ ->
+      false
 
 (* The funnel of every type that can grow: the limit, lower for a
    function, bounds the work of every walk over a type, not just its
@@ -133,6 +137,7 @@ let arithmetic target (a : Arithmetic.t) =
 let integer target i = arithmetic target (Integer i)
 let enum tag = of_shape (Enum tag)
 let record tag = of_shape (Record tag)
+let va_list = of_shape Va_list
 let pointer_to referenced = within_limit (of_shape (Pointer referenced))
 
 (* An array decays to a pointer of its size, a function to one of one
@@ -141,7 +146,7 @@ let decay t =
   match t.shape with
   | Array { element; _ } -> of_shape (Pointer element)
   | Function _ -> of_shape (Pointer t)
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ -> t
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list -> t
 
 let lvalue_conversion t =
   if is_array t || is_function t then decay t else unqualified t
@@ -162,7 +167,7 @@ let function_returning return parameters =
   match return.shape with
   | Array _ -> Error Function_returning_array
   | Function _ -> Error Function_returning_function
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list ->
       if has_void_parameter parameters then Error Void_parameter
       else
         let return = unqualified return in
@@ -176,10 +181,12 @@ let add_qualifiers a b =
     atomic = a.atomic || b.atomic;
   }
 
-(* 6.7.3p2: restrict needs a pointer to an object type. *)
+(* 6.7.3p2: restrict needs a pointer to an object type. A va_list may be
+   one, which the backend checks. *)
 let restrict_allowed t =
   match t.shape with
   | Pointer referenced -> not (is_function referenced)
+  | Va_list -> true
   | Void | Arithmetic _ | Enum _ | Record _ | Array _ | Function _ -> false
 
 let rec qualify qualifiers t =
@@ -192,7 +199,7 @@ let rec qualify qualifiers t =
         Result.map
           (fun element -> of_shape (Array { element; length }))
           (qualify qualifiers element)
-    | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ ->
+    | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list ->
         if qualifiers.restrict && not (restrict_allowed t) then
           Error Restrict_without_object_pointer
         else Ok { t with qualifiers = add_qualifiers t.qualifiers qualifiers }
@@ -231,7 +238,7 @@ let find_member tags tag name =
 let is_complete tags t =
   match t.shape with
   | Void | Function _ -> false
-  | Arithmetic _ | Pointer _ -> true
+  | Arithmetic _ | Pointer _ | Va_list -> true
   | Enum tag -> Hashtbl.mem tags.enums tag.enum_id
   | Record tag -> Hashtbl.mem tags.records tag.record_id
   | Array { length = Unknown; _ } -> false
@@ -253,7 +260,7 @@ let rec is_variably_modified t =
   | Array { element = referenced; _ } | Pointer referenced ->
       is_variably_modified referenced
   | Function { return; _ } -> is_variably_modified return
-  | Void | Arithmetic _ | Enum _ | Record _ -> false
+  | Void | Arithmetic _ | Enum _ | Record _ | Va_list -> false
 
 let define_enum tags tag integer =
   if Hashtbl.mem tags.enums tag.enum_id then Error Redefinition
@@ -269,25 +276,28 @@ let is_integer t =
   match t.shape with
   | Arithmetic (Integer _) | Enum _ -> true
   | Arithmetic (Real _ | Complex _)
-  | Void | Pointer _ | Record _ | Array _ | Function _ ->
+  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ ->
       false
 
 let is_real t =
   match t.shape with
   | Arithmetic (Integer _ | Real _) | Enum _ -> true
   | Arithmetic (Complex _)
-  | Void | Pointer _ | Record _ | Array _ | Function _ ->
+  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ ->
       false
 
 let is_arithmetic t =
   match t.shape with
   | Arithmetic _ | Enum _ -> true
-  | Void | Pointer _ | Record _ | Array _ | Function _ -> false
+  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ -> false
 
 let is_pointer t =
   match t.shape with
   | Pointer _ -> true
-  | Void | Arithmetic _ | Enum _ | Record _ | Array _ | Function _ -> false
+  | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _ | Function _
+    ->
+      false
+
 let is_scalar t = is_arithmetic t || is_pointer t
 let is_object t = not (is_function t)
 
@@ -297,7 +307,7 @@ let as_arithmetic tags t =
   | Enum tag ->
       Option.map (fun integer -> Arithmetic.Integer integer)
         (enum_integer tags tag)
-  | Void | Pointer _ | Record _ | Array _ | Function _ -> None
+  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ -> None
 
 (* Structure and union definitions *)
 
@@ -336,7 +346,8 @@ let is_flexible_array member =
   match member.member_type.shape with
   | Array { length = Unknown; _ } -> true
   | Array { length = Constant _ | Opaque | Variable; _ }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Function _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Function _ ->
       false
 
 (* 6.7.2.1p4: an integer type and a width from 0 to that of the type, 0
@@ -430,6 +441,7 @@ let rec merge target tags a b =
   | Record x, Record y ->
       require (x.record_id = y.record_id);
       a
+  | Va_list, Va_list -> a
   | Pointer x, Pointer y -> make a.qualifiers (Pointer (merge x y))
   | Array x, Array y ->
       let element = merge x.element y.element in
@@ -439,8 +451,8 @@ let rec merge target tags a b =
       let return = merge x.return y.return in
       let parameters = merge_parameters target tags x.parameters y.parameters in
       of_shape (Function { return; parameters })
-  | ( ( Void | Arithmetic _ | Enum _ | Record _ | Pointer _ | Array _
-      | Function _ ),
+  | ( ( Void | Arithmetic _ | Enum _ | Record _ | Va_list | Pointer _
+      | Array _ | Function _ ),
       _ ) ->
       raise Not_compatible
 
@@ -501,7 +513,8 @@ let rec same_type a b =
   | Function x, Function y ->
       same_type x.return y.return
       && same_parameters x.parameters y.parameters
-  | (Void | Arithmetic _ | Enum _ | Record _), _ -> a.shape = b.shape
+  | (Void | Arithmetic _ | Enum _ | Record _ | Va_list), _ ->
+      a.shape = b.shape
   | (Pointer _ | Array _ | Function _), _ -> false
 
 and same_parameters a b =

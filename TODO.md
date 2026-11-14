@@ -208,8 +208,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   the preferred alignment for it, which differs from `_Alignof` on i386
   (`double`, `long long`). No supported target has the difference;
   revisit if one does.
-- [Low] `__builtin_va_list`, the one builtin typedef name, is listed in
-  the parser. Have the builtin table of 0.7b be its one source.
 - [Low] `Tree.Constant` holds a `Number.t` that is never
   `Not_a_constant`. Have `Number.classify` return an option, so that the
   tree cannot represent the case.
@@ -225,10 +223,10 @@ is [type-c-language-design.md](type-c-language-design.md).
 ## Declarations
 
 - [Medium] `Declarations` accepts the GNU attributes of a table that
-  gives each one's effect (`attribute_effects`): `noreturn` marks a
-  function, the rest change no type or constant it computes. It refuses
-  every other one, `packed`, `mode`, `vector_size`, `gnu_inline` and
-  Clang's `overloadable` among them, so the SDK's `tgmath.h` is refused.
+  gives each one's effect (`attribute_effects`): `noreturn` and
+  `gnu_inline` mark a function, the rest change no type or constant it
+  computes. It refuses every other one, `packed`, `mode`, `vector_size`
+  and Clang's `overloadable` among them, so the SDK's `tgmath.h` is refused.
   The table is the answer to the design question on attributes until
   0.7b reads them; `aligned` is on it only while record layout is the
   backend's. `noreturn` on a pointer to a function or on a function
@@ -252,8 +250,25 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [High] The reader accepts everything the parser parses, entering
   what it cannot type yet with an opaque type, so that the scope rules
   of steps 2 to 5 run on every translation unit the parser reads. It
-  refuses `__builtin_va_list` from `<stdio.h>`, `_Float16`, `typeof` and
-  block pointers.
+  refuses `_Float16`, `typeof` and block pointers.
+- [Medium] `Function.gnu_inline` records the attribute, under which an
+  inline definition is external unless it says `extern inline` (GNU89),
+  in place of C11 6.7.4p7, but nothing reads it. Whatever decides
+  which inline definition is external (the rule on one external
+  definition, 6.9p5, and any emission or lowering of an inline function)
+  must honour it. Two `inline` declarations that disagree on it are
+  merged, as Clang does; GCC refuses them, and the backend reports it.
+- [Medium] `__builtin_va_list` is opaque (design P20): a `va_list`
+  parameter is not adjusted to a pointer where the target's `va_list` is
+  an array (x86-64), and it is compatible only with itself. The reader
+  accepts `int f(va_list); int f(const va_list);`, which x86-64 refuses
+  and leaves to the backend, and refuses `int g(va_list); int g(char
+  *);`, which i386 and arm64 Darwin accept. Typing `__builtin_va_arg`
+  and bodies (0.9b, 0.7b) must check that no expression needs more:
+  `&ap` of a parameter (`va_list *` on arm64, not on x86-64),
+  `char *p = ap;` and `va_copy` are the cases to try. If one does, the
+  representation must come from the backend (a target table is ruled
+  out by design 13.3).
 - [High] Initialisers are not read: an array of unknown size keeps its
   incomplete type where its initialiser completes it (6.7.9p22), and the
   tags and enumerators that an initialiser declares, inside `sizeof` or a
@@ -331,28 +346,19 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Corpus
 
-The front end refuses 98 of the 246 units of the corpus on each backend
-(macOS x86-64, Clang and GCC 16): the first error of each run is below,
-with the error behind it from a probe that accepts `__builtin_va_list`.
-Reproducers and the probe are in
+The front end refuses 65 of the 246 units of the corpus with Clang and
+8 with GCC 16 (macOS x86-64); the first errors are below. With
+`-fno-blocks` Clang refuses the 8 that GCC does. Reproducers are in
 `/Volumes/Optaine/type-c-corpus-cache/probe/front-end-tail`.
 
-- [Critical] `__builtin_va_list` is a typedef name to the parser but not
-  to `Declarations`, so every unit that includes a system header fails
-  (`i386/_types.h:119`, Clang's `__stdarg___gnuc_va_list.h:12`, GCC's
-  `stdarg.h:40`): 93 units on each backend, the first error of all but
-  five. The builtin table of 0.7b gives it a type; until then no
-  hosted program compiles, and `test/run/pipeline.t` and
-  `tools/corpus/runner.t` include no system header.
-- [High] With Clang, `_stdlib.h:298` declares a block pointer (the SDK's
-  `__BLOCKS__` declarations): 58 units behind `__builtin_va_list`, none
-  with `-fno-blocks` (0.7b).
-- [High] `math.h:645` declares `_Float16` functions: 6 lua units on
-  each backend, 3 of them as the first error (0.7b).
-- [Medium] `__uint128_t` is a builtin typedef name that the parser does
-  not know, so `sqlite3.c:37317` (`__uint128_t r = ...`) is a parse
-  error: 1 unit on each backend (0.7b's builtin table, with the
-  parser's `builtin_typedef_names`).
+- [High] With Clang, the SDK's `__BLOCKS__` declarations declare block
+  pointers (`_stdlib.h:298`, `glob.h:61`): 59 units, all of zlib, qbe
+  and chibicc among them, none with `-fno-blocks` (0.7b).
+- [High] `math.h:645` declares `_Float16` functions: 5 lua units and
+  sqlite's shell on each backend (0.7b).
+- [Medium] `sqlite3.c` includes SDK headers that declare enumerations
+  with a fixed type (`malloc/malloc.h:92` with GCC, `mach/port.h:417`
+  with Clang under `-fno-blocks`): 1 unit on each backend (0.7b).
 - [Medium] lua's `lvm.c` uses computed goto (`&&L_OP_MOVE` in
   `ljumptab.h:28`): 1 unit on each backend. The GNU profile leaves it
   out (see the Parser item on GNU forms); decide whether 13.3 adds it.
@@ -402,7 +408,8 @@ Reproducers and the probe are in
   which `Declarations` records on a function; Clang's `overloadable`,
   without which the SDK's `tgmath.h` declares one function with
   conflicting types; and `gnu_inline`, which changes what an inline
-  definition defines (`sys/cdefs.h` uses it under GCC, not Clang).
+  definition defines (`sys/cdefs.h` uses it under GCC, not Clang) and
+  which `Declarations` records on a function.
   Common code adds `packed`, `mode`, `vector_size` and
   `transparent_union`, which change a type or a layout. The rest the
   headers use (`availability`, `deprecated`, `format`, `noescape` and

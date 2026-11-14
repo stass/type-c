@@ -44,7 +44,7 @@ let pointer_declarator qualifiers declarator =
 let parenthesized_under_pointer t =
   match t.shape with
   | Array _ | Function _ -> true
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ -> false
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list -> false
 
 (* The declarator grows outward from the name as the type is unwrapped
    from the outermost derivation to the specifier. *)
@@ -69,6 +69,9 @@ let rec declaration t declarator =
   | Record tag ->
       let name = tag_name (record_keyword tag.kind) tag.record_name in
       specified t.qualifiers name declarator
+  | Va_list ->
+      specified t.qualifiers Typec_syntax.Builtin_typedef.va_list_name
+        declarator
 
 and parameter_list = function
   | Prototype { types = []; variadic = false } -> "void"

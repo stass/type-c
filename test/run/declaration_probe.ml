@@ -64,7 +64,9 @@ let print_enum_integer (result : Declarations.t) name (t : Ctype.t) =
              \"%s is %s\");\n"
             name (Integer.name integer) name (Integer.name integer))
         integer
-  | Void | Arithmetic _ | Pointer _ | Record _ | Array _ | Function _ -> ()
+  | Void | Arithmetic _ | Pointer _ | Record _ | Va_list | Array _ | Function _
+    ->
+      ()
 
 let print_identifier result (name, (entity : Declarations.entity)) =
   match entity.declared with

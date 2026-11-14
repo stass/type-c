@@ -608,6 +608,9 @@ let keyword_cases =
       "typedef __builtin_va_list va_list; int x = __builtin_va_arg(ap, int *);"
       "(declaration (typedef __builtin_va_list) va_list) | (declaration (int) \
        (init x (va_arg ap (type int pointer))))";
+    case "the builtin 128-bit integer types"
+      "__int128_t i; __uint128_t r = 0;"
+      "(declaration (__int128_t) i) | (declaration (__uint128_t) (init r 0))";
     case "offsetof" "int x = __builtin_offsetof(struct s, a.b[1].c);"
       "(declaration (int) (init x (offsetof (type (struct s)) a .b ([] 1) \
        .c)))";

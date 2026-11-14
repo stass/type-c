@@ -42,11 +42,12 @@ let describe (declared : Declarations.declared) =
       String.concat " "
         [ "object"; Type_name.of_ctype object_type; linkage_name linkage;
           storage_name ]
-  | Function { function_type; linkage; inline; noreturn } ->
+  | Function { function_type; linkage; inline; noreturn; gnu_inline } ->
       String.concat " "
         ([ "function"; Type_name.of_ctype function_type; linkage_name linkage ]
         @ (if inline then [ "inline" ] else [])
-        @ if noreturn then [ "noreturn" ] else [])
+        @ (if noreturn then [ "noreturn" ] else [])
+        @ if gnu_inline then [ "gnu_inline" ] else [])
   | Typedef t -> "typedef " ^ Type_name.of_ctype t
   | Enumerator { enumerator_type; value } ->
       Printf.sprintf "enumerator %s = %s"
@@ -519,9 +520,22 @@ let attributes () =
   rejects "__attribute__((mode(DI))) __attribute__((vector_size(8))) int x;"
     "'mode'";
   rejects "__attribute__((mode(DI), vector_size(8))) int x;" "'mode'";
-  (* GNU89 inline: it swaps what [inline] and [extern inline] define. *)
-  rejects "extern inline __attribute__((gnu_inline)) int f(void) { return 0; }"
-    "the attribute 'gnu_inline' is not typed yet";
+  (* [gnu_inline] swaps what [inline] and [extern inline] define (GNU89),
+     so it is recorded, through redeclarations and next to [noreturn]. *)
+  declares "extern inline __attribute__((gnu_inline)) int f(void) { return 0; }"
+    "f" "function int (void) external inline gnu_inline";
+  declares "extern inline int f(void) { return 0; }" "f"
+    "function int (void) external inline";
+  declares "extern inline int h(void) __attribute__((gnu_inline)); int h(void);"
+    "h" "function int (void) external inline gnu_inline";
+  declares "__attribute__((gnu_inline, noreturn)) extern inline void g(void);"
+    "g" "function void (void) external inline noreturn gnu_inline";
+  (* GCC and Clang ignore it without inline, and on anything else. *)
+  declares
+    "int k(void) __attribute__((gnu_inline)); extern inline int k(void);" "k"
+    "function int (void) external inline";
+  declares "__attribute__((gnu_inline)) int x;" "x"
+    "object int external static";
   (* [noreturn] marks a function as [_Noreturn] does (design 4.4), from the
      specifiers for every declarator and from a declarator for its own. *)
   declares "void die(void) __attribute__((noreturn));" "die"
@@ -537,7 +551,38 @@ let attributes () =
   declares "__attribute__((noreturn)) int x;" "x" "object int external static";
   accepts "void f(__attribute__((noreturn)) void (*g)(void));"
 
+(* The typedef names that GCC and Clang declare before the first token.
+   The representation of __builtin_va_list is the target's, so the reader
+   sees no more of it than that it is a complete object type compatible
+   only with itself. *)
+let builtin_typedefs () =
+  declares "" "__builtin_va_list" "typedef __builtin_va_list";
+  declares "" "__int128_t" "typedef __int128";
+  declares "" "__uint128_t" "typedef unsigned __int128";
+  declares "__uint128_t r = 0;" "r" "object unsigned __int128 external static";
+  declares "typedef __builtin_va_list va_list; va_list ap;" "ap"
+    "object __builtin_va_list external static";
+  declares
+    "typedef __builtin_va_list va_list; int vf(const char *, va_list); \
+     int vf(const char *f, __builtin_va_list ap) { return 0; }"
+    "vf" "function int (const char *, __builtin_va_list) external";
+  declares "struct w { __builtin_va_list ap; } w; __builtin_va_list a[2];" "a"
+    "object __builtin_va_list[2] external static";
+  declares "char c[sizeof(__builtin_va_list)];" "c"
+    "object char[<constant>] external static";
+  (* A limitation (design P20): i386 and arm64 Darwin accept it. *)
+  rejects "int g(__builtin_va_list); int g(char *);" "6.7p4";
+  rejects "int g(__builtin_va_list); int g(__builtin_va_list *);" "6.7p4";
+  rejects "__builtin_va_list a; void *a;" "6.7p4";
+  rejects "struct b { __builtin_va_list f : 1; };" "bit-field";
+  (* A target without __int128 has no names for it, as in GCC and Clang. *)
+  rejects ~target:ilp32 "__uint128_t u;" "'__uint128_t' is not a typedef name";
+  rejects ~target:ilp32 "__int128_t i;" "'__int128_t' is not a typedef name";
+  declares ~target:ilp32 "__builtin_va_list ap;" "ap"
+    "object __builtin_va_list external static"
+
 let () =
+  builtin_typedefs ();
   gnu_profile ();
   attributes ();
   specifier_combinations ();

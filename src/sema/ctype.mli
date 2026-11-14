@@ -78,6 +78,17 @@ and shape =
   | Enum of enum_tag
   | Pointer of t  (** The referenced type. *)
   | Record of record_tag
+  | Va_list
+      (** {e Provisional (design P20).} The type of [__builtin_va_list]
+          ({!Typec_syntax.Builtin_typedef.Va_list}), whose representation
+          is the target's and is not modelled: a complete object type,
+          compatible only with itself, neither scalar nor an array, whose
+          size is the backend's. A parameter of this type is therefore not
+          adjusted. Where compatibility depends on the representation the
+          reader is wrong in both directions: it accepts a
+          [const va_list] parameter where another has [va_list], which
+          x86-64 refuses, and refuses [char *] where another has
+          [va_list], which i386 and arm64 Darwin accept. *)
   | Array of { element : t; length : length }
   | Function of { return : t; parameters : parameters }
       (** The return type is unqualified (6.7.6.3p5). *)
@@ -145,6 +156,10 @@ val integer : Target.t -> Integer.t -> (t, error) result
 
 val enum : enum_tag -> t
 val record : record_tag -> t
+
+val va_list : t
+(** The type of [__builtin_va_list], without qualifiers. *)
+
 val pointer_to : t -> (t, error) result
 
 val array_of : tags -> t -> length -> (t, error) result

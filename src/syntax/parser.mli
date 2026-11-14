@@ -74,7 +74,7 @@ val parse_with :
 val parse : Reader.t -> (Tree.translation_unit, error) result
 (** [parse_with] the syntactic scope rules: a name is a typedef name if
     the specifiers of its declaration hold [typedef], or if GCC and Clang
-    declare it before the first token ([__builtin_va_list]). *)
+    declare it before the first token ({!Builtin_typedef.table}). *)
 
 val error_message : error -> string
 (** ["file:line: message"], as {!Reader.error_message}. *)

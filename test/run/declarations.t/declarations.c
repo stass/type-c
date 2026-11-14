@@ -108,3 +108,17 @@ int by_enumerator[S3];
 int by_size[sizeof(struct node)];
 _Static_assert(sizeof(char) == 1, "char");
 _Static_assert(sizeof(struct node) > 0, "passes through");
+
+/* The builtin typedef names. The backend adjusts a va_list parameter to
+   a pointer where the target's va_list is an array; typec does not, and
+   the function types still agree. */
+typedef __builtin_va_list va_list;
+va_list ap;
+va_list aps[2];
+struct with_va_list { va_list ap; } wva;
+int vf(const char *, va_list);
+int vf(const char *, __builtin_va_list);
+#ifdef __SIZEOF_INT128__
+__int128_t i128;
+__uint128_t u128;
+#endif

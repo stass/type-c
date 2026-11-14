@@ -15,8 +15,8 @@ host, the backend, the revisions and the timings are left out.
   > const char *greeting(void) { return __FILE__ " " GREETING; }
   > EOF
   $ cat > cache/src/hello-1/main.c <<'EOF'
+  > #include <stdio.h>
   > #include "greet.h"
-  > int puts(const char *);
   > int main(void) { puts(greeting()); return 0; }
   > EOF
   $ cat > corpus/programs/hello/recipe <<'EOF'

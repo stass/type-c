@@ -14,6 +14,7 @@ type declared =
       linkage : linkage;
       inline : bool;
       noreturn : bool;
+      gnu_inline : bool;
     }
   | Typedef of Ctype.t
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
@@ -145,6 +146,7 @@ let redeclared state span name prior next =
           function_type;
           inline = old.inline || next.inline;
           noreturn = old.noreturn || next.noreturn;
+          gnu_inline = old.gnu_inline || next.gnu_inline;
         }
   | (Object _ | Function _ | Typedef _ | Enumerator _), _ ->
       fail state span
@@ -180,7 +182,7 @@ let file_scope_linkage state name ~is_function storage =
 (* Declaration specifiers *)
 
 (* What the GNU attributes of a declaration say. *)
-type attributed = { gnu_noreturn : bool }
+type attributed = { gnu_noreturn : bool; gnu_inline : bool }
 
 (* What a list of declaration specifiers says. [storage] excludes
    [_Thread_local], which [thread_local] records; [noreturn] is
@@ -318,6 +320,7 @@ let size_in_bytes state span (t : Ctype.t) =
         | Some integer -> of_integer integer
         | None -> incomplete ())
     | Pointer _ -> Some target.sizeof_pointer
+    | Va_list -> None
     | Record _ | Array _ when not (Ctype.is_complete state.tags t) ->
         incomplete ()
     | Array _ when Ctype.is_variably_modified t ->
@@ -389,9 +392,10 @@ let not_typed state span construct package =
     (Printf.sprintf "%s is not typed yet (plan %s)" construct package)
 
 (* What a GNU attribute does to the declarations: [Neutral] changes
-   nothing they compute, and [Sets_noreturn] marks a function that does
-   not return, as [_Noreturn] does (design 4.4). *)
-type attribute_effect = Neutral | Sets_noreturn
+   nothing they compute, [Sets_noreturn] marks a function that does not
+   return, as [_Noreturn] does (design 4.4), and [Sets_gnu_inline] gives
+   a function the GNU89 meaning of [inline] and [extern inline]. *)
+type attribute_effect = Neutral | Sets_noreturn | Sets_gnu_inline
 
 (* The GNU attributes that the declarations accept, each with its effect.
    [aligned] is neutral because typec leaves [_Alignof] and the sizes of
@@ -406,7 +410,8 @@ let attribute_effects =
     ("const", Neutral); ("constructor", Neutral); ("deprecated", Neutral);
     ("destructor", Neutral); ("disable_tail_calls", Neutral);
     ("enum_extensibility", Neutral); ("flag_enum", Neutral);
-    ("format", Neutral); ("format_arg", Neutral); ("hot", Neutral);
+    ("format", Neutral); ("format_arg", Neutral);
+    ("gnu_inline", Sets_gnu_inline); ("hot", Neutral);
     ("leaf", Neutral); ("malloc", Neutral); ("noescape", Neutral);
     ("noinline", Neutral); ("nonnull", Neutral); ("noreturn", Sets_noreturn);
     ("not_tail_called", Neutral); ("nothrow", Neutral); ("pure", Neutral);
@@ -415,7 +420,7 @@ let attribute_effects =
     ("used", Neutral); ("visibility", Neutral);
     ("warn_unused_result", Neutral); ("weak", Neutral) ]
 
-let no_attributes = { gnu_noreturn = false }
+let no_attributes = { gnu_noreturn = false; gnu_inline = false }
 
 (* [onto] with the effects of [attributes] applied in source order. *)
 let read_attributes state ~onto (attributes : Tree.attribute list) =
@@ -423,7 +428,8 @@ let read_attributes state ~onto (attributes : Tree.attribute list) =
     let name = attribute.node.name.node in
     match List.assoc_opt name attribute_effects with
     | Some Neutral -> attributed
-    | Some Sets_noreturn -> { gnu_noreturn = true }
+    | Some Sets_noreturn -> { attributed with gnu_noreturn = true }
+    | Some Sets_gnu_inline -> { attributed with gnu_inline = true }
     | None ->
         not_typed state attribute.span ("the attribute " ^ quote name) "0.7b"
   in
@@ -1142,6 +1148,8 @@ let file_scope_declared state span specified name (declared_type : Ctype.t) =
           linkage;
           inline = specified.inline;
           noreturn = specified.noreturn || specified.attributed.gnu_noreturn;
+          (* GCC and Clang ignore it on a declaration without inline. *)
+          gnu_inline = specified.inline && specified.attributed.gnu_inline;
         }
   | (None | Some (Static | Extern)) as storage ->
       function_specifiers ();
@@ -1227,6 +1235,28 @@ let read_external state (external_declaration : Tree.external_declaration) =
   | Function_definition definition -> read_function_definition state definition
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
+let builtin_type target : Builtin_typedef.t -> (Ctype.t, Ctype.error) result =
+  function
+  | Va_list -> Ok Ctype.va_list
+  | Int128 -> Ctype.integer target Integer.Int128
+  | Unsigned_int128 -> Ctype.integer target Integer.Unsigned_int128
+
+(* File scope before the first token holds the builtin typedef names whose
+   type the target has; the others are not declared, and no other error
+   can come from a table that names no derived type. *)
+let declare_builtin_typedefs state =
+  List.iter
+    (fun (name, builtin) ->
+      match builtin_type state.target builtin with
+      | Ok t ->
+          let entity = fresh_entity state in
+          state.scope <-
+            Scope.declare state.scope name
+              { name; entity; declared = Typedef t }
+      | Error Int128_unavailable -> ()
+      | Error error -> invalid_arg (Ctype.error_message error))
+    Builtin_typedef.table
+
 let read target text unit =
   let state =
     {
@@ -1239,6 +1269,7 @@ let read target text unit =
       expression_depth = 0;
     }
   in
+  declare_builtin_typedefs state;
   match List.map (read_external state) unit with
   | items -> Ok { tags = state.tags; file_scope = state.scope; items }
   | exception Failed error -> Error error

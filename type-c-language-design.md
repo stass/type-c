@@ -1154,11 +1154,16 @@ scope boundaries would have to agree with the parser's at every point.
 and common code use: attributes, `__extension__`, alternate keyword
 spellings, assembler labels and statements, `typeof`, statement
 expressions, the variable-argument and `offsetof` builtins, a table of
-builtin functions with their types, `__int128` and the `_Float` types,
+builtin functions with their types, the typedef names that GCC and
+Clang declare before the first token (`__builtin_va_list`, and
+`__int128_t` and `__uint128_t` where the target has `__int128`),
+`__int128` and the `_Float` types,
 case ranges and range designators, empty structures and `{}`
 initialisers, a lone `;` at file scope, and, for the macOS SDK, block
 declarators, nullability qualifiers, enumerations with a fixed
-underlying type and a parameter list of `...` alone. A construct outside the profile is an error that names it; the
+underlying type and a parameter list of `...` alone. One table holds
+the builtin typedef names: the parser reads the names from it and the
+declaration reader the types. A construct outside the profile is an error that names it; the
 front end does not guess. Bodies of functions defined in system headers
 are not parsed: they are brace-matched and passed through.
 
@@ -1181,6 +1186,20 @@ the front end. Expressions that use them are emitted as written and the
 backend evaluates them; `_Static_assert` passes through. Packing pragmas,
 bit-fields and layout attributes make this the part of C that is hardest
 to duplicate, and a silent disagreement would be an ABI bug.
+
+**The va_list type.** *Provisional (P20).* `__builtin_va_list` is an
+opaque complete object type, compatible only with itself, whose
+representation and size are the backend's: it is an array of one
+structure on x86-64 and `char *` on i386 and arm64 Darwin, and with no
+target table `typec` cannot know which. A parameter of that type is
+therefore not adjusted to a pointer. Where compatibility depends on the
+representation the reader is wrong both ways: it accepts `const va_list`
+against `va_list`, which the backend then refuses on x86-64, and it
+refuses `char *` against `va_list`, which i386 and arm64 Darwin accept.
+Both are unportable code. Typing `__builtin_va_arg` and
+the bodies that pass a `va_list` on settles it: if one needs the
+representation, it comes from the backend, as the target model does;
+otherwise the opaque type stays.
 
 **Division of diagnostics.** The front end diagnoses every Type-C rule and
 the C errors it must detect to do so: syntax, undeclared names, types. It
@@ -1294,6 +1313,7 @@ numbers refer to the implementation plan.
 | P17 | The tier 1 rule set (11.2) | Stage 5 prototype on pilot code | Tier 1 is not released until the rules pass |
 | P18 | Lifetimes by homogeneous regions (11.3) | Stage 6: a formal model, then a prototype | No lifetime tier |
 | P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition | Own front end |
+| P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 
 ## 16. Non-goals
 

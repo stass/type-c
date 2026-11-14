@@ -1873,16 +1873,12 @@ let declare_syntactically scope declaration =
   | Some name -> Scope.declare scope name (syntactic_binding declaration)
   | None -> scope
 
-(* The typedef names that GCC and Clang declare before the first token:
-   [stdarg.h] declares [va_list] with [__builtin_va_list]. *)
-let builtin_typedef_names = [ "__builtin_va_list" ]
-
 let syntactic_scopes : (binding, unit) Scope.t scopes =
   {
     file =
       List.fold_left
-        (fun scope name -> Scope.declare scope name Typedef_name_binding)
-        Scope.file builtin_typedef_names;
+        (fun scope (name, _) -> Scope.declare scope name Typedef_name_binding)
+        Scope.file Builtin_typedef.table;
     enter = Scope.enter;
     reenter = Scope.reenter;
     declare = declare_syntactically;
