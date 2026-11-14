@@ -21,19 +21,42 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Medium] A backend that resolves to `typec` itself, such as a `cc`
   symlink to `typec` first on `PATH`, makes the driver exec itself forever
   with no message. Detect it, or document how to install `typec` as `cc`.
-- [Low] When `.tc` inputs are recognised, the driver must know which C
-  compiler options take a separate value, so that `-o --cc=x` or
-  `-o x.tc` is not misread; keep that table in one place. The same table
-  chooses the options of the target query (`Target_query.query`): those
-  of the compilation without its inputs, `-o`, `-c`, `-S`, `-E` and the
-  `-M` family, plus the `-std=` that design 2.4 adds, so that the model
-  and the compilation see the same options.
-- [Medium] `test/run/target.t`, `test/run/read.t` and `test/run/types.t`
-  run `/usr/bin/clang` and `/usr/local/bin/gcc-16`, and `target.t`
-  expects the model of the x86-64 macOS host. Choose the backends and the
-  expected facts per host once the Linux and FreeBSD test hosts exist;
-  `types.t` then confirms the provisional enumeration rule
-  (`Arithmetic.enum_compatible_type`) on each.
+- [Low] When a stage reads the target model during a compilation, query
+  it (`Target_query.query`) with the options of the compile step of
+  `Pipeline` (its Common and Dialect options and the `-std=` default), so
+  that the model and the compilation see the same options.
+- [Medium] A command that compiles a `.tc` input and links loses the
+  side outputs of the compile step, which are written next to the
+  temporary object and removed with it: with `-g` on macOS the debug
+  information (Clang runs `dsymutil` for a one-step build, the final
+  command links objects and does not), and the `.dwo` files of
+  `-gsplit-dwarf` and GCC's `-fstack-usage` and `-fcallgraph-info`
+  files. Run `dsymutil` when the backend would, or keep the objects
+  beside the output.
+- [Medium] Several `-arch` options make the `-E` step fail ("cannot use
+  'cpp-output' output with multiple -arch options"), where cc builds a
+  universal object. Refuse them with a `.tc` input with a clear message,
+  or run one translation per architecture and join the objects with
+  `lipo`.
+- [Low] The steps of the pipeline get `-Wno-unused-command-line-argument`
+  so that Clang does not warn about the options of the whole command
+  line that a step does not use; GCC ignores it, but adds a note that
+  names it to any diagnostic of that step. Pass it to Clang only once
+  the driver knows the backend's family.
+- [Low] The pipeline stops at the first `.tc` input that fails, where cc
+  compiles every input and reports every error.
+- [Low] GCC names the dependency file of a link without `-o` `a-x.d`;
+  `typec` names it `x.d`, as Clang does.
+- [Low] The option table leaves out GCC's unique abbreviations of long
+  options (`--for-link X`), the options of GCC's other front ends, and
+  Apple Clang's `-cc1-args`, which takes the rest of the line.
+- [Medium] `test/run/target.t`, `test/run/read.t`, `test/run/types.t`
+  and `test/run/pipeline.t` run `/usr/bin/clang` and
+  `/usr/local/bin/gcc-16`, and `target.t` expects the model of the x86-64
+  macOS host. Choose the backends and the expected facts per host once
+  the Linux and FreeBSD test hosts exist; `types.t` then confirms the
+  provisional enumeration rule (`Arithmetic.enum_compatible_type`) on
+  each.
 - [Low] `Unix.execvp` hands an executable without a `#!` line to
   `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
   a backend works on some hosts only. Document it or decide one behaviour.
@@ -98,14 +121,21 @@ is [type-c-language-design.md](type-c-language-design.md).
   as directives. Lex them, counting their newlines.
 - [Medium] With `-P` or Clang's `-fuse-line-directives` the `-E` output
   has no enter and return flags, and every token silently belongs to the
-  main file, which is not a system header. The driver must keep both
-  options out of its `-E` run, or the reader must refuse such output.
+  main file, which is not a system header. The driver refuses both with
+  a `.tc` input, but `-Wp,-P` and `-Xpreprocessor -P` still reach the
+  `-E` step, and so do `-C` and `-dD` that way, which the reader refuses
+  with a message about the text instead of the option. Classify the
+  options inside `-Wp,` and `-Xpreprocessor` with the same table, or
+  make the reader refuse output without a line marker before its first
+  token.
 - [Medium] Tokens record the owner but not the flags of the last line
   marker, so a file after `#pragma GCC system_header` is not a system
-  header to typec, and the emitter (0.3) cannot repeat the flags in
-  effect in the markers it writes for lowered code; GCC turns the system
-  header state off at a marker without flag 3. Add the flags in effect
-  to `Location.t` when the emitter needs them.
+  header to typec. The markers that the emitter writes around an edit
+  carry no flags, and both GCC and Clang turn the system header state
+  off at a marker without flag 3, so lowered text in a system header (a
+  `.tci` found through `-isystem`) ends that state for the rest of the
+  header. Add the flags in effect to `Location.t` and repeat them in
+  those markers when Stage 1 lowers such text.
 - [Low] Diagnostics of later stages print names and spellings from the
   text; route them through the escaping of `Reader.error_message`, and
   cut a quoted spelling, such as a number that is no constant, to a

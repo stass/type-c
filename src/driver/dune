@@ -3,4 +3,4 @@
 
 (library
  (name typec_driver)
- (libraries unix typec_sema))
+ (libraries unix typec_cpp typec_emit typec_sema))

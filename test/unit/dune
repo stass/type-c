@@ -15,3 +15,13 @@
  (name test_reader)
  (modules test_reader)
  (libraries typec_cpp typec_test_support))
+
+(test
+ (name test_emitter)
+ (modules test_emitter)
+ (libraries typec_cpp typec_emit))
+
+(test
+ (name test_pipeline)
+ (modules test_pipeline)
+ (libraries typec_driver))

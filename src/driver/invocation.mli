@@ -3,21 +3,28 @@
 
 (** The backend command that a [typec] command line asks for.
 
-    [typec] owns two options, [--cc=PATH] and [--print-target]; every other
-    argument belongs to the backend and keeps its position. *)
+    [typec] owns three options, [--cc=PATH], [--print-target] and
+    [--emit-c]; every other argument belongs to the backend and keeps its
+    position. The command line is read with {!Command_line.read}, so an
+    option of [typec] is one only where an option can stand: the value of
+    [-o] is never one. *)
 
 (** What [typec] does with the backend. *)
 type action =
-  | Forward  (** Run the backend with the arguments. *)
+  | Compile
+      (** Run the backend with the arguments, through the pipeline of
+          {!Pipeline} when an input is a [.tc] file. *)
+  | Emit_c  (** Write the C of the one [.tc] input ([--emit-c]). *)
   | Print_target
       (** Print the target model that the backend reports when it is run
           with the arguments as options ([--print-target]). *)
 
 (** A backend command: the program to run, the arguments after its name
-    and the action. The program is never empty. *)
+    and the action. The program is never empty, and the arguments hold
+    no option of [typec]. *)
 type t = private {
   program : string;
-  arguments : string list;
+  arguments : Command_line.argument list;
   action : action;
 }
 
@@ -29,9 +36,10 @@ val of_command_line :
 (** [of_command_line ~env_cc arguments] takes the backend from the last
     [--cc=PATH] in [arguments], else from [env_cc] (the value of
     [TYPEC_CC]) when it is set and not empty, else ["cc"]. The action is
-    [Print_target] when [--print-target] appears anywhere, else [Forward].
-    The [typec] options are removed and every other argument is kept in
-    order; a look-alike such as [--cc] without [=] is not a [typec] option
-    and is forwarded like any other. *)
+    [Print_target] when [--print-target] appears anywhere, else [Emit_c]
+    when [--emit-c] does, else [Compile]. The [typec] options are removed
+    and every other argument is kept in order; a look-alike such as
+    [--cc] without [=] is not a [typec] option and is forwarded like any
+    other. *)
 
 val error_message : error -> string

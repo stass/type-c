@@ -1,21 +1,24 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type action = Forward | Print_target
-type t = { program : string; arguments : string list; action : action }
-type error = Empty_cc_option
+type action = Compile | Emit_c | Print_target
 
-let cc_option_prefix = "--cc="
-let print_target_option = "--print-target"
+type t = {
+  program : string;
+  arguments : Command_line.argument list;
+  action : action;
+}
+
+type error = Empty_cc_option
 
 (* The backend when neither the command line nor TYPEC_CC names one. *)
 let default_program = "cc"
 
-let is_cc_option = String.starts_with ~prefix:cc_option_prefix
-
-let cc_option_path option =
-  let prefix_length = String.length cc_option_prefix in
-  String.sub option prefix_length (String.length option - prefix_length)
+(* The option of typec that [argument] is, with its value. *)
+let typec_option = function
+  | Command_line.Option { role = Typec option; value; _ } ->
+      Some (option, value)
+  | _ -> None
 
 (* The last --cc= wins, as a later option overrides an earlier one in cc. *)
 let choose_program ~env_cc cc_paths =
@@ -24,17 +27,32 @@ let choose_program ~env_cc cc_paths =
   | [], Some program when program <> "" -> program
   | [], _ -> default_program
 
-let of_command_line ~env_cc arguments =
-  let cc_options, arguments = List.partition is_cc_option arguments in
-  let print_target_options, forwarded =
-    List.partition (String.equal print_target_option) arguments
+let choose_action typec_options =
+  let given option = List.mem_assoc option typec_options in
+  if given Cc_option.Print_target then Print_target
+  else if given Cc_option.Emit_c then Emit_c
+  else Compile
+
+let of_command_line ~env_cc words =
+  let arguments = Command_line.read words in
+  let typec_options = List.filter_map typec_option arguments in
+  let backend_arguments =
+    List.filter (fun argument -> typec_option argument = None) arguments
   in
-  let action = if print_target_options = [] then Forward else Print_target in
-  let cc_paths = List.map cc_option_path cc_options in
+  let cc_paths =
+    List.filter_map
+      (fun (option, value) ->
+        if option = Cc_option.Cc then Some value else None)
+      typec_options
+  in
   if List.mem "" cc_paths then Error Empty_cc_option
   else
-    let program = choose_program ~env_cc cc_paths in
-    Ok { program; arguments = forwarded; action }
+    Ok
+      {
+        program = choose_program ~env_cc cc_paths;
+        arguments = backend_arguments;
+        action = choose_action typec_options;
+      }
 
 let error_message = function
   | Empty_cc_option -> "--cc= needs the path of a C compiler"
