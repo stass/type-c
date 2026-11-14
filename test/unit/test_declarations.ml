@@ -8,6 +8,7 @@ open Typec_test_support
 
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
 let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
+let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
 
 let read target source =
   let text =
@@ -498,6 +499,16 @@ let constant_expressions () =
     "6.7.2.2p2";
   rejects "enum { V = _Generic(__builtin_foo, int: 1, default: 2) };"
     "the value of _Generic depends on the builtin '__builtin_foo'";
+  (* GCC types the value of a narrow bit-field otherwise than Clang. *)
+  declares ~target:lp64_clang
+    "struct { unsigned b : 3; } v; \
+     enum { V = _Generic(v.b++, unsigned: 1, default: 2) };"
+    "V" "enumerator int = 1";
+  rejects
+    "struct { unsigned b : 3; } v; \
+     enum { V = _Generic(v.b++, unsigned: 1, default: 2) };"
+    "the value of _Generic depends on the value of a bit-field narrower \
+     than its type at in.c:1, which GCC types otherwise than Clang";
   evaluates_int "__builtin_types_compatible_p(int, int)" "1";
   evaluates_int "__builtin_types_compatible_p(int, long)" "0";
   evaluates_int "__builtin_types_compatible_p(const int, volatile int)" "1";
@@ -507,10 +518,19 @@ let constant_expressions () =
     "1";
   evaluates_int "__builtin_types_compatible_p(enum { B }, unsigned)" "1";
   evaluates_int "__builtin_types_compatible_p(_Atomic int, _Atomic int)" "1";
-  evaluates_int "__builtin_types_compatible_p(_Atomic int, long)" "0";
-  (* GCC drops _Atomic as a top-level qualifier, Clang keeps it. *)
+  (* GCC drops _Atomic as a top-level qualifier, Clang keeps it, so with
+     GCC the comparison of an _Atomic type with another is unknown. *)
+  evaluates_int ~target:lp64_clang
+    "__builtin_types_compatible_p(_Atomic int, long)" "0";
+  evaluates_int ~target:lp64_clang
+    "__builtin_types_compatible_p(_Atomic int[2], int[2])" "0";
+  declares ~target:lp64_clang
+    "int a[__builtin_types_compatible_p(_Atomic int, int) + 1];" "a"
+    "object int[1] external static";
   declares "int a[__builtin_types_compatible_p(_Atomic int, int) + 1];" "a"
     "object int[<constant>] external static";
+  rejects "enum { V = __builtin_types_compatible_p(_Atomic int, long) };"
+    "does not evaluate";
   declares "int a[__builtin_types_compatible_p(typeof(__builtin_foo), int)];"
     "a" "object int[<constant>] external static";
   declares "int a[__builtin_types_compatible_p(int, signed)];" "a"

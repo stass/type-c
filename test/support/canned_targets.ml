@@ -88,3 +88,17 @@ let target macros =
   match Typec_sema.Target.of_predefined_macros (dump_of macros) with
   | Ok target -> target
   | Error error -> failwith (Typec_sema.Target.error_message error)
+
+let names_backend (name, _) =
+  List.mem name [ "__clang__"; "__clang_major__"; "__GNUC__" ]
+
+let without_backend macros =
+  List.filter (fun macro -> not (names_backend macro)) macros
+
+(* [macros] as Clang 20 or GCC 14 would print them, for the typing that
+   depends on the backend (Backend_difference). *)
+let as_clang macros =
+  ("__clang__", "1") :: ("__clang_major__", "20") :: ("__GNUC__", "4")
+  :: without_backend macros
+
+let as_gcc macros = ("__GNUC__", "14") :: without_backend macros

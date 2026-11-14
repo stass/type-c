@@ -25,10 +25,9 @@ val promote : Target.t -> ?bit_field_width:int -> t -> promoted
     of a bit-field operand of an integer type: a bit-field whose values all
     fit [int] promotes to [int], else one whose values fit [unsigned int]
     to [unsigned int]. A wider bit-field keeps its declared type. This is
-    the rule of Clang and of C11 for the bit-field types it defines; for a
-    type ranked above [int], GCC keeps the declared type of a bit-field of
-    full width, such as [long : 32] on ILP32, and gives a bit-field wider
-    than [int] and narrower than its type a type of its own width. *)
+    the rule of Clang and of C11 for the bit-field types it defines; GCC
+    promotes some bit-fields of types ranked above [int] otherwise
+    ({!Backend_difference.Bit_field_promotion}). *)
 
 val usual_arithmetic_conversions : Target.t -> promoted -> promoted -> t
 (** The common real type and type domain of two operands (C11 6.3.1.8). *)

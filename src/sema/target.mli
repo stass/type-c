@@ -27,8 +27,11 @@ type backend = {
     see {!integer_width}. *)
 type t = {
   backend : backend;
-      (** A supported release, see {!minimum_major_version}, named for
-          [--print-target]: typec types C alike for every one. *)
+      (** A supported release, see {!minimum_major_version}. Its compiler
+          decides which constructs have an unknown type, those that GCC
+          types otherwise than Clang ({!Backend_difference}); its version
+          is named for [--print-target] only, as typec types C alike for
+          every supported release of a compiler. *)
   char_bit : int;  (** [__CHAR_BIT__]: the width of a byte. *)
   char_signed : bool;  (** Plain [char] is signed: no [__CHAR_UNSIGNED__]. *)
   sizeof_short : int;

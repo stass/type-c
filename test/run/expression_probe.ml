@@ -9,8 +9,9 @@
    typec answers. A backend that compiles the result agrees with typec on
    every one. The statements of compound statements are probed, those under
    other statements not; types that are not C when spelled, unknown
-   types, variably modified ones and bit-fields, which typeof refuses in
-   GCC, are left out. *)
+   types, among them those that GCC gives otherwise than Clang, variably
+   modified ones and the bit-fields that a member access designates,
+   which typeof refuses, are left out. *)
 
 open Typec_cpp
 open Typec_syntax
@@ -40,7 +41,7 @@ let assertions text result (typed : Expressions.typed) expression =
   let written = source_text text expression.Tree.span in
   let type_check =
     match spelled typed.expression_type with
-    | Some pointer when typed.bit_field = Not_bit_field ->
+    | Some pointer when not (Expressions.designates_bit_field typed) ->
         [ Printf.sprintf
             "_Static_assert(__builtin_types_compatible_p(__typeof__(%s) *, \
              %s), \"typec\");"
@@ -48,7 +49,7 @@ let assertions text result (typed : Expressions.typed) expression =
     | Some _ | None -> []
   in
   let lvalue_check =
-    if typed.lvalue && typed.bit_field = Not_bit_field then
+    if typed.lvalue && not (Expressions.designates_bit_field typed) then
       [ Printf.sprintf "(void)sizeof &(%s);" written ]
     else []
   in

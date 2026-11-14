@@ -22,11 +22,13 @@ type record_tag = {
 type enum_tag = { enum_id : int; enum_name : string option }
 type length = Constant of int | Opaque | Unknown | Variable
 type unknown_kind = Unknown_object | Unknown_function | Object_or_function
+type unknown_cause = Not_typed | Typed_differently
 
 type unknown = {
   construct : string;
   location : Typec_cpp.Location.t;
   kind : unknown_kind;
+  cause : unknown_cause;
 }
 
 type parameters =
@@ -57,9 +59,11 @@ type member = {
 
 module Names = Map.Make (String)
 
-(* A member found by name and its position: that of the member that holds
-   it in the record, then in each anonymous member down to it. *)
-type located = { member : member; path : int list }
+type found_member = {
+  member : member;
+  path : int list;
+  anonymous_qualifiers : qualifiers;
+}
 
 (* The members in order; those with a position, which are those that an
    initialiser reaches; and every member by name, those of anonymous
@@ -67,7 +71,7 @@ type located = { member : member; path : int list }
 type record_definition = {
   members : member list;
   positions : member array;
-  by_name : located Names.t;
+  by_name : found_member Names.t;
 }
 
 type tags = {
@@ -121,14 +125,21 @@ let make qualifiers shape = { qualifiers; shape; size = shape_size shape }
 let of_shape shape = make no_qualifiers shape
 let unqualified t = { t with qualifiers = no_qualifiers }
 
-let rec without_top_qualifiers ~keep_atomic t =
+let rec top_qualifiers t =
+  match t.shape with
+  | Array { element; _ } -> top_qualifiers element
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
+  | Unknown_type _ ->
+      t.qualifiers
+
+let rec without_top_qualifiers t =
   match t.shape with
   | Array array ->
-      let element = without_top_qualifiers ~keep_atomic array.element in
+      let element = without_top_qualifiers array.element in
       { t with shape = Array { array with element } }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
   | Unknown_type _ ->
-      let atomic = keep_atomic && t.qualifiers.atomic in
+      let atomic = t.qualifiers.atomic in
       { t with qualifiers = { no_qualifiers with atomic } }
 
 let is_function t =
@@ -290,15 +301,9 @@ let record_definition tags tag = Hashtbl.find_opt tags.records tag.record_id
 let record_members tags tag =
   Option.map (fun definition -> definition.members) (record_definition tags tag)
 
-let located tags tag name =
+let find_member tags tag name =
   Option.bind (record_definition tags tag) (fun definition ->
       Names.find_opt name definition.by_name)
-
-let find_member tags tag name =
-  Option.map (fun found -> found.member) (located tags tag name)
-
-let member_path tags tag name =
-  Option.map (fun found -> found.path) (located tags tag name)
 
 let member_at tags tag position =
   Option.bind (record_definition tags tag) (fun definition ->
@@ -428,26 +433,31 @@ let add_name name found names =
   Names.add name found names
 
 (* The members of an anonymous member are members of the containing type
-   (6.7.2.1p13), const and volatile as the anonymous member is. Its
-   _Atomic does not pass on, since a member of an atomic structure is not
+   (6.7.2.1p13), and keep its const and volatile on the side. Its _Atomic
+   does not pass on, since a member of an atomic structure is not
    accessed on its own (6.5.2.3p5). *)
 let add_anonymous_members tags ~index anonymous tag names =
   let { const; volatile; _ } = anonymous.member_type.qualifiers in
-  let qualifiers = { no_qualifiers with const; volatile } in
-  let qualify_inner _ { member = inner; path } =
-    match qualify qualifiers inner.member_type with
-    | Ok member_type ->
-        { member = { inner with member_type }; path = index :: path }
-    | Error error -> raise (Invalid error)
+  let through_anonymous _ found =
+    let q = found.anonymous_qualifiers in
+    let anonymous_qualifiers =
+      { q with const = q.const || const; volatile = q.volatile || volatile }
+    in
+    { found with path = index :: found.path; anonymous_qualifiers }
   in
   match record_definition tags tag with
   | Some definition ->
-      Names.fold add_name (Names.mapi qualify_inner definition.by_name) names
+      let inner = Names.mapi through_anonymous definition.by_name in
+      Names.fold add_name inner names
   | None -> raise (Invalid Incomplete_member)
 
 let add_member_names tags names (index, member) =
   match (member.member_name, member.member_type.shape) with
-  | Some name, _ -> add_name name { member; path = [ index ] } names
+  | Some name, _ ->
+      let found =
+        { member; path = [ index ]; anonymous_qualifiers = no_qualifiers }
+      in
+      add_name name found names
   | None, Record tag when member.bit_field_width = None ->
       add_anonymous_members tags ~index member tag names
   | None, _ -> names

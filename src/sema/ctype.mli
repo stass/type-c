@@ -69,13 +69,21 @@ type unknown_kind =
       (** A function type, such as a function that an attribute changes. *)
   | Object_or_function  (** As [typeof] of an expression may give. *)
 
+(** Why typec does not compute a type (design 13.3). *)
+type unknown_cause =
+  | Not_typed  (** typec does not type the construct. *)
+  | Typed_differently
+      (** The backend, GCC, types the construct otherwise than Clang, whose
+          rules typec follows; see {!Backend_difference}. *)
+
 (** A type that typec does not compute: the construct that gives it, as a
-    message names it ("a block pointer"), and the location of the token
-    that starts it, for the error at a point that needs the type. *)
+    message names it ("a block pointer"), the location of the token that
+    starts it, for the error at a point that needs the type, and why. *)
 type unknown = {
   construct : string;
   location : Typec_cpp.Location.t;
   kind : unknown_kind;
+  cause : unknown_cause;
 }
 
 (** The parameters of a function type (6.7.6.3). Their types are adjusted
@@ -229,18 +237,25 @@ val define_enum :
 val record_members : tags -> record_tag -> member list option
 (** The members of a complete structure or union, in order. *)
 
-val find_member : tags -> record_tag -> string -> member option
+(** A member found by name. [path] is where: the position of the member
+    that holds it (see {!member_at}), then its position in each anonymous
+    member down to it. [anonymous_qualifiers] are the [const] and
+    [volatile] of the anonymous members that it is found through, which
+    are not part of its type: Clang does not give them to it, and GCC does
+    (see {!Backend_difference}). *)
+type found_member = {
+  member : member;
+  path : int list;
+  anonymous_qualifiers : qualifiers;
+}
+
+val find_member : tags -> record_tag -> string -> found_member option
 (** The member of that name, looked up through anonymous members too. *)
 
 (** {2 Positions}
 
     The members of a structure or union that an initialiser reaches have
     positions, from 0 in order: all but unnamed bit-fields (6.7.9p9). *)
-
-val member_path : tags -> record_tag -> string -> int list option
-(** Where {!find_member} finds the member of that name: the position of
-    the member that holds it, then its position in each anonymous member
-    down to it. *)
 
 val member_at : tags -> record_tag -> int -> member option
 (** The member at a position of a complete structure or union; [None]
@@ -282,10 +297,13 @@ val as_arithmetic : tags -> t -> Arithmetic.t option answer
 
 val unqualified : t -> t
 
-val without_top_qualifiers : keep_atomic:bool -> t -> t
-(** The type without its top-level qualifiers, which for an array are
-    those of its innermost element (6.7.3p9), but [_Atomic] if
-    [keep_atomic]. *)
+val top_qualifiers : t -> qualifiers
+(** The top-level qualifiers of a type, which for an array are those of
+    its innermost element (6.7.3p9). *)
+
+val without_top_qualifiers : t -> t
+(** The type without its top-level qualifiers but [_Atomic], as Clang
+    compares types in [__builtin_types_compatible_p]. *)
 
 val decay : t -> t
 (** The pointer that an array or a function converts to (6.3.2.1p3, p4);

@@ -12,9 +12,11 @@
     {!context}: how to read what an expression declares and refers to,
     which it alone knows, and its one way to fail.
 
-    An expression whose type depends on a type that typec does not
-    compute has that unknown type (design 13.3, P21); a constraint on an
-    unknown type is the backend's to check. The pass reports what it must
+    Types are those that Clang gives. An expression whose type depends on
+    a type that typec does not compute has that unknown type (design
+    13.3, P21), as has one that GCC, as the backend, types otherwise
+    ({!Backend_difference}); a constraint on an unknown type is the
+    backend's to check. The pass reports what it must
     detect to give the types (design 13.3): undeclared names, operands
     that an operator does not take, members that a structure lacks, calls
     of what is not a function, operands that must be lvalues, the
@@ -30,23 +32,38 @@
 
 open Typec_syntax
 
+(** A bit-field member: its width, and the integer type that it is
+    declared with or that its enumerated type is compatible with, by which
+    its value promotes (6.3.1.1p2) whatever type the backend gives the
+    value. [location] is where the member is named, for the unknown type
+    of a promotion that GCC gives otherwise. *)
+type field = {
+  width : int;
+  integer : Integer.t Ctype.answer;
+  location : Typec_cpp.Location.t;
+}
+
 (** Whether an expression is a bit-field, whose integer promotion depends
-    on its width (6.3.1.1p2): one that it designates, as a member access
-    does, which [&] and [sizeof] do not take (6.5.3.2p1, 6.5.3.4p1), or
-    the value of one, as GCC and Clang take an assignment to a bit-field,
-    a prefix [++] of one and a comma whose right operand is one. *)
-type bit_field = Not_bit_field | Bit_field of int | Bit_field_value of int
+    on its width: one that it designates, as a member access does, which
+    [&] and [sizeof] do not take (6.5.3.2p1, 6.5.3.4p1), or the value of
+    one, as Clang takes an assignment to a bit-field, a prefix [++] of one
+    and a comma whose right operand is one. *)
+type bit_field = Not_bit_field | Bit_field of field | Bit_field_value of field
 
 (** What typing gives an expression. [expression_type] is the type that
-    C gives the expression itself, before the conversions of its context:
-    an lvalue keeps its qualifiers, an array and a function their own
-    types (6.3.2.1); {!Ctype.lvalue_conversion} gives the type of its
-    value. *)
+    Clang gives the expression itself, before the conversions of its
+    context: an lvalue keeps its qualifiers, an array and a function
+    their own types (6.3.2.1); {!Ctype.lvalue_conversion} gives the type
+    of its value. *)
 type typed = {
   expression_type : Ctype.t;
   lvalue : bool;
   bit_field : bit_field;
 }
+
+val designates_bit_field : typed -> bool
+(** Whether the expression designates a bit-field, which [sizeof] and [&]
+    refuse, rather than give the value of one. *)
 
 (** {1 Constant expressions (6.6)} *)
 
@@ -127,14 +144,12 @@ val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
 (** The result expression of a generic selection (6.5.1.1p3), selected
     by the type that {!find} gives the controlling expression. The
     selection is unknown where that type is, or the compatibility of any
-    association with it, and where the controlling expression is a
-    bit-field, which GCC gives a type of its own width. *)
+    association with it. *)
 
 val types_compatible : t -> Tree.expression -> bool Ctype.answer option
 (** Whether the two types of [__builtin_types_compatible_p] are
-    compatible without their top-level qualifiers, as GCC and Clang
-    compare them. That of an [_Atomic] type, which GCC drops and Clang
-    keeps, is unknown where it changes the answer. *)
+    compatible without their top-level qualifiers but [_Atomic], as Clang
+    compares them. *)
 
 val constant : t -> Tree.expression -> constant option
 (** The class of constant expression of an expression that has been

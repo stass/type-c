@@ -1239,7 +1239,8 @@ as `-D` and `-undef` are left out: they cannot change the ABI of that
 step, and `-D__SIZEOF_LONG__=4` would make the model lie. `typec` has no
 target table of its own. The model also names the backend, Clang when
 `__clang__` is defined and GCC otherwise, with its major version
-(`__clang_major__` or `__GNUC__`), and `typec` refuses a release older
+(`__clang_major__` or `__GNUC__`). The compiler decides the constructs
+whose types are unknown (below), and `typec` refuses a release older
 than `Target.minimum_major_version`, the one statement of the oldest
 supported releases. For Clang that is the first release that types C as
 the front end does: Clang 19 gives an enumerator that `int` holds the
@@ -1296,6 +1297,31 @@ attribute makes a function of an object. Typing bodies (0.9b) and the
 corpus settle it: a point that often needs an unknown type's properties
 makes the front end type that construct; the default is that unknown
 types stay.
+
+**Where GCC and Clang differ.** The front end types C as Clang does,
+whichever the backend is. GCC types a few constructs otherwise: the
+value of a bit-field narrower than its type, which it gives a type of
+that width and keeps through assignment, `++`, `--`, the comma operator,
+a statement expression, `__real__` and `__imag__`; `__real__` of a
+bit-field, which is the bit-field itself, where Clang takes its value;
+the promotion of a bit-field of a type ranked above `int` and at least
+as wide as `int`, which it leaves unpromoted; a member found through a
+`const` or `volatile` anonymous member, which it qualifies as that
+member; and `__builtin_types_compatible_p` of an `_Atomic` type and one that is not,
+as it drops `_Atomic` with the other top-level qualifiers. With GCC as
+the backend each of these has an unknown type (P21) wherever GCC's type
+differs from Clang's, and the real part of a bit-field, which differs in
+being an lvalue, has one too: the front end neither guesses GCC's type nor
+refuses what GCC accepts, and the error at a point that needs the type
+names the construct and says that GCC types it otherwise. One table,
+`Backend_difference`, holds the constructs, what GCC does and a probe of
+each, and decides for every place that types one; GCC 14 to 16 and Clang
+20 to 22 confirm every entry. One rule for the class replaces a policy
+per construct: the front end models one compiler's typing, and the other
+costs an unknown type where it differs, not a second model.
+*Provisional:* the table holds the differences that probes have found;
+a construct that the typing oracle or the corpus shows GCC typing
+otherwise joins it, and without one the table stays.
 
 **Overloads.** Clang's `overloadable` attribute makes a function one of
 an overload set of its name, which Clang chooses among by the argument

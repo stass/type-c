@@ -76,12 +76,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   `-funsigned-bitfields` (plain `int` bit-fields, which
   `Arithmetic.promote` takes as signed). Reject them in the driver or
   find a probe that reads them.
-- [Low] GCC and Clang promote bit-fields of types ranked above `int`
-  differently (`Arithmetic.promote`): GCC keeps `long : 32` on ILP32 as
-  `long`, and gives `unsigned long : 40` on LP64 a 40-bit type whose
-  arithmetic wraps at 2^40. typec follows Clang. Decide whether the
-  target model records the backend family, or whether such bit-fields
-  are an error.
 - [Low] The target query gives the backend typec's stdin, which it never
   needs; a stray `-` among the options makes it read the terminal. Give
   it `/dev/null`.
@@ -281,25 +275,41 @@ is [type-c-language-design.md](type-c-language-design.md).
   empty structure (`struct { struct {} e; int b; } y[] = { 1, 2 };`),
   where GCC skips the member with a warning; typec stops following the
   positions there, and the length it gives such an array is opaque.
-- [High] Where GCC and Clang type an expression differently, typing
-  follows one of them whatever `Target.compiler` is. GCC gives the value
-  of a bit-field narrower than its type a type of its own width,
-  compatible with no type that a program names, and keeps it where
-  Clang does not: through a postfix `++` or `--` and a statement
-  expression (`s.b++`, `({ s.b; })`), and through the arithmetic of a
-  bit-field wider than `int`, such as `unsigned long long w : 40`
-  (`Arithmetic.promote` promotes it to its declared type as in Clang).
-  A member found through an anonymous structure with a `const` type is
-  `const` as in GCC (`struct { const struct { int z; }; } t; t.z`),
-  which Clang lets `t.z = 1` assign. `_Generic`, `typeof` and
-  `__builtin_types_compatible_p` turn these types into values that GCC
-  does not give, so `_Generic(s.b++, int: 1, default: 0)` is 1 here and
-  0 in GCC, as an array length or enumerator too. `_Generic` of a
-  bit-field is unknown on either backend, and the builtin with `_Atomic`
-  is unknown where the backends differ: a third policy. Decide one rule
-  for the class, a type chosen by `Target.compiler` where typing gives a
-  value its type or an unknown type wherever the backends differ, and
-  apply it there, so that the special case of `_Generic` goes.
+- [High] `Ctype.composite` gives an enumerated type and its compatible
+  integer type the enumerated type as their composite, as GCC does,
+  where Clang gives the integer type: after `extern enum E x; extern
+  unsigned x;`, typec refuses `typedef typeof(x) T; typedef unsigned T;`,
+  which Clang accepts, and accepts `typedef enum E T;`, which Clang
+  refuses. Follow Clang and make the composite an entry of
+  `Backend_difference`, unknown with GCC. The table depends on `Ctype`,
+  so `Ctype.composite` cannot ask it: move the unknown type and
+  `answer` below both, or let the caller of `composite` pass the
+  decision.
+- [Medium] With GCC, the unknown types of `Backend_difference` cover more
+  than the difference, so code that needs the type is refused where both
+  compilers agree. A member found through a qualified anonymous member
+  is unknown, though only the qualifiers of the lvalue differ and its
+  value has one type in both (`_Generic(t.z + 0, int: 1, default: 0)`
+  in an enumerator is refused). An operand whose promotion is unknown
+  makes `p + w.l`, `a[w.l]` and `1 << w.l` unknown, though GCC gives
+  them the type of the pointer, the element and `int`. And
+  `__builtin_types_compatible_p(_Atomic int, long)` is unknown though
+  GCC also answers 0, and the real part of a bit-field is unknown where
+  only whether it is an lvalue differs (`__real__ s.f` with
+  `unsigned f : 32` is `unsigned int` in both). Keep the value type of
+  such a member apart from the qualifiers of its lvalue, let an
+  arithmetic operand keep its integer type with an unknown promoted
+  type, let the comparison ask whether the types without `_Atomic` are
+  compatible, and keep the type of a real part that both compilers
+  give.
+- [Low] Whether a bit-field's type is an integer type is decided twice:
+  `Ctype.check_bit_field` refuses other types, and
+  `Expressions.bit_field_integer` reads the integer type again, failing
+  with `invalid_arg` where the two disagree. Let `Ctype.member` carry
+  the width and integer type of a bit-field, filled where the record is
+  defined.
+- [Low] `typeof` of a bit-field that a member access designates, which
+  GCC and Clang refuse, gives the bit-field's type.
 - [Medium] `Ctype.find_member` passes over an anonymous member of
   unknown type, such as one whose specifier has an attribute outside the
   table, so `t.z` of `struct T { struct { int z; }

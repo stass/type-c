@@ -287,8 +287,8 @@ let designate typing t designators =
         check_depth typing designator.span (List.length levels);
         match (designator.node, t.shape) with
         | Member_designator name, Record tag -> (
-            match Ctype.member_path typing.tags tag name.node with
-            | Some path ->
+            match Ctype.find_member typing.tags tag name.node with
+            | Some { path; _ } ->
                 let member_type, levels = along typing tag path levels in
                 enter member_type levels rest
             | None ->

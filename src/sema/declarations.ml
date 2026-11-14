@@ -100,7 +100,7 @@ let integer_type state span integer =
 (* What the construct at [span] gives in place of a type. *)
 let unknown_of state (span : Tree.span) construct kind : Ctype.unknown =
   let location = state.text.tokens.(span.first).location in
-  { construct; location; kind }
+  { construct; location; kind; cause = Not_typed }
 
 let unknown_type state span construct kind =
   Ctype.unknown (unknown_of state span construct kind)

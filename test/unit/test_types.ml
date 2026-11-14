@@ -474,19 +474,32 @@ let definition_cases : (string * Ctype.error option * Ctype.error option)
 
 let check_definition (name, outcome, expected) = check name outcome expected
 
+let found name = Ctype.find_member tags with_anonymous name
+
 let member_type name =
   Option.map
-    (fun (member : Ctype.member) -> member.member_type)
-    (Ctype.find_member tags with_anonymous name)
+    (fun (found : Ctype.found_member) -> found.member.member_type)
+    (found name)
 
+let anonymous_qualifiers name =
+  Option.map
+    (fun (found : Ctype.found_member) -> found.anonymous_qualifiers)
+    (found name)
+
+(* The qualifiers of an anonymous member stay apart from the type of the
+   members found through it, which Clang does not give them. *)
 let member_facts () =
   check "named member" (member_type "first") (Some char_type)
+  && check "named member, no anonymous qualifiers"
+       (anonymous_qualifiers "first") (Some Ctype.no_qualifiers)
   && check "member of a const anonymous member" (member_type "b")
-       (Some (qualify const float_type))
+       (Some float_type)
+  && check "qualifiers of a const anonymous member"
+       (anonymous_qualifiers "b") (Some const)
   && check "bit-field width"
        (Option.map
-          (fun (member : Ctype.member) -> member.bit_field_width)
-          (Ctype.find_member tags with_anonymous "bits"))
+          (fun (found : Ctype.found_member) -> found.member.bit_field_width)
+          (found "bits"))
        (Some (Some 5))
   && check "no such member" (member_type "c") None
   && check "members in order"
@@ -676,7 +689,7 @@ let declaration_facts () =
 let unknown_facts () =
   let unknown_of kind =
     let location = { Typec_cpp.Location.file = "in.c"; line = 1 } in
-    { Ctype.construct = "x"; location; kind }
+    { Ctype.construct = "x"; location; kind; cause = Not_typed }
   in
   let object_unknown = unknown_of Unknown_object in
   let function_unknown = unknown_of Unknown_function in

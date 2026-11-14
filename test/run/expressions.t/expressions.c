@@ -9,6 +9,12 @@ union u { int i; double d; };
 struct anonymous { int x; union { int y; struct { char z; }; }; };
 enum e { E0, E1 = -1 };
 enum big { B0 = 0x100000000LL };
+enum __attribute__((packed)) packed { P0 };
+struct bits { unsigned b : 3; unsigned u8 : 8; unsigned f : 32; _Bool bo : 1;
+	      enum e e : 2; unsigned long long l : 40; long lw : 32;
+	      unsigned long long fl : 64; enum packed p : 2; };
+struct qualified { const struct { int z; }; volatile union { int y; };
+		   const struct { const int c; struct { int n; }; }; };
 
 int f(int);
 int g(int, ...);
@@ -118,6 +124,32 @@ void operators(int x, const int cx, char c, signed char sc, unsigned char uc,
 	__builtin_offsetof(struct s, m);
 	r + 1;
 	(void)ca;
+}
+
+/* What GCC types otherwise than Clang, which typec gives an unknown type
+   with GCC */
+void differences(int x, struct bits v, struct qualified q,
+		 const struct qualified cq)
+{
+	v.b++; v.b--; ++v.b; --v.b; v.b = 1; v.b += 1; v.b *= 2; (x, v.b);
+	({ v.b; }); __real__ v.b; v.b++ + 0; ({ v.b; }) + 0; (v.b = 1) + 0;
+	v.b + 0; -v.b; v.u8 + 0; v.e++; v.e + 0; v.f++; v.bo++; v.fl++;
+	v.l++; v.l + 1; v.l + 1u; -v.l; ~v.l; v.l << 1; x ? v.l : v.l;
+	v.l == 0; v.lw + 0; v.lw++; v.fl + 1;
+	_Generic(v.b, unsigned: 1L, default: 2);
+	_Generic(v.b++, unsigned: 1L, default: 2);
+	_Generic(({ v.b; }), unsigned: 1L, default: 2);
+	_Generic(-v.l, unsigned long long: 1L, default: 2);
+	_Generic(v.f, unsigned: 1L, default: 2);
+	_Generic(v.p, enum packed: 1L, default: 2);
+	__real__ v.f; __imag__ v.f; __imag__ v.l; sizeof (__imag__ v.l);
+	q.z; q.y; q.n; q.c; cq.z; &q.z; &q.y;
+	__builtin_types_compatible_p(_Atomic int, int);
+	__builtin_types_compatible_p(_Atomic int, long);
+	__builtin_types_compatible_p(_Atomic int[2], int[2]);
+	__builtin_types_compatible_p(int *_Atomic, int *);
+	__builtin_types_compatible_p(const _Atomic int, _Atomic int);
+	__builtin_types_compatible_p(__typeof__(v.b++), unsigned);
 }
 
 void blocks(int n)

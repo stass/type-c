@@ -4,7 +4,13 @@
 open Typec_cpp
 open Typec_syntax
 
-type bit_field = Not_bit_field | Bit_field of int | Bit_field_value of int
+type field = {
+  width : int;
+  integer : Integer.t Ctype.answer;
+  location : Typec_cpp.Location.t;
+}
+
+type bit_field = Not_bit_field | Bit_field of field | Bit_field_value of field
 
 type typed = { expression_type : Ctype.t; lvalue : bool; bit_field : bit_field }
 
@@ -95,9 +101,13 @@ let quote text =
   else "'" ^ String.sub text 0 max_quoted ^ "...'"
 
 let needing need (unknown : Ctype.unknown) =
-  Printf.sprintf
-    "%s depends on %s at %s:%d, which typec does not type yet (design 13.3)"
-    need unknown.construct unknown.location.file unknown.location.line
+  let why =
+    match unknown.cause with
+    | Not_typed -> "which typec does not type yet"
+    | Typed_differently -> "which GCC types otherwise than Clang"
+  in
+  Printf.sprintf "%s depends on %s at %s:%d, %s (design 13.3)" need
+    unknown.construct unknown.location.file unknown.location.line why
 
 (* [walk] one level deeper. *)
 let nested context span walk =
@@ -128,17 +138,17 @@ let value expression_type =
 let lvalue expression_type =
   { expression_type; lvalue = true; bit_field = Not_bit_field }
 
-(* The width that the integer promotions of the value use (6.3.1.1p2). *)
-let promotion_width = function
-  | Bit_field width | Bit_field_value width -> Some width
-  | Not_bit_field -> None
-
-(* What the value of an expression of [bit_field] is: GCC and Clang
-   promote the value of an assignment to a bit-field, of a prefix [++] of
-   one and of a comma whose right operand is one by its width. *)
+(* What the value of an expression of [bit_field] is: Clang promotes the
+   value of an assignment to a bit-field, of a prefix [++] of one and of a
+   comma whose right operand is one by its width. *)
 let value_of = function
-  | Bit_field width | Bit_field_value width -> Bit_field_value width
+  | Bit_field field | Bit_field_value field -> Bit_field_value field
   | Not_bit_field -> Not_bit_field
+
+let is_bit_field typed =
+  match typed.bit_field with
+  | Bit_field _ | Bit_field_value _ -> true
+  | Not_bit_field -> false
 
 let designates_bit_field typed =
   match typed.bit_field with
@@ -160,9 +170,11 @@ let size_type context span =
 let void_pointer context span =
   checked context span (Ctype.pointer_to Ctype.void)
 
-let unknown_at context (span : Tree.span) construct kind : Ctype.unknown =
-  let location = context.text.tokens.(span.first).location in
-  { construct; location; kind }
+let location_of context (span : Tree.span) =
+  context.text.tokens.(span.first).location
+
+let unknown_at context span construct kind : Ctype.unknown =
+  { construct; location = location_of context span; kind; cause = Not_typed }
 
 let unknown context span construct kind =
   Ctype.unknown (unknown_at context span construct kind)
@@ -171,6 +183,18 @@ let unknown context span construct kind =
    turn, and an object, as no operator gives a function. *)
 let unknown_value (unknown : Ctype.unknown) =
   Ctype.unknown { unknown with kind = Unknown_object }
+
+(* [t], Clang's type for [difference], or an unknown type where the
+   backend types the construct otherwise (design 13.3). A type that is
+   unknown already stays so, for the reason that it has. *)
+let backend_type context location difference (t : Ctype.t) =
+  match t.shape with
+  | Unknown_type _ -> t
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Function _ -> (
+      match Backend_difference.answer context.target difference location t with
+      | Answer t -> t
+      | Depends_on unknown -> Ctype.unknown unknown)
 
 let fail_operands context span clause =
   context.fail span
@@ -192,8 +216,7 @@ type operand =
   | Other_operand of Ctype.t
       (** void, a structure or union, [va_list], an incomplete enumeration *)
 
-let operand context (typed : typed) =
-  let t = Ctype.lvalue_conversion typed.expression_type in
+let value_operand context (t : Ctype.t) =
   match t.shape with
   | Pointer referenced -> Pointer_operand { pointer = t; referenced }
   | Unknown_type unknown -> Unknown_operand unknown
@@ -201,13 +224,35 @@ let operand context (typed : typed) =
     -> (
       match Ctype.as_arithmetic context.tags t with
       | Answer (Some arithmetic) ->
-          let promoted =
-            Arithmetic.promote context.target
-              ?bit_field_width:(promotion_width typed.bit_field) arithmetic
-          in
+          let promoted = Arithmetic.promote context.target arithmetic in
           Arithmetic_operand { arithmetic; promoted }
       | Answer None -> Other_operand t
       | Depends_on unknown -> Unknown_operand unknown)
+
+(* A bit-field promotes by its width and declared type, whatever type the
+   backend gives its value. *)
+let bit_field_operand context field =
+  match field.integer with
+  | Depends_on unknown -> Unknown_operand unknown
+  | Answer integer -> (
+      let width = field.width in
+      let arithmetic = Arithmetic.Integer integer in
+      let clang =
+        Arithmetic.promote context.target ~bit_field_width:width arithmetic
+      in
+      match
+        Backend_difference.answer context.target
+          (Bit_field_promotion { integer; width })
+          field.location clang
+      with
+      | Answer promoted -> Arithmetic_operand { arithmetic; promoted }
+      | Depends_on unknown -> Unknown_operand unknown)
+
+let operand context (typed : typed) =
+  match typed.bit_field with
+  | Bit_field field | Bit_field_value field -> bit_field_operand context field
+  | Not_bit_field ->
+      value_operand context (Ctype.lvalue_conversion typed.expression_type)
 
 let is_integer : Arithmetic.t -> bool = function
   | Integer _ -> true
@@ -401,6 +446,16 @@ let identifier context span name (resolution : Tree.resolution) =
 
 (* Members (6.5.2.3) *)
 
+(* The integer type of a bit-field member, of which define_record allows
+   no other type. *)
+let bit_field_integer context (member : Ctype.member) : Integer.t Ctype.answer
+    =
+  match Ctype.as_arithmetic context.tags member.member_type with
+  | Answer (Some (Integer integer)) -> Answer integer
+  | Depends_on unknown -> Depends_on unknown
+  | Answer (Some (Real _ | Complex _) | None) ->
+      invalid_arg "Expressions: a bit-field of no integer type"
+
 (* 6.5.2.3p3, p4: the member, qualified as the structure is but for
    _Atomic, whose members are not accessed (p5). *)
 let member_of context tag (qualifiers : Ctype.qualifiers)
@@ -413,17 +468,29 @@ let member_of context tag (qualifiers : Ctype.qualifiers)
       context.fail name.span
         (quote name.node ^ " is not a member of the structure or union (C11 \
                             6.5.2.3p1)")
-  | Some member ->
+  | Some { member; anonymous_qualifiers; _ } -> (
+      let location = location_of context name.span in
       let qualifiers = { qualifiers with atomic = false; restrict = false } in
-      let expression_type =
+      let qualified =
         checked context name.span (Ctype.qualify qualifiers member.member_type)
       in
-      let bit_field =
-        match member.bit_field_width with
-        | Some width -> Bit_field width
-        | None -> Not_bit_field
+      let expression_type =
+        backend_type context location
+          (Anonymous_member
+             { member_type = qualified; anonymous = anonymous_qualifiers })
+          qualified
       in
-      { expression_type; lvalue; bit_field }
+      match member.bit_field_width with
+      | None -> { expression_type; lvalue; bit_field = Not_bit_field }
+      | Some width ->
+          let integer = bit_field_integer context member in
+          let narrow = Backend_difference.Narrow_bit_field { integer; width } in
+          let value_type =
+            backend_type context location narrow expression_type
+          in
+          { expression_type = value_type;
+            lvalue;
+            bit_field = Bit_field { width; integer; location } })
 
 let direct_member context span (record : typed) name =
   let t = record.expression_type in
@@ -539,25 +606,42 @@ let arithmetic_unary context span ~integer typed =
   | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
       fail_operands context span "6.5.3.3p1"
 
-(* GNU [__real__] and [__imag__]: a part of a complex value, of the
-   floating type of the parts, or a real operand's own type; an lvalue
-   where the operand is one, but for the imaginary part of a real value,
-   which is a zero. *)
-let complex_part context span ~imaginary (typed : typed) =
+(* Clang takes either part of a bit-field as its value; GCC's real part
+   of one is the bit-field itself. *)
+let bit_field_part context span ~imaginary (typed : typed) =
+  let part = value (Ctype.lvalue_conversion typed.expression_type) in
+  if imaginary then part
+  else
+    match
+      Backend_difference.answer context.target Bit_field_real_part
+        (location_of context span) part
+    with
+    | Answer part -> part
+    | Depends_on unknown ->
+        { typed with expression_type = Ctype.unknown unknown }
+
+(* GNU [__real__] and [__imag__] of what is no bit-field: a part of a
+   complex value, of the floating type of the parts, or a real operand's
+   own type; an lvalue where the operand is one, but for the imaginary
+   part of a real value, which is a zero. *)
+let other_part context span ~imaginary (typed : typed) =
   let t = typed.expression_type in
   match operand context typed with
   | Arithmetic_operand { arithmetic = Complex floating; _ } ->
       let part = arithmetic_type context span (Real floating) in
       let part = checked context span (Ctype.qualify t.qualifiers part) in
       { typed with expression_type = part; bit_field = Not_bit_field }
-  | Arithmetic_operand _ when imaginary ->
-      value (Ctype.lvalue_conversion t)
-  | Arithmetic_operand _ -> { typed with bit_field = Not_bit_field }
+  | Arithmetic_operand _ when imaginary -> value (Ctype.lvalue_conversion t)
+  | Arithmetic_operand _ -> typed
   | Unknown_operand unknown ->
       { typed with expression_type = unknown_value unknown }
   | Pointer_operand _ | Other_operand _ ->
       context.fail span
         "the operand of __real__ or __imag__ is not arithmetic"
+
+let complex_part context span ~imaginary typed =
+  if is_bit_field typed then bit_field_part context span ~imaginary typed
+  else other_part context span ~imaginary typed
 
 (* Binary operators (6.5.5 to 6.5.14) *)
 
@@ -753,19 +837,6 @@ let default_association context associations =
       context.fail second.association_span
         "a second default generic association (C11 6.5.1.1p2)"
 
-(* The type that selects is that of the controlling expression after
-   lvalue conversion, as C17 says and GCC and Clang do in every mode. GCC
-   gives a bit-field narrower than its type a type of its own width,
-   which Clang does not, so the selection by a bit-field is unknown. *)
-let controlling_type context (controlling : Tree.expression) typed =
-  match typed.bit_field with
-  | Not_bit_field ->
-      Ctype.Answer (Ctype.lvalue_conversion typed.expression_type)
-  | Bit_field _ | Bit_field_value _ ->
-      Depends_on
-        (unknown_at context controlling.span "the type of a bit-field"
-           Unknown_object)
-
 (* 6.5.1.1p2, p3: the result of the one association whose type is
    compatible with the controlling type, else that of the default; the
    selection is unknown where the compatibility of any association is.
@@ -797,22 +868,19 @@ let select context span controlling_type associations default =
         "the controlling expression is compatible with more than one \
          generic association"
 
-(* GCC and Clang compare the types without their top-level qualifiers.
-   GCC drops [_Atomic] with the others and Clang keeps it; where that
-   changes the answer, typec gives none. *)
+(* GCC and Clang compare the types without their top-level qualifiers,
+   which for Clang do not include [_Atomic]. *)
 let types_compatible_answer context span first second =
-  let answer ~keep_atomic =
+  match
     compatible context
-      (Ctype.without_top_qualifiers ~keep_atomic first)
-      (Ctype.without_top_qualifiers ~keep_atomic second)
-  in
-  match (answer ~keep_atomic:false, answer ~keep_atomic:true) with
-  | Depends_on unknown, _ | _, Depends_on unknown -> Ctype.Depends_on unknown
-  | Answer gcc, Answer clang when gcc = clang -> Answer gcc
-  | Answer _, Answer _ ->
-      Depends_on
-        (unknown_at context span "the compatibility of an _Atomic type"
-           Unknown_object)
+      (Ctype.without_top_qualifiers first)
+      (Ctype.without_top_qualifiers second)
+  with
+  | Depends_on unknown -> Ctype.Depends_on unknown
+  | Answer clang ->
+      Backend_difference.answer context.target
+        (Atomic_comparison (first, second))
+        (location_of context span) clang
 
 (* Constant expressions (6.6) *)
 
@@ -1390,18 +1458,18 @@ and unary context span (op : Tree.unary_operator) typed =
 
 (* 6.5.1.1p4: the selection is its result expression, an lvalue or a
    function designator if that is one. Every association is typed, as
-   GCC and Clang check the ones they do not select. *)
+   GCC and Clang check the ones they do not select. The type that
+   selects is that of the controlling expression after lvalue conversion,
+   as C17 says and GCC and Clang do in every mode. *)
 and generic context span controlling associations =
   let controlling_typed = expression context controlling in
   let associations = List.map (generic_association context) associations in
   check_distinct context associations;
   let default = default_association context associations in
-  let selection =
-    match controlling_type context controlling controlling_typed with
-    | Answer controlling_type ->
-        select context span controlling_type associations default
-    | Depends_on unknown -> Depends_on unknown
+  let controlling_type =
+    Ctype.lvalue_conversion controlling_typed.expression_type
   in
+  let selection = select context span controlling_type associations default in
   Hashtbl.replace context.typed.selections span selection;
   match selection with
   | Answer result -> expression context result
@@ -1531,7 +1599,7 @@ and assignment context span (op : Tree.assignment_operator) left right =
     bit_field = value_of left.bit_field }
 
 (* GNU: the value of the last expression statement of the block, or
-   void. *)
+   void, which is no bit-field in Clang. *)
 and statement_expression context (block : Tree.block) =
   block_items context block;
   match List.rev block.node.items with

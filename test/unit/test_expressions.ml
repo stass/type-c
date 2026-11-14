@@ -3,15 +3,18 @@
 
 (* The types that expression typing gives (C11 6.3, 6.5) and the
    constraints it checks in function bodies (6.8), on an LP64 and an ILP32
-   target. *)
+   target with Clang, whose types typec gives, and with GCC where it types
+   a construct otherwise (Backend_difference). *)
 
 open Typec_cpp
 open Typec_syntax
 open Typec_sema
 open Typec_test_support
 
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
-let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
+let lp64 = Canned_targets.(target (as_clang lp64_macros))
+let ilp32 = Canned_targets.(target (as_clang ilp32_macros))
+let lp64_gcc = Canned_targets.(target (as_gcc lp64_macros))
+let ilp32_gcc = Canned_targets.(target (as_gcc ilp32_macros))
 
 (* Declarations that most cases use. *)
 let prelude =
@@ -53,8 +56,8 @@ let describe (typed : Expressions.typed) =
     [ Type_name.of_ctype typed.expression_type;
       (if typed.lvalue then " lvalue" else "");
       (match typed.bit_field with
-      | Bit_field width -> Printf.sprintf " :%d" width
-      | Bit_field_value width -> Printf.sprintf " value:%d" width
+      | Bit_field field -> Printf.sprintf " :%d" field.width
+      | Bit_field_value field -> Printf.sprintf " value:%d" field.width
       | Not_bit_field -> "") ]
 
 let failures = ref 0
@@ -352,10 +355,8 @@ let generic () =
   types "_Generic(\"s\", char *: 1u, default: 1)" "unsigned int";
   types "_Generic(e, unsigned: 1L, default: 1)" "long";
   types ~target:ilp32 "_Generic(1L, int: 1, long: 2L)" "long";
-  (* GCC gives a bit-field a type of its own width. *)
-  types "_Generic(s.b, unsigned: 1, default: 2)" "<the type of a bit-field>";
-  types "_Generic(s.b = 1, unsigned: 1, default: 2)"
-    "<the type of a bit-field>";
+  types "_Generic(s.b, unsigned: 1L, default: 2)" "long";
+  types "_Generic(s.b = 1, unsigned: 1L, default: 2)" "long";
   (* Unknown where the controlling type or a compatibility is. *)
   types "_Generic(__builtin_foo, int: 1, default: 2)"
     "<the builtin '__builtin_foo'>";
@@ -386,6 +387,107 @@ let generic () =
     "more than one";
   rejects "_Generic(h, int (*)(int): 1, int (*)(double): 2, default: 3)"
     "more than one"
+
+(* Each construct that GCC types otherwise than Clang has Clang's type
+   with Clang and an unknown type with GCC, but where GCC's type is
+   Clang's (Backend_difference). *)
+let bit_field_declarations =
+  "struct v { unsigned b : 3; unsigned u8 : 8; unsigned f : 32; \
+   _Bool bo : 1; enum { V0 } e : 2; enum { V1 } fe : 32; \
+   unsigned long long l : 40; long lw : 32; unsigned long long fl : 64; \
+   } v; int a[2]; "
+
+let bit_field_value = "<the value of a bit-field narrower than its type>"
+let promotion = "<the promotion of a bit-field ranked above int>"
+
+let both ?(declarations = bit_field_declarations) ~clang ~gcc body =
+  types ~declarations body clang;
+  types ~target:lp64_gcc ~declarations body gcc
+
+let bit_field_values () =
+  both "v.b" ~clang:"unsigned int lvalue :3"
+    ~gcc:(bit_field_value ^ " lvalue :3");
+  both "v.u8" ~clang:"unsigned int lvalue :8"
+    ~gcc:(bit_field_value ^ " lvalue :8");
+  both "v.e" ~clang:"enum <anonymous> lvalue :2"
+    ~gcc:(bit_field_value ^ " lvalue :2");
+  both "v.b++" ~clang:"unsigned int" ~gcc:bit_field_value;
+  both "v.b++ + 0" ~clang:"unsigned int" ~gcc:bit_field_value;
+  both "({ v.b; })" ~clang:"unsigned int" ~gcc:bit_field_value;
+  (* Clang takes the real part of a bit-field as its value, and GCC's is
+     the bit-field, which it assigns. *)
+  let real_part = "<the real part of a bit-field>" in
+  both "__real__ v.b" ~clang:"unsigned int" ~gcc:(real_part ^ " lvalue :3");
+  both "__real__ v.f" ~clang:"unsigned int" ~gcc:(real_part ^ " lvalue :32");
+  both "__imag__ v.b" ~clang:"unsigned int" ~gcc:bit_field_value;
+  both "__imag__ v.f" ~clang:"unsigned int" ~gcc:"unsigned int";
+  rejects ~declarations:bit_field_declarations "__real__ v.f = 1"
+    "not an lvalue";
+  accepts ~target:lp64_gcc ~declarations:bit_field_declarations
+    "__real__ v.f = 1";
+  rejects ~target:lp64_gcc ~declarations:bit_field_declarations
+    "sizeof (__real__ v.b)" "6.5.3.4p1";
+  accepts ~target:lp64_gcc ~declarations:bit_field_declarations
+    "sizeof (__imag__ v.l)";
+  both "v.b = 1" ~clang:"unsigned int value:3"
+    ~gcc:(bit_field_value ^ " value:3");
+  both "_Generic(v.b++, unsigned: 1L, default: 2)" ~clang:"long"
+    ~gcc:bit_field_value;
+  both "typeof(v.b = 1) y; y" ~clang:"unsigned int lvalue"
+    ~gcc:(bit_field_value ^ " lvalue");
+  (* Both promote a bit-field narrower than int to int, also where they
+     type its value otherwise. *)
+  both "v.b + 0" ~clang:"int" ~gcc:"int";
+  both "(v.b = 1) + 0" ~clang:"int" ~gcc:"int";
+  both "a[v.b]" ~clang:"int lvalue" ~gcc:"int lvalue";
+  (* A bit-field of the full width of its type has that type in both. *)
+  both "v.f" ~clang:"unsigned int lvalue :32" ~gcc:"unsigned int lvalue :32";
+  both "v.bo" ~clang:"_Bool lvalue :1" ~gcc:"_Bool lvalue :1";
+  both "v.fe++" ~clang:"enum <anonymous>" ~gcc:"enum <anonymous>";
+  both "v.fl" ~clang:"unsigned long long lvalue :64"
+    ~gcc:"unsigned long long lvalue :64";
+  (* The width of an enumerated type whose integer type typec does not
+     know is unknown too, and so is GCC's type of the bit-field. *)
+  let declarations =
+    "enum __attribute__((packed)) p { P0 }; struct { enum p e : 2; } w; "
+  in
+  both ~declarations "w.e" ~clang:"enum p lvalue :2"
+    ~gcc:(bit_field_value ^ " lvalue :2");
+  both ~declarations "_Generic(w.e, enum p: 1L, default: 2)" ~clang:"long"
+    ~gcc:bit_field_value
+
+let bit_field_promotions () =
+  both "v.l + 1" ~clang:"unsigned long long" ~gcc:promotion;
+  both "-v.l" ~clang:"unsigned long long" ~gcc:promotion;
+  both "1 ? v.l : v.l" ~clang:"unsigned long long" ~gcc:promotion;
+  both "v.l == 0" ~clang:"int" ~gcc:"int";
+  both "v.fl + 1" ~clang:"unsigned long long" ~gcc:"unsigned long long";
+  (* A bit-field of a type wider than int and of int's width promotes as
+     in Clang; one of a type as wide as int ranked above it stays of that
+     type in GCC. *)
+  both "v.lw + 0" ~clang:"int" ~gcc:"int";
+  types ~target:ilp32 ~declarations:bit_field_declarations "v.lw + 0" "int";
+  types ~target:ilp32_gcc ~declarations:bit_field_declarations "v.lw + 0"
+    promotion;
+  types ~target:ilp32_gcc ~declarations:bit_field_declarations "v.f + 0"
+    "unsigned int"
+
+let anonymous_members () =
+  let declarations =
+    "struct t { const struct { int z; }; volatile union { int y; }; \
+     const struct { const int c; struct { int n; }; }; } an; \
+     const struct t can; "
+  in
+  let member = "<a member of a qualified anonymous member> lvalue" in
+  both ~declarations "an.z" ~clang:"int lvalue" ~gcc:member;
+  both ~declarations "an.y" ~clang:"int lvalue" ~gcc:member;
+  both ~declarations "an.n" ~clang:"int lvalue" ~gcc:member;
+  both ~declarations "an.c" ~clang:"const int lvalue" ~gcc:"const int lvalue";
+  both ~declarations "can.z" ~clang:"const int lvalue"
+    ~gcc:"const int lvalue";
+  accepts ~declarations "an.z = 1";
+  accepts ~target:lp64_gcc ~declarations "an.z = 1";
+  rejects ~declarations "can.z = 1" "modifiable lvalue"
 
 (* 6.8: the constraints that typing checks. *)
 let statements () =
@@ -576,6 +678,9 @@ let () =
   conditional_and_assignment ();
   gnu ();
   generic ();
+  bit_field_values ();
+  bit_field_promotions ();
+  anonymous_members ();
   statements ();
   block_declarations ();
   block_linkage ();
