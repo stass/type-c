@@ -7,6 +7,7 @@ type translation = {
   source : string;
   preprocess : string list;
   preprocessed : string;
+  target_options : string list;
   emitted : destination;
   compile : string list option;
 }
@@ -190,9 +191,14 @@ let emit_c_destination output =
   | Some output when output <> "-" -> File output
   | Some _ | None -> Standard_output
 
-let compile_command shape arguments ~linked_object source emitted_file =
-  (shape.program :: shape.standard)
+(* The target model is read with these options so that it describes the
+   target that the compile step compiles for (design 13.3). *)
+let compile_options shape arguments =
+  shape.standard
   @ (quiet_unused_options :: options_where compiling_role arguments)
+
+let compile_command shape arguments ~linked_object source emitted_file =
+  (shape.program :: compile_options shape arguments)
   @ compile_outputs ~goal:shape.goal ~output:shape.output ~linked_object
       source
   @ [ "-x"; "cpp-output"; emitted_file ]
@@ -222,6 +228,7 @@ let translation shape arguments ~linked_object index source =
     source;
     preprocess;
     preprocessed = temp_file ".preprocessed.i";
+    target_options = compile_options shape arguments;
     emitted;
     compile;
   }

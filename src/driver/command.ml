@@ -87,6 +87,25 @@ let read_preprocessed (translation : Pipeline.translation) =
   | Ok unit -> unit
   | Error error -> stop exit_failure (Typec_cpp.Reader.error_message error)
 
+(* A signal that interrupts the query ends the pipeline by that signal. *)
+let query_target ~program (translation : Pipeline.translation) =
+  let model =
+    try Target_query.query ~program translation.target_options
+    with Unix.Unix_error (error, _, _) ->
+      stop_if_caught ();
+      stop exit_cannot_run (cannot_run program error)
+  in
+  stop_if_caught ();
+  match model with
+  | Ok target -> target
+  | Error error ->
+      stop exit_failure (Target_query.error_message ~program error)
+
+let check_front_end target text =
+  match Front_end.check target text with
+  | Ok () -> ()
+  | Error error -> stop exit_failure (Typec_cpp.Reader.error_message error)
+
 let write_emitted (destination : Pipeline.destination) text =
   try
     match destination with
@@ -98,16 +117,20 @@ let write_emitted (destination : Pipeline.destination) text =
             Out_channel.output_string channel text)
   with Sys_error message -> stop exit_failure ("cannot write the C: " ^ message)
 
-let translate ~null (translation : Pipeline.translation) =
+(* Each translation queries its own target model, which is simpler than
+   sharing one between translations whose options are the same. *)
+let translate ~program ~null (translation : Pipeline.translation) =
   preprocess ~null translation;
-  let unit = read_preprocessed translation in
-  write_emitted translation.emitted (Typec_emit.Emitter.emit unit []);
+  let text = read_preprocessed translation in
+  let target = query_target ~program translation in
+  check_front_end target text;
+  write_emitted translation.emitted (Typec_emit.Emitter.emit text []);
   Option.iter (run_step ~stdin:null ~stdout:Unix.stdout) translation.compile
 
 (* The final command reads typec's stdin, which an input "-" names. *)
-let run_plan (plan : Pipeline.t) =
+let run_plan ~program (plan : Pipeline.t) =
   with_file "/dev/null" [ Unix.O_RDONLY ] (fun null ->
-      List.iter (translate ~null) plan.translations);
+      List.iter (translate ~program ~null) plan.translations);
   Option.iter (run_step ~stdin:Unix.stdin ~stdout:Unix.stdout) plan.final
 
 let run_pipeline (invocation : Invocation.t) temp_dir =
@@ -121,7 +144,7 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
       Exit exit_usage
   | Ok plan -> (
       try
-        run_plan plan;
+        run_plan ~program:invocation.program plan;
         Exit 0
       with
       | Stopped outcome -> outcome

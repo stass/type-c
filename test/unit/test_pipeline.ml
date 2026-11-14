@@ -133,6 +133,8 @@ let () =
   check "-c -o: files"
     (translation.preprocessed = "/T/1.preprocessed.i"
     && translation.emitted = File "/T/1.emitted.i");
+  check "-c -o: target options are the compile step's"
+    (translation.target_options = [ "-std=gnu11"; quiet; "-O2" ]);
   check "-c -o: no final command" (plan.final = None)
 
 let () =
@@ -216,7 +218,11 @@ let () =
   check "--emit-c to -o" (emitted [ "x.tc"; "-o"; "x.c" ] = File "x.c");
   check "--emit-c compiles nothing"
     (let plan = planned ~emit_c:true [ "x.tc" ] in
-     (only_translation plan).compile = None && plan.final = None)
+     (only_translation plan).compile = None && plan.final = None);
+  check "--emit-c target options"
+    ((only_translation (planned ~emit_c:true [ "-m32"; "-std=c11"; "x.tc" ]))
+       .target_options
+    = [ quiet; "-m32"; "-std=c11" ])
 
 let () =
   let fails words error = plan words = Error error in

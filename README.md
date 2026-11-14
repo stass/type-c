@@ -62,9 +62,13 @@ before it, goes through three steps:
 
 1. `BACKEND -E -D__TYPEC__=1 -std=gnu11 OPTIONS -x c FILE.tc`, with its
    stdout in a private temporary directory;
-2. `typec` reads the preprocessed text and emits it; with no Type-C
-   construct yet the emitted text is the preprocessed text, byte for
-   byte;
+2. `typec` reads the preprocessed text, parses it and reads its
+   declarations at file scope, then emits it. The declarations are read
+   for the target model that the backend gives with the options of step
+   3 (see "Printing the target model"). A text that the front end
+   refuses stops `typec` with one message, `FILE:LINE: MESSAGE`. With no
+   Type-C construct yet the emitted text is the preprocessed text, byte
+   for byte;
 3. `BACKEND -std=gnu11 OPTIONS -c -o OUTPUT -x cpp-output EMITTED`, or
    `-S`, or `-fsyntax-only`, as the command line asks.
 
@@ -101,8 +105,9 @@ SIGTERM are passed on to the running backend; `typec` then removes the
 directory and ends by the same signal.
 
 Exit status: 0 when every step succeeds; else the status of the first
-step that fails, or the signal that ended it; 1 when the reader refuses
-the preprocessed text or a file cannot be read or written; 2 for a
+step that fails, or the signal that ended it; 1 when the front end
+refuses the preprocessed text, the backend gives no target model or a
+file cannot be read or written; 2 for a
 usage error; 127 when the backend cannot be started.
 
 ## Printing the target model

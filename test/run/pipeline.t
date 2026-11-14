@@ -13,9 +13,15 @@ in it.
   $ mkdir tmp out
   $ export TMPDIR=$PWD/tmp
 
+x.tc declares what it uses in a header of its own: the system headers
+name GNU builtin types that the front end refuses (TODO.md, Corpus).
+
+  $ cat > x.h <<'EOF'
+  > int printf(const char *, ...);
+  > int atoi(const char *);
+  > EOF
   $ cat > x.tc <<'EOF'
-  > #include <stdio.h>
-  > #include <stdlib.h>
+  > #include "x.h"
   > int twice(int);
   > int main(int argc, char **argv) {
   >   int n = argc > 1 ? atoi(argv[1]) : 0;
@@ -83,12 +89,12 @@ names it, and its target is the real output.
 
   $ typec --cc=$clang -MD -c x.tc -o out/x.o
   $ head -1 out/x.d
-  out/x.o: x.tc \
+  out/x.o: x.tc x.h
   $ typec --cc=$gcc -MMD -MF out/deps -MT target -c x.tc
   $ head -1 out/deps
-  target: x.tc
+  target: x.tc x.h
   $ typec --cc=$clang -MD -c x.tc && head -1 x.d
-  x.o: x.tc \
+  x.o: x.tc x.h
 
 The dialect is C11 or C17 (design 2.4), and options that would stop the
 backend at preprocessing or change the preprocessed text are refused
@@ -128,3 +134,29 @@ ended by a signal.
   $ { typec --cc=./killed-cc -c x.tc; } 2>/dev/null
   [137]
   $ ls -A tmp
+
+The front end parses the text it reads and reads its declarations for
+the target model of the compile step; a text it refuses ends typec with
+status 1 and one message, before anything is emitted or compiled.
+
+  $ printf 'int x = ;\n' > bad-parse.tc
+  $ typec --cc=$clang -c bad-parse.tc
+  typec: bad-parse.tc:1: expected an expression, found `;`
+  [1]
+  $ printf 'int n;\nlong n;\n' > bad-type.tc
+  $ typec --cc=$gcc -c bad-type.tc
+  typec: bad-type.tc:2: 'n' is redeclared with an incompatible type (C11 6.7p4)
+  [1]
+  $ typec --cc=$clang --emit-c bad-type.tc
+  typec: bad-type.tc:2: 'n' is redeclared with an incompatible type (C11 6.7p4)
+  [1]
+  $ test ! -e bad-parse.o && test ! -e bad-type.o && ls -A tmp
+
+The target model comes from the backend with the options of the compile
+step, so -funsigned-char reaches the declarations.
+
+  $ printf 'int a[(char)-1 < 0 ? 1 : -1];\n' > signed-char.tc
+  $ typec --cc=$clang --emit-c signed-char.tc -o out/signed-char.i
+  $ typec --cc=$clang -funsigned-char --emit-c signed-char.tc
+  typec: signed-char.tc:1: array has a negative length
+  [1]

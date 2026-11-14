@@ -35,6 +35,10 @@ type translation = {
       (** writes the preprocessed text on stdout, which goes to
           [preprocessed] *)
   preprocessed : string;
+  target_options : string list;
+      (** the options of the compile step, without its inputs and
+          outputs, for {!Target_query.query}: the target model is that of
+          the compilation *)
   emitted : destination;
   compile : string list option;  (** [None] with [--emit-c] *)
 }
