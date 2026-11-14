@@ -1148,11 +1148,20 @@ language is defined here and not by the tool.
 token array. C's grammar needs scope feedback for typedef names; Type-C
 adds positional words that need lookahead to a matching parenthesis, and
 the universe scope. All three are direct in recursive descent. The scope
-rules (C11 6.2.1) have one implementation: the parser alone decides
-where each scope begins and ends and when a declaration enters one, and
-hands each declaration to the declaration reader, which binds it and
-says which names are typedef names. A second walk that kept its own
-scope boundaries would have to agree with the parser's at every point.
+rules (C11 6.2.1, the name spaces of 6.2.3 that scopes hold, and the
+tags of 6.7.2.3) have one implementation, the parser's, and the tree
+records their outcome: every declaration of an ordinary identifier or a
+tag has an id, the token of its identifier, and the declaration of the
+same name in the same scope and name space that it redeclares; every
+use resolves, where it is read, to the declaration visible there or to
+none. The declaration reader follows these links and keeps no scope of
+its own; linkage (6.2.2), which joins declarations across scopes, is its
+table keyed by name. A second walk that kept its own scope boundaries
+would have to agree with the parser's at every point. Parsing needs the
+kind of a name (a typedef name or not), never its type, in Type-C as in
+C. Members belong to their structure and are resolved by type. A
+label's scope is its function (6.2.1p3), so a jump to it resolves once
+the function's body is read.
 
 **GNU profile.** The front end accepts the extensions that system headers
 and common code use: attributes, including those among the qualifiers

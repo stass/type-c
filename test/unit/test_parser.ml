@@ -25,6 +25,16 @@ let outcome ~parse ~spans text =
               List.map (Tree_dump.to_string ~spans) dump
               |> String.concat " | "))
 
+(* The scope entries of a text, or its error. *)
+let resolutions text =
+  match Reader.read ~name:"in.i" text with
+  | Error error -> "read error: " ^ Reader.error_message error
+  | Ok reader -> (
+      match Parser.parse reader with
+      | Error error -> "error: " ^ Parser.error_message error
+      | Ok unit ->
+          Tree_dump.resolutions (Tree_dump.translation_unit reader unit))
+
 let declarator_cases =
   [
     case "a plain declaration" "int x;" "(declaration (int) x)";
@@ -422,60 +432,125 @@ let scope_cases =
        y))))";
   ]
 
-(* Scope rules under which every name that [find] finds is a typedef
-   name, so that a dump shows which names are in scope where the grammar
-   asks. *)
-let names_as_typedef_names find : (unit, unit) Scope.t Parser.scopes =
-  {
-    file = Scope.file;
-    enter = Scope.enter;
-    reenter = Scope.reenter;
-    declare =
-      (fun scope declaration ->
-        match Parser.scoped_name declaration with
-        | Some name -> Scope.declare scope name ()
-        | None -> scope);
-    is_typedef_name = (fun scope name -> find scope name <> None);
-  }
-
-let every_name_a_typedef_name = names_as_typedef_names Scope.find
-
-(* Only the names of the innermost scope, which tells a scope from one
-   nested in it. *)
-let innermost_names_typedef_names =
-  names_as_typedef_names Scope.find_in_innermost
-
-(* The scopes that the parser reports to the scope rules. *)
-let scope_rule_cases =
+(* The declarations and uses that the scope rules record, as
+   [Tree_dump.resolutions] shows them. *)
+let resolution_cases =
   [
+    case "a block hides an outer declaration to its end"
+      "int x; void f(void) { x; { int x; x; } x; }"
+      "x#1 f#1 x->#1 x#2 x->#2 x->#1";
+    case "a prototype is a scope of its own"
+      "int a; int f(int a, int b[sizeof a]); int g = a;"
+      "a#1 f#1 a#2 b#1 a->#2 g#1 a->#1";
+    case "a for declaration is in scope in the for statement only"
+      "int i; void f(void) { for (int i = i; i; ) i; i; }"
+      "i#1 f#1 i#2 i->#2 i->#2 i->#2 i->#1";
+    case "a condition's declarations are in scope in both branches"
+      "void f(void) { if (sizeof (enum { A })) A; else A; A; }"
+      "f#1 A#1 A->#1 A->#1 A->?";
+    case "a statement expression is a block"
+      "int f(void) { return ({ int y = 1; y; }) + y; }"
+      "f#1 y#1 y->#1 y->?";
     case "a function's name is in scope in its body"
-      "int f(void) { f * x; }"
-      "(define (int) (function f (void)) (block (declaration (f) (pointer \
-       x))))";
+      "int f(int a) { f; a; int f; f; }"
+      "f#1 a#1 f->#1 a->#1 f#2 f->#2";
     case "a function's name is in scope in its declaration list"
-      "int f(a) f a; { }"
-      "(define (int) (function f (identifiers a)) (declaration (f) a) block)";
-    case "a parameter is in scope in the body"
-      "int f(int a) { a * x; }"
-      "(define (int) (function f (int a)) (block (declaration (a) (pointer \
-       x))))";
-  ]
-
-(* The scopes that the parser opens, under
-   [innermost_names_typedef_names]. *)
-let innermost_scope_cases =
-  [
+      "int f(a) int a[sizeof f]; { }"
+      "f#1 a#1 a#2<#1 f->#1";
     case "a function's body is the scope of its parameters"
-      "int f(int a) { a * x; }"
-      "(define (int) (function f (int a)) (block (declaration (a) (pointer \
-       x))))";
+      "int a; int f(int a) { int a; }"
+      "a#1 f#1 a#2 a#3<#2";
     case "a block in a function's body is a scope of its own"
-      "int f(int a) { { a * x; } }"
-      "(define (int) (function f (int a)) (block (block (expr (* a x)))))";
+      "int f(int a) { { int a; } }"
+      "f#1 a#1 a#2";
     case "an old-style declaration list is in the body's scope"
-      "int f(a) a b; { b * x; }"
-      "(define (int) (function f (identifiers a)) (declaration (a) b) (block \
-       (declaration (b) (pointer x))))";
+      "int f(a) int a; { int a; }"
+      "f#1 a#1 a#2<#1 a#3<#2";
+    case "the parameters of the return type are not in the body"
+      "int (*f(int a))(int b) { a; b; }"
+      "f#1 a#1 b#1 a->#1 b->?";
+    case "an enumerator in a parameter list is in scope in the body"
+      "int f(enum { A } x) { return A; }"
+      "f#1 A#1 x#1 A->#1";
+    case "a block literal's body is in the scope of its parameters"
+      "void f(void) { ^(int a) { a; }; a; }"
+      "f#1 a#1 a->#1 a->?";
+    case "a typedef name redeclared as an object"
+      "typedef int T; void f(void) { T T; T = 1; }"
+      "T#1 f#1 T->#1 T#2 T->#2";
+    case "a declarator's scope begins after it"
+      "int x = sizeof x; int y[sizeof y];"
+      "x#1 x->#1 y#1 y->?";
+    case "an enumerator in a declarator precedes it in scope"
+      "int x[sizeof (enum { x = 1 })];"
+      "x#1<#2 x#2";
+    case "redeclarations in one scope"
+      "int x; int x; extern int x; void g(void) { extern int x; }"
+      "x#1 x#2<#1 x#3<#2 g#1 x#4";
+    case "a parameter declared twice"
+      "int f(int a, int a);"
+      "f#1 a#1 a#2<#1";
+    case "a function declared and then defined"
+      "int f(void); int f(void) { return 0; }"
+      "f#1 f#2<#1";
+    case "an enumerator declared twice"
+      "enum { A, A = A };"
+      "A#1 A#2<#1 A->#1";
+    case "uses of nothing declared"
+      "int f(void) { return g(x); }"
+      "f#1 g->? x->?";
+    case "a typedef name declared before the first token"
+      "__builtin_va_list v;"
+      "__builtin_va_list->builtin v#1";
+    case "a tag defined after its declaration in one scope"
+      "struct s; struct s { int a; }; struct s x;"
+      "tag s#1 tag s#2<#1 tag s->#2 x#1";
+    case "a reference declares a tag where none is visible"
+      "struct s *p; struct s { int a; };"
+      "tag s#1 p#1 tag s#2<#1";
+    case "a tag is in scope in its own body"
+      "struct s { struct s *next; };"
+      "tag s#1 tag s->#1";
+    case "a tag alone in a block declares a new one"
+      "struct s { int a; }; void f(void) { struct s; struct s *p; }"
+      "tag s#1 f#1 tag s#2 tag s->#2 p#1";
+    case "attributes leave a tag alone"
+      "struct s; void f(void) { __attribute__((unused)) struct s \
+       __attribute__((unused)); }"
+      "tag s#1 f#1 tag s#2";
+    case "a qualifier keeps a tag from being alone"
+      "struct s; void f(void) { const struct s; }"
+      "tag s#1 f#1 tag s->#1";
+    case "a tag alone among members names the visible one"
+      "struct s; struct o { struct s; int b; };"
+      "tag s#1 tag o#1 tag s->#1";
+    case "a tag declared in a prototype is local to it"
+      "void f(struct s *p); struct s *q;"
+      "f#1 tag s#1 p#1 tag s#2 q#1";
+    case "a definition in a block declares a new tag"
+      "struct s { int a; }; void f(void) { struct s { int b; } x; }"
+      "tag s#1 f#1 tag s#2 x#1";
+    case "a tag of another kind in one scope"
+      "struct s; union s; enum s *p;"
+      "tag s#1 tag s#2<#1 tag s->#2 p#1";
+    case "an enumeration alone names the visible one"
+      "enum e { A }; void f(void) { enum e; }"
+      "tag e#1 A#1 f#1 tag e->#1";
+    case "an enumeration with a fixed type alone declares one"
+      "enum e : int { A }; void f(void) { enum e : int; }"
+      "tag e#1 A#1 f#1 tag e#2";
+    case "an enumeration referenced before its list"
+      "enum e *p; enum e { A };"
+      "tag e#1 p#1 tag e#2<#1 A#1";
+    case "a tag in a parameter list is in the body's scope"
+      "void f(struct s *p) { struct s { int a; }; }"
+      "f#1 tag s#1 p#1 tag s#2<#1";
+    case "typeof of an identifier"
+      "int x; typeof(x) y;"
+      "x#1 x->#1 y#1";
+    case "tags and ordinary identifiers are apart"
+      "struct s { int s; } s; int t = sizeof s;"
+      "tag s#1 s#1 t#1 s->#1";
   ]
 
 (* Old-style definitions and bodies that system headers define. *)
@@ -1245,12 +1320,15 @@ let failed_chain_cases () =
    parser on, so that a chain the parser reads in a loop fails loudly if
    it ever becomes recursion. *)
 let failures () =
-  let failed_cases ?(parse = fun reader -> Parser.parse reader) ~spans cases =
+  let failed_with outcome cases =
     List.filter_map
       (fun case ->
-        let actual = outcome ~parse ~spans case.text in
+        let actual = outcome case.text in
         if actual = case.expected then None else Some (case, actual))
       cases
+  in
+  let failed_cases ?(parse = fun reader -> Parser.parse reader) ~spans cases =
+    failed_with (outcome ~parse ~spans) cases
   in
   let failed =
     List.concat_map (failed_cases ~spans:false)
@@ -1275,12 +1353,7 @@ let failures () =
     @ failed_cases ~spans:true (span_cases @ gnu_span_cases)
     @ failed_cases ~parse:(Parser.parse ~keywords:Iso) ~spans:false
         iso_keyword_cases
-    @ failed_cases
-        ~parse:(Parser.parse_with every_name_a_typedef_name)
-        ~spans:false scope_rule_cases
-    @ failed_cases
-        ~parse:(Parser.parse_with innermost_names_typedef_names)
-        ~spans:false innermost_scope_cases
+    @ failed_with resolutions resolution_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())
 

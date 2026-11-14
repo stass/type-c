@@ -10,9 +10,9 @@
     name; the declaration reader declares those whose type the target has,
     as GCC and Clang declare [__int128_t] only where [__int128] exists.
     On a target without it the parser still reads [__int128_t] as a
-    typedef name, so a declaration that uses the reserved name for an
-    ordinary identifier there is refused, until the reader's scopes drive
-    the parser (TODO.md, scope rules). *)
+    typedef name, since parsing knows no target, so a declaration that
+    uses the reserved name for an ordinary identifier there is
+    refused. *)
 
 (** What a builtin typedef name denotes. *)
 type t =

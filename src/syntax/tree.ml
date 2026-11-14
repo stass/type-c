@@ -9,7 +9,15 @@
     Every node is {!spanned}: it records the tokens it was parsed from,
     which emission copies when it leaves the node untouched (design 13.4).
     The tree holds what the grammar decides and nothing the tokens already
-    say: the spelling of a constant or a string is read from its span. *)
+    say: the spelling of a constant or a string is read from its span.
+
+    The parser is the one implementation of the scope rules (C11 6.2.1,
+    6.2.3, 6.7.2.3), and the tree records their outcome: every
+    declaration of an ordinary identifier or a tag carries its
+    {!declared}, and every use of one the declaration it resolves to.
+    Members, which belong to their structure, and labels, which belong
+    to their function, are names only, and so are the identifiers in the
+    arguments of an attribute, which the parser does not read. *)
 
 open Typec_cpp
 
@@ -20,6 +28,40 @@ type span = { first : int; last : int }
 
 type 'a spanned = { span : span; node : 'a }
 type identifier = string spanned
+
+(** The identity of a declaration: the token of the identifier that it
+    declares, or the name of a typedef name that GCC and Clang declare
+    before the first token ({!Builtin_typedef.table}). The parser reads
+    each token once, so no two declarations share an id. *)
+type declaration_id = At_token of int | Builtin of string
+
+(** A declaration of an identifier, made where the identifier enters scope
+    (6.2.1p7): its id, and the declaration of the same identifier in the
+    same scope and name space that it redeclares, if one entered scope
+    before it, which an enumerator in a declarator's own array length
+    does though its token comes later. A redeclaration denotes the same
+    entity, as a tag does (6.7.2.3p4), or breaks a constraint (6.7p3),
+    which the declaration reader checks. *)
+type declared = { id : declaration_id; earlier : declaration_id option }
+
+(** The declaration that a use of an ordinary identifier refers to: the
+    one visible at the use (6.2.1p2), or none. A use of no declaration is
+    an error unless the name is predefined, as [__func__] is (6.4.2.2),
+    or a builtin function; C11 has no implicit declaration. *)
+type resolution = Resolved of declaration_id | Undeclared
+
+(** A tag in a structure, union or enumeration specifier, and what it does
+    (C11 6.7.2.3). *)
+type tag = { name : identifier; binding : tag_binding }
+
+and tag_binding =
+  | Declares of declared
+      (** declares the tag in the current scope: before a body or an
+          enumerator list (p6), alone in a declaration (p7, and C23's
+          [enum e : T;]), or where no tag of its name is visible (p8; for
+          an enumeration a GNU forward reference, against p3) *)
+  | Names of declaration_id
+      (** the visible tag, which it does not redeclare (p9) *)
 
 (** A GNU attribute: its name, without the [__] around it that GCC allows
     ([__packed__] is [packed]), and the span of its arguments from [(] to
@@ -113,7 +155,7 @@ type assignment_operator = Assign | Compound_assign of binary_operator
 type expression = expression_node spanned
 
 and expression_node =
-  | Identifier of string
+  | Identifier of { name : string; resolution : resolution }
   | Constant of Number.t  (** never [Number.Not_a_constant] *)
   | Character of Token.encoding  (** the value is the token's spelling *)
   | String of string_literal
@@ -205,7 +247,7 @@ and type_specifier =
       kind : struct_or_union;
       attributes : attribute list;
           (** after the keyword and after the body, in source order *)
-      tag : identifier option;
+      tag : tag option;
       members : member_declaration list option;
           (** [None] without a body; a GNU body may be empty *)
     }
@@ -213,13 +255,14 @@ and type_specifier =
       attributes : attribute list;
           (** after the keyword, the fixed type and the body, in source
               order *)
-      tag : identifier option;
+      tag : tag option;
       underlying : specifiers option;
           (** Clang's fixed underlying type, after a [:] (C23 6.7.2.2) *)
       enumerators : enumerator list option;
           (** [None] without a body; a body holds at least one *)
     }
-  | Typedef_name of string
+  | Typedef_name of { name : string; declaration : declaration_id }
+      (** a typedef name is one only where its declaration is visible *)
   | Typeof_expression of expression  (** GNU [typeof (] expression [)] *)
   | Typeof_type of type_name  (** GNU [typeof (] type-name [)] *)
 
@@ -253,6 +296,7 @@ and enumerator = enumerator_node spanned
 
 and enumerator_node = {
   name : identifier;
+  declared : declared;  (** where the enumerator ends (6.2.1p7) *)
   attributes : attribute list;
   value : expression option;
 }
@@ -305,16 +349,25 @@ and parameters =
   | Prototype of { parameters : parameter list; variadic : bool }
       (** at least one parameter, [(void)] being one, except in a [(...)]
           of C23, which Clang accepts *)
-  | Identifier_list of identifier list
+  | Identifier_list of parameter_name list
       (** old style; [()] is the empty list *)
+
+(** A name in an identifier list, which declares it in the prototype
+    scope; the declaration list of a definition declares it again. *)
+and parameter_name = { name : identifier; declared : declared }
 
 and parameter = parameter_node spanned
 
 and parameter_node = {
   specifiers : specifiers;
-  declarator : declarator option;  (** named or abstract *)
+  declarator : parameter_declarator;
   attributes : attribute list;  (** after the declarator *)
 }
+
+and parameter_declarator =
+  | Named_parameter of { declarator : declarator; declared : declared }
+  | Abstract_parameter of declarator option
+      (** [None] where no declarator follows the specifiers *)
 
 (** C11 6.7.9. *)
 and initialiser =
@@ -348,6 +401,7 @@ and init_declarator = init_declarator_node spanned
 
 and init_declarator_node = {
   declarator : declarator;
+  declared : declared;  (** of the name that [declarator] declares *)
   asm_label : string_literal option;  (** GNU [asm (] string [)] *)
   attributes : attribute list;
       (** before a declarator after the first, and after the declarator
@@ -464,22 +518,26 @@ and asm_operand_node = {
 
 [@@@warning "+30"]
 
-(** The name a declarator declares, if it is not abstract. The walk inward
-    is a tail call, so a long chain of derivations needs no stack. *)
-let rec declared_name declarator =
+(** The identifier a declarator declares, if it is not abstract. The walk
+    inward is a tail call, so a long chain of derivations needs no
+    stack. *)
+let rec declared_identifier declarator =
   match declarator.node with
-  | Name name -> Some name
+  | Name name -> Some { span = declarator.span; node = name }
   | Parenthesized_declarator { inner; _ }
   | Pointer { inner = Some inner; _ }
   | Block_pointer { inner = Some inner; _ }
   | Array { inner = Some inner; _ }
   | Function { inner = Some inner; _ } ->
-      declared_name inner
+      declared_identifier inner
   | Pointer { inner = None; _ }
   | Block_pointer { inner = None; _ }
   | Array { inner = None; _ }
   | Function { inner = None; _ } ->
       None
+
+let declared_name declarator =
+  Option.map (fun name -> name.node) (declared_identifier declarator)
 
 (** The body of a function definition: parsed, or, where a system header
     defines the function, matched brace for brace and kept as the span of
@@ -494,6 +552,7 @@ type function_definition = function_definition_node spanned
 and function_definition_node = {
   specifiers : specifiers;
   declarator : declarator;
+  declared : declared;  (** of the function *)
   attributes : attribute list;  (** after the declarator *)
   declarations : declaration list;
   body : function_body;

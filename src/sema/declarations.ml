@@ -586,6 +586,7 @@ and other_type state span ~standalone (specifier : Tree.type_specifier) =
       checked state span (Ctype.atomic (read_type_name state type_name))
   | Struct_or_union { kind; tag; members; attributes } ->
       let kind = record_kind kind in
+      let tag = tag_name tag in
       let record = record_type state span ~standalone kind tag members in
       let attribute = first_unrecorded_attribute attributes in
       obscured state attribute (Ctype.record record)
@@ -593,7 +594,8 @@ and other_type state span ~standalone (specifier : Tree.type_specifier) =
       let attribute = first_unrecorded_attribute attributes in
       let fixed = Option.map (fixed_type state span) underlying in
       let enum =
-        enum_type state span ~standalone ~attribute ~fixed tag enumerators
+        enum_type state span ~standalone ~attribute ~fixed (tag_name tag)
+          enumerators
       in
       obscured state attribute (Ctype.enum enum)
   | Typeof_type type_name -> read_type_name state type_name
@@ -601,7 +603,7 @@ and other_type state span ~standalone (specifier : Tree.type_specifier) =
       unknown_type state span
         (quote "typeof" ^ " of an expression")
         Object_or_function
-  | Typedef_name name -> (
+  | Typedef_name { name; declaration = _ } -> (
       match Scope.find state.scope name with
       | Some { declared = Typedef t; _ } -> t
       | Some _ | None ->
@@ -619,6 +621,9 @@ and alignment state (alignment : Tree.alignment Tree.spanned) =
             "an alignment is not an integer constant expression (C11 6.7.5p3)")
 
 (* Tags (6.7.2.3) *)
+
+and tag_name (tag : Tree.tag option) =
+  Option.map (fun (tag : Tree.tag) -> tag.name) tag
 
 (* The tag that [struct s] without a body names: the visible one, or one
    it declares here (p8). Alone in a declaration it declares one in this
@@ -811,7 +816,7 @@ and check_enumerator_attributes state (name : Tree.identifier) attributes =
 and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
     =
   let declare (previous, declared) (enumerator : Tree.enumerator) =
-    let { Tree.name; attributes; value } = enumerator.node in
+    let { Tree.name; declared = _; attributes; value } = enumerator.node in
     check_enumerator_attributes state name attributes;
     let ((integer, value) as typed) =
       enumerator_value state previous enumerator.span value
@@ -861,7 +866,7 @@ and define_fixed_enum state span enum (integer : Integer.t Ctype.answer)
         fail_needing state span "the value of each enumerator" unknown
   in
   let declare previous (enumerator : Tree.enumerator) =
-    let { Tree.name; attributes; value } = enumerator.node in
+    let { Tree.name; declared = _; attributes; value } = enumerator.node in
     check_enumerator_attributes state name attributes;
     let value =
       fixed_enumerator_value state integer previous enumerator.span value
@@ -1108,11 +1113,14 @@ and array_length state span (size : Tree.array_size) : Ctype.length =
 and read_parameters state ~definition (parameters : Tree.parameters) =
   match (parameters, definition) with
   | Identifier_list [], None -> (Ctype.Unspecified, Scope.enter state.scope)
-  | Identifier_list (name :: _), None ->
-      fail state name.span
+  | Identifier_list (first :: _), None ->
+      fail state first.name.span
         "an identifier list in a function declarator that is not a \
          definition (C11 6.7.6.3p3)"
   | Identifier_list names, Some declarations ->
+      let names =
+        List.map (fun (listed : Tree.parameter_name) -> listed.name) names
+      in
       old_style_parameters state names declarations
   | Prototype { parameters; variadic }, _ ->
       let types, scope =
@@ -1121,8 +1129,17 @@ and read_parameters state ~definition (parameters : Tree.parameters) =
       in
       let types =
         match (parameters, types) with
-        | ( [ { node = { declarator = None; specifiers = _; attributes = _ };
-                _ } ],
+        | ( [
+              {
+                node =
+                  {
+                    declarator = Abstract_parameter None;
+                    specifiers = _;
+                    attributes = _;
+                  };
+                _;
+              };
+            ],
             [ only ] )
           when only = Ctype.void ->
             []
@@ -1134,6 +1151,11 @@ and read_parameter state (parameter : Tree.parameter) =
   let span = parameter.span in
   let ({ specifiers; declarator; attributes } : Tree.parameter_node) =
     parameter.node
+  in
+  let declarator =
+    match declarator with
+    | Named_parameter { declarator; declared = _ } -> Some declarator
+    | Abstract_parameter declarator -> declarator
   in
   let specified =
     for_declarator (parameter_specifiers state span specifiers) attributes
@@ -1188,7 +1210,13 @@ and read_old_style_declaration state names (declaration : Tree.declaration) =
       List.iter
         (fun (init_declarator : Tree.init_declarator) ->
           let span = init_declarator.span in
-          let { Tree.declarator; asm_label = _; attributes; initialiser } =
+          let {
+            Tree.declarator;
+            declared = _;
+            asm_label = _;
+            attributes;
+            initialiser;
+          } =
             init_declarator.node
           in
           if initialiser <> None then
@@ -1266,7 +1294,8 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
   let target = state.target and span = expression.span in
   let settled result = constant_checked state span result in
   match expression.node with
-  | Identifier name -> identifier_value state expression name
+  | Identifier { name; resolution = _ } ->
+      identifier_value state expression name
   | Constant (Integer { base; digits; suffix }) ->
       settled (Integer_constant.of_integer_constant target base digits suffix)
   | Constant (Floating _ | Not_a_constant) -> not_constant expression
@@ -1427,7 +1456,13 @@ let declare_file_scope state span specified (derived : derived) =
    reads the initializer. *)
 let read_init_declarator state specified
     (init_declarator : Tree.init_declarator) =
-  let { Tree.declarator; asm_label = _; attributes; initialiser = _ } =
+  let {
+    Tree.declarator;
+    declared = _;
+    asm_label = _;
+    attributes;
+    initialiser = _;
+  } =
     init_declarator.node
   in
   let specified = for_declarator specified attributes in
@@ -1460,7 +1495,14 @@ let read_declaration state (declaration : Tree.declaration) =
 
 (* 6.9.1. The body is not read. *)
 let read_function_definition state (definition : Tree.function_definition) =
-  let { Tree.specifiers; declarator; declarations; body = _; attributes } =
+  let {
+    Tree.specifiers;
+    declarator;
+    declared = _;
+    declarations;
+    body = _;
+    attributes;
+  } =
     definition.node
   in
   let span = definition.span in

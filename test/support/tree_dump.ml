@@ -2,20 +2,46 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 (* A structural dump of a syntax tree for tests: an s-expression of the
-   nodes, never C text (design 13.4), and a check of the spans that every
-   dumped tree passes through. *)
+   nodes, never C text (design 13.4), a check of the spans that every
+   dumped tree passes through, and the declarations and uses of names
+   that the parser's scope rules recorded. *)
 
 open Typec_cpp
 open Typec_syntax
 open Tree
 
-(* A node of the dump: a label, the span of the tree node it shows, if
-   it shows one, and its parts in source order. *)
-type sexp = { label : string; span : span option; parts : sexp list }
+type name_space = Ordinary | Tag
 
-let node span label parts = { label; span = Some span; parts }
-let leaf label = { label; span = None; parts = [] }
-let group parts = { label = ""; span = None; parts }
+(* A declaration or a use of a name that a dump node shows, which only
+   [resolutions] prints. *)
+type scope_entry =
+  | Declaration_entry of {
+      space : name_space;
+      name : string;
+      declared : declared;
+    }
+  | Use_entry of { space : name_space; name : string; resolution : resolution }
+
+(* A node of the dump: a label, the span of the tree node it shows, if
+   it shows one, its scope entry, and its parts in source order. *)
+type sexp = {
+  label : string;
+  span : span option;
+  entry : scope_entry option;
+  parts : sexp list;
+}
+
+let node span label parts = { label; span = Some span; entry = None; parts }
+let leaf label = { label; span = None; entry = None; parts = [] }
+let group parts = { label = ""; span = None; entry = None; parts }
+let section label parts = { label; span = None; entry = None; parts }
+let noted entry sexp = { sexp with entry = Some entry }
+
+let declaration_entry ?(space = Ordinary) name declared =
+  Declaration_entry { space; name; declared }
+
+let use_entry ?(space = Ordinary) name resolution =
+  Use_entry { space; name; resolution }
 
 let rec to_string ~spans sexp =
   let head =
@@ -181,18 +207,12 @@ let attribute reader (a : attribute) =
 
 (* One attribute among parts that it may come before or after. *)
 let single_attribute reader a =
-  { label = "attribute"; span = None; parts = [ attribute reader a ] }
+  section "attribute" [ attribute reader a ]
 
 let attribute_group reader = function
   | [] -> []
   | attributes ->
-      [
-        {
-          label = "attributes";
-          span = None;
-          parts = List.map (attribute reader) attributes;
-        };
-      ]
+      [ section "attributes" (List.map (attribute reader) attributes) ]
 
 let asm_qualifier_label = function
   | Asm_volatile -> "volatile"
@@ -203,13 +223,13 @@ let asm_qualifier_label = function
 let absent = leaf "_"
 
 let optional dump = function Some part -> dump part | None -> absent
-let section label parts = { label; span = None; parts }
 
 let rec expression reader (e : expression) =
   let here = node e.span in
   let sub = expression reader in
   match e.node with
-  | Identifier name -> here name []
+  | Identifier { name; resolution } ->
+      noted (use_entry name resolution) (here name [])
   | Constant _ | Character _ -> here (spelling reader e.span.first) []
   | String pieces -> here "string" (string_literal reader pieces)
   | Parenthesized inner -> here "paren" [ sub inner ]
@@ -283,7 +303,8 @@ and specifier reader (s : declaration_specifier spanned) =
       here "alignas" [ expression reader e ]
   | Attributes list -> here "attributes" (List.map (attribute reader) list)
   | Type_specifier (Basic basic) -> here (basic_label basic) []
-  | Type_specifier (Typedef_name name) -> here name []
+  | Type_specifier (Typedef_name { name; declaration }) ->
+      noted (use_entry name (Resolved declaration)) (here name [])
   | Type_specifier (Atomic_type t) -> here "atomic" [ type_name reader t ]
   | Type_specifier (Typeof_expression e) ->
       here "typeof" [ expression reader e ]
@@ -298,20 +319,29 @@ and specifier reader (s : declaration_specifier spanned) =
       in
       here label
         (in_source_order
-           (Option.to_list (Option.map identifier tag)
+           (Option.to_list (Option.map tag_part tag)
            @ body
            @ List.map (single_attribute reader) attributes))
   | Type_specifier (Enum { attributes; tag; underlying; enumerators }) ->
       let underlying_part list =
-        { label = ":"; span = None; parts = specifiers reader list }
+        section ":" (specifiers reader list)
       in
       here "enum"
         (in_source_order
-           (Option.to_list (Option.map identifier tag)
+           (Option.to_list (Option.map tag_part tag)
            @ Option.to_list (Option.map underlying_part underlying)
            @ List.map (enumerator reader)
                (Option.value enumerators ~default:[])
            @ List.map (single_attribute reader) attributes))
+
+and tag_part (tag : tag) =
+  let name = tag.name.node in
+  let entry =
+    match tag.binding with
+    | Declares declared -> declaration_entry ~space:Tag name declared
+    | Names declaration -> use_entry ~space:Tag name (Resolved declaration)
+  in
+  noted entry (identifier tag.name)
 
 and member reader (m : member_declaration) =
   match m.node with
@@ -334,9 +364,12 @@ and member_declarator reader (d : member_declarator) =
         @ (expression reader width :: attribute_group reader attributes))
 
 and enumerator reader (e : enumerator) =
-  node e.span e.node.name.node
-    (attribute_group reader e.node.attributes
-    @ Option.to_list (Option.map (expression reader) e.node.value))
+  let name = e.node.name.node in
+  noted
+    (declaration_entry name e.node.declared)
+    (node e.span name
+       (attribute_group reader e.node.attributes
+       @ Option.to_list (Option.map (expression reader) e.node.value)))
 
 and declarator reader (d : declarator) =
   let here = node d.span in
@@ -370,7 +403,12 @@ and parameters reader = function
       List.map (parameter reader) parameters
       @ if variadic then [ leaf "..." ] else []
   | Identifier_list names ->
-      [ group (leaf "identifiers" :: List.map identifier names) ]
+      let name (listed : parameter_name) =
+        noted
+          (declaration_entry listed.name.node listed.declared)
+          (identifier listed.name)
+      in
+      [ group (leaf "identifiers" :: List.map name names) ]
 
 and array_size reader = function
   | Unsized -> []
@@ -379,10 +417,23 @@ and array_size reader = function
   | Unspecified_variable -> [ leaf "*" ]
 
 and parameter reader (p : parameter) =
-  node p.span ""
-    (specifiers reader p.node.specifiers
-    @ Option.to_list (Option.map (declarator reader) p.node.declarator)
-    @ attribute_group reader p.node.attributes)
+  let dump inner =
+    node p.span ""
+      (specifiers reader p.node.specifiers
+      @ Option.to_list inner
+      @ attribute_group reader p.node.attributes)
+  in
+  match p.node.declarator with
+  | Named_parameter { declarator = inner; declared } ->
+      dump (Some (declared_declarator reader inner declared))
+  | Abstract_parameter inner -> dump (Option.map (declarator reader) inner)
+
+(* A named declarator with the entry of its declaration, which keeps
+   source order: nothing in a declarator before its name declares or
+   uses a name. *)
+and declared_declarator reader inner declared =
+  let name = Option.value (declared_name inner) ~default:"(no name)" in
+  noted (declaration_entry name declared) (declarator reader inner)
 
 and initialiser reader = function
   | Expression_initialiser e -> expression reader e
@@ -418,7 +469,7 @@ and init_declarator reader (d : init_declarator) =
   let leading, trailing = List.partition before d.node.attributes in
   let around =
     attribute_group reader leading
-    @ (declarator reader inner
+    @ (declared_declarator reader inner d.node.declared
       :: Option.to_list
            (Option.map
               (fun label -> section "asm" (string_literal reader label))
@@ -540,7 +591,8 @@ let external_declaration reader = function
       node span "define"
         ([
            group (specifiers reader definition.specifiers);
-           declarator reader definition.declarator;
+           declared_declarator reader definition.declarator
+             definition.declared;
          ]
         @ attribute_group reader definition.attributes
         @ List.map (declaration reader) definition.declarations
@@ -549,3 +601,55 @@ let external_declaration reader = function
   | Empty_declaration span -> node span ";" []
 
 let translation_unit reader unit = List.map (external_declaration reader) unit
+
+(* The scope entries of a dump in source order: a declaration as [x#n],
+   [n] counting the declarations of [x] in its name space in token order,
+   with [<#m] after it where it redeclares [x#m]; a use as [x->#n], or
+   [x->?] where it resolves to no declaration and [x->builtin] where it
+   resolves to a typedef name that GCC and Clang declare. A tag's entry
+   begins with [tag]. *)
+let resolutions dump =
+  let rec entries sexp =
+    Option.to_list sexp.entry @ List.concat_map entries sexp.parts
+  in
+  let all = List.concat_map entries dump in
+  let declared_ids space name =
+    List.filter_map
+      (function
+        | Declaration_entry entry when entry.space = space && entry.name = name
+          ->
+            Some entry.declared.id
+        | Declaration_entry _ | Use_entry _ -> None)
+      all
+    |> List.sort compare
+  in
+  let reference space name = function
+    | Builtin _ -> "builtin"
+    | At_token _ as id -> (
+        let rec position index = function
+          | [] -> None
+          | declared :: _ when declared = id -> Some index
+          | _ :: rest -> position (index + 1) rest
+        in
+        match position 1 (declared_ids space name) with
+        | Some index -> "#" ^ string_of_int index
+        | None -> "#unknown")
+  in
+  let prefix = function Ordinary -> "" | Tag -> "tag " in
+  let show = function
+    | Declaration_entry { space; name; declared } ->
+        let earlier =
+          match declared.earlier with
+          | None -> ""
+          | Some earlier -> "<" ^ reference space name earlier
+        in
+        prefix space ^ name ^ reference space name declared.id ^ earlier
+    | Use_entry { space; name; resolution } ->
+        let target =
+          match resolution with
+          | Resolved id -> reference space name id
+          | Undeclared -> "?"
+        in
+        prefix space ^ name ^ "->" ^ target
+  in
+  String.concat " " (List.map show all)

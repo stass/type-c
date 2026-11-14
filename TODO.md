@@ -155,29 +155,43 @@ is [type-c-language-design.md](type-c-language-design.md).
   `a`, and a jump into a statement expression from outside it. Check
   them where bodies are typed (0.9b). `Declarations` checks those of
   declarations.
-- [High] One implementation of the scope rules (6.2.1), step 2: the
-  parser drives `Parser.scopes`, and `Parser.parse` uses syntactic rules
-  of its own, while `Declarations` keeps its own scope boundaries, so
-  where a scope starts and ends is still implemented twice. Make the
-  declaration reader an implementation of `Parser.scopes` that declares
-  enumerators and tags when the parser hands them over; tags need a new
-  case of `Parser.scoped_declaration`, at the point where a tag enters
-  scope (6.2.1p7).
-- [High] Scope rules, step 3: the reader declares parameters,
-  declarators and the re-entered scope of a function body when the
-  parser hands them over; block-scope entities are bound by kind only,
-  untyped, until 0.9b types bodies. A `Declarator` is handed over before
-  the parser knows whether a function definition follows, so the rules
-  on defining an identifier twice (6.7p3, 6.9p3) need a separate event
-  for a definition; and every declarator of a declaration carries the
-  same specifiers, so a tag they define must enter scope once, through
-  the tag case of step 2, not once per declarator.
-- [High] Scope rules, step 4: the type names inside expressions (casts,
-  `sizeof`, compound literals) declare their tags and enumerators
-  through the same interface.
-- [High] Scope rules, step 5: delete the reader's own scope boundaries:
-  `within_scope`, its use of `Scope.reenter`, and the scope of
-  `read_parameters`.
+- [High] Scope rules, package R2: the parser records the outcome of the
+  scope rules in the tree (`Tree.declared`, `Tree.resolution`,
+  `Tree.tag_binding`; design 13.3), but `Declarations` still keeps scopes
+  of its own (`state.scope`, `within_scope`, its use of `Scope.reenter`,
+  the scope of `read_parameters`, `referenced_tag`, `has_one_specifier`).
+  Make the reader follow the links and delete its scope: a table from
+  `Tree.declaration_id` to entity and one to tag; a use's `Resolved` id
+  and a tag's `Names` id give the entity or tag, a declaration's
+  `earlier` the one it redeclares (6.7p3, the composite type of 6.2.7,
+  and tag completion, 6.7.2.3p4) or a tag of another kind (p2), and a
+  `Builtin` id the type in `Builtin_typedef.table` where the target has
+  it. Linkage across scopes (6.2.2) becomes a table keyed by name. An
+  `Undeclared` use is an error unless it names `__func__` (6.4.2.2) or a
+  builtin function. The ids also give an entity its location for
+  messages. `Declarations.result.file_scope`, which `test_declarations`
+  and `declaration_probe` read, must give way to the tables, and `Scope`
+  is then the parser's alone. Two points for the reader: give tags an id
+  type of their own, and the ids of declarations made in the tree (never
+  `Builtin`) one apart from what a use resolves to, so that a tag's id
+  cannot be looked up among ordinary entities; and read a declarator's
+  array lengths and parameters before binding its `declared`, as an
+  enumerator there enters scope first (`int x[sizeof (enum { x })];`).
+- [Medium] The arguments of an attribute are a span the parser does not
+  read, so the identifiers in them resolve to nothing: `aligned(N)` with
+  an enumerator `N`, `vector_size(N * sizeof (T))`, `cleanup(f)`. The
+  first consumer of such an argument must not look names up itself:
+  parse the arguments of the attributes whose grammar is known (an
+  expression for `aligned` and `vector_size`, an identifier for
+  `cleanup`) through the parser's scope.
+- [Medium] Labels are names only in the tree: a label statement, `goto`,
+  `&&label` and the labels of `asm goto` record no declaration or
+  resolution. A label's scope is its function (6.2.1p3), so a `goto`
+  before its label resolves only at the end of the body, and a GNU
+  `__label__` declares a label with block scope that a label statement
+  in that block defines. Resolve them per function body, and per block
+  literal body, once it is parsed (a pure step of the parser), into the
+  tree, for the label checks of 0.9b.
 - [Medium] GNU forms that common code uses and the profile leaves out,
   each an error that names its first token: attributes before a
   statement that no named label precedes (`__attribute__((musttail))
@@ -294,12 +308,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   would cover every position by construction; the reader's full record
   patterns cover only the positions it reads, and not a field read by
   projection.
-- [Low] `struct s;` alone declares a new tag (6.7.2.3p7) by GCC's
-  reading in `Declarations` (attributes on either side, no qualifier or
-  storage class), which Clang reads differently: it requires the `;`
-  right after the tag and allows qualifiers and storage classes before
-  it. Only block scope shows the difference; decide which to follow, and
-  test it, when block-scope declarations are read.
+- [Low] The parser reads a tag alone in a declaration as GCC and C11 do
+  (6.7.2.3p7, p9): `const struct s;`, `struct s;` among members and
+  `enum e;` without a fixed type name the visible tag, where Clang
+  declares a new one in the current scope, and attributes after the tag
+  leave `struct s` alone, where Clang requires the `;` right after it.
+  With Clang as the backend, typec and the backend then see different
+  types where an outer tag of the name is visible. Refuse those forms
+  there if the corpus has them.
 - [Medium] `Function.gnu_inline` records the attribute, under which an
   inline definition is external unless it says `extern inline` (GNU89),
   in place of C11 6.7.4p7, but nothing reads it. Whatever decides
