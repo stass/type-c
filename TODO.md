@@ -13,11 +13,11 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 - [High] Check the license and provenance of each pilot candidate named
   in the plan before fetching any of them.
-- [Medium] Decide where the arm64 Linux and the FreeBSD test hosts run
-  (`tools/hosts` runs the x86-64 Linux ones in containers), and where
-  the corpus repository is hosted: it exists locally at
-  `/Volumes/Optaine/type-c-corpus`, with no remote, and its README says
-  what it holds.
+- [Medium] Decide where the arm64 Linux test host runs (`tools/hosts`
+  runs the x86-64 Linux ones in containers and the FreeBSD one over ssh,
+  on a machine of the owner's), and where the corpus repository is
+  hosted: it exists locally at `/Volumes/Optaine/type-c-corpus`, with no
+  remote, and its README says what it holds.
 
 ## Driver
 
@@ -519,7 +519,7 @@ is [type-c-language-design.md](type-c-language-design.md).
 ## Test hosts
 
 `tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24
-(musl), both x86-64.
+(musl) in containers, and on FreeBSD 16.0-CURRENT over ssh, all x86-64.
 
 - [Medium] `test/run/target.t`, `types.t` and `declarations.t` run on
   x86-64 hosts only: `target.t` expects the x86-64 model and the other
@@ -527,8 +527,20 @@ is [type-c-language-design.md](type-c-language-design.md).
   second target of arm64 once an arm64 host runs the suite, so that
   `types.t` confirms the provisional enumeration rule
   (`Arithmetic.enum_compatible_type`) there too.
-- [Low] `tools/corpus/runner.t` runs `/usr/bin/clang`, not the Clang
-  that `TYPEC_TEST_CLANG` names (`test/run/backends.sh`).
+- [Medium] `tools/hosts/freebsd.sh` runs `corpus/fetch.sh` for the whole
+  manifest, GCC's archive included, whichever programs it runs, so an
+  archive that does not download fails a run that does not need it.
+  Let the runner or `fetch.sh` resolve a program to its archives.
+- [Medium] The records of a corpus run on the FreeBSD host exist only in
+  the log: `tools/hosts/freebsd.sh` deletes `DIR/corpus` on the next run
+  and does not copy `runs/` back into the corpus repository.
+- [Low] `tools/hosts/freebsd.sh` copies the source with a pipeline of
+  `git ls-files` and `tar` without `pipefail`, so a failure of either
+  that leaves a partial tree shows up as a failure of dune. Two runs on
+  one `DIR` at once are not guarded.
+- [Low] `tools/oracle/oracle.t` has its own default of
+  `TYPEC_TEST_CLANG` instead of sourcing `test/run/backends.sh`.
+- [Low] `tools/hosts/run.sh run` runs `run.sh` as a host script.
 
 ## Corpus
 

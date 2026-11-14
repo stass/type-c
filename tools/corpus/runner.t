@@ -1,11 +1,14 @@
 SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-The corpus runner builds a program of a fixture corpus with Clang: a
-library unit and a program unit, compiled through typec and through the
-reference recipe, then linked and tested. The lines that depend on the
-host, the backend, the revisions and the timings are left out.
+The corpus runner builds a program of a fixture corpus with the Clang
+that test/run/backends.sh names, linked as clang: a library unit and a
+program unit, compiled through typec and through the reference recipe,
+then linked and tested. The lines that depend on the host, the backend,
+the revisions and the timings are left out.
 
+  $ . ../../test/run/backends.sh
+  $ ln -s "$(command -v "$clang")" clang
   $ mkdir -p corpus/programs/hello cache/src/hello-1/include
   $ cat > cache/src/hello-1/include/greet.h <<'EOF'
   > const char *greeting(void);
@@ -33,14 +36,14 @@ host, the backend, the revisions and the timings are left out.
   > EOF
   $ run() {
   >   out=$(./corpus.exe --corpus corpus --cache cache \
-  >     --typec "$(command -v typec)" --cc /usr/bin/clang "$@")
+  >     --typec "$(command -v typec)" --cc ./clang "$@")
   >   status=$?
   >   echo "$out" | grep -v -E '^(host|backend|typec|corpus|log) |^  |^$'
   >   return $status
   > }
   $ fails() {
   >   out=$(./corpus.exe --corpus corpus --cache cache \
-  >     --typec "$(command -v typec)" --cc /usr/bin/clang "$@" 2>&1)
+  >     --typec "$(command -v typec)" --cc ./clang "$@" 2>&1)
   >   status=$?
   >   echo "$out" | sed "s|$PWD/||"
   >   return $status
@@ -205,7 +208,7 @@ failed to build is recorded as a partial pass, which does not meet gate
   > test own test.sh
   > EOF
   $ cat > corpus/programs/multi/test.sh <<'EOF'
-  > [ -x "$TYPEC" ] && [ "$CC" = /usr/bin/clang ] && [ "$TYPEC_CC" = "$CC" ] ||
+  > [ -x "$TYPEC" ] && [ "${CC##*/}" = clang ] && [ "$TYPEC_CC" = "$CC" ] ||
   >   exit 7
   > for name in ok bad ugly; do
   >   [ -x "bin/$name" ] && echo "TEST pass $name"

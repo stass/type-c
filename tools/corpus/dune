@@ -8,4 +8,8 @@
  (libraries unix typec_driver))
 
 (cram
- (deps corpus.exe %{bin:typec}))
+ (deps
+  corpus.exe
+  %{bin:typec}
+  ../../test/run/backends.sh
+  (env_var TYPEC_TEST_CLANG)))

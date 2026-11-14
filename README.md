@@ -64,6 +64,32 @@ tools/hosts/run.sh debian
 tools/hosts/run.sh alpine /Volumes/Optaine/alpine.log
 ```
 
+### FreeBSD test host
+
+The FreeBSD x86-64 host is a machine reached over ssh, not a container:
+`tools/hosts/freebsd.sh`, or `tools/hosts/run.sh freebsd`, which runs
+it. The header of the script says which environment variables name the
+account (`TYPEC_FREEBSD_TARGET`, `TYPEC_FREEBSD_KEY`,
+`TYPEC_FREEBSD_DIR`) and the corpus programs to run
+(`TYPEC_FREEBSD_CORPUS`), which compilers and tools the host must
+supply, and which OCaml and dune it builds. Everything goes to
+`~/typec-host` of the account and nothing runs as root; the corpus
+programs are third-party code run with the account's own rights, so use
+an account that holds nothing else. ssh asks no question, so the key
+must be loaded or named and the host key must be known.
+
+```sh
+export TYPEC_FREEBSD_TARGET=user@freebsd-host
+TYPEC_FREEBSD_CORPUS="c-testsuite zlib lua sqlite chibicc qbe" \
+  tools/hosts/run.sh freebsd /Volumes/Optaine/freebsd.log
+```
+
+The run prints whether the suite passed, and the log holds the whole
+output, including the record of each corpus run (the runner's status 3,
+substitute tests only, counts as a pass). The toolchain, the build tree
+and the corpus cache stay between runs. To remove them all:
+`ssh USER@HOST "sh -c 'chmod -R u+w typec-host; rm -rf typec-host'"`.
+
 ## Choosing the backend
 
 The backend is the program named by the last `--cc=PATH` option, else by

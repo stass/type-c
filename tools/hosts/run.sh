@@ -2,15 +2,16 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-# Builds the image of a Linux test host and runs typec's build and test
-# suite in a container of it.
+# Runs typec's build and test suite on a test host.
 #
 # usage: tools/hosts/run.sh HOST [LOG]
 #
-# HOST names HOST.Dockerfile in this directory. The source is mounted
-# read-only and built in the container, which has no network and is
-# removed afterwards. The image build and the run write to LOG, by
-# default ${TMPDIR:-/tmp}/typec-host-HOST.log, outside the repository.
+# HOST names HOST.Dockerfile or HOST.sh in this directory. A Dockerfile
+# is a Linux host: the script builds its image and runs the suite in a
+# container of it, with the source mounted read-only and no network, the
+# container removed afterwards. A script is a host that no container
+# gives, and is run with LOG. Either writes to LOG, by default
+# ${TMPDIR:-/tmp}/typec-host-HOST.log, outside the repository.
 
 set -eu
 
@@ -32,6 +33,9 @@ dockerfile=$hosts_dir/$host.Dockerfile
 image=typec-host-$host
 log=${2:-${TMPDIR:-/tmp}/typec-host-$host.log}
 
+if [ -x "$hosts_dir/$host.sh" ]; then
+  exec "$hosts_dir/$host.sh" "$log"
+fi
 if [ ! -f "$dockerfile" ]; then
   echo "$0: no host $host: $dockerfile does not exist" >&2
   exit 2
