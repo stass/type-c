@@ -1,0 +1,14 @@
+(lang dune 3.0)
+
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; The workspace that builds the typing oracle (README, "Typing oracle"):
+; one context, named oracle, of the opam switch tools in the OPAMROOT of
+; the environment. dune requires the lang stanza on the first line, so
+; the header follows it.
+
+(context
+ (opam
+  (switch tools)
+  (name oracle)))

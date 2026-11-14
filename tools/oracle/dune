@@ -1,0 +1,18 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; The Clang half of the typing oracle (README, "Typing oracle"). It needs
+; yojson, which only the tools opam switch has, so it is built only in
+; the context that oracle.workspace makes of that switch; the default
+; context of a plain dune build skips it and oracle.t.
+
+(executable
+ (name oracle)
+ (enabled_if
+  (= %{context_name} oracle))
+ (libraries unix yojson))
+
+(cram
+ (enabled_if
+  (= %{context_name} oracle))
+ (deps oracle.exe (env_var TYPEC_TEST_CLANG)))

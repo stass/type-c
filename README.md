@@ -308,3 +308,115 @@ a line for each record that does not meet the gates); 2 when the
 command line or a recipe is wrong, an archive has not been fetched, or
 the runner cannot write a file of its own. `dune test` runs
 `tools/corpus/runner.t`, which checks the runner on a fixture program.
+
+## Typing oracle
+
+`tools/oracle/` holds the Clang half of the typing oracle of plan
+package 0.10, which records the type Clang gives each expression so
+that the comparison half can check `typec`'s against it.
+
+```sh
+oracle.exe CC INPUT.i OUTPUT [OPTION...]
+```
+
+runs `CC -Xclang -ast-dump=json -fsyntax-only -w OPTION... -x cpp-output
+-- INPUT.i`, without a shell, on the preprocessed text that `typec`
+reads, and writes to OUTPUT a record of every expression node of the
+translation unit: those of function bodies and initialisers, in the
+file and in the headers it includes, and those of declarations, such as
+array lengths and enumerators. It prints how many it recorded and how
+many it left out for having no source range (the implicit initialisers
+of the members an initialiser list leaves out). OUTPUT is written in
+full or not at all; the exit status is 1 when Clang fails or its output
+is refused.
+
+The oracle reads JSON with yojson, which `typec` does not depend on, so
+it is built in an opam switch of its own, in the opam root of the fuzz
+harness. Setting up, once:
+
+```sh
+export OPAMROOT=/Volumes/Optaine/opam
+opam init --bare --disable-sandboxing -n -y   # unless the root exists
+opam switch create tools --no-switch -y ocaml-base-compiler.5.5.2
+opam install --switch tools -y dune.3.24.2 yojson.3.0.0
+```
+
+Building it and running its test, with the build outside this
+repository, then running it on a unit of the corpus:
+
+```sh
+export OPAMROOT=/Volumes/Optaine/opam
+build=/Volumes/Optaine/typec-oracle/_build
+dune build --root . --workspace tools/oracle/oracle.workspace \
+  --build-dir "$build" @tools/oracle/runtest
+"$build/oracle/tools/oracle/oracle.exe" /usr/bin/clang lvm.tc.ref.i \
+  /Volumes/Optaine/typec-oracle/lvm.records -std=gnu11
+```
+
+`tools/oracle/oracle.workspace` makes a dune context named `oracle` of
+the switch, and `tools/oracle/dune` enables the oracle and its test only
+in that context, so a plain `dune build` or `dune test`, in the default
+context, skips them. A condition on the library itself
+(`%{lib-available:yojson}`) needs dune language 3.15, and an executable
+marked `(optional)` is still built by the default alias. `oracle.t`
+runs the Clang that `TYPEC_TEST_CLANG` names, `/usr/bin/clang` when it
+is unset.
+
+Each record is a line of tab-separated fields:
+
+```text
+FIRST  LIMIT  KIND  CAST  CATEGORY  TYPE  DESUGARED
+```
+
+* `FIRST` and `LIMIT` are byte offsets in INPUT.i: the expression's
+  source range is from `FIRST` up to, not including, `LIMIT`. Clang
+  gives a location's `offset` in the buffer it read, which for a
+  preprocessed file is INPUT.i itself; line markers change only the
+  presumed file and line it also gives (`presumedFile`, `presumedLine`,
+  `includedFrom`). A range ends at the start of its last token, so
+  `LIMIT` is the end's `offset` plus its `tokLen`. Clang names a
+  location's buffer (`file`) only when it differs from that of the
+  location written before it, so the oracle follows every location in
+  the order of the dump, and refuses one in another buffer or in a
+  macro expansion.
+* `KIND` is Clang's node kind and `CAST` the cast kind of an implicit
+  or explicit cast, such as `LValueToRValue`.
+* `CATEGORY` is `lvalue`, `prvalue` or `xvalue`.
+* `TYPE` is the type as Clang prints it (`qualType`), and `DESUGARED` the
+  type with its outermost sugar removed (`desugaredQualType`), when
+  that is spelled differently.
+* An absent field is `-`. A backslash or control byte in a field, such
+  as a tab in a file name, is written `\xHH`.
+
+The records come in the order of the dump, each node before the nodes
+inside it, since Clang writes a node's range before its children. An
+implicit conversion has the source range of its operand, so for the
+nodes that share a range the first record has the type after the
+conversions and the last the type of the expression as written; the
+comparison chooses which to check.
+
+Clang's output is untrusted: it is read one top-level declaration at a
+time, and refused when it nests deeper than `Clang_ast.max_depth`, a
+declaration takes more than `Clang_ast.max_declaration_bytes`, or it
+holds a comment, which yojson would read and Clang never writes. A
+declaration within the bound takes under a gigabyte as a tree; Clang's
+are far smaller, and the oracle reads all of SQLite in about 55
+megabytes.
+
+Clang spells types as `Type_name.of_ctype` does, apart from these
+cases, which the comparison has to normalise:
+
+| Clang | `typec` |
+| --- | --- |
+| typedef names, anywhere in the type: `A3 *`, `size`; `DESUGARED` removes only the outermost (`size` gives `unsigned long`, `A3 *` none) | no typedef names |
+| `typeof (n) *`, like a typedef name | the type of `n` |
+| `struct (unnamed struct at FILE:LINE:COL)`, desugared `struct (unnamed at FILE:LINE:COL)`, or `union O::(unnamed at FILE:LINE:COL)` for a member of `struct O`, at the presumed location of the tag's keyword | `struct <anonymous>` |
+| an anonymous tag declared in a typedef, by the typedef's name even when desugared: `point` | `struct <anonymous>` |
+| `_Atomic(int)` | `_Atomic int` |
+| `int[n]`, the length as written | `int[*]` |
+| `__builtin_va_list`, desugared `struct __va_list_tag[1]` on x86-64; a `va_list` parameter `struct __va_list_tag *` | `__builtin_va_list` |
+| `bool` under `-std=c23`, `_Bool` before | `_Bool` |
+| `__attribute__((__vector_size__(4 * sizeof(int)))) int` | an unknown type, `<...>` |
+
+Apart from spelling, Clang gives a function designator the category
+`prvalue`.

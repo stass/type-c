@@ -491,12 +491,35 @@ types (design 13.3).
   it instead, which also makes `__FILE__` name the copy.
 - [Low] The corpus runner waits for every command without a time
   limit, so a test or a compile that hangs stops the run.
+- [Low] The corpus runner reports a command ended by a signal with
+  OCaml's number for it (`Command.describe`), which is negative and not
+  the system's: "ended by signal -10" for SIGSEGV. `Sys.signal_to_string`
+  names it.
 - [Low] A run record names `typec` by the revision of the checkout its
   binary sits in and by the binary's digest. `typec --version`, printing
   the revision it was built from, would name it exactly.
 - [Low] The corpus runner's reference recipe repeats what
   `src/driver/pipeline.ml` passes to the backend (`-D__TYPEC__=1`, the
   default `-std=gnu11`), as `test/run/pipeline.t` does.
+
+## Typing oracle
+
+- [High] The comparison half of plan 0.10, after 0.9b: check the type
+  and value category `typec` gives each expression against the records
+  of `tools/oracle` for its source range (README, "Typing oracle"), and
+  keep the reviewed allow-list of gate 4. Clang's spellings keep typedef
+  names at every level, and its JSON gives no canonical type: the
+  desugared spelling removes only the outermost typedef, so `A3 *`
+  stays as written. Decide how to resolve them. Recommended: parse
+  Clang's spelling as a type name with `typec`'s parser in the scope of
+  the expression, which `typec` holds while typing it, then apply the
+  normalisations of the README's table. The alternative, rebuilding
+  each spelling from the typedef declarations of the dump, needs a
+  parser of C type names in the oracle.
+- [Low] The order of the oracle's records is what shows which of the
+  nodes that share a range is outermost, and it holds only because
+  Clang writes a node's range before its children. A field with each
+  record's depth among the expressions would state it.
 
 ## Design questions without a gate yet
 
