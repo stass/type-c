@@ -160,7 +160,11 @@ inclusion, and:
 The accepted dialect is ISO C11 plus a *GNU profile*: the GNU and Clang
 extensions that system headers and common code rely on (13.3). `typec`
 passes `-std=gnu11` to the C compiler unless the command line selects C11
-or C17 in ISO or GNU form. Other dialects are not accepted.
+or C17 in ISO or GNU form. Other dialects are not accepted. The GNU
+keywords spelled without underscores, `asm` and `typeof`, are keywords in
+the GNU form and identifiers in the ISO form, as for the C compiler;
+`-fasm` and `-fno-asm` override the choice. The `__` spellings are
+keywords in both.
 
 Rationale. Headers select constructs by `__STDC_VERSION__`; pinning the
 dialect bounds what the front end must parse. Everything Type-C lowers to is
