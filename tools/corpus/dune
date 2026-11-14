@@ -1,0 +1,11 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; The corpus runner. runner.t runs it on a fixture program.
+
+(executable
+ (name corpus)
+ (libraries unix))
+
+(cram
+ (deps corpus.exe %{bin:typec}))

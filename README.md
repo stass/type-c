@@ -21,7 +21,8 @@ Requirements: OCaml 5 and dune 3; the tests also need a C compiler as
 `cc`, and `test/run/target.t`, `test/run/read.t`, `test/run/types.t`,
 `test/run/declarations.t`, `test/run/pipeline.t` and `test/run/parse.t`
 run `/usr/bin/clang` and `/usr/local/bin/gcc-16`, `types.t` and
-`declarations.t` with `-m32` too. There are no other dependencies.
+`declarations.t` with `-m32` too, and `tools/corpus/runner.t` runs
+`/usr/bin/clang`. There are no other dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec
@@ -190,3 +191,55 @@ every input its stage accepts or refuses and raises otherwise. Adding
 one is that module, its libraries in `tools/fuzz/dune`, an entry in the
 `targets` table of `fuzz.ml` and seeds in `tools/fuzz/seeds/TARGET/`,
 which `dune test` runs through it.
+
+## Running the corpus
+
+`tools/corpus/` holds the corpus runner, which checks the exit gate of
+plan package 0.11 on real programs. The corpus itself, its recipes and
+the records of its runs live in a separate repository, at
+`/Volumes/Optaine/type-c-corpus`, and its sources in a cache outside
+both, by default `/Volumes/Optaine/type-c-corpus-cache`; that
+repository's README says how they are pinned and fetched.
+
+```sh
+corpus=/Volumes/Optaine/type-c-corpus
+cache=/Volumes/Optaine/type-c-corpus-cache
+"$corpus/fetch.sh"
+dune build
+_build/default/tools/corpus/corpus.exe --corpus "$corpus" --cache "$cache" \
+  --typec _build/install/default/bin/typec \
+  --cc /usr/bin/clang --cc /usr/local/bin/gcc-16 \
+  c-testsuite zlib lua sqlite chibicc qbe
+```
+
+For each program and backend the runner makes a fresh build tree in
+`CACHE/build/HOST/PROGRAM/BACKEND/` from the archives of the program's
+recipe (`programs/PROGRAM/recipe`, in the format of
+`tools/corpus/recipe.mli`) and compiles each unit `U.c` of it, with
+`-O2`, no debug option and the recipe's options:
+
+1. `typec --cc=BACKEND -c U.tc -o U.o`, where `U.tc` is a copy of `U.c`
+   next to it, so that its includes resolve as before;
+2. the reference, as `test/run/pipeline.t` builds it:
+   `BACKEND -E -x c -D__TYPEC__=1 -std=gnu11 ... U.tc > U.ref.i`, then
+   `BACKEND -x cpp-output -std=gnu11 ... -c U.ref.i -o U.ref.o`;
+3. `U.o` and `U.ref.o` must be equal byte for byte.
+
+It then links each program of the recipe from the `typec` objects and
+runs the recipe's test script in the build tree, with `CC` naming the
+backend. It writes a record of each program and backend to
+`CORPUS/runs/HOST/PROGRAM.BACKEND.txt` and prints it: the revisions
+of the corpus and of the checkout `typec` was built in and the digest
+of the `typec` binary, the counts of
+identical, different and failed units, which failed and at which step,
+whether the programs linked and the tests passed, and the CPU time of
+preprocessing, of `typec --emit-c` and of the backend's `-fsyntax-only`
+on `U.ref.i`, summed over the units, whose first two differ by the time
+of `typec`'s front end. The stderr of every command goes to
+`CACHE/build/HOST/PROGRAM/BACKEND.log`.
+
+Exit status: 0 when every unit gave identical objects and every
+program's tests passed; 1 otherwise; 2 when the command line or a
+recipe is wrong, an archive has not been fetched, or the runner cannot
+write a file of its own. `dune test` runs
+`tools/corpus/runner.t`, which checks the runner on a fixture program.
