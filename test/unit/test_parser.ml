@@ -1505,10 +1505,11 @@ let type_declaration_cases =
       "type list; type list = | Nil | Cons(int head, list *tail); list l;"
       "(type list claims) | (type list claims Nil (Cons (field (int) head) \
        (field (list) (pointer tail)))) | (declaration (list) l)";
-    case "a variant in a block hides an incomplete one outside"
-      "type e; void f(void) { type e = | A; e x; }"
-      "(type e claims) | (define (void) (function f (void)) (block (type e \
-       claims claims A) (declaration (e) x)))";
+    case "a variant in a block hides an outer C structure"
+      "struct e { int i; }; void f(void) { type e = | A; e x; }"
+      "(declaration ((struct e (member (int) i)))) | (define (void) \
+       (function f (void)) (block (type e claims claims A) (declaration (e) \
+       x)))";
     case "a universe name that a declaration hides"
       "int result = 1; void f(void) { int str; str = result; }"
       "(declaration (int) (init result 1)) | (define (void) (function f \
@@ -1604,6 +1605,18 @@ let type_c_error_cases =
     case "a derived enumerator declared after" "type e = | A; int e_A;"
       "error: in.tc:1: the enumerator `e_A` is declared again, as a type \
        declaration claims it (design 10.1 rule 6)";
+    case "a block declares a derived enumerator"
+      "type e = | A; void f(void) { int e_A; }"
+      "error: in.tc:1: the enumerator `e_A` is declared again, as a type \
+       declaration claims it (design 10.1 rule 6)";
+    case "a parameter of a prototype declares a derived enumerator"
+      "type e = | A; void f(int e_A);"
+      "error: in.tc:1: the enumerator `e_A` is declared again, as a type \
+       declaration claims it (design 10.1 rule 6)";
+    case "a variant in a block derives an outer one's enumerator"
+      "type a_b = | C; void f(void) { type a = | b_C; }"
+      "error: in.tc:1: the variant `a` claims the enumerator `a_b_C`, which \
+       an enclosing scope claims already (design 10.1 rule 6)";
     case "a derived enumerator named in Type-C text"
       "type e = | A; int x = e_A;"
       "error: in.tc:1: the enumerator `e_A` is not available to Type-C \
@@ -1680,6 +1693,22 @@ let type_c_error_cases =
       "type node; struct node { int b; };"
       "error: in.tc:1: the tag `node` is declared again, as a type \
        declaration claims it (design 10.1 rule 6)";
+    case "a block declares a claimed tag"
+      "type node; void f(void) { struct node { int x; } n; }"
+      "error: in.tc:1: the tag `node` is declared again, as a type \
+       declaration claims it (design 10.1 rule 6)";
+    case "a block declares a derived enumeration tag"
+      "type e = | A; void f(void) { enum e_tag { X }; }"
+      "error: in.tc:1: the tag `e_tag` is declared again, as a type \
+       declaration claims it (design 10.1 rule 6)";
+    case "a variant in a block meets an outer incomplete one"
+      "type e; void f(void) { type e = | A; e x; }"
+      "error: in.tc:1: the type declaration of `e` claims the tag `e`, which \
+       an enclosing scope claims already (design 10.1 rule 6)";
+    case "a type declaration in a block claims an outer one's tag"
+      "type e = | A; void f(void) { type e = | B; }"
+      "error: in.tc:1: the type declaration of `e` claims the tag `e`, which \
+       an enclosing scope claims already (design 10.1 rule 6)";
     case "a claimed tag named in Type-C text"
       "type node; struct node *p;"
       "error: in.tc:1: the tag `node` is not available to Type-C text, as a \
@@ -1717,10 +1746,12 @@ let type_c_resolution_cases =
     case "a tag of its own is the specifier's"
       "type list = struct node { list *next; struct node *n; };"
       "list#1 tag node#1 list->#1 tag node->#1";
-    case "a block hides a claimed tag"
-      "type node; void f(void) { struct node { int x; } n; struct node *p; \
-       }"
-      "node#1 tag node#1 f#1 tag node#2 n#1 tag node->#2 p#1";
+    case "a block hides an unclaimed tag with a claimed one"
+      "struct e; void f(void) { type e = | A; e x; }"
+      "tag e#1 f#1 e#1 tag e#2 tag e_tag#1 e_A#1 e->#1 x#1";
+    case "a block hides the name of a variant"
+      "type e = | A; void f(void) { int e; e = 1; }"
+      "e#1 tag e#1 tag e_tag#1 e_A#1 f#1 e#2 e->#2";
     case "a type declaration in a block hides an outer one"
       "type t = int; void f(void) { type t = long; t x; } t y;"
       "t#1 f#1 t#2 t->#2 x#1 t->#1 y#1";

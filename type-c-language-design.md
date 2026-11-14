@@ -903,10 +903,18 @@ struct expr {
    wire format, and copying one to an untrusted destination can disclose
    stale memory, as with any C struct that has padding.
 6. The declaration claims the struct tag `expr`, the enum tag `expr_tag` and
-   the enumerators `expr_C` in its scope. Declaring any of them otherwise in
-   that scope is an error, whichever comes first, and so is a name that two
-   variants derive alike (`a_b` with `C` and `a` with `b_C`). Type-C code
-   cannot name them; they exist for C clients and debuggers. An incomplete
+   the enumerators `expr_C` in its scope, which, as in C (C11 6.2.1p4),
+   includes the blocks and prototypes nested in it. Declaring any of them
+   otherwise in the same block is an error, whichever comes first, and so
+   is a declaration of one in a nested block or prototype, in C text such
+   as a header included there as well. So is a name that two variants
+   derive alike (`a_b` with `C` and `a` with `b_C`), and a type
+   declaration in a block that claims a name an enclosing one claims. No
+   declaration hides a claimed name, so it denotes the variant wherever
+   the variant is in scope, and a constructor lowers to it (13.5). The
+   typedef name `expr` is not claimed: a block may declare `int expr;`,
+   as in C. Type-C code cannot name the claimed names; they exist for C
+   clients, debuggers and the lowering. An incomplete
    variant `type expr;` claims the struct tag, as it declares the struct;
    the definition that completes it claims the rest, since only it knows
    the constructors. The enum tag and the enumerators are in scope from
@@ -1431,7 +1439,7 @@ Two properties follow by construction:
 | Construct | C11 form |
 | --- | --- |
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
-| Constructor expression | A compound literal, `((expr){ .tag = expr_Add, .u.Add = { a, b } })`. Inside an initialiser, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. |
+| Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. Inside an initialiser, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. |
 | `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that declares the bindings and ends in a trap; `break`, `continue` and `return` unchanged; `default:` holding the trap. |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end when a Type-C type is involved. |
 | Type application | The instance definition, once, at file scope before first use. |

@@ -229,13 +229,20 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [High] Lowered constructors name the variant's typedef name and its
-  enumerators (design 13.5), which an inner scope may declare otherwise:
-  after `int e_A;` in a block, `.tag = e_A` reads the local object, and
-  after `int e;` the compound literal `(e){...}` does not compile. Claim
-  the derived names and the typedef name in every scope where a
-  constructor of the variant is used, or lower to names that cannot be
-  shadowed.
+- [High] A constructor whose target is a variant declared in a block can
+  be written outside that block, where `__typeof__` carries the type of
+  a statement expression (or a block literal) out of it. There the
+  names it lowers to denote something else or nothing: with
+  `int e_A = 7;` outside, `__typeof__(({ type e = | A; e v = A; v; })) y
+  = A;` lowers to `{ .tag = e_A }`, reads the local object and compiles
+  silently; a compound literal's `struct e` fails in the backend. Design
+  10.1 rule 6 makes the names denote the variant only within its scope.
+  Recommended: refuse a construction outside its variant's scope, which
+  is a token range, so the parser records where each type declaration's
+  scope ends and constructor_expression checks the use against it; the
+  alternative, refusing type declarations inside expressions, also
+  refuses `type t = typeof(({ type u = ...; ... }))`. Owner decision, as
+  it adds a rule to 3.3.
 - [Medium] `Expressions.positioned` refuses a second typing of a node
   in another position at run time, and some callers type a node twice in
   the same position on purpose (`selected`, `statement_expression`,

@@ -50,22 +50,22 @@ The arguments keep their tokens and lines.
   ;
   e f(int n) {
     e x = n ? 
-  ((e){ .tag = e_A })
+  ((struct e){ .tag = e_A })
    : 
-  ((e){ .tag = e_B, .u.B = { 
+  ((struct e){ .tag = e_B, .u.B = { 
   n,
                     &a
    } })
   ;
     x = 
-  ((e){ .tag = e_A })
+  ((struct e){ .tag = e_A })
   ;
     return (x = 
-  ((e){ .tag = e_B, .u.B = { 
+  ((struct e){ .tag = e_B, .u.B = { 
   2, 0
    } })
   , 
-  ((e){ .tag = e_A })
+  ((struct e){ .tag = e_A })
   );
   }
 
@@ -112,4 +112,32 @@ it zeroes a structure whose first member is a variant too.
   $ printf 'type e = | A | B(int i);\nstruct s { e v; int n; } z = { 0, 1 };\n' > elided.tc
   $ ./golden.exe elided.tc
   elided.tc:2: an initialiser reaches into the variant 'e'; the only braced initialiser of a variant is {0} (design 3.2 rule 7)
+  [1]
+
+A constructor's lowering names the variant's structure tag and its
+enumerators, which are claimed in the whole scope of the variant, so a
+declaration in a nested block cannot hide them, in C text such as a
+header included there either (design 10.1 rule 6). The typedef name is
+not claimed, and a block may hide it.
+
+  $ cat > hidden.tc <<'EOF'
+  > type e = | A;
+  > void f(e *p) {
+  >   int e = 0;
+  >   *p = A;
+  > }
+  > EOF
+  $ ./golden.exe hidden.tc | grep '\.tag ='
+  ((struct e){ .tag = e_A })
+  $ cat > header.tc <<'EOF'
+  > type e = | A;
+  > void f(e *p) {
+  > # 1 "header.h"
+  > int e_A;
+  > # 5 "header.tc"
+  >   *p = A;
+  > }
+  > EOF
+  $ ./golden.exe header.tc
+  header.h:1: the enumerator `e_A` is declared again, as a type declaration claims it (design 10.1 rule 6)
   [1]

@@ -322,12 +322,25 @@ let fail_claimed state (name : identifier) what text =
        (Printf.sprintf "the %s %s %s, as a type declaration claims it" what
           (quoted name.node) text))
 
+(* A name that a type declaration claims for C is claimed in its whole
+   scope, nested blocks included (design 10.1 rule 6): a constructor
+   lowers to the structure tag and the enumerators, which must denote
+   the variant wherever it is in scope. As no declaration hides a
+   claimed name, the visible declaration of the name is the claim. *)
+let claims_enumerator state name =
+  match Scope.find state.scope name with
+  | Some { kind = Derived_enumerator; _ } -> true
+  | Some _ | None -> false
+
+let claims_tag state name =
+  match Scope.find_tag state.scope name with
+  | Some { claimed; _ } -> claimed
+  | None -> false
+
 (* A type declaration is the only declaration of its name in its scope
    (design 3.1 rule 5): unlike [typedef], it is not repeated. *)
 let refuse_second_definition state (name : identifier) kind earlier =
   match earlier with
-  | Some { kind = Derived_enumerator; _ } ->
-      fail_claimed state name "enumerator" "is declared again"
   | Some (earlier : ordinary)
     when is_type_declared kind || is_type_declared earlier.kind ->
       fail_at_token state (token_of name)
@@ -341,6 +354,8 @@ let refuse_second_definition state (name : identifier) kind earlier =
    its scope begins. *)
 let declare state ~kind (name : identifier) =
   let id = Ordinary_at (token_of name) in
+  if claims_enumerator state name.node then
+    fail_claimed state name "enumerator" "is declared again";
   let earlier = Scope.find_in_innermost state.scope name.node in
   refuse_second_definition state name kind earlier;
   state.scope <-
@@ -386,31 +401,35 @@ let resolve state name =
       refuse_universe_name state name;
       Undeclared
 
-(* A C declaration of a tag that a type declaration claims in the same
-   scope is an error (design 10.1 rule 6). *)
+(* A C declaration of a tag that a type declaration claims is an error
+   (design 10.1 rule 6). *)
 let declare_tag state (name : identifier) =
   let id = Tag_at (token_of name) in
+  if claims_tag state name.node then
+    fail_claimed state name "tag" "is declared again";
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
-  (match earlier with
-  | Some { claimed = true; _ } ->
-      fail_claimed state name "tag" "is declared again"
-  | Some { claimed = false; _ } | None -> ());
   state.scope <-
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
   Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
 
+(* The end of a refused claim's message: what holds the name already. *)
+let already_taken_by ~declared_here =
+  if declared_here then "this scope declares already"
+  else "an enclosing scope claims already"
+
 (* The tag [tag] that the type declaration of [name] lowers to, which it
    claims in the current scope (design 10.1 rule 6, 10.2): no other
-   declaration of the tag may be in that scope. *)
+   declaration of the tag may be in that scope, and it hides no claim. *)
 let claim_tag state (name : identifier) ~tag id =
   refuse_generated_name state ~at:(token_of name) tag;
-  if Scope.find_tag_in_innermost state.scope tag <> None then
+  let declared_here = Scope.find_tag_in_innermost state.scope tag <> None in
+  if declared_here || claims_tag state tag then
     fail_at_token state (token_of name)
       (Rule.message Claimed_name
          (Printf.sprintf
-            "the type declaration of %s claims the tag %s, which this \
-             scope declares already"
-            (quoted name.node) (quoted tag)));
+            "the type declaration of %s claims the tag %s, which %s"
+            (quoted name.node) (quoted tag)
+            (already_taken_by ~declared_here)));
   state.scope <-
     Scope.declare_tag state.scope tag { tag = id; claimed = true }
 
@@ -426,13 +445,13 @@ let claim_own_tag state (name : identifier) =
 let claim_enumerator state ~(variant : identifier) ~at constructor =
   let enumerator = enumerator_name ~variant:variant.node constructor in
   refuse_generated_name state ~at enumerator;
-  if Scope.find_in_innermost state.scope enumerator <> None then
+  let declared_here = Scope.find_in_innermost state.scope enumerator <> None in
+  if declared_here || claims_enumerator state enumerator then
     fail_at_token state at
       (Rule.message Claimed_name
-         (Printf.sprintf
-            "the variant %s claims the enumerator %s, which this scope \
-             declares already"
-            (quoted variant.node) (quoted enumerator)));
+         (Printf.sprintf "the variant %s claims the enumerator %s, which %s"
+            (quoted variant.node) (quoted enumerator)
+            (already_taken_by ~declared_here)));
   let id = derived_enumerator at in
   state.scope <-
     Scope.declare state.scope enumerator

@@ -77,3 +77,49 @@ direct initialiser even where an object of the same name is visible
   0 0 0
   $ typec --cc=$gcc -Wall -Werror -Wno-missing-braces -o gcc-elided elided.tc && ./gcc-elided
   0 0 0
+
+A constructor lowers to the structure tag and the enumerators of its
+variant, which no declaration in the variant's scope may hide, so a
+block that hides the variant's typedef name still builds it (design
+10.1 rule 6, 13.5).
+
+  $ cat > payload.h <<'EOF'
+  > static int payload(e v) { return v.u.B.i; }
+  > EOF
+  $ cat > hidden.tc <<'EOF'
+  > #include <stdio.h>
+  > type e = | A | B(int i);
+  > #include "tag.h"
+  > #include "payload.h"
+  > int main(void) {
+  >   e x = A;
+  >   {
+  >     int e = 3;
+  >     x = B(e);
+  >   }
+  >   printf("%d %d\n", tagof(x), payload(x));
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Werror -o clang-hidden hidden.tc && ./clang-hidden
+  1 3
+  $ typec --cc=$gcc -Wall -Werror -o gcc-hidden hidden.tc && ./gcc-hidden
+  1 3
+
+A block that declares a derived enumerator is refused, as it would
+hide the one that the lowered constructor names.
+
+  $ cat > enumerator.tc <<'EOF'
+  > type e = | A;
+  > int main(void) {
+  >   e x;
+  >   {
+  >     int e_A = 1;
+  >     x = A;
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -o clang-enumerator enumerator.tc
+  typec: enumerator.tc:5: the enumerator `e_A` is declared again, as a type declaration claims it (design 10.1 rule 6)
+  [80]

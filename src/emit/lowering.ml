@@ -210,9 +210,12 @@ let grammar_tokens (tokens : Token.t array) first last =
              true)
 
 (* Design 13.5: a constructor expression becomes the compound literal
-   [((N){ .tag = N_C, .u.C = { a, b } })], or inside an initialiser the
-   braced list alone. The arguments keep their tokens; only the name of
-   the constructor, the [(] and the [)] are replaced. *)
+   [((struct N){ .tag = N_C, .u.C = { a, b } })], or inside an
+   initialiser the braced list alone. It names the structure tag, which
+   no declaration in the variant's scope may hide (design 10.1 rule 6),
+   rather than the typedef name, which a block may hide. The arguments
+   keep their tokens; only the name of the constructor, the [(] and the
+   [)] are replaced. *)
 let construction (tokens : Token.t array)
     (construction : Typec_sema.Expressions.construction) =
   let { Typec_sema.Expressions.span; variant; constructor; callee; braced; _ } =
@@ -221,7 +224,7 @@ let construction (tokens : Token.t array)
   let location = tokens.(span.first).location in
   let enumerator = Tree.enumerator_name ~variant constructor in
   let opening =
-    if braced then "{ " else Printf.sprintf "((%s){ " variant
+    if braced then "{ " else Printf.sprintf "((struct %s){ " variant
   in
   let closing = if braced then "}" else "})" in
   let tag = Printf.sprintf ".%s = %s" Tree.tag_member enumerator in

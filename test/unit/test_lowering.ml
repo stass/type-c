@@ -68,8 +68,8 @@ let constructors () =
   lowers "an assignment and a return"
     (variant ^ "e f(e v) { v = B(1, 2); return (A); }")
     (lowered
-   ^ " e f(e v) { v = ((e){ .tag = e_B, .u.B = { 1, 2 } }) ; return ( \
-      ((e){ .tag = e_A }) ); }");
+   ^ " e f(e v) { v = ((struct e){ .tag = e_B, .u.B = { 1, 2 } }) ; return ( \
+      ((struct e){ .tag = e_A }) ); }");
   (* C text keeps C's meaning of a name that a target type would make a
      constructor in Type-C text. *)
   lowers "a parameter named as a constructor in C text"
@@ -81,10 +81,10 @@ let constructors () =
   lowers "brace elision into an array of variants"
     (variant ^ "struct t { e a[2]; int n; } s = { A, B(1, 2), 5 };")
     (lowered
-   ^ " struct t { e a[2]; int n; } s = { ((e){ .tag = e_A }) , { .tag = \
+   ^ " struct t { e a[2]; int n; } s = { ((struct e){ .tag = e_A }) , { .tag = \
       e_B, .u.B = { 1, 2 } } , 5 };");
   lowers "an atomic object" (variant ^ "_Atomic e g = A;")
-    (lowered ^ " _Atomic e g = ((e){ .tag = e_A }) ;");
+    (lowered ^ " _Atomic e g = ((struct e){ .tag = e_A }) ;");
   lowers "a pragma before the arguments"
     (variant ^ "e x = B\n#pragma weak w\n(1, 2);")
     (lowered ^ " e x = { .tag = e_B, .u.B = { #pragma weak w 1, 2 } } ;");
@@ -94,8 +94,8 @@ let constructors () =
     (lowered
    ^ " struct p; typedef struct p p; enum p_tag { p_P }; struct p { enum \
       p_tag tag; union { struct { e first ; e second ; } P; } u; }; p \
-      f(void) { return ((p){ .tag = p_P, .u.P = { { .tag = e_B, .u.B = { \
-      1, 2 } } , { .tag = e_A } } }) ; }")
+      f(void) { return ((struct p){ .tag = p_P, .u.P = { { .tag = e_B, \
+      .u.B = { 1, 2 } } , { .tag = e_A } } }) ; }")
 
 let () =
   lowers "a variant without fields" "type e = | A | B;"
