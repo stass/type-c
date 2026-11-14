@@ -84,11 +84,11 @@ val constant : t -> Tree.expression -> Expressions.constant option
 (** The class of constant expression of an expression that the reader
     has typed; see {!Expressions.constant}. *)
 
-val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
+val selection : t -> Tree.expression -> Tree.expression Unknown.answer option
 (** What a generic selection that the reader has typed selects; see
     {!Expressions.selection}. *)
 
-val types_compatible : t -> Tree.expression -> bool Ctype.answer option
+val types_compatible : t -> Tree.expression -> bool Unknown.answer option
 (** The answer of a [__builtin_types_compatible_p] that the reader has
     typed; see {!Expressions.types_compatible}. *)
 

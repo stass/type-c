@@ -11,10 +11,11 @@
     names the construct, what GCC does, and a probe that shows it, with
     [struct { unsigned b : 3; unsigned long long l : 40; } s] where it
     takes one; GCC 14, 15 and 16 and Clang 20, 21 (Apple) and 22 give the
-    answers stated. *)
+    answers stated unless an entry names other releases. The table holds
+    no {!Ctype.t}, so that {!Ctype} can ask it. *)
 
 type t =
-  | Narrow_bit_field of { integer : Integer.t Ctype.answer; width : int }
+  | Narrow_bit_field of { integer : Integer.t Unknown.answer; width : int }
       (** The value of a bit-field of [width] bits declared with [integer],
           or with an enumerated type compatible with it, which may be
           unknown. GCC gives one narrower than its type a type of that
@@ -40,26 +41,48 @@ type t =
           [sizeof] and [&] refuse: GCC accepts [__real__ s.b = 1] and
           Clang refuses it, also where the bit-field has its type's full
           width. *)
-  | Anonymous_member of { member_type : Ctype.t; anonymous : Ctype.qualifiers }
-      (** A member of type [member_type], qualified as the structure that
-          it is a member of, found through anonymous members that are
-          qualified with [anonymous]. GCC gives the member their
-          [const] and [volatile] and Clang does not: with
+  | Anonymous_member of {
+      member_qualifiers : Qualifiers.t;
+      anonymous : Qualifiers.t;
+    }
+      (** A member whose type, qualified as the structure that it is a
+          member of, has the top-level qualifiers [member_qualifiers],
+          found through
+          anonymous members that are qualified with [anonymous]. GCC gives
+          the member their [const] and [volatile] and Clang does not: with
           [struct { const struct { int z; }; } t], [&t.z] is a
           [const int *] in GCC and an [int *] in Clang, which lets
           [t.z = 1] assign. *)
-  | Atomic_comparison of Ctype.t * Ctype.t
-      (** The comparison of two types by [__builtin_types_compatible_p],
-          where one has a top-level [_Atomic] and the other has not. GCC
-          drops [_Atomic] with the other top-level qualifiers and Clang
-          keeps it: [__builtin_types_compatible_p(_Atomic int, int)] is 1
-          in GCC and 0 in Clang. *)
+  | Atomic_comparison of Qualifiers.t * Qualifiers.t
+      (** The comparison by [__builtin_types_compatible_p] of two types
+          with these top-level qualifiers, where one has [_Atomic] and the
+          other has not. GCC drops [_Atomic] with the other top-level
+          qualifiers and Clang keeps it:
+          [__builtin_types_compatible_p(_Atomic int, int)] is 1 in GCC and
+          0 in Clang. *)
+  | Enum_integer_composite
+      (** The composite of an enumerated type and its compatible integer
+          type (6.2.7p3), as a redeclaration or [?:] of two pointers forms
+          it. Clang gives the integer type and GCC the enumerated type,
+          whichever comes first: after
+          [enum e { E0 = 1 }; extern enum e x; extern unsigned x;], Clang
+          accepts [typedef typeof(x) T; typedef unsigned T;] and refuses
+          [typedef enum e T;], and GCC does the reverse. Each compiler
+          keeps its rule for the parameter of
+          [void f(enum e); void f(unsigned);], the return type of
+          [enum e g(void); unsigned g(void);], the referenced type of a
+          pointer, the element type of an array and [typeof(c ? ep : up)]
+          for [enum e *ep; unsigned *up;].
+          [_Generic] and [__builtin_types_compatible_p] compare by
+          compatibility, so neither tells the two apart. GCC 16 and
+          Clang 21 (Apple), 22 and 23 give these answers. *)
   | Old_style_function of {
-      clang : Ctype.parameters;
-      composite : Ctype.parameters;
+      clang_prototype : bool;
+      composite_prototype : bool;
     }
-      (** A use of a function whose composite type has the parameters
-          [composite], to which Clang gives [clang]. Clang gives a
+      (** A use of a function, where [composite_prototype] says whether
+          its composite type has a prototype and [clang_prototype] whether
+          the type that Clang gives the use has one. Clang gives a
           definition with a non-empty identifier list the prototype of the
           promoted types of its parameters. A later declaration without a
           prototype inherits it, but the uses that reach the definition
@@ -75,7 +98,7 @@ type t =
           these answers. *)
 
 val answer :
-  Target.t -> t -> Typec_cpp.Location.t -> 'a -> 'a Ctype.answer
+  Target.t -> t -> Typec_cpp.Location.t -> 'a -> 'a Unknown.answer
 (** [answer target construct location clang] is [Answer clang], Clang's
     answer for [construct], unless the backend is GCC and GCC's differs;
     then it depends on an unknown object type at [location], the start of

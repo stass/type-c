@@ -41,7 +41,7 @@ type typing = {
   fail : 'a. Tree.span -> string -> 'a;
   value : Tree.expression -> Ctype.t;
   initialises : Tree.expression -> unit;
-  source : Tree.expression -> Tree.expression Ctype.answer;
+  source : Tree.expression -> Tree.expression Unknown.answer;
   index : Tree.expression -> (Integer_constant.t, Tree.span) result;
 }
 

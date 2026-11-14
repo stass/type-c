@@ -2,14 +2,18 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 type t =
-  | Narrow_bit_field of { integer : Integer.t Ctype.answer; width : int }
+  | Narrow_bit_field of { integer : Integer.t Unknown.answer; width : int }
   | Bit_field_promotion of { integer : Integer.t; width : int }
   | Bit_field_real_part
-  | Anonymous_member of { member_type : Ctype.t; anonymous : Ctype.qualifiers }
-  | Atomic_comparison of Ctype.t * Ctype.t
+  | Anonymous_member of {
+      member_qualifiers : Qualifiers.t;
+      anonymous : Qualifiers.t;
+    }
+  | Atomic_comparison of Qualifiers.t * Qualifiers.t
+  | Enum_integer_composite
   | Old_style_function of {
-      clang : Ctype.parameters;
-      composite : Ctype.parameters;
+      clang_prototype : bool;
+      composite_prototype : bool;
     }
 
 let construct = function
@@ -19,6 +23,8 @@ let construct = function
   | Anonymous_member _ -> "a member of a qualified anonymous member"
   | Atomic_comparison _ -> "__builtin_types_compatible_p of one _Atomic type"
   | Old_style_function _ -> "a function of an old-style definition"
+  | Enum_integer_composite ->
+      "the composite of an enumerated type and its integer type"
 
 (* GCC leaves a bit-field of a type ranked above int and at least as wide
    as int unpromoted, where Clang promotes:
@@ -43,21 +49,16 @@ let differs_in_gcc target = function
   | Bit_field_promotion { integer; width } ->
       promotes_differently target integer width
   | Bit_field_real_part -> true
-  | Anonymous_member { member_type; anonymous } ->
-      Ctype.qualify anonymous member_type <> Ok member_type
-  | Atomic_comparison (first, second) ->
-      let atomic t = (Ctype.top_qualifiers t).atomic in
-      atomic first <> atomic second
-  | Old_style_function { clang; composite } ->
-      (* GCC gives a use the composite type, of which only a prototype
-         that some declaration writes is a prototype. *)
-      let is_prototype : Ctype.parameters -> bool = function
-        | Prototype _ -> true
-        | Old_style _ | Unspecified -> false
-      in
-      is_prototype clang <> is_prototype composite
+  | Anonymous_member { member_qualifiers; anonymous } ->
+      Qualifiers.union member_qualifiers anonymous <> member_qualifiers
+  | Atomic_comparison (first, second) -> first.atomic <> second.atomic
+  | Enum_integer_composite -> true
+  (* GCC gives a use the composite type, of which only a prototype that
+     some declaration writes is a prototype. *)
+  | Old_style_function { clang_prototype; composite_prototype } ->
+      clang_prototype <> composite_prototype
 
-let answer (target : Target.t) difference location clang : _ Ctype.answer =
+let answer (target : Target.t) difference location clang : _ Unknown.answer =
   let differs =
     match target.backend.compiler with
     | Clang -> false

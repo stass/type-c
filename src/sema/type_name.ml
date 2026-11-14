@@ -3,7 +3,7 @@
 
 open Ctype
 
-let qualifier_words qualifiers =
+let qualifier_words (qualifiers : Qualifiers.t) =
   List.filter_map
     (fun (present, word) -> if present then Some word else None)
     [

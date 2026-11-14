@@ -275,16 +275,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   empty structure (`struct { struct {} e; int b; } y[] = { 1, 2 };`),
   where GCC skips the member with a warning; typec stops following the
   positions there, and the length it gives such an array is opaque.
-- [High] `Ctype.composite` gives an enumerated type and its compatible
-  integer type the enumerated type as their composite, as GCC does,
-  where Clang gives the integer type: after `extern enum E x; extern
-  unsigned x;`, typec refuses `typedef typeof(x) T; typedef unsigned T;`,
-  which Clang accepts, and accepts `typedef enum E T;`, which Clang
-  refuses. Follow Clang and make the composite an entry of
-  `Backend_difference`, unknown with GCC. The table depends on `Ctype`,
-  so `Ctype.composite` cannot ask it: move the unknown type and
-  `answer` below both, or let the caller of `composite` pass the
-  decision.
+- [Low] The run probes (`test/run/expression_probe.ml`,
+  `declaration_probe.ml`) check a type by compatibility, through
+  `_Generic` and `__builtin_types_compatible_p`, so they miss a type that
+  is compatible with the backend's but not the same, such as the
+  composite of an enumerated type and its integer type. A typedef
+  redefinition with typec's spelling (`typedef __typeof__(e) T1;
+  typedef <spelling> T1;`) would check sameness (6.7p3).
 - [Medium] With GCC, the unknown types of `Backend_difference` cover more
   than the difference, so code that needs the type is refused where both
   compilers agree. A member found through a qualified anonymous member
@@ -296,7 +293,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   `__builtin_types_compatible_p(_Atomic int, long)` is unknown though
   GCC also answers 0, and the real part of a bit-field is unknown where
   only whether it is an lvalue differs (`__real__ s.f` with
-  `unsigned f : 32` is `unsigned int` in both). Keep the value type of
+  `unsigned f : 32` is `unsigned int` in both). The composite of an
+  enumerated type and its integer type is unknown, though the two differ
+  only where a rule asks for the same type, as a typedef redefinition
+  does: after `enum e { E0 = 1 }; extern enum e x; extern unsigned x;`,
+  `_Generic(&x, unsigned *: 1, default: 2)` is refused in an enumerator,
+  though both compilers select 1. Keep the value type of
   such a member apart from the qualifiers of its lvalue, let an
   arithmetic operand keep its integer type with an unknown promoted
   type, let the comparison ask whether the types without `_Atomic` are

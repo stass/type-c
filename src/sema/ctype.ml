@@ -1,15 +1,7 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type qualifiers = {
-  const : bool;
-  volatile : bool;
-  restrict : bool;
-  atomic : bool;
-}
-
-let no_qualifiers =
-  { const = false; volatile = false; restrict = false; atomic = false }
+open Unknown
 
 type record_kind = Struct | Union
 
@@ -21,22 +13,13 @@ type record_tag = {
 
 type enum_tag = { enum_id : int; enum_name : string option }
 type length = Constant of int | Opaque | Unknown | Variable
-type unknown_kind = Unknown_object | Unknown_function | Object_or_function
-type unknown_cause = Not_typed | Typed_differently
-
-type unknown = {
-  construct : string;
-  location : Typec_cpp.Location.t;
-  kind : unknown_kind;
-  cause : unknown_cause;
-}
 
 type parameters =
   | Prototype of { types : t list; variadic : bool }
   | Unspecified
   | Old_style of t list
 
-and t = { qualifiers : qualifiers; shape : shape; size : int }
+and t = { qualifiers : Qualifiers.t; shape : shape; size : int }
 
 and shape =
   | Void
@@ -47,9 +30,7 @@ and shape =
   | Va_list
   | Array of { element : t; length : length }
   | Function of { return : t; parameters : parameters }
-  | Unknown_type of unknown
-
-type 'a answer = Answer of 'a | Depends_on of unknown
+  | Unknown_type of Unknown.t
 
 type member = {
   member_name : string option;
@@ -62,7 +43,7 @@ module Names = Map.Make (String)
 type found_member = {
   member : member;
   path : int list;
-  anonymous_qualifiers : qualifiers;
+  anonymous_qualifiers : Qualifiers.t;
 }
 
 (* The members in order; those with a position, which are those that an
@@ -77,7 +58,7 @@ type record_definition = {
 type tags = {
   mutable next_id : int;
   records : (int, record_definition) Hashtbl.t;
-  enums : (int, Integer.t answer) Hashtbl.t;
+  enums : (int, Integer.t Unknown.answer) Hashtbl.t;
 }
 
 type error =
@@ -122,8 +103,8 @@ let shape_size = function
 
 (* Every type is made here, so its size is always that of its shape. *)
 let make qualifiers shape = { qualifiers; shape; size = shape_size shape }
-let of_shape shape = make no_qualifiers shape
-let unqualified t = { t with qualifiers = no_qualifiers }
+let of_shape shape = make Qualifiers.none shape
+let unqualified t = { t with qualifiers = Qualifiers.none }
 
 let rec top_qualifiers t =
   match t.shape with
@@ -140,7 +121,7 @@ let rec without_top_qualifiers t =
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
   | Unknown_type _ ->
       let atomic = t.qualifiers.atomic in
-      { t with qualifiers = { no_qualifiers with atomic } }
+      { t with qualifiers = { Qualifiers.none with atomic } }
 
 let is_function t =
   match t.shape with
@@ -237,14 +218,6 @@ let function_returning return parameters =
         let return = unqualified return in
         within_limit (of_shape (Function { return; parameters }))
 
-let add_qualifiers a b =
-  {
-    const = a.const || b.const;
-    volatile = a.volatile || b.volatile;
-    restrict = a.restrict || b.restrict;
-    atomic = a.atomic || b.atomic;
-  }
-
 (* 6.7.3p2: restrict needs a pointer to an object type. A va_list may be
    one, which the backend checks. *)
 let restrict_allowed t =
@@ -256,14 +229,14 @@ let restrict_allowed t =
       false
 
 let rec qualify qualifiers t =
-  if qualifiers = no_qualifiers then Ok t
+  if qualifiers = Qualifiers.none then Ok t
   else
     match t.shape with
     | Function _ | Unknown_type { kind = Unknown_function; _ } ->
         Error Qualified_function
     (* The backend checks restrict and _Atomic on an unknown type. *)
     | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
-        Ok { t with qualifiers = add_qualifiers t.qualifiers qualifiers }
+        Ok { t with qualifiers = Qualifiers.union t.qualifiers qualifiers }
     | Array _ when qualifiers.atomic -> Error Atomic_array
     | Array { element; length } ->
         Result.map
@@ -272,12 +245,13 @@ let rec qualify qualifiers t =
     | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list ->
         if qualifiers.restrict && not (restrict_allowed t) then
           Error Restrict_without_object_pointer
-        else Ok { t with qualifiers = add_qualifiers t.qualifiers qualifiers }
+        else
+          Ok { t with qualifiers = Qualifiers.union t.qualifiers qualifiers }
 
 let atomic t =
-  if surely_array t || surely_function t || t.qualifiers <> no_qualifiers then
+  if surely_array t || surely_function t || t.qualifiers <> Qualifiers.none then
     Error Atomic_of_unsuitable_type
-  else qualify { no_qualifiers with atomic = true } t
+  else qualify { Qualifiers.none with atomic = true } t
 
 (* Tags *)
 
@@ -437,7 +411,7 @@ let add_name name found names =
    does not pass on, since a member of an atomic structure is not
    accessed on its own (6.5.2.3p5). *)
 let add_anonymous_members tags ~index anonymous tag names =
-  let { const; volatile; _ } = anonymous.member_type.qualifiers in
+  let { Qualifiers.const; volatile; _ } = anonymous.member_type.qualifiers in
   let through_anonymous _ found =
     let q = found.anonymous_qualifiers in
     let anonymous_qualifiers =
@@ -455,7 +429,7 @@ let add_member_names tags names (index, member) =
   match (member.member_name, member.member_type.shape) with
   | Some name, _ ->
       let found =
-        { member; path = [ index ]; anonymous_qualifiers = no_qualifiers }
+        { member; path = [ index ]; anonymous_qualifiers = Qualifiers.none }
       in
       add_name name found names
   | None, Record tag when member.bit_field_width = None ->
@@ -556,7 +530,7 @@ let promoted target tags parameter =
 
 (* The first unknown type that a comparison of two types passed over: the
    verdict that their known parts leave open depends on it. *)
-type dependence = { mutable first_unknown : unknown option }
+type dependence = { mutable first_unknown : Unknown.t option }
 
 let no_dependence () = { first_unknown = None }
 
@@ -569,7 +543,15 @@ let verdict dependence =
   | Some unknown -> Depends_on unknown
   | None -> Answer true
 
-type comparison = { target : Target.t; tags : tags; dependence : dependence }
+(* [composite_location] is where the composite is formed, for the unknown
+   type that the backend may give a part of it (Backend_difference); there
+   is none where only compatibility is asked, which drops the composite. *)
+type comparison = {
+  target : Target.t;
+  tags : tags;
+  dependence : dependence;
+  composite_location : Typec_cpp.Location.t option;
+}
 
 (* Whether one type is known to be a function type and the other known
    not to be one, which no unknown part of them changes. *)
@@ -603,13 +585,12 @@ and merge_known comparison a b =
   | Enum x, Enum y ->
       require (x.enum_id = y.enum_id);
       a
-  (* The enumerated type is the composite whatever the order, as in GCC. *)
   | Enum tag, Arithmetic (Integer integer) ->
       require_enum_integer comparison tag integer;
-      a
+      enum_integer_composite comparison b
   | Arithmetic (Integer integer), Enum tag ->
       require_enum_integer comparison tag integer;
-      b
+      enum_integer_composite comparison a
   | Record x, Record y ->
       require (x.record_id = y.record_id);
       a
@@ -633,6 +614,21 @@ and require_enum_integer comparison tag integer =
   | Some (Answer compatible) -> require (compatible = integer)
   | Some (Depends_on unknown) -> passed_over comparison.dependence unknown
   | None -> raise Not_compatible
+
+(* Clang gives an enumerated type and its compatible integer type the
+   integer type as their composite whatever the order, and GCC the
+   enumerated type. *)
+and enum_integer_composite comparison integer_type =
+  match comparison.composite_location with
+  | None -> integer_type
+  | Some location -> (
+      match
+        Backend_difference.answer comparison.target Enum_integer_composite
+          location integer_type
+      with
+      | Answer t -> t
+      | Depends_on unknown ->
+          make integer_type.qualifiers (Unknown_type unknown))
 
 (* 6.7.6.3p15 and 6.2.7p3: a prototype gives the composite its parameter
    types; without one the parameters are not compared, except that an
@@ -672,14 +668,21 @@ and merge_parameters comparison a b =
 
 (* A composite can exceed both types in size, as when each gives
    parameter types the other lacks, so it passes the limit again. *)
-let composite target tags a b =
-  match merge { target; tags; dependence = no_dependence () } a b with
+let composite target tags location a b =
+  let comparison =
+    { target;
+      tags;
+      dependence = no_dependence ();
+      composite_location = Some location }
+  in
+  match merge comparison a b with
   | t -> within_limit t
   | exception Not_compatible -> Error Incompatible
 
 let compatible target tags a b =
   let dependence = no_dependence () in
-  match merge { target; tags; dependence } a b with
+  let comparison = { target; tags; dependence; composite_location = None } in
+  match merge comparison a b with
   | _ -> verdict dependence
   | exception Not_compatible -> Answer false
 

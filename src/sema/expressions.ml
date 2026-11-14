@@ -6,7 +6,7 @@ open Typec_syntax
 
 type field = {
   width : int;
-  integer : Integer.t Ctype.answer;
+  integer : Integer.t Unknown.answer;
   location : Typec_cpp.Location.t;
 }
 
@@ -48,8 +48,8 @@ type enclosing = {
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
-  selections : (Tree.span, Tree.expression Ctype.answer) Hashtbl.t;
-  compatibilities : (Tree.span, bool Ctype.answer) Hashtbl.t;
+  selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
+  compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
   mutable depth : int;
   mutable enclosing : enclosing;
 }
@@ -101,7 +101,7 @@ let quote text =
   if String.length text <= max_quoted then "'" ^ text ^ "'"
   else "'" ^ String.sub text 0 max_quoted ^ "...'"
 
-let needing need (unknown : Ctype.unknown) =
+let needing need (unknown : Unknown.t) =
   let why =
     match unknown.cause with
     | Not_typed -> "which typec does not type yet"
@@ -174,7 +174,7 @@ let void_pointer context span =
 let location_of context (span : Tree.span) =
   context.text.tokens.(span.first).location
 
-let unknown_at context span construct kind : Ctype.unknown =
+let unknown_at context span construct kind : Unknown.t =
   { construct; location = location_of context span; kind; cause = Not_typed }
 
 let unknown context span construct kind =
@@ -182,12 +182,12 @@ let unknown context span construct kind =
 
 (* The value of an operation on an operand of unknown type: unknown in
    turn, and an object, as no operator gives a function. *)
-let unknown_value (unknown : Ctype.unknown) =
+let unknown_value (unknown : Unknown.t) =
   Ctype.unknown { unknown with kind = Unknown_object }
 
 (* An unknown type in place of [t] keeps whether it is a function type
    (P21). *)
-let unknown_in_place_of (t : Ctype.t) (unknown : Ctype.unknown) =
+let unknown_in_place_of (t : Ctype.t) (unknown : Unknown.t) =
   match t.shape with
   | Function _ -> Ctype.unknown { unknown with kind = Unknown_function }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
@@ -222,7 +222,7 @@ type operand =
       promoted : Arithmetic.promoted;
     }
   | Pointer_operand of { pointer : Ctype.t; referenced : Ctype.t }
-  | Unknown_operand of Ctype.unknown
+  | Unknown_operand of Unknown.t
   | Other_operand of Ctype.t
       (** void, a structure or union, [va_list], an incomplete enumeration *)
 
@@ -431,7 +431,7 @@ let builtin context span name =
       context.fail span (quote name ^ " is not declared (C11 6.5.1p2)")
 
 let const_char context span =
-  let const = { Ctype.no_qualifiers with const = true } in
+  let const = { Qualifiers.none with const = true } in
   checked context span
     (Ctype.qualify const (integer_type context span Integer.Char))
 
@@ -467,6 +467,10 @@ let clang_parameters context ~old_style_definition
       Prototype { types = List.map promoted types; variadic = false }
   | false, (Prototype _ | Unspecified) -> parameters
 
+let has_prototype : Ctype.parameters -> bool = function
+  | Prototype _ -> true
+  | Old_style _ | Unspecified -> false
+
 (* The type of a use of a function whose composite type is [t], where
    [old_style_definition] says whether the declaration that the use
    reaches is a definition with a non-empty identifier list. *)
@@ -476,7 +480,8 @@ let function_designator context span ~old_style_definition (t : Ctype.t) =
       let clang = clang_parameters context ~old_style_definition parameters in
       let difference =
         Backend_difference.Old_style_function
-          { clang; composite = parameters }
+          { clang_prototype = has_prototype clang;
+            composite_prototype = has_prototype parameters }
       in
       backend_type context (location_of context span) difference
         (checked context span (Ctype.function_returning return clang))
@@ -507,7 +512,7 @@ let identifier context span name (resolution : Tree.resolution) =
 
 (* The integer type of a bit-field member, of which define_record allows
    no other type. *)
-let bit_field_integer context (member : Ctype.member) : Integer.t Ctype.answer
+let bit_field_integer context (member : Ctype.member) : Integer.t Unknown.answer
     =
   match Ctype.as_arithmetic context.tags member.member_type with
   | Answer (Some (Integer integer)) -> Answer integer
@@ -517,7 +522,7 @@ let bit_field_integer context (member : Ctype.member) : Integer.t Ctype.answer
 
 (* 6.5.2.3p3, p4: the member, qualified as the structure is but for
    _Atomic, whose members are not accessed (p5). *)
-let member_of context tag (qualifiers : Ctype.qualifiers)
+let member_of context tag (qualifiers : Qualifiers.t)
     (name : Tree.identifier) ~lvalue =
   if Ctype.record_members context.tags tag = None then
     context.fail name.span
@@ -536,7 +541,8 @@ let member_of context tag (qualifiers : Ctype.qualifiers)
       let expression_type =
         backend_type context location
           (Anonymous_member
-             { member_type = qualified; anonymous = anonymous_qualifiers })
+             { member_qualifiers = Ctype.top_qualifiers qualified;
+               anonymous = anonymous_qualifiers })
           qualified
       in
       match member.bit_field_width with
@@ -796,18 +802,9 @@ let binary_type context span (op : Tree.binary_operator) left right =
 
 (* The conditional operator (6.5.15) *)
 
-let union_qualifiers (a : Ctype.qualifiers) (b : Ctype.qualifiers) :
-    Ctype.qualifiers =
-  {
-    const = a.const || b.const;
-    volatile = a.volatile || b.volatile;
-    restrict = a.restrict || b.restrict;
-    atomic = a.atomic || b.atomic;
-  }
-
 let is_plain_void_pointer (t : Ctype.t) =
   match t.shape with
-  | Pointer { shape = Void; qualifiers; _ } -> qualifiers = Ctype.no_qualifiers
+  | Pointer { shape = Void; qualifiers; _ } -> qualifiers = Qualifiers.none
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       false
@@ -815,7 +812,7 @@ let is_plain_void_pointer (t : Ctype.t) =
 (* 6.5.15p6: a pointer to void, qualified as both referenced types are;
    restrict and _Atomic do not apply to void. *)
 let qualified_void_pointer context span (a : Ctype.t) (b : Ctype.t) =
-  let both = union_qualifiers a.qualifiers b.qualifiers in
+  let both = Qualifiers.union a.qualifiers b.qualifiers in
   let qualifiers = { both with restrict = false; atomic = false } in
   let void = checked context span (Ctype.qualify qualifiers Ctype.void) in
   checked context span (Ctype.pointer_to void)
@@ -825,11 +822,11 @@ let qualified_void_pointer context span (a : Ctype.t) (b : Ctype.t) =
    to unqualified void. *)
 let composite_pointer context span (a : Ctype.t) (b : Ctype.t) =
   match
-    Ctype.composite context.target context.tags (Ctype.unqualified a)
-      (Ctype.unqualified b)
+    Ctype.composite context.target context.tags (location_of context span)
+      (Ctype.unqualified a) (Ctype.unqualified b)
   with
   | Ok composite ->
-      let qualifiers = union_qualifiers a.qualifiers b.qualifiers in
+      let qualifiers = Qualifiers.union a.qualifiers b.qualifiers in
       let referenced =
         checked context span (Ctype.qualify qualifiers composite)
       in
@@ -915,7 +912,7 @@ let select context span controlling_type associations default =
   in
   List.iter compare associations;
   match (!unknown, !compatible_results, default) with
-  | Some dependence, _, _ -> Ctype.Depends_on dependence
+  | Some dependence, _, _ -> Unknown.Depends_on dependence
   | None, [ result ], _ -> Answer result
   | None, [], Some default -> Answer default
   | None, [], None ->
@@ -935,10 +932,11 @@ let types_compatible_answer context span first second =
       (Ctype.without_top_qualifiers first)
       (Ctype.without_top_qualifiers second)
   with
-  | Depends_on unknown -> Ctype.Depends_on unknown
+  | Depends_on unknown -> Unknown.Depends_on unknown
   | Answer clang ->
       Backend_difference.answer context.target
-        (Atomic_comparison (first, second))
+        (Atomic_comparison
+           (Ctype.top_qualifiers first, Ctype.top_qualifiers second))
         (location_of context span) clang
 
 (* Constant expressions (6.6) *)
@@ -1273,7 +1271,7 @@ let rec value_source context (expression : Tree.expression) =
   | Generic _ | Choose _ -> (
       match Hashtbl.find_opt context.typed.selections expression.span with
       | Some (Answer chosen) -> value_source context chosen
-      | Some (Depends_on unknown) -> Ctype.Depends_on unknown
+      | Some (Depends_on unknown) -> Unknown.Depends_on unknown
       | None -> invalid_arg "Expressions: an untyped selection")
   | _ -> Answer expression
 
@@ -1432,7 +1430,7 @@ let fail_builtin_argument context span name requirement =
    tell them apart, so a qualified referenced type gives an unknown
    result. _Atomic, which Clang's __c11 builtins drop, does not count. *)
 let pointee_of_first context span name first =
-  let qualified (qualifiers : Ctype.qualifiers) =
+  let qualified (qualifiers : Qualifiers.t) =
     qualifiers.const || qualifiers.volatile || qualifiers.restrict
   in
   match operand context first with
@@ -1458,13 +1456,13 @@ let complex_of_first context span name first =
    for a call of __builtin_constant_p. *)
 let choice context span condition first second =
   let undecided () =
-    Ctype.Depends_on
+    Unknown.Depends_on
       (unknown_at context span "the condition of __builtin_choose_expr"
          Object_or_function)
   in
   match operand_constant context condition with
   | Integer_expression { value = { value = Known value; _ }; flaw = None } ->
-      if Exact_integer.equal value Exact_integer.zero then Ctype.Answer second
+      if Exact_integer.equal value Exact_integer.zero then Unknown.Answer second
       else Answer first
   | Integer_expression { value = { value = Opaque; _ }; flaw = None }
   | Integer_expression { flaw = Some (Comma_operator _); _ }

@@ -341,9 +341,9 @@ let rec c_type target t =
   | Pointer referenced ->
       let* referenced = c_type target referenced in
       Ctype.pointer_to referenced
-  | Const t -> qualified target { Ctype.no_qualifiers with const = true } t
+  | Const t -> qualified target { Qualifiers.none with const = true } t
   | Volatile t ->
-      qualified target { Ctype.no_qualifiers with volatile = true } t
+      qualified target { Qualifiers.none with volatile = true } t
 
 and qualified target qualifiers t =
   Result.bind (c_type target t) (Ctype.qualify qualifiers)

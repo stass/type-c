@@ -158,7 +158,7 @@ let compatibility_types target tags enums =
   let array t length = get (Ctype.array_of tags t length) in
   let func parameters = get (Ctype.function_returning int_type parameters) in
   let prototype types = Ctype.Prototype { types; variadic = false } in
-  let const_qualifier = { Ctype.no_qualifiers with const = true } in
+  let const_qualifier = { Qualifiers.none with const = true } in
   let const t = get (Ctype.qualify const_qualifier t) in
   let struct_type name =
     Ctype.record (Ctype.declare_record tags Struct (Some name))

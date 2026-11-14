@@ -93,9 +93,11 @@ type state = {
 (* Raised at the first error; caught in [read]. *)
 exception Failed of error
 
-let fail state (span : Tree.span) message =
-  let location = state.text.tokens.(span.first).location in
-  raise (Failed { location; message })
+let location_of state (span : Tree.span) =
+  state.text.tokens.(span.first).location
+
+let fail state span message =
+  raise (Failed { location = location_of state span; message })
 
 let quote = Expressions.quote
 
@@ -109,9 +111,8 @@ let integer_type state span integer =
 (* Types that typec does not compute (design 13.3) *)
 
 (* What the construct at [span] gives in place of a type. *)
-let unknown_of state (span : Tree.span) construct kind : Ctype.unknown =
-  let location = state.text.tokens.(span.first).location in
-  { construct; location; kind; cause = Not_typed }
+let unknown_of state span construct kind : Unknown.t =
+  { construct; location = location_of state span; kind; cause = Not_typed }
 
 let unknown_type state span construct kind =
   Ctype.unknown (unknown_of state span construct kind)
@@ -180,7 +181,8 @@ let check_linkage state span name prior next =
       (quote name ^ " has both internal and external linkage (C11 6.2.2p7)")
 
 let composite state span name prior next =
-  match Ctype.composite state.target state.tags prior next with
+  let location = location_of state span in
+  match Ctype.composite state.target state.tags location prior next with
   | Ok composite -> composite
   | Error Ctype.Incompatible ->
       fail state span
@@ -401,7 +403,7 @@ let is_optional_float : Tree.basic_type_specifier -> bool = function
       false
 
 let qualifiers_of (qualifiers : Tree.type_qualifier list) =
-  let add (q : Ctype.qualifiers) (qualifier : Tree.type_qualifier) =
+  let add (q : Qualifiers.t) (qualifier : Tree.type_qualifier) =
     match qualifier with
     | Const -> { q with const = true }
     | Restrict -> { q with restrict = true }
@@ -410,7 +412,7 @@ let qualifiers_of (qualifiers : Tree.type_qualifier list) =
     (* Clang's nullability does not change a C type. *)
     | Nullability _ -> q
   in
-  List.fold_left add Ctype.no_qualifiers qualifiers
+  List.fold_left add Qualifiers.none qualifiers
 
 let spanned_qualifiers (qualifiers : Tree.type_qualifier Tree.spanned list) =
   qualifiers_of (List.map (fun (q : _ Tree.spanned) -> q.node) qualifiers)
@@ -445,7 +447,7 @@ let spelling state (span : Tree.span) =
 type derived = {
   name : string option;
   declared_type : Ctype.t;
-  parameter_qualifiers : Ctype.qualifiers;
+  parameter_qualifiers : Qualifiers.t;
   defines : bool;
   inner_effect : Tree.attribute option;
       (* The first attribute with an effect inside the declarator, which
@@ -535,7 +537,7 @@ let attribute_unknown state (attribute : Tree.attribute) kind =
    there: unknown, but a function type still, as no attribute makes a
    function of an object or an object of a function. *)
 let obscured state attribute (t : Ctype.t) =
-  let kind_of t : Ctype.unknown_kind =
+  let kind_of t : Unknown.kind =
     match Ctype.is_function t with
     | Answer true -> Unknown_function
     | Answer false -> Unknown_object
@@ -896,8 +898,8 @@ and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
 
 (* The integer type of an enumeration, unknown where an attribute that
    typec does not know may change it, as [packed] and [mode] do. *)
-and attributed_integer state attribute (integer : Integer.t Ctype.answer) :
-    Integer.t Ctype.answer =
+and attributed_integer state attribute (integer : Integer.t Unknown.answer) :
+    Integer.t Unknown.answer =
   match attribute with
   | Some attribute ->
       Depends_on (attribute_unknown state attribute Unknown_object)
@@ -905,7 +907,7 @@ and attributed_integer state attribute (integer : Integer.t Ctype.answer) :
 
 (* C23 6.7.2.2: the fixed type of an enumeration names an integer type
    other than an enumerated type; its qualifiers do not count. *)
-and fixed_type state span specifiers : Integer.t Ctype.answer =
+and fixed_type state span specifiers : Integer.t Unknown.answer =
   let specified = read_specifiers state specifiers in
   let fixed = declare_type state ~parameter:false specified None in
   match fixed.declared_type.shape with
@@ -1054,7 +1056,7 @@ and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
 (* The enumerators of an enumeration with a fixed type have the enumerated
    type and values that the fixed type holds (C23 6.7.2.2). A value that
    the backend evaluates decides no type here, so it may be opaque. *)
-and define_fixed_enum state span enum (integer : Integer.t Ctype.answer)
+and define_fixed_enum state span enum (integer : Integer.t Unknown.answer)
     enumerators =
   let integer =
     match integer with
@@ -1196,7 +1198,7 @@ and declare_type state ?definition ?(records_effects = false) ~parameter
     specified declarator =
   let underived =
     { name = None; declared_type = specified.base_type;
-      parameter_qualifiers = Ctype.no_qualifiers; defines = false;
+      parameter_qualifiers = Qualifiers.none; defines = false;
       inner_effect = None }
   in
   let derived =

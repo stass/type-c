@@ -39,7 +39,7 @@ open Typec_syntax
     of a promotion that GCC gives otherwise. *)
 type field = {
   width : int;
-  integer : Integer.t Ctype.answer;
+  integer : Integer.t Unknown.answer;
   location : Typec_cpp.Location.t;
 }
 
@@ -140,7 +140,7 @@ val find : t -> Tree.expression -> typed option
     on (P21), and [None] for an expression that is not such a construct
     or has not been typed. *)
 
-val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
+val selection : t -> Tree.expression -> Tree.expression Unknown.answer option
 (** The result expression of a generic selection (6.5.1.1p3), selected
     by the type that {!find} gives the controlling expression. The
     selection is unknown where that type is, or the compatibility of any
@@ -148,7 +148,7 @@ val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
     its condition chooses, unknown where the backend evaluates the
     condition, as for a call of [__builtin_constant_p]. *)
 
-val types_compatible : t -> Tree.expression -> bool Ctype.answer option
+val types_compatible : t -> Tree.expression -> bool Unknown.answer option
 (** Whether the two types of [__builtin_types_compatible_p] are
     compatible without their top-level qualifiers but [_Atomic], as Clang
     compares them. *)
@@ -206,5 +206,5 @@ val function_body : context -> name:string -> Tree.block -> unit
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)
 
-val needing : string -> Ctype.unknown -> string
+val needing : string -> Unknown.t -> string
 (** The message where [need] depends on an unknown type. *)

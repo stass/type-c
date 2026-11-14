@@ -5,6 +5,7 @@ open Typec_sema
 open Typec_test_support
 
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
+let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
 let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
 
 (* A target whose int is as wide as its short, as on 16-bit machines. *)
@@ -35,15 +36,16 @@ let float_type = get (Ctype.arithmetic lp64 (Real Float))
 let double_type = get (Ctype.arithmetic lp64 (Real Double))
 let pointer t = get (Ctype.pointer_to t)
 let tags = Ctype.create_tags ()
+let location = { Typec_cpp.Location.file = "in.c"; line = 1 }
 let array t length = get (Ctype.array_of tags t length)
 let func return parameters = get (Ctype.function_returning return parameters)
 let prototype types = Ctype.Prototype { types; variadic = false }
 let variadic types = Ctype.Prototype { types; variadic = true }
 let qualify qualifiers t = get (Ctype.qualify qualifiers t)
-let const = { Ctype.no_qualifiers with const = true }
-let volatile = { Ctype.no_qualifiers with volatile = true }
-let restrict = { Ctype.no_qualifiers with restrict = true }
-let atomic = { Ctype.no_qualifiers with atomic = true }
+let const = { Qualifiers.none with const = true }
+let volatile = { Qualifiers.none with volatile = true }
+let restrict = { Qualifiers.none with restrict = true }
+let atomic = { Qualifiers.none with atomic = true }
 
 (* Ranks and promotions *)
 
@@ -224,7 +226,7 @@ let construction_errors : (string * (Ctype.t, Ctype.error) result
     ("unsigned __int128 with it", Ctype.integer lp64 Unsigned_int128, None);
     ("const function", Ctype.qualify const function_type,
      Some Qualified_function);
-    ("unqualified function", Ctype.qualify Ctype.no_qualifiers function_type,
+    ("unqualified function", Ctype.qualify Qualifiers.none function_type,
      None);
     ("_Atomic array", Ctype.qualify atomic (array int_type (Constant 3)),
      Some Atomic_array);
@@ -309,7 +311,8 @@ let oversized_composite () =
                                               without_prototype ])) in
   let b = pointer (func int_type (prototype [ without_prototype;
                                               with_prototype ])) in
-  check "oversized composite" (error_of (Ctype.composite lp64 tags a b))
+  check "oversized composite"
+    (error_of (Ctype.composite lp64 tags location a b))
     (Some Too_large)
   && check "oversized composite, compatible" (Ctype.compatible lp64 tags a b)
        (Answer true)
@@ -491,7 +494,7 @@ let anonymous_qualifiers name =
 let member_facts () =
   check "named member" (member_type "first") (Some char_type)
   && check "named member, no anonymous qualifiers"
-       (anonymous_qualifiers "first") (Some Ctype.no_qualifiers)
+       (anonymous_qualifiers "first") (Some Qualifiers.none)
   && check "member of a const anonymous member" (member_type "b")
        (Some float_type)
   && check "qualifiers of a const anonymous member"
@@ -594,9 +597,13 @@ let composite_cases : (string * Ctype.t * Ctype.t * Ctype.t option) list =
      pointer (func int_type (prototype [ long_type ])),
      Some (pointer (func int_type (prototype [ long_type ]))));
     ("enum u, unsigned int", Ctype.enum enum_u, unsigned_type,
-     Some (Ctype.enum enum_u));
+     Some unsigned_type);
     ("unsigned int, enum u", unsigned_type, Ctype.enum enum_u,
-     Some (Ctype.enum enum_u));
+     Some unsigned_type);
+    ("const enum u *, const unsigned int *",
+     pointer (qualify const (Ctype.enum enum_u)),
+     pointer (qualify const unsigned_type),
+     Some (pointer (qualify const unsigned_type)));
     ("enum u, int", Ctype.enum enum_u, int_type, None);
     ("enum u, enum v", Ctype.enum enum_u, Ctype.enum other_enum_u, None);
     ("enum u, enum u", Ctype.enum enum_u, Ctype.enum enum_u,
@@ -617,9 +624,29 @@ let check_composite (name, a, b, expected) =
     | Some t -> Ok t
     | None -> Error Ctype.Incompatible
   in
-  check name (Ctype.composite lp64 tags a b) expected_composite
+  check name (Ctype.composite lp64_clang tags location a b) expected_composite
   && check (name ^ ", compatible") (Ctype.compatible lp64 tags b a)
        (Answer (Option.is_some expected))
+
+(* GCC gives an enumerated type and its compatible integer type the
+   enumerated type as their composite, so with GCC it is unknown, qualified
+   as both types are. *)
+let enum_integer_composite_with_gcc () =
+  let composite =
+    Ctype.unknown
+      { construct = "the composite of an enumerated type and its integer type";
+        location;
+        kind = Unknown_object;
+        cause = Typed_differently }
+  in
+  let enum = Ctype.enum enum_u in
+  let composite_with_gcc a b = Ctype.composite lp64 tags location a b in
+  check "enum u, unsigned int with GCC"
+    (composite_with_gcc enum unsigned_type) (Ok composite)
+  && check "const unsigned int, const enum u with GCC"
+       (composite_with_gcc (qualify const unsigned_type) (qualify const enum))
+       (Ok (qualify const composite))
+  && check "enum u, enum u with GCC" (composite_with_gcc enum enum) (Ok enum)
 
 let unsigned_short_parameter () =
   check "int(unsigned short), int() on a 16-bit int target"
@@ -688,8 +715,7 @@ let declaration_facts () =
    answers so, and the known parts still decide what they can. *)
 let unknown_facts () =
   let unknown_of kind =
-    let location = { Typec_cpp.Location.file = "in.c"; line = 1 } in
-    { Ctype.construct = "x"; location; kind; cause = Not_typed }
+    { Unknown.construct = "x"; location; kind; cause = Not_typed }
   in
   let object_unknown = unknown_of Unknown_object in
   let function_unknown = unknown_of Unknown_function in
@@ -721,11 +747,14 @@ let unknown_facts () =
        (Ctype.compatible lp64 tags u function_type)
        (Answer false)
   && check "the composite is the unknown side"
-       (Ctype.composite lp64 tags (array int_type Unknown) u)
+       (Ctype.composite lp64 tags location (array int_type Unknown) u)
        (Ok u)
   && check "an enumeration of unknown integer type and int"
        (Ctype.compatible lp64 tags packed int_type)
        (Depends_on object_unknown)
+  && check "the composite of such an enumeration and int is int"
+       (Ctype.composite lp64_clang tags location packed int_type)
+       (Ok int_type)
   && check "promotion of an enumeration of unknown integer type"
        (Ctype.compatible lp64 tags
           (func int_type (prototype [ packed ]))
@@ -743,7 +772,8 @@ let () =
     [ unknown_facts (); check_ranks (); floating_promotions ();
       construction_facts ();
       member_facts (); doubling_typedefs (); oversized_composite ();
-      unsigned_short_parameter (); declaration_facts () ]
+      enum_integer_composite_with_gcc (); unsigned_short_parameter ();
+      declaration_facts () ]
     @ List.map check_promotion promotion_cases
     @ List.map check_conversion conversion_cases
     @ List.map check_enum enum_cases

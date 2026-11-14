@@ -9,7 +9,7 @@ type typing = {
   fail : 'a. Tree.span -> string -> 'a;
   value : Tree.expression -> Ctype.t;
   initialises : Tree.expression -> unit;
-  source : Tree.expression -> Tree.expression Ctype.answer;
+  source : Tree.expression -> Tree.expression Unknown.answer;
   index : Tree.expression -> (Integer_constant.t, Tree.span) result;
 }
 
@@ -127,7 +127,7 @@ type form =
   | String_form
   | Compound_form
   | Other_form
-  | Unknown_form of Ctype.unknown
+  | Unknown_form of Unknown.t
 
 let form typing expression =
   match typing.source expression with
@@ -136,7 +136,7 @@ let form typing expression =
   | Answer _ -> Other_form
   | Depends_on unknown -> Unknown_form unknown
 
-let is_character typing t : bool Ctype.answer =
+let is_character typing t : bool Unknown.answer =
   match Ctype.as_arithmetic typing.tags t with
   | Answer (Some (Integer (Char | Signed_char | Unsigned_char))) -> Answer true
   | Answer (Some (Integer _ | Real _ | Complex _) | None) -> Answer false
@@ -155,16 +155,16 @@ let compatible typing a b =
 
 (* Whether a string literal initialises an array of [element]: one of a
    character type or of a code unit of a prefixed literal. *)
-let takes_strings typing element : bool Ctype.answer =
+let takes_strings typing element : bool Unknown.answer =
   let answers =
     is_character typing element
     :: List.map (compatible typing element) (wide_units typing)
   in
-  let is_unknown : bool Ctype.answer -> bool = function
+  let is_unknown : bool Unknown.answer -> bool = function
     | Depends_on _ -> true
     | Answer _ -> false
   in
-  if List.mem (Ctype.Answer true) answers then Answer true
+  if List.mem (Unknown.Answer true) answers then Answer true
   else
     match List.find_opt is_unknown answers with
     | Some unknown -> unknown
@@ -172,7 +172,7 @@ let takes_strings typing element : bool Ctype.answer =
 
 (* Whether [expression] is a string literal that initialises a whole
    array of [element]. *)
-let string_for typing element expression : bool Ctype.answer =
+let string_for typing element expression : bool Unknown.answer =
   match form typing expression with
   | String_form -> takes_strings typing element
   | Unknown_form unknown -> Depends_on unknown

@@ -59,7 +59,7 @@ let print_enum_integer (result : Declarations.t) name (t : Ctype.t) =
   | Enum tag ->
       Option.iter
         (function
-          | Ctype.Answer integer ->
+          | Unknown.Answer integer ->
               Printf.printf
                 "_Static_assert(_Generic((%s)0, %s: 1, default: 0), \
                  \"%s is %s\");\n"

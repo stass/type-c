@@ -129,7 +129,7 @@ void operators(int x, const int cx, char c, signed char sc, unsigned char uc,
 /* What GCC types otherwise than Clang, which typec gives an unknown type
    with GCC */
 void differences(int x, struct bits v, struct qualified q,
-		 const struct qualified cq)
+		 const struct qualified cq, enum e *ep, int *ip)
 {
 	v.b++; v.b--; ++v.b; --v.b; v.b = 1; v.b += 1; v.b *= 2; (x, v.b);
 	({ v.b; }); __real__ v.b; v.b++ + 0; ({ v.b; }) + 0; (v.b = 1) + 0;
@@ -150,6 +150,7 @@ void differences(int x, struct bits v, struct qualified q,
 	__builtin_types_compatible_p(int *_Atomic, int *);
 	__builtin_types_compatible_p(const _Atomic int, _Atomic int);
 	__builtin_types_compatible_p(__typeof__(v.b++), unsigned);
+	x ? ep : ip; x ? ip : ep;
 }
 
 void blocks(int n)

@@ -602,6 +602,15 @@ let old_style_definitions () =
   accepts ~declarations "f(1, 2)";
   rejects ~declarations:(declarations ^ "int f(); ") "f(1, 2)" "6.5.2.2p2"
 
+let enum_integer_composites () =
+  let declarations = "enum e { E0 = 1 } *ep; unsigned *up; int x; " in
+  let composite =
+    "<the composite of an enumerated type and its integer type> *"
+  in
+  both ~declarations "x ? ep : up" ~clang:"unsigned int *" ~gcc:composite;
+  both ~declarations "x ? up : ep" ~clang:"unsigned int *" ~gcc:composite;
+  both ~declarations "x ? ep : ep" ~clang:"enum e *" ~gcc:"enum e *"
+
 (* 6.8: the constraints that typing checks. *)
 let statements () =
   accepts "if (p) x; else if (d) x; while (ip) break; do continue; while (z)";
@@ -796,6 +805,7 @@ let () =
   bit_field_promotions ();
   anonymous_members ();
   old_style_definitions ();
+  enum_integer_composites ();
   statements ();
   block_declarations ();
   block_linkage ();

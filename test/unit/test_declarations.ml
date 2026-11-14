@@ -389,6 +389,48 @@ let composites () =
   declares "struct s { int x; }; int a[sizeof (struct s)];" "a"
     "object int[<constant>] external static"
 
+(* Clang gives an enumerated type and its compatible integer type the
+   integer type as their composite and GCC the enumerated type, which
+   with GCC makes the composite unknown. *)
+let enum_integer_composites () =
+  let enum = "enum e { E0 = 1 }; " in
+  let clang_declares source = declares ~target:lp64_clang (enum ^ source) in
+  clang_declares "extern enum e x; extern unsigned x;" "x"
+    "object unsigned int external static";
+  clang_declares "extern unsigned x; extern enum e x;" "x"
+    "object unsigned int external static";
+  clang_declares "extern enum e *y; extern unsigned *y;" "y"
+    "object unsigned int * external static";
+  clang_declares "void f(enum e); void f(unsigned);" "f"
+    "function void (unsigned int) external";
+  clang_declares "enum e g(void); unsigned g(void);" "g"
+    "function unsigned int (void) external";
+  accepts ~target:lp64_clang
+    (enum ^ "extern enum e x; extern unsigned x; \
+             typedef typeof(x) T; typedef unsigned T;");
+  rejects ~target:lp64_clang
+    (enum ^ "extern enum e x; extern unsigned x; \
+             typedef typeof(x) T; typedef enum e T;")
+    "6.7p3";
+  let composite =
+    "<the composite of an enumerated type and its integer type>"
+  in
+  declares (enum ^ "extern enum e x; extern unsigned x;") "x"
+    ("object " ^ composite ^ " external static");
+  declares (enum ^ "extern const enum e x; extern const unsigned x;") "x"
+    ("object const " ^ composite ^ " external static");
+  declares (enum ^ "void f(enum e); void f(unsigned);") "f"
+    ("function void (" ^ composite ^ ") external");
+  declares (enum ^ "extern enum e x; extern enum e x;") "x"
+    "object enum e external static";
+  (* Both compilers select 1 here; the unknown type covers more than the
+     difference (TODO.md). *)
+  rejects
+    (enum ^ "extern enum e x; extern unsigned x; \
+             enum { V = _Generic(x, unsigned: 1, default: 2) };")
+    ("the value of _Generic depends on the composite of an enumerated type \
+      and its integer type at in.c:1, which GCC types otherwise than Clang")
+
 let constant_expressions () =
   evaluates_int "1 + 2 * 3" "7";
   evaluates_int "-7 / 2" "-3";
@@ -1211,6 +1253,7 @@ let () =
   linkage_table ();
   linkage ();
   composites ();
+  enum_integer_composites ();
   constant_expressions ();
   enumerations ();
   deep_expression ();
