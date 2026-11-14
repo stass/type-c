@@ -27,6 +27,11 @@
  (libraries typec_cpp typec_emit))
 
 (test
+ (name test_lowering)
+ (modules test_lowering)
+ (libraries typec_cpp typec_syntax typec_sema typec_emit typec_test_support))
+
+(test
  (name test_pipeline)
  (modules test_pipeline)
  (libraries typec_driver))

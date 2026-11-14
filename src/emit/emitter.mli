@@ -7,8 +7,7 @@
 
     Everything outside the replaced ranges is copied from the text, white
     space and line markers included, so a unit without edits is emitted
-    byte for byte as it was read. Stage 1 lowering is the consumer of
-    edits; until then only tests make them. *)
+    byte for byte as it was read. {!Lowering} makes the edits. *)
 
 (** Replace the tokens [first] to [first + count - 1] by [text], which
     the backend places at [location], the line of the construct it

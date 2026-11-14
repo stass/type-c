@@ -14,6 +14,7 @@ type item =
   | Declaration of entity list
   | Static_assertion
   | Function_definition of entity
+  | Type_declaration of entity
 
 type t = {
   tags : Ctype.tags;
@@ -22,10 +23,18 @@ type t = {
   tag_types : (Tree.tag_id, tag) Hashtbl.t;
   linked : (string, entity) Hashtbl.t;
   typed : Expressions.t;
+  type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
 }
 
 let tags result = result.tags
 let items result = result.items
+
+let type_declarations result =
+  Hashtbl.to_seq_values result.type_declarations
+  |> List.of_seq
+  |> List.sort (fun (a : Tree.type_declaration) b ->
+         compare a.span.first b.span.first)
+
 let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name
@@ -62,7 +71,8 @@ type place = At_file_scope | In_prototype | In_definition | In_block
    whose uses name the overload set (design 13.3). [typed] is the typed
    view of the expressions, and [type_names] the type of each type name
    read, which typing and constant evaluation both ask for and whose
-   declarations are made once. *)
+   declarations are made once. [type_declarations] holds each type
+   declaration read, by the id of its name. *)
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -75,6 +85,7 @@ type state = {
   overloaded : (Tree.reference, unit) Hashtbl.t;
   typed : Expressions.t;
   type_names : (Tree.span, Ctype.t) Hashtbl.t;
+  type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   mutable place : place;
   mutable next_entity : int;
 }
@@ -836,9 +847,9 @@ and record_type state span kind (tag : Tree.tag option) members =
   record
 
 (* [span] is the specifier's: GNU C allows a body without members. *)
-and define_record state span record (members : Tree.member_declaration list)
-    =
-  let members = List.concat_map (read_member state) members in
+and define_record state span record
+    (members : Tree.member_declaration list Tree.spanned) =
+  let members = List.concat_map (read_member state) members.node in
   checked state span
     (Ctype.define_record state.target state.tags record members)
 
@@ -1585,6 +1596,46 @@ and read_block_declaration state (declaration : Tree.declaration) =
           ignore (read_init_declarator state Block_scope specified declarator))
         declarators
 
+(* Type declarations (design 3.1). The parser has made each the only
+   declaration of its name in its scope (rule 5), so it declares a new
+   entity: a typedef name of the type that it defines. *)
+
+and read_type_declaration state (declaration : Tree.type_declaration) =
+  let { Tree.name; declared; definition } = declaration.node in
+  Hashtbl.replace state.type_declarations declared.id declaration;
+  let bind t =
+    record state name.node declared
+      { name = name.node; entity = fresh_entity state; declared = Typedef t }
+  in
+  match definition with
+  | Incomplete_variant ->
+      (* Until variants (work package 1.2), an incomplete variant is the
+         incomplete structure that it lowers to (design 10.1). *)
+      let record =
+        Ctype.declare_record state.tags (record_kind Struct) (Some name.node)
+      in
+      Hashtbl.replace state.tag_types (Tree.claimed_tag name)
+        (Record_tag record);
+      bind (Ctype.record record)
+  | Alias type_name -> bind (read_type_name state type_name)
+  | Record_alias specifier -> read_record_alias state name specifier bind
+
+(* The name denotes the record before its members are read, so that they
+   may use it (rule 2). A specifier without a tag of its own declares the
+   tag that the declaration claims. *)
+and read_record_alias state name
+    (specifier : Tree.record_specifier Tree.spanned) bind =
+  let { Tree.kind; attributes; tag; members } = specifier.node in
+  let claimed : Tree.tag =
+    { name; binding = Declares { id = Tree.claimed_tag name; earlier = None } }
+  in
+  let tag = Option.value tag ~default:claimed in
+  let span = specifier.span in
+  let record = record_type state span (record_kind kind) (Some tag) None in
+  let entity = bind (obscured_by state attributes (Ctype.record record)) in
+  Option.iter (define_record state span record) members;
+  entity
+
 and typing state : Expressions.context =
   {
     typed = state.typed;
@@ -1596,6 +1647,8 @@ and typing state : Expressions.context =
     overloaded = Hashtbl.mem state.overloaded;
     type_name = read_type_name state;
     declaration = read_block_declaration state;
+    type_declaration =
+      (fun declaration -> ignore (read_type_declaration state declaration));
   }
 
 (* External declarations (6.9) *)
@@ -1654,6 +1707,8 @@ let read_external state (external_declaration : Tree.external_declaration) =
   match external_declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
+  | Type_declaration declaration ->
+      Type_declaration (read_type_declaration state declaration)
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
 let builtin_type target : Builtin_typedef.t -> (Ctype.t, Ctype.error) result =
@@ -1693,6 +1748,7 @@ let read target text unit =
       overloaded = Hashtbl.create 64;
       typed = Expressions.create ();
       type_names = Hashtbl.create 256;
+      type_declarations = Hashtbl.create 16;
       place = At_file_scope;
       next_entity = 0;
     }
@@ -1700,6 +1756,8 @@ let read target text unit =
   declare_builtin_typedefs state;
   match List.map (read_external state) unit with
   | items ->
-      let { tags; entities; tag_types; linked; typed; _ } = state in
-      Ok { tags; items; entities; tag_types; linked; typed }
+      let { tags; entities; tag_types; linked; typed; type_declarations; _ } =
+        state
+      in
+      Ok { tags; items; entities; tag_types; linked; typed; type_declarations }
   | exception Failed error -> Error error

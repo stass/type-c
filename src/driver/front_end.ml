@@ -3,8 +3,11 @@
 
 let ( let* ) = Result.bind
 
-let check dialect target text =
+let lower dialect target text =
   let keywords = Typec_sema.Target.keywords target dialect in
   let* unit = Typec_syntax.Parser.parse ~keywords text in
-  let* _declarations = Typec_sema.Declarations.read target text unit in
-  Ok ()
+  let* declarations = Typec_sema.Declarations.read target text unit in
+  let type_declarations =
+    Typec_sema.Declarations.type_declarations declarations
+  in
+  Ok (Typec_emit.Lowering.edits text type_declarations)

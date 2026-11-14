@@ -6,8 +6,6 @@ type argument =
   | Option of { role : Cc_option.role; words : string list; value : string }
   | Truncated of string list
 
-let type_c_suffix = ".tc"
-
 (* The language that cc gives an input when no -x is in effect. *)
 let no_language = "none"
 
@@ -34,7 +32,8 @@ let read words =
     | [] -> List.rev arguments
     | word :: rest when not (is_option word) ->
         let type_c =
-          language = no_language && Filename.check_suffix word type_c_suffix
+          language = no_language
+          && Filename.check_suffix word Typec_cpp.File.source_suffix
         in
         read_from language (Input { path = word; type_c } :: arguments) rest
     | word :: rest -> (

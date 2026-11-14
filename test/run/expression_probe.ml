@@ -68,7 +68,7 @@ let rec block_insertions text result (block : Tree.block) =
     (function
       | Tree.Block_statement statement ->
           statement_insertions text result statement
-      | Block_declaration _ -> [])
+      | Block_declaration _ | Block_type_declaration _ -> [])
     block.node.items
 
 and statement_insertions text result (statement : Tree.statement) =

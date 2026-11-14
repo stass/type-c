@@ -3,8 +3,8 @@
 
 (** The syntax tree of a translation unit: the declarations, expressions
     and statements of C11 (6.5, 6.7, 6.8, 6.9) and of the GNU profile
-    (design 13.3). The body of a function that a system header defines is
-    a span of tokens.
+    (design 13.3), and the type declarations of Type-C (design 3.1). The
+    body of a function that a system header defines is a span of tokens.
 
     Every node is {!spanned}: it records the tokens it was parsed from,
     which emission copies when it leaves the node untouched (design 13.4).
@@ -261,14 +261,7 @@ and declaration_specifier =
 and type_specifier =
   | Basic of basic_type_specifier
   | Atomic_type of type_name  (** [_Atomic (] type-name [)] *)
-  | Struct_or_union of {
-      kind : struct_or_union;
-      attributes : attribute list;
-          (** after the keyword and after the body, in source order *)
-      tag : tag option;
-      members : member_declaration list option;
-          (** [None] without a body; a GNU body may be empty *)
-    }
+  | Struct_or_union of record_specifier
   | Enum of {
       attributes : attribute list;
           (** after the keyword, the fixed type and the body, in source
@@ -283,6 +276,17 @@ and type_specifier =
       (** a typedef name is one only where its declaration is visible *)
   | Typeof_expression of expression  (** GNU [typeof (] expression [)] *)
   | Typeof_type of type_name  (** GNU [typeof (] type-name [)] *)
+
+(** A structure or union specifier (C11 6.7.2.1). *)
+and record_specifier = {
+  kind : struct_or_union;
+  attributes : attribute list;
+      (** after the keyword and after the body, in source order *)
+  tag : tag option;
+  members : member_declaration list spanned option;
+      (** [None] without a body; a GNU body may be empty; the span holds
+          the braces *)
+}
 
 (** C11 6.7.5. *)
 and alignment = Alignas_type of type_name | Alignas_expression of expression
@@ -501,7 +505,36 @@ and block_node = {
 and local_label_declaration = identifier list spanned
 
 (** Declarations and statements in any order. *)
-and block_item = Block_declaration of declaration | Block_statement of statement
+and block_item =
+  | Block_declaration of declaration
+  | Block_type_declaration of type_declaration
+  | Block_statement of statement
+
+(** A type declaration (design 3.1): [type], the name, which is in scope
+    from the end of its identifier as a typedef name, and the definition.
+    It stands where an external declaration or a block item may, and
+    nowhere else that a C declaration may (design Appendix A). *)
+and type_declaration = type_declaration_node spanned
+
+and type_declaration_node = {
+  name : identifier;
+  declared : declared;  (** never a redeclaration (design 3.1 rule 5) *)
+  definition : type_definition;
+}
+
+and type_definition =
+  | Incomplete_variant
+      (** [type N;], which claims the structure tag [N] that its
+          lowering declares (design 10.1) *)
+  | Alias of type_name
+      (** [= type-name;] for a type name that is not a [Record_alias]:
+          the name denotes the type, as [typedef] makes it, and the
+          definition does not use the name (design 3.1 rule 2) *)
+  | Record_alias of record_specifier spanned
+      (** [= struct-or-union-specifier;] with a body, which its
+          [members] always hold, and nothing else; it may use the name.
+          Without a tag of its own, the specifier takes the declared name
+          as its tag, which the declaration claims (design 10.2). *)
 
 and for_clause =
   | Clause_declaration of declaration
@@ -557,6 +590,11 @@ let rec declared_identifier declarator =
 let declared_name declarator =
   Option.map (fun name -> name.node) (declared_identifier declarator)
 
+(** The tag that a type declaration of [name] claims, where it claims
+    one (design 10.1 rule 6, 10.2): a declaration of the tag at the
+    token of the name. *)
+let claimed_tag (name : identifier) = Tag_at name.span.first
+
 (** The body of a function definition: parsed, or, where a system header
     defines the function, matched brace for brace and kept as the span of
     its braces, which emission copies (design 13.3). *)
@@ -578,6 +616,7 @@ and function_definition_node = {
 
 type external_declaration =
   | External_declaration of declaration
+  | Type_declaration of type_declaration
   | Function_definition of function_definition
   | Top_level_asm of assembler spanned  (** GNU [asm (...);] *)
   | Empty_declaration of span  (** a GNU [;] alone *)

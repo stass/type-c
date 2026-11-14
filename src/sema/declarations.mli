@@ -44,6 +44,7 @@ type item =
           alone or a file-scope [asm]. *)
   | Static_assertion
   | Function_definition of entity
+  | Type_declaration of entity  (** a typedef name (design 3.1) *)
 
 type t
 
@@ -59,6 +60,10 @@ val entity : t -> Tree.reference -> entity option
 
 val tag : t -> Tree.tag_id -> tag option
 (** The tag that a tag declaration declares, [None] as for {!entity}. *)
+
+val type_declarations : t -> Tree.type_declaration list
+(** The type declarations that the reader has read, in source order:
+    those that lowering replaces (design 13.5). *)
 
 val linked : t -> string -> entity option
 (** The object or function with linkage (6.2.2) of that name: the one

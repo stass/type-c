@@ -11,9 +11,10 @@ work is [type-c-implementation-plan.md](type-c-implementation-plan.md).
 
 `typec` is its compiler. It takes the command line of the C compiler, so
 it can replace `cc` in a build. At this stage it compiles a `.tc` input
-as C through its pipeline, hands every other input and option to the
-backend C compiler unchanged, and can print the target model the backend
-reports (`--print-target`).
+through its pipeline, which reads it as C with the type declarations of
+design 3.1 (aliases and forward declarations) and lowers those to C,
+hands every other input and option to the backend C compiler unchanged,
+and can print the target model the backend reports (`--print-target`).
 
 ## Building and testing
 
@@ -40,7 +41,11 @@ TYPEC_TEST_GCC=/usr/bin/gcc dune test   # with another GCC
 
 Library tests are in `test/unit`; the parser's are tables of C text and
 the structural dump of its tree (`test/support/tree_dump.ml`) or its
-error. `test/run` holds cram tests that run `typec` and the backends;
+error. `test/golden` holds cram tests that show the C or the diagnostic
+that the front end gives for a source, with no backend
+(`test/golden/golden.ml`); `dune test test/golden` runs them and
+`dune promote` takes a changed output. `test/run` holds cram tests that
+run `typec` and the backends;
 `types.t` and `declarations.t` compile static assertions of what typec
 computes, so a backend that disagrees fails to compile them.
 

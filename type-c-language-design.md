@@ -75,9 +75,10 @@ it. Otherwise add the smallest extension that does the job.
 | `.tci` | Type-C interface | A header in Type-C syntax, pulled in by `#include` (section 9). |
 
 Text is *Type-C text* when the file it comes from has the suffix `.tc` or
-`.tci`, and *C text* otherwise. The grammar is the same for both; the only
-difference is the two reserved words of 2.3. A `.tc` file may include `.h`
-and `.tci` files in any mix.
+`.tci`, and *C text* otherwise. The grammar is the same for both but for
+the two reserved words of 2.3; the other difference is that Type-C text
+cannot name the C that a type declaration derives (10.1). A `.tc` file
+may include `.h` and `.tci` files in any mix.
 
 `typec` predefines the macro `__TYPEC__` as `1` while preprocessing a Type-C
 translation unit, so that a shared header can adapt.
@@ -129,9 +130,10 @@ universe name from that point, under C's ordinary scope rules, so
 simply unavailable.
 
 **Generated names.** Identifiers that begin with `__tc_` are reserved for the
-compiler in a Type-C translation unit; declaring one is an error. The names
-that a type declaration derives for C (section 10) are reserved in the scope
-of that declaration.
+compiler in a Type-C translation unit; one in its text, C text included, is
+an error, so that no declaration and no use can meet a name that lowering
+generates. The names that a type declaration derives for C (section 10)
+are reserved in the scope of that declaration.
 
 Rationale. The words Type-C wants (`type`, `match`, `result`, `str`,
 `option`) are among the most common identifiers in C. Reserving them would
@@ -181,9 +183,11 @@ type reg_id = distinct uint32_t;                  /* distinct type      */
 type pair(A, B) = struct { A first; B second; };  /* generic type       */
 ```
 
-A type declaration may appear wherever a C declaration may, at file scope or
-in a block. One with type parameters appears at file scope only, where its
-instances are emitted.
+A type declaration may appear at file scope or in a block, where an
+external declaration or a block item may (Appendix A); not in the first
+clause of a `for` or in the declarations of an old-style definition. One
+with type parameters appears at file scope only, where its instances are
+emitted.
 
 1. It declares its name in the ordinary identifier namespace of the current
    scope, as `typedef` does.
@@ -850,6 +854,7 @@ it exposes, and no Type-C rule binds them.
 The declaration of `expr` in 3.2 becomes this C:
 
 ```c
+struct expr;
 typedef struct expr expr;
 enum expr_tag { expr_Number, expr_Variable, expr_Add, expr_Multiply };
 struct expr {
@@ -886,10 +891,17 @@ struct expr {
 ### 10.2 Distinct types and aliases
 
 `type D = distinct U;` becomes `typedef U D;`. C callers see `U` and lose
-the check. An alias becomes a `typedef`. When its definition is an untagged
-struct or union specifier, the specifier takes the declared name as its
-tag, `typedef struct N N; struct N { ... };`, and the declaration claims
-that tag as a variant does.
+the check. An alias becomes a `typedef`. When its definition is a struct
+or union specifier with a body, it becomes
+`struct T; typedef struct T N; struct T { ... };`, so that the body can
+use `N` (3.1 rule 2). `T` is the specifier's tag; an untagged specifier
+takes the declared name as its tag, and the declaration claims that tag
+as a variant does.
+
+The leading `struct T;` of this form and of 10.1 declares the tag in the
+scope of the declaration (C11 6.7.2.3p7). A `typedef struct T N;` alone
+would name a tag `T` that an enclosing block declares, and the body
+after it would define another.
 
 ### 10.3 Generic instances
 

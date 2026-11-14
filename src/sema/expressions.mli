@@ -160,7 +160,8 @@ val constant : t -> Tree.expression -> constant option
     a resolved use of a name denotes, and [overloaded] whether it names
     a Clang overload set (design 13.3); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
-    block, binding its identifiers and typing its initialisers. *)
+    block, binding its identifiers and typing its initialisers, and
+    [type_declaration] a type declaration there. *)
 type context = {
   typed : t;
   target : Target.t;
@@ -171,6 +172,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
+  type_declaration : Tree.type_declaration -> unit;
 }
 
 val max_depth : int

@@ -328,19 +328,8 @@ and specifier reader (s : declaration_specifier spanned) =
   | Type_specifier (Typeof_expression e) ->
       here "typeof" [ expression reader e ]
   | Type_specifier (Typeof_type t) -> here "typeof" [ type_name reader t ]
-  | Type_specifier (Struct_or_union { kind; attributes; tag; members }) ->
-      let label = match kind with Struct -> "struct" | Union -> "union" in
-      let body =
-        match members with
-        | None -> []
-        | Some [] -> [ leaf "{}" ]
-        | Some members -> List.map (member reader) members
-      in
-      here label
-        (in_source_order
-           (Option.to_list (Option.map tag_part tag)
-           @ body
-           @ List.map (single_attribute reader) attributes))
+  | Type_specifier (Struct_or_union specifier) ->
+      specifier_dump reader here ~claimed:[] specifier
   | Type_specifier (Enum { attributes; tag; underlying; enumerators }) ->
       let underlying_part list =
         section ":" (specifiers reader list)
@@ -352,6 +341,24 @@ and specifier reader (s : declaration_specifier spanned) =
            @ List.map (enumerator reader)
                (Option.value enumerators ~default:[])
            @ List.map (single_attribute reader) attributes))
+
+(* [claimed] is the part of a tag that a type declaration claims for the
+   specifier, which comes first. *)
+and specifier_dump reader here ~claimed
+    ({ kind; attributes; tag; members } : record_specifier) =
+  let label = match kind with Struct -> "struct" | Union -> "union" in
+  let body =
+    match members with
+    | None -> []
+    | Some { node = []; _ } -> [ leaf "{}" ]
+    | Some { node = members; _ } -> List.map (member reader) members
+  in
+  here label
+    (claimed
+    @ in_source_order
+        (Option.to_list (Option.map tag_part tag)
+        @ body
+        @ List.map (single_attribute reader) attributes))
 
 and tag_part (tag : tag) =
   let name = tag.name.node in
@@ -570,7 +577,32 @@ and local_labels (d : local_label_declaration) =
 
 and block_item reader = function
   | Block_declaration d -> declaration reader d
+  | Block_type_declaration d -> type_declaration reader d
   | Block_statement s -> statement reader s
+
+(* A type declaration as [(type N definition)]; the tag that it claims
+   is a [claims] part, whose entry is a declaration in the tag space. *)
+and type_declaration reader (d : type_declaration) =
+  let { name; declared; definition } = d.node in
+  let declared_name =
+    noted (declaration_entry name.node declared) (identifier name)
+  in
+  let (Tag_at token) = claimed_tag name in
+  let claim =
+    noted
+      (Declaration_entry
+         { space = Tag; name = name.node; token; earlier = None })
+      (leaf "claims")
+  in
+  let parts =
+    match definition with
+    | Incomplete_variant -> [ claim ]
+    | Alias t -> [ type_name reader t ]
+    | Record_alias { span; node = specifier } ->
+        let claimed = if specifier.tag = None then [ claim ] else [] in
+        [ specifier_dump reader (node span) ~claimed specifier ]
+  in
+  node d.span "type" (declared_name :: parts)
 
 (* The qualifiers, the template and, for extended assembler, its four
    sections. *)
@@ -609,6 +641,7 @@ let function_body reader = function
 
 let external_declaration reader = function
   | External_declaration d -> declaration reader d
+  | Type_declaration d -> type_declaration reader d
   | Function_definition { span; node = definition } ->
       node span "define"
         ([

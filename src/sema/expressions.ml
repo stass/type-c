@@ -87,6 +87,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
+  type_declaration : Tree.type_declaration -> unit;
 }
 
 (* Far above the nesting of real code, it bounds the recursion on the
@@ -1605,7 +1606,9 @@ and statement_expression context (block : Tree.block) =
   match List.rev block.node.items with
   | Block_statement { node = Expression_statement last; _ } :: _ ->
       Ctype.lvalue_conversion (expression context last).expression_type
-  | (Block_statement _ | Block_declaration _) :: _ | [] -> Ctype.void
+  | (Block_statement _ | Block_declaration _ | Block_type_declaration _) :: _
+  | [] ->
+      Ctype.void
 
 and designator context (designator : Tree.designator) =
   match designator.node with
@@ -1653,6 +1656,8 @@ and block_items context (block : Tree.block) =
   List.iter
     (function
       | Tree.Block_declaration declaration -> context.declaration declaration
+      | Block_type_declaration declaration ->
+          context.type_declaration declaration
       | Block_statement statement -> typed_statement context statement)
     block.node.items
 

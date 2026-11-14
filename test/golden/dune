@@ -1,0 +1,12 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; Golden tests: source in, C or diagnostics out. Each cram test writes
+; preprocessed text and shows what golden.exe makes of it.
+
+(executable
+ (name golden)
+ (libraries typec_cpp typec_emit typec_driver typec_test_support))
+
+(cram
+ (deps golden.exe))

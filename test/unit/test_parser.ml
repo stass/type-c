@@ -10,14 +10,17 @@ open Typec_test_support
 let gnu_keywords : Keyword_set.t =
   { dialect = Gnu; optional_floats = Optional_float.all; int128 = true }
 
-(* A text, read as from the file "in.i", and the dump of its external
-   declarations, separated by " | ", or its error. *)
+(* A text, read as from the file "in.i", which is C text, and the dump of
+   its external declarations, separated by " | ", or its error. *)
 type case = { name : string; text : string; expected : string }
 
 let case name text expected = { name; text; expected }
 
-let outcome ~parse ~spans text =
-  match Reader.read ~name:"in.i" text with
+(* Type-C text is that of a file named [*.tc] (design 2.1). *)
+let type_c_file = "in.tc"
+
+let outcome ?(file = "in.i") ~parse ~spans text =
+  match Reader.read ~name:file text with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match parse reader with
@@ -31,8 +34,8 @@ let outcome ~parse ~spans text =
               |> String.concat " | "))
 
 (* The scope entries of a text, or its error. *)
-let resolutions text =
-  match Reader.read ~name:"in.i" text with
+let resolutions ?(file = "in.i") text =
+  match Reader.read ~name:file text with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with
@@ -1419,6 +1422,245 @@ let failed_chain_cases () =
 (* Every case runs on the small stack that the fuzz harness runs the
    parser on, so that a chain the parser reads in a loop fails loudly if
    it ever becomes recursion. *)
+(* Type-C text, read from [type_c_file]. *)
+let type_declaration_cases =
+  [
+    case "a forward declaration" "type node;"
+      "(type node claims)";
+    case "an alias" "type id = unsigned int;"
+      "(type id (type unsigned int))";
+    case "an alias of a pointer to a function"
+      "type handler = void (*)(int);"
+      "(type handler (type void (function (paren pointer) (int))))";
+    case "an alias of an array of pointers" "type table = char *[4];"
+      "(type table (type char (pointer (array 4))))";
+    case "a structure that takes the declared name as its tag"
+      "type pair = struct { int a; pair *next; };"
+      "(type pair (struct claims (member (int) a) (member (pair) (pointer \
+       next))))";
+    case "a union with a tag of its own and attributes"
+      "type u = union __attribute__((aligned(8))) w { int i; u *p; } \
+       __attribute__((packed));"
+      "(type u (union (attribute (aligned ( 8 ))) w (member (int) i) (member \
+       (u) (pointer p)) (attribute packed)))";
+    case "an empty GNU structure" "type e = struct { };"
+      "(type e (struct claims {}))";
+    case "a structure inside a larger type name is an alias"
+      "type p = struct { int a; } *;"
+      "(type p (type (struct (member (int) a)) pointer))";
+    case "a structure without a body is an alias" "type s = struct t;"
+      "(type s (type (struct t)))";
+    case "a type declaration in a block"
+      "void f(void) { type t = int; t x; }"
+      "(define (void) (function f (void)) (block (type t (type int)) \
+       (declaration (t) x)))";
+    case "the declared name is a typedef name"
+      "type t = int; t x; int f(t);"
+      "(type t (type int)) | (declaration (t) x) | (declaration (int) \
+       (function f (t)))";
+    case "type is an ordinary identifier"
+      "int type; struct s { int type; } v; int f(int type) { return type; \
+       }"
+      "(declaration (int) type) | (declaration ((struct s (member (int) \
+       type))) v) | (define (int) (function f (int type)) (block (return \
+       type)))";
+    case "a variable named type does not hide the construct"
+      "int type; type x;"
+      "(declaration (int) type) | (type x claims)";
+    case "where type is a typedef name, type x is the C declaration"
+      "typedef int type; type x; void f(void) { type y; }"
+      "(declaration (typedef int) type) | (declaration (type) x) | (define \
+       (void) (function f (void)) (block (declaration (type) y)))";
+    case "a typedef name type in a block hides the construct there"
+      "void f(void) { typedef int type; type y; } type z;"
+      "(define (void) (function f (void)) (block (declaration (typedef int) \
+       type) (declaration (type) y))) | (type z claims)";
+    case "a label named type" "void f(void) { type: ; }"
+      "(define (void) (function f (void)) (block (label type ;)))";
+    case "an obsolete designator may be a reserved word"
+      "struct s { int a; } v = { defer: 1, try: 2 };"
+
+      "(declaration ((struct s (member (int) a))) (init v ({} (designate \
+       .defer 1) (designate .try 2))))";
+    case "a member after . and -> may be a reserved word"
+      "struct s { int a; } *p; void f(void) { p->try; (*p).defer; \
+       struct s v = { .defer = 1, ._Defer = 2 }; }"
+      "(declaration ((struct s (member (int) a))) (pointer p)) | (define \
+       (void) (function f (void)) (block (expr (-> p try)) (expr (. (paren (* \
+       p)) defer)) (declaration ((struct s)) (init v ({} (designate .defer 1) \
+       (designate ._Defer 2))))))";
+    case "private and distinct name types where no definition begins"
+      "typedef int private; typedef int distinct; type a = private *; \
+       type b = distinct; type c = distinct *;"
+      "(declaration (typedef int) private) | (declaration (typedef int) \
+       distinct) | (type a (type private pointer)) | (type b (type distinct)) \
+       | (type c (type distinct pointer))";
+    case "a universe name that a declaration hides"
+      "int result = 1; void f(void) { int str; str = result; }"
+      "(declaration (int) (init result 1)) | (define (void) (function f \
+       (void)) (block (declaration (int) str) (expr (= str result))))";
+  ]
+
+let type_c_error_cases =
+  [
+    case "try is a keyword in Type-C text" "int try;"
+      "error: in.tc:1: expected a declarator, found `try`";
+    case "defer is a keyword in Type-C text" "int defer;"
+      "error: in.tc:1: expected a declarator, found `defer`";
+    case "a try expression is not implemented"
+      "int f(void) { return try f(); }"
+      "error: in.tc:1: `try` is not implemented yet (design 5.1; work package \
+       2.4)";
+    case "a defer statement is not implemented"
+      "void f(void) { defer f(); }"
+      "error: in.tc:1: `defer` is not implemented yet (design 6; work package \
+       2.5)";
+    case "_Defer is defer" "void f(void) { _Defer f(); }"
+      "error: in.tc:1: `_Defer` is not implemented yet (design 6; work \
+       package 2.5)";
+    case "a generated name" "int __tc_x;"
+      "error: in.tc:1: `__tc_x` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a generated member" "struct s { int __tc_m; };"
+      "error: in.tc:1: `__tc_m` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a generated tag" "struct __tc_s *p;"
+      "error: in.tc:1: `__tc_s` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a generated label" "void f(void) { __tc_l: ; }"
+      "error: in.tc:1: `__tc_l` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a generated type declaration" "type __tc_t = int;"
+      "error: in.tc:1: `__tc_t` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a use of a generated name" "int f(void) { return __tc_x; }"
+      "error: in.tc:1: `__tc_x` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a generated local label" "void f(void) { __label__ __tc_l; }"
+      "error: in.tc:1: `__tc_l` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a generated name in an attribute's arguments"
+      "int x __attribute__((cleanup(__tc_f)));"
+      "error: in.tc:1: `__tc_f` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a universe name in an expression"
+      "int f(void) { return result; }"
+      "error: in.tc:1: `result` is a universe name that typec does not \
+       implement yet (design 3.6; work package 2.3)";
+    case "a universe name where a declaration begins" "str s;"
+      "error: in.tc:1: `str` is a universe name that typec does not implement \
+       yet (design 8; work package 3.4)";
+    case "a universe name in a block" "void f(void) { slice_sub(0); }"
+      "error: in.tc:1: `slice_sub` is a universe name that typec does not \
+       implement yet (design 8; work package 3.4)";
+    case "a type declaration repeated" "type t = int;\ntype t = int;"
+      "error: in.tc:2: `t` is declared twice in one scope, and one of them is \
+       a type declaration (design 3.1 rule 5)";
+    case "a forward declaration repeated" "type t; type t;"
+      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
+       a type declaration (design 3.1 rule 5)";
+    case "a typedef before a type declaration"
+      "typedef int t; type t = int;"
+      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
+       a type declaration (design 3.1 rule 5)";
+    case "a declaration after a type declaration" "type t = int; int t;"
+      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
+       a type declaration (design 3.1 rule 5)";
+    case "a parameter redeclared by a type declaration"
+      "void f(int t) { type t = int; }"
+      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
+       a type declaration (design 3.1 rule 5)";
+    case "an alias that uses its own name" "type t = t *;"
+      "error: in.tc:1: `t` is used in its own definition, which is not a \
+       structure or union specifier (design 3.1 rule 2)";
+    case "an alias of a pointer to a structure that uses its own name"
+      "type t = struct { t *next; } *;"
+      "error: in.tc:1: `t` is used in its own definition, which is not a \
+       structure or union specifier (design 3.1 rule 2)";
+    case "an alias that hides an outer name uses its own"
+      "typedef int t; void f(void) { type t = t; }"
+      "error: in.tc:1: `t` is used in its own definition, which is not a \
+       structure or union specifier (design 3.1 rule 2)";
+    case "a variant" "type e = | A | B;"
+      "error: in.tc:1: variants are not implemented yet (design 3.2; work \
+       package 1.2)";
+    case "a distinct type" "type d = distinct unsigned int;"
+      "error: in.tc:1: distinct types are not implemented yet (design 3.4; \
+       work package 1.4)";
+    case "a private variant" "type v = private | A;"
+      "error: in.tc:1: `private` is not implemented yet (design 9.2; work \
+       package 1.7)";
+    case "a private distinct type" "type v = private distinct int;"
+      "error: in.tc:1: `private` is not implemented yet (design 9.2; work \
+       package 1.7)";
+    case "type parameters" "type box(T) = struct { T value; };"
+      "error: in.tc:1: type parameters are not implemented yet (design 3.5; \
+       work package 2.1)";
+    case "a type declaration without = or ;" "type t int;"
+      "error: in.tc:1: expected `=` or `;` after the name of a type \
+       declaration, found `int`";
+    case "a type declaration in a for clause"
+      "void f(void) { for (type t = int; ; ) ; }"
+      "error: in.tc:1: expected `;` after the first clause of `for`, found \
+       `t`";
+    case "a claimed tag declared before" "struct pair; type pair = struct \
+       { int a; };"
+      "error: in.tc:1: the type declaration of `pair` claims the tag of its \
+       name, which this scope declares already (design 10.2)";
+    case "a claimed tag declared after"
+      "type pair = struct { int a; }; struct pair { int b; };"
+      "error: in.tc:1: the tag `pair` is declared again, as a type \
+       declaration claims it (design 10.2)";
+    case "a claimed tag of a forward declaration declared after"
+      "type node; struct node { int b; };"
+      "error: in.tc:1: the tag `node` is declared again, as a type \
+       declaration claims it (design 10.2)";
+    case "a claimed tag named in Type-C text"
+      "type node; struct node *p;"
+      "error: in.tc:1: the tag `node` is not available to Type-C text, as a \
+       type declaration claims it (design 10.2)";
+    case "a claimed tag named in the structure's body"
+      "type node = struct { struct node *next; };"
+      "error: in.tc:1: the tag `node` is not available to Type-C text, as a \
+       type declaration claims it (design 10.2)";
+  ]
+
+(* C text, which keeps the words that Type-C reserves as identifiers. *)
+let c_text_word_cases =
+  [
+    case "try and defer are identifiers in C text"
+      "int try, defer; int f(void) { return try + defer; }"
+      "(declaration (int) try defer) | (define (int) (function f (void)) \
+       (block (return (+ try defer))))";
+    case "_Defer is a keyword in C text as well" "int _Defer;"
+      "error: in.i:1: expected a declarator, found `_Defer`";
+    case "a generated name in C text" "int __tc_x;"
+      "error: in.i:1: `__tc_x` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "type declarations in C text" "type t = int; t x;"
+      "(type t (type int)) | (declaration (t) x)";
+  ]
+
+let type_c_resolution_cases =
+  [
+    case "a forward declaration declares a typedef name and claims a tag"
+      "type node; node *p;"
+      "node#1 tag node#1 node->#1 p#1";
+    case "a structure's members see the declared name"
+      "type list = struct { list *next; }; list l;"
+      "list#1 tag list#1 list->#1 list->#1 l#1";
+    case "a tag of its own is the specifier's"
+      "type list = struct node { list *next; struct node *n; };"
+      "list#1 tag node#1 list->#1 tag node->#1";
+    case "a block hides a claimed tag"
+      "type node; void f(void) { struct node { int x; } n; struct node *p; \
+       }"
+      "node#1 tag node#1 f#1 tag node#2 n#1 tag node->#2 p#1";
+    case "a type declaration in a block hides an outer one"
+      "type t = int; void f(void) { type t = long; t x; } t y;"
+      "t#1 f#1 t#2 t->#2 x#1 t->#1 y#1";
+  ]
+
 let failures () =
   let failed_with outcome cases =
     List.filter_map
@@ -1427,8 +1669,9 @@ let failures () =
         if actual = case.expected then None else Some (case, actual))
       cases
   in
-  let failed_cases ?(parse = Parser.parse ~keywords:gnu_keywords) ~spans cases =
-    failed_with (outcome ~parse ~spans) cases
+  let failed_cases ?file ?(parse = Parser.parse ~keywords:gnu_keywords)
+      ~spans cases =
+    failed_with (outcome ?file ~parse ~spans) cases
   in
   let parse_with ?(int128 = true) dialect optional_floats =
     Parser.parse ~keywords:{ dialect; optional_floats; int128 }
@@ -1464,6 +1707,10 @@ let failures () =
         ~parse:(parse_with ~int128:false Gnu Optional_float.all)
         ~spans:false without_int128_cases
     @ failed_with resolutions resolution_cases
+    @ failed_cases ~file:type_c_file ~spans:false
+        (type_declaration_cases @ type_c_error_cases)
+    @ failed_cases ~spans:false c_text_word_cases
+    @ failed_with (resolutions ~file:type_c_file) type_c_resolution_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())
 

@@ -12,3 +12,15 @@
     The reader makes one value per name and flag, so owners compare with
     [==] as well as [=]. *)
 type t = { name : string; system_header : bool }
+
+(** The suffix of a Type-C source file and of a Type-C interface (design
+    2.1). *)
+let source_suffix = ".tc"
+
+let interface_suffix = ".tci"
+
+(** Whether text that [file] holds is Type-C text, which the suffix of
+    its name decides (design 2.1); all other text is C text. *)
+let is_type_c_text file =
+  Filename.check_suffix file.name source_suffix
+  || Filename.check_suffix file.name interface_suffix

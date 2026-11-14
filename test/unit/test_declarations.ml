@@ -10,9 +10,10 @@ let lp64 = Canned_targets.target Canned_targets.lp64_macros
 let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
 let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
 
-let read target source =
+(* [file] is "in.c", C text, unless a case reads Type-C text. *)
+let read ?(file = "in.c") target source =
   let text =
-    match Reader.read ~name:"in.c" source with
+    match Reader.read ~name:file source with
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in
@@ -76,8 +77,8 @@ let fail_case source message =
   Printf.eprintf "FAIL: %s\n  %s\n" source message
 
 (* [source] declares [name] at file scope as [expected] describes. *)
-let declares ?(target = lp64) source name expected =
-  match read target source with
+let declares ?file ?(target = lp64) source name expected =
+  match read ?file target source with
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
   | Ok read -> (
       match file_scope_entity read name with
@@ -97,16 +98,16 @@ let contains text part =
   at 0
 
 (* [source] is an error whose message contains [expected]. *)
-let rejects ?(target = lp64) source expected =
-  match read target source with
+let rejects ?file ?(target = lp64) source expected =
+  match read ?file target source with
   | Ok _ -> fail_case source "accepted"
   | Error { message; _ } ->
       if not (contains message expected) then
         fail_case source (Printf.sprintf "message %S lacks %S" message expected)
 
 (* [source] has no error. *)
-let accepts ?(target = lp64) source =
-  match read target source with
+let accepts ?file ?(target = lp64) source =
+  match read ?file target source with
   | Ok _ -> ()
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
 
@@ -1146,7 +1147,39 @@ let static_initialisers () =
      int i; int j; } u = { 1, x };";
   accepts "void f(void) { static int a[] = (int[]){ 1, 2 }; }"
 
+(* Type declarations (design 3.1) in Type-C text. *)
+let type_declarations () =
+  let file = "in.tc" in
+  declares ~file "type id = unsigned int;" "id" "typedef unsigned int";
+  declares ~file "type handler = void (*)(int);" "handler"
+    "typedef void (*)(int)";
+  declares ~file "type node;" "node" "typedef struct node";
+  declares ~file "type node; node *p;" "p"
+    "object struct node * external static";
+  declares ~file "type pair = struct { int a; pair *next; };" "pair"
+    "typedef struct pair";
+  declares ~file "type list = struct node { list *next; };" "list"
+    "typedef struct node";
+  declares ~file "type u = union { int i; u *p; }; u v;" "v"
+    "object union u external static";
+  (* An alias is the type it names, not a new one. *)
+  accepts ~file
+    "type id = unsigned int; \
+     _Static_assert(__builtin_types_compatible_p(id, unsigned int), \"\");";
+  accepts ~file
+    "type pair = struct { int a; pair *next; }; \
+     _Static_assert(sizeof(pair) == 16, \"\"); pair p; int n = sizeof p.a;";
+  (* The structure is incomplete in its own body. *)
+  rejects ~file "type t = struct { t inner; };" "incomplete";
+  rejects ~file "type node; int a[sizeof(node)];" "incomplete";
+  (* A type declaration in a block is read there. *)
+  accepts ~file "void f(int n) { type row = int[n]; row r; r[0] = 1; }";
+  rejects ~file "int n = 3; type row = int[n];" "6.7.6.2p2";
+  declares ~file "type t = int; void f(void) { type t = long; t x; } t y;" "y"
+    "object int external static"
+
 let () =
+  type_declarations ();
   builtin_typedefs ();
   gnu_profile ();
   unknown_types ();

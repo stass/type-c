@@ -57,6 +57,8 @@ let add_external names = function
     ->
       List.iter (add_specifier names) specifiers;
       add_declarator names declarator declared
+  | Type_declaration { node = { name; declared; _ }; _ } ->
+      Hashtbl.replace names.ordinary name.node (In_tree declared.id)
   | External_declaration { node = Static_assert _; _ }
   | Top_level_asm _ | Empty_declaration _ ->
       ()

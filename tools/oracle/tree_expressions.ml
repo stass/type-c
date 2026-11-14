@@ -88,7 +88,8 @@ and type_specifier visit = function
   | Basic _ | Typedef_name _ -> ()
   | Atomic_type name | Typeof_type name -> type_name visit name
   | Struct_or_union { kind = _; attributes = _; tag = _; members } ->
-      option (list member_declaration) visit members
+      option (fun visit (body : _ spanned) ->
+          list member_declaration visit body.node) visit members
   | Enum { attributes = _; tag = _; underlying; enumerators } ->
       option specifiers visit underlying;
       option (list enumerator) visit enumerators
@@ -213,8 +214,16 @@ and block visit (b : block) =
   List.iter
     (function
       | Block_declaration d -> declaration visit d
+      | Block_type_declaration d -> type_declaration visit d
       | Block_statement s -> statement visit s)
     b.node.items
+
+and type_declaration visit (d : type_declaration) =
+  match d.node.definition with
+  | Incomplete_variant -> ()
+  | Alias name -> type_name visit name
+  | Record_alias specifier ->
+      type_specifier visit (Struct_or_union specifier.node)
 
 and for_clause visit = function
   | Clause_declaration d -> declaration visit d
@@ -238,6 +247,7 @@ let function_definition visit (definition : function_definition) =
 
 let external_declaration visit = function
   | External_declaration d -> declaration visit d
+  | Type_declaration d -> type_declaration visit d
   | Function_definition definition -> function_definition visit definition
   | Top_level_asm code -> assembler visit code.node
   | Empty_declaration _ -> ()

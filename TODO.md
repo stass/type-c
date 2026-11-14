@@ -669,6 +669,40 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
+- [Medium] `str` is a typedef name of the universe scope (design 8),
+  so where no declaration hides it, C11 6.7.6.3p11 reads an old-style
+  definition `int f(str) char *str; { ... }` and a parameter `int (str)`
+  with `str` as the type, against the superset claim of design 2.2.
+  Decide before work package 3.4 gives `str` its meaning, which makes it
+  a typedef name to the parser; until then `Universe` leaves every
+  universe name an ordinary identifier to the grammar.
+- [Low] After the `=` of a type declaration, `private` and `distinct`
+  may also be typedef names (design 2.3 recognises them only there).
+  The parser takes `distinct` as the word only before a token that
+  begins a type name, and `private` only before `|` or `distinct`, so
+  `type a = distinct;` and `type b = private *;` are aliases. Confirm in
+  the design (3.4, 9.2) when 1.4 and 1.7 implement them.
+- [Low] `type N;` claims the structure tag `N` only; the enumeration tag
+  `N_tag` and the enumerators of design 10.1 rule 6 are claimed when 1.2
+  completes the variant. Decide whether the forward declaration claims
+  `N_tag` already.
+- [Low] Type-C text cannot name a tag that a type declaration claims
+  (design 10.1 rule 6); C text in the same unit can, and names the
+  lowered structure. Say so in the design or refuse it there too.
+- [Low] Until 1.2, an incomplete variant is the incomplete structure it
+  lowers to, in `Declarations` as in C.
+- [Low] A type declaration in a span that the parser does not read, the
+  arguments of a GNU attribute or the body of a function that a system
+  header defines, is emitted unlowered and fails in the backend. Refuse
+  it there, or say in design 13.3 that those spans hold C only.
+- [Low] Lowering takes the type declarations that `Declarations` reads,
+  so one in a node that the reader does not visit would go unlowered.
+  Every node probed is visited; the parser, which meets each one, could
+  hand them over instead.
+- [Low] Each edit of the emitter is wrapped in two line markers, so
+  `--emit-c` shows a lowered alias over eight lines. An edit whose text
+  and replaced tokens hold no newline could go without them.
+
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.

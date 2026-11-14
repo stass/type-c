@@ -45,14 +45,27 @@ type grammar_token = { lexeme : lexeme; index : int }
    or the [?] of a conditional, which its [:] closes. *)
 type opening = Open_bracket of P.t | Open_conditional
 
+(* The kind of an ordinary identifier in scope, which is what parsing
+   needs of a name: never its type. A [Declared_type] is a typedef name to C
+   that a type declaration declares, which is the only declaration of
+   its name in its scope (design 3.1 rule 5); it is [Defining_type]
+   within its own definition where that may not use it (rule 2). *)
+type kind = Not_a_type | Typedef_name | Declared_type | Defining_type
+
 (* What the grammar needs of an ordinary identifier in scope: its
-   declaration, and whether it is a typedef name. Parsing needs the kind
-   of a name, never its type. *)
-type ordinary = { declaration : reference; names_type : bool }
+   declaration and its kind. *)
+type ordinary = { declaration : reference; kind : kind }
+
+(* A tag in scope: its declaration, and whether a type declaration
+   claims it for the C that it lowers to (design 10.1 rule 6, 10.2). *)
+type tag_entry = { tag : tag_id; claimed : bool }
 
 (* The scopes open at a point, in the two name spaces that scopes hold
-   (6.2.3): ordinary identifiers, and tags by their declaration. *)
-type scope = (ordinary, tag_id) Scope.t
+   (6.2.3): ordinary identifiers, and tags. The universe scope (design
+   2.3), which encloses file scope, holds names that no declaration
+   makes, so it is not among them: a name that no scope declares is
+   looked up in {!Universe}. *)
+type scope = (ordinary, tag_entry) Scope.t
 
 (* The cursor. [scope] is persistent, so leaving a scope restores the
    value saved on entering it. *)
@@ -83,7 +96,8 @@ let lexeme_of keywords reader (token : Token.t) =
   match token.kind with
   | Token.Identifier -> (
       let spelling = Reader.spelling reader token in
-      match Keyword.of_spelling keywords spelling with
+      let type_c_text = File.is_type_c_text token.owner in
+      match Keyword.of_spelling keywords ~type_c_text spelling with
       | Some keyword -> Some (Keyword_token keyword)
       | None -> Some (Identifier_token spelling))
   | Token.Number -> Some Number_token
@@ -139,9 +153,46 @@ let error_location state =
 let fail state message =
   raise (Failed { location = error_location state; message })
 
+(* An error at the token [index] of [Reader.t.tokens], which the cursor
+   has passed. *)
+let fail_at_token state index message =
+  raise (Failed { location = state.reader.tokens.(index).location; message })
+
 let quoted spelling =
   if String.length spelling <= max_quoted_spelling then "`" ^ spelling ^ "`"
   else "`" ^ String.sub spelling 0 max_quoted_spelling ^ "...`"
+
+(* Whether the token [index] of [Reader.t.tokens] is Type-C text. *)
+let is_type_c_text_at state index =
+  File.is_type_c_text state.reader.tokens.(index).owner
+
+(* The names that typec generates begin with this (design 13.5). *)
+let generated_prefix = "__tc_"
+
+(* A Type-C translation unit holds no identifier that lowering may
+   generate (design 2.3), in C text as in Type-C text, so neither a
+   declaration nor a use can meet a generated name. Every identifier is
+   one of the grammar tokens, read or not. *)
+let refuse_generated_names state =
+  Array.iter
+    (fun { lexeme; index } ->
+      match lexeme with
+      | Identifier_token spelling
+        when String.starts_with ~prefix:generated_prefix spelling ->
+          fail_at_token state index
+            (Rule.message Generated_name
+               (Printf.sprintf
+                  "%s begins with `%s`, which is reserved for the names \
+                   that typec generates"
+                  (quoted spelling) generated_prefix))
+      | Keyword_token _ | Identifier_token _ | Punctuator_token _
+      | Number_token | Character_token _ | String_token _ | End_of_input ->
+          ())
+    state.grammar
+
+(* A construct that a later work package implements, at the cursor. *)
+let fail_not_implemented state ~section ~package text =
+  fail state (Rule.message (Not_implemented { section; package }) text)
 
 let found state =
   match peek state with
@@ -227,15 +278,20 @@ let file_scope keywords =
   List.fold_left
     (fun scope (name, builtin) ->
       if Builtin_typedef.declared keywords builtin then
-        let entry = { declaration = Builtin name; names_type = true } in
+        let entry = { declaration = Builtin name; kind = Typedef_name } in
         Scope.declare scope name entry
       else scope)
     Scope.file Builtin_typedef.table
 
+let names_type = function
+  | Not_a_type -> false
+  | Typedef_name | Declared_type | Defining_type -> true
+
+(* The visible declaration of [name] where it is a typedef name. *)
 let typedef_declaration state name =
   match Scope.find state.scope name with
-  | Some { declaration; names_type = true } -> Some declaration
-  | Some { names_type = false; _ } | None -> None
+  | Some ordinary when names_type ordinary.kind -> Some ordinary
+  | Some _ | None -> None
 
 let is_typedef_name state name = typedef_declaration state name <> None
 
@@ -243,30 +299,96 @@ let is_typedef_name state name = typedef_declaration state name <> None
    the cursor reads each token once, so the token is a unique id. *)
 let token_of (name : identifier) = name.span.first
 
+let is_type_declared = function
+  | Declared_type | Defining_type -> true
+  | Not_a_type | Typedef_name -> false
+
+(* A type declaration is the only declaration of its name in its scope
+   (design 3.1 rule 5): unlike [typedef], it is not repeated. *)
+let refuse_second_definition state (name : identifier) kind earlier =
+  match earlier with
+  | Some (earlier : ordinary)
+    when is_type_declared kind || is_type_declared earlier.kind ->
+      fail_at_token state (token_of name)
+        (Rule.message One_definition
+           (quoted name.node
+          ^ " is declared twice in one scope, and one of them is a type \
+             declaration"))
+  | Some _ | None -> ()
+
 (* Declares the ordinary identifier [name] in the innermost scope, where
    its scope begins. *)
-let declare state ~names_type (name : identifier) =
+let declare state ~kind (name : identifier) =
   let id = Ordinary_at (token_of name) in
-  let earlier =
-    Option.map
-      (fun ordinary -> ordinary.declaration)
-      (Scope.find_in_innermost state.scope name.node)
-  in
+  let earlier = Scope.find_in_innermost state.scope name.node in
+  refuse_second_definition state name kind earlier;
+  state.scope <-
+    Scope.declare state.scope name.node { declaration = In_tree id; kind };
+  { id; earlier = Option.map (fun ordinary -> ordinary.declaration) earlier }
+
+(* The name of a type declaration as of the end of its definition, which
+   may use it from there on. *)
+let end_definition state (name : identifier) (declared : declared) =
   state.scope <-
     Scope.declare state.scope name.node
-      { declaration = In_tree id; names_type };
-  { id; earlier }
+      { declaration = In_tree declared.id; kind = Declared_type }
 
+(* A name that no scope declares may be one of the universe scope,
+   which no work package has given a meaning yet. *)
+let refuse_universe_name state name =
+  match Universe.find name with
+  | Some { section; package; _ } ->
+      fail_not_implemented state ~section ~package
+        (quoted name ^ " is a universe name that typec does not implement yet")
+  | None -> ()
+
+(* At the identifier [name], which the cursor has not passed. *)
 let resolve state name =
   match Scope.find state.scope name with
   | Some { declaration; _ } -> Resolved declaration
-  | None -> Undeclared
+  | None ->
+      refuse_universe_name state name;
+      Undeclared
 
+let fail_claimed state (name : identifier) text =
+  fail_at_token state (token_of name)
+    (Rule.message Claimed_tag
+       (Printf.sprintf "the tag %s %s, as a type declaration claims it"
+          (quoted name.node) text))
+
+(* A C declaration of a tag that a type declaration claims in the same
+   scope is an error (design 10.1 rule 6). *)
 let declare_tag state (name : identifier) =
   let id = Tag_at (token_of name) in
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
-  state.scope <- Scope.declare_tag state.scope name.node id;
-  Declares { id; earlier }
+  (match earlier with
+  | Some { claimed = true; _ } -> fail_claimed state name "is declared again"
+  | Some { claimed = false; _ } | None -> ());
+  state.scope <-
+    Scope.declare_tag state.scope name.node { tag = id; claimed = false };
+  Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
+
+(* The tag [name] of the structure that a type declaration of [name]
+   lowers to, which it claims in the current scope (design 10.1 rule 6,
+   10.2): no other declaration of the tag may be in that scope. *)
+let claim_tag state (name : identifier) =
+  let id = claimed_tag name in
+  if Scope.find_tag_in_innermost state.scope name.node <> None then
+    fail_at_token state (token_of name)
+      (Rule.message Claimed_tag
+         (Printf.sprintf
+            "the type declaration of %s claims the tag of its name, which \
+             this scope declares already"
+            (quoted name.node)));
+  state.scope <-
+    Scope.declare_tag state.scope name.node { tag = id; claimed = true }
+
+(* A tag that a type declaration claims exists for C (design 10.1 rule
+   6), so Type-C text cannot name it. *)
+let named_tag state (name : identifier) entry =
+  if entry.claimed && is_type_c_text_at state (token_of name) then
+    fail_claimed state name "is not available to Type-C text";
+  Names entry.tag
 
 (* A tag that [declares] by its form declares itself in the current
    scope (6.7.2.3p6, p7); any other names the visible tag (p9), or
@@ -276,7 +398,7 @@ let bound_tag state (name : identifier) ~declares =
     if declares then declare_tag state name
     else
       match Scope.find_tag state.scope name.node with
-      | Some id -> Names id
+      | Some entry -> named_tag state name entry
       | None -> declare_tag state name
   in
   { name; binding }
@@ -312,7 +434,7 @@ type specifier_word =
   | Struct_word of struct_or_union
   | Enum_word
   | Alignas_word
-  | Typedef_word of string * reference
+  | Typedef_word of string * ordinary
   | Typeof_word
   | Attribute_word
 
@@ -359,7 +481,7 @@ let keyword_specifier_word state offset keyword =
   | Break | Case | Continue | Default | Do | Else | For | Goto | If | Return
   | Sizeof | Switch | While | Alignof | Generic | Imaginary | Static_assert
   | Asm | Extension | Label | Builtin_va_arg | Builtin_offsetof
-  | Builtin_types_compatible_p | Real | Imag ->
+  | Builtin_types_compatible_p | Real | Imag | Try | Defer ->
       None
 
 (* The specifier that the token [offset] places ahead begins. A typedef
@@ -370,7 +492,7 @@ let specifier_word state offset =
   | Keyword_token keyword -> keyword_specifier_word state offset keyword
   | Identifier_token name -> (
       match typedef_declaration state name with
-      | Some declaration -> Some (Typedef_word (name, declaration))
+      | Some ordinary -> Some (Typedef_word (name, ordinary))
       | None -> None)
   | Punctuator_token _ | Number_token | Character_token _ | String_token _
   | End_of_input ->
@@ -488,9 +610,13 @@ let is_attributes = function
   | Function_specifier _ | Alignment_specifier _ ->
       false
 
-let declares_typedef specifiers =
-  List.exists (fun specifier -> specifier.node = Storage_class Typedef)
-    specifiers
+(* The kind of the names that a C declaration with [specifiers]
+   declares. *)
+let declared_kind specifiers =
+  if List.exists (fun specifier -> specifier.node = Storage_class Typedef)
+      specifiers
+  then Typedef_name
+  else Not_a_type
 
 let is_identifier = function
   | Identifier_token _ -> true
@@ -512,6 +638,20 @@ let identifier state expected =
   | Keyword_token _ | Punctuator_token _ | Number_token | Character_token _
   | String_token _ | End_of_input ->
       fail_expected state expected
+
+(* After [.] and [->], in a designator and in [offsetof], a word that
+   Type-C reserves is a member name as well (design 2.3), so that Type-C
+   text can reach a member that C text names [defer]. *)
+let member_name state expected =
+  match peek state with
+  | Keyword_token (Keyword.Try | Keyword.Defer) ->
+      let start = state.position in
+      let name = next_spelling state in
+      advance state;
+      finish state start name
+  | Keyword_token _ | Identifier_token _ | Punctuator_token _ | Number_token
+  | Character_token _ | String_token _ | End_of_input ->
+      identifier state expected
 
 let optional_identifier state =
   match peek state with
@@ -961,6 +1101,58 @@ and open_kind =
    closed, or, after the [else] of an [if], open again. *)
 type closing = Closed of statement_node | Reopened of open_kind
 
+(* Type declarations (design 3.1, Appendix A) are recognised by
+   position: [type] is an identifier everywhere else (design 2.3). *)
+
+let type_word = "type"
+
+(* A type declaration begins with [type] and an identifier where an
+   external declaration or a block item begins, except where [type] is
+   visible as a typedef name: there the same tokens begin the C
+   declaration (design 2.2, 2.3). C rejects them anywhere else. *)
+let begins_type_declaration state =
+  peek state = Identifier_token type_word
+  && is_identifier (peek_at state 1)
+  && not (is_typedef_name state type_word)
+
+(* Whether the definition at the cursor, after the [=] of a type
+   declaration, is a structure or union specifier with a body and
+   nothing else: the one definition that may use the name it defines
+   (design 3.1 rule 2), which [record_specifier] then reads. *)
+let defines_record_alone state =
+  match peek state with
+  | Keyword_token (Keyword.Struct | Keyword.Union) ->
+      let before_tag = past_attributes state 1 in
+      let before_body =
+        if is_identifier (peek_at state before_tag) then before_tag + 1
+        else before_tag
+      in
+      let after_body = past_group state P.Left_brace before_body in
+      peek_at state before_body = Punctuator_token P.Left_brace
+      && peek_at state (past_attributes state after_body)
+         = Punctuator_token P.Semicolon
+  | _ -> false
+
+(* The definitions that a later work package implements: a variant,
+   which begins with [|]; [private] before [|] or [distinct]; and
+   [distinct] before a type name. [private] and [distinct] are words
+   only there (design 2.3), so elsewhere after the [=] they may name a
+   type. *)
+let refuse_unimplemented_definition state =
+  let word_at offset word = peek_at state offset = Identifier_token word in
+  if peek state = Punctuator_token P.Pipe then
+    fail_not_implemented state ~section:"3.2" ~package:"1.2"
+      "variants are not implemented yet";
+  if
+    word_at 0 "private"
+    && (peek_at state 1 = Punctuator_token P.Pipe || word_at 1 "distinct")
+  then
+    fail_not_implemented state ~section:"9.2" ~package:"1.7"
+      "`private` is not implemented yet";
+  if word_at 0 "distinct" && starts_type_name state 1 then
+    fail_not_implemented state ~section:"3.4" ~package:"1.4"
+      "distinct types are not implemented yet"
+
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
 
@@ -991,6 +1183,14 @@ let rec specifiers state context =
    specifiers of a declaration, for {!ends_alone}. *)
 and specifier state word ~alone =
   let start = state.position in
+  (match word with
+  | Typedef_word (name, { kind = Defining_type; _ }) ->
+      fail state
+        (Rule.message Own_name
+           (quoted name
+          ^ " is used in its own definition, which is not a structure or \
+             union specifier"))
+  | _ -> ());
   advance state;
   let node =
     match word with
@@ -998,7 +1198,7 @@ and specifier state word ~alone =
     | Qualifier_word qualifier -> Type_qualifier qualifier
     | Function_word function_specifier -> Function_specifier function_specifier
     | Basic_word basic -> Type_specifier (Basic basic)
-    | Typedef_word (name, declaration) ->
+    | Typedef_word (name, { declaration; _ }) ->
         Type_specifier (Typedef_name { name; declaration })
     | Atomic_type_word ->
         expect state P.Left_paren "`(` after `_Atomic`";
@@ -1012,6 +1212,17 @@ and specifier state word ~alone =
     | Attribute_word -> Attributes (attribute_list state)
   in
   finish state start node
+
+(* Where a declaration must begin and does not. A universe name there may
+   be a type that typec does not implement yet, which the error says. *)
+and refuse_declaration state =
+  (match peek state with
+  | Identifier_token name when Scope.find state.scope name = None ->
+      refuse_universe_name state name
+  | Identifier_token _ | Keyword_token _ | Punctuator_token _ | Number_token
+  | Character_token _ | String_token _ | End_of_input ->
+      ());
+  fail_expected state "a declaration"
 
 (* After the [typeof]. *)
 and typeof_specifier state =
@@ -1032,23 +1243,31 @@ and alignment state =
   expect state P.Right_paren "`)` after the operand of `_Alignas`";
   alignment
 
-(* The attributes after the keyword and after a body apply to the type
-   (GCC manual 6.39.5). *)
 and struct_or_union state kind ~alone =
+  Struct_or_union (record_specifier state kind ~alone ~claimed_by:None)
+
+(* After the keyword. The attributes after it and after a body apply to
+   the type (GCC manual 6.39.5). [claimed_by] is the type declaration
+   whose definition the specifier is, which claims its tag where it has
+   none of its own (design 10.2). *)
+and record_specifier state kind ~alone ~claimed_by =
   let leading = attributes state in
   let tag_name = optional_identifier state in
   let declares =
     peek state = Punctuator_token P.Left_brace || ends_alone state ~alone
   in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
+  if tag = None then Option.iter (claim_tag state) claimed_by;
+  let body_start = state.position in
   let members =
-    if accept state P.Left_brace then Some (member_declarations state)
+    if accept state P.Left_brace then
+      Some (finish state body_start (member_declarations state))
     else None
   in
   if tag = None && members = None then
     fail_expected state "a tag or `{` after `struct` or `union`";
   let trailing = if members = None then [] else attributes state in
-  Struct_or_union { kind; attributes = leading @ trailing; tag; members }
+  ({ kind; attributes = leading @ trailing; tag; members } : record_specifier)
 
 (* After the [{]: the member declarations, which GNU C allows to be none
    and to have a [;] alone among them, and the [}]. *)
@@ -1160,7 +1379,7 @@ and enumerator state =
   let value =
     if accept state P.Equal then Some (constant_expression state) else None
   in
-  let declared = declare state ~names_type:false name in
+  let declared = declare state ~kind:Not_a_type name in
   finish state start { name; declared; attributes; value }
 
 (* After the [_Static_assert]. *)
@@ -1354,7 +1573,7 @@ and parameter_declarator state = function
   | Some declarator -> (
       match declared_identifier declarator with
       | Some name ->
-          let declared = declare state ~names_type:false name in
+          let declared = declare state ~kind:Not_a_type name in
           Named_parameter { declarator; declared }
       | None -> Abstract_parameter (Some declarator))
 
@@ -1367,7 +1586,7 @@ and identifier_list state =
         fail_type_name state "a parameter name" name
     | _ -> ());
     let name = identifier state "a parameter name" in
-    let declared = declare state ~names_type:false name in
+    let declared = declare state ~kind:Not_a_type name in
     let identifiers = { name; declared } :: identifiers in
     if accept state P.Comma then loop identifiers else List.rev identifiers
   in
@@ -1411,17 +1630,19 @@ and designated_initialiser state =
 
 (* GNU's obsolete [member:], which means [.member =] (GCC manual,
    "Designated Initializers"). The member's name may also be a typedef
-   name, as members have a name space of their own. *)
+   name, as members have a name space of their own, or a word that Type-C
+   reserves ([member_name]). *)
 and begins_obsolete_designator state =
   match peek state with
-  | Identifier_token _ -> peek_at state 1 = Punctuator_token P.Colon
+  | Identifier_token _ | Keyword_token (Keyword.Try | Keyword.Defer) ->
+      peek_at state 1 = Punctuator_token P.Colon
   | Keyword_token _ | Punctuator_token _ | Number_token | Character_token _
   | String_token _ | End_of_input ->
       false
 
 and obsolete_designator state =
   let start = state.position in
-  let member = identifier state "a member name" in
+  let member = member_name state "a member name" in
   expect state P.Colon "`:` after a member name";
   finish state start (Member_designator member)
 
@@ -1438,7 +1659,7 @@ and designators state =
 and designator state =
   let start = state.position in
   if accept state P.Dot then
-    let member = identifier state "a member name after `.`" in
+    let member = member_name state "a member name after `.`" in
     finish state start (Member_designator member)
   else begin
     expect state P.Left_bracket "`[` or `.`";
@@ -1617,11 +1838,11 @@ and postfix_operators state start operand =
       continue_with (Call { callee = operand; arguments })
   | Punctuator_token P.Dot ->
       advance state;
-      let member = identifier state "a member name after `.`" in
+      let member = member_name state "a member name after `.`" in
       continue_with (Member { operand; member })
   | Punctuator_token P.Arrow ->
       advance state;
-      let member = identifier state "a member name after `->`" in
+      let member = member_name state "a member name after `->`" in
       continue_with (Pointer_member { operand; member })
   | Punctuator_token P.Plus_plus ->
       advance state;
@@ -1651,8 +1872,9 @@ and primary_expression state =
   | Identifier_token name when is_typedef_name state name ->
       fail_type_name state "an expression" name
   | Identifier_token name ->
+      let resolution = resolve state name in
       advance state;
-      finish state start (Identifier { name; resolution = resolve state name })
+      finish state start (Identifier { name; resolution })
   | Number_token -> (
       match Number.classify (next_spelling state) with
       | Number.Not_a_constant ->
@@ -1695,6 +1917,12 @@ and primary_expression state =
   | Punctuator_token P.Caret ->
       advance state;
       block_literal state start
+  | Keyword_token Keyword.Try ->
+      fail_not_implemented state ~section:"5.1" ~package:"2.4"
+        "`try` is not implemented yet"
+  | Keyword_token Keyword.Defer ->
+      fail_not_implemented state ~section:"6" ~package:"2.5"
+        (quoted (next_spelling state) ^ " is not implemented yet")
   | _ -> fail_expected state "an expression"
 
 (* After the [__builtin_va_arg]. *)
@@ -1711,7 +1939,7 @@ and offsetof state start =
   expect state P.Left_paren "`(` after `__builtin_offsetof`";
   let type_name = type_name state in
   expect state P.Comma "`,` after the type name of `__builtin_offsetof`";
-  let member = identifier state "a member name" in
+  let member = member_name state "a member name" in
   let designators = designators state in
   expect state P.Right_paren "`)` after the member of `__builtin_offsetof`";
   finish state start (Offsetof { type_name; member; designators })
@@ -1790,7 +2018,7 @@ and scoped_declarator state specifiers =
   let trailing = attributes state in
   let declared =
     declare state
-      ~names_type:(declares_typedef specifiers)
+      ~kind:(declared_kind specifiers)
       (named_identifier state declarator)
   in
   {
@@ -1823,7 +2051,7 @@ and declaration_start state =
     Complete (finish state start (Static_assert (static_assertion state)))
   else begin
     let specifiers = specifiers state Declaration_specifiers in
-    if specifiers = [] then fail_expected state "a declaration";
+    if specifiers = [] then refuse_declaration state;
     if accept state P.Semicolon then
       Complete
         (finish state start (Declaration { specifiers; declarators = [] }))
@@ -1849,6 +2077,49 @@ and declaration_of_start state = function
       let declarators = loop [ init_declarator state first ] in
       expect state P.Semicolon "`;` after a declaration";
       finish state start (Declaration { specifiers; declarators })
+
+(* At the [type] that [begins_type_declaration] recognises. *)
+and type_declaration state =
+  let start = state.position in
+  advance state;
+  let name = identifier state "the name of a type declaration" in
+  if peek state = Punctuator_token P.Left_paren then
+    fail_not_implemented state ~section:"3.5" ~package:"2.1"
+      "type parameters are not implemented yet";
+  let declared, definition =
+    if accept state P.Semicolon then incomplete_variant state name
+    else begin
+      expect state P.Equal "`=` or `;` after the name of a type declaration";
+      let declared_definition = type_definition state name in
+      expect state P.Semicolon "`;` after a type declaration";
+      declared_definition
+    end
+  in
+  finish state start ({ name; declared; definition } : type_declaration_node)
+
+and incomplete_variant state name =
+  let declared = declare state ~kind:Declared_type name in
+  claim_tag state name;
+  (declared, Incomplete_variant)
+
+(* After the [=]: the declaration of [name], which is in scope from the
+   end of its identifier, and the definition. *)
+and type_definition state name =
+  refuse_unimplemented_definition state;
+  match specifier_word state 0 with
+  | Some (Struct_word kind) when defines_record_alone state ->
+      let declared = declare state ~kind:Declared_type name in
+      let start = state.position in
+      advance state;
+      let specifier =
+        record_specifier state kind ~alone:false ~claimed_by:(Some name)
+      in
+      (declared, Record_alias (finish state start specifier))
+  | _ ->
+      let declared = declare state ~kind:Defining_type name in
+      let type_name = type_name state in
+      end_definition state name declared;
+      (declared, Alias type_name)
 
 (* Statements (C11 6.8). *)
 
@@ -2153,6 +2424,8 @@ and block_items state =
 and block_item state =
   if begins_label state || begins_attribute_statement state then
     Block_statement (statement state)
+  else if begins_type_declaration state then
+    Block_type_declaration (type_declaration state)
   else if begins_declaration state then
     Block_declaration (block_declaration state)
   else Block_statement (statement state)
@@ -2228,10 +2501,10 @@ let function_definition state start specifiers (first : scoped_declarator)
          body;
        })
 
-(* [__extension__] may come before every external declaration; the node
-   holds it in its span. A function definition has no asm label: GCC and
-   Clang take one only in a declaration. *)
-let external_declaration state =
+(* [__extension__] may come before every external declaration of C; the
+   node holds it in its span. A function definition has no asm label: GCC
+   and Clang take one only in a declaration. *)
+let c_external_declaration state =
   let start = state.position in
   match peek_at state (extensions_ahead state 0) with
   | Punctuator_token P.Semicolon ->
@@ -2258,6 +2531,11 @@ let external_declaration state =
       | declaration_start ->
           External_declaration (declaration_of_start state declaration_start))
 
+let external_declaration state =
+  if begins_type_declaration state then
+    Type_declaration (type_declaration state)
+  else c_external_declaration state
+
 let translation_unit state =
   let rec loop declarations =
     if peek state = End_of_input then List.rev declarations
@@ -2275,7 +2553,10 @@ let parse ~keywords reader =
       scope = file_scope keywords;
     }
   in
-  match translation_unit state with
+  match
+    refuse_generated_names state;
+    translation_unit state
+  with
   | translation_unit -> Ok translation_unit
   | exception Failed error -> Error error
 

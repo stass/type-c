@@ -13,13 +13,13 @@ val run : env_cc:string option -> string list -> 'a
     commands of {!Pipeline.plan} one after the other in a directory made
     by {!Temp_dir.create}, which it removes on every way out, and stops
     at the first that fails. Between the preprocessing and the compile
-    step of each translation it runs {!Front_end.check} on the text, for
+    step of each translation it runs {!Front_end.lower} on the text, for
     the model from {!Target_query.query} with the translation's
-    [target_options]. When a command fails, [typec] exits with its
-    status, or ends by the signal that ended it, or by a signal that
-    {!Signals} caught. To print the target model, it prints
-    {!Typec_sema.Target.to_string} of the model from
-    {!Target_query.query} on stdout and exits with status 0.
+    [target_options], and emits the text with the edits it gives. When a
+    command fails, [typec] exits with its status, or ends by the signal
+    that ended it, or by a signal that {!Signals} caught. To print the
+    target model, it prints {!Typec_sema.Target.to_string} of the model
+    from {!Target_query.query} on stdout and exits with status 0.
 
     It never returns. When [typec] fails itself it prints one message
     on stderr and exits with the {!Exit_status.code} of the failure:
