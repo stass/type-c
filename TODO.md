@@ -224,15 +224,31 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
-- [Medium] `Declarations` accepts the GNU attributes of a list that
-  changes no type or constant it computes (`neutral_attributes`) and
-  refuses every other one, `packed`, `mode`, `vector_size` and Clang's
-  `overloadable` among them, so the SDK's `tgmath.h` is refused. The
-  list is the answer to the design question on attributes until 0.7b
-  reads them; `aligned` is on it only while record layout is the
-  backend's. The rest of the GNU profile that no type models
-  (`_Float16`, `typeof`, block pointers, fixed enumeration types) is an
-  error that names it.
+- [Medium] `Declarations` accepts the GNU attributes of a table that
+  gives each one's effect (`attribute_effects`): `noreturn` marks a
+  function, the rest change no type or constant it computes. It refuses
+  every other one, `packed`, `mode`, `vector_size`, `gnu_inline` and
+  Clang's `overloadable` among them, so the SDK's `tgmath.h` is refused.
+  The table is the answer to the design question on attributes until
+  0.7b reads them; `aligned` is on it only while record layout is the
+  backend's. `noreturn` on a pointer to a function or on a function
+  typedef is not recorded, though GCC and Clang make it part of the type
+  and treat a call through it as not returning. The table checks no
+  attribute's arguments (`noreturn(1)` is accepted). The rest of the GNU
+  profile that no type models (`_Float16`, `typeof`, block pointers,
+  fixed enumeration types) is an error that names it.
+- [Medium] Attributes inside what the reader does not read, such as an
+  initialiser or the operand of `sizeof`, are not checked against the
+  table. Checking them in the parser, where every attribute is made,
+  would cover every position by construction; the reader's full record
+  patterns cover only the positions it reads, and not a field read by
+  projection.
+- [Low] `struct s;` alone declares a new tag (6.7.2.3p7) by GCC's
+  reading in `Declarations` (attributes on either side, no qualifier or
+  storage class), which Clang reads differently: it requires the `;`
+  right after the tag and allows qualifiers and storage classes before
+  it. Only block scope shows the difference; decide which to follow, and
+  test it, when block-scope declarations are read.
 - [High] The reader accepts everything the parser parses, entering
   what it cannot type yet with an opaque type, so that the scope rules
   of steps 2 to 5 run on every translation unit the parser reads. It
@@ -376,14 +392,15 @@ Reproducers and the probe are in
 - [Medium] Define which GNU attributes the front end must understand
   rather than merely carry (the tree holds each one's name and its
   argument tokens unread). The macOS headers use four that typing needs:
-  `aligned`, which changes a layout; `noreturn`, for reachability;
-  Clang's `overloadable`, without which the SDK's `tgmath.h` declares
-  one function with conflicting types; and `gnu_inline`, which changes
-  what an inline definition defines. Common code adds `packed`, `mode`,
-  `vector_size` and `transparent_union`, which change a type or a
-  layout. The rest the headers use (`availability`, `deprecated`,
-  `format`, `noescape` and others) only shape diagnostics or code
-  generation.
+  `aligned`, which changes a layout; `noreturn`, for reachability,
+  which `Declarations` records on a function; Clang's `overloadable`,
+  without which the SDK's `tgmath.h` declares one function with
+  conflicting types; and `gnu_inline`, which changes what an inline
+  definition defines (`sys/cdefs.h` uses it under GCC, not Clang).
+  Common code adds `packed`, `mode`, `vector_size` and
+  `transparent_union`, which change a type or a layout. The rest the
+  headers use (`availability`, `deprecated`, `format`, `noescape` and
+  others) only shape diagnostics or code generation.
 - [Medium] Header macros that collide with constructor names, such as
   `None` in the X11 headers, break those constructors with an obscure
   error. Find a way to report the macro (design 3.3).

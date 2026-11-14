@@ -241,6 +241,12 @@ let tags () =
     "object struct i external static";
   declares "struct o { enum { K = 3 } k; }; int a[K];" "a"
     "object int[3] external static";
+  (* A member declaration without declarators violates 6.7.2.1p2, which
+     GCC and Clang accept, declaring no tag of its own; typec follows. *)
+  accepts "struct t { int a; }; void f(struct u { struct t; struct t m; } *p);";
+  accepts
+    "struct t { int a; }; \
+     void f(struct u { __attribute__((unused)) struct t; struct t m; } *p);";
   (* An anonymous structure is a member; a tagged one declares a tag. *)
   accepts "struct s { union { int a; float b; }; int c; };";
   rejects "struct s { union { int a; }; int a; };" "a";
@@ -293,6 +299,7 @@ let composites () =
   rejects "int f(a) int a; int a; {}" "6.7p3";
   rejects "int f(a) static int a; {}" "6.7.6.3p2";
   rejects "int f(a) int; {}" "6.9.1p6";
+  rejects "int f(a) int a = 1; { return a; }" "6.9.1p6";
   declares "int a[sizeof (struct { int x; })]; int a[4];" "a"
     "object int[4] external static";
   declares "struct s { int x; }; int a[sizeof (struct s)];" "a"
@@ -471,10 +478,20 @@ let gnu_profile () =
   declares
     "struct s { int a; }; char c[__builtin_offsetof(struct s, a) + 1];" "c"
     "object char[<constant>] external static";
+  rejects "_Float16 h;" "'_Float16' is not typed yet";
+  rejects "typeof(int) t;" "'typeof' is not typed yet";
+  rejects "void (^b)(void);" "a block pointer is not typed yet";
+  rejects "enum e : int { A };" "the fixed type of an enumeration"
+
+(* The GNU attributes: those that change nothing the declarations compute
+   are accepted, [noreturn] marks a function, and any other is an error
+   that names it, in every position of a declaration that the reader
+   reads. *)
+let attributes () =
   accepts
     "struct __attribute__((aligned(8))) s { int a __attribute__((aligned)); \
      } __attribute__((unused)); enum e { A __attribute__((deprecated)) }; \
-     __attribute__((noreturn)) void f(int x __attribute__((unused))) \
+     __attribute__((cold)) void f(int x __attribute__((unused))) \
      __attribute__((cold));";
   rejects "typedef int TI __attribute__((mode(TI)));"
     "the attribute 'mode' is not typed yet";
@@ -482,14 +499,46 @@ let gnu_profile () =
     "the attribute 'vector_size' is not typed yet";
   rejects "__attribute__((packed)) enum p { P } x;"
     "the attribute 'packed' is not typed yet";
-  rejects "void g(int a __attribute__((mode(DI))));" "'mode'";
-  rejects "_Float16 h;" "'_Float16' is not typed yet";
-  rejects "typeof(int) t;" "'typeof' is not typed yet";
-  rejects "void (^b)(void);" "a block pointer is not typed yet";
-  rejects "enum e : int { A };" "the fixed type of an enumeration"
+  List.iter
+    (fun source -> rejects source "the attribute 'mode' is not typed yet")
+    [ "struct __attribute__((mode(DI))) s { int a; };";
+      "struct s { int a; } __attribute__((mode(DI)));";
+      "enum __attribute__((mode(DI))) e { A };";
+      "enum e { A } __attribute__((mode(DI)));";
+      "struct s { int a __attribute__((mode(DI))); };";
+      "struct s { int a : 3 __attribute__((mode(DI))); };";
+      "enum e { A __attribute__((mode(DI))) };";
+      "void f(void) __attribute__((mode(DI))) {}";
+      "int f(a) int a __attribute__((mode(DI))); { return a; }";
+      "void g(int a __attribute__((mode(DI))));";
+      "int x __attribute__((mode(DI)));";
+      "__attribute__((mode(DI))) int x;" ];
+  (* Of the specifiers' attributes, the first that is not typed is the one
+     reported. *)
+  rejects "__attribute__((mode(DI))) __attribute__((vector_size(8))) int x;"
+    "'mode'";
+  rejects "__attribute__((mode(DI), vector_size(8))) int x;" "'mode'";
+  (* GNU89 inline: it swaps what [inline] and [extern inline] define. *)
+  rejects "extern inline __attribute__((gnu_inline)) int f(void) { return 0; }"
+    "the attribute 'gnu_inline' is not typed yet";
+  (* [noreturn] marks a function as [_Noreturn] does (design 4.4), from the
+     specifiers for every declarator and from a declarator for its own. *)
+  declares "void die(void) __attribute__((noreturn));" "die"
+    "function void (void) external noreturn";
+  declares "__attribute__((noreturn)) void a(void), b(void);" "b"
+    "function void (void) external noreturn";
+  declares "void a(void) __attribute__((noreturn)), b(void);" "b"
+    "function void (void) external";
+  declares "void d(void) __attribute__((noreturn)) {}" "d"
+    "function void (void) external noreturn";
+  declares "void e(void); void e(void) __attribute__((noreturn));" "e"
+    "function void (void) external noreturn";
+  declares "__attribute__((noreturn)) int x;" "x" "object int external static";
+  accepts "void f(__attribute__((noreturn)) void (*g)(void));"
 
 let () =
   gnu_profile ();
+  attributes ();
   specifier_combinations ();
   storage_classes ();
   declarators ();

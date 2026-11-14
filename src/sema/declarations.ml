@@ -37,6 +37,10 @@ let max_expression_depth = 10_000
 
 (* The reader *)
 
+(* The reader matches every tree record that holds attributes with a
+   pattern that names each field, so that a field added to one is warning
+   9 wherever the record is read rather than attributes no one checks. *)
+
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -175,8 +179,12 @@ let file_scope_linkage state name ~is_function storage =
 
 (* Declaration specifiers *)
 
+(* What the GNU attributes of a declaration say. *)
+type attributed = { gnu_noreturn : bool }
+
 (* What a list of declaration specifiers says. [storage] excludes
-   [_Thread_local], which [thread_local] records. *)
+   [_Thread_local], which [thread_local] records; [noreturn] is
+   [_Noreturn] only, which 6.7.4p1 allows on functions alone. *)
 type specified = {
   storage : Tree.storage_class option;
   thread_local : bool;
@@ -184,6 +192,7 @@ type specified = {
   inline : bool;
   noreturn : bool;
   aligned : Tree.span option;  (** The first alignment specifier. *)
+  attributed : attributed;
 }
 
 (* The declaration specifiers of each kind, in order. *)
@@ -218,7 +227,9 @@ let sort_specifiers (specifiers : Tree.specifiers) =
       function_specifiers = []; alignments = []; attributes = [] }
   in
   let sorted = List.fold_left add empty specifiers in
-  { sorted with alignments = List.rev sorted.alignments }
+  { sorted with
+    alignments = List.rev sorted.alignments;
+    attributes = List.rev sorted.attributes }
 
 (* 6.7.1p2: one storage class, but [_Thread_local] with [static] or
    [extern]. *)
@@ -377,34 +388,63 @@ let not_typed state span construct package =
   fail state span
     (Printf.sprintf "%s is not typed yet (plan %s)" construct package)
 
-(* The GNU attributes that change neither a type nor a value that the
-   declarations compute: the alignment and layout of records are the
-   backend's (6.7.5p3), and the rest shape diagnostics or code. Any other
-   attribute may, as [mode] and [vector_size] change a type, so it is an
-   error until typing reads it (TODO.md). *)
-let neutral_attributes =
-  [ "alloc_align"; "alloc_size"; "aligned"; "always_inline"; "availability";
-    "cold"; "const"; "constructor"; "deprecated"; "destructor";
-    "disable_tail_calls"; "enum_extensibility"; "flag_enum"; "format";
-    "format_arg"; "gnu_inline"; "hot"; "leaf"; "malloc"; "noescape";
-    "noinline"; "nonnull"; "noreturn"; "not_tail_called"; "nothrow"; "pure";
-    "returns_nonnull"; "section"; "sentinel"; "swift_attr"; "unavailable";
-    "unused"; "used"; "visibility"; "warn_unused_result"; "weak" ]
+(* What a GNU attribute does to the declarations: [Neutral] changes
+   nothing they compute, and [Sets_noreturn] marks a function that does
+   not return, as [_Noreturn] does (design 4.4). *)
+type attribute_effect = Neutral | Sets_noreturn
 
-let read_attributes state (attributes : Tree.attribute list) =
-  let read (attribute : Tree.attribute) =
+(* The GNU attributes that the declarations accept, each with its effect.
+   [aligned] is neutral because typec leaves [_Alignof] and the sizes of
+   records and arrays to the backend (design P16) and the attribute does
+   not change the size of a scalar; it leaves this table once typec
+   computes a layout. The rest shape diagnostics or code. Any other
+   attribute may change a type or a definition, so it is an error until
+   typing reads it (TODO.md). *)
+let attribute_effects =
+  [ ("alloc_align", Neutral); ("alloc_size", Neutral); ("aligned", Neutral);
+    ("always_inline", Neutral); ("availability", Neutral); ("cold", Neutral);
+    ("const", Neutral); ("constructor", Neutral); ("deprecated", Neutral);
+    ("destructor", Neutral); ("disable_tail_calls", Neutral);
+    ("enum_extensibility", Neutral); ("flag_enum", Neutral);
+    ("format", Neutral); ("format_arg", Neutral); ("hot", Neutral);
+    ("leaf", Neutral); ("malloc", Neutral); ("noescape", Neutral);
+    ("noinline", Neutral); ("nonnull", Neutral); ("noreturn", Sets_noreturn);
+    ("not_tail_called", Neutral); ("nothrow", Neutral); ("pure", Neutral);
+    ("returns_nonnull", Neutral); ("section", Neutral); ("sentinel", Neutral);
+    ("swift_attr", Neutral); ("unavailable", Neutral); ("unused", Neutral);
+    ("used", Neutral); ("visibility", Neutral);
+    ("warn_unused_result", Neutral); ("weak", Neutral) ]
+
+let no_attributes = { gnu_noreturn = false }
+
+(* [onto] with the effects of [attributes] applied in source order. *)
+let read_attributes state ~onto (attributes : Tree.attribute list) =
+  let apply attributed (attribute : Tree.attribute) =
     let name = attribute.node.name.node in
-    if not (List.mem name neutral_attributes) then
-      not_typed state attribute.span
-        ("the attribute " ^ quote name)
-        "0.7b"
+    match List.assoc_opt name attribute_effects with
+    | Some Neutral -> attributed
+    | Some Sets_noreturn -> { gnu_noreturn = true }
+    | None ->
+        not_typed state attribute.span ("the attribute " ^ quote name) "0.7b"
   in
-  List.iter read attributes
+  List.fold_left apply onto attributes
+
+(* Attributes whose effects the declarations do not record. *)
+let check_attributes state attributes =
+  ignore (read_attributes state ~onto:no_attributes attributes)
+
+(* [specified] for one declarator: its attributes extend those of the
+   specifiers. *)
+let for_declarator state specified attributes =
+  let onto = specified.attributed in
+  { specified with attributed = read_attributes state ~onto attributes }
 
 let rec read_specifiers state ~standalone (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
   let sorted = sort_specifiers specifiers in
-  read_attributes state sorted.attributes;
+  let attributed =
+    read_attributes state ~onto:no_attributes sorted.attributes
+  in
   let storage = storage_class state span sorted.storage_classes in
   let base = base_type state span ~standalone sorted in
   let qualifiers = qualifiers_of sorted.qualifiers in
@@ -420,6 +460,7 @@ let rec read_specifiers state ~standalone (specifiers : Tree.specifiers) =
       (match sorted.alignments with
       | [] -> None
       | first :: _ -> Some first.span);
+    attributed;
   }
 
 and base_type state span ~standalone sorted =
@@ -445,14 +486,14 @@ and other_type state span ~standalone (specifier : Tree.type_specifier) =
   | Atomic_type type_name ->
       checked state span (Ctype.atomic (read_type_name state type_name))
   | Struct_or_union { kind; tag; members; attributes } ->
-      read_attributes state attributes;
+      check_attributes state attributes;
       let kind = record_kind kind in
       Ctype.record (record_type state span ~standalone kind tag members)
-  | Enum { underlying = Some _; _ } ->
-      not_typed state span "the fixed type of an enumeration" "0.7b"
-  | Enum { tag; enumerators; underlying = None; attributes } ->
-      read_attributes state attributes;
-      Ctype.enum (enum_type state span ~standalone tag enumerators)
+  | Enum { tag; enumerators; underlying; attributes } -> (
+      check_attributes state attributes;
+      match underlying with
+      | Some _ -> not_typed state span "the fixed type of an enumeration" "0.7b"
+      | None -> Ctype.enum (enum_type state span ~standalone tag enumerators))
   | Typeof_expression _ | Typeof_type _ ->
       not_typed state span (quote "typeof") "0.7b"
   | Typedef_name name -> (
@@ -547,10 +588,7 @@ and read_member state (member : Tree.member_declaration) =
       static_assert state assertion;
       []
   | Members { specifiers; declarators = [] } ->
-      let specified =
-        let standalone = List.length specifiers = 1 in
-        read_specifiers state ~standalone specifiers
-      in
+      let specified = read_specifiers state ~standalone:false specifiers in
       if is_anonymous_record specifiers then
         [ { Ctype.member_name = None; member_type = specified.base_type;
             bit_field_width = None } ]
@@ -565,7 +603,9 @@ and is_anonymous_record (specifiers : Tree.specifiers) =
   List.exists
     (fun (specifier : Tree.declaration_specifier Tree.spanned) ->
       match specifier.node with
-      | Type_specifier (Struct_or_union { tag = None; members = Some _; _ }) ->
+      | Type_specifier
+          (Struct_or_union
+            { tag = None; members = Some _; kind = _; attributes = _ }) ->
           true
       | _ -> false)
     specifiers
@@ -574,12 +614,12 @@ and read_member_declarator state specified
     (declarator : Tree.member_declarator) =
   match declarator.node with
   | Field { declarator = field; attributes } ->
-      read_attributes state attributes;
+      check_attributes state attributes;
       let derived = derive_object state specified field in
       { Ctype.member_name = derived.name; member_type = derived.declared_type;
         bit_field_width = None }
   | Bit_field { declarator = field; width; attributes } ->
-      read_attributes state attributes;
+      check_attributes state attributes;
       Option.iter
         (fun span ->
           fail state span
@@ -618,10 +658,10 @@ and bit_field_width state width =
    sizes that follow, which typec would have to guess (design P16). *)
 and define_enum state span enum (enumerators : Tree.enumerator list) =
   let declare (previous, declared) (enumerator : Tree.enumerator) =
-    let name = enumerator.node.name in
-    read_attributes state enumerator.node.attributes;
+    let { Tree.name; attributes; value } = enumerator.node in
+    check_attributes state attributes;
     let ((integer, value) as typed) =
-      enumerator_value state previous enumerator
+      enumerator_value state previous enumerator.span value
     in
     let enumerator_type = integer_type state name.span integer in
     let constant = Integer_constant.known state.target integer value in
@@ -653,9 +693,9 @@ and define_enum state span enum (enumerators : Tree.enumerator list) =
 (* The type and value of an enumerator while its list is read: int when
    the value fits, else the type of its value (C23 6.7.2.2, as in GCC and
    Clang). *)
-and enumerator_value state previous (enumerator : Tree.enumerator) =
+and enumerator_value state previous span (value : Tree.expression option) =
   let target = state.target in
-  match (enumerator.node.value, previous) with
+  match (value, previous) with
   | Some expression, _ -> (
       match constant_expression state expression with
       | Not_constant span ->
@@ -671,7 +711,7 @@ and enumerator_value state previous (enumerator : Tree.enumerator) =
           (Integer.Int, value)
       | Constant { integer_type; value = Known value } -> (integer_type, value))
   | None, None -> (Integer.Int, Exact_integer.zero)
-  | None, Some previous -> successor state enumerator.span previous
+  | None, Some previous -> successor state span previous
 
 (* The previous value plus one in its type, or in the next standard type
    of its signedness that holds it. *)
@@ -842,7 +882,9 @@ and read_parameters state ~definition (parameters : Tree.parameters) =
       in
       let types =
         match (parameters, types) with
-        | [ { node = { declarator = None; _ }; _ } ], [ only ]
+        | ( [ { node = { declarator = None; specifiers = _; attributes = _ };
+                _ } ],
+            [ only ] )
           when only = Ctype.void ->
             []
         | _ -> types
@@ -851,10 +893,13 @@ and read_parameters state ~definition (parameters : Tree.parameters) =
 
 and read_parameter state (parameter : Tree.parameter) =
   let span = parameter.span in
-  let specified = parameter_specifiers state span parameter.node.specifiers in
-  read_attributes state parameter.node.attributes;
+  let ({ specifiers; declarator; attributes } : Tree.parameter_node) =
+    parameter.node
+  in
+  let specified = parameter_specifiers state span specifiers in
+  check_attributes state attributes;
   let derived =
-    match parameter.node.declarator with
+    match declarator with
     | Some declarator -> derive_parameter state specified declarator
     | None -> underived specified
   in
@@ -899,7 +944,7 @@ and read_old_style_declaration state names (declaration : Tree.declaration) =
   let span = declaration.span in
   match declaration.node with
   | Static_assert assertion -> static_assert state assertion
-  | Declaration { declarators = []; _ } ->
+  | Declaration { declarators = []; specifiers = _ } ->
       fail state span
         "a declaration before a function body declares no parameter \
          (C11 6.9.1p6)"
@@ -909,12 +954,17 @@ and read_old_style_declaration state names (declaration : Tree.declaration) =
         List.exists (fun (listed : Tree.identifier) -> listed.node = name) names
       in
       List.iter
-        (fun (declarator : Tree.init_declarator) ->
-          let span = declarator.span in
-          read_attributes state declarator.node.attributes;
-          let derived =
-            derive_parameter state specified declarator.node.declarator
+        (fun (init_declarator : Tree.init_declarator) ->
+          let span = init_declarator.span in
+          let { Tree.declarator; asm_label = _; attributes; initialiser } =
+            init_declarator.node
           in
+          if initialiser <> None then
+            fail state span
+              "a declaration before a function body has an initializer \
+               (C11 6.9.1p6)";
+          check_attributes state attributes;
+          let derived = derive_parameter state specified declarator in
           match derived.name with
           | Some name when in_list name ->
               declare_parameter state span derived name
@@ -1091,7 +1141,7 @@ let file_scope_declared state span specified name (declared_type : Ctype.t) =
           function_type = declared_type;
           linkage;
           inline = specified.inline;
-          noreturn = specified.noreturn;
+          noreturn = specified.noreturn || specified.attributed.gnu_noreturn;
         }
   | (None | Some (Static | Extern)) as storage ->
       function_specifiers ();
@@ -1110,11 +1160,25 @@ let declare_file_scope state span specified (derived : derived) =
       declare_ordinary state span name declared
   | None -> invalid_arg "Declarations: a declarator without a name"
 
-(* The asm label names a symbol, which no type depends on. *)
-let read_init_declarator state specified (declarator : Tree.init_declarator) =
-  read_attributes state declarator.node.attributes;
-  let derived = derive_object state specified declarator.node.declarator in
-  declare_file_scope state declarator.span specified derived
+(* The asm label names a symbol, which no type depends on, and typing
+   reads the initializer. *)
+let read_init_declarator state specified
+    (init_declarator : Tree.init_declarator) =
+  let { Tree.declarator; asm_label = _; attributes; initialiser = _ } =
+    init_declarator.node
+  in
+  let specified = for_declarator state specified attributes in
+  let derived = derive_object state specified declarator in
+  declare_file_scope state init_declarator.span specified derived
+
+(* 6.7.2.3p7, [struct s;] alone, as GCC reads it: attributes on either side
+   leave it alone, a qualifier or storage class does not. Clang differs,
+   and only block scope shows it (TODO.md). *)
+let has_one_specifier (specifiers : Tree.specifiers) =
+  let counts (specifier : Tree.declaration_specifier Tree.spanned) =
+    match specifier.node with Attributes _ -> false | _ -> true
+  in
+  List.length (List.filter counts specifiers) = 1
 
 let read_declaration state (declaration : Tree.declaration) =
   match declaration.node with
@@ -1122,7 +1186,7 @@ let read_declaration state (declaration : Tree.declaration) =
       static_assert state assertion;
       Static_assertion
   | Declaration { specifiers; declarators } ->
-      let standalone = declarators = [] && List.length specifiers = 1 in
+      let standalone = declarators = [] && has_one_specifier specifiers in
       let specified = read_specifiers state ~standalone specifiers in
       Declaration (List.map (read_init_declarator state specified) declarators)
 
@@ -1132,8 +1196,11 @@ let read_function_definition state (definition : Tree.function_definition) =
     definition.node
   in
   let span = definition.span in
-  read_attributes state attributes;
-  let specified = read_specifiers state ~standalone:false specifiers in
+  let specified =
+    for_declarator state
+      (read_specifiers state ~standalone:false specifiers)
+      attributes
+  in
   (match (specified.storage, specified.thread_local) with
   | (None | Some (Extern | Static)), false -> ()
   | _ ->
