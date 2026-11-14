@@ -54,6 +54,25 @@ type t =
           drops [_Atomic] with the other top-level qualifiers and Clang
           keeps it: [__builtin_types_compatible_p(_Atomic int, int)] is 1
           in GCC and 0 in Clang. *)
+  | Old_style_function of {
+      clang : Ctype.parameters;
+      composite : Ctype.parameters;
+    }
+      (** A use of a function whose composite type has the parameters
+          [composite], to which Clang gives [clang]. Clang gives a
+          definition with a non-empty identifier list the prototype of the
+          promoted types of its parameters. A later declaration without a
+          prototype inherits it, but the uses that reach the definition
+          itself see no prototype (C11 6.9.1p7, DR 316). GCC gives the
+          definition no prototype of its own and keeps one before it:
+          after
+          [int f(int); int f(a) int a; {...}],
+          [__builtin_types_compatible_p(typeof(f), int (long))] is 1 in
+          Clang and 0 in GCC, and after
+          [int g(a) long a; {...} int g();],
+          [__builtin_types_compatible_p(typeof(g), int (int))] is 0 in
+          Clang and 1 in GCC. GCC 16 and Clang 21 (Apple), 22 and 23 give
+          these answers. *)
 
 val answer :
   Target.t -> t -> Typec_cpp.Location.t -> 'a -> 'a Ctype.answer

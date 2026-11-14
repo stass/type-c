@@ -28,6 +28,10 @@ type declared =
               overload set of its name, an entity of its own that no other
               declaration redeclares and that is not in
               [Declarations.linked]. *)
+      old_style_definition : bool;
+          (** This declaration is a definition with a non-empty identifier
+              list (6.9.1p6), whose uses see no prototype in Clang
+              (DR 316). *)
     }
   | Typedef of Ctype.t
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }

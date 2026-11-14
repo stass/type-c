@@ -462,7 +462,17 @@ is [type-c-language-design.md](type-c-language-design.md).
   there and accepted here, and `int a[3]; void f(void) { int a; {
   extern int a[]; sizeof a; } }` gives `a` the size it lacks. The
   resolution of the declared name where its declarator starts, recorded
-  by the parser, would settle both.
+  by the parser, would settle both. A function shows it too: in
+  `int f(int); void g(void) { int f; { extern int f(); } }` Clang and
+  GCC give the inner `f` the type `int ()` and typec `int (int)`, and
+  after `int f(a) long a; {...}` typec gives it `int (long)`.
+- [Low] `Backend_difference.answer` makes every unknown type an object
+  type, so `Expressions.backend_type` gives back a function type's
+  kind; `answer` could take the kind from Clang's type. In
+  `Expressions.function_designator`, `checked` guards a
+  `Ctype.function_returning` that cannot fail, as promoted parameters
+  are no larger than those they replace; a total `Ctype` function that
+  replaces the parameters of a function type would drop it.
 - [Medium] An `entity` and an `item` carry no location or tree node, so
   no message can point at a previous declaration and a consumer lines
   `items` up with the tree by position. The id of each declaration is
@@ -602,18 +612,6 @@ types (design 13.3).
 
 ## Typing oracle
 
-- [High] Gate 4 of plan 0.10 does not hold: on c-testsuite, zlib,
-  Lua and SQLite with Apple clang, a class of disagreement remains
-  outside the empty allow-list (README, "Typing oracle"). Re-run the
-  comparison on the corpus once it is closed.
-  * (0.10) A function of an old-style definition, `int f() {...}`: Clang
-    spells its type `int ()`, which reads as a function type without
-    parameter information, and `same_type` tells it from `typec`'s
-    `Old_style []`: 20 disagreements. Clang's spelling cannot carry the
-    parameters of the definition, so it is the comparison's to accept.
-    Decide between an allow-list entry and reading `()` against
-    `typec`'s type with its parameter types dropped. Reproducer:
-    `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/c-testsuite/clang/tests/single-exec/00030.tc.ref.i`.
 - [Medium] (0.10) The comparison leaves 2748 records of the corpus
   unresolved for naming an anonymous structure, union or member by its
   location (`union (unnamed union at src/lstate.h:181:3)`), which no

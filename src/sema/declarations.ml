@@ -587,6 +587,16 @@ let function_linkage state scope span name declared storage =
   | Some (Auto | Register | Typedef | Thread_local), File_scope ->
       invalid_arg "Declarations: a storage class refused at file scope"
 
+(* A declarator has [Old_style] parameters only where it defines the
+   function (6.7.6.3p3), so its type tells an old-style definition. *)
+let is_old_style_definition (t : Ctype.t) =
+  match t.shape with
+  | Function { parameters = Old_style (_ :: _); _ } -> true
+  | Function { parameters = Prototype _ | Unspecified | Old_style []; _ }
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Unknown_type _ ->
+      false
+
 let function_declared state scope span specified name declared
     (derived : derived) storage =
   (* Its noreturn, gnu_inline and overload would be guessed false. *)
@@ -615,6 +625,7 @@ let function_declared state scope span specified name declared
       (* GCC and Clang ignore it on a declaration without inline. *)
       gnu_inline = specified.inline && specified.attributed.gnu_inline;
       overload = specified.attributed.overloadable;
+      old_style_definition = is_old_style_definition derived.declared_type;
     }
 
 (* 6.2.2p3-p6, 6.2.4, 6.7.1p3: the linkage and storage duration of an

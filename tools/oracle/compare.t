@@ -3,10 +3,10 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 The comparison checks the type typec gives each expression against the
 oracle's records of Clang's, joined by their byte ranges. The unit below
-has an expression of each outcome: typedef names, a noreturn function
-and a variable length array that agree once read; an array that its
-initialiser completes and an old-style definition, which disagree; a
-builtin and a va_list parameter, which typec does not type; an anonymous
+has an expression of each outcome: typedef names, a noreturn function,
+a variable length array, an array that its initialiser completes and a
+function of an old-style definition, which agree once read; a builtin
+and a va_list parameter, which typec does not type; an anonymous
 structure, a tag and a typedef name of a block and a statement
 expression in typeof, which Clang's spellings cannot name at file scope;
 a typedef name of a block that hides one of file scope, which reads as
@@ -53,6 +53,8 @@ typec's half gives its type for each range, before the conversions of
 its context:
 
   $ ./typec_dump.exe "$clang" unit.i $options
+  85	86	rvalue	int
+  88	89	rvalue	int
   112	113	rvalue	int
   199	220	rvalue	unsigned long
   233	234	lvalue	unsigned long
@@ -72,7 +74,7 @@ its context:
   364	407	rvalue	int
   364	416	rvalue	int
   364	429	rvalue	int
-  371	376	lvalue	int[]
+  371	376	lvalue	int[2]
   371	379	lvalue	int
   377	378	rvalue	int
   382	385	rvalue	int ()
@@ -101,7 +103,7 @@ its context:
   655	667	rvalue	int
   655	681	rvalue	int
   659	660	lvalue	int
-  663	664	lvalue	char[]
+  663	664	lvalue	char[3]
   663	667	lvalue	char
   665	666	rvalue	int
   670	681	rvalue	int
@@ -110,7 +112,7 @@ its context:
   679	680	rvalue	int
   $ : > none.allow
   $ ./compare.exe "$clang" unit.i unit.records none.allow $options
-  unit.i: 38 agree, 4 disagree, 0 allowed, 2 unknown, 6 unresolved, 5 Clang-only, 5 typec-only
+  unit.i: 43 agree, 1 disagree, 0 allowed, 2 unknown, 6 unresolved, 3 Clang-only, 5 typec-only
   unresolved 1: a builtin function, which has no C type in Clang
   unresolved 1: a spelling with a control byte such as a line break, a backslash, a brace, a semicolon or unbalanced brackets, which is not one type name on one line
   unresolved 1: a string literal that initialises an array, which Clang gives the array's type
@@ -118,17 +120,12 @@ its context:
   unresolved 1: it names a tag that no file-scope declaration declares
   unresolved 1: typec refuses it at file scope: 'local' is not declared (C11 6.5.1p2)
   disagreements:
-    unit.c:13: [371,376) DeclRefExpr: Clang lvalue 'int[2]', typec lvalue 'int[]'
-    unit.c:13: [382,385) DeclRefExpr: Clang rvalue 'int ()', typec rvalue 'int ()'
     unit.c:23: [643,644) DeclRefExpr: Clang lvalue 'shadowed', typec lvalue 'double'
-    unit.c:24: [663,664) DeclRefExpr: Clang lvalue 'char[3]', typec lvalue 'char[]'
   unknown:
     unit.c:11: [319,341) CallExpr: Clang rvalue 'long', typec rvalue '<the builtin '__builtin_expect'>'
     unit.c:24: [671,675) DeclRefExpr: Clang lvalue 'struct __va_list_tag *', typec lvalue '<a va_list parameter>'
   Clang only:
     unit.c:3: [83,91) InitListExpr: Clang rvalue 'int[2]'
-    unit.c:3: [85,86) IntegerLiteral: Clang rvalue 'int'
-    unit.c:3: [88,89) IntegerLiteral: Clang rvalue 'int'
     unit.c:9: [269,274) InitListExpr: Clang rvalue 'struct (unnamed struct at unit.c:9:3)'
     unit.c:10: [306,311) InitListExpr: Clang rvalue 'struct local'
   typec only:
@@ -150,21 +147,20 @@ A disagreement outside the allow-list fails the comparison. An entry is
 a pattern over the printed line, in which * matches any run of bytes,
 and a reason; the allowed disagreements are counted apart.
 
-  $ echo '# Reviewed.' > old.allow
-  $ printf '%s\t%s\n' '*: Clang rvalue *()*, typec rvalue *()*' \
-  >   'Clang spells no parameters of an old-style definition' >> old.allow
-  $ ./compare.exe --show 0 "$clang" unit.i unit.records old.allow $options
-  unit.i: 38 agree, 3 disagree, 1 allowed, 2 unknown, 6 unresolved, 5 Clang-only, 5 typec-only
+  $ echo '# Reviewed.' > shadow.allow
+  $ printf '%s\t%s\n' "*: Clang lvalue 'shadowed', typec lvalue 'double'" \
+  >   'a typedef name of a block reads as the file-scope one' >> shadow.allow
+  $ ./compare.exe --show 0 "$clang" unit.i unit.records shadow.allow $options
+  unit.i: 43 agree, 0 disagree, 1 allowed, 2 unknown, 6 unresolved, 3 Clang-only, 5 typec-only
   unresolved 1: a builtin function, which has no C type in Clang
   unresolved 1: a spelling with a control byte such as a line break, a backslash, a brace, a semicolon or unbalanced brackets, which is not one type name on one line
   unresolved 1: a string literal that initialises an array, which Clang gives the array's type
   unresolved 1: an anonymous structure, union or enumeration, which Clang names by the location of its keyword
   unresolved 1: it names a tag that no file-scope declaration declares
   unresolved 1: typec refuses it at file scope: 'local' is not declared (C11 6.5.1p2)
-  [1]
   $ printf '*\tall of them\n' > all.allow
   $ ./compare.exe --show 0 "$clang" unit.i unit.records all.allow $options
-  unit.i: 38 agree, 0 disagree, 4 allowed, 2 unknown, 6 unresolved, 5 Clang-only, 5 typec-only
+  unit.i: 43 agree, 0 disagree, 1 allowed, 2 unknown, 6 unresolved, 3 Clang-only, 5 typec-only
   unresolved 1: a builtin function, which has no C type in Clang
   unresolved 1: a spelling with a control byte such as a line break, a backslash, a brace, a semicolon or unbalanced brackets, which is not one type name on one line
   unresolved 1: a string literal that initialises an array, which Clang gives the array's type

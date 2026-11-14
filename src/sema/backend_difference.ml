@@ -7,6 +7,10 @@ type t =
   | Bit_field_real_part
   | Anonymous_member of { member_type : Ctype.t; anonymous : Ctype.qualifiers }
   | Atomic_comparison of Ctype.t * Ctype.t
+  | Old_style_function of {
+      clang : Ctype.parameters;
+      composite : Ctype.parameters;
+    }
 
 let construct = function
   | Narrow_bit_field _ -> "the value of a bit-field narrower than its type"
@@ -14,6 +18,7 @@ let construct = function
   | Bit_field_real_part -> "the real part of a bit-field"
   | Anonymous_member _ -> "a member of a qualified anonymous member"
   | Atomic_comparison _ -> "__builtin_types_compatible_p of one _Atomic type"
+  | Old_style_function _ -> "a function of an old-style definition"
 
 (* GCC leaves a bit-field of a type ranked above int and at least as wide
    as int unpromoted, where Clang promotes:
@@ -43,6 +48,14 @@ let differs_in_gcc target = function
   | Atomic_comparison (first, second) ->
       let atomic t = (Ctype.top_qualifiers t).atomic in
       atomic first <> atomic second
+  | Old_style_function { clang; composite } ->
+      (* GCC gives a use the composite type, of which only a prototype
+         that some declaration writes is a prototype. *)
+      let is_prototype : Ctype.parameters -> bool = function
+        | Prototype _ -> true
+        | Old_style _ | Unspecified -> false
+      in
+      is_prototype clang <> is_prototype composite
 
 let answer (target : Target.t) difference location clang : _ Ctype.answer =
   let differs =

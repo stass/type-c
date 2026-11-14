@@ -489,6 +489,44 @@ let anonymous_members () =
   accepts ~target:lp64_gcc ~declarations "an.z = 1";
   rejects ~declarations "can.z = 1" "modifiable lvalue"
 
+(* A function of an old-style definition, typed as
+   Backend_difference.Old_style_function says. *)
+let old_style_definitions () =
+  let old_style = "<a function of an old-style definition>" in
+  let designates declarations ~clang ~gcc =
+    both ~declarations "f" ~clang ~gcc
+  in
+  designates "int f(a, b) long a; char *b; { return 0; } " ~clang:"int ()"
+    ~gcc:"int ()";
+  designates "int f() { return 0; } " ~clang:"int ()" ~gcc:"int ()";
+  designates "int f(int); int f(a) int a; { return 0; } " ~clang:"int ()"
+    ~gcc:old_style;
+  designates "int f(void); int f() { return 0; } " ~clang:"int (void)"
+    ~gcc:"int (void)";
+  designates "int f(a, b) char a; float b; { return 0; } int f(); "
+    ~clang:"int (int, double)" ~gcc:old_style;
+  designates "int f(a) int a[3]; { return 0; } int f(); "
+    ~clang:"int (int *)" ~gcc:old_style;
+  designates "int f() { return 0; } int f(); " ~clang:"int ()" ~gcc:"int ()";
+  designates "int f(a) long a; { return 0; } int f(); int f(); "
+    ~clang:"int (long)" ~gcc:old_style;
+  designates "int f(int); int f(a) int a; { return 0; } int f(); "
+    ~clang:"int (int)" ~gcc:"int (int)";
+  designates "int f(a) long a; { return 0; } int f(long); "
+    ~clang:"int (long)" ~gcc:"int (long)";
+  (* A promoted type that depends on an unknown integer type is unknown. *)
+  designates
+    "enum __attribute__((packed)) p { P0 }; \
+     int f(a) enum p a; { return 0; } int f(); "
+    ~clang:"int (<the attribute 'packed'>)" ~gcc:old_style;
+  (* The uses compare and convert as unprototyped. *)
+  let declarations = "int f(a) int a; { return 0; } " in
+  both ~declarations "_Generic(f, int (*)(long): 1L, default: 2)"
+    ~clang:"long" ~gcc:"long";
+  accepts ~declarations "int (*q)(long) = f";
+  accepts ~declarations "f(1, 2)";
+  rejects ~declarations:(declarations ^ "int f(); ") "f(1, 2)" "6.5.2.2p2"
+
 (* 6.8: the constraints that typing checks. *)
 let statements () =
   accepts "if (p) x; else if (d) x; while (ip) break; do continue; while (z)";
@@ -681,6 +719,7 @@ let () =
   bit_field_values ();
   bit_field_promotions ();
   anonymous_members ();
+  old_style_definitions ();
   statements ();
   block_declarations ();
   block_linkage ();

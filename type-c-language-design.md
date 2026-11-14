@@ -1319,8 +1319,13 @@ bit-field, which is the bit-field itself, where Clang takes its value;
 the promotion of a bit-field of a type ranked above `int` and at least
 as wide as `int`, which it leaves unpromoted; a member found through a
 `const` or `volatile` anonymous member, which it qualifies as that
-member; and `__builtin_types_compatible_p` of an `_Atomic` type and one that is not,
-as it drops `_Atomic` with the other top-level qualifiers. With GCC as
+member; `__builtin_types_compatible_p` of an `_Atomic` type and one that is not,
+as it drops `_Atomic` with the other top-level qualifiers; and a
+function of an old-style definition with parameters, to which Clang
+gives the prototype of their promoted types, which a later declaration
+without a prototype inherits and the uses that the definition reaches do
+not see (C11 6.9.1p7, DR 316), where GCC gives the definition no
+prototype of its own and keeps one before it. With GCC as
 the backend each of these has an unknown type (P21) wherever GCC's type
 differs from Clang's, and the real part of a bit-field, which differs in
 being an lvalue, has one too: the front end neither guesses GCC's type nor

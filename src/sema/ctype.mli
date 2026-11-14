@@ -314,6 +314,11 @@ val lvalue_conversion : t -> t
 (** The type of the value of an lvalue (6.3.2.1p2-4): {!decay}, or the
     unqualified type. *)
 
+val promoted : Target.t -> tags -> t -> t answer
+(** The type of an argument for a parameter of type [t] where no
+    prototype is in scope (6.5.2.2p6): the default argument promotion of
+    an arithmetic type, any other type unchanged. *)
+
 val compatible : Target.t -> tags -> t -> t -> bool answer
 (** Whether two types are compatible (6.2.7p1, 6.7.3p10, 6.7.6.1p2,
     6.7.6.2p6, 6.7.6.3p15). The parameters of a prototype and of an

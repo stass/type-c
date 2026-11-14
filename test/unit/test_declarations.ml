@@ -57,7 +57,15 @@ let describe (declared : Entity.declared) =
         [ "object"; Type_name.of_ctype object_type; linkage_name linkage;
           storage_name ]
   | Function
-      { function_type; linkage; inline; noreturn; gnu_inline; overload } ->
+      {
+        function_type;
+        linkage;
+        inline;
+        noreturn;
+        gnu_inline;
+        overload;
+        old_style_definition = _;
+      } ->
       String.concat " "
         ([ "function"; Type_name.of_ctype function_type; linkage_name linkage ]
         @ (if inline then [ "inline" ] else [])

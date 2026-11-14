@@ -185,6 +185,15 @@ let unknown context span construct kind =
 let unknown_value (unknown : Ctype.unknown) =
   Ctype.unknown { unknown with kind = Unknown_object }
 
+(* An unknown type in place of [t] keeps whether it is a function type
+   (P21). *)
+let unknown_in_place_of (t : Ctype.t) (unknown : Ctype.unknown) =
+  match t.shape with
+  | Function _ -> Ctype.unknown { unknown with kind = Unknown_function }
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Unknown_type _ ->
+      Ctype.unknown unknown
+
 (* [t], Clang's type for [difference], or an unknown type where the
    backend types the construct otherwise (design 13.3). A type that is
    unknown already stays so, for the reason that it has. *)
@@ -195,7 +204,7 @@ let backend_type context location difference (t : Ctype.t) =
   | Function _ -> (
       match Backend_difference.answer context.target difference location t with
       | Answer t -> t
-      | Depends_on unknown -> Ctype.unknown unknown)
+      | Depends_on unknown -> unknown_in_place_of t unknown)
 
 let fail_operands context span clause =
   context.fail span
@@ -429,6 +438,39 @@ let predefined context span name =
         (unknown context span ("the builtin " ^ quote name) Object_or_function)
   | _ -> context.fail span (quote name ^ " is not declared (C11 6.5.1p2)")
 
+(* The parameters that Clang gives a use of a function whose composite
+   type has [parameters], by the rule of
+   [Backend_difference.Old_style_function]. *)
+let clang_parameters context ~old_style_definition
+    (parameters : Ctype.parameters) : Ctype.parameters =
+  let promoted t =
+    match Ctype.promoted context.target context.tags t with
+    | Answer promoted -> promoted
+    | Depends_on unknown -> Ctype.unknown unknown
+  in
+  match (old_style_definition, parameters) with
+  | true, _ | false, Old_style [] -> Unspecified
+  | false, Old_style types ->
+      Prototype { types = List.map promoted types; variadic = false }
+  | false, (Prototype _ | Unspecified) -> parameters
+
+(* The type of a use of a function whose composite type is [t], where
+   [old_style_definition] says whether the declaration that the use
+   reaches is a definition with a non-empty identifier list. *)
+let function_designator context span ~old_style_definition (t : Ctype.t) =
+  match t.shape with
+  | Function { return; parameters } ->
+      let clang = clang_parameters context ~old_style_definition parameters in
+      let difference =
+        Backend_difference.Old_style_function
+          { clang; composite = parameters }
+      in
+      backend_type context (location_of context span) difference
+        (checked context span (Ctype.function_returning return clang))
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Unknown_type _ ->
+      t
+
 let identifier context span name (resolution : Tree.resolution) =
   match resolution with
   | Undeclared -> predefined context span name
@@ -441,7 +483,10 @@ let identifier context span name (resolution : Tree.resolution) =
             (unknown context span ("the overloaded " ^ quote name)
                Unknown_function)
       | Object { object_type; _ } -> lvalue object_type
-      | Function { function_type; _ } -> value function_type
+      | Function { function_type; old_style_definition; _ } ->
+          value
+            (function_designator context span ~old_style_definition
+               function_type)
       | Enumerator { enumerator_type; _ } -> value enumerator_type
       | Typedef _ -> invalid_arg "Expressions: a typedef name as an operand")
 
