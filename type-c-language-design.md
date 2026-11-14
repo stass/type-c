@@ -1071,6 +1071,7 @@ a design change to this document, not an implementation detail.
 | Expression `match` | A match that yields a value. | Real code where a local assigned in each arm reads materially worse. |
 | Constraints | `requires(...)` on type parameters, resolved statically. Needs overloading or named instances. | Measured cost of function-pointer operations in the Stage 3 library: time, and noise at call sites. |
 | Deduction from the target type | `vector(int) v = vector_new(8);` | Frequency of explicit instances in pilot code (P11). |
+| Declarations typed by their initialiser | `auto r = parse_numbers(text);` gives `r` the type of the initialiser after lvalue conversion, as GNU `__auto_type` and C23 `auto` do. Block-scope objects with an initialiser only: never parameters, return types or file-scope objects, so every interface still states its types. One expression decides the type, so this is not the pervasive inference that principle 3 excludes. | Local declarations in the Stage 2 pilots that repeat a long generic type their initialiser already names, and whether passing `__auto_type` through from the GNU profile suffices. |
 | External instances | One definition of an instance per program. | Measured code growth from per-unit instances (P12). |
 | Operations on distinct types | Declared arithmetic, so that `meters + meters` is `meters`. | Casts that dominate real arithmetic on distinct values. |
 | Tag ordinal | The tag as an integer, for tables and serialisation. | Tables in pilot code that a `match` expresses badly. |
