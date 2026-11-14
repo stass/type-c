@@ -408,11 +408,14 @@ types (design 13.3).
   notice), GCC's `c-torture/execute` (GPL-3.0 or later: the repository
   names the archive and holds no file of it), and the translation unit
   that includes every standard and POSIX header of a host.
-- [Medium] SQLite's recipe runs a smoke test of ours: the amalgamation
-  has no test suite. Its own suite needs the full source tree and Tcl.
-- [Medium] chibicc's recipe runs its test suite only on Linux x86-64,
-  which has not run yet; on other hosts its tests are only compiled to
-  assembly.
+- [Medium] SQLite's recipe declares a substitute test (a smoke test of
+  ours), so gate 1 is not met for it: the amalgamation has no test
+  suite. Its own suite needs the full source tree and Tcl.
+- [Medium] chibicc's recipe declares a substitute test (its tests
+  compiled to assembly) on every host. Its own suite runs only on Linux
+  x86-64, which has not run yet; the recipe format limits only `cflags`
+  and `libs` to a system, so a `test own` for Linux x86-64 needs the
+  format to limit `test` to a system and to name a machine.
 - [Low] A `typec` option that compiles a `.c` input as Type-C would let
   a program's own build replace `cc` with `typec` without renaming its
   sources. The corpus runner copies each unit to a `.tc` file next to

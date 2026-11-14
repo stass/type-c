@@ -3,6 +3,8 @@
 
 type tree = { archive : string; dir : string }
 type program = { name : string; units : string list }
+type suite = Own | Substitute of string
+type test = { script : string; suite : suite }
 
 type t = {
   trees : tree list;
@@ -11,7 +13,7 @@ type t = {
   prepare : string option;
   library : string list;
   programs : program list;
-  test : string;
+  test : test;
 }
 
 let units recipe =
@@ -72,6 +74,11 @@ let only_once what previous value =
   if previous <> None then invalid "a second %s line" what;
   Some value
 
+let with_test recipe script suite =
+  let script = plain_name script in
+  if recipe.test.script <> "" then invalid "a second test line";
+  { recipe with test = { script; suite } }
+
 (* Lists accumulate in reverse and are put in order by [finish]. *)
 let add_line ~system recipe line =
   match words line with
@@ -99,10 +106,16 @@ let add_line ~system recipe line =
       | "prepare", [ script ] ->
           let script = plain_name script in
           { recipe with prepare = only_once "prepare" recipe.prepare script }
-      | "test", [ script ] ->
-          let script = plain_name script in
-          if recipe.test <> "" then invalid "a second test line";
-          { recipe with test = script }
+      | "test", [ "own"; script ] -> with_test recipe script Own
+      | "test", "substitute" :: script :: (_ :: _ as description) ->
+          let suite = Substitute (String.concat " " description) in
+          with_test recipe script suite
+      | "test", ("own" | "substitute") :: _ ->
+          invalid "wrong number of words after test %s" (List.hd rest)
+      | "test", _ ->
+          invalid
+            "a test line is \"test own SCRIPT\" or \"test substitute \
+             SCRIPT DESCRIPTION...\""
       | "library", units ->
           let units = List.map unit_path units in
           { recipe with library = List.rev_append units recipe.library }
@@ -113,7 +126,7 @@ let add_line ~system recipe line =
             { name = relative_path name; units = List.map unit_path units }
           in
           { recipe with programs = program :: recipe.programs }
-      | ("tree" | "prepare" | "test" | "program"), _ ->
+      | ("tree" | "prepare" | "program"), _ ->
           invalid "wrong number of words after %s" keyword
       | _, _ -> invalid "unknown keyword %S" keyword)
 
@@ -125,13 +138,15 @@ let empty =
     prepare = None;
     library = [];
     programs = [];
-    test = "";  (* no test line yet; [finish] requires one *)
+    (* No test line yet: [finish] requires one, and the placeholder suite
+       is the one that does not count toward gate 1. *)
+    test = { script = ""; suite = Substitute "no test line" };
   }
 
 let finish recipe =
   if recipe.trees = [] then invalid "no tree line";
   if recipe.programs = [] then invalid "no program line";
-  if recipe.test = "" then invalid "no test line";
+  if recipe.test.script = "" then invalid "no test line";
   {
     recipe with
     trees = List.rev recipe.trees;

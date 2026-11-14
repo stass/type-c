@@ -252,19 +252,28 @@ recipe (`programs/PROGRAM/recipe`, in the format of
 
 It then links each program of the recipe from the `typec` objects and
 runs the recipe's test script in the build tree, with `CC` naming the
-backend. It writes a record of each program and backend to
+backend. The recipe says whether the script is the program's own test
+suite (`test own SCRIPT`) or a substitute for it (`test substitute SCRIPT
+DESCRIPTION`, a smoke test or tests that are only compiled); it has no
+default. It writes a record of each program and backend to
 `CORPUS/runs/HOST/PROGRAM.BACKEND.txt` and prints it: the revisions
 of the corpus and of the checkout `typec` was built in and the digest
 of the `typec` binary, the counts of
 identical, different and failed units, which failed and at which step,
-whether the programs linked and the tests passed, and the CPU time of
+whether the programs linked and the tests passed (`passed` for an own
+suite; `substitute passed, not the program's own suite: DESCRIPTION` for a
+substitute, which does not meet gate 1), and the CPU time of
 preprocessing, of `typec --emit-c` and of the backend's `-fsyntax-only`
 on `U.ref.i`, summed over the units, whose first two differ by the time
 of `typec`'s front end. The stderr of every command goes to
 `CACHE/build/HOST/PROGRAM/BACKEND.log`.
 
 Exit status: 0 when every unit gave identical objects and every
-program's tests passed; 1 otherwise; 2 when the command line or a
-recipe is wrong, an archive has not been fetched, or the runner cannot
-write a file of its own. `dune test` runs
+program's own tests passed; 1 when a unit differs or failed, a test
+failed or did not run, or a build could not be set up; 3 when nothing
+failed but a program's tests are a substitute, so that a status of 0
+never comes from a run that did not meet gate 1 (the runner also prints
+a line for each record that does not meet the gates); 2 when the
+command line or a recipe is wrong, an archive has not been fetched, or
+the runner cannot write a file of its own. `dune test` runs
 `tools/corpus/runner.t`, which checks the runner on a fixture program.

@@ -26,7 +26,7 @@ host, the backend, the revisions and the timings are left out.
   > cflags@NoSuchSystem -DGREETING="never"
   > library greet.c
   > program bin/hello main.c
-  > test test.sh
+  > test own test.sh
   > EOF
   $ cat > corpus/programs/hello/test.sh <<'EOF'
   > [ "$(bin/hello)" = 'greet.tc hello' ]
@@ -35,7 +35,7 @@ host, the backend, the revisions and the timings are left out.
   >   out=$(./corpus.exe --corpus corpus --cache cache \
   >     --typec "$(command -v typec)" --cc /usr/bin/clang "$@")
   >   status=$?
-  >   echo "$out" | grep -v -E '^(host|backend|typec|corpus|log) |^  '
+  >   echo "$out" | grep -v -E '^(host|backend|typec|corpus|log) |^  |^$'
   >   return $status
   > }
   $ run hello
@@ -72,6 +72,69 @@ its log go into the cache.
   main.tc.ref.i
   main.tc.ref.o
 
+A test script that fails is recorded as failed, with the exit status 1.
+
+  $ echo 'exit 5' > corpus/programs/hello/fail.sh
+  $ sed 's/test own test.sh/test own fail.sh/' corpus/programs/hello/recipe \
+  >   > corpus/programs/hello/recipe.own-fails
+  $ cp corpus/programs/hello/recipe corpus/programs/hello/recipe.good
+  $ cp corpus/programs/hello/recipe.own-fails corpus/programs/hello/recipe
+  $ run hello
+  program      hello
+  units        2
+  identical    2
+  different    0
+  failed       0
+  linked       1 of 1
+  tests        FAILED: the tests exited with 5
+  cpu seconds, summed over the units:
+  hello.clang: gates not met
+  [1]
+
+A script that is not the program's own suite is recorded as a substitute
+that passed, and the exit status is 3, neither a pass nor a failure.
+
+  $ sed 's/test own test.sh/test substitute test.sh a greeting smoke test/' \
+  >   corpus/programs/hello/recipe.good > corpus/programs/hello/recipe
+  $ run hello
+  program      hello
+  units        2
+  identical    2
+  different    0
+  failed       0
+  linked       1 of 1
+  tests        substitute passed, not the program's own suite: a greeting smoke test
+  cpu seconds, summed over the units:
+  hello.clang: gate 1 not met: only a substitute test passed
+  [3]
+  $ grep '^tests' corpus/runs/*/hello.clang.txt
+  tests        substitute passed, not the program's own suite: a greeting smoke test
+
+A substitute that fails is failed like any other test.
+
+  $ sed 's/test own test.sh/test substitute fail.sh smoke/' \
+  >   corpus/programs/hello/recipe.good > corpus/programs/hello/recipe
+  $ run hello > out; echo "exit $?"; grep -E '^(tests|hello)' out
+  exit 1
+  tests        FAILED: the tests exited with 5
+  hello.clang: gates not met
+
+The exit status 1 outranks 3 when the run holds both.
+
+  $ cp corpus/programs/hello/recipe.own-fails corpus/programs/hello/recipe
+  $ mkdir corpus/programs/smoke
+  $ sed 's/test own test.sh/test substitute test.sh smoke/' \
+  >   corpus/programs/hello/recipe.good > corpus/programs/smoke/recipe
+  $ cp corpus/programs/hello/test.sh corpus/programs/smoke/test.sh
+  $ run hello smoke > out; echo "exit $?"; grep -E '^hello|^smoke|^tests' out
+  exit 1
+  tests        FAILED: the tests exited with 5
+  hello.clang: gates not met
+  tests        substitute passed, not the program's own suite: smoke
+  smoke.clang: gate 1 not met: only a substitute test passed
+  $ cp corpus/programs/hello/recipe.good corpus/programs/hello/recipe
+  $ rm -r corpus/programs/smoke corpus/programs/hello/recipe.*
+
 A unit typec refuses keeps the programs that use it from linking, so the
 tests do not run, and the runner exits with 1.
 
@@ -87,6 +150,7 @@ tests do not run, and the runner exits with 1.
   cpu seconds, summed over the units:
   failed       greet.c: typec -c exited with 1
   not linked   bin/hello
+  hello.clang: gates not met
   [1]
 
 A recipe that cannot be read ends the run with 2 before anything is
@@ -120,7 +184,27 @@ built.
   $ fails hello
   corpus: corpus/programs/hello/recipe: no test line
   [2]
-  $ printf 'tree missing-1\nprogram a a.c\ntest t.sh\n' \
+
+A test line must say whether its script is the program's own suite, so
+the form without it, and a substitute without a description, are
+refused.
+
+  $ printf 'tree hello-1\nprogram a a.c\ntest test.sh\n' \
+  >   > corpus/programs/hello/recipe
+  $ fails hello
+  corpus: corpus/programs/hello/recipe:3: a test line is "test own SCRIPT" or "test substitute SCRIPT DESCRIPTION..."
+  [2]
+  $ printf 'tree hello-1\nprogram a a.c\ntest substitute test.sh\n' \
+  >   > corpus/programs/hello/recipe
+  $ fails hello
+  corpus: corpus/programs/hello/recipe:3: wrong number of words after test substitute
+  [2]
+  $ printf 'tree hello-1\nprogram a a.c\ntest own test.sh extra\n' \
+  >   > corpus/programs/hello/recipe
+  $ fails hello
+  corpus: corpus/programs/hello/recipe:3: wrong number of words after test own
+  [2]
+  $ printf 'tree missing-1\nprogram a a.c\ntest own t.sh\n' \
   >   > corpus/programs/hello/recipe
   $ fails hello
   corpus: cache/src/missing-1 is missing: fetch the corpus first (fetch.sh)

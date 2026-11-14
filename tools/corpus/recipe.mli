@@ -18,9 +18,19 @@
     prepare SCRIPT            run in the build tree before compiling
     library UNIT...           units linked into every program
     program NAME UNIT...      a program linked from its units
-    test SCRIPT               run in the build tree after linking;
-                              exit status 0 means the tests pass
+    test own SCRIPT           run in the build tree after linking;
+                              exit status 0 means the program's own
+                              test suite passes
+    test substitute SCRIPT DESCRIPTION...
+                              the same, for a script that is not the
+                              program's own suite (a smoke test, or
+                              tests that are only compiled); the
+                              DESCRIPTION says what it checks
     v}
+
+    The [test] line has no default: a recipe states whether its script
+    is the program's own suite, because the exit gate counts only that
+    as the program's tests passing.
 
     A [DIR], [UNIT] or [NAME] is a path relative to the build tree, a
     [SCRIPT] a file in the directory of the recipe. The runner adds
@@ -29,6 +39,12 @@
 type tree = { archive : string; dir : string  (** ["."] for the root *) }
 type program = { name : string; units : string list }
 
+type suite =
+  | Own  (** the program's own test suite *)
+  | Substitute of string  (** what a script that is not the suite checks *)
+
+type test = { script : string; suite : suite }
+
 type t = {
   trees : tree list;
   cflags : string list;
@@ -36,7 +52,7 @@ type t = {
   prepare : string option;
   library : string list;
   programs : program list;
-  test : string;
+  test : test;
 }
 
 val units : t -> string list

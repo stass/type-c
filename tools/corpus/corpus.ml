@@ -221,7 +221,14 @@ let compile_or_fail context unit =
   | exception Step_failed message -> Failed message
   | exception Sys_error message -> Failed message
 
-type tests = Passed | Tests_failed of string | Not_run of string
+(* [Substitute_passed] is a script that is not the program's own suite
+   (the recipe says what it checks): it never counts as the tests
+   passing. *)
+type tests =
+  | Passed
+  | Substitute_passed of string
+  | Tests_failed of string
+  | Not_run of string
 
 type build = {
   units : (string * unit_result) list;
@@ -259,9 +266,13 @@ let script_command ~recipe_dir ~cc script =
 let run_tests context ~recipe_dir (recipe : Recipe.t) ~not_linked =
   if not_linked <> [] then Not_run "a program did not link"
   else
-    let command = script_command ~recipe_dir ~cc:context.cc recipe.test in
+    let test = recipe.test in
+    let command = script_command ~recipe_dir ~cc:context.cc test.script in
     match run context ~step:"the tests" command with
-    | _ -> Passed
+    | _ -> (
+        match test.suite with
+        | Own -> Passed
+        | Substitute description -> Substitute_passed description)
     | exception Step_failed message -> Tests_failed message
 
 (* The build tree is made afresh: the trees of the recipe, copied from
@@ -331,14 +342,39 @@ let is_failed = function _, Failed _ -> true | _ -> false
 
 let tests_text = function
   | Passed -> "passed"
+  | Substitute_passed description ->
+      "substitute passed, not the program's own suite: " ^ description
   | Tests_failed message -> "FAILED: " ^ message
   | Not_run reason -> "not run: " ^ reason
 
-let clean build =
-  List.for_all is_identical build.units && build.tests = Passed
+(* What a record says about the exit gate of plan 0.11: gate 1 (the
+   program's own tests pass) and gate 2 (identical objects). *)
+type verdict = Gates_met | Substitute_tests | Gates_failed
 
-let record_is_clean record =
-  match record.outcome with Ok build -> clean build | Error _ -> false
+let build_verdict build =
+  let identical = List.for_all is_identical build.units in
+  match build.tests with
+  | Passed when identical -> Gates_met
+  | Substitute_passed _ when identical -> Substitute_tests
+  | _ -> Gates_failed
+
+let record_verdict record =
+  match record.outcome with
+  | Ok build -> build_verdict build
+  | Error _ -> Gates_failed
+
+let verdict_text = function
+  | Gates_met -> "gates met"
+  | Substitute_tests -> "gate 1 not met: only a substitute test passed"
+  | Gates_failed -> "gates not met"
+
+(* Exit status 0 only when every record meets the gates; a failure (1)
+   outranks a run whose only shortfall is a substitute test (3), so that
+   a script reading the status never takes either for a pass. *)
+let exit_status verdicts =
+  if List.mem Gates_failed verdicts then 1
+  else if List.mem Substitute_tests verdicts then 3
+  else 0
 
 let build_lines build =
   let add total (_, result) = add_times total (unit_times result) in
@@ -449,17 +485,21 @@ let main arguments =
       corpus_line = revision options.corpus;
     }
   in
-  let all_clean = ref true in
+  let verdicts = ref [] in
   let each_backend program cc =
     let record = run_program options host ~cc program in
     write_record options host provenance ~cc record;
-    if not (record_is_clean record) then all_clean := false
+    let verdict = record_verdict record in
+    if verdict <> Gates_met then
+      Printf.printf "%s.%s: %s\n\n" record.program record.backend
+        (verdict_text verdict);
+    verdicts := verdict :: !verdicts
   in
   let each_program program =
     List.iter (each_backend program) options.backends
   in
   List.iter each_program programs;
-  if !all_clean then 0 else 1
+  exit_status !verdicts
 
 let () =
   let arguments = List.tl (Array.to_list Sys.argv) in
