@@ -16,12 +16,10 @@ let encoding_name = function
 
 let kind_name = function
   | Token.Identifier -> "id"
-  | Token.Integer -> "int"
-  | Token.Floating -> "float"
-  | Token.Version -> "version"
+  | Token.Number -> "number"
   | Token.Character encoding -> "char" ^ encoding_name encoding
   | Token.String encoding -> "str" ^ encoding_name encoding
-  | Token.Punctuator -> "punct"
+  | Token.Punctuator _ -> "punct"
   | Token.Pragma -> "pragma"
   | Token.Typec_pragma -> "typec-pragma"
 
@@ -52,25 +50,10 @@ let outcome show case =
 
 let case name text expected = { name; text; expected }
 
-(* Each spelling is one constant of the kind. *)
-let numbers kind spellings =
-  List.map
-    (fun spelling ->
-      case ("number " ^ spelling) spelling (kind ^ " " ^ spelling))
-    spellings
-
-(* Each spelling is a preprocessing number that is no constant. *)
-let invalid_numbers spellings =
-  List.map
-    (fun spelling ->
-      case ("invalid number " ^ spelling) spelling
-        ("error: in.i:1: invalid number " ^ spelling))
-    spellings
-
 let kind_cases =
   [
     case "a declaration" "int x = 42;"
-      "id int | id x | punct = | int 42 | punct ;";
+      "id int | id x | punct = | number 42 | punct ;";
     case "digraphs" "<: :> <% %> %: %:%: %:% <::"
       "punct <: | punct :> | punct <% | punct %> | punct %: | punct %:%: \
        | punct %: | punct % | punct <: | punct :";
@@ -84,7 +67,7 @@ let kind_cases =
     case "maximal munch" "x+++++y..z"
       "id x | punct ++ | punct ++ | punct + | id y | punct . | punct . | id z";
     case "member access is no number" "a.b .5 a.5"
-      "id a | punct . | id b | float .5 | id a | float .5";
+      "id a | punct . | id b | number .5 | id a | number .5";
     case "characters" {|'a' L'b' u'c' U'd' '\'' '\\' '"'|}
       ({|char 'a' | char(L) L'b' | char(u) u'c' | char(U) U'd'|}
       ^ {| | char '\'' | char '\\' | char '"'|});
@@ -108,7 +91,8 @@ let kind_cases =
     case "a # inside a line is a punctuator" "a # b ## c\n%: d"
       "id a | punct # | id b | punct ## | id c | punct %: | id d";
     case "a # after a blank is a punctuator" " # 1 \"f.h\" 1\n\t#pragma x"
-      "punct # | int 1 | str \"f.h\" | int 1 | punct # | id pragma | id x";
+      "punct # | number 1 | str \"f.h\" | number 1 | punct # | id pragma \
+       | id x";
     case "white space" "\t a \011\012\r\n b " "id a | id b";
     case "empty" "" "";
     case "unexpected character" "a @ b"
@@ -137,25 +121,18 @@ let kind_cases =
     case "other directives" "#define X 1"
       "error: in.i:1: unsupported directive #define";
     case "null directive" "#\n" "error: in.i:1: unsupported directive #";
+    case "a preprocessing number need not be a constant"
+      "08 1e+ 1..2 10.13.4 10_4 0x1e+1 1$ 1\\u00e9 1\xc3\xa9 1.0u"
+      "number 08 | number 1e+ | number 1..2 | number 10.13.4 | number 10_4 \
+       | number 0x1e+1 | number 1$ | number 1\\u00e9 | number 1\xc3\xa9 \
+       | number 1.0u";
+    case "a preprocessing number takes a sign only after e or p"
+      "1+2 1e+2 0x1p-3 1E-x 1P+ 1.e5.x 0x1+1"
+      "number 1 | punct + | number 2 | number 1e+2 | number 0x1p-3 \
+       | number 1E-x | number 1P+ | number 1.e5.x | number 0x1 | punct + \
+       | number 1";
+    case "invalid UTF-8 in a number" "1\xff" "error: in.i:1: invalid UTF-8";
   ]
-  @ numbers "int"
-      [
-        "0"; "7"; "0777"; "0x1F"; "0XaBu"; "0b101"; "0B1"; "1u"; "1U"; "1l";
-        "1LL"; "1ull"; "1LLu"; "1uLL"; "1lu"; "1i"; "1ui"; "2J"; "1Il";
-      ]
-  @ numbers "float"
-      [
-        "1.0"; "1."; ".5"; "1e10"; "1E+10"; "1e-3f"; "1.5L"; "0x1p3";
-        "0x1.8P-2"; "0X.8p0"; "0x1.p1"; "09.5"; "09e1"; "0e0"; "1.0i";
-        "1.0fi"; "1.0if"; "1.0Fj";
-      ]
-  @ numbers "version" [ "10.13.4"; "10_4"; "10_13_4"; "1.2_3" ]
-  @ invalid_numbers
-      [
-        "08"; "0x"; "0b"; "1e"; "1e+"; "0x1.8"; "0x1p"; "1f"; "1lL"; "1lll";
-        "1uu"; "1ii"; "1.0ff"; "1..2"; "0b2"; "0b1.0"; "0b1p1"; "0x.p1";
-        "1.2.3.4"; "1.2."; "1_"; "0x1e+1"; "1a"; "1$"; "1\\u00e9"; "1.0u";
-      ]
 
 let place_cases =
   [
@@ -244,10 +221,8 @@ let place_cases =
       "error: in.i:1: unterminated literal";
     case "a message escapes control characters" "# 1 \"a\027[2Jb\"\n@"
       "error: a\\x1B[2Jb:1: unexpected character '@'";
-    case "a message escapes other bytes" "1\xc2\x9b"
-      "error: in.i:1: invalid number 1\\xC2\\x9B";
-    case "a message cuts a long spelling" ("1" ^ String.make 100 'x')
-      ("error: in.i:1: invalid number 1" ^ String.make 39 'x' ^ "...");
+    case "a message escapes other bytes" "# 1 \"a\xc2\x9bb\"\n@"
+      "error: a\\xC2\\x9Bb:1: unexpected character '@'";
     case "#line without a number" "#line\n"
       "error: in.i:1: missing line number";
     case "#line with a name for a number" "#line \"x\""
@@ -255,6 +230,141 @@ let place_cases =
     case "#line takes no flags" "#line 1 \"f\" 3"
       "error: in.i:1: unexpected text at the end of a directive";
   ]
+
+(* The constant a preprocessing number is, as words: the kind, the base
+   or type, then each part of the suffix. *)
+let show_constant constant =
+  let word name present = if present then [ name ] else [] in
+  match constant with
+  | Number.Integer { base; suffix } ->
+      let base_name =
+        match base with
+        | Number.Binary -> "binary"
+        | Number.Octal -> "octal"
+        | Number.Decimal -> "decimal"
+        | Number.Hexadecimal -> "hexadecimal"
+      in
+      let length =
+        match suffix.length with
+        | Number.Not_long -> []
+        | Number.Long -> [ "long" ]
+        | Number.Long_long -> [ "long long" ]
+      in
+      String.concat " "
+        ([ "integer"; base_name ]
+        @ word "unsigned" suffix.unsigned
+        @ length
+        @ word "imaginary" suffix.imaginary)
+  | Number.Floating { suffix } ->
+      let type_name =
+        match suffix.floating_type with
+        | Number.Double -> "double"
+        | Number.Float -> "float"
+        | Number.Long_double -> "long double"
+      in
+      String.concat " "
+        ([ "floating"; type_name ] @ word "imaginary" suffix.imaginary)
+  | Number.Not_a_constant -> "not a constant"
+
+(* Each spelling with the constant it is. *)
+let constant_cases =
+  [
+    ("0", "integer octal");
+    ("7", "integer decimal");
+    ("0777", "integer octal");
+    ("0x1F", "integer hexadecimal");
+    ("0XaBu", "integer hexadecimal unsigned");
+    ("0b101", "integer binary");
+    ("0B1", "integer binary");
+    ("1u", "integer decimal unsigned");
+    ("1U", "integer decimal unsigned");
+    ("1l", "integer decimal long");
+    ("1LL", "integer decimal long long");
+    ("1ull", "integer decimal unsigned long long");
+    ("1LLu", "integer decimal unsigned long long");
+    ("1uLL", "integer decimal unsigned long long");
+    ("1lu", "integer decimal unsigned long");
+    ("1i", "integer decimal imaginary");
+    ("1ui", "integer decimal unsigned imaginary");
+    ("2J", "integer decimal imaginary");
+    ("1Il", "integer decimal long imaginary");
+    ("1.0", "floating double");
+    ("1.", "floating double");
+    (".5", "floating double");
+    ("1e10", "floating double");
+    ("1E+10", "floating double");
+    ("1e-3f", "floating float");
+    ("1.5L", "floating long double");
+    ("0x1p3", "floating double");
+    ("0x1.8P-2", "floating double");
+    ("0X.8p0", "floating double");
+    ("0x1.p1", "floating double");
+    ("09.5", "floating double");
+    ("09e1", "floating double");
+    ("0e0", "floating double");
+    ("1.0i", "floating double imaginary");
+    ("1.0fi", "floating float imaginary");
+    ("1.0if", "floating float imaginary");
+    ("1.0Fj", "floating float imaginary");
+    ("1.0lJ", "floating long double imaginary");
+    ("0xfull", "integer hexadecimal unsigned long long");
+    ("00", "integer octal");
+    ("0u", "integer octal unsigned");
+    ("1jul", "integer decimal unsigned long imaginary");
+    ("08e1", "floating double");
+    ("0x0p0fi", "floating float imaginary");
+  ]
+  @ List.map
+      (fun spelling -> (spelling, "not a constant"))
+      [
+        ""; "08"; "0x"; "0b"; "1e"; "1e+"; "0x1.8"; "0x1p"; "1f"; "1lL";
+        "1lll"; "1uu"; "1ii"; "1.0ff"; "1.0fl"; "1..2"; "0b2"; "0b1.0";
+        "0b1p1"; "0x.p1"; "1.2.3.4"; "1.2."; "1_"; "0x1e+1"; "1a"; "1$";
+        "1\\u00e9"; "1.0u"; "10.13.4"; "10_4"; "10_13_4"; "1.2_3"; "x";
+        "1.0ii"; "1.0ij"; "1Ll"; "1llL"; "1lul"; "1uLu";
+      ]
+
+let failed_constant_cases () =
+  List.filter_map
+    (fun (spelling, expected) ->
+      let actual = show_constant (Number.classify spelling) in
+      if actual = expected then None else Some (spelling, expected, actual))
+    constant_cases
+
+(* Every spelling of C11 6.4.6 with the punctuator it is, digraphs as the
+   punctuator they stand for (6.4.6p3). *)
+let punctuator_cases =
+  Punctuator.
+    [
+      ("[", Left_bracket); ("]", Right_bracket); ("(", Left_paren);
+      (")", Right_paren); ("{", Left_brace); ("}", Right_brace);
+      (".", Dot); ("->", Arrow); ("++", Plus_plus); ("--", Minus_minus);
+      ("&", Ampersand); ("*", Star); ("+", Plus); ("-", Minus);
+      ("~", Tilde); ("!", Exclaim); ("/", Slash); ("%", Percent);
+      ("<<", Less_less); (">>", Greater_greater); ("<", Less);
+      (">", Greater); ("<=", Less_equal); (">=", Greater_equal);
+      ("==", Equal_equal); ("!=", Exclaim_equal); ("^", Caret);
+      ("|", Pipe); ("&&", Ampersand_ampersand); ("||", Pipe_pipe);
+      ("?", Question); (":", Colon); (";", Semicolon); ("...", Ellipsis);
+      ("=", Equal); ("*=", Star_equal); ("/=", Slash_equal);
+      ("%=", Percent_equal); ("+=", Plus_equal); ("-=", Minus_equal);
+      ("<<=", Less_less_equal); (">>=", Greater_greater_equal);
+      ("&=", Ampersand_equal); ("^=", Caret_equal); ("|=", Pipe_equal);
+      (",", Comma); ("#", Hash); ("##", Hash_hash); ("<:", Left_bracket);
+      (":>", Right_bracket); ("<%", Left_brace); ("%>", Right_brace);
+      ("%:", Hash); ("%:%:", Hash_hash);
+    ]
+
+(* The spellings that do not read as their punctuator alone. Each is read
+   after a blank, where "#" starts no directive. *)
+let failed_punctuator_cases () =
+  List.filter
+    (fun (spelling, punctuator) ->
+      match Reader.read ~name:"in.i" (" " ^ spelling) with
+      | Ok { tokens = [| token |]; _ } ->
+          token.kind <> Token.Punctuator punctuator
+      | Ok _ | Error _ -> true)
+    punctuator_cases
 
 (* Each owner is one value, so tokens of one owner share it. *)
 let owners_are_shared () =
@@ -282,6 +392,19 @@ let () =
       Printf.eprintf "FAIL: %s\n  expected: %s\n  actual:   %s\n" case.name
         case.expected actual)
     failed;
+  let failed_constants = failed_constant_cases () in
+  List.iter
+    (fun (spelling, expected, actual) ->
+      Printf.eprintf "FAIL: constant %S\n  expected: %s\n  actual:   %s\n"
+        spelling expected actual)
+    failed_constants;
+  let failed_punctuators = failed_punctuator_cases () in
+  List.iter
+    (fun (spelling, _) -> Printf.eprintf "FAIL: punctuator %S\n" spelling)
+    failed_punctuators;
   let shared = owners_are_shared () in
   if not shared then prerr_endline "FAIL: owners are shared";
-  if failed <> [] || not shared then exit 1
+  if
+    failed <> [] || failed_constants <> [] || failed_punctuators <> []
+    || not shared
+  then exit 1

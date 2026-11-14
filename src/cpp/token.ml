@@ -15,20 +15,17 @@ type encoding =
 
 (** What a token is. Keywords are identifiers here: whether [try] or
     [defer] is a keyword depends on the file the token belongs to, which
-    the parser decides. A punctuator keeps its spelling, digraphs
-    included. *)
+    the parser decides. *)
 type kind =
   | Identifier
-  | Integer  (** an integer constant, suffix included *)
-  | Floating  (** a floating constant, suffix included *)
-  | Version
-      (** a preprocessing number such as [10.13.4] or [10_4] that is no
-          constant but a version of Clang's [availability] attribute,
-          which the macOS SDK uses; [10.13] is [Floating] and [10] is
-          [Integer] *)
+  | Number
+      (** a preprocessing number (C11 6.4.8), which is not always a
+          constant: the macOS SDK writes versions such as [10.13.4] in
+          Clang's [availability] attribute. {!Number.classify} tells the
+          constant it is where one is needed. *)
   | Character of encoding
   | String of encoding
-  | Punctuator
+  | Punctuator of Punctuator.t
   | Pragma  (** a [#pragma] line other than [#pragma typec] *)
   | Typec_pragma  (** a [#pragma typec] line, which [typec] consumes *)
 

@@ -3,4 +3,4 @@
 
 (library
  (name typec_cpp)
- (private_modules char_class number))
+ (private_modules char_class))

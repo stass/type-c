@@ -56,9 +56,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Reader of preprocessed text
 
-- [Medium] The reader refuses the floating suffixes of the `_Float`
-  types (`f16`, `f32`, `f64`, `f128`, `f32x`, `f64x`, `bf16`) and GCC's
-  `q` and `w`, which the GNU profile needs once it has those types (0.7).
+- [Medium] `Number.classify` finds no constant in a number with a
+  floating suffix of the `_Float` types (`f16`, `f32`, `f64`, `f128`,
+  `f32x`, `f64x`, `bf16`), GCC's `q`, `w` and `d`, or the decimal
+  floating suffixes `df`, `dd` and `dl`. Decide which the GNU profile
+  accepts once it has those types (0.7), and how `floating_type` names
+  them.
+- [Medium] `Number.classify` says which constant a number is but not
+  where its digits end, and the type of an integer constant depends on
+  its value (C11 6.4.4.1). When constant evaluation needs the value,
+  have the classifier return the digits too, so that the grammar of a
+  constant stays in one place.
 - [Medium] A token records the file it belongs to, not the inclusion:
   two inclusions of one header have one owner. Design 11.1 keeps the
   checked state per file and does not carry it into or out of an
@@ -79,12 +87,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   effect in the markers it writes for lowered code; GCC turns the system
   header state off at a marker without flag 3. Add the flags in effect
   to `Location.t` when the emitter needs them.
-- [Medium] `Token.Punctuator` keeps only the spelling, so the parser
-  (0.5) must map `<:`, `<%`, `%:` and `%:%:` itself. Give the kind one
-  constructor per punctuator, digraphs mapped to their canonical form,
-  from the table the reader matches.
 - [Low] Diagnostics of later stages print names and spellings from the
-  text; route them through the escaping of `Reader.error_message`.
+  text; route them through the escaping of `Reader.error_message`, and
+  cut a quoted spelling, such as a number that is no constant, to a
+  bounded length so that a huge token cannot make a huge message.
 - [Low] `#ident` and `#sccs`, which `cc -E` passes through, are refused
   as unsupported directives. Pass them through like a pragma if a corpus
   uses them.

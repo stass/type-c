@@ -8,10 +8,6 @@ type error = { location : Location.t; message : string }
    it also keeps the number far from overflow while it is read. *)
 let max_line_number = 2147483647
 
-(* The most bytes of the text an error message quotes, so that a huge
-   token cannot make a huge message. *)
-let max_quoted_length = 40
-
 (* How a line marker moves on the stack of files being read. *)
 type motion = Stay | Enter | Return
 
@@ -86,10 +82,6 @@ let is_printable c = ' ' <= c && c <= '~'
 let describe_byte c =
   if is_printable c then Printf.sprintf "character '%c'" c
   else Printf.sprintf "byte 0x%02X" (Char.code c)
-
-let quote text =
-  if String.length text <= max_quoted_length then text
-  else String.sub text 0 max_quoted_length ^ "..."
 
 (* Lines, owners and tokens. *)
 
@@ -170,7 +162,7 @@ let scan_identifier state =
 
 (* A preprocessing number (C11 6.4.8): a digit, or '.' and a digit, then
    digits, identifier characters, '.' and signs after e, E, p and P. *)
-let scan_pp_number state =
+let scan_number state =
   advance state (if peek state 0 = Some '.' then 2 else 1);
   let continues = ref true in
   while !continues do
@@ -178,15 +170,8 @@ let scan_pp_number state =
     | Some ('e' | 'E' | 'p' | 'P'), Some ('+' | '-') -> advance state 2
     | Some '.', _ -> advance state 1
     | _ -> continues := scan_identifier_char state
-  done
-
-let scan_number state =
-  let start = state.pos in
-  scan_pp_number state;
-  let spelling = String.sub state.text start (state.pos - start) in
-  match Number.classify spelling with
-  | Some kind -> kind
-  | None -> fail state ("invalid number " ^ quote spelling)
+  done;
+  Token.Number
 
 let starts_number state =
   match (peek state 0, peek state 1) with
@@ -229,24 +214,19 @@ let literal_openers =
     ("'", Token.Character Plain);
   ]
 
-(* C11 6.4.6, longest first, so that the first one that matches is the
-   longest. *)
+(* The spellings of the punctuators, longest first, so that the first one
+   that matches is the longest. *)
 let punctuators =
   List.stable_sort
-    (fun a b -> compare (String.length b) (String.length a))
-    [
-      "["; "]"; "("; ")"; "{"; "}"; "."; "->"; "++"; "--"; "&"; "*"; "+";
-      "-"; "~"; "!"; "/"; "%"; "<<"; ">>"; "<"; ">"; "<="; ">="; "==";
-      "!="; "^"; "|"; "&&"; "||"; "?"; ":"; ";"; "..."; "="; "*="; "/=";
-      "%="; "+="; "-="; "<<="; ">>="; "&="; "^="; "|="; ","; "#"; "##";
-      "<:"; ":>"; "<%"; "%>"; "%:"; "%:%:";
-    ]
+    (fun (a, _) (b, _) -> compare (String.length b) (String.length a))
+    Punctuator.spellings
 
 let scan_punctuator state =
-  match List.find_opt (looking_at state) punctuators with
-  | Some punctuator ->
-      advance state (String.length punctuator);
-      Token.Punctuator
+  let matches (spelling, _) = looking_at state spelling in
+  match List.find_opt matches punctuators with
+  | Some (spelling, punctuator) ->
+      advance state (String.length spelling);
+      Token.Punctuator punctuator
   | None -> fail state ("unexpected " ^ describe_byte state.text.[state.pos])
 
 (* Consumes one token and returns its kind. *)

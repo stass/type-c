@@ -1,13 +1,28 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type radix = Binary | Octal_or_decimal | Hexadecimal
+type base = Binary | Octal | Decimal | Hexadecimal
+type integer_length = Not_long | Long | Long_long
+
+type integer_suffix = {
+  unsigned : bool;
+  length : integer_length;
+  imaginary : bool;
+}
+
+type floating_type = Double | Float | Long_double
+type floating_suffix = { floating_type : floating_type; imaginary : bool }
+
+type t =
+  | Integer of { base : base; suffix : integer_suffix }
+  | Floating of { suffix : floating_suffix }
+  | Not_a_constant
 
 (* The spelling being classified and how much of it is read. *)
 type cursor = { spelling : string; mutable at : int }
 
-(* Raised at the first part of the spelling that is not a constant. *)
-exception Not_a_constant
+(* Raised at the first part of the spelling that no constant has. *)
+exception Rejected
 
 let at_end cursor = cursor.at >= String.length cursor.spelling
 
@@ -48,113 +63,114 @@ let accept cursor characters =
       true
   | _ -> false
 
-let read_radix cursor =
+(* A leading 0 makes an integer octal but leaves a floating constant such
+   as 09.5 decimal, so [integer_base] decides it. *)
+let read_base cursor =
   let spelling = cursor.spelling in
-  if String.length spelling < 2 || spelling.[0] <> '0' then Octal_or_decimal
-  else
-    match spelling.[1] with
-    | 'x' | 'X' ->
-        advance cursor 2;
-        Hexadecimal
-    | 'b' | 'B' ->
-        advance cursor 2;
-        Binary
-    | _ -> Octal_or_decimal
+  let prefix = String.sub spelling 0 (Int.min 2 (String.length spelling)) in
+  match String.lowercase_ascii prefix with
+  | "0x" ->
+      advance cursor 2;
+      Hexadecimal
+  | "0b" ->
+      advance cursor 2;
+      Binary
+  | _ -> Decimal
 
 let is_digit_of = function
   | Binary -> is_binary_digit
-  | Octal_or_decimal -> is_digit
+  | Octal | Decimal -> is_digit
   | Hexadecimal -> is_hex_digit
 
 (* An exponent, e for decimal and p for hexadecimal, with an optional sign
    and decimal digits; binary constants have none. Returns whether there
    is one. *)
-let read_exponent cursor radix =
+let read_exponent cursor base =
   let letters =
-    match radix with
-    | Octal_or_decimal -> "eE"
+    match base with
+    | Octal | Decimal -> "eE"
     | Hexadecimal -> "pP"
     | Binary -> ""
   in
   let present = accept cursor letters in
   if present then begin
     ignore (accept cursor "+-");
-    if skip cursor is_digit = 0 then raise Not_a_constant
+    if skip cursor is_digit = 0 then raise Rejected
   end;
   present
 
-let at_most_once counts =
-  if List.exists (fun count -> count > 1) counts then raise Not_a_constant
+(* Each part of a suffix may stand once. *)
+let set_once part value =
+  if Option.is_some !part then raise Rejected;
+  part := Some value
 
 (* One of each at most, in any order: u or U; l, L, ll or LL; and an
    imaginary suffix. *)
 let read_integer_suffix cursor =
-  let unsigned = ref 0 and long = ref 0 and imaginary = ref 0 in
+  let unsigned = ref None and length = ref None and imaginary = ref None in
   while not (at_end cursor) do
     match next cursor with
-    | 'u' | 'U' -> incr unsigned
+    | 'u' | 'U' -> set_once unsigned ()
     | ('l' | 'L') as l ->
-        ignore (accept cursor (String.make 1 l));
-        incr long
-    | c when is_imaginary_suffix c -> incr imaginary
-    | _ -> raise Not_a_constant
+        let doubled = accept cursor (String.make 1 l) in
+        set_once length (if doubled then Long_long else Long)
+    | c when is_imaginary_suffix c -> set_once imaginary ()
+    | _ -> raise Rejected
   done;
-  at_most_once [ !unsigned; !long; !imaginary ]
+  {
+    unsigned = Option.is_some !unsigned;
+    length = Option.value !length ~default:Not_long;
+    imaginary = Option.is_some !imaginary;
+  }
 
 (* One of each at most, in any order: f, F, l or L; and an imaginary
    suffix. *)
 let read_floating_suffix cursor =
-  let size = ref 0 and imaginary = ref 0 in
+  let floating_type = ref None and imaginary = ref None in
   while not (at_end cursor) do
     match next cursor with
-    | 'f' | 'F' | 'l' | 'L' -> incr size
-    | c when is_imaginary_suffix c -> incr imaginary
-    | _ -> raise Not_a_constant
+    | 'f' | 'F' -> set_once floating_type Float
+    | 'l' | 'L' -> set_once floating_type Long_double
+    | c when is_imaginary_suffix c -> set_once imaginary ()
+    | _ -> raise Rejected
   done;
-  at_most_once [ !size; !imaginary ]
+  {
+    floating_type = Option.value !floating_type ~default:Double;
+    imaginary = Option.is_some !imaginary;
+  }
 
-(* A decimal constant other than 0 starts with a nonzero digit, so a
-   leading 0 makes the digits octal. *)
-let check_octal whole_digits =
-  if whole_digits.[0] = '0' && not (String.for_all is_octal_digit whole_digits)
-  then raise Not_a_constant
+(* An integer whose digits [whole] start with 0 is octal, with octal
+   digits only. *)
+let integer_base base whole =
+  match base with
+  | Decimal when whole.[0] = '0' ->
+      if not (String.for_all is_octal_digit whole) then raise Rejected;
+      Octal
+  | _ -> base
 
 let classify_exn spelling =
   let cursor = { spelling; at = 0 } in
-  let radix = read_radix cursor in
+  let base = read_base cursor in
   let digits_start = cursor.at in
-  let whole_digits = skip cursor (is_digit_of radix) in
-  let has_point = radix <> Binary && accept cursor "." in
+  let whole_digits = skip cursor (is_digit_of base) in
+  let has_point = base <> Binary && accept cursor "." in
   let fraction_digits =
-    if has_point then skip cursor (is_digit_of radix) else 0
+    if has_point then skip cursor (is_digit_of base) else 0
   in
-  let has_exponent = read_exponent cursor radix in
-  if whole_digits + fraction_digits = 0 then raise Not_a_constant;
+  let has_exponent = read_exponent cursor base in
+  if whole_digits + fraction_digits = 0 then raise Rejected;
   if has_point || has_exponent then begin
     (* A hexadecimal floating constant needs its binary exponent. *)
-    if radix = Hexadecimal && not has_exponent then raise Not_a_constant;
-    read_floating_suffix cursor;
-    Token.Floating
+    if base = Hexadecimal && not has_exponent then raise Rejected;
+    Floating { suffix = read_floating_suffix cursor }
   end
   else begin
-    if radix = Octal_or_decimal then
-      check_octal (String.sub spelling digits_start whole_digits);
-    read_integer_suffix cursor;
-    Token.Integer
+    let whole = String.sub spelling digits_start whole_digits in
+    let base = integer_base base whole in
+    Integer { base; suffix = read_integer_suffix cursor }
   end
-
-(* Two or three groups of decimal digits joined by '.' or '_', as Clang
-   parses the versions of its availability attribute. *)
-let is_version spelling =
-  let dotted = String.map (fun c -> if c = '_' then '.' else c) spelling in
-  let groups = String.split_on_char '.' dotted in
-  let count = List.length groups in
-  2 <= count && count <= 3
-  && List.for_all (fun group -> group <> "" && String.for_all is_digit group)
-       groups
 
 let classify spelling =
   match classify_exn spelling with
-  | kind -> Some kind
-  | exception Not_a_constant ->
-      if is_version spelling then Some Token.Version else None
+  | constant -> constant
+  | exception Rejected -> Not_a_constant
