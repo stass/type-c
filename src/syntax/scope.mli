@@ -9,7 +9,11 @@
     unit, file scope at the bottom; it is persistent, so a point keeps the
     declarations visible there. It is generic in what a declaration binds,
     so that a reader that needs less than the types, such as whether an
-    identifier is a typedef name, can keep the same scopes. *)
+    identifier is a typedef name, can keep the same scopes. Leaving a
+    scope is going back to the value saved on entering it.
+
+    A lookup takes time logarithmic in the number of names visible,
+    whatever the number of scopes open. *)
 
 type ('ordinary, 'tag) t
 
@@ -18,10 +22,6 @@ val file : ('ordinary, 'tag) t
 
 val enter : ('ordinary, 'tag) t -> ('ordinary, 'tag) t
 (** A block or function prototype scope inside the innermost one. *)
-
-val leave : ('ordinary, 'tag) t -> ('ordinary, 'tag) t
-(** The scopes around the innermost one. Raises [Invalid_argument] at
-    file scope. *)
 
 val reenter :
   ('ordinary, 'tag) t -> inner:('ordinary, 'tag) t -> ('ordinary, 'tag) t

@@ -11,11 +11,11 @@ type case = { name : string; text : string; expected : string }
 
 let case name text expected = { name; text; expected }
 
-let outcome ~spans text =
+let outcome ~parse ~spans text =
   match Reader.read ~name:"in.i" text with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
-      match Parser.parse reader with
+      match parse reader with
       | Error error -> "error: " ^ Parser.error_message error
       | Ok unit -> (
           let dump = Tree_dump.translation_unit reader unit in
@@ -389,6 +389,72 @@ let scope_cases =
     case "an object named as a typedef name is no type after it"
       "typedef int T; void f(void) { T T; T x; }"
       "error: in.i:1: expected `;` after an expression, found `x`";
+    case "parameters end with a declaration that is no definition"
+      "typedef int a; int f(int a); a * x;"
+      "(declaration (typedef int) a) | (declaration (int) (function f (int \
+       a))) | (declaration (a) (pointer x))";
+    case "a do condition's declarations end with the statement"
+      "typedef int T; void f(void) { do ; while (sizeof(enum { T })); \
+       T * y; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (do ; (sizeof-type (type (enum T)))) (declaration (T) (pointer \
+       y))))";
+  ]
+
+(* Scope rules under which every name that [find] finds is a typedef
+   name, so that a dump shows which names are in scope where the grammar
+   asks. *)
+let names_as_typedef_names find : (unit, unit) Scope.t Parser.scopes =
+  {
+    file = Scope.file;
+    enter = Scope.enter;
+    reenter = Scope.reenter;
+    declare =
+      (fun scope declaration ->
+        match Parser.scoped_name declaration with
+        | Some name -> Scope.declare scope name ()
+        | None -> scope);
+    is_typedef_name = (fun scope name -> find scope name <> None);
+  }
+
+let every_name_a_typedef_name = names_as_typedef_names Scope.find
+
+(* Only the names of the innermost scope, which tells a scope from one
+   nested in it. *)
+let innermost_names_typedef_names =
+  names_as_typedef_names Scope.find_in_innermost
+
+(* The scopes that the parser reports to the scope rules. *)
+let scope_rule_cases =
+  [
+    case "a function's name is in scope in its body"
+      "int f(void) { f * x; }"
+      "(define (int) (function f (void)) (block (declaration (f) (pointer \
+       x))))";
+    case "a function's name is in scope in its declaration list"
+      "int f(a) f a; { }"
+      "(define (int) (function f (identifiers a)) (declaration (f) a) block)";
+    case "a parameter is in scope in the body"
+      "int f(int a) { a * x; }"
+      "(define (int) (function f (int a)) (block (declaration (a) (pointer \
+       x))))";
+  ]
+
+(* The scopes that the parser opens, under
+   [innermost_names_typedef_names]. *)
+let innermost_scope_cases =
+  [
+    case "a function's body is the scope of its parameters"
+      "int f(int a) { a * x; }"
+      "(define (int) (function f (int a)) (block (declaration (a) (pointer \
+       x))))";
+    case "a block in a function's body is a scope of its own"
+      "int f(int a) { { a * x; } }"
+      "(define (int) (function f (int a)) (block (block (expr (* a x)))))";
+    case "an old-style declaration list is in the body's scope"
+      "int f(a) a b; { b * x; }"
+      "(define (int) (function f (identifiers a)) (declaration (a) b) (block \
+       (declaration (b) (pointer x))))";
   ]
 
 (* Old-style definitions and bodies that system headers define. *)
@@ -912,10 +978,10 @@ let failed_chain_cases () =
     texts
 
 let () =
-  let failed_cases ~spans cases =
+  let failed_cases ?(parse = Parser.parse) ~spans cases =
     List.filter_map
       (fun case ->
-        let actual = outcome ~spans case.text in
+        let actual = outcome ~parse ~spans case.text in
         if actual = case.expected then None else Some (case, actual))
       cases
   in
@@ -939,6 +1005,12 @@ let () =
         error_cases;
       ]
     @ failed_cases ~spans:true (span_cases @ gnu_span_cases)
+    @ failed_cases
+        ~parse:(Parser.parse_with every_name_a_typedef_name)
+        ~spans:false scope_rule_cases
+    @ failed_cases
+        ~parse:(Parser.parse_with innermost_names_typedef_names)
+        ~spans:false innermost_scope_cases
   in
   List.iter
     (fun (case, actual) ->

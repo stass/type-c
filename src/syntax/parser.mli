@@ -3,7 +3,8 @@
 
 (** Parsing the tokens of preprocessed text into a {!Tree.translation_unit}
     (design 13.3): recursive descent over the complete token array, with
-    the scope of typedef names fed back into the grammar.
+    the scope of typedef names fed back into the grammar through scope
+    rules ({!scopes}) that the parser drives.
 
     The grammar is C11's declarations, expressions and statements (C11
     6.5, 6.7, 6.8, 6.9) and the GNU profile's (design 13.3). The body of
@@ -32,7 +33,48 @@ val max_nesting : int
 (** The most brackets ([(], [[], [{]) and conditional operators that the
     parser accepts open at once; one more is an error. *)
 
+(** A declaration that the parser hands to the scope rules where the
+    name it declares, if it has one, enters scope (C11 6.2.1p7). *)
+type scoped_declaration =
+  | Declarator of { specifiers : Tree.specifiers; declarator : Tree.declarator }
+      (** at the end of a declarator, before its initialiser, or before
+          the body of a function definition *)
+  | Enumerator of Tree.enumerator  (** at the end of the enumerator *)
+  | Parameter of Tree.parameter
+      (** at the end of a parameter declaration, named or not *)
+  | Parameter_name of Tree.identifier  (** in an identifier list *)
+
+val scoped_name : scoped_declaration -> string option
+(** The identifier that a declaration puts in scope, if it has one. *)
+
+(** The scope rules (C11 6.2.1) as the parser drives them: the parser
+    alone decides where a scope begins and ends and when a declaration
+    enters one; the rules decide what a declaration binds and which
+    names are typedef names, which the grammar needs. A ['scope] is the
+    stack of scopes open at a point. It is persistent: the parser saves
+    the value on entering a scope and goes back to it on leaving. The
+    functions have no effects: the parser may call them to look ahead
+    and drop the result, as where an old-style definition's declaration
+    list may begin. *)
+type 'scope scopes = {
+  file : 'scope;  (** file scope before the first token *)
+  enter : 'scope -> 'scope;  (** a block or prototype scope inside *)
+  reenter : 'scope -> inner:'scope -> 'scope;
+      (** [reenter outer ~inner] is the innermost scope of [inner] inside
+          [outer]: the body of a function definition is its parameter
+          list's scope (6.2.1p4), not one nested in it, inside the scope
+          where the function is declared. *)
+  declare : 'scope -> scoped_declaration -> 'scope;
+  is_typedef_name : 'scope -> string -> bool;
+}
+
+val parse_with :
+  'scope scopes -> Reader.t -> (Tree.translation_unit, error) result
+
 val parse : Reader.t -> (Tree.translation_unit, error) result
+(** [parse_with] the syntactic scope rules: a name is a typedef name if
+    the specifiers of its declaration hold [typedef], or if GCC and Clang
+    declare it before the first token ([__builtin_va_list]). *)
 
 val error_message : error -> string
 (** ["file:line: message"], as {!Reader.error_message}. *)

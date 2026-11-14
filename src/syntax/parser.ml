@@ -45,29 +45,44 @@ type grammar_token = { lexeme : lexeme; index : int }
    or the [?] of a conditional, which its [:] closes. *)
 type opening = Open_bracket of P.t | Open_conditional
 
-(* What an ordinary identifier in scope is. Stage 1 adds the universe
-   names of design 2.3. *)
-type binding = Typedef_name_binding | Ordinary_binding
+type scoped_declaration =
+  | Declarator of { specifiers : specifiers; declarator : declarator }
+  | Enumerator of enumerator
+  | Parameter of parameter
+  | Parameter_name of identifier
 
-module Scope = Map.Make (String)
+let scoped_name = function
+  | Declarator { declarator; _ } -> declared_name declarator
+  | Parameter parameter -> Option.bind parameter.node.declarator declared_name
+  | Enumerator enumerator -> Some enumerator.node.name.node
+  | Parameter_name name -> Some name.node
 
-(* The cursor. [scope] is persistent, so leaving a scope restores the map
-   saved on entering it; block scopes use the same mechanism. *)
-type state = {
+type 'scope scopes = {
+  file : 'scope;
+  enter : 'scope -> 'scope;
+  reenter : 'scope -> inner:'scope -> 'scope;
+  declare : 'scope -> scoped_declaration -> 'scope;
+  is_typedef_name : 'scope -> string -> bool;
+}
+
+(* The cursor. [scope] is persistent, so leaving a scope restores the
+   value saved on entering it. *)
+type 'scope state = {
   reader : Reader.t;
   grammar : grammar_token array;
   mutable position : int;  (** in [grammar] *)
   mutable open_brackets : opening list;
       (** read and not yet closed, innermost first *)
-  mutable scope : binding Scope.t;
+  scopes : 'scope scopes;
+  mutable scope : 'scope;
 }
 
 (* The function derivation applied to the name that a declarator
    declares: its parameters, and the scope at their [)], which the body of
    a definition continues (6.2.1p4). *)
-type named_function = {
+type 'scope named_function = {
   parameters : parameters;
-  parameter_scope : binding Scope.t;
+  parameter_scope : 'scope;
 }
 
 (* Raised at the first token that the grammar does not accept. *)
@@ -214,26 +229,34 @@ let accept_keyword state keyword =
 let expect state punctuator expected =
   if not (accept state punctuator) then fail_expected state expected
 
-(* Scopes of ordinary identifiers (C11 6.2.1), which say whether an
-   identifier is a typedef name. *)
+(* Scopes (C11 6.2.1), which say whether an identifier is a typedef
+   name. Only these functions use [state.scopes]; the parser leaves a
+   scope by restoring the value it saved on entering it. *)
 
-let is_typedef_name state name =
-  Scope.find_opt name state.scope = Some Typedef_name_binding
+let is_typedef_name state name = state.scopes.is_typedef_name state.scope name
 
-let declare state name binding =
-  state.scope <- Scope.add name binding state.scope
+let declare state declaration =
+  state.scope <- state.scopes.declare state.scope declaration
 
-(* Runs [parse] in a scope nested in the current one and returns its
-   result with the nested scope as [parse] left it. An error abandons the
-   state, so the scope needs no restoring on one. *)
-let nested_scope state parse =
+(* Scopes made from the current one, which the caller runs in. *)
+let inner_scope state = state.scopes.enter state.scope
+let reentered_scope state ~inner = state.scopes.reenter state.scope ~inner
+
+(* Moves the cursor into a scope nested in the current one. *)
+let enter_scope state = state.scope <- inner_scope state
+
+(* Runs [parse] in [scope] and returns its result with the scope as
+   [parse] left it. An error abandons the state, so the scope needs no
+   restoring on one. *)
+let run_in_scope state scope parse =
   let saved = state.scope in
+  state.scope <- scope;
   let result = parse () in
-  let nested = state.scope in
+  let left = state.scope in
   state.scope <- saved;
-  (result, nested)
+  (result, left)
 
-let within_scope state parse = fst (nested_scope state parse)
+let in_scope state scope parse = fst (run_in_scope state scope parse)
 
 (* What a token begins among declaration specifiers: the one place that
    says which tokens are specifiers. *)
@@ -657,30 +680,26 @@ let rec is_name declarator =
   | Parenthesized_declarator inner -> is_name inner
   | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
 
-(* What the declarators of a declaration with these specifiers declare,
-   worked out once per declaration. *)
-let binding_of specifiers =
-  if declares_typedef specifiers then Typedef_name_binding
-  else Ordinary_binding
+(* A declarator with the asm label and attributes after it, which belong
+   to it, read up to where its identifier enters scope (6.2.1p7): before
+   an initialiser or the body of a function definition. *)
+type 'scope scoped_declarator = {
+  declarator_start : int;
+  declarator : declarator;
+  named_function : 'scope named_function option;
+  asm_label : string_literal option;
+  attributes : attribute list;
+}
 
-let declare_declarator state binding declarator =
-  Option.iter
-    (fun name -> declare state name binding)
-    (declared_name declarator)
-
-(* A declaration read up to the end of its first declarator and the asm
-   label and attributes after it, where a function definition parts from
-   it, or read whole if it has no declarator. *)
-type declaration_start =
+(* A declaration read up to the end of its first declarator, where a
+   function definition parts from it, or read whole if it has no
+   declarator. *)
+type 'scope declaration_start =
   | Complete of declaration
   | First_declarator of {
       start : int;
       specifiers : specifiers;
-      declarator_start : int;
-      declarator : declarator;
-      named_function : named_function option;
-      asm_label : string_literal option;
-      attributes : attribute list;
+      first : 'scope scoped_declarator;
     }
 
 (* A statement read up to its substatement, which ends it or, for [if]
@@ -688,23 +707,21 @@ type declaration_start =
    the statement, which closing it restores: a selection or iteration
    statement is a block, and so is each of its substatements (6.8.4p3,
    6.8.5p5). A label opens no scope, so its [outer] is None. *)
-type open_statement = {
+type 'scope open_statement = {
   start : int;
-  outer : binding Scope.t option;
-  kind : open_kind;
+  outer : 'scope option;
+  kind : 'scope open_kind;
 }
 
-and open_kind =
+(* [statement_scope] is the scope of the whole statement after its head;
+   the [else] branch and the condition of a [do] are read in it. *)
+and 'scope open_kind =
   | Open_labeled of label
-  | Open_if of {
-      condition : expression;
-      condition_scope : binding Scope.t;
-          (** [outer] and what the condition declared *)
-    }
+  | Open_if of { condition : expression; statement_scope : 'scope }
   | Open_else of { condition : expression; then_branch : statement }
   | Open_switch of expression
   | Open_while of expression
-  | Open_do
+  | Open_do of { statement_scope : 'scope }
   | Open_for of {
       clause : for_clause option;
       condition : expression option;
@@ -713,7 +730,9 @@ and open_kind =
 
 (* What the substatement of an open statement leaves: the statement
    closed, or, after the [else] of an [if], open again. *)
-type closing = Closed of statement_node | Reopened of open_kind
+type 'scope closing =
+  | Closed of statement_node
+  | Reopened of 'scope open_kind
 
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
@@ -887,8 +906,9 @@ and enumerator state =
   let value =
     if accept state P.Equal then Some (constant_expression state) else None
   in
-  declare state name.node Ordinary_binding;
-  finish state start { name; attributes; value }
+  let enumerator = finish state start { name; attributes; value } in
+  declare state (Enumerator enumerator);
+  enumerator
 
 (* After the [_Static_assert]. *)
 and static_assertion state =
@@ -987,7 +1007,8 @@ and declarator_suffixes state form start inner named_function =
   | Punctuator_token P.Left_paren ->
       advance state;
       let parameters, parameter_scope =
-        nested_scope state (fun () -> parameters state form)
+        run_in_scope state (inner_scope state) (fun () ->
+            parameters state form)
       in
       let function_ = Function { inner; parameters } in
       let named_function =
@@ -1059,10 +1080,12 @@ and parameter state =
   if specifiers = [] then fail_expected state "a parameter declaration";
   let declarator = declarator state Named_or_abstract in
   let attributes = attributes state in
-  Option.iter
-    (fun name -> declare state name Ordinary_binding)
-    (Option.bind declarator declared_name);
-  finish state start ({ specifiers; declarator; attributes } : parameter_node)
+  let parameter =
+    finish state start
+      ({ specifiers; declarator; attributes } : parameter_node)
+  in
+  declare state (Parameter parameter);
+  parameter
 
 (* A typedef name is refused in an identifier list: it would begin a
    parameter declaration. *)
@@ -1073,7 +1096,7 @@ and identifier_list state =
         fail_type_name state "a parameter name" name
     | _ -> ());
     let name = identifier state "a parameter name" in
-    declare state name.node Ordinary_binding;
+    declare state (Parameter_name name);
     let identifiers = name :: identifiers in
     if accept state P.Comma then loop identifiers else List.rev identifiers
   in
@@ -1414,14 +1437,28 @@ and generic_association state =
 
 (* Declarations (C11 6.7). *)
 
-(* A declarator's identifier is in scope from the end of the declarator,
-   before its initialiser (6.2.1p7). *)
-and init_declarator state binding start declarator asm_label attributes =
-  declare_declarator state binding declarator;
+(* The only way the parser reads the declarator of a declaration, so
+   that each one enters scope at the same point. *)
+and scoped_declarator state specifiers =
+  let declarator_start = state.position in
+  let declarator, named_function = named_declarator_and_function state in
+  let asm_label = asm_label state in
+  let attributes = attributes state in
+  declare state (Declarator { specifiers; declarator });
+  { declarator_start; declarator; named_function; asm_label; attributes }
+
+and init_declarator state scoped =
   let initialiser =
     if accept state P.Equal then Some (initialiser state) else None
   in
-  finish state start { declarator; asm_label; attributes; initialiser }
+  finish state scoped.declarator_start
+    ({
+       declarator = scoped.declarator;
+       asm_label = scoped.asm_label;
+       attributes = scoped.attributes;
+       initialiser;
+     }
+      : init_declarator_node)
 
 and declaration_start state =
   let start = state.position in
@@ -1435,20 +1472,8 @@ and declaration_start state =
       Complete
         (finish state start (Declaration { specifiers; declarators = [] }))
     else
-      let declarator_start = state.position in
-      let declarator, named_function = named_declarator_and_function state in
-      let asm_label = asm_label state in
-      let attributes = attributes state in
-      First_declarator
-        {
-          start;
-          specifiers;
-          declarator_start;
-          declarator;
-          named_function;
-          asm_label;
-          attributes;
-        }
+      let first = scoped_declarator state specifiers in
+      First_declarator { start; specifiers; first }
   end
 
 and declaration state = declaration_of_start state (declaration_start state)
@@ -1457,30 +1482,17 @@ and declaration state = declaration_of_start state (declaration_start state)
    initialiser and the declarators after it. *)
 and declaration_of_start state = function
   | Complete declaration -> declaration
-  | First_declarator first ->
-      let binding = binding_of first.specifiers in
+  | First_declarator { start; specifiers; first } ->
       let next_declarator () =
-        let declarator_start = state.position in
-        let declarator = named_declarator state in
-        let label = asm_label state in
-        let attributes = attributes state in
-        init_declarator state binding declarator_start declarator label
-          attributes
+        init_declarator state (scoped_declarator state specifiers)
       in
       let rec loop declarators =
         if accept state P.Comma then loop (next_declarator () :: declarators)
         else List.rev declarators
       in
-      let declarators =
-        loop
-          [
-            init_declarator state binding first.declarator_start
-              first.declarator first.asm_label first.attributes;
-          ]
-      in
+      let declarators = loop [ init_declarator state first ] in
       expect state P.Semicolon "`;` after a declaration";
-      finish state first.start
-        (Declaration { specifiers = first.specifiers; declarators })
+      finish state start (Declaration { specifiers; declarators })
 
 (* Statements (C11 6.8). *)
 
@@ -1560,7 +1572,12 @@ and statement state = open_statements state []
 and open_statements state opened =
   let start = state.position in
   let outer = state.scope in
-  let read_substatement_of kind =
+  (* A selection or iteration statement is a block, which [read_head]
+     reads in, and so is its substatement. *)
+  let open_block_statement read_head =
+    enter_scope state;
+    let kind = read_head () in
+    enter_scope state;
     (open_statements [@tailcall]) state
       ({ start; outer = Some outer; kind } :: opened)
   in
@@ -1571,23 +1588,26 @@ and open_statements state opened =
         ({ start; outer = None; kind = Open_labeled label } :: opened)
   | Keyword_token Keyword.If ->
       advance state;
-      let condition = controlling_expression state "if" in
-      read_substatement_of
-        (Open_if { condition; condition_scope = state.scope })
+      open_block_statement (fun () ->
+          let condition = controlling_expression state "if" in
+          Open_if { condition; statement_scope = state.scope })
   | Keyword_token Keyword.Switch ->
       advance state;
-      read_substatement_of
-        (Open_switch (controlling_expression state "switch"))
+      open_block_statement (fun () ->
+          Open_switch (controlling_expression state "switch"))
   | Keyword_token Keyword.While ->
       advance state;
-      read_substatement_of (Open_while (controlling_expression state "while"))
+      open_block_statement (fun () ->
+          Open_while (controlling_expression state "while"))
   | Keyword_token Keyword.Do ->
       advance state;
-      read_substatement_of Open_do
+      open_block_statement (fun () ->
+          Open_do { statement_scope = state.scope })
   | Keyword_token Keyword.For ->
       advance state;
-      let clause, condition, step = for_clauses state in
-      read_substatement_of (Open_for { clause; condition; step })
+      open_block_statement (fun () ->
+          let clause, condition, step = for_clauses state in
+          Open_for { clause; condition; step })
   | _ ->
       let statement = simple_statement state in
       (close_statements [@tailcall]) state opened statement
@@ -1607,23 +1627,25 @@ and close_statements state opened statement =
           (close_statements [@tailcall]) state outside
             (finish state innermost.start node))
 
-(* The rest of [opened] after its substatement [statement]. *)
+(* The rest of [opened] after its substatement [statement]. The scope of
+   the substatement ends with it. *)
 and close_one state opened statement =
   match opened.kind with
   | Open_labeled label -> Closed (Labeled { label; statement })
-  | Open_if { condition; condition_scope } ->
-      state.scope <- condition_scope;
-      if accept_keyword state Keyword.Else then
+  | Open_if { condition; statement_scope } ->
+      state.scope <- statement_scope;
+      if accept_keyword state Keyword.Else then begin
+        enter_scope state;
         Reopened (Open_else { condition; then_branch = statement })
+      end
       else
         Closed (If { condition; then_branch = statement; else_branch = None })
   | Open_else { condition; then_branch } ->
       Closed (If { condition; then_branch; else_branch = Some statement })
   | Open_switch controlling -> Closed (Switch { controlling; body = statement })
   | Open_while condition -> Closed (While { condition; body = statement })
-  | Open_do ->
-      (* The scope of the body ends before the condition. *)
-      Option.iter (fun outer -> state.scope <- outer) opened.outer;
+  | Open_do { statement_scope } ->
+      state.scope <- statement_scope;
       if not (accept_keyword state Keyword.While) then
         fail_expected state "`while` after the body of `do`";
       let condition = controlling_expression state "while" in
@@ -1714,10 +1736,15 @@ and asm_operand state =
 
 (* From the [{] to the [}], in a block scope of its own. *)
 and block state =
+  in_scope state (inner_scope state) (fun () -> compound_statement state)
+
+(* From the [{] to the [}], in the current scope: the body of a function
+   definition is in the block scope of its parameters (6.2.1p4), so that
+   a declaration in it cannot hide one of them (6.7p3). *)
+and compound_statement state =
   let start = state.position in
   expect state P.Left_brace "`{`";
-  let items = within_scope state (fun () -> block_items state) in
-  finish state start items
+  finish state start (block_items state)
 
 (* After the [{], up to and including the [}]. *)
 and block_items state =
@@ -1745,7 +1772,7 @@ and block_item state =
 let function_body state =
   if (token_at state state.position).owner.system_header then
     Skipped (skip_balanced state "`}` to end the function body")
-  else Parsed (block state)
+  else Parsed (compound_statement state)
 
 (* The declaration list of an old-style definition, up to the [{]. *)
 let parameter_declarations state =
@@ -1759,35 +1786,30 @@ let takes_declaration_list = function
   | Identifier_list _ -> true
   | Prototype _ -> false
 
+(* The scope of a function's body (6.2.1p4), which [declaration_start]
+   has declared the function in. *)
+let body_scope state named_function =
+  reentered_scope state ~inner:named_function.parameter_scope
+
 (* A declarator whose name is a function begins a definition at a [{],
    or, after an identifier list, at a declaration (6.9.1p1), read in the
-   scope of the parameters as the declaration list will be. *)
+   scope of the body as the declaration list will be. *)
 let begins_definition state named_function =
-  let begins_declaration_list () =
-    state.scope <- named_function.parameter_scope;
-    starts_declaration state 0
-  in
   peek state = Punctuator_token P.Left_brace
   || takes_declaration_list named_function.parameters
-     && within_scope state begins_declaration_list
+     && in_scope state (body_scope state named_function) (fun () ->
+            starts_declaration state 0)
 
 (* After the declarator of a function and its attributes. Its parameters
    and its body are in one block scope, which continues the scope of the
-   parameter list (6.2.1p4). What the declarator declares after its
-   parameter list, the function's own name and any enumerators of its
-   return type, is in scope at file scope and missing from the body's
-   scope. That loses no typedef name: none of them is one, and none can
-   hide a file-scope typedef name, which a declaration at file scope
-   cannot give another meaning (6.2.1p2), so a lookup in the body finds no
-   typedef name either way. *)
+   parameter list (6.2.1p4). *)
 let function_definition state start specifiers declarator attributes
     named_function =
-  declare_declarator state (binding_of specifiers) declarator;
-  let file_scope = state.scope in
-  state.scope <- named_function.parameter_scope;
-  let declarations = parameter_declarations state in
-  let body = function_body state in
-  state.scope <- file_scope;
+  let declarations, body =
+    in_scope state (body_scope state named_function) (fun () ->
+        let declarations = parameter_declarations state in
+        (declarations, function_body state))
+  in
   Function_definition
     (finish state start
        { specifiers; declarator; attributes; declarations; body })
@@ -1814,11 +1836,14 @@ let external_declaration state =
           {
             start;
             specifiers;
-            declarator;
-            named_function = Some named;
-            asm_label = None;
-            attributes;
-            _;
+            first =
+              {
+                declarator;
+                named_function = Some named;
+                asm_label = None;
+                attributes;
+                _;
+              };
           }
         when begins_definition state named ->
           function_definition state start specifiers declarator attributes
@@ -1833,25 +1858,53 @@ let translation_unit state =
   in
   loop []
 
+(* The syntactic scope rules: what an ordinary identifier in scope is.
+   Stage 1 adds the universe names of design 2.3. *)
+type binding = Typedef_name_binding | Ordinary_binding
+
+let syntactic_binding = function
+  | Declarator { specifiers; _ } when declares_typedef specifiers ->
+      Typedef_name_binding
+  | Declarator _ | Parameter _ | Enumerator _ | Parameter_name _ ->
+      Ordinary_binding
+
+let declare_syntactically scope declaration =
+  match scoped_name declaration with
+  | Some name -> Scope.declare scope name (syntactic_binding declaration)
+  | None -> scope
+
 (* The typedef names that GCC and Clang declare before the first token:
    [stdarg.h] declares [va_list] with [__builtin_va_list]. *)
 let builtin_typedef_names = [ "__builtin_va_list" ]
 
-let parse reader =
+let syntactic_scopes : (binding, unit) Scope.t scopes =
+  {
+    file =
+      List.fold_left
+        (fun scope name -> Scope.declare scope name Typedef_name_binding)
+        Scope.file builtin_typedef_names;
+    enter = Scope.enter;
+    reenter = Scope.reenter;
+    declare = declare_syntactically;
+    is_typedef_name =
+      (fun scope name -> Scope.find scope name = Some Typedef_name_binding);
+  }
+
+let parse_with scopes reader =
   let state =
     {
       reader;
       grammar = grammar_tokens reader;
       position = 0;
       open_brackets = [];
-      scope =
-        List.fold_left
-          (fun scope name -> Scope.add name Typedef_name_binding scope)
-          Scope.empty builtin_typedef_names;
+      scopes;
+      scope = scopes.file;
     }
   in
   match translation_unit state with
   | translation_unit -> Ok translation_unit
   | exception Failed error -> Error error
+
+let parse reader = parse_with syntactic_scopes reader
 
 let error_message = Reader.error_message

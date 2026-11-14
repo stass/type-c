@@ -51,8 +51,8 @@ Target layout of the repository:
 bin/            the typec executable
 src/driver/     command line, backend invocation, temporary files
 src/cpp/        reader for preprocessed text: tokens, line markers, pragmas
-src/syntax/     tokens, tree, parser
-src/sema/       scopes, types, target model, constant evaluation, typing
+src/syntax/     tokens, tree, scopes, parser
+src/sema/       types, target model, constant evaluation, typing
 src/check/      Type-C rules
 src/emit/       span emission and lowering
 test/unit/      library tests

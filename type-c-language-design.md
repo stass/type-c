@@ -1143,7 +1143,12 @@ language is defined here and not by the tool.
 **Parsing.** A hand-written recursive-descent parser over the complete
 token array. C's grammar needs scope feedback for typedef names; Type-C
 adds positional words that need lookahead to a matching parenthesis, and
-the universe scope. All three are direct in recursive descent.
+the universe scope. All three are direct in recursive descent. The scope
+rules (C11 6.2.1) have one implementation: the parser alone decides
+where each scope begins and ends and when a declaration enters one, and
+hands each declaration to the declaration reader, which binds it and
+says which names are typedef names. A second walk that kept its own
+scope boundaries would have to agree with the parser's at every point.
 
 **GNU profile.** The front end accepts the extensions that system headers
 and common code use: attributes, `__extension__`, alternate keyword

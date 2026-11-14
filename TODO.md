@@ -158,18 +158,29 @@ is [type-c-language-design.md](type-c-language-design.md).
   (6.8.1p3, 6.8.6.1p1) and `return` with or without a value (6.8.6.4p1).
   Check them where bodies are typed (0.9b). `Declarations` checks those
   of declarations.
-- [Medium] The parser decides typedef names with a scope map of its own
-  (6.2.1), and `Declarations` resolves the same identifiers through
-  `Scope`, so where each scope starts and ends is implemented twice; a
-  `Typedef_name` that the scope of `Declarations` does not bind as a
-  typedef is an error there. Both keep the same fact, which identifier a
-  name denotes at a point, and `Scope` is generic in the binding so that
-  the parser could keep `(binding, unit) Scope.t`, but sharing the map
-  would not share the rules. Proposed: one traversal. Move `Tree` into a
-  library of its own, have the parser call the declaration reader at the
-  point where each identifier comes into scope (6.2.1p7), and ask its
-  `Scope` whether a name is a typedef name. Decide before 0.9b adds block
-  scopes, which would add a third copy of the rules.
+- [High] One implementation of the scope rules (6.2.1), step 2: the
+  parser drives `Parser.scopes`, and `Parser.parse` uses syntactic rules
+  of its own, while `Declarations` keeps its own scope boundaries, so
+  where a scope starts and ends is still implemented twice. Make the
+  declaration reader an implementation of `Parser.scopes` that declares
+  enumerators and tags when the parser hands them over; tags need a new
+  case of `Parser.scoped_declaration`, at the point where a tag enters
+  scope (6.2.1p7).
+- [High] Scope rules, step 3: the reader declares parameters,
+  declarators and the re-entered scope of a function body when the
+  parser hands them over; block-scope entities are bound by kind only,
+  untyped, until 0.9b types bodies. A `Declarator` is handed over before
+  the parser knows whether a function definition follows, so the rules
+  on defining an identifier twice (6.7p3, 6.9p3) need a separate event
+  for a definition; and every declarator of a declaration carries the
+  same specifiers, so a tag they define must enter scope once, through
+  the tag case of step 2, not once per declarator.
+- [High] Scope rules, step 4: the type names inside expressions (casts,
+  `sizeof`, compound literals) declare their tags and enumerators
+  through the same interface.
+- [High] Scope rules, step 5: delete the reader's own scope boundaries:
+  `within_scope`, its use of `Scope.reenter`, and the scope of
+  `read_parameters`.
 - [Medium] GNU forms that common code uses and the profile leaves out,
   each an error that names its first token: the conditional without a
   middle operand (`a ?: b`), computed goto (`&&label`, `goto *p`),
@@ -222,6 +233,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   backend's. The rest of the GNU profile that no type models
   (`_Float16`, `typeof`, block pointers, fixed enumeration types) is an
   error that names it.
+- [High] The reader accepts everything the parser parses, entering
+  what it cannot type yet with an opaque type, so that the scope rules
+  of steps 2 to 5 run on every translation unit the parser reads. It
+  refuses `__builtin_va_list` from `<stdio.h>`, `_Float16`, `typeof` and
+  block pointers.
 - [High] Initialisers are not read: an array of unknown size keeps its
   incomplete type where its initialiser completes it (6.7.9p22), and the
   tags and enumerators that an initialiser declares, inside `sizeof` or a
