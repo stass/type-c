@@ -546,9 +546,33 @@ types (design 13.3).
   OCaml's number for it (`Command.describe`), which is negative and not
   the system's: "ended by signal -10" for SIGSEGV. `Sys.signal_to_string`
   names it.
-- [Low] A run record names `typec` by the revision of the checkout its
-  binary sits in and by the binary's digest. `typec --version`, printing
-  the revision it was built from, would name it exactly.
+- [Low] A run record names `typec` by the digest of its binary and
+  labels the revision of the checkout beside it as that at run time,
+  because `typec` cannot report the revision it was built from. A
+  `typec --version` printing it would name the binary exactly; today
+  `--version` goes to the backend like any unknown option.
+- [Medium] `typec` exits with the backend's status when a backend step
+  fails, so a refusal of the front end and a failure of the backend (the
+  preprocessor, or the compile of the emitted C) both exit with 1. The
+  corpus runner tells them apart by the `typec: ` prefix of `typec`'s own
+  diagnostics on stderr, which is wrong both ways: an internal error of
+  `typec` (an uncaught exception, exit 2, no prefix) is recorded as a
+  backend failure, and `typec`'s own environment errors (the backend
+  cannot run or fails the target query) as refusals. A distinct exit
+  status for the front end's refusals, and a top-level handler giving
+  internal errors another, would let the runner read the status and drop
+  the stderr scan.
+- [Medium] The corpus runner trusts a test script to test every program
+  that linked: gcc-torture and Csmith re-read the recipe and skip a
+  program whose file is missing, c-testsuite globs its own list. The
+  runner could pass the names of the linked programs and check that each
+  gets one `TEST` line. It also ends the whole run (exit 2) when a file
+  of one unit cannot be read or written, as when a unit the prepare
+  script should have generated is missing, instead of recording the
+  unit.
+- [Low] The corpus test scripts: c-testsuite's has no CPU limit like the
+  others, Csmith's stops at a failed reference link, and a Csmith program
+  that times out in both builds with the same output counts as agreeing.
 - [Low] The corpus runner's reference recipe repeats what
   `src/driver/pipeline.ml` passes to the backend (`-D__TYPEC__=1`, the
   default `-std=gnu11`), as `test/run/pipeline.t` does.

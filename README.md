@@ -281,33 +281,55 @@ recipe (`programs/PROGRAM/recipe`, in the format of
    `BACKEND -x cpp-output -std=gnu11 ... -c U.ref.i -o U.ref.o`;
 3. `U.o` and `U.ref.o` must be equal byte for byte.
 
-It then links each program of the recipe from the `typec` objects and
-runs the recipe's test script in the build tree, with `CC` naming the
-backend. The recipe says whether the script is the program's own test
-suite (`test own SCRIPT`) or a substitute for it (`test substitute SCRIPT
-DESCRIPTION`, a smoke test or tests that are only compiled); it has no
-default. It writes a record of each program and backend to
-`CORPUS/runs/HOST/PROGRAM.BACKEND.txt` and prints it: the revisions
-of the corpus and of the checkout `typec` was built in and the digest
-of the `typec` binary, the counts of
-identical, different and failed units, which failed and at which step,
-whether the programs linked and the tests passed (`passed` for an own
-suite; `substitute passed, not the program's own suite: DESCRIPTION` for a
-substitute, which does not meet gate 1), and the CPU time of
-preprocessing, of `typec --emit-c` and of the backend's `-fsyntax-only`
-on `U.ref.i`, summed over the units, whose first two differ by the time
-of `typec`'s front end. The stderr of every command goes to
-`CACHE/build/HOST/PROGRAM/BACKEND.log`.
+Each unit ends in one of four states: identical, different, refused by
+`typec` or failed in the backend. `typec` exits with the backend's
+status when a backend step fails, so the runner tells the last two apart
+by `typec`'s own diagnostic, a line of its stderr that starts with
+`typec: `; a failure without one, such as the backend compiling `typec`'s
+output or preprocessing it, is the backend's.
 
-Exit status: 0 when every unit gave identical objects and every
-program's own tests passed; 1 when a unit differs or failed, a test
-failed or did not run, or a build could not be set up; 3 when nothing
-failed but a program's tests are a substitute, so that a status of 0
-never comes from a run that did not meet gate 1 (the runner also prints
-a line for each record that does not meet the gates); 2 when the
-command line or a recipe is wrong, an archive has not been fetched, or
-the runner cannot write a file of its own. `dune test` runs
-`tools/corpus/runner.t`, which checks the runner on a fixture program.
+The runner then links each program of the recipe from the `typec`
+objects, and runs the recipe's test script in the build tree on the
+programs that linked, even when others did not. The script's environment
+has `CC` and `TYPEC_CC` naming the backend and `TYPEC` naming the
+`typec` under test. The recipe says whether the script is the program's
+own test suite (`test own SCRIPT`) or a substitute for it (`test
+substitute SCRIPT DESCRIPTION`, a smoke test or tests that are only
+compiled); it has no default. A script may print one line per test,
+`TEST pass NAME`, `TEST fail NAME` or `TEST fail-with-backend NAME` (a
+test that fails with the backend's own objects too, so that it says
+something about the host), which the record counts.
+
+It writes a record of each program and backend to
+`CORPUS/runs/HOST/PROGRAM.BACKEND.txt` and prints it: the digest of the
+`typec` binary, which cannot report its own revision, and the revision of
+the checkout beside it at run time, the revision of the corpus, the
+counts of identical, different, refused and backend-failed units, which
+failed and why, whether the programs linked, and the tests. The tests
+line says `passed` for an own suite that passed with everything built;
+`partial: ...` when the script passed but a unit failed or a program did
+not link, which does not meet gate 1; `substitute passed, not the
+program's own suite: DESCRIPTION` for a substitute, which does not meet
+gate 1 either; and `FAILED` or `not run` otherwise. The results line
+counts the `TEST` lines (passed, failed, failed with the backend too) and
+lists the failures. The record ends with the CPU time of preprocessing,
+of `typec --emit-c` and of the backend's `-fsyntax-only` on `U.ref.i`,
+summed over the units, whose first two differ by the time of `typec`'s
+front end. The stderr of every command and the stdout of the test script
+go to `CACHE/build/HOST/PROGRAM/BACKEND.log`, and its stdout is kept in
+`BACKEND.tests` beside it.
+
+Exit status: 0 when every unit gave identical objects, every program
+linked and every program's own tests passed; 1 when a unit differs or
+failed, a program did not link, a test failed or did not run, or a build
+could not be set up; 3 when nothing failed but a program's tests are a
+substitute, so that a status of 0 never comes from a run that did not
+meet gate 1 (the runner also prints a line for each record that does not
+meet the gates); 2 when the command line or a recipe is wrong, an
+archive has not been fetched, or the runner cannot read or write a file
+of its own. A `TEST` line the runner cannot count, or a script that
+exits with 0 after reporting a failed test, is a failed test. `dune test`
+runs `tools/corpus/runner.t`, which checks the runner on a fixture program.
 
 ## Typing oracle
 

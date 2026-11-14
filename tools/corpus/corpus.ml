@@ -23,6 +23,10 @@ let fatal fmt = Printf.ksprintf (fun message -> raise (Fatal message)) fmt
    with the next unit, or stops when the step is not a unit's. *)
 exception Step_failed of string
 
+(* A step of a unit in which typec stopped with a diagnostic of its own;
+   it carries the diagnostic. *)
+exception Typec_refused of string
+
 type options = {
   corpus : string;  (** the corpus repository *)
   cache : string;  (** the fetched sources and the build trees *)
@@ -99,12 +103,13 @@ let probe_host () =
 let revision dir =
   ask ~cwd:dir [ "git"; "describe"; "--always"; "--dirty"; "--abbrev=12" ]
 
-(* The revision of the checkout typec was built in misses untracked
-   files and a binary not rebuilt since, so the record names the binary
-   by its digest too. *)
+(* typec cannot report the revision it was built from, so the binary is
+   named by its digest. The checkout beside it is only where the binary
+   sits at run time: it may have moved on since the build. *)
 let typec_identity typec =
   let digest = Digest.BLAKE256.to_hex (Digest.BLAKE256.file typec) in
-  revision (Filename.dirname typec) ^ ", blake2b-256 " ^ digest
+  Printf.sprintf "blake2b-256 %s (checkout at run time: %s)" digest
+    (revision (Filename.dirname typec))
 
 (* What one build needs to run its commands. *)
 type context = {
@@ -117,28 +122,31 @@ type context = {
 
 let in_tree context path = Filename.concat context.root path
 
-let log_command context command =
-  let line = "$ " ^ String.concat " " command ^ "\n" in
-  ignore (Unix.write_substring context.log line 0 (String.length line))
+let write_to_log context text =
+  ignore (Unix.write_substring context.log text 0 (String.length text))
 
-let run_to ?cwd context ~stdout ~step command =
+let log_command context command =
+  write_to_log context ("$ " ^ String.concat " " command ^ "\n")
+
+let run_to ?cwd context ~stdout ~stderr ~step command =
   let cwd = Option.value cwd ~default:context.root in
   log_command context command;
-  let outcome = Command.run ~cwd ~stdout ~stderr:context.log command in
+  let outcome = Command.run ~cwd ~stdout ~stderr command in
   match outcome.status with
   | Unix.WEXITED 0 -> outcome.cpu_seconds
   | status -> raise (Step_failed (step ^ " " ^ Command.describe status))
 
 let run ?cwd context ~step command =
-  run_to ?cwd context ~stdout:context.log ~step command
+  run_to ?cwd context ~stdout:context.log ~stderr:context.log ~step command
 
-let run_into_file context ~step ~output command =
-  let path = in_tree context output in
+let with_output_file path f =
   let flags = [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC; Unix.O_CLOEXEC ] in
   let fd = Unix.openfile path flags 0o644 in
-  Fun.protect
-    ~finally:(fun () -> Unix.close fd)
-    (fun () -> run_to context ~stdout:fd ~step command)
+  Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> f fd)
+
+let run_into_file context ~step ~output command =
+  with_output_file (in_tree context output) (fun fd ->
+      run_to context ~stdout:fd ~stderr:context.log ~step command)
 
 let rec make_directories path =
   if not (Sys.file_exists path) then begin
@@ -168,7 +176,14 @@ let add_times a b =
     syntax_only = a.syntax_only +. b.syntax_only;
   }
 
-type unit_result = Identical of times | Different of times | Failed of string
+(* How the compile of one unit ended. [Refused] is typec's front end
+   stopping at the unit; [Backend_failed] is any other step failing, the
+   backend compiling typec's output included. *)
+type unit_result =
+  | Identical of times
+  | Different of times
+  | Refused of string
+  | Backend_failed of string
 
 (* The .tc copy of a unit sits next to it, so that its includes resolve
    as before. Every file the runner makes for the unit is named after the
@@ -176,6 +191,38 @@ type unit_result = Identical of times | Different of times | Failed of string
 let type_c_copy unit = Filename.chop_suffix unit ".c" ^ ".tc"
 
 let derived unit suffix = type_c_copy unit ^ suffix
+
+(* typec exits with the backend's status when a backend step fails, so
+   its status does not tell a refusal from a backend failure. Its own
+   diagnostics are the stderr lines that start with its name
+   (src/driver/command.ml); a backend's diagnostics never do. *)
+let typec_diagnostic stderr_text =
+  let prefix = "typec: " in
+  let skip = String.length prefix in
+  let own line = String.starts_with ~prefix line in
+  String.split_on_char '\n' stderr_text
+  |> List.find_opt own
+  |> Option.map (fun line -> String.sub line skip (String.length line - skip))
+
+(* Runs typec on a unit with its stderr in [errors], which the log gets
+   too. A failure is [Refused] with typec's first diagnostic, or
+   [Step_failed] when typec printed none. *)
+let run_typec context ~step ~errors command =
+  let run fd =
+    run_to context ~stdout:context.log ~stderr:fd ~step command |> ignore
+  in
+  let path = in_tree context errors in
+  let outcome =
+    match with_output_file path run with
+    | () -> None
+    | exception Step_failed message -> Some message
+  in
+  let stderr_text = read_file path in
+  write_to_log context stderr_text;
+  match (outcome, typec_diagnostic stderr_text) with
+  | None, _ -> ()
+  | Some _, Some diagnostic -> raise (Typec_refused diagnostic)
+  | Some message, None -> raise (Step_failed message)
 
 (* typec compiles the .tc copy of the unit first, so that a unit it
    refuses is reported as its failure. The reference follows
@@ -189,9 +236,8 @@ let compile_unit context unit =
   let typec = [ context.typec; "--cc=" ^ cc ] @ flags in
   let backend_on_text = [ cc; "-x"; "cpp-output"; "-std=gnu11" ] @ flags in
   copy_file ~source:(in_tree context unit) ~target:(in_tree context tc);
-  let _ : float =
-    run context ~step:"typec -c" (typec @ [ "-c"; tc; "-o"; object_ ])
-  in
+  run_typec context ~step:"typec -c" ~errors:(derived unit ".typec.err")
+    (typec @ [ "-c"; tc; "-o"; object_ ]);
   let preprocess =
     run_into_file context ~step:"preprocessing" ~output:reference_i
       ([ cc; "-E"; "-x"; "c"; "-D__TYPEC__=1"; "-std=gnu11" ] @ flags @ [ tc ])
@@ -218,8 +264,8 @@ let compile_unit context unit =
 let compile_or_fail context unit =
   match compile_unit context unit with
   | result -> result
-  | exception Step_failed message -> Failed message
-  | exception Sys_error message -> Failed message
+  | exception Typec_refused diagnostic -> Refused diagnostic
+  | exception Step_failed message -> Backend_failed message
 
 (* [Substitute_passed] is a script that is not the program's own suite
    (the recipe says what it checks): it never counts as the tests
@@ -235,12 +281,14 @@ type build = {
   linked : string list;
   not_linked : string list;
   tests : tests;
+  results : Test_lines.t;  (** what the script reported, if anything *)
 }
 
-let compiled units unit =
-  match List.assoc unit units with
+let is_compiled = function
   | Identical _ | Different _ -> true
-  | Failed _ -> false
+  | Refused _ | Backend_failed _ -> false
+
+let compiled units unit = is_compiled (List.assoc unit units)
 
 (* A program links the Type-C objects, so a unit typec did not compile
    keeps every program that uses it from linking. *)
@@ -258,27 +306,57 @@ let link context (recipe : Recipe.t) units (program : Recipe.program) =
     | _ -> true
     | exception Step_failed _ -> false
 
-(* A recipe's script runs with CC naming the backend, for the scripts
-   that compile test drivers. *)
-let script_command ~recipe_dir ~cc script =
-  [ "env"; "CC=" ^ cc; "sh"; Filename.concat recipe_dir script ]
+(* A recipe's script runs with CC and TYPEC_CC naming the backend, for
+   the scripts that compile test drivers, and TYPEC naming the typec
+   under test (recipe.mli). *)
+let script_command context ~recipe_dir script =
+  [
+    "env";
+    "CC=" ^ context.cc;
+    "TYPEC_CC=" ^ context.cc;
+    "TYPEC=" ^ context.typec;
+    "sh";
+    Filename.concat recipe_dir script;
+  ]
 
-let run_tests context ~recipe_dir (recipe : Recipe.t) ~not_linked =
-  if not_linked <> [] then Not_run "a program did not link"
+(* The script's stdout, kept beside the log; a run removes the last one's. *)
+let tests_file context = context.root ^ ".tests"
+
+(* The script runs on the programs that linked, and its stdout, which
+   the log gets too, is kept next to the log for the results it prints. *)
+let run_tests context ~recipe_dir (recipe : Recipe.t) ~linked =
+  if linked = [] then (Not_run "no program linked", Test_lines.none)
   else
     let test = recipe.test in
-    let command = script_command ~recipe_dir ~cc:context.cc test.script in
-    match run context ~step:"the tests" command with
-    | _ -> (
-        match test.suite with
-        | Own -> Passed
-        | Substitute description -> Substitute_passed description)
-    | exception Step_failed message -> Tests_failed message
+    let command = script_command context ~recipe_dir test.script in
+    let path = tests_file context in
+    let run fd =
+      run_to context ~stdout:fd ~stderr:context.log ~step:"the tests" command
+      |> ignore
+    in
+    let failure =
+      match with_output_file path run with
+      | () -> None
+      | exception Step_failed message -> Some message
+    in
+    let output = read_file path in
+    write_to_log context output;
+    let results = Test_lines.read output in
+    let tests =
+      match (failure, results, test.suite) with
+      | Some message, _, _ -> Tests_failed message
+      | None, Error message, _ -> Tests_failed (test.script ^ ": " ^ message)
+      | None, Ok { failed = _ :: _; _ }, _ ->
+          Tests_failed "the script exited with 0 but reported a failed test"
+      | None, Ok _, Own -> Passed
+      | None, Ok _, Substitute description -> Substitute_passed description
+    in
+    (tests, Result.value results ~default:Test_lines.none)
 
 (* The build tree is made afresh: the trees of the recipe, copied from
    the cache, then its prepare script. *)
 let set_up context ~cache ~recipe_dir (recipe : Recipe.t) =
-  let remove = [ "rm"; "-rf"; "--"; context.root ] in
+  let remove = [ "rm"; "-rf"; "--"; context.root; tests_file context ] in
   ignore (run ~cwd:"/" context ~step:"removing the old tree" remove);
   let copy (tree : Recipe.tree) =
     let source = List.fold_left Filename.concat cache [ "src"; tree.archive ] in
@@ -297,7 +375,7 @@ let set_up context ~cache ~recipe_dir (recipe : Recipe.t) =
   | Some script ->
       ignore
         (run context ~step:"the prepare script"
-           (script_command ~recipe_dir ~cc:context.cc script))
+           (script_command context ~recipe_dir script))
 
 let build context ~cache ~recipe_dir recipe =
   set_up context ~cache ~recipe_dir recipe;
@@ -307,13 +385,9 @@ let build context ~cache ~recipe_dir recipe =
     List.partition (link context recipe units) recipe.programs
   in
   let names = List.map (fun (p : Recipe.program) -> p.name) in
-  let not_linked = names not_linked in
-  {
-    units;
-    linked = names linked;
-    not_linked;
-    tests = run_tests context ~recipe_dir recipe ~not_linked;
-  }
+  let linked = names linked and not_linked = names not_linked in
+  let tests, results = run_tests context ~recipe_dir recipe ~linked in
+  { units; linked; not_linked; tests; results }
 
 let with_log path f =
   let flags =
@@ -334,18 +408,42 @@ let count predicate units = List.length (List.filter predicate units)
 
 let unit_times = function
   | Identical times | Different times -> times
-  | Failed _ -> no_time
+  | Refused _ | Backend_failed _ -> no_time
 
 let is_identical = function _, Identical _ -> true | _ -> false
 let is_different = function _, Different _ -> true | _ -> false
-let is_failed = function _, Failed _ -> true | _ -> false
+let is_refused = function _, Refused _ -> true | _ -> false
+let is_backend_failed = function _, Backend_failed _ -> true | _ -> false
 
-let tests_text = function
+(* Everything the recipe lists is built: each unit compiled and each
+   program linked. A script that passes on less has not met gate 1. *)
+let all_built build =
+  let compiled (_, result) = is_compiled result in
+  build.not_linked = [] && List.for_all compiled build.units
+
+let tests_text build =
+  match build.tests with
+  | Passed when not (all_built build) ->
+      "partial: passed on what linked only, gate 1 not met"
+  | Substitute_passed description when not (all_built build) ->
+      "partial: a substitute passed on what linked only, not the program's \
+       own suite: " ^ description
   | Passed -> "passed"
   | Substitute_passed description ->
       "substitute passed, not the program's own suite: " ^ description
   | Tests_failed message -> "FAILED: " ^ message
   | Not_run reason -> "not run: " ^ reason
+
+let results_lines (results : Test_lines.t) =
+  let failed = List.length results.failed in
+  let with_backend = List.length results.failed_with_backend in
+  let total = results.passed + failed + with_backend in
+  if total = 0 then [ "results      none reported" ]
+  else
+    Printf.sprintf "results      %d passed, %d failed, %d failed with the \
+                    backend too" results.passed failed with_backend
+    :: (List.map (( ^ ) "test-failed  ") results.failed
+       @ List.map (( ^ ) "test-host    ") results.failed_with_backend)
 
 (* What a record says about the exit gate of plan 0.11: gate 1 (the
    program's own tests pass) and gate 2 (identical objects). *)
@@ -353,9 +451,10 @@ type verdict = Gates_met | Substitute_tests | Gates_failed
 
 let build_verdict build =
   let identical = List.for_all is_identical build.units in
+  let met = identical && all_built build in
   match build.tests with
-  | Passed when identical -> Gates_met
-  | Substitute_passed _ when identical -> Substitute_tests
+  | Passed when met -> Gates_met
+  | Substitute_passed _ when met -> Substitute_tests
   | _ -> Gates_failed
 
 let record_verdict record =
@@ -381,17 +480,23 @@ let build_lines build =
   let total = List.fold_left add no_time build.units in
   let detail = function
     | unit, Different _ -> [ "different    " ^ unit ]
-    | unit, Failed message -> [ "failed       " ^ unit ^ ": " ^ message ]
+    | unit, Refused message -> [ "refused      " ^ unit ^ ": " ^ message ]
+    | unit, Backend_failed message ->
+        [ "backend-fail " ^ unit ^ ": " ^ message ]
     | _, Identical _ -> []
   in
   [
     Printf.sprintf "units        %d" (List.length build.units);
     Printf.sprintf "identical    %d" (count is_identical build.units);
     Printf.sprintf "different    %d" (count is_different build.units);
-    Printf.sprintf "failed       %d" (count is_failed build.units);
+    Printf.sprintf "refused      %d" (count is_refused build.units);
+    Printf.sprintf "backend-fail %d" (count is_backend_failed build.units);
     Printf.sprintf "linked       %d of %d" (List.length build.linked)
       (List.length build.linked + List.length build.not_linked);
-    Printf.sprintf "tests        %s" (tests_text build.tests);
+    Printf.sprintf "tests        %s" (tests_text build);
+  ]
+  @ results_lines build.results
+  @ [
     "cpu seconds, summed over the units:";
     Printf.sprintf "  preprocessing (cc -E)            %8.2f" total.preprocess;
     Printf.sprintf "  typec --emit-c                   %8.2f" total.emit_c;

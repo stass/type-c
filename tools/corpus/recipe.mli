@@ -34,7 +34,23 @@
 
     A [DIR], [UNIT] or [NAME] is a path relative to the build tree, a
     [SCRIPT] a file in the directory of the recipe. The runner adds
-    [-O2]; a recipe gives no optimisation or debug option. *)
+    [-O2]; a recipe gives no optimisation or debug option.
+
+    The [prepare] and [test] scripts run with [sh], in the build tree,
+    with these environment variables:
+
+    {v
+    CC         the backend, as given to the runner
+    TYPEC_CC   the same, which typec reads as its default backend
+    TYPEC      the typec under test, as an absolute path
+    v}
+
+    The test script runs once the units are built, on the programs that
+    linked, even when others did not: a program that did not link has no
+    file [NAME] in the build tree, and the script skips it. The record
+    never calls such a run a pass of the program's tests, whatever the
+    script's status. A script may print one line per test for the
+    runner to count into the record, in the format of {!Test_lines}. *)
 
 type tree = { archive : string; dir : string  (** ["."] for the root *) }
 type program = { name : string; units : string list }

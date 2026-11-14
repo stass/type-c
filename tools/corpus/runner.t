@@ -38,14 +38,23 @@ host, the backend, the revisions and the timings are left out.
   >   echo "$out" | grep -v -E '^(host|backend|typec|corpus|log) |^  |^$'
   >   return $status
   > }
+  $ fails() {
+  >   out=$(./corpus.exe --corpus corpus --cache cache \
+  >     --typec "$(command -v typec)" --cc /usr/bin/clang "$@" 2>&1)
+  >   status=$?
+  >   echo "$out" | sed "s|$PWD/||"
+  >   return $status
+  > }
   $ run hello
   program      hello
   units        2
   identical    2
   different    0
-  failed       0
+  refused      0
+  backend-fail 0
   linked       1 of 1
   tests        passed
+  results      none reported
   cpu seconds, summed over the units:
 
 The run record goes into the corpus, under the host; the build tree and
@@ -53,9 +62,19 @@ its log go into the cache.
 
   $ ls corpus/runs/*/
   hello.clang.txt
+
+The record names the typec binary by its digest. typec cannot report the
+revision it was built from, so the revision of the checkout beside it is
+labelled as that of the run.
+
+  $ grep '^typec' corpus/runs/*/hello.clang.txt |
+  >   sed -E 's/[0-9a-f]{64}/DIGEST/; s/time: .*\)/time: REVISION)/'
+  typec        blake2b-256 DIGEST (checkout at run time: REVISION)
+
   $ ls cache/build/*/hello/
   clang
   clang.log
+  clang.tests
   $ ls cache/build/*/hello/clang/
   bin
   greet.c
@@ -64,6 +83,7 @@ its log go into the cache.
   greet.tc.o
   greet.tc.ref.i
   greet.tc.ref.o
+  greet.tc.typec.err
   include
   main.c
   main.tc
@@ -71,6 +91,7 @@ its log go into the cache.
   main.tc.o
   main.tc.ref.i
   main.tc.ref.o
+  main.tc.typec.err
 
 A test script that fails is recorded as failed, with the exit status 1.
 
@@ -84,9 +105,11 @@ A test script that fails is recorded as failed, with the exit status 1.
   units        2
   identical    2
   different    0
-  failed       0
+  refused      0
+  backend-fail 0
   linked       1 of 1
   tests        FAILED: the tests exited with 5
+  results      none reported
   cpu seconds, summed over the units:
   hello.clang: gates not met
   [1]
@@ -101,9 +124,11 @@ that passed, and the exit status is 3, neither a pass nor a failure.
   units        2
   identical    2
   different    0
-  failed       0
+  refused      0
+  backend-fail 0
   linked       1 of 1
   tests        substitute passed, not the program's own suite: a greeting smoke test
+  results      none reported
   cpu seconds, summed over the units:
   hello.clang: gate 1 not met: only a substitute test passed
   [3]
@@ -135,8 +160,8 @@ The exit status 1 outranks 3 when the run holds both.
   $ cp corpus/programs/hello/recipe.good corpus/programs/hello/recipe
   $ rm -r corpus/programs/smoke corpus/programs/hello/recipe.*
 
-A unit typec refuses keeps the programs that use it from linking, so the
-tests do not run, and the runner exits with 1.
+A unit typec refuses keeps the programs that use it from linking. With
+no program linked the tests do not run, and the runner exits with 1.
 
   $ printf 'int @;\n' >> cache/src/hello-1/greet.c
   $ run hello
@@ -144,25 +169,85 @@ tests do not run, and the runner exits with 1.
   units        2
   identical    1
   different    0
-  failed       1
+  refused      1
+  backend-fail 0
   linked       0 of 1
-  tests        not run: a program did not link
+  tests        not run: no program linked
+  results      none reported
   cpu seconds, summed over the units:
-  failed       greet.c: typec -c exited with 1
+  refused      greet.c: greet.tc:3: unexpected character '@'
   not linked   bin/hello
   hello.clang: gates not met
   [1]
 
+A unit that the backend refuses inside typec, here its preprocessing,
+is told apart from one typec refuses. The tests run on the programs that
+linked, with TYPEC and the backend in their environment, and the lines
+they print as results are counted. A script that passes while anything
+failed to build is recorded as a partial pass, which does not meet gate
+1.
+
+  $ printf 'int @;\n' > cache/src/hello-1/bad.c
+  $ printf '#error the backend refuses this\n' > cache/src/hello-1/ugly.c
+  $ printf 'int main(void) { return 0; }\n' > cache/src/hello-1/ok.c
+  $ mkdir corpus/programs/multi
+  $ cat > corpus/programs/multi/recipe <<'EOF'
+  > tree hello-1
+  > program bin/ok ok.c
+  > program bin/bad bad.c
+  > program bin/ugly ugly.c
+  > test own test.sh
+  > EOF
+  $ cat > corpus/programs/multi/test.sh <<'EOF'
+  > [ -x "$TYPEC" ] && [ "$CC" = /usr/bin/clang ] && [ "$TYPEC_CC" = "$CC" ] ||
+  >   exit 7
+  > for name in ok bad ugly; do
+  >   [ -x "bin/$name" ] && echo "TEST pass $name"
+  > done
+  > echo "TEST fail-with-backend a host test with spaces"
+  > echo "an ordinary line"
+  > exit 0
+  > EOF
+  $ run multi
+  program      multi
+  units        3
+  identical    1
+  different    0
+  refused      1
+  backend-fail 1
+  linked       1 of 3
+  tests        partial: passed on what linked only, gate 1 not met
+  results      1 passed, 0 failed, 1 failed with the backend too
+  test-host    a host test with spaces
+  cpu seconds, summed over the units:
+  refused      bad.c: bad.tc:1: unexpected character '@'
+  backend-fail ugly.c: typec -c exited with 1
+  not linked   bin/bad
+  not linked   bin/ugly
+  multi.clang: gates not met
+  [1]
+  $ grep -c 'error: the backend refuses this' cache/build/*/multi/clang.log
+  1
+  $ grep -c 'TEST pass ok' cache/build/*/multi/clang.log
+  1
+
+A script that prints a TEST line it cannot count, or that exits with 0
+after reporting a failed test, is recorded as failed.
+
+  $ echo 'echo "TEST maybe ok"' > corpus/programs/multi/test.sh
+  $ run multi | grep '^tests'
+  tests        FAILED: test.sh: not a test result: "TEST maybe ok"
+  $ echo 'echo "TEST pass "' > corpus/programs/multi/test.sh
+  $ run multi | grep '^tests'
+  tests        FAILED: test.sh: not a test result: "TEST pass "
+  $ echo 'echo "TEST fail one"' > corpus/programs/multi/test.sh
+  $ run multi | grep '^tests'
+  tests        FAILED: the script exited with 0 but reported a failed test
+  $ rm -r corpus/programs/multi
+
 A recipe that cannot be read ends the run with 2 before anything is
 built.
 
-  $ fails() {
-  >   out=$(./corpus.exe --corpus corpus --cache cache \
-  >     --typec "$(command -v typec)" --cc /usr/bin/clang "$@" 2>&1)
-  >   status=$?
-  >   echo "$out" | sed "s|$PWD/||"
-  >   return $status
-  > }
   $ printf 'tree hello-1\nlibrary ../outside.c\n' > corpus/programs/hello/recipe
   $ fails hello
   corpus: corpus/programs/hello/recipe:2: "../outside.c" is not a relative path inside the tree
