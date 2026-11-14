@@ -54,12 +54,14 @@ let describe (declared : Declarations.declared) =
       String.concat " "
         [ "object"; Type_name.of_ctype object_type; linkage_name linkage;
           storage_name ]
-  | Function { function_type; linkage; inline; noreturn; gnu_inline } ->
+  | Function
+      { function_type; linkage; inline; noreturn; gnu_inline; overload } ->
       String.concat " "
         ([ "function"; Type_name.of_ctype function_type; linkage_name linkage ]
         @ (if inline then [ "inline" ] else [])
         @ (if noreturn then [ "noreturn" ] else [])
-        @ if gnu_inline then [ "gnu_inline" ] else [])
+        @ (if gnu_inline then [ "gnu_inline" ] else [])
+        @ if overload then [ "overload" ] else [])
   | Typedef t -> "typedef " ^ Type_name.of_ctype t
   | Enumerator { enumerator_type; value } ->
       Printf.sprintf "enumerator %s = %s"
@@ -754,12 +756,6 @@ let attributes () =
     "x" ("object " ^ unknown_mode ^ " external static");
   declares "__attribute__((mode(DI), vector_size(8))) int x;" "x"
     ("object " ^ unknown_mode ^ " external static");
-  (* A function stays a function: Clang's overloads redeclare one with
-     other types, which typec does not check. *)
-  declares
-    "__attribute__((overloadable)) float t(float); \
-     __attribute__((overloadable)) double t(double);"
-    "t" "function <the attribute 'overloadable'> external";
   rejects "int f(void) __attribute__((weak_import)); int f;"
     "different kind of identifier";
   declares "int x; int x __attribute__((mode(DI)));" "x"
@@ -842,6 +838,89 @@ let attributes () =
   declares "int (^ __attribute__((mode(DI))) b)(void);" "b"
     "object <the attribute 'mode'> external static"
 
+(* Clang's [overloadable] makes a function one of an overload set of its
+   name: an entity of its own, which redeclares nothing, is not linked and
+   is checked against no other declaration (design 13.3). *)
+let overloads () =
+  (* musl's fortify-headers, as Clang reads them with -O. *)
+  let fortified =
+    "char *fgets(char *, int); \
+     __typeof__(fgets) __orig_fgets __asm__(\"fgets\"); \
+     static __inline__ __attribute__((__overloadable__)) char *fgets(\
+     char *const __attribute__((pass_object_size(0))) s, int n) \
+     { return __orig_fgets(s, n); }"
+  in
+  declares fortified "__orig_fgets" "function char *(char *, int) external";
+  links_to fortified "fgets" "function char *(char *, int) external";
+  declares "int f(int); __attribute__((overloadable)) int f(long);" "f"
+    "function int (long) external overload";
+  links_to "int f(int); __attribute__((overloadable)) int f(long);" "f"
+    "function int (int) external";
+  declares "int f(int); static __attribute__((overloadable)) int f(long);" "f"
+    "function int (long) internal overload";
+  (* Its linkage is its own, as nothing visible is redeclared (6.2.2p5). *)
+  declares "static int f(int); __attribute__((overloadable)) int f(long);" "f"
+    "function int (long) external overload";
+  declares
+    "static int f(int); extern __attribute__((overloadable)) int f(long);" "f"
+    "function int (long) external overload";
+  declares "int f(int); int f(long) __attribute__((overloadable));" "f"
+    "function int (long) external overload";
+  links_to "__attribute__((overloadable)) int f(long);" "f" "";
+  (* A declaration without it redeclares the one before the overloads. *)
+  links_to
+    "int f(int); __attribute__((overloadable)) int f(long); \
+     __attribute__((overloadable)) int f(char); int f();"
+    "f" "function int (int) external";
+  declares
+    "static int f(int); __attribute__((overloadable)) int f(long); \
+     int f(int);"
+    "f" "function int (int) internal";
+  declares "__attribute__((overloadable)) int f(long); int f(int);" "f"
+    "function int (int) external";
+  rejects
+    "int f(int); __attribute__((overloadable)) int f(long); long f(int);"
+    "6.7p4";
+  rejects
+    "int f(); __attribute__((overloadable)) int f(long); int f(int); \
+     __attribute__((overloadable)) int f(char); int f(long);"
+    "6.7p4";
+  (* Nor is an overload checked against the others, which Clang does. *)
+  accepts "int x; __attribute__((overloadable)) int x(void);";
+  (* Clang takes two with the same type as one function; typec gives each
+     an entity of its own, and leaves a conflict among them to Clang. *)
+  accepts
+    "__attribute__((overloadable)) int f(int); \
+     __attribute__((overloadable)) int f(int);";
+  declares
+    "__attribute__((overloadable)) float t(float); \
+     __attribute__((overloadable)) double t(double);"
+    "t" "function double (double) external overload";
+  accepts
+    "__attribute__((overloadable)) int f(int); \
+     __attribute__((overloadable)) long f(int);";
+  (* Which overload a use denotes is for overload resolution (0.9b), even
+     where the declaration it resolves to has no attribute. *)
+  declares "__attribute__((overloadable)) int f(long); typeof(f) g;" "g"
+    "function <the overloaded 'f'> external";
+  declares
+    "__attribute__((overloadable)) int f(long); int f(int); int f(int); \
+     typeof(f) g;"
+    "g" "function <the overloaded 'f'> external";
+  declares "int f(int); typeof(f) g; __attribute__((overloadable)) int f(long);"
+    "g" "function int (int) external";
+  (* Elsewhere the attribute is not recorded, as noreturn is not. *)
+  declares "__attribute__((overloadable)) int x;" "x"
+    "object <the attribute 'overloadable'> external static";
+  declares "typedef __attribute__((overloadable)) int F(int);" "F"
+    "typedef <the attribute 'overloadable'>";
+  rejects "int (__attribute__((overloadable)) f)(int);"
+    "the declaration of the function 'f' depends on the attribute \
+     'overloadable'";
+  rejects "int * __attribute__((overloadable)) f(int);"
+    "the declaration of the function 'f' depends on the attribute \
+     'overloadable'"
+
 (* The typedef names that GCC and Clang declare before the first token.
    The representation of __builtin_va_list is the target's, so the reader
    sees no more of it than that it is a complete object type compatible
@@ -886,6 +965,7 @@ let () =
   unknown_types ();
   fixed_enumerations ();
   attributes ();
+  overloads ();
   specifier_combinations ();
   storage_classes ();
   declarators ();

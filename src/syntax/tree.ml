@@ -50,7 +50,7 @@ type reference = In_tree of declaration_id | Builtin of string
     before it, which an enumerator in a declarator's own array length
     does though its token comes later. A redeclaration denotes the same
     entity or breaks a constraint (6.7p3), which the declaration reader
-    checks. *)
+    checks, except where either is a Clang overload (design 13.3). *)
 type declared = { id : declaration_id; earlier : reference option }
 
 (** The declaration that a use of an ordinary identifier refers to: the

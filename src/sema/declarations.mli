@@ -14,8 +14,9 @@
 
     The reader keeps no scope: it follows the links that the parser
     records in the tree (design 13.3), from each use to the declaration it
-    resolves to and from each declaration to the one it redeclares, and
-    keeps what each declaration declares by its id.
+    resolves to and from each declaration to the one before it in its
+    scope, which it redeclares unless one of them is a Clang overload
+    (design 13.3), and keeps what each declaration declares by its id.
 
     The pass reports the errors it must detect to give the types (design
     13.3): constraints that decide a type or the meaning of a declaration,
@@ -45,6 +46,10 @@ type declared =
               which it is unless it says [extern inline], in place of
               C11 6.7.4p7, which decides from every file-scope declaration
               of the function. *)
+      overload : bool;
+          (** The attribute [overloadable] (Clang): one function of an
+              overload set of its name, an entity of its own that no other
+              declaration redeclares and that is not {!linked}. *)
     }
   | Typedef of Ctype.t
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
@@ -85,7 +90,8 @@ val tag : t -> Tree.tag_id -> tag option
 val linked : t -> string -> entity option
 (** The object or function with linkage (6.2.2) of that name: the one
     entity that its declarations with linkage denote in any scope, as of
-    the last of them. *)
+    the last of them. An overload, which has a symbol of its own, is not
+    linked. *)
 
 (** Where the declarations are wrong: the location of the token where the
     construct starts, and a message that names the clause of C11. *)

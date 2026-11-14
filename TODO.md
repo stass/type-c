@@ -231,25 +231,30 @@ is [type-c-language-design.md](type-c-language-design.md).
 ## Declarations
 
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
-  table (`attribute_effects`): `noreturn` and `gnu_inline` mark a
-  function, the rest change no type or constant it computes. Any other
-  one, `packed`, `mode`, `vector_size` and Clang's `overloadable` among
+  table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
+  `overloadable` mark a function, the rest change no type or constant it
+  computes. Any other one, `packed`, `mode` and `vector_size` among
   them, makes the type it applies to unknown (design 13.3, P21). The
   table is the answer to the design question on attributes until 0.7b
   reads them; `aligned` is on it only while record layout is the
   backend's, and `packed` could join it on the same ground. Only the
-  declaration of a function at file scope records `noreturn` and
-  `gnu_inline`; anywhere else, on a pointer, a parenthesized
-  declarator, a typedef, an object, a structure, either makes the type
-  it applies to unknown, though GCC and Clang make `noreturn` part of
+  declaration of a function at file scope records `noreturn`,
+  `gnu_inline` and `overloadable`; anywhere else, on a pointer, a
+  parenthesized declarator, a typedef, an object, a structure, each
+  makes the type it applies to unknown, though GCC and Clang make
+  `noreturn` part of
   the type of a pointer to a function and of a function typedef, and
   ignore both on an `int`. Inside the declarator of a function, as in
-  `void * __attribute__((noreturn)) f(void);`, both move to the
+  `void * __attribute__((noreturn)) f(void);`, they move to the
   function in GCC and Clang, which typec refuses rather than record.
   Whether a declaration records the effects is decided twice, by
   `read_init_declarator` for `declare_type` and by `file_scope_declared`;
-  block-scope declarations should get it from one place. The table
-  checks no attribute's arguments (`noreturn(1)` is accepted).
+  block-scope declarations should get it from one place. Each effect is
+  also spelled in four places in step (a field of `attributed`, a
+  constructor of `attribute_effect`, an arm of `read_attributes`, the
+  empty `no_attributes`); a set of effects would leave the table and the
+  one consumer. The table checks no attribute's arguments
+  (`noreturn(1)` is accepted).
 - [Medium] Unknown types (design 13.3, P21) for 0.7b and 0.9b to
   replace by types where a point needs them: block pointers, `_Float16`,
   `typeof` of an expression other than an identifier, and what an
@@ -276,10 +281,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   against it.
 - [Medium] An attribute outside the table makes a whole function type
   unknown, return and parameters included, though most such attributes
-  (`access`, `alias`, `target`, `overloadable`) belong to the
-  declaration; the arity and return checks of those functions are lost.
-  Decide in 13.3 whether an attribute on a function declarator keeps
-  the function type and marks the declaration instead.
+  (`access`, `alias`, `target`) belong to the declaration; the arity
+  and return checks of those functions are lost. Decide in 13.3
+  whether an attribute on a function declarator keeps the function type
+  and marks the declaration instead.
 - [Low] An unknown type is not known to be other than `void`, so
   `void f(typeof((void)0));` is read as one parameter rather than
   `(void)`; asking would refuse `_Float16 f(_Float16);`. A kind for an
@@ -351,6 +356,26 @@ is [type-c-language-design.md](type-c-language-design.md).
   sizeof (struct s); } struct s { int a; };` the structure would look
   complete inside `f`. Either record completion per tag declaration or
   type each body during `read`.
+- [High] A use of a name with a Clang overload (`overloadable`, design
+  13.3) in scope before the declaration it resolves to must be typed by
+  overload resolution, with Clang's rules, or left unknown: the parser
+  resolves it to the last declaration of the name, overload or not,
+  which need not be the function that Clang chooses. `typeof` of one is
+  unknown; expression typing (0.9b) must do the same for a call to one
+  and for its address, from the reader's private `overloaded` table,
+  which `Declarations` then exposes.
+- [Medium] Two `overloadable` declarations of a name with the same type
+  in one scope are one function in Clang; typec gives each an entity of
+  its own and checks none of Clang's rules on overload sets: an
+  overload whose parameter types are those of the name's declaration
+  without the attribute, a second such declaration, a return type that
+  conflicts with an overload of the same parameter types, an overload
+  without a prototype (Clang refuses each). The backend reports them.
+  Merging needs the overloads of a name in scope, which the reader does
+  not keep (`beside` holds only the entity before them), and a type
+  comparison that counts `pass_object_size` and `enable_if`, which typec
+  leaves unknown.
+  Do it with overload resolution in 0.9b if it needs the identity.
 - [High] Block-scope declarations with linkage (0.9b) must join
   `Declarations.linked`, the table of the objects and functions with
   linkage by name (6.2.2p4, 6.2.7p2): a block-scope `extern int x;`,
@@ -414,23 +439,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 `tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24
 (musl), both x86-64.
 
-- [High] With `-O`, Alpine's Clang defines `_FORTIFY_SOURCE`, and
-  musl's fortify-headers then declare an overload of `fgets` and others
-  after the library's declaration: `static __inline__
-  __attribute__((__overloadable__)) char *fgets(char *const
-  __attribute__((pass_object_size(0))) __s, int __n, FILE *__f) {...}`
-  (`/usr/include/fortify/stdio.h:42`, from `_FORTIFY_INLINE` in
-  `fortify-headers.h:34`). Clang's `overloadable` makes it a function of
-  its own, which typec reads as a redeclaration of the external `fgets`
-  and refuses (6.2.2p7), so a `.tc` input that includes `stdio.h` does
-  not compile with Clang and `-O` there, and `test/run/pipeline.t` and
-  `tools/corpus/runner.t` fail on Alpine; GCC's form, `extern
-  __inline__` with `gnu_inline`, compiles. Decide in 13.3 what a
-  declaration with `overloadable` declares: likely an entity of its own
-  that redeclares nothing, its uses left to the backend until 0.9b
-  resolves overloads. `-U_FORTIFY_SOURCE` or `-O0` avoids it.
-  Reproducer: `/Volumes/Optaine/typec-hosts/repro/alpine-fortify/run.sh
-  REPO`.
 - [Medium] `test/run/headers.t` fails on Alpine in the ISO modes
   (`-std=c11`, with or without `_DARWIN_C_SOURCE`): musl's `aio.h:17`
   declares a member of `struct sigevent`, which `signal.h` defines only
@@ -510,9 +518,10 @@ types (design 13.3).
   `aligned`, which changes a layout; `noreturn`, for reachability,
   which `Declarations` records on a function; Clang's `overloadable`,
   without which the SDK's `tgmath.h` declares one function with
-  conflicting types; and `gnu_inline`, which changes what an inline
-  definition defines (`sys/cdefs.h` uses it under GCC, not Clang) and
-  which `Declarations` records on a function.
+  conflicting types, and which `Declarations` records on a function;
+  and `gnu_inline`, which changes what an inline definition defines
+  (`sys/cdefs.h` uses it under GCC, not Clang) and which `Declarations`
+  records on a function.
   Common code adds `packed`, `mode`, `vector_size` and
   `transparent_union`, which change a type or a layout. The rest the
   headers use (`availability`, `deprecated`, `format`, `noescape` and

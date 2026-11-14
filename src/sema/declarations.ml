@@ -15,6 +15,7 @@ type declared =
       inline : bool;
       noreturn : bool;
       gnu_inline : bool;
+      overload : bool;
     }
   | Typedef of Ctype.t
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
@@ -62,7 +63,11 @@ type place = At_file_scope | In_prototype | In_definition
    (design 13.3): [entities] holds what each declaration that it has read
    declares, as of that declaration, [tag_types] the tag that each tag
    declaration declares, and [linked] the entity that each name with
-   linkage denotes (6.2.2), which no scope hides. *)
+   linkage denotes (6.2.2), which no scope hides. [beside] holds, for each
+   declaration of an overload, the entity that a later declaration of its
+   name without [overloadable] redeclares in its place, and [overloaded]
+   each overload and each declaration with one before it in its scope,
+   whose uses name the overload set (design 13.3). *)
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -70,6 +75,8 @@ type state = {
   entities : (Tree.reference, entity) Hashtbl.t;
   tag_types : (Tree.tag_id, tag) Hashtbl.t;
   linked : (string, entity) Hashtbl.t;
+  beside : (Tree.reference, entity option) Hashtbl.t;
+  overloaded : (Tree.reference, unit) Hashtbl.t;
   mutable place : place;
   mutable next_entity : int;
   mutable expression_depth : int;
@@ -156,15 +163,25 @@ let undeclared state span name =
   fail state span (quote name ^ " is not declared (C11 6.5.1p2)")
 
 (* The entity that the declaration of [name] at [span] redeclares: none
-   where it is the first in its scope. *)
+   where it is the first in its scope. An overload in between is passed
+   over. *)
 let earlier_entity state span name (declared : Tree.declared) =
-  Option.map (referenced state span name) declared.earlier
+  match declared.earlier with
+  | None -> None
+  | Some earlier -> (
+      match Hashtbl.find_opt state.beside earlier with
+      | Some passed_over -> passed_over
+      | None -> Some (referenced state span name earlier))
 
 (* Ordinary identifiers (6.2.2, 6.7p3, p4) *)
 
 let linkage_of = function
   | Object { linkage; _ } | Function { linkage; _ } -> linkage
   | Typedef _ | Enumerator _ -> No_linkage
+
+let is_overload = function
+  | Function { overload; _ } -> overload
+  | Object _ | Typedef _ | Enumerator _ -> false
 
 let check_linkage state span name prior next =
   if linkage_of prior = No_linkage || linkage_of next = No_linkage then
@@ -221,19 +238,42 @@ let redeclared state span name prior next =
         (quote name ^ " is redeclared as a different kind of identifier \
                        (C11 6.7p3)")
 
+(* An overload (design 13.3) is a new entity, which is not linked under
+   its name, and stands beside what a declaration in its place would
+   redeclare. *)
+let bind_overload state span name (declared : Tree.declared) next =
+  let entity = { name; entity = fresh_entity state; declared = next } in
+  let reference = Tree.In_tree declared.id in
+  Hashtbl.replace state.entities reference entity;
+  Hashtbl.replace state.beside reference
+    (earlier_entity state span name declared);
+  Hashtbl.replace state.overloaded reference ();
+  entity
+
+let follows_overload state (declared : Tree.declared) =
+  match declared.earlier with
+  | Some earlier -> Hashtbl.mem state.overloaded earlier
+  | None -> false
+
 (* Records what [declared] declares [name] as: a new entity, or the one
    it redeclares with the composite of their types. *)
 let bind state span name (declared : Tree.declared) next =
-  let entity =
-    match earlier_entity state span name declared with
-    | None -> { name; entity = fresh_entity state; declared = next }
-    | Some prior ->
-        { prior with declared = redeclared state span name prior.declared next }
-  in
-  Hashtbl.replace state.entities (In_tree declared.id) entity;
-  if linkage_of entity.declared <> No_linkage then
-    Hashtbl.replace state.linked name entity;
-  entity
+  if is_overload next then bind_overload state span name declared next
+  else
+    let entity =
+      match earlier_entity state span name declared with
+      | None -> { name; entity = fresh_entity state; declared = next }
+      | Some prior ->
+          { prior with
+            declared = redeclared state span name prior.declared next }
+    in
+    let reference = Tree.In_tree declared.id in
+    Hashtbl.replace state.entities reference entity;
+    if follows_overload state declared then
+      Hashtbl.replace state.overloaded reference ();
+    if linkage_of entity.declared <> No_linkage then
+      Hashtbl.replace state.linked name entity;
+    entity
 
 (* 6.2.2p4, p5: [extern], or a function without a storage class, takes the
    linkage of a visible declaration that has one, which at file scope is
@@ -259,6 +299,7 @@ let file_scope_linkage state span name declared ~is_function storage =
 type attributed = {
   gnu_noreturn : bool;
   gnu_inline : bool;
+  overloadable : bool;
   unknown_attribute : Tree.attribute option;
   effect_attribute : Tree.attribute option;
 }
@@ -474,9 +515,14 @@ type derived = {
 
 (* What a GNU attribute does to the declarations: [Neutral] changes
    nothing they compute, [Sets_noreturn] marks a function that does not
-   return, as [_Noreturn] does (design 4.4), and [Sets_gnu_inline] gives
-   a function the GNU89 meaning of [inline] and [extern inline]. *)
-type attribute_effect = Neutral | Sets_noreturn | Sets_gnu_inline
+   return, as [_Noreturn] does (design 4.4), [Sets_gnu_inline] gives a
+   function the GNU89 meaning of [inline] and [extern inline], and
+   [Makes_overload] makes a function one of a Clang overload set. *)
+type attribute_effect =
+  | Neutral
+  | Sets_noreturn
+  | Sets_gnu_inline
+  | Makes_overload
 
 (* The GNU attributes that the declarations accept, each with its effect.
    [aligned] is neutral because typec leaves [_Alignof] and the sizes of
@@ -495,7 +541,8 @@ let attribute_effects =
     ("gnu_inline", Sets_gnu_inline); ("hot", Neutral);
     ("leaf", Neutral); ("malloc", Neutral); ("noescape", Neutral);
     ("noinline", Neutral); ("nonnull", Neutral); ("noreturn", Sets_noreturn);
-    ("not_tail_called", Neutral); ("nothrow", Neutral); ("pure", Neutral);
+    ("not_tail_called", Neutral); ("nothrow", Neutral);
+    ("overloadable", Makes_overload); ("pure", Neutral);
     ("returns_nonnull", Neutral); ("section", Neutral); ("sentinel", Neutral);
     ("swift_attr", Neutral); ("swift_name", Neutral);
     ("unavailable", Neutral); ("unused", Neutral);
@@ -503,8 +550,8 @@ let attribute_effects =
     ("warn_unused_result", Neutral); ("weak", Neutral) ]
 
 let no_attributes =
-  { gnu_noreturn = false; gnu_inline = false; unknown_attribute = None;
-    effect_attribute = None }
+  { gnu_noreturn = false; gnu_inline = false; overloadable = false;
+    unknown_attribute = None; effect_attribute = None }
 
 (* [onto] with the effects of [attributes] applied in source order. *)
 let read_attributes ~onto (attributes : Tree.attribute list) =
@@ -520,6 +567,8 @@ let read_attributes ~onto (attributes : Tree.attribute list) =
         with_effect { attributed with gnu_noreturn = true } attribute
     | Some Sets_gnu_inline ->
         with_effect { attributed with gnu_inline = true } attribute
+    | Some Makes_overload ->
+        with_effect { attributed with overloadable = true } attribute
     | None ->
         { attributed with
           unknown_attribute = first attributed.unknown_attribute attribute }
@@ -527,9 +576,10 @@ let read_attributes ~onto (attributes : Tree.attribute list) =
   List.fold_left apply onto attributes
 
 (* An attribute whose effect is not recorded where it stands, as only the
-   declaration of a function at file scope records [noreturn] and
-   [gnu_inline]: it makes the type it applies to unknown. One without an
-   entry in the table is named before one with an effect. *)
+   declaration of a function at file scope records [noreturn],
+   [gnu_inline] and [overloadable]: it makes the type it applies to
+   unknown. One without an entry in the table is named before one with an
+   effect. *)
 let unrecorded attributed =
   match attributed.unknown_attribute with
   | Some attribute -> Some attribute
@@ -665,11 +715,15 @@ and other_type state span (specifier : Tree.type_specifier) =
           fail state span (quote name ^ " is not a typedef name"))
 
 (* GNU [typeof] of an identifier is the type of what it denotes, without
-   conversion; typec types no other expression yet (0.9b). *)
+   conversion; typec types no other expression yet (0.9b), nor resolves
+   overloads. *)
 and typeof_expression state span expression =
   match (strip_parentheses expression).node with
   | Identifier { name; resolution = Resolved reference } -> (
       match (referenced state expression.span name reference).declared with
+      | Function _ when Hashtbl.mem state.overloaded reference ->
+          unknown_type state span ("the overloaded " ^ quote name)
+            Unknown_function
       | Object { object_type = t; _ }
       | Function { function_type = t; _ }
       | Enumerator { enumerator_type = t; _ } ->
@@ -1514,7 +1568,7 @@ let file_scope_declared state span specified name declared
       fail state span ("an alignment specifier for " ^ what ^ " (C11 6.7.5p2)")
   in
   let declared_function storage =
-    (* Its noreturn and gnu_inline would be guessed false. *)
+    (* Its noreturn, gnu_inline and overload would be guessed false. *)
     Option.iter
       (fun attribute ->
         fail_needing state span
@@ -1524,6 +1578,13 @@ let file_scope_declared state span specified name declared
     if specified.thread_local then
       fail state span "a function declared _Thread_local (C11 6.7.1p4)";
     no_alignment "a function";
+    (* An overload redeclares nothing, so it has no visible declaration
+       to take a linkage from. *)
+    let declared =
+      if specified.attributed.overloadable then
+        { declared with Tree.earlier = None }
+      else declared
+    in
     let linkage =
       file_scope_linkage state span name declared ~is_function:true storage
     in
@@ -1535,6 +1596,7 @@ let file_scope_declared state span specified name declared
         noreturn = specified.noreturn || specified.attributed.gnu_noreturn;
         (* GCC and Clang ignore it on a declaration without inline. *)
         gnu_inline = specified.inline && specified.attributed.gnu_inline;
+        overload = specified.attributed.overloadable;
       }
   in
   let declared_object storage =
@@ -1675,6 +1737,8 @@ let read target text unit =
       entities = Hashtbl.create 1024;
       tag_types = Hashtbl.create 256;
       linked = Hashtbl.create 1024;
+      beside = Hashtbl.create 64;
+      overloaded = Hashtbl.create 64;
       place = At_file_scope;
       next_entity = 0;
       expression_depth = 0;

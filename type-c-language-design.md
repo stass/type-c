@@ -1268,8 +1268,9 @@ identifier (whose type is that of the declaration it resolves to), and
 the type that an attribute applies to when the front end does not record the attribute's effect
 there: one without an entry in the table of effects that the front end
 knows, as `mode` and `vector_size` change a type in ways it does not
-model, or `noreturn` and `gnu_inline` anywhere but in the specifiers
-of a function declared at file scope or after its declarator. Every question about an unknown type, such
+model, or `noreturn`, `gnu_inline` and `overloadable` anywhere but in
+the specifiers of a function declared at file scope or after its
+declarator. Every question about an unknown type, such
 as its size, class, completeness or compatibility, answers that it
 depends on that type, and the front end reports an error only at the
 first point that needs the answer, naming the construct: whether a
@@ -1285,6 +1286,24 @@ attribute makes a function of an object. Typing bodies (0.9b) and the
 corpus settle it: a point that often needs an unknown type's properties
 makes the front end type that construct; the default is that unknown
 types stay.
+
+**Overloads.** Clang's `overloadable` attribute makes a function one of
+an overload set of its name, which Clang chooses among by the argument
+types of a call, as musl's fortify-headers do for `fgets` beside the
+library's declaration. Each declaration with it declares an entity of
+its own: it redeclares no other declaration of the name, a
+declaration without the attribute redeclares the one before the
+overloads, as if they were absent, and an overload has no entry in the
+table of names with linkage, since Clang gives it a symbol of its own.
+No declaration is checked against an overload, so the rules that Clang
+puts on an overload set are left to it. A use of the name resolves as
+the parser resolves it, to the last declaration in scope, so a use
+whose declaration is an overload, or follows one in its scope, has an
+unknown type until typing resolves overloads by Clang's rules (0.9b).
+An overload takes its linkage from its own storage class, as nothing
+visible is redeclared. GCC ignores the attribute
+with a warning and checks the declarations as one function; its
+headers do not use it.
 
 **Division of diagnostics.** The front end diagnoses every Type-C rule and
 the C errors it must detect to do so: syntax, undeclared names, types. It
