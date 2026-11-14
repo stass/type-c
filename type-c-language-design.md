@@ -1142,6 +1142,18 @@ language is defined here and not by the tool.
   described in 9.3.
 - Subprocesses are started with argument vectors, never through a shell.
   Intermediate files live in a private temporary directory.
+- A backend step that fails ends `typec` with the backend's own status,
+  or by the signal that ended it, as a direct compile would. `typec`'s
+  own failures have statuses of their own, so that a build tool or a
+  test runner tells them from the backend's without reading stderr: 80
+  when `typec` refuses the program (a diagnostic about the source), 81
+  for an error of its environment (the command line, a backend it cannot
+  start or that gives no target model, a file it cannot read or write)
+  and 82 for an internal error, which is a bug in `typec`. *Provisional
+  (P22).* The values assume that no backend exits with them: GCC and
+  Clang exit with small statuses, statuses of the sysexits range (64 to
+  78) and 128 plus a signal number, a shell with 126 or 127 for a
+  command it cannot run, and distcc from 100 up.
 
 ### 13.3 Front end
 
@@ -1417,6 +1429,7 @@ numbers refer to the implementation plan.
 | P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition | Own front end |
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties | Unknown types stay |
+| P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
 
 ## 16. Non-goals
 

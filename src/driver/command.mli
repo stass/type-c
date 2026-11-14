@@ -21,8 +21,9 @@ val run : env_cc:string option -> string list -> 'a
     {!Typec_sema.Target.to_string} of the model from
     {!Target_query.query} on stdout and exits with status 0.
 
-    It never returns. When the command line is wrong it prints one
-    message on stderr and exits with 2; when the backend cannot be
-    started, with 127; when the backend gives no model, the reader or
-    the front end refuses the preprocessed text or a file cannot be
-    written, with 1. *)
+    It never returns. When [typec] fails itself it prints one message
+    on stderr and exits with the {!Exit_status.code} of the failure:
+    [Refused] when the reader or the front end refuses the preprocessed
+    text; [Environment] when the command line is wrong, the backend
+    cannot be started or gives no model, or a file cannot be read or
+    written; [Internal] when an exception escapes, which is a bug. *)

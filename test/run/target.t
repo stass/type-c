@@ -88,20 +88,20 @@ arguments, which GNU yes would refuse as options.
 
   $ typec --cc=false --print-target
   typec: the C compiler "false" exited with status 1 listing its predefined macros
-  [1]
+  [81]
   $ typec --cc=./no-such-cc --print-target
   typec: cannot run the C compiler "./no-such-cc": No such file or directory
-  [127]
+  [81]
   $ typec --cc=echo --print-target
   typec: unexpected line "-dM -E -x c /dev/null" among the predefined macros
-  [1]
+  [81]
   $ printf '#!/bin/sh\nexec yes\n' > endless && chmod +x endless
   $ typec --cc=./endless --print-target
   typec: the C compiler "./endless" printed more than 1048576 bytes listing its predefined macros
-  [1]
+  [81]
   $ typec --cc=$clang --print-target -std=c89
   typec: the C compiler does not define __STDC_VERSION__
-  [1]
+  [81]
 
 A backend older than typec supports gives no model either. clang19 is
 the Clang of the host that claims to be Clang 19.
@@ -113,4 +113,4 @@ the Clang of the host that claims to be Clang 19.
   $ chmod +x clang19
   $ typec --cc=./clang19 --print-target
   typec: the C compiler is Clang 19; typec supports Clang 20 or later and GCC 14 or later
-  [1]
+  [81]

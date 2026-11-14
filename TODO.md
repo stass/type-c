@@ -563,17 +563,6 @@ types (design 13.3).
   because `typec` cannot report the revision it was built from. A
   `typec --version` printing it would name the binary exactly; today
   `--version` goes to the backend like any unknown option.
-- [Medium] `typec` exits with the backend's status when a backend step
-  fails, so a refusal of the front end and a failure of the backend (the
-  preprocessor, or the compile of the emitted C) both exit with 1. The
-  corpus runner tells them apart by the `typec: ` prefix of `typec`'s own
-  diagnostics on stderr, which is wrong both ways: an internal error of
-  `typec` (an uncaught exception, exit 2, no prefix) is recorded as a
-  backend failure, and `typec`'s own environment errors (the backend
-  cannot run or fails the target query) as refusals. A distinct exit
-  status for the front end's refusals, and a top-level handler giving
-  internal errors another, would let the runner read the status and drop
-  the stderr scan.
 - [Medium] The corpus runner trusts a test script to test every program
   that linked: gcc-torture and Csmith re-read the recipe and skip a
   program whose file is missing, c-testsuite globs its own list. The

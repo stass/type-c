@@ -5,7 +5,7 @@
 
 (executable
  (name corpus)
- (libraries unix))
+ (libraries unix typec_driver))
 
 (cram
  (deps corpus.exe %{bin:typec}))

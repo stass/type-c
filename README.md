@@ -82,8 +82,15 @@ older one with a message naming the oldest supported releases.
 
 Without a `.tc` input `typec` replaces itself with the backend. Exit
 status: the backend's own; a backend ended by a signal ends `typec`
-with the same signal. `typec` exits with 2 when `--cc=` has no path and
-with 127 when the backend cannot be started, after one message on stderr.
+with the same signal. `typec` exits with 81 when `--cc=` has no path or
+the backend cannot be started, after one message on stderr.
+
+`typec`'s own failures have statuses of their own, which
+[src/driver/exit_status.ml](src/driver/exit_status.ml) defines and
+design 13.2 explains: 80 when it refuses the program (a diagnostic about
+the source), 81 for an error of its environment (the command line, the
+backend, a file it cannot read or write) and 82 for an internal error, a
+bug in `typec`. Every other status is the backend's.
 
 ## Compiling a `.tc` input
 
@@ -138,10 +145,10 @@ SIGTERM are passed on to the running backend; `typec` then removes the
 directory and ends by the same signal.
 
 Exit status: 0 when every step succeeds; else the status of the first
-step that fails, or the signal that ended it; 1 when the front end
-refuses the preprocessed text, the backend gives no target model or a
-file cannot be read or written; 2 for a
-usage error; 127 when the backend cannot be started.
+backend step that fails, or the signal that ended it; 80 when the reader
+or the front end refuses the preprocessed text; 81 for a usage error,
+when the backend cannot be started or gives no target model, or when a
+file cannot be read or written; 82 for an internal error.
 
 ## Printing the target model
 
@@ -155,9 +162,9 @@ line. The other arguments are the backend options that select the
 target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu11`;
 inputs, `-o` and dependency options do not belong there.
 
-Exit status: 0 with the model on stdout; 1 when the backend fails, is
-not supported or prints macros the model cannot be read from; 2 and 127
-as above.
+Exit status: 0 with the model on stdout; 81 when the backend fails,
+cannot be started, is not supported or prints macros the model cannot
+be read from, or for a usage error; 82 for an internal error.
 
 ## Fuzzing
 
@@ -281,12 +288,15 @@ recipe (`programs/PROGRAM/recipe`, in the format of
    `BACKEND -x cpp-output -std=gnu11 ... -c U.ref.i -o U.ref.o`;
 3. `U.o` and `U.ref.o` must be equal byte for byte.
 
-Each unit ends in one of four states: identical, different, refused by
-`typec` or failed in the backend. `typec` exits with the backend's
-status when a backend step fails, so the runner tells the last two apart
-by `typec`'s own diagnostic, a line of its stderr that starts with
-`typec: `; a failure without one, such as the backend compiling `typec`'s
-output or preprocessing it, is the backend's.
+Each unit ends in one of five states: identical, different, refused by
+`typec`, an internal error of `typec` or failed in the backend. The
+runner tells them apart by `typec`'s exit status (see "Choosing the
+backend"), and records `typec`'s message, the last line of its stderr;
+any other failure, such as the backend compiling `typec`'s output or
+preprocessing it, is the backend's. An error of `typec`'s environment,
+such as a backend it cannot start or an option it refuses, ends the run
+with 2. The runner reads the statuses from the checkout it is built
+from, so the `typec` binary must be built from the same revision.
 
 The runner then links each program of the recipe from the `typec`
 objects, and runs the recipe's test script in the build tree on the
@@ -304,15 +314,15 @@ It writes a record of each program and backend to
 `CORPUS/runs/HOST/PROGRAM.BACKEND.txt` and prints it: the digest of the
 `typec` binary, which cannot report its own revision, and the revision of
 the checkout beside it at run time, the revision of the corpus, the
-counts of identical, different, refused and backend-failed units, which
-failed and why, whether the programs linked, and the tests. The tests
-line says `passed` for an own suite that passed with everything built;
-`partial: ...` when the script passed but a unit failed or a program did
-not link, which does not meet gate 1; `substitute passed, not the
-program's own suite: DESCRIPTION` for a substitute, which does not meet
-gate 1 either; and `FAILED` or `not run` otherwise. The results line
-counts the `TEST` lines (passed, failed, failed with the backend too) and
-lists the failures. The record ends with the CPU time of preprocessing,
+counts of identical, different, refused, typec-bug and backend-failed
+units, which failed and why, whether the programs linked, and the
+tests. The tests line says `passed` for an own suite that passed with
+everything built; `partial: ...` when the script passed but a unit
+failed or a program did not link, which does not meet gate 1;
+`substitute passed, not the program's own suite: DESCRIPTION` for a
+substitute, which does not meet gate 1 either; and `FAILED` or `not
+run` otherwise. The results line counts the `TEST` lines (passed,
+failed, failed with the backend too) and lists the failures. The record ends with the CPU time of preprocessing,
 of `typec --emit-c` and of the backend's `-fsyntax-only` on `U.ref.i`,
 summed over the units, whose first two differ by the time of `typec`'s
 front end. The stderr of every command and the stdout of the test script

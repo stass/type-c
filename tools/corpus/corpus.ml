@@ -13,7 +13,8 @@ let usage =
    [--cc PATH]... PROGRAM..."
 
 (* Every error that ends the whole run: a usage error, a recipe that
-   cannot be read, an archive not fetched. [main]'s caller also ends the
+   cannot be read, an archive not fetched, an environment typec cannot
+   work in. [main]'s caller also ends the
    run on a file or process the runner itself cannot make. *)
 exception Fatal of string
 
@@ -23,9 +24,7 @@ let fatal fmt = Printf.ksprintf (fun message -> raise (Fatal message)) fmt
    with the next unit, or stops when the step is not a unit's. *)
 exception Step_failed of string
 
-(* A step of a unit in which typec stopped with a diagnostic of its own;
-   it carries the diagnostic. *)
-exception Typec_refused of string
+module Exit_status = Typec_driver.Exit_status
 
 type options = {
   corpus : string;  (** the corpus repository *)
@@ -176,14 +175,19 @@ let add_times a b =
     syntax_only = a.syntax_only +. b.syntax_only;
   }
 
-(* How the compile of one unit ended. [Refused] is typec's front end
-   stopping at the unit; [Backend_failed] is any other step failing, the
-   backend compiling typec's output included. *)
+(* How the compile of one unit ended. [Refused] is typec refusing the
+   unit's source and [Typec_bug] typec's internal error, each with its
+   message; [Backend_failed] is any other step failing, the backend
+   compiling typec's output included. *)
 type unit_result =
   | Identical of times
   | Different of times
   | Refused of string
+  | Typec_bug of string
   | Backend_failed of string
+
+(* A step of a unit in which typec stopped by a failure of its own. *)
+exception Typec_stopped of unit_result
 
 (* The .tc copy of a unit sits next to it, so that its includes resolve
    as before. Every file the runner makes for the unit is named after the
@@ -192,37 +196,45 @@ let type_c_copy unit = Filename.chop_suffix unit ".c" ^ ".tc"
 
 let derived unit suffix = type_c_copy unit ^ suffix
 
-(* typec exits with the backend's status when a backend step fails, so
-   its status does not tell a refusal from a backend failure. Its own
-   diagnostics are the stderr lines that start with its name
-   (src/driver/command.ml); a backend's diagnostics never do. *)
-let typec_diagnostic stderr_text =
-  let prefix = "typec: " in
-  let skip = String.length prefix in
-  let own line = String.starts_with ~prefix line in
-  String.split_on_char '\n' stderr_text
-  |> List.find_opt own
-  |> Option.map (fun line -> String.sub line skip (String.length line - skip))
+(* typec reports a failure of its own last, after anything the backend
+   printed; the record leaves out the name the message starts with. *)
+let typec_message stderr_text =
+  let name = "typec: " in
+  let lines = String.split_on_char '\n' (String.trim stderr_text) in
+  let last = List.hd (List.rev lines) in
+  if not (String.starts_with ~prefix:name last) then last
+  else
+    let skip = String.length name in
+    String.sub last skip (String.length last - skip)
+
+let typec_failure = function
+  | Unix.WEXITED code -> Exit_status.of_code code
+  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
 
 (* Runs typec on a unit with its stderr in [errors], which the log gets
-   too. A failure is [Refused] with typec's first diagnostic, or
-   [Step_failed] when typec printed none. *)
+   too, and gives its CPU seconds. A failure of typec's own has a status
+   of its own (src/driver/exit_status.mli): an environment that typec
+   cannot work in ends the run, a refusal or an internal error is the
+   unit's. Any other status is a backend step's, which typec passes on. *)
 let run_typec context ~step ~errors command =
-  let run fd =
-    run_to context ~stdout:context.log ~stderr:fd ~step command |> ignore
-  in
   let path = in_tree context errors in
+  log_command context command;
   let outcome =
-    match with_output_file path run with
-    | () -> None
-    | exception Step_failed message -> Some message
+    with_output_file path (fun fd ->
+        Command.run ~cwd:context.root ~stdout:context.log ~stderr:fd command)
   in
   let stderr_text = read_file path in
   write_to_log context stderr_text;
-  match (outcome, typec_diagnostic stderr_text) with
-  | None, _ -> ()
-  | Some _, Some diagnostic -> raise (Typec_refused diagnostic)
-  | Some message, None -> raise (Step_failed message)
+  let message = typec_message stderr_text in
+  match outcome.status with
+  | Unix.WEXITED 0 -> outcome.cpu_seconds
+  | status -> (
+      match typec_failure status with
+      | Some Exit_status.Refused -> raise (Typec_stopped (Refused message))
+      | Some Exit_status.Internal -> raise (Typec_stopped (Typec_bug message))
+      | Some Exit_status.Environment ->
+          fatal "%s cannot work in this environment: %s" step message
+      | None -> raise (Step_failed (step ^ " " ^ Command.describe status)))
 
 (* typec compiles the .tc copy of the unit first, so that a unit it
    refuses is reported as its failure. The reference follows
@@ -236,8 +248,10 @@ let compile_unit context unit =
   let typec = [ context.typec; "--cc=" ^ cc ] @ flags in
   let backend_on_text = [ cc; "-x"; "cpp-output"; "-std=gnu11" ] @ flags in
   copy_file ~source:(in_tree context unit) ~target:(in_tree context tc);
-  run_typec context ~step:"typec -c" ~errors:(derived unit ".typec.err")
-    (typec @ [ "-c"; tc; "-o"; object_ ]);
+  let _ : float =
+    run_typec context ~step:"typec -c" ~errors:(derived unit ".typec.err")
+      (typec @ [ "-c"; tc; "-o"; object_ ])
+  in
   let preprocess =
     run_into_file context ~step:"preprocessing" ~output:reference_i
       ([ cc; "-E"; "-x"; "c"; "-D__TYPEC__=1"; "-std=gnu11" ] @ flags @ [ tc ])
@@ -247,7 +261,7 @@ let compile_unit context unit =
       (backend_on_text @ [ "-c"; reference_i; "-o"; reference_o ])
   in
   let emit_c =
-    run context ~step:"typec --emit-c"
+    run_typec context ~step:"typec --emit-c" ~errors:(derived unit ".emit.err")
       (typec @ [ "--emit-c"; tc; "-o"; derived unit ".emit.i" ])
   in
   let syntax_only =
@@ -264,7 +278,7 @@ let compile_unit context unit =
 let compile_or_fail context unit =
   match compile_unit context unit with
   | result -> result
-  | exception Typec_refused diagnostic -> Refused diagnostic
+  | exception Typec_stopped result -> result
   | exception Step_failed message -> Backend_failed message
 
 (* [Substitute_passed] is a script that is not the program's own suite
@@ -286,7 +300,7 @@ type build = {
 
 let is_compiled = function
   | Identical _ | Different _ -> true
-  | Refused _ | Backend_failed _ -> false
+  | Refused _ | Typec_bug _ | Backend_failed _ -> false
 
 let compiled units unit = is_compiled (List.assoc unit units)
 
@@ -408,11 +422,12 @@ let count predicate units = List.length (List.filter predicate units)
 
 let unit_times = function
   | Identical times | Different times -> times
-  | Refused _ | Backend_failed _ -> no_time
+  | Refused _ | Typec_bug _ | Backend_failed _ -> no_time
 
 let is_identical = function _, Identical _ -> true | _ -> false
 let is_different = function _, Different _ -> true | _ -> false
 let is_refused = function _, Refused _ -> true | _ -> false
+let is_typec_bug = function _, Typec_bug _ -> true | _ -> false
 let is_backend_failed = function _, Backend_failed _ -> true | _ -> false
 
 (* Everything the recipe lists is built: each unit compiled and each
@@ -481,6 +496,7 @@ let build_lines build =
   let detail = function
     | unit, Different _ -> [ "different    " ^ unit ]
     | unit, Refused message -> [ "refused      " ^ unit ^ ": " ^ message ]
+    | unit, Typec_bug message -> [ "typec-bug    " ^ unit ^ ": " ^ message ]
     | unit, Backend_failed message ->
         [ "backend-fail " ^ unit ^ ": " ^ message ]
     | _, Identical _ -> []
@@ -490,6 +506,7 @@ let build_lines build =
     Printf.sprintf "identical    %d" (count is_identical build.units);
     Printf.sprintf "different    %d" (count is_different build.units);
     Printf.sprintf "refused      %d" (count is_refused build.units);
+    Printf.sprintf "typec-bug    %d" (count is_typec_bug build.units);
     Printf.sprintf "backend-fail %d" (count is_backend_failed build.units);
     Printf.sprintf "linked       %d of %d" (List.length build.linked)
       (List.length build.linked + List.length build.not_linked);

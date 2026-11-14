@@ -107,7 +107,7 @@ nothing. It is the preprocessed text.
   $ typec --cc=$clang --emit-c x.tc -o out/x.i && cmp out/x.i plain.i
   $ typec --cc=$clang --emit-c x.tc twice.c
   typec: --emit-c needs exactly one input, a .tc file
-  [2]
+  [81]
 
 A dependency file comes from the preprocessing step. It is named as cc
 names it, and its target is the real output.
@@ -130,10 +130,10 @@ with a .tc input. Without one they reach the backend as they are.
   $ typec --cc=$clang -std=c17 -c x.tc
   $ typec --cc=$clang -std=c99 -c x.tc
   typec: -std=c99 cannot be used with a .tc input: Type-C accepts C11 and C17, in ISO or GNU form
-  [2]
+  [81]
   $ typec --cc=$clang -P -c x.tc
   typec: -P cannot be used with a .tc input: the preprocessed text must keep its line markers and nothing else
-  [2]
+  [81]
   $ typec --cc=$clang -std=c99 -c twice.c
 
 The keywords follow the dialect as in GCC and Clang: asm and typeof are
@@ -156,10 +156,10 @@ typec and to the backends alike.
   $ typec --cc=$clang -fno-asm -fsyntax-only iso.tc
   $ typec --cc=$clang -c iso.tc
   typec: iso.tc:1: expected `(` after `typeof`, found `;`
-  [1]
+  [80]
   $ typec --cc=$gcc -std=c11 -fasm -c iso.tc
   typec: iso.tc:1: expected `(` after `typeof`, found `;`
-  [1]
+  [80]
   $ $clang -x c -std=gnu11 -fsyntax-only iso.tc 2>/dev/null
   [1]
   $ $gcc -x c -std=gnu11 -fsyntax-only iso.tc 2>/dev/null
@@ -171,41 +171,52 @@ forwarded, so -E is the backend's and __TYPEC__ is not defined.
   $ typec --cc=$clang -x c -E x.tc | grep -c ', __TYPEC__, n'
   1
 
-A failure ends typec with the status of the step that failed, and the
-temporary directory is removed on every path: a backend that fails to
-preprocess or to compile, text that the reader refuses, and a backend
-ended by a signal.
+A backend step that fails ends typec with the status of the step, text
+that the reader refuses ends it with 80, the status of a refused program
+(src/driver/exit_status.ml), and the temporary directory is removed on
+every path: a backend that fails to preprocess or to compile, text that
+the reader refuses, and a backend ended by a signal. fails-compile fails
+the compile step with a status of its own, which typec passes on.
 
   $ printf '#error stop\n' > bad-cpp.tc
   $ typec --cc=$clang -c bad-cpp.tc 2>/dev/null
   [1]
-  $ printf 'int x = "a" * 2;\n' > bad-c.tc
+  $ printf 'void f(void) { goto nowhere; }\n' > bad-c.tc
   $ typec --cc=$clang -c bad-c.tc 2>/dev/null
   [1]
   $ printf 'int @;\n' > bad-read.tc
   $ typec --cc=$clang -c bad-read.tc
   typec: bad-read.tc:1: unexpected character '@'
-  [1]
+  [80]
   $ printf '#!/bin/sh\nkill -s KILL $$\n' > killed-cc && chmod +x killed-cc
   $ { typec --cc=./killed-cc -c x.tc; } 2>/dev/null
   [137]
+  $ printf '#!/bin/sh\ncase " $* " in *" cpp-output "*) exit 42 ;; esac\n' \
+  >   > fails-compile
+  $ printf 'exec "%s" "$@"\n' "$clang" >> fails-compile
+  $ chmod +x fails-compile
+  $ typec --cc=./fails-compile -c x.tc
+  [42]
+  $ typec --cc=./no-such-cc -c x.tc
+  typec: cannot run the C compiler "./no-such-cc": No such file or directory
+  [81]
   $ ls -A tmp
 
 The front end parses the text it reads and reads its declarations for
 the target model of the compile step; a text it refuses ends typec with
-status 1 and one message, before anything is emitted or compiled.
+status 80 and one message, before anything is emitted or compiled.
 
   $ printf 'int x = ;\n' > bad-parse.tc
   $ typec --cc=$clang -c bad-parse.tc
   typec: bad-parse.tc:1: expected an expression, found `;`
-  [1]
+  [80]
   $ printf 'int n;\nlong n;\n' > bad-type.tc
   $ typec --cc=$gcc -c bad-type.tc
   typec: bad-type.tc:2: 'n' is redeclared with an incompatible type (C11 6.7p4)
-  [1]
+  [80]
   $ typec --cc=$clang --emit-c bad-type.tc
   typec: bad-type.tc:2: 'n' is redeclared with an incompatible type (C11 6.7p4)
-  [1]
+  [80]
   $ test ! -e bad-parse.o && test ! -e bad-type.o && ls -A tmp
 
 The target model comes from the backend with the options of the compile
@@ -215,4 +226,4 @@ step, so -funsigned-char reaches the declarations.
   $ typec --cc=$clang --emit-c signed-char.tc -o out/signed-char.i
   $ typec --cc=$clang -funsigned-char --emit-c signed-char.tc
   typec: signed-char.tc:1: array has a negative length
-  [1]
+  [80]

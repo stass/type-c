@@ -3,19 +3,13 @@
 
 module Target = Typec_sema.Target
 
-(* A usage error follows the getopt convention; 127 is the status a shell
-   gives for a command it cannot run; any other failure is 1. *)
-let exit_failure = 1
-let exit_usage = 2
-let exit_cannot_run = 127
-
 (* The status still reports the failure when stderr is closed. *)
 let report message =
   try prerr_endline ("typec: " ^ message) with Sys_error _ -> ()
 
-let fail status message =
+let fail failure message =
   report message;
-  exit status
+  exit (Exit_status.code failure)
 
 let cannot_run program error =
   Printf.sprintf "cannot run the C compiler %S: %s" program
@@ -30,13 +24,15 @@ let exec { Invocation.program; arguments; _ } =
 let print_target { Invocation.program; arguments; _ } =
   let options = Command_line.words arguments in
   match Target_query.query ~program options with
-  | Error error -> fail exit_failure (Target_query.error_message ~program error)
+  | Error error ->
+      fail Exit_status.Environment (Target_query.error_message ~program error)
   | Ok target ->
       (try
          print_string (Target.to_string target);
          flush stdout
        with Sys_error message ->
-         fail exit_failure ("cannot write the target model: " ^ message));
+         fail Exit_status.Environment
+           ("cannot write the target model: " ^ message));
       exit 0
 
 (* How the pipeline ends: with an exit status, or by a signal. *)
@@ -46,25 +42,28 @@ type outcome = Exit of int | Signal of int
    message, and caught once in run_pipeline. *)
 exception Stopped of outcome
 
-let stop status message =
+let stop failure message =
   report message;
-  raise (Stopped (Exit status))
+  raise (Stopped (Exit (Exit_status.code failure)))
 
 let stop_if_caught () =
   match Signals.caught () with
   | Some signal -> raise (Stopped (Signal signal))
   | None -> ()
 
-(* A step that fails ends the pipeline as the backend ended. *)
+(* A step that fails ends the pipeline as the backend ended. waitpid
+   reports a stopped child only when asked to, which Process.run does not. *)
 let run_step ~stdin ~stdout command =
   stop_if_caught ();
   (match Process.run ~stdin ~stdout command with
   | Unix.WEXITED 0 -> ()
   | Unix.WEXITED status -> raise (Stopped (Exit status))
   | Unix.WSIGNALED signal -> raise (Stopped (Signal signal))
-  | Unix.WSTOPPED _ -> raise (Stopped (Exit exit_failure))
+  | Unix.WSTOPPED _ ->
+      stop Exit_status.Internal
+        "internal error, a bug in typec: the backend was reported stopped"
   | exception Unix.Unix_error (error, _, _) ->
-      stop exit_cannot_run (cannot_run (List.hd command) error));
+      stop Exit_status.Environment (cannot_run (List.hd command) error));
   stop_if_caught ()
 
 let with_file path flags f =
@@ -81,11 +80,13 @@ let read_preprocessed (translation : Pipeline.translation) =
   let text =
     try In_channel.with_open_bin translation.preprocessed In_channel.input_all
     with Sys_error message ->
-      stop exit_failure ("cannot read the preprocessed text: " ^ message)
+      stop Exit_status.Environment
+        ("cannot read the preprocessed text: " ^ message)
   in
   match Typec_cpp.Reader.read ~name:translation.source text with
   | Ok unit -> unit
-  | Error error -> stop exit_failure (Typec_cpp.Reader.error_message error)
+  | Error error ->
+      stop Exit_status.Refused (Typec_cpp.Reader.error_message error)
 
 (* A signal that interrupts the query ends the pipeline by that signal. *)
 let query_target ~program (translation : Pipeline.translation) =
@@ -93,18 +94,19 @@ let query_target ~program (translation : Pipeline.translation) =
     try Target_query.query ~program translation.target_options
     with Unix.Unix_error (error, _, _) ->
       stop_if_caught ();
-      stop exit_cannot_run (cannot_run program error)
+      stop Exit_status.Environment (cannot_run program error)
   in
   stop_if_caught ();
   match model with
   | Ok target -> target
   | Error error ->
-      stop exit_failure (Target_query.error_message ~program error)
+      stop Exit_status.Environment (Target_query.error_message ~program error)
 
 let check_front_end dialect target text =
   match Front_end.check dialect target text with
   | Ok () -> ()
-  | Error error -> stop exit_failure (Typec_cpp.Reader.error_message error)
+  | Error error ->
+      stop Exit_status.Refused (Typec_cpp.Reader.error_message error)
 
 let write_emitted (destination : Pipeline.destination) text =
   try
@@ -115,7 +117,8 @@ let write_emitted (destination : Pipeline.destination) text =
     | Pipeline.File path ->
         Out_channel.with_open_bin path (fun channel ->
             Out_channel.output_string channel text)
-  with Sys_error message -> stop exit_failure ("cannot write the C: " ^ message)
+  with Sys_error message ->
+    stop Exit_status.Environment ("cannot write the C: " ^ message)
 
 (* Each translation queries its own target model, which is simpler than
    sharing one between translations whose options are the same. *)
@@ -141,7 +144,7 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
   with
   | Error error ->
       report (Pipeline.error_message error);
-      Exit exit_usage
+      Exit (Exit_status.code Exit_status.Environment)
   | Ok plan -> (
       try
         run_plan ~program:invocation.program plan;
@@ -151,7 +154,7 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
       | Unix.Unix_error (error, call, path) ->
           report
             (Printf.sprintf "%s %s: %s" call path (Unix.error_message error));
-          Exit exit_failure)
+          Exit (Exit_status.code Exit_status.Environment))
 
 (* A signal caught at any point, the removal included, ends typec by it
    once the directory is gone. *)
@@ -165,7 +168,8 @@ let compile_through_pipeline invocation =
   let temp_dir =
     try Temp_dir.create ()
     with Sys_error message ->
-      fail exit_failure ("cannot create a temporary directory: " ^ message)
+      fail Exit_status.Environment
+        ("cannot create a temporary directory: " ^ message)
   in
   let outcome =
     Fun.protect
@@ -182,10 +186,20 @@ let perform (invocation : Invocation.t) =
       compile_through_pipeline invocation
   | Invocation.Compile -> exec invocation
 
-let run ~env_cc arguments =
+let run_command_line ~env_cc arguments =
   match Invocation.of_command_line ~env_cc arguments with
-  | Error error -> fail exit_usage (Invocation.error_message error)
+  | Error error -> fail Exit_status.Environment (Invocation.error_message error)
   | Ok invocation -> (
       try perform invocation
       with Unix.Unix_error (error, _, _) ->
-        fail exit_cannot_run (cannot_run invocation.program error))
+        fail Exit_status.Environment (cannot_run invocation.program error))
+
+(* Every failure of typec's own is handled where it happens, so an
+   exception that reaches this handler is a bug. The backtrace, recorded
+   under OCAMLRUNPARAM=b, comes first so that the message ends stderr. *)
+let run ~env_cc arguments =
+  try run_command_line ~env_cc arguments
+  with exn ->
+    (try prerr_string (Printexc.get_backtrace ()) with Sys_error _ -> ());
+    fail Exit_status.Internal
+      ("internal error, a bug in typec: " ^ Printexc.to_string exn)

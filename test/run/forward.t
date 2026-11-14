@@ -47,16 +47,17 @@ print with a pid.
   [137]
 
 A backend that cannot be started and a --cc= without a path each give one
-message.
+message and 81, the status of typec's environment errors
+(src/driver/exit_status.ml).
 
   $ typec --cc=./no-such-cc -c hello.c
   typec: cannot run the C compiler "./no-such-cc": No such file or directory
-  [127]
+  [81]
   $ typec --cc=missing-cc -c hello.c
   typec: cannot run the C compiler "missing-cc": No such file or directory
-  [127]
+  [81]
   $ typec --cc=./no-such-cc -c hello.c 2>&-
-  [127]
+  [81]
   $ typec --cc= -c hello.c
   typec: --cc= needs the path of a C compiler
-  [2]
+  [81]

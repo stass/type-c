@@ -51,6 +51,7 @@ host, the backend, the revisions and the timings are left out.
   identical    2
   different    0
   refused      0
+  typec-bug    0
   backend-fail 0
   linked       1 of 1
   tests        passed
@@ -67,7 +68,7 @@ The record names the typec binary by its digest. typec cannot report the
 revision it was built from, so the revision of the checkout beside it is
 labelled as that of the run.
 
-  $ grep '^typec' corpus/runs/*/hello.clang.txt |
+  $ grep '^typec ' corpus/runs/*/hello.clang.txt |
   >   sed -E 's/[0-9a-f]{64}/DIGEST/; s/time: .*\)/time: REVISION)/'
   typec        blake2b-256 DIGEST (checkout at run time: REVISION)
 
@@ -79,6 +80,7 @@ labelled as that of the run.
   bin
   greet.c
   greet.tc
+  greet.tc.emit.err
   greet.tc.emit.i
   greet.tc.o
   greet.tc.ref.i
@@ -87,6 +89,7 @@ labelled as that of the run.
   include
   main.c
   main.tc
+  main.tc.emit.err
   main.tc.emit.i
   main.tc.o
   main.tc.ref.i
@@ -106,6 +109,7 @@ A test script that fails is recorded as failed, with the exit status 1.
   identical    2
   different    0
   refused      0
+  typec-bug    0
   backend-fail 0
   linked       1 of 1
   tests        FAILED: the tests exited with 5
@@ -125,6 +129,7 @@ that passed, and the exit status is 3, neither a pass nor a failure.
   identical    2
   different    0
   refused      0
+  typec-bug    0
   backend-fail 0
   linked       1 of 1
   tests        substitute passed, not the program's own suite: a greeting smoke test
@@ -170,6 +175,7 @@ no program linked the tests do not run, and the runner exits with 1.
   identical    1
   different    0
   refused      1
+  typec-bug    0
   backend-fail 0
   linked       0 of 1
   tests        not run: no program linked
@@ -214,6 +220,7 @@ failed to build is recorded as a partial pass, which does not meet gate
   identical    1
   different    0
   refused      1
+  typec-bug    0
   backend-fail 1
   linked       1 of 3
   tests        partial: passed on what linked only, gate 1 not met
@@ -230,6 +237,31 @@ failed to build is recorded as a partial pass, which does not meet gate
   1
   $ grep -c 'TEST pass ok' cache/build/*/multi/clang.log
   1
+
+typec's own failures have exit statuses of their own
+(src/driver/exit_status.mli), which the runner reads. An internal error
+of typec is recorded against the unit; an environment typec cannot work
+in ends the run with 2. buggy-typec fails as an internal error does, and
+lost-cc-typec runs typec with a backend that cannot be started.
+
+  $ cat > buggy-typec <<'EOF'
+  > #!/bin/sh
+  > echo 'typec: internal error, a bug in typec: Not_found' >&2
+  > exit 82
+  > EOF
+  $ printf '#!/bin/sh\nexec "%s" "$@" --cc=no-such-cc\n' "$(command -v typec)" \
+  >   > lost-cc-typec
+  $ chmod +x buggy-typec lost-cc-typec
+  $ run --typec ./buggy-typec multi | grep -E '^(refused|typec-bug|backend-fail)'
+  refused      0
+  typec-bug    3
+  backend-fail 0
+  typec-bug    ok.c: internal error, a bug in typec: Not_found
+  typec-bug    bad.c: internal error, a bug in typec: Not_found
+  typec-bug    ugly.c: internal error, a bug in typec: Not_found
+  $ fails --typec ./lost-cc-typec multi
+  corpus: typec -c cannot work in this environment: cannot run the C compiler "no-such-cc": No such file or directory
+  [2]
 
 A script that prints a TEST line it cannot count, or that exits with 0
 after reporting a failed test, is recorded as failed.
