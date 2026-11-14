@@ -256,7 +256,7 @@ let () =
    last -fasm or -fno-asm overrides them wherever it stands, as in GCC
    and Clang. *)
 let () =
-  let keywords words = (only_translation (planned words)).keywords in
+  let keywords words = (only_translation (planned words)).dialect in
   check "gnu11 by default" (keywords [ "x.tc" ] = Gnu);
   check "-std=c11" (keywords [ "-std=c11"; "x.tc" ] = Iso);
   check "--std iso9899:2018"

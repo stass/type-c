@@ -8,7 +8,7 @@ type translation = {
   preprocess : string list;
   preprocessed : string;
   target_options : string list;
-  keywords : Typec_syntax.Keyword_set.t;
+  dialect : Typec_syntax.Keyword_set.dialect;
   emitted : destination;
   compile : string list option;
 }
@@ -27,8 +27,8 @@ type error =
 exception Failed of error
 
 (* C11 and C17 in ISO and GNU form, under every name that GCC and Clang
-   give them, and the keywords of each form (design 2.4). *)
-let accepted_standards : (string * Typec_syntax.Keyword_set.t) list =
+   give them, and the dialect of the keywords of each form (design 2.4). *)
+let accepted_standards : (string * Typec_syntax.Keyword_set.dialect) list =
   [
     ("c11", Iso); ("c1x", Iso); ("iso9899:2011", Iso); ("c17", Iso);
     ("c18", Iso); ("iso9899:2017", Iso); ("iso9899:2018", Iso);
@@ -100,28 +100,28 @@ let refuse_unusable_options arguments =
       | _ -> ())
     arguments
 
-(* The keywords of the -std= standard; raises Unaccepted_standard for one
+(* The keyword dialect of the -std= standard; raises Unaccepted_standard for one
    that Type-C does not accept. *)
-let standard_keywords arguments =
+let standard_dialect arguments =
   let standard =
     Option.value (last_value Dialect arguments) ~default:default_standard
   in
   match List.assoc_opt standard accepted_standards with
-  | Some keywords -> keywords
+  | Some dialect -> dialect
   | None -> raise (Failed (Unaccepted_standard standard))
 
-(* The keywords that the backend reads: GCC and Clang let the last -fasm
-   or -fno-asm decide, wherever -std= stands. *)
-let keywords_of arguments =
-  let keywords =
+(* The dialect of the keywords that the backend reads: GCC and Clang let
+   the last -fasm or -fno-asm decide, wherever -std= stands. *)
+let dialect_of arguments =
+  let chosen =
     List.fold_left
       (fun last -> function
         | Command_line.Option { role = Keywords set; _ } -> Some set
         | _ -> last)
       None arguments
   in
-  let standard = standard_keywords arguments in
-  Option.value keywords ~default:standard
+  let standard = standard_dialect arguments in
+  Option.value chosen ~default:standard
 
 (* cc stops at the earliest output any option asks for. *)
 let goal_of arguments =
@@ -203,7 +203,7 @@ type shape = {
   goal : goal;
   output : string option;
   standard : string list;  (** what the backend adds for design 2.4 *)
-  keywords : Typec_syntax.Keyword_set.t;
+  dialect : Typec_syntax.Keyword_set.dialect;
 }
 
 (* With --emit-c the C goes where -o says, and "-o -" is stdout as for
@@ -251,7 +251,7 @@ let translation shape arguments ~linked_object index source =
     preprocess;
     preprocessed = temp_file ".preprocessed.i";
     target_options = compile_options shape arguments;
-    keywords = shape.keywords;
+    dialect = shape.dialect;
     emitted;
     compile;
   }
@@ -292,7 +292,7 @@ let final_command shape ~objects arguments =
 let plan ~program ~emit_c ~temp_dir arguments =
   try
     refuse_unusable_options arguments;
-    let keywords = keywords_of arguments in
+    let dialect = dialect_of arguments in
     let goal = goal_of arguments in
     let output = last_value Output arguments in
     check_outputs ~emit_c ~goal ~output arguments;
@@ -300,7 +300,7 @@ let plan ~program ~emit_c ~temp_dir arguments =
       if has_role Dialect arguments then [] else [ "-std=" ^ default_standard ]
     in
     let shape =
-      { program; emit_c; temp_dir; goal; output; standard; keywords }
+      { program; emit_c; temp_dir; goal; output; standard; dialect }
     in
     (* The number of a .tc input, from 1, names its files. *)
     let sources =

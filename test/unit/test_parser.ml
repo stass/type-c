@@ -5,6 +5,11 @@ open Typec_cpp
 open Typec_syntax
 open Typec_test_support
 
+(* The keywords of gnu11 on a backend with every optional floating type,
+   which most cases are read with. *)
+let gnu_keywords : Keyword_set.t =
+  { dialect = Gnu; optional_floats = Optional_float.all }
+
 (* A text, read as from the file "in.i", and the dump of its external
    declarations, separated by " | ", or its error. *)
 type case = { name : string; text : string; expected : string }
@@ -30,7 +35,7 @@ let resolutions text =
   match Reader.read ~name:"in.i" text with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
-      match Parser.parse reader with
+      match Parser.parse ~keywords:gnu_keywords reader with
       | Error error -> "error: " ^ Parser.error_message error
       | Ok unit ->
           Tree_dump.resolutions (Tree_dump.translation_unit reader unit))
@@ -797,6 +802,30 @@ let iso_keyword_cases =
        p))))";
   ]
 
+(* An optional floating type is a keyword exactly where the backend has
+   it; elsewhere a C library may declare the spelling, as glibc does
+   _Float128 under Clang, which has only _Float16 and __float128. *)
+let optional_float_cases =
+  [
+    case "GCC's binary128 keywords"
+      "_Complex _Float128 f(_Float128, _Float64x, __float128);"
+      "(declaration (_Complex _Float128) (function f (_Float128) (_Float64x) \
+       (__float128)))";
+    case "glibc's typedef for Clang declares nothing"
+      "typedef __float128 _Float128;"
+      "(declaration (typedef __float128 _Float128))";
+  ]
+
+let clang_optional_float_cases =
+  [
+    case "glibc's _Float128 under Clang"
+      "typedef __float128 _Float128; _Float128 f(_Float128);"
+      "(declaration (typedef __float128) _Float128) | (declaration \
+       (_Float128) (function f (_Float128)))";
+    case "a spelling of a type the backend lacks is an identifier"
+      "int _Float32;" "(declaration (int) _Float32)";
+  ]
+
 let block_pointer_cases =
   [
     case "block pointers"
@@ -1206,7 +1235,7 @@ let failed_nesting_cases () =
     match Reader.read ~name:"in.i" text with
     | Error _ -> Some "read error"
     | Ok reader -> (
-        match Parser.parse reader with
+        match Parser.parse ~keywords:gnu_keywords reader with
         | Ok _ -> None
         | Error error -> Some error.message)
   in
@@ -1311,7 +1340,7 @@ let failed_chain_cases () =
       match Reader.read ~name:"in.i" text with
       | Error _ -> Some (name, "read error")
       | Ok reader -> (
-          match Parser.parse reader with
+          match Parser.parse ~keywords:gnu_keywords reader with
           | Ok _ -> None
           | Error error -> Some (name, error.message)))
     texts
@@ -1327,8 +1356,11 @@ let failures () =
         if actual = case.expected then None else Some (case, actual))
       cases
   in
-  let failed_cases ?(parse = fun reader -> Parser.parse reader) ~spans cases =
+  let failed_cases ?(parse = Parser.parse ~keywords:gnu_keywords) ~spans cases =
     failed_with (outcome ~parse ~spans) cases
+  in
+  let parse_with dialect optional_floats =
+    Parser.parse ~keywords:{ dialect; optional_floats }
   in
   let failed =
     List.concat_map (failed_cases ~spans:false)
@@ -1351,8 +1383,11 @@ let failures () =
         error_cases;
       ]
     @ failed_cases ~spans:true (span_cases @ gnu_span_cases)
-    @ failed_cases ~parse:(Parser.parse ~keywords:Iso) ~spans:false
+    @ failed_cases ~parse:(parse_with Iso Optional_float.all) ~spans:false
         iso_keyword_cases
+    @ failed_cases ~spans:false optional_float_cases
+    @ failed_cases ~parse:(parse_with Gnu [ Float16; Gnu_float128 ])
+        ~spans:false clang_optional_float_cases
     @ failed_with resolutions resolution_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())

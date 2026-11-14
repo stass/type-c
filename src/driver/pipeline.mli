@@ -39,9 +39,10 @@ type translation = {
       (** the options of the compile step, without its inputs and
           outputs, for {!Target_query.query}: the target model is that of
           the compilation *)
-  keywords : Typec_syntax.Keyword_set.t;
-      (** the keywords that the backend reads the text with: those of
-          [-std=], unless [-fasm] or [-fno-asm] says otherwise *)
+  dialect : Typec_syntax.Keyword_set.dialect;
+      (** the dialect of the keywords that the backend reads the text
+          with: that of [-std=], unless [-fasm] or [-fno-asm] says
+          otherwise *)
   emitted : destination;
   compile : string list option;  (** [None] with [--emit-c] *)
 }

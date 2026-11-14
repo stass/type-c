@@ -3,7 +3,8 @@
 
 let ( let* ) = Result.bind
 
-let check keywords target text =
+let check dialect target text =
+  let keywords = Typec_sema.Target.keywords target dialect in
   let* unit = Typec_syntax.Parser.parse ~keywords text in
   let* _declarations = Typec_sema.Declarations.read target text unit in
   Ok ()

@@ -57,7 +57,7 @@ type t =
   | Extension
   | Label
   | Typeof
-  | Float16
+  | Optional_float of Optional_float.t
   | Nonnull
   | Nullable
   | Nullable_result
@@ -75,9 +75,10 @@ type t =
    keyword in every dialect. *)
 type reserved_in = Every_dialect | Gnu_dialect
 
-(* The one mapping from spellings to keywords. The GNU spellings of C11
-   keywords map to the C11 keyword: GCC and Clang give them the same
-   meaning in every dialect. *)
+(* The one mapping from spellings to keywords but for the optional
+   floating types, which Optional_float spells and the keyword set
+   selects. The GNU spellings of C11 keywords map to the C11 keyword: GCC
+   and Clang give them the same meaning in every dialect. *)
 let spellings =
   [
     ("auto", Auto, Every_dialect);
@@ -149,7 +150,6 @@ let spellings =
     ("typeof", Typeof, Gnu_dialect);
     ("__typeof", Typeof, Every_dialect);
     ("__typeof__", Typeof, Every_dialect);
-    ("_Float16", Float16, Every_dialect);
     ("_Nonnull", Nonnull, Every_dialect);
     ("_Nullable", Nullable, Every_dialect);
     ("_Nullable_result", Nullable_result, Every_dialect);
@@ -171,14 +171,23 @@ let table =
             (spelling, (keyword, reserved_in)))
           spellings))
 
-let is_reserved (keywords : Keyword_set.t) reserved_in =
-  match (reserved_in, keywords) with
+let is_reserved (dialect : Keyword_set.dialect) reserved_in =
+  match (reserved_in, dialect) with
   | Every_dialect, _ | Gnu_dialect, Gnu -> true
   | Gnu_dialect, Iso -> false
 
+let optional_float_of_spelling (keywords : Keyword_set.t) spelling =
+  List.find_opt
+    (fun optional -> Optional_float.spelling optional = spelling)
+    keywords.optional_floats
+
 (* The keyword that an identifier token spells in [keywords], if any. *)
-let of_spelling keywords spelling =
+let of_spelling (keywords : Keyword_set.t) spelling =
+  let reserved = is_reserved keywords.dialect in
   match Hashtbl.find_opt table spelling with
-  | Some (keyword, reserved_in) when is_reserved keywords reserved_in ->
-      Some keyword
-  | Some _ | None -> None
+  | Some (keyword, reserved_in) when reserved reserved_in -> Some keyword
+  | Some _ -> None
+  | None ->
+      Option.map
+        (fun optional -> Optional_float optional)
+        (optional_float_of_spelling keywords spelling)

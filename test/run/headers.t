@@ -131,7 +131,8 @@ a .tc file, so the unit is copied to one.
   >   for mode in "-std=gnu11" "-std=c11" "-std=gnu11 -D_GNU_SOURCE" \
   >     "-std=c11 -D_DARWIN_C_SOURCE" "-std=c11 -D_POSIX_C_SOURCE=200809L"; do
   >     "$1" $mode -E "$2" > all.i || return 1
-  >     ./parse_check.exe all.i > /dev/null || return 1
+  >     "$1" $mode -dM -E -x c /dev/null > all.macros || return 1
+  >     ./parse_check.exe all.macros all.i > /dev/null || return 1
   >     typec --cc="$1" $mode --emit-c all.tc -o /dev/null || return 1
   >   done
   > }

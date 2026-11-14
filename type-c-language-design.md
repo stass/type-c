@@ -1177,16 +1177,32 @@ builtins, a table of
 builtin functions with their types, the typedef names that GCC and
 Clang declare before the first token (`__builtin_va_list`, and
 `__int128_t` and `__uint128_t` where the target has `__int128`),
-`__int128` and the `_Float` types,
+`__int128`, the optional floating types (`_Float16`, `_Float32`,
+`_Float64`, `_Float128`, `_Float32x`, `_Float64x` and `__float128`),
 case ranges and range designators, empty structures and `{}`
 initialisers, a lone `;` at file scope and among members, and, for the
 macOS SDK, block declarators and block literals (`^{ ... }`, `^(int x)
 { ... }`), nullability qualifiers, enumerations with a fixed
 underlying type and a parameter list of `...` alone. One table holds
 the builtin typedef names: the parser reads the names from it and the
-declaration reader the types. A construct outside the profile is an error that names it; the
-front end does not guess. Bodies of functions defined in system headers
-are not parsed: they are brace-matched and passed through.
+declaration reader the types. *Provisional:* an optional floating type
+is a keyword exactly where the backend's predefined macros say that it
+has the type, `__FLTN_MANT_DIG__` for `_FloatN`, `__FLTNX_MANT_DIG__`
+for `_FloatNx` and `__SIZEOF_FLOAT128__` for `__float128`, as on every
+backend of the test hosts: where the compiler lacks the keyword, the C
+library declares the spelling, as glibc declares `typedef __float128
+_Float128;` for Clang, so no fixed keyword set reads glibc under both
+GCC and Clang. No macro says that a backend reserves a spelling it
+cannot use, as Apple clang reserves `__float128` and GCC `_Float128x`;
+typec reads such a spelling as an identifier, which only a program that
+declares a reserved identifier (C11 7.1.3) can tell; GCC's `__float128`
+is a builtin typedef name, which such a program can tell as well. Only
+x86-64 backends confirm the rule; a backend of another architecture
+whose macros disagree with its keywords would settle it otherwise, and
+without one the rule stays. A construct outside the profile is an error
+that names it; the front end does not guess. Bodies of functions defined
+in system headers are not parsed: they are brace-matched and passed
+through.
 
 **Typing.** The front end types every expression by C's rules: promotions,
 usual arithmetic conversions, lvalues, qualifiers, composite types and
@@ -1237,8 +1253,8 @@ otherwise the opaque type stays.
 
 **Unknown types.** *Provisional (P21).* A type that the front end does
 not compute is unknown, never guessed: Clang's block pointers,
-`_Float16`, `typeof` of an expression, and the type that an attribute
-applies to when the front end does not record the attribute's effect
+the optional floating types, `typeof` of an expression, and the type
+that an attribute applies to when the front end does not record the attribute's effect
 there: one without an entry in the table of effects that the front end
 knows, as `mode` and `vector_size` change a type in ways it does not
 model, or `noreturn` and `gnu_inline` anywhere but in the specifiers

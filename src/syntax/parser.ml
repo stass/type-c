@@ -345,7 +345,7 @@ let keyword_specifier_word state offset keyword =
   | Unsigned -> Some (Basic_word Unsigned)
   | Bool -> Some (Basic_word Bool)
   | Complex -> Some (Basic_word Complex)
-  | Float16 -> Some (Basic_word Float16)
+  | Optional_float optional -> Some (Basic_word (Optional_float optional))
   | Struct -> Some (Struct_word Struct)
   | Union -> Some (Struct_word Union)
   | Enum -> Some Enum_word
@@ -2105,7 +2105,7 @@ let translation_unit state =
   in
   loop []
 
-let parse ?(keywords = Keyword_set.Gnu) reader =
+let parse ~keywords reader =
   let state =
     {
       reader;

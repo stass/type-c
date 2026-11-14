@@ -38,7 +38,7 @@ type role =
   | Link  (** Matters to linking only, such as [-l]: the final command. *)
   | Common  (** Every step: the target, code generation, warnings. *)
   | Dialect  (** [-std=]: every step, once checked (design 2.4). *)
-  | Keywords of Typec_syntax.Keyword_set.t
+  | Keywords of Typec_syntax.Keyword_set.dialect
       (** [-fasm], [-fno-asm]: every step. They select the keywords
           given, whatever [-std=] says, as in GCC and Clang. *)
   | Output  (** [-o]: names the result. *)

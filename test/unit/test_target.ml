@@ -18,6 +18,7 @@ let lp64 : Target.t =
     sizeof_double = 8;
     sizeof_long_double = 16;
     sizeof_int128 = Some 16;
+    optional_floats = Typec_syntax.Optional_float.all;
     size_type = Unsigned_long;
     ptrdiff_type = Long;
     wchar_type = Int;
@@ -44,6 +45,7 @@ let ilp32 : Target.t =
     sizeof_double = 8;
     sizeof_long_double = 8;
     sizeof_int128 = None;
+    optional_floats = [];
     size_type = Unsigned_int;
     ptrdiff_type = Int;
     wchar_type = Unsigned_int;
@@ -70,6 +72,17 @@ let lp64_clang_dump major =
   dump_of
     (without "__GNUC__"
     @ [ ("__clang__", "1"); ("__clang_major__", major); ("__GNUC__", "4") ])
+
+(* The LP64 dump with these macros of the optional floating types in
+   place of GCC's. *)
+let lp64_dump_with_floats macros =
+  let is_gcc_float (name, _) =
+    List.mem_assoc name Canned_targets.gcc_optional_float_macros
+  in
+  dump_of
+    (List.filter (fun macro -> not (is_gcc_float macro))
+       Canned_targets.lp64_macros
+    @ macros)
 
 let unsupported_backend compiler major_version =
   Error (Target.Unsupported_backend { compiler; major_version })
@@ -126,6 +139,40 @@ let model_cases =
       dump = lp64_clang_dump "22";
       expected =
         Ok { lp64 with backend = { compiler = Clang; major_version = 22 } };
+    };
+  ]
+
+(* The optional floating types follow their macros alone, as Clang 20 on
+   x86-64 Linux, Apple clang 21 and GCC 14 define them. *)
+let optional_float_cases =
+  [
+    {
+      name = "Clang on x86-64 Linux: _Float16 and __float128";
+      dump =
+        lp64_dump_with_floats
+          [
+            ("__FLOAT128__", "1");
+            ("__FLT16_MANT_DIG__", "11");
+            ("__SIZEOF_FLOAT128__", "16");
+          ];
+      expected = Ok { lp64 with optional_floats = [ Float16; Gnu_float128 ] };
+    };
+    {
+      name = "Apple clang: _Float16 alone";
+      dump = lp64_dump_with_floats [ ("__FLT16_MANT_DIG__", "11") ];
+      expected = Ok { lp64 with optional_floats = [ Float16 ] };
+    };
+    {
+      name = "no optional floating type";
+      dump = lp64_dump_with_floats [];
+      expected = Ok { lp64 with optional_floats = [] };
+    };
+    {
+      name = "the order of Optional_float.all";
+      dump =
+        lp64_dump_with_floats
+          (List.rev Canned_targets.gcc_optional_float_macros);
+      expected = Ok lp64;
     };
   ]
 
@@ -361,7 +408,7 @@ let signedness =
 
 let () =
   let results =
-    List.map check_case (model_cases @ error_cases)
+    List.map check_case (model_cases @ optional_float_cases @ error_cases)
     @ List.map check_width widths
     @ List.map check_signed signedness
     @ [ without_int128 () ]

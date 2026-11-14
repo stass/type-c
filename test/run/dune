@@ -44,7 +44,7 @@
 
 (executable
  (name parse_check)
- (libraries typec_cpp typec_syntax typec_test_support))
+ (libraries typec_cpp typec_syntax typec_sema typec_test_support))
 
 (cram
  (applies_to parse headers)

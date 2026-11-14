@@ -15,7 +15,7 @@ let read target source =
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in
-  match Parser.parse text with
+  match Parser.parse ~keywords:(Target.keywords target Gnu) text with
   | Ok unit -> Declarations.read target text unit
   | Error error -> failwith (Parser.error_message error)
 
@@ -515,6 +515,9 @@ let unknown_types () =
   declares "_Complex _Float16 z;" "z"
     "object <'_Complex _Float16'> external static";
   rejects "int _Float16 i;" "6.7.2p2";
+  declares "_Complex _Float128 f(__float128);" "f"
+    "function <'_Complex _Float128'> (<'__float128'>) external";
+  rejects "__float128 _Float128 q;" "6.7.2p2";
   declares "void (^b)(void);" "b" "object <a block pointer> external static";
   declares "int q(void *, int (^)(const void *, const void *));" "q"
     "function int (void *, <a block pointer>) external";

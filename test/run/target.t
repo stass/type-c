@@ -4,12 +4,14 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 typec --print-target prints the target model that the backend reports in
 its predefined macros when it is run with the other arguments as options.
 The backends are those that backends.sh names, on an x86-64 host, whose
-release varies with the host.
+release varies with the host, and so do the optional floating types of
+Clang, which are left out here: __float128 is one on Linux alone.
 
   $ unset TYPEC_CC
   $ . ./backends.sh
 
-  $ typec --cc=$clang --print-target | sed '1s/ [0-9]*$//'
+  $ typec --cc=$clang --print-target |
+  >   sed -e '1s/ [0-9]*$//' -e '/^optional_floats:/d'
   backend: Clang
   char_bit: 8
   char_signed: true
@@ -47,6 +49,18 @@ GCC spells the types in another order and reads the same target.
   sizeof_long: 8
   sizeof_pointer: 8
   char16_type: unsigned short
+
+GCC has every optional floating type on each host.
+
+  $ typec --cc=$gcc --print-target | grep '^optional_floats:' | tr ' ' '\n'
+  optional_floats:
+  _Float16
+  _Float32
+  _Float64
+  _Float128
+  _Float32x
+  _Float64x
+  __float128
 
 The options reach the backend, so they change the model.
 

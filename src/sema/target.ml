@@ -18,6 +18,7 @@ type t = {
   sizeof_double : int;
   sizeof_long_double : int;
   sizeof_int128 : int option;
+  optional_floats : Typec_syntax.Optional_float.t list;
   size_type : Integer.t;
   ptrdiff_type : Integer.t;
   wchar_type : Integer.t;
@@ -115,6 +116,23 @@ let read_count macros name = count_of_value name (find macros name)
 let read_optional_count macros name =
   Option.map (count_of_value name) (Macros.find_opt name macros)
 
+(* The macro that GCC and Clang define exactly where they have the type,
+   as each backend of a test host does (design 13.3). *)
+let optional_float_macro : Typec_syntax.Optional_float.t -> string =
+  function
+  | Float16 -> "__FLT16_MANT_DIG__"
+  | Float32 -> "__FLT32_MANT_DIG__"
+  | Float64 -> "__FLT64_MANT_DIG__"
+  | Float128 -> "__FLT128_MANT_DIG__"
+  | Float32x -> "__FLT32X_MANT_DIG__"
+  | Float64x -> "__FLT64X_MANT_DIG__"
+  | Gnu_float128 -> "__SIZEOF_FLOAT128__"
+
+let read_optional_floats macros =
+  List.filter
+    (fun optional -> Macros.mem (optional_float_macro optional) macros)
+    Typec_syntax.Optional_float.all
+
 (* A type is spelled as type specifiers (C11 6.7.2p2), such as
    [long unsigned int], in any order. *)
 let specifier_of_word :
@@ -195,6 +213,7 @@ let model_of_macros macros backend =
     sizeof_double = count "__SIZEOF_DOUBLE__";
     sizeof_long_double = count "__SIZEOF_LONG_DOUBLE__";
     sizeof_int128 = read_optional_count macros "__SIZEOF_INT128__";
+    optional_floats = read_optional_floats macros;
     size_type = integer_type "__SIZE_TYPE__";
     ptrdiff_type = integer_type "__PTRDIFF_TYPE__";
     wchar_type = integer_type "__WCHAR_TYPE__";
@@ -207,6 +226,9 @@ let model_of_macros macros backend =
     stdc_version = read_stdc_version macros;
   }
 
+
+let keywords target dialect : Typec_syntax.Keyword_set.t =
+  { dialect; optional_floats = target.optional_floats }
 
 (* GCC and Clang give no integer type padding bits, so a width is the
    size in bits. *)
@@ -295,6 +317,12 @@ let optional_count_name = function
   | Some count -> string_of_int count
   | None -> "none"
 
+let optional_floats_name = function
+  | [] -> "none"
+  | optional_floats ->
+      String.concat " "
+        (List.map Typec_syntax.Optional_float.spelling optional_floats)
+
 let byte_order_name = function
   | Little_endian -> "little-endian"
   | Big_endian -> "big-endian"
@@ -321,6 +349,7 @@ let to_string target =
       ("sizeof_double", string_of_int target.sizeof_double);
       ("sizeof_long_double", string_of_int target.sizeof_long_double);
       ("sizeof_int128", optional_count_name target.sizeof_int128);
+      ("optional_floats", optional_floats_name target.optional_floats);
       ("size_type", Integer.name target.size_type);
       ("ptrdiff_type", Integer.name target.ptrdiff_type);
       ("wchar_type", Integer.name target.wchar_type);

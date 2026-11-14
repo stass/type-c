@@ -40,14 +40,13 @@ val max_nesting : int
     parser accepts open at once; one more is an error. *)
 
 val parse :
-  ?keywords:Keyword_set.t ->
+  keywords:Keyword_set.t ->
   Reader.t ->
   (Tree.translation_unit, error) result
-(** [parse ~keywords text] parses [text] with [keywords], by default
-    [Gnu], those of gnu11, which [typec] selects unless the command line
-    says otherwise (design 2.4). File scope holds the typedef names that
-    GCC and Clang declare before the first token
-    ({!Builtin_typedef.table}). *)
+(** [parse ~keywords text] parses [text] with [keywords], those that
+    the backend reads it with ([Typec_sema.Target.keywords]). File scope
+    holds the typedef names that GCC and Clang declare before the first
+    token ({!Builtin_typedef.table}). *)
 
 val error_message : error -> string
 (** ["file:line: message"], as {!Reader.error_message}. *)

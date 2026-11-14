@@ -6,10 +6,11 @@
     scope. This is the one place where [typec] chains them. *)
 
 val check :
-  Typec_syntax.Keyword_set.t ->
+  Typec_syntax.Keyword_set.dialect ->
   Typec_sema.Target.t ->
   Typec_cpp.Reader.t ->
   (unit, Typec_cpp.Reader.error) result
-(** [check keywords target text] parses [text] with [keywords] and reads
-    its declarations for [target], and gives the first error of either
-    stage. It has no effects. *)
+(** [check dialect target text] parses [text] with the keywords that the
+    backend of [target] reads in [dialect] and reads its declarations for
+    [target], and gives the first error of either stage. It has no
+    effects. *)

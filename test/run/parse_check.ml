@@ -1,13 +1,15 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* parse_check FILE: reads and parses the cc -E output FILE, checks that
-   the spans of the tree nest in order and that every token outside the
-   external declarations is a pragma, and prints what each external
-   declaration declares. *)
+(* parse_check MACROS FILE: reads and parses the cc -E output FILE with
+   the keywords of the backend whose cc -dM -E output is MACROS, in GNU C
+   whatever the dialect of FILE, checks that the spans of the tree nest
+   in order and that every token outside the external declarations is a
+   pragma, and prints what each external declaration declares. *)
 
 open Typec_cpp
 open Typec_syntax
+open Typec_sema
 open Typec_test_support
 
 let fail message =
@@ -61,13 +63,19 @@ let describe = function
   | Tree.Top_level_asm _ -> "assembler"
   | Tree.Empty_declaration _ -> "empty declaration"
 
+let keywords_of_dump path =
+  match Target.of_predefined_macros (read_file path) with
+  | Ok target -> Target.keywords target Gnu
+  | Error error -> fail (Target.error_message error)
+
 let () =
   match Sys.argv with
-  | [| _; path |] -> (
+  | [| _; macros; path |] -> (
+      let keywords = keywords_of_dump macros in
       match Reader.read ~name:path (read_file path) with
       | Error error -> fail (Reader.error_message error)
       | Ok reader -> (
-          match Parser.parse reader with
+          match Parser.parse ~keywords reader with
           | Error error -> fail (Parser.error_message error)
           | Ok unit ->
               let dump = Tree_dump.translation_unit reader unit in
@@ -78,4 +86,4 @@ let () =
                   fail (Printf.sprintf "token %d is outside the tree" index))
                 (first_token_outside reader unit);
               List.iter (fun d -> print_endline (describe d)) unit))
-  | _ -> fail "usage: parse_check FILE"
+  | _ -> fail "usage: parse_check MACROS FILE"

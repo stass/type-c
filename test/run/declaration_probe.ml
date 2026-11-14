@@ -91,7 +91,10 @@ let () =
         or_exit Reader.error_message
           (Reader.read ~name:source (read_file source))
       in
-      let unit = or_exit Parser.error_message (Parser.parse text) in
+      let keywords = Target.keywords target Gnu in
+      let unit =
+        or_exit Parser.error_message (Parser.parse ~keywords text)
+      in
       let result =
         or_exit Reader.error_message (Declarations.read target text unit)
       in

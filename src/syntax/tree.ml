@@ -103,7 +103,10 @@ type basic_type_specifier =
   | Unsigned
   | Bool
   | Complex
-  | Float16  (** [_Float16] (ISO/IEC TS 18661-3), which the SDK uses *)
+  | Optional_float of Optional_float.t
+      (** [_Float16] and the others that the backend has. It stays last:
+          a sorted multiset lists it after the constant constructors,
+          which [compare] orders first. *)
 
 type struct_or_union = Struct | Union
 

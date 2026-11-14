@@ -427,20 +427,24 @@ is [type-c-language-design.md](type-c-language-design.md).
   out of the modes without a POSIX feature macro; both backends on
   macOS refuse the unit in the three modes with a feature macro, so
   check that the change keeps what macOS reads.
-- [High] glibc declares binary128 types that the parser does not read
-  as type names: under Clang `bits/floatn.h:97` is
-  `typedef __float128 _Float128;`, and under GCC `math.h` declares
-  functions of GCC's `_Float128` (`bits/mathcalls-helper-functions.h:20`).
-  On Debian no `.tc` input that includes `stdio.h` compiles with Clang,
-  and `test/run/pipeline.t`, `headers.t` and `tools/corpus/runner.t`
-  fail. Reproducer:
-  `/Volumes/Optaine/typec-hosts/repro/debian-glibc/run.sh REPO`.
 - [Medium] `test/run/target.t`, `types.t` and `declarations.t` run on
   x86-64 hosts only: `target.t` expects the x86-64 model and the other
   two compile with `-m32` as well. Give them the expected model and a
   second target of arm64 once an arm64 host runs the suite, so that
   `types.t` confirms the provisional enumeration rule
   (`Arithmetic.enum_compatible_type`) there too.
+- [High] The parser has no `__int128` keyword, which design 13.3 lists
+  in the GNU profile: Debian's `linux/types.h:12` declares
+  `typedef __signed__ __int128 __s128`, so `test/run/headers.t` fails on
+  Debian with both backends; what the unit holds after that line is
+  untested there. Read `__int128` as a keyword where `__SIZEOF_INT128__`
+  is defined, through the keyword set as the optional floating types
+  are, and decide the `Builtin_typedef` names `__int128_t` and
+  `__uint128_t` the same way: they are typedef names on every target
+  now and the declaration reader refuses them where `__int128` is
+  missing, so `int __int128_t;` is refused on a target whose backend
+  accepts it, and the parser keeps two rules for names that the target
+  decides.
 - [Low] `tools/corpus/runner.t` runs `/usr/bin/clang`, not the Clang
   that `TYPEC_TEST_CLANG` names (`test/run/backends.sh`).
 

@@ -17,7 +17,7 @@ type role =
   | Link
   | Common
   | Dialect
-  | Keywords of Typec_syntax.Keyword_set.t
+  | Keywords of Typec_syntax.Keyword_set.dialect
   | Output
   | Language
   | Stop of stop

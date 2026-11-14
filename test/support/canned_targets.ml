@@ -4,11 +4,25 @@
 (* Predefined macro dumps of two targets, shared by the unit tests and
    the fuzz harness. *)
 
+(* The macros of the optional floating types that GCC 14 defines on
+   x86-64, in the order it prints them. *)
+let gcc_optional_float_macros =
+  [
+    ("__FLT16_MANT_DIG__", "11");
+    ("__FLT32_MANT_DIG__", "24");
+    ("__FLT64_MANT_DIG__", "53");
+    ("__FLT128_MANT_DIG__", "113");
+    ("__FLT32X_MANT_DIG__", "53");
+    ("__FLT64X_MANT_DIG__", "64");
+    ("__SIZEOF_FLOAT128__", "16");
+  ]
+
 (* The macros of a GCC 14 dump for an LP64 target that the model reads,
    with a few it ignores: a function-like macro and one without a
    value. *)
 let lp64_macros =
-  [
+  gcc_optional_float_macros
+  @ [
     ("__GNUC__", "14");
     ("__CHAR_BIT__", "8");
     ("__SIZEOF_SHORT__", "2");

@@ -290,6 +290,12 @@ let basic_type (specifiers : Tree.basic_type_specifier list) :
   | None, [ Long; Double; Complex ] -> Some (Complex Long_double)
   | None, _ -> None
 
+let is_optional_float : Tree.basic_type_specifier -> bool = function
+  | Optional_float _ -> true
+  | Void | Char | Short | Int | Long | Float | Double | Signed | Unsigned
+  | Bool | Complex ->
+      false
+
 let qualifiers_of (qualifiers : Tree.type_qualifier list) =
   let add (q : Ctype.qualifiers) (qualifier : Tree.type_qualifier) =
     match qualifier with
@@ -552,7 +558,8 @@ and base_type state span ~standalone sorted =
   | [], [] ->
       fail state span "a declaration has no type specifier (C11 6.7.2p2)"
   | [ Void ], [] -> Ctype.void
-  | basic, [] when List.mem Tree.Float16 basic -> float16_type state span basic
+  | basic, [] when List.exists is_optional_float basic ->
+      optional_float_type state span basic
   | basic, [] -> (
       match basic_type basic with
       | Some arithmetic ->
@@ -563,14 +570,17 @@ and base_type state span ~standalone sorted =
   | [], [ other ] -> other_type state span ~standalone other
   | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
 
-(* [_Float16] of ISO/IEC TS 18661-3, real or complex, for which the target
-   model has no size. The specifiers are sorted in the order of
-   [Tree.basic_type_specifier], as in [basic_type]. *)
-and float16_type state span basic =
+(* An optional floating type, such as [_Float16], real or complex, for
+   which the target model has no size. The specifiers are sorted in the
+   order of [Tree.basic_type_specifier], as in [basic_type]. *)
+and optional_float_type state span basic =
   match List.sort compare basic with
-  | [ Float16 ] -> unknown_type state span (quote "_Float16") Unknown_object
-  | [ Complex; Float16 ] ->
-      unknown_type state span (quote "_Complex _Float16") Unknown_object
+  | [ Optional_float optional ] ->
+      let name = Optional_float.spelling optional in
+      unknown_type state span (quote name) Unknown_object
+  | [ Complex; Optional_float optional ] ->
+      let name = "_Complex " ^ Optional_float.spelling optional in
+      unknown_type state span (quote name) Unknown_object
   | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
 
 (* An attribute of a structure, union or enumeration specifier that typec

@@ -19,10 +19,12 @@ open Typec_syntax
 open Typec_test_support
 
 let violated = Property.violated
+let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
 (* The only call of the parser, so that a change to its interface is one
    edit here. *)
-let parse reader = Parser.parse reader
+let parse reader =
+  Parser.parse ~keywords:(Typec_sema.Target.keywords lp64 Gnu) reader
 
 let check_spans reader unit =
   let dump = Tree_dump.translation_unit reader unit in
@@ -34,8 +36,6 @@ let check_spans reader unit =
    the same process shows whether any of it outlives a parse. *)
 let check_deterministic reader unit =
   if parse reader <> Ok unit then violated "parsing is deterministic"
-
-let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
 let read_declarations reader unit =
   match Typec_sema.Declarations.read lp64 reader unit with

@@ -41,6 +41,11 @@ type t = {
   sizeof_long_double : int;
   sizeof_int128 : int option;
       (** [__SIZEOF_INT128__], present when [__int128] exists. *)
+  optional_floats : Typec_syntax.Optional_float.t list;
+      (** The optional floating types that the backend has, in the order
+          of [Optional_float.all]: those whose macro it defines,
+          [__FLTN_MANT_DIG__] for [_FloatN], [__FLTNX_MANT_DIG__] for
+          [_FloatNx] and [__SIZEOF_FLOAT128__] for [__float128]. *)
   size_type : Integer.t;  (** [size_t] *)
   ptrdiff_type : Integer.t;  (** [ptrdiff_t] *)
   wchar_type : Integer.t;  (** [wchar_t] *)
@@ -89,6 +94,11 @@ val of_predefined_macros : string -> (t, error) result
     malformed. A dump with neither [__clang__] nor [__GNUC__] is
     reported as missing [__GNUC__], and a backend older than
     {!minimum_major_version} is unsupported. *)
+
+val keywords :
+  t -> Typec_syntax.Keyword_set.dialect -> Typec_syntax.Keyword_set.t
+(** [keywords target dialect]: the keywords that the backend reads a text
+    of [dialect] with, which spell its [optional_floats]. *)
 
 val integer_width : t -> Integer.t -> int
 (** The width of an integer type in bits: its value bits and its sign bit
