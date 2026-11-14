@@ -257,10 +257,21 @@ tools/fuzz/fuzz.sh build             # the instrumented harness
 tools/fuzz/fuzz.sh seeds             # more seeds: cc -E of C headers
 CC=gcc-16 tools/fuzz/fuzz.sh seeds   # and those of another compiler
 tools/fuzz/fuzz.sh run reader 30     # 30 minutes; resumes a run
+tools/fuzz/fuzz.sh run parser 180 12 # 3 hours: a main and 12 secondaries
 tools/fuzz/fuzz.sh triage reader     # minimise crashes and hangs
 ```
 
-The generated seeds, in `seeds/headers` there, go to every target. So
+With SECONDARIES, `run` starts one main instance (`-M default`) and that
+many secondary ones (`-S s1`, `-S s2`, ...) in the same output
+directory, where they share what each finds; each logs to
+`out/TARGET.NAME.log` and shows no status screen (`afl-whatsup` on the
+output directory shows the totals), and `triage` minimises the crashes
+and hangs of every instance, so a bug that several found is minimised
+once for each.
+
+The generated seeds, in any directory of `seeds/` there (`seeds/headers`
+for those of `fuzz.sh seeds`; preprocessed units of the corpus under
+16 KiB, thinned with `afl-cmin`, can go in another), go to every target. So
 does the AFL++ dictionary, `fuzz.dict`, which the build generates from
 the keyword and punctuator tables of the parser and the reader and the
 pieces of `cc -E` output listed in `dictionary.ml`.
