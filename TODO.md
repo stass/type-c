@@ -11,10 +11,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Before Stage 0 starts
 
-- [High] Verify GCC as a backend: the lowering of design 13.5 under
-  `-std=c11 -pedantic-errors`, including a constructor nested in a static
-  initialiser, and `-E -x c` followed by `-x cpp-output`. Only Clang has
-  been tried.
 - [High] Check the licence and provenance of each corpus and pilot
   candidate named in the plan before fetching any of them.
 - [Medium] Decide where the Linux and FreeBSD test hosts run, and create
