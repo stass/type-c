@@ -1150,8 +1150,10 @@ and common code use: attributes, `__extension__`, alternate keyword
 spellings, assembler labels and statements, `typeof`, statement
 expressions, the variable-argument and `offsetof` builtins, a table of
 builtin functions with their types, `__int128` and the `_Float` types,
-case ranges, and, for the macOS SDK, block declarators and nullability
-qualifiers. A construct outside the profile is an error that names it; the
+case ranges and range designators, empty structures and `{}`
+initialisers, a lone `;` at file scope, and, for the macOS SDK, block
+declarators, nullability qualifiers, enumerations with a fixed
+underlying type and a parameter list of `...` alone. A construct outside the profile is an error that names it; the
 front end does not guess. Bodies of functions defined in system headers
 are not parsed: they are brace-matched and passed through.
 
