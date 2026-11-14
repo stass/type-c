@@ -428,10 +428,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Cc_option` names Clang 18 to 21 as supported: decide the oldest
   Clang, or make the rule depend on the backend's version. Reproducer:
   `enum.c` in `/Volumes/Optaine/typec-hosts/repro/debian-glibc`.
-- [Low] `typec.opam` asks for OCaml 5.0, but `tools/fuzz` uses
-  `Char.Ascii` of 5.4, so Debian 13's OCaml 5.3 does not build the
-  tree and the Debian host takes OCaml from opam. Raise the bound to
-  5.4, or do without `Char.Ascii` if a distribution's OCaml should do.
 - [Medium] `test/run/target.t`, `types.t` and `declarations.t` run on
   x86-64 hosts only: `target.t` expects the x86-64 model and the other
   two compile with `-m32` as well. Give them the expected model and a
