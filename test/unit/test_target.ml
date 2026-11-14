@@ -3,35 +3,6 @@
 
 open Typec_sema
 
-(* The macros of a GCC dump for an LP64 target that the model reads, with
-   a few it ignores: a function-like macro and one without a value. *)
-let lp64_macros =
-  [
-    ("__CHAR_BIT__", "8");
-    ("__SIZEOF_SHORT__", "2");
-    ("__SIZEOF_INT__", "4");
-    ("__SIZEOF_LONG__", "8");
-    ("__SIZEOF_LONG_LONG__", "8");
-    ("__SIZEOF_POINTER__", "8");
-    ("__SIZEOF_FLOAT__", "4");
-    ("__SIZEOF_DOUBLE__", "8");
-    ("__SIZEOF_LONG_DOUBLE__", "16");
-    ("__SIZEOF_INT128__", "16");
-    ("__SIZE_TYPE__", "long unsigned int");
-    ("__PTRDIFF_TYPE__", "long int");
-    ("__WCHAR_TYPE__", "int");
-    ("__INTMAX_TYPE__", "long int");
-    ("__UINTMAX_TYPE__", "long unsigned int");
-    ("__INTPTR_TYPE__", "long int");
-    ("__CHAR16_TYPE__", "short unsigned int");
-    ("__CHAR32_TYPE__", "unsigned int");
-    ("__ORDER_LITTLE_ENDIAN__", "1234");
-    ("__BYTE_ORDER__", "__ORDER_LITTLE_ENDIAN__");
-    ("__STDC_VERSION__", "201112L");
-    ("__has_include(STR)", "__has_include__(STR)");
-    ("__GCC_ASM_FLAG_OUTPUTS__", "");
-  ]
-
 let lp64 : Target.t =
   {
     char_bit = 8;
@@ -44,7 +15,7 @@ let lp64 : Target.t =
     sizeof_float = 4;
     sizeof_double = 8;
     sizeof_long_double = 16;
-    has_int128 = true;
+    sizeof_int128 = Some 16;
     size_type = Unsigned_long;
     ptrdiff_type = Long;
     wchar_type = Int;
@@ -56,32 +27,6 @@ let lp64 : Target.t =
     byte_order = Little_endian;
     stdc_version = 201112;
   }
-
-(* An ILP32 target with unsigned char, no __int128 and big-endian bytes,
-   as for 32-bit ARM, with Clang's spellings of the types. *)
-let ilp32_macros =
-  [
-    ("__CHAR_BIT__", "8");
-    ("__CHAR_UNSIGNED__", "1");
-    ("__SIZEOF_SHORT__", "2");
-    ("__SIZEOF_INT__", "4");
-    ("__SIZEOF_LONG__", "4");
-    ("__SIZEOF_LONG_LONG__", "8");
-    ("__SIZEOF_POINTER__", "4");
-    ("__SIZEOF_FLOAT__", "4");
-    ("__SIZEOF_DOUBLE__", "8");
-    ("__SIZEOF_LONG_DOUBLE__", "8");
-    ("__SIZE_TYPE__", "unsigned int");
-    ("__PTRDIFF_TYPE__", "int");
-    ("__WCHAR_TYPE__", "unsigned int");
-    ("__INTMAX_TYPE__", "long long int");
-    ("__UINTMAX_TYPE__", "long long unsigned int");
-    ("__INTPTR_TYPE__", "int");
-    ("__CHAR16_TYPE__", "unsigned short");
-    ("__CHAR32_TYPE__", "unsigned int");
-    ("__BYTE_ORDER__", "__ORDER_BIG_ENDIAN__");
-    ("__STDC_VERSION__", "201710L");
-  ]
 
 let ilp32 : Target.t =
   {
@@ -95,7 +40,7 @@ let ilp32 : Target.t =
     sizeof_float = 4;
     sizeof_double = 8;
     sizeof_long_double = 8;
-    has_int128 = false;
+    sizeof_int128 = None;
     size_type = Unsigned_int;
     ptrdiff_type = Int;
     wchar_type = Unsigned_int;
@@ -108,13 +53,11 @@ let ilp32 : Target.t =
     stdc_version = 201710;
   }
 
-let dump_of macros =
-  String.concat ""
-    (List.map (fun (name, value) -> "#define " ^ name ^ " " ^ value ^ "\n")
-       macros)
+let dump_of = Canned_targets.dump_of
+let lp64_dump = dump_of Canned_targets.lp64_macros
 
-let lp64_dump = dump_of lp64_macros
-let without name = List.filter (fun (other, _) -> other <> name) lp64_macros
+let without name =
+  List.filter (fun (other, _) -> other <> name) Canned_targets.lp64_macros
 
 (* The LP64 dump with one macro defined as [value]. *)
 let lp64_dump_with name value = dump_of (without name @ [ (name, value) ])
@@ -133,7 +76,7 @@ let model_cases =
     { name = "LP64"; dump = lp64_dump; expected = Ok lp64 };
     {
       name = "ILP32, unsigned char";
-      dump = dump_of ilp32_macros;
+      dump = dump_of Canned_targets.ilp32_macros;
       expected = Ok ilp32;
     };
     {
@@ -259,24 +202,50 @@ let check_case case =
     Printf.eprintf "FAIL: %s\n" case.name;
     false)
 
-(* An integer type and its size on a target. *)
-let sizes =
+(* An integer type and its width on a target. *)
+let widths =
   [
-    ("char on LP64", lp64, Target.Unsigned_char, 1);
-    ("size_t on LP64", lp64, lp64.size_type, 8);
-    ("size_t on ILP32", ilp32, ilp32.size_type, 4);
-    ("intmax_t on ILP32", ilp32, ilp32.intmax_type, 8);
+    ("char on LP64", lp64, Integer.Unsigned_char, 8);
+    ("_Bool on LP64", lp64, Integer.Bool, 1);
+    ("size_t on LP64", lp64, lp64.size_type, 64);
+    ("size_t on ILP32", ilp32, ilp32.size_type, 32);
+    ("intmax_t on ILP32", ilp32, ilp32.intmax_type, 64);
+    ("__int128 on LP64", lp64, Integer.Int128, 128);
   ]
 
-let check_size (name, target, integer_type, expected) =
-  if Target.sizeof_integer target integer_type = expected then true
+let check_width (name, target, integer, expected) =
+  if Target.integer_width target integer = expected then true
   else (
     Printf.eprintf "FAIL: %s\n" name;
     false)
 
+let without_int128 () =
+  match Target.integer_width ilp32 Integer.Unsigned_int128 with
+  | _ ->
+      prerr_endline "FAIL: unsigned __int128 has a width on ILP32";
+      false
+  | exception Invalid_argument _ -> true
+
+let check_signed (name, target, integer, expected) =
+  if Target.is_signed target integer = expected then true
+  else (
+    Printf.eprintf "FAIL: signedness of %s\n" name;
+    false)
+
+let signedness =
+  [
+    ("char on LP64", lp64, Integer.Char, true);
+    ("char on ILP32", ilp32, Integer.Char, false);
+    ("signed char on ILP32", ilp32, Integer.Signed_char, true);
+    ("_Bool", lp64, Integer.Bool, false);
+    ("__int128", lp64, Integer.Int128, true);
+  ]
+
 let () =
   let results =
     List.map check_case (model_cases @ error_cases)
-    @ List.map check_size sizes
+    @ List.map check_width widths
+    @ List.map check_signed signedness
+    @ [ without_int128 () ]
   in
   if List.mem false results then exit 1

@@ -20,7 +20,7 @@ The backends are those of the x86-64 macOS host.
   sizeof_float: 4
   sizeof_double: 8
   sizeof_long_double: 16
-  has_int128: true
+  sizeof_int128: 16
   size_type: unsigned long
   ptrdiff_type: long
   wchar_type: int

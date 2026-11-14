@@ -17,8 +17,9 @@ prints the target model the backend reports (`--print-target`).
 ## Building and testing
 
 Requirements: OCaml 5 and dune 3; the tests also need a C compiler as
-`cc`, and `test/run/target.t` and `test/run/read.t` run `/usr/bin/clang`
-and `/usr/local/bin/gcc-16`. There are no other dependencies.
+`cc`, and `test/run/target.t`, `test/run/read.t` and `test/run/types.t`
+run `/usr/bin/clang` and `/usr/local/bin/gcc-16`, with `-m32` too. There
+are no other dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec

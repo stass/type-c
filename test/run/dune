@@ -15,3 +15,13 @@
 (cram
  (applies_to read)
  (deps read_check.exe))
+
+; types.t compiles the output of type_probe with each backend.
+
+(executable
+ (name type_probe)
+ (libraries typec_sema))
+
+(cram
+ (applies_to types)
+ (deps type_probe.exe))

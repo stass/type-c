@@ -1,19 +1,6 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type integer_type =
-  | Char
-  | Signed_char
-  | Unsigned_char
-  | Short
-  | Unsigned_short
-  | Int
-  | Unsigned_int
-  | Long
-  | Unsigned_long
-  | Long_long
-  | Unsigned_long_long
-
 type byte_order = Little_endian | Big_endian
 
 type t = {
@@ -27,15 +14,15 @@ type t = {
   sizeof_float : int;
   sizeof_double : int;
   sizeof_long_double : int;
-  has_int128 : bool;
-  size_type : integer_type;
-  ptrdiff_type : integer_type;
-  wchar_type : integer_type;
-  intmax_type : integer_type;
-  uintmax_type : integer_type;
-  intptr_type : integer_type;
-  char16_type : integer_type;
-  char32_type : integer_type;
+  sizeof_int128 : int option;
+  size_type : Integer.t;
+  ptrdiff_type : Integer.t;
+  wchar_type : Integer.t;
+  intmax_type : Integer.t;
+  uintmax_type : Integer.t;
+  intptr_type : Integer.t;
+  char16_type : Integer.t;
+  char32_type : Integer.t;
   byte_order : byte_order;
   stdc_version : int;
 }
@@ -98,15 +85,20 @@ let decimal text =
   else None
 
 (* A size or a width: a positive decimal number. *)
-let read_count macros name =
-  let value = find macros name in
+let count_of_value name value =
   match decimal value with
   | Some count when count > 0 -> count
   | Some _ | None -> malformed name value
 
+let read_count macros name = count_of_value name (find macros name)
+
+(* A size the target defines only when it has the type. *)
+let read_optional_count macros name =
+  Option.map (count_of_value name) (Macros.find_opt name macros)
+
 (* The spellings that C11 6.7.2p2 allows for each type, as sorted words:
    the order of the specifiers does not matter. *)
-let integer_type_of_words words =
+let integer_type_of_words words : Integer.t option =
   match List.sort String.compare words with
   | [ "char" ] -> Some Char
   | [ "char"; "signed" ] -> Some Signed_char
@@ -178,7 +170,7 @@ let model_of_macros macros =
     sizeof_float = count "__SIZEOF_FLOAT__";
     sizeof_double = count "__SIZEOF_DOUBLE__";
     sizeof_long_double = count "__SIZEOF_LONG_DOUBLE__";
-    has_int128 = Macros.mem "__SIZEOF_INT128__" macros;
+    sizeof_int128 = read_optional_count macros "__SIZEOF_INT128__";
     size_type = integer_type "__SIZE_TYPE__";
     ptrdiff_type = integer_type "__PTRDIFF_TYPE__";
     wchar_type = integer_type "__WCHAR_TYPE__";
@@ -195,25 +187,33 @@ let of_predefined_macros dump =
   try Ok (model_of_macros (macros_of_dump dump))
   with Invalid error -> Error error
 
-let sizeof_integer target = function
-  | Char | Signed_char | Unsigned_char -> 1
-  | Short | Unsigned_short -> target.sizeof_short
-  | Int | Unsigned_int -> target.sizeof_int
-  | Long | Unsigned_long -> target.sizeof_long
-  | Long_long | Unsigned_long_long -> target.sizeof_long_long
+(* GCC and Clang give no integer type padding bits, so a width is the
+   size in bits. *)
+let integer_width target (integer : Integer.t) =
+  let bits size = size * target.char_bit in
+  match integer with
+  | Bool -> 1
+  | Char | Signed_char | Unsigned_char -> target.char_bit
+  | Short | Unsigned_short -> bits target.sizeof_short
+  | Int | Unsigned_int -> bits target.sizeof_int
+  | Long | Unsigned_long -> bits target.sizeof_long
+  | Long_long | Unsigned_long_long -> bits target.sizeof_long_long
+  | Int128 | Unsigned_int128 -> (
+      match target.sizeof_int128 with
+      | Some size -> bits size
+      | None -> invalid_arg "Target.integer_width: no __int128")
 
-let integer_type_name = function
-  | Char -> "char"
-  | Signed_char -> "signed char"
-  | Unsigned_char -> "unsigned char"
-  | Short -> "short"
-  | Unsigned_short -> "unsigned short"
-  | Int -> "int"
-  | Unsigned_int -> "unsigned int"
-  | Long -> "long"
-  | Unsigned_long -> "unsigned long"
-  | Long_long -> "long long"
-  | Unsigned_long_long -> "unsigned long long"
+let is_signed target (integer : Integer.t) =
+  match integer with
+  | Char -> target.char_signed
+  | Signed_char | Short | Int | Long | Long_long | Int128 -> true
+  | Bool | Unsigned_char | Unsigned_short | Unsigned_int | Unsigned_long
+  | Unsigned_long_long | Unsigned_int128 ->
+      false
+
+let optional_count_name = function
+  | Some count -> string_of_int count
+  | None -> "none"
 
 let byte_order_name = function
   | Little_endian -> "little-endian"
@@ -232,15 +232,15 @@ let to_string target =
       ("sizeof_float", string_of_int target.sizeof_float);
       ("sizeof_double", string_of_int target.sizeof_double);
       ("sizeof_long_double", string_of_int target.sizeof_long_double);
-      ("has_int128", string_of_bool target.has_int128);
-      ("size_type", integer_type_name target.size_type);
-      ("ptrdiff_type", integer_type_name target.ptrdiff_type);
-      ("wchar_type", integer_type_name target.wchar_type);
-      ("intmax_type", integer_type_name target.intmax_type);
-      ("uintmax_type", integer_type_name target.uintmax_type);
-      ("intptr_type", integer_type_name target.intptr_type);
-      ("char16_type", integer_type_name target.char16_type);
-      ("char32_type", integer_type_name target.char32_type);
+      ("sizeof_int128", optional_count_name target.sizeof_int128);
+      ("size_type", Integer.name target.size_type);
+      ("ptrdiff_type", Integer.name target.ptrdiff_type);
+      ("wchar_type", Integer.name target.wchar_type);
+      ("intmax_type", Integer.name target.intmax_type);
+      ("uintmax_type", Integer.name target.uintmax_type);
+      ("intptr_type", Integer.name target.intptr_type);
+      ("char16_type", Integer.name target.char16_type);
+      ("char32_type", Integer.name target.char32_type);
       ("byte_order", byte_order_name target.byte_order);
       ("stdc_version", string_of_int target.stdc_version);
     ]

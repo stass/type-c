@@ -28,11 +28,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   of the compilation without its inputs, `-o`, `-c`, `-S`, `-E` and the
   `-M` family, plus the `-std=` that design 2.4 adds, so that the model
   and the compilation see the same options.
-- [Medium] `test/run/target.t` and `test/run/read.t` run `/usr/bin/clang`
-  and `/usr/local/bin/gcc-16`, and `target.t` expects the model of the
-  x86-64 macOS host.
-  Choose the backends and the expected facts per host once the Linux and
-  FreeBSD test hosts exist.
+- [Medium] `test/run/target.t`, `test/run/read.t` and `test/run/types.t`
+  run `/usr/bin/clang` and `/usr/local/bin/gcc-16`, and `target.t`
+  expects the model of the x86-64 macOS host. Choose the backends and the
+  expected facts per host once the Linux and FreeBSD test hosts exist;
+  `types.t` then confirms the provisional enumeration rule
+  (`Arithmetic.enum_compatible_type`) on each.
 - [Low] `Unix.execvp` hands an executable without a `#!` line to
   `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
   a backend works on some hosts only. Document it or decide one behaviour.
@@ -47,6 +48,24 @@ is [type-c-language-design.md](type-c-language-design.md).
   unsigned `size_t`, `uintmax_t`, `char16_t` and `char32_t`, signed
   `ptrdiff_t`, `intmax_t` and `intptr_t`), preferably by separate signed
   and unsigned types for the typedef fields, and make `Target.t` private.
+- [Medium] `Target.integer_width` raises `Invalid_argument` for the
+  `__int128` types on a target without them, and `Ctype.integer` builds
+  such a type on any target, so a type that reaches the promotions there
+  stops the compiler. Before the declaration code and the builtin table
+  can name `__int128`, make one constructor that takes the target the
+  only way to build the type.
+- [Medium] Backend options that change C's types without changing a
+  predefined macro make the model wrong without a message:
+  `-fshort-enums` (the integer type of enumerations) and
+  `-funsigned-bitfields` (plain `int` bit-fields, which
+  `Arithmetic.promote` takes as signed). Reject them in the driver or
+  find a probe that reads them.
+- [Low] GCC and Clang promote bit-fields of types ranked above `int`
+  differently (`Arithmetic.promote`): GCC keeps `long : 32` on ILP32 as
+  `long`, and gives `unsigned long : 40` on LP64 a 40-bit type whose
+  arithmetic wraps at 2^40. typec follows Clang. Decide whether the
+  target model records the backend family, or whether such bit-fields
+  are an error.
 - [Low] The target query gives the backend typec's stdin, which it never
   needs; a stray `-` among the options makes it read the terminal. Give
   it `/dev/null`.
