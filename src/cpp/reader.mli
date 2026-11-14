@@ -1,0 +1,50 @@
+(* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
+
+(** Reading the output of [cc -E] into tokens.
+
+    The input is the text that GCC or Clang writes for [-E]: tokens,
+    white space, line markers ([# N "file" flags]), [#line] directives and
+    [#pragma] lines. A [#] that is the first byte of a line starts a
+    directive; after a blank it is a punctuator. Comments and other
+    directives are errors, as is any byte that starts no token.
+
+    Every token belongs to a file (its owner, {!File.t}) and has a
+    presumed location ({!Location.t}). The enter (1) and return (2) flags
+    of the line markers keep a stack of the files being read, and the
+    owner of a token is the top of that stack. A file is a system header
+    when the marker that opened it carries flag 3. Flag 4, which only C++
+    uses, is accepted and has no effect. Any other line marker and
+    [#line] change the presumed location only. The main file is opened by
+    the first token or the first line marker with a file name, whichever
+    comes first: a marker opens it under the marker's name and flags, and
+    a token under the input's name, not a system header.
+
+    GCC and Clang also write a marker with flag 3 and without flag 1 or 2
+    for [#pragma GCC system_header], and GCC writes one around the tokens
+    of a macro that a system header defines. Neither changes the owner,
+    so the text after that pragma belongs to a file that is not a system
+    header.
+
+    Reading takes time and memory linear in the size of the text and
+    never recurses on it. *)
+
+(** The text and its tokens in order. The bytes before, between and after
+    the tokens are white space and line markers only, so the tokens with
+    those gaps spell the text exactly. *)
+type t = private { text : string; tokens : Token.t array }
+
+(** Why a text is not [cc -E] output: the message and the presumed
+    location of the line where reading stopped. *)
+type error = { location : Location.t; message : string }
+
+val read : name:string -> string -> (t, error) result
+(** [read ~name text] reads [text], which was read from the file [name].
+    [name] is the presumed file name until a line marker changes it. *)
+
+val spelling : t -> Token.t -> string
+(** [spelling result token] is the bytes of [token] in [result.text]. *)
+
+val error_message : error -> string
+(** ["file:line: message"], the form of a C compiler's diagnostics, with
+    every byte that is not printable ASCII written as [\xNN]. *)

@@ -10,3 +10,8 @@
  (name test_target)
  (modules test_target)
  (libraries typec_sema))
+
+(test
+ (name test_reader)
+ (modules test_reader)
+ (libraries typec_cpp typec_test_support))

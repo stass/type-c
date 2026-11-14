@@ -5,3 +5,13 @@
 
 (cram
  (deps %{bin:typec}))
+
+; read.t runs the reader on the output of both backends.
+
+(executable
+ (name read_check)
+ (libraries typec_cpp typec_test_support))
+
+(cram
+ (applies_to read)
+ (deps read_check.exe))

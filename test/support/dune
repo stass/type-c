@@ -1,0 +1,8 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; Checks that the tests of more than one directory share.
+
+(library
+ (name typec_test_support)
+ (libraries typec_cpp))
