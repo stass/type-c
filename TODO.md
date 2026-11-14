@@ -741,13 +741,30 @@ types (design 13.3).
 - [Low] Type-C text cannot name a tag that a type declaration claims
   (design 10.1 rule 6); C text in the same unit can, and names the
   lowered structure. Say so in the design or refuse it there too.
-- [High] Design 3.2 rule 6 is not enforced: `Declarations` reads a
-  variant as the structure it lowers to (10.1), so Type-C text may read
-  `v.tag` and `v.u`, compare variants and give one a braced initialiser
-  other than `{0}`; only C text may. Give `Ctype` a variant (or mark
-  the records that are variants) and refuse the operations in
-  `Expressions` from Type-C text; 1.3 needs the same fact for target
-  types.
+- [High] Type-C text gives a variant any braced initialiser and reaches
+  its members through an initialiser, against design 3.2 rules 6 and 7:
+  `e x = {1};`, `{ .tag = 1 }`, and brace elision into a variant member
+  (`struct s { e v; int n; } x = { 0, 1 };` sets `x.v`'s payload).
+  `Initialiser` opens a record only in `first_level` and `designate`;
+  refuse a variant there from Type-C text (`Ctype.as_variant`) and take
+  `{0}` for the variant itself. Settle first whether `{0}` for a
+  structure whose first member is a variant, which reaches the tag by
+  elision, stays valid; C programs rely on it.
+- [Medium] A selection that depends on what typec does not know hides a
+  variant from design 3.2 rule 6: Type-C text may write
+  `__builtin_choose_expr(__builtin_constant_p(n), v, v).tag` and the
+  same through `_Generic`, as the result has an unknown type; and the
+  body of a Clang block literal is not typed at all. Where every
+  candidate is a variant, refuse the operation in Type-C text. The
+  check of rule 6 could also move to where `Expressions` and
+  `Initialiser` open a record's members, deciding the text by the
+  member's token rather than the first token of the operation (a line
+  marker inside an expression makes them differ).
+- [Medium] `offsetof(struct s, v.tag)` in Type-C text reaches the tag of
+  the variant member `v`: `Expressions` refuses `offsetof` of a variant
+  but does not resolve the member path of `offsetof`, so it cannot see
+  one that passes through a variant. Resolve the path through
+  `Ctype.find_member` and refuse a variant on it.
 - [Medium] A name that a variant derives (design 10.1 rule 6) may be a
   keyword of the backend: `type _Static = | assert;` lowers to the
   enumerator `_Static_assert`, which the backend refuses. The claim

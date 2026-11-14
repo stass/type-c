@@ -76,8 +76,9 @@ it. Otherwise add the smallest extension that does the job.
 
 Text is *Type-C text* when the file it comes from has the suffix `.tc` or
 `.tci`, and *C text* otherwise. The grammar is the same for both but for
-the two reserved words of 2.3; the other difference is that Type-C text
-cannot name the C that a type declaration derives (10.1). A `.tc` file
+the two reserved words of 2.3; the other differences are that Type-C
+text cannot name the C that a type declaration derives (10.1) and cannot
+treat a variant as the structure it lowers to (3.2 rule 6). A `.tc` file
 may include `.h` and `.tci` files in any mix.
 
 `typec` predefines the macro `__TYPEC__` as `1` while preprocessing a Type-C
@@ -898,7 +899,9 @@ struct expr {
    cannot name them; they exist for C clients and debuggers. An incomplete
    variant `type expr;` claims the struct tag, as it declares the struct;
    the definition that completes it claims the rest, since only it knows
-   the constructors.
+   the constructors. The enum tag and the enumerators are in scope from
+   the start of the definition, before its first field, as in the C it
+   lowers to, where the enumeration precedes the structure.
 7. Where a definition completes `type expr;`, the forward declaration has
    already become `struct expr; typedef struct expr expr;`, and the
    definition becomes the rest.

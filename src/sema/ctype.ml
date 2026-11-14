@@ -9,6 +9,7 @@ type record_tag = {
   record_id : int;
   kind : record_kind;
   record_name : string option;
+  variant : bool;
 }
 
 type enum_tag = { enum_id : int; enum_name : string option }
@@ -105,6 +106,14 @@ let shape_size = function
 let make qualifiers shape = { qualifiers; shape; size = shape_size shape }
 let of_shape shape = make Qualifiers.none shape
 let unqualified t = { t with qualifiers = Qualifiers.none }
+
+let as_variant t =
+  match t.shape with
+  | Record { variant = true; record_name; _ } -> record_name
+  | Record { variant = false; _ }
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _ | Function _
+  | Unknown_type _ ->
+      None
 
 let rec top_qualifiers t =
   match t.shape with
@@ -264,7 +273,13 @@ let fresh_id tags =
   id
 
 let declare_record tags kind record_name =
-  { record_id = fresh_id tags; kind; record_name }
+  { record_id = fresh_id tags; kind; record_name; variant = false }
+
+let declare_variant tags name =
+  { record_id = fresh_id tags;
+    kind = Struct;
+    record_name = Some name;
+    variant = true }
 
 let declare_enum tags enum_name = { enum_id = fresh_id tags; enum_name }
 

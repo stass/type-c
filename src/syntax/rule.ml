@@ -26,6 +26,9 @@ type t =
   | Field_type
       (** A field of a constructor whose type is not a value type (design
           3.2 rules 4 and 5). *)
+  | Variant_operation
+      (** An operation on a variant in Type-C text other than those that
+          design 3.2 rule 6 allows. *)
   | Not_implemented of { section : string; package : string }
       (** A construct of design [section] that work [package] implements. *)
 
@@ -36,6 +39,7 @@ let clause = function
   | Claimed_name -> "design 10.1 rule 6"
   | Duplicate_constructor -> "design 3.2 rule 2"
   | Field_type -> "design 3.2 rule 4"
+  | Variant_operation -> "design 3.2 rule 6"
   | Not_implemented { section; package } ->
       Printf.sprintf "design %s; work package %s" section package
 

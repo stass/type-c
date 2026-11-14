@@ -1277,9 +1277,52 @@ let variants () =
   accepts ~file "struct s { const int *p; }; type e = | A(struct s v);";
   rejects ~file "type e = | A(int x, long x);" "duplicate member"
 
+(* Type-C text takes a variant only whole (design 3.2 rule 6): it may
+   initialise, assign, pass, return, size and address one; C text may use
+   the structure it lowers to (10.6). *)
+let variant_operations () =
+  let file = "in.tc" in
+  let variant = "type e = | A | B(int i); " in
+  let in_function body = variant ^ "e f(e v, e w, e *p) { " ^ body ^ " }" in
+  let refused body =
+    rejects ~file (in_function body)
+      "the variant 'e' takes no such operation; Type-C text reaches its tag \
+       and fields only through constructors and match (design 3.2 rule 6)"
+  in
+  accepts ~file
+    (in_function
+       "e x = v; x = w; e *q = &x; (void)sizeof v; (void)_Alignof(e); \
+        (void)sizeof(*p); f(x, v, q); (v, w); return 1 ? v : *p;");
+  accepts ~file (in_function "return ({ v; });");
+  accepts ~file (in_function "return (v);");
+  accepts ~file (in_function "v; return v;");
+  refused "(void)v.tag; return v;";
+  refused "(void)p->tag; return v;";
+  refused "(void)(*p).u; return v;";
+  refused "(void)f(v, w, p).tag; return v;";
+  refused "(void)sizeof(v.tag); return v;";
+  refused "(void)(v == w); return v;";
+  refused "(void)(v != w); return v;";
+  refused "(void)!v; return v;";
+  refused "v += w; return v;";
+  refused "(void)(int)v; return v;";
+  refused "(void)v; return v;";
+  refused "return (e)v;";
+  refused "return (e)1;";
+  refused "return (const e)v;";
+  refused "(void)__builtin_offsetof(e, tag); return v;";
+  (* C text, here a header that the Type-C file includes, reads the
+     representation. *)
+  accepts ~file
+    (variant
+   ^ "\n# 1 \"v.h\" 1\nint tag_of(e v) { return v.tag == e_B; }\n\
+      int tag_at(e *p) { return (int)p->tag + (int)(e){0}.tag; }\n\
+      # 3 \"in.tc\" 2\nint g(e v) { return tag_of(v); }")
+
 let () =
   type_declarations ();
   variants ();
+  variant_operations ();
   builtin_typedefs ();
   gnu_profile ();
   unknown_types ();

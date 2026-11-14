@@ -211,6 +211,23 @@ let fail_operands context span clause =
     ("the operands have types that the operator does not take (C11 " ^ clause
    ^ ")")
 
+(* Design 3.2 rule 6: Type-C text reaches the tag and fields of a
+   variant only through constructors and match, so an operation at [span]
+   whose operand, or the type it converts to or reaches into, is the
+   variant [t] is refused there. C text may use the structure that a
+   variant lowers to (design 10.6). *)
+let refuse_variant context (span : Tree.span) (t : Ctype.t) =
+  match Ctype.as_variant t with
+  | Some name when File.is_type_c_text context.text.tokens.(span.first).owner
+    ->
+      context.fail span
+        (Rule.message Variant_operation
+           (Printf.sprintf
+              "the variant %s takes no such operation; Type-C text reaches \
+               its tag and fields only through constructors and match"
+              (quote name)))
+  | Some _ | None -> ()
+
 (* Operands (6.3.2.1, 6.3.1.1) *)
 
 (* The value of an operand, after lvalue conversion, by what the
@@ -575,9 +592,14 @@ let direct_member context span (record : typed) name =
       context.fail span
         "the operand of '.' is not a structure or union (C11 6.5.2.3p1)"
 
+(* [p->m] reaches into [*p], which may not be a variant (design 3.2 rule
+   6). *)
 let pointer_member context span (pointer : typed) name =
   match operand context pointer with
-  | Pointer_operand { referenced = { shape = Record tag; qualifiers; _ }; _ } ->
+  | Pointer_operand
+      { referenced = { shape = Record tag; qualifiers; _ } as referenced; _ }
+    ->
+      refuse_variant context span referenced;
       member_of context tag qualifiers name ~lvalue:true
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
@@ -1525,13 +1547,23 @@ let rec expression context (expression : Tree.expression) =
 
 and expression_node context (whole : Tree.expression) =
   let span = whole.span in
-  let typed = expression context in
+  (* An operand that the operation takes as a whole, as design 3.2 rule 6
+     lets it take a variant: copies, sizes, addresses, passes on or
+     discards. *)
+  let as_whole = expression context in
+  (* Any other operand, which the operation reaches into, so it may not
+     be a variant. *)
+  let typed operand =
+    let operand_typed = expression context operand in
+    refuse_variant context span operand_typed.expression_type;
+    operand_typed
+  in
   match whole.node with
   | Identifier { name; resolution } -> identifier context span name resolution
   | Constant number -> value (constant_type context span number)
   | Character encoding -> value (character_type context span encoding)
   | String literal -> lvalue (string_type context literal)
-  | Parenthesized inner -> typed inner
+  | Parenthesized inner -> as_whole inner
   | Generic { controlling; associations } ->
       generic context span controlling associations
   | Compound_literal { type_name; values } ->
@@ -1541,7 +1573,7 @@ and expression_node context (whole : Tree.expression) =
       subscript context span array (typed index)
   | Call { callee; arguments } ->
       let callee_typed = typed callee in
-      let arguments = List.map typed arguments in
+      let arguments = List.map as_whole arguments in
       call context span callee callee_typed arguments
   | Member { operand; member } ->
       direct_member context span (typed operand) member
@@ -1550,20 +1582,22 @@ and expression_node context (whole : Tree.expression) =
   (* The value of a postfix operation is no bit-field in Clang. *)
   | Post_increment operand | Post_decrement operand ->
       increment context span ~clause:"6.5.2.4p1" (typed operand)
+  | Unary ((Address as op), operand) -> unary context span op (as_whole operand)
   | Unary (op, operand) -> unary context span op (typed operand)
   | Sizeof_expression operand ->
-      if designates_bit_field (typed operand) then
+      if designates_bit_field (as_whole operand) then
         context.fail span "sizeof of a bit-field (C11 6.5.3.4p1)";
       value (size_type context span)
   | Sizeof_type type_name | Alignof type_name ->
       ignore (context.type_name type_name);
       value (size_type context span)
   | Alignof_expression operand ->
-      ignore (typed operand);
+      ignore (as_whole operand);
       value (size_type context span)
   (* 6.5.4p5: the value of a cast has the unqualified type. *)
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
+      refuse_variant context span cast_type;
       ignore (typed operand);
       value (Ctype.unqualified cast_type)
   | Binary (op, left, right) ->
@@ -1571,13 +1605,16 @@ and expression_node context (whole : Tree.expression) =
       value (binary_type context span op left (typed right))
   | Conditional { condition; if_true; if_false } ->
       value (conditional context span condition if_true if_false)
-  | Assignment (op, left, right) ->
+  | Assignment ((Assign as op), left, right) ->
+      let left_typed = as_whole left in
+      assignment context span op left_typed (as_whole right)
+  | Assignment ((Compound_assign _ as op), left, right) ->
       let left_typed = typed left in
       assignment context span op left_typed (typed right)
   (* 6.5.17p2: the right operand's value. *)
   | Comma (left, right) ->
-      ignore (typed left);
-      let right = typed right in
+      ignore (as_whole left);
+      let right = as_whole right in
       { expression_type = Ctype.lvalue_conversion right.expression_type;
         lvalue = false;
         bit_field = value_of right.bit_field }
@@ -1587,7 +1624,7 @@ and expression_node context (whole : Tree.expression) =
       ignore (typed list);
       value (Ctype.unqualified (context.type_name type_name))
   | Offsetof { type_name; member = _; designators } ->
-      ignore (context.type_name type_name);
+      refuse_variant context span (context.type_name type_name);
       List.iter (designator context) designators;
       value (size_type context span)
   | Choose { condition; first; second } ->

@@ -1639,9 +1639,7 @@ and variant_record state (name : Tree.identifier) (declared : Tree.declared) =
   match declared.earlier with
   | Some forward -> Hashtbl.find state.incomplete_variants forward
   | None ->
-      let record =
-        Ctype.declare_record state.tags Ctype.Struct (Some name.node)
-      in
+      let record = Ctype.declare_variant state.tags name.node in
       Hashtbl.replace state.tag_types (Tree.claimed_tag declared.id)
         (Record_tag record);
       record

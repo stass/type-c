@@ -214,6 +214,63 @@ Derived names, field types and constructor names are checked.
   array.tc:1: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type (design 3.2 rule 4)
   [1]
 
+Type-C text takes a variant only whole (design 3.2 rule 6): no member
+access, no comparison and no cast to or from one.
+
+  $ printf 'type e = | A;\nint f(e v) { return v.tag; }\n' > member.tc
+  $ ./golden.exe member.tc
+  member.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  [1]
+  $ printf 'type e = | A;\nint f(e v, e w) { return v == w; }\n' > equal.tc
+  $ ./golden.exe equal.tc
+  equal.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  [1]
+  $ printf 'type e = | A;\nvoid f(e v) { (void)v; }\n' > cast.tc
+  $ ./golden.exe cast.tc
+  cast.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  [1]
+  $ printf 'type e = | A;\ne f(void) { return (e)0; }\n' > cast_to.tc
+  $ ./golden.exe cast_to.tc
+  cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  [1]
+
+C text, here a header that the Type-C file includes, may use the
+structure that a variant lowers to (design 10.6).
+
+  $ cat > header.tc <<'EOF'
+  > type e = | A | B(int i);
+  > # 1 "e.h" 1
+  > static int is_b(e v) { return v.tag == e_B; }
+  > # 3 "header.tc" 2
+  > int f(e v) { return is_b(v); }
+  > EOF
+  $ ./golden.exe header.tc
+  
+  # 1 "header.tc"
+  struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  # 1 "header.tc"
+   
+  # 1 "header.tc"
+  
+  # 1 "header.tc"
+   
+  # 1 "header.tc"
+  struct {
+  # 1 "header.tc"
+  int i
+  # 1 "header.tc"
+  ; } B;
+  # 1 "header.tc"
+  
+  # 1 "header.tc"
+  } u; };
+  # 1 "header.tc"
+  
+  # 1 "e.h" 1
+  static int is_b(e v) { return v.tag == e_B; }
+  # 3 "header.tc" 2
+  int f(e v) { return is_b(v); }
+
 The constructs of later work packages are refused with the package that
 implements them.
 
