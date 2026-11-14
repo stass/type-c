@@ -46,7 +46,7 @@ val parse :
 (** [parse ~keywords text] parses [text] with [keywords], those that
     the backend reads it with ([Typec_sema.Target.keywords]). File scope
     holds the typedef names that GCC and Clang declare before the first
-    token ({!Builtin_typedef.table}). *)
+    token for a backend with [keywords] ({!Builtin_typedef.declared}). *)
 
 val error_message : error -> string
 (** ["file:line: message"], as {!Reader.error_message}. *)

@@ -114,6 +114,7 @@ type basic_type_specifier =
   | Unsigned
   | Bool
   | Complex
+  | Int128  (** [__int128] where the backend has it *)
   | Optional_float of Optional_float.t
       (** [_Float16] and the others that the backend has. It stays last:
           a sorted multiset lists it after the constant constructors,

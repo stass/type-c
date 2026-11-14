@@ -98,7 +98,8 @@ val of_predefined_macros : string -> (t, error) result
 val keywords :
   t -> Typec_syntax.Keyword_set.dialect -> Typec_syntax.Keyword_set.t
 (** [keywords target dialect]: the keywords that the backend reads a text
-    of [dialect] with, which spell its [optional_floats]. *)
+    of [dialect] with, which spell its [optional_floats] and, where it has
+    [sizeof_int128], [__int128]. *)
 
 val integer_width : t -> Integer.t -> int
 (** The width of an integer type in bits: its value bits and its sign bit

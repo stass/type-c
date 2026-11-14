@@ -857,9 +857,15 @@ let builtin_typedefs () =
   rejects "int g(__builtin_va_list); int g(__builtin_va_list *);" "6.7p4";
   rejects "__builtin_va_list a; void *a;" "6.7p4";
   rejects "struct b { __builtin_va_list f : 1; };" "bit-field";
+  declares "typedef __signed__ __int128 s128;" "s128" "typedef __int128";
+  declares "__int128 unsigned u;" "u" "object unsigned __int128 external static";
+  rejects "long __int128 l;" "6.7.2p2";
   (* A target without __int128 has no names for it, as in GCC and Clang. *)
-  rejects ~target:ilp32 "__uint128_t u;" "'__uint128_t' is not a typedef name";
-  rejects ~target:ilp32 "__int128_t i;" "'__int128_t' is not a typedef name";
+  declares ~target:ilp32 "int __int128_t;" "__int128_t"
+    "object int external static";
+  declares ~target:ilp32 "long __uint128_t;" "__uint128_t"
+    "object long external static";
+  declares ~target:ilp32 "int __int128;" "__int128" "object int external static";
   declares ~target:ilp32 "__builtin_va_list ap;" "ap"
     "object __builtin_va_list external static"
 

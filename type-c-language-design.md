@@ -1178,7 +1178,8 @@ builtins, a table of
 builtin functions with their types, the typedef names that GCC and
 Clang declare before the first token (`__builtin_va_list`, and
 `__int128_t` and `__uint128_t` where the target has `__int128`),
-`__int128`, the optional floating types (`_Float16`, `_Float32`,
+`__int128` where the backend's `__SIZEOF_INT128__` says that it has the
+type, the optional floating types (`_Float16`, `_Float32`,
 `_Float64`, `_Float128`, `_Float32x`, `_Float64x` and `__float128`),
 case ranges and range designators, empty structures and `{}`
 initialisers, a lone `;` at file scope and among members, and, for the
@@ -1197,7 +1198,9 @@ GCC and Clang. No macro says that a backend reserves a spelling it
 cannot use, as Apple clang reserves `__float128` and GCC `_Float128x`;
 typec reads such a spelling as an identifier, which only a program that
 declares a reserved identifier (C11 7.1.3) can tell; GCC's `__float128`
-is a builtin typedef name, which such a program can tell as well. Only
+is a builtin typedef name, which such a program can tell as well. Both
+GCC and Clang reserve `__int128` on targets without the type, i386
+among them, where typec reads it as an identifier in the same way. Only
 x86-64 backends confirm the rule; a backend of another architecture
 whose macros disagree with its keywords would settle it otherwise, and
 without one the rule stays. A construct outside the profile is an error

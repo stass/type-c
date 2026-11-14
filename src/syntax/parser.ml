@@ -222,12 +222,14 @@ let expect state punctuator expected =
    scope by restoring the value it saved on entering it. *)
 
 (* File scope before the first token, which holds the typedef names that
-   GCC and Clang declare there. *)
-let file_scope =
+   GCC and Clang declare there for a backend with [keywords]. *)
+let file_scope keywords =
   List.fold_left
-    (fun scope (name, _) ->
-      let builtin = { declaration = Builtin name; names_type = true } in
-      Scope.declare scope name builtin)
+    (fun scope (name, builtin) ->
+      if Builtin_typedef.declared keywords builtin then
+        let entry = { declaration = Builtin name; names_type = true } in
+        Scope.declare scope name entry
+      else scope)
     Scope.file Builtin_typedef.table
 
 let typedef_declaration state name =
@@ -346,6 +348,7 @@ let keyword_specifier_word state offset keyword =
   | Unsigned -> Some (Basic_word Unsigned)
   | Bool -> Some (Basic_word Bool)
   | Complex -> Some (Basic_word Complex)
+  | Int128 -> Some (Basic_word Int128)
   | Optional_float optional -> Some (Basic_word (Optional_float optional))
   | Struct -> Some (Struct_word Struct)
   | Union -> Some (Struct_word Union)
@@ -2113,7 +2116,7 @@ let parse ~keywords reader =
       grammar = grammar_tokens keywords reader;
       position = 0;
       open_brackets = [];
-      scope = file_scope;
+      scope = file_scope keywords;
     }
   in
   match translation_unit state with

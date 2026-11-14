@@ -9,6 +9,13 @@
     both. *)
 type dialect = Iso | Gnu
 
-(** The keywords that a text is read with: those of its dialect, and the
-    spelling of each optional floating type that the backend has. *)
-type t = { dialect : dialect; optional_floats : Optional_float.t list }
+(** The keywords that a text is read with: those of its dialect, the
+    spelling of each optional floating type that the backend has, and
+    [__int128] where the backend has that type, which its macro
+    [__SIZEOF_INT128__] states. [int128] also decides the typedef names
+    [__int128_t] and [__uint128_t] ({!Builtin_typedef}). *)
+type t = {
+  dialect : dialect;
+  optional_floats : Optional_float.t list;
+  int128 : bool;
+}

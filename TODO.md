@@ -437,18 +437,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   second target of arm64 once an arm64 host runs the suite, so that
   `types.t` confirms the provisional enumeration rule
   (`Arithmetic.enum_compatible_type`) there too.
-- [High] The parser has no `__int128` keyword, which design 13.3 lists
-  in the GNU profile: Debian's `linux/types.h:12` declares
-  `typedef __signed__ __int128 __s128`, so `test/run/headers.t` fails on
-  Debian with both backends; what the unit holds after that line is
-  untested there. Read `__int128` as a keyword where `__SIZEOF_INT128__`
-  is defined, through the keyword set as the optional floating types
-  are, and decide the `Builtin_typedef` names `__int128_t` and
-  `__uint128_t` the same way: they are typedef names on every target
-  now and the declaration reader refuses them where `__int128` is
-  missing, so `int __int128_t;` is refused on a target whose backend
-  accepts it, and the parser keeps two rules for names that the target
-  decides.
 - [Low] `tools/corpus/runner.t` runs `/usr/bin/clang`, not the Clang
   that `TYPEC_TEST_CLANG` names (`test/run/backends.sh`).
 

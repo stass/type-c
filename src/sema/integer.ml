@@ -51,8 +51,8 @@ let name = function
   | Int128 -> "__int128"
   | Unsigned_int128 -> "unsigned __int128"
 
-(* The integer rows of the multisets of 6.7.2p2, each sorted in the order
-   of [Tree.basic_type_specifier]. *)
+(* The integer rows of the multisets of 6.7.2p2 and those of GNU
+   [__int128], each sorted in the order of [Tree.basic_type_specifier]. *)
 let of_specifiers (specifiers : Typec_syntax.Tree.basic_type_specifier list) =
   match List.sort compare specifiers with
   | [ Char ] -> Some Char
@@ -74,4 +74,6 @@ let of_specifiers (specifiers : Typec_syntax.Tree.basic_type_specifier list) =
   | [ Long; Long; Unsigned ] | [ Int; Long; Long; Unsigned ] ->
       Some Unsigned_long_long
   | [ Bool ] -> Some Bool
+  | [ Int128 ] | [ Signed; Int128 ] -> Some Int128
+  | [ Unsigned; Int128 ] -> Some Unsigned_int128
   | _ -> None

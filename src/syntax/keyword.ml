@@ -58,6 +58,7 @@ type t =
   | Label
   | Typeof
   | Optional_float of Optional_float.t
+  | Int128
   | Nonnull
   | Nullable
   | Nullable_result
@@ -68,12 +69,12 @@ type t =
   | Real
   | Imag
 
-(* The dialects where a spelling is a keyword. GCC and Clang reserve the
-   GNU keywords spelled without underscores only in the GNU dialects,
-   since in ISO C they are the user's identifiers; a spelling with
-   underscores is reserved to the implementation (C11 7.1.3), so it is a
-   keyword in every dialect. *)
-type reserved_in = Every_dialect | Gnu_dialect
+(* Where a spelling is a keyword. GCC and Clang reserve the GNU keywords
+   spelled without underscores only in the GNU dialects, since in ISO C
+   they are the user's identifiers; a spelling with underscores is
+   reserved to the implementation (C11 7.1.3), so it is a keyword in
+   every dialect, and [__int128] where the backend has the type. *)
+type reserved_in = Every_dialect | Gnu_dialect | With_int128
 
 (* The one mapping from spellings to keywords but for the optional
    floating types, which Optional_float spells and the keyword set
@@ -146,6 +147,7 @@ let spellings =
     ("__attribute", Attribute, Every_dialect);
     ("__attribute__", Attribute, Every_dialect);
     ("__extension__", Extension, Every_dialect);
+    ("__int128", Int128, With_int128);
     ("__label__", Label, Every_dialect);
     ("typeof", Typeof, Gnu_dialect);
     ("__typeof", Typeof, Every_dialect);
@@ -171,10 +173,11 @@ let table =
             (spelling, (keyword, reserved_in)))
           spellings))
 
-let is_reserved (dialect : Keyword_set.dialect) reserved_in =
-  match (reserved_in, dialect) with
+let is_reserved (keywords : Keyword_set.t) reserved_in =
+  match (reserved_in, keywords.dialect) with
   | Every_dialect, _ | Gnu_dialect, Gnu -> true
   | Gnu_dialect, Iso -> false
+  | With_int128, _ -> keywords.int128
 
 let optional_float_of_spelling (keywords : Keyword_set.t) spelling =
   List.find_opt
@@ -183,7 +186,7 @@ let optional_float_of_spelling (keywords : Keyword_set.t) spelling =
 
 (* The keyword that an identifier token spells in [keywords], if any. *)
 let of_spelling (keywords : Keyword_set.t) spelling =
-  let reserved = is_reserved keywords.dialect in
+  let reserved = is_reserved keywords in
   match Hashtbl.find_opt table spelling with
   | Some (keyword, reserved_in) when reserved reserved_in -> Some keyword
   | Some _ -> None

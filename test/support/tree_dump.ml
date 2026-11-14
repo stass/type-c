@@ -154,6 +154,7 @@ let basic_label = function
   | Unsigned -> "unsigned"
   | Bool -> "_Bool"
   | Complex -> "_Complex"
+  | Int128 -> "__int128"
   | Optional_float optional -> Optional_float.spelling optional
 
 let unary_label = function

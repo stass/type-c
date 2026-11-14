@@ -156,13 +156,9 @@ let undeclared state span name =
   fail state span (quote name ^ " is not declared (C11 6.5.1p2)")
 
 (* The entity that the declaration of [name] at [span] redeclares: none
-   where it is the first in its scope, or where the one before it is a
-   builtin typedef name that the target lacks. *)
+   where it is the first in its scope. *)
 let earlier_entity state span name (declared : Tree.declared) =
-  match declared.earlier with
-  | None -> None
-  | Some (Builtin _ as builtin) -> Hashtbl.find_opt state.entities builtin
-  | Some (In_tree _ as earlier) -> Some (referenced state span name earlier)
+  Option.map (referenced state span name) declared.earlier
 
 (* Ordinary identifiers (6.2.2, 6.7p3, p4) *)
 
@@ -348,7 +344,7 @@ let basic_type (specifiers : Tree.basic_type_specifier list) :
 let is_optional_float : Tree.basic_type_specifier -> bool = function
   | Optional_float _ -> true
   | Void | Char | Short | Int | Long | Float | Double | Signed | Unsigned
-  | Bool | Complex ->
+  | Bool | Complex | Int128 ->
       false
 
 let qualifiers_of (qualifiers : Tree.type_qualifier list) =
@@ -1641,9 +1637,10 @@ let builtin_type target : Builtin_typedef.t -> (Ctype.t, Ctype.error) result =
   | Int128 -> Ctype.integer target Integer.Int128
   | Unsigned_int128 -> Ctype.integer target Integer.Unsigned_int128
 
-(* The builtin typedef names whose type the target has are entities; the
-   others are not, and no other error can come from a table that names
-   no derived type. *)
+(* The builtin typedef names whose type the target has are entities: the
+   names that the parser declares for the target's keywords
+   ({!Builtin_typedef.declared}). No other error can come from a table
+   that names no derived type. *)
 let declare_builtin_typedefs state =
   List.iter
     (fun (name, builtin) ->

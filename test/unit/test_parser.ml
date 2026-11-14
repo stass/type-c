@@ -5,10 +5,10 @@ open Typec_cpp
 open Typec_syntax
 open Typec_test_support
 
-(* The keywords of gnu11 on a backend with every optional floating type,
-   which most cases are read with. *)
+(* The keywords of gnu11 on a backend with every optional floating type
+   and [__int128], which most cases are read with. *)
 let gnu_keywords : Keyword_set.t =
-  { dialect = Gnu; optional_floats = Optional_float.all }
+  { dialect = Gnu; optional_floats = Optional_float.all; int128 = true }
 
 (* A text, read as from the file "in.i", and the dump of its external
    declarations, separated by " | ", or its error. *)
@@ -816,6 +816,35 @@ let optional_float_cases =
       "(declaration (typedef __float128 _Float128))";
   ]
 
+(* [__int128] is a keyword where the backend has it, and [__int128_t] and
+   [__uint128_t] are typedef names there; elsewhere all three are
+   identifiers. *)
+let int128_cases =
+  [
+    case "the __int128 keyword"
+      "__int128 a; unsigned __int128 b; __int128 unsigned c; signed __int128 \
+       d; const __int128 e;"
+      "(declaration (__int128) a) | (declaration (unsigned __int128) b) | \
+       (declaration (__int128 unsigned) c) | (declaration (signed __int128) \
+       d) | (declaration (const __int128) e)";
+    case "linux/types.h's 128-bit types"
+      "typedef __signed__ __int128 __s128 __attribute__((aligned(16))); \
+       typedef unsigned __int128 __u128 __attribute__((aligned(16)));"
+      "(declaration (typedef signed __int128) (declarator __s128 (attributes \
+       (aligned ( 16 ))))) | (declaration (typedef unsigned __int128) \
+       (declarator __u128 (attributes (aligned ( 16 )))))";
+    case "__int128 is a keyword" "int __int128;"
+      "(declaration (int __int128))";
+  ]
+
+let without_int128_cases =
+  [
+    case "the 128-bit spellings are identifiers"
+      "int __int128; int __int128_t; long __uint128_t;"
+      "(declaration (int) __int128) | (declaration (int) __int128_t) | \
+       (declaration (long) __uint128_t)";
+  ]
+
 let clang_optional_float_cases =
   [
     case "glibc's _Float128 under Clang"
@@ -1359,8 +1388,8 @@ let failures () =
   let failed_cases ?(parse = Parser.parse ~keywords:gnu_keywords) ~spans cases =
     failed_with (outcome ~parse ~spans) cases
   in
-  let parse_with dialect optional_floats =
-    Parser.parse ~keywords:{ dialect; optional_floats }
+  let parse_with ?(int128 = true) dialect optional_floats =
+    Parser.parse ~keywords:{ dialect; optional_floats; int128 }
   in
   let failed =
     List.concat_map (failed_cases ~spans:false)
@@ -1388,6 +1417,10 @@ let failures () =
     @ failed_cases ~spans:false optional_float_cases
     @ failed_cases ~parse:(parse_with Gnu [ Float16; Gnu_float128 ])
         ~spans:false clang_optional_float_cases
+    @ failed_cases ~spans:false int128_cases
+    @ failed_cases
+        ~parse:(parse_with ~int128:false Gnu Optional_float.all)
+        ~spans:false without_int128_cases
     @ failed_with resolutions resolution_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())

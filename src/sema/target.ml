@@ -228,7 +228,11 @@ let model_of_macros macros backend =
 
 
 let keywords target dialect : Typec_syntax.Keyword_set.t =
-  { dialect; optional_floats = target.optional_floats }
+  {
+    dialect;
+    optional_floats = target.optional_floats;
+    int128 = Option.is_some target.sizeof_int128;
+  }
 
 (* GCC and Clang give no integer type padding bits, so a width is the
    size in bits. *)
