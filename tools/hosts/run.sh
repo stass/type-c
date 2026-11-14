@@ -6,47 +6,56 @@
 #
 # usage: tools/hosts/run.sh HOST [LOG]
 #
-# HOST names HOST.Dockerfile or HOST.sh in this directory. A Dockerfile
-# is a Linux host: the script builds its image and runs the suite in a
-# container of it, with the source mounted read-only and no network, the
-# container removed afterwards. A script is a host that no container
-# gives, and is run with LOG. Either writes to LOG, by default
+# HOST is a name from the table below. A Linux host is a Dockerfile and a
+# platform: the script builds its image and runs the suite in a container
+# of it, with the source mounted read-only and no network, the container
+# removed afterwards. A platform that the machine does not run itself
+# needs emulation in Docker (binfmt and qemu-user), and the suite is slow
+# there. The FreeBSD host is a script, which no container gives, and is
+# run with LOG. Either kind writes to LOG, by default
 # ${TMPDIR:-/tmp}/typec-host-HOST.log, outside the repository.
 
 set -eu
 
 usage() {
   echo "usage: $0 HOST [LOG]" >&2
+  echo "hosts: debian-amd64 debian-arm64 alpine-amd64 alpine-arm64" \
+    "freebsd" >&2
   exit 2
 }
 
 [ $# -ge 1 ] && [ $# -le 2 ] || usage
 host=$1
-# The name becomes part of a path and of an image tag.
+
+# The hosts: the Dockerfile and the platform of each Linux host, which is
+# the host's whatever the machine that runs it, and the script of the
+# others.
+dockerfile= platform= script=
 case $host in
-  '' | *[!a-z0-9-]*) usage ;;
+  debian-amd64) dockerfile=debian.Dockerfile platform=linux/amd64 ;;
+  debian-arm64) dockerfile=debian.Dockerfile platform=linux/arm64 ;;
+  alpine-amd64) dockerfile=alpine.Dockerfile platform=linux/amd64 ;;
+  alpine-arm64) dockerfile=alpine.Dockerfile platform=linux/arm64 ;;
+  freebsd) script=freebsd.sh ;;
+  *) usage ;;
 esac
 
 hosts_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 repo=$(CDPATH='' cd "$hosts_dir/../.." && pwd)
-dockerfile=$hosts_dir/$host.Dockerfile
 image=typec-host-$host
 log=${2:-${TMPDIR:-/tmp}/typec-host-$host.log}
 
-if [ -x "$hosts_dir/$host.sh" ]; then
-  exec "$hosts_dir/$host.sh" "$log"
+if [ -n "$script" ]; then
+  exec "$hosts_dir/$script" "$log"
 fi
-if [ ! -f "$dockerfile" ]; then
-  echo "$0: no host $host: $dockerfile does not exist" >&2
-  exit 2
-fi
+dockerfile=$hosts_dir/$dockerfile
 
 echo "$host: building $image; log in $log"
-# The hosts are x86-64 whatever the machine that runs them.
-platform=linux/amd64
 
-# The Dockerfile comes on stdin, so no build context is sent.
-if ! docker build --platform "$platform" --tag "$image" - \
+# The Dockerfile comes on stdin, so no build context is sent. buildx
+# builds for a platform that the machine does not run; the classic
+# builder reuses a base image of the machine's own platform instead.
+if ! docker buildx build --platform "$platform" --load --tag "$image" - \
   < "$dockerfile" > "$log" 2>&1; then
   echo "$host: the image does not build; see $log" >&2
   exit 1

@@ -7,8 +7,8 @@ assertions of what typec computes for that target: the integer promotions,
 those of bit-fields, the usual arithmetic conversions, the integer type of
 enumerations and the compatibility of pairs of types. The backend compiles
 the file only if it agrees on every one. The backends are those that
-backends.sh names, on an x86-64 host so that -m32 gives a second
-target, in C11 so that `int ()` declares no prototype.
+backends.sh names, for two targets (its second_target), in C11 so that
+`int ()` declares no prototype.
 
   $ probe() {
   >   "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
@@ -17,6 +17,6 @@ target, in C11 so that `int ()` declares no prototype.
   > }
   $ . ./backends.sh
   $ probe "$clang"
-  $ probe "$clang" -m32 -funsigned-char
+  $ probe "$clang" $second_target
   $ probe "$gcc"
-  $ probe "$gcc" -m32 -funsigned-char
+  $ probe "$gcc" $second_target

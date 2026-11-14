@@ -7,8 +7,8 @@ literals. initialisers.c declares such arrays at file scope and in
 blocks, with static assertions on their sizes that the backend checks,
 and names each in an expression statement, after which expression_probe
 writes a static assertion of the type that typec gives it, the length
-included. The backends are those that backends.sh names, on an x86-64
-host so that -m32 gives a second target.
+included. The backends are those that backends.sh names, for two
+targets (its second_target).
 
   $ probe() {
   >   "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
@@ -18,6 +18,6 @@ host so that -m32 gives a second target.
   > }
   $ . ../backends.sh
   $ probe "$clang"
-  $ probe "$clang" -m32 -funsigned-char
+  $ probe "$clang" $second_target
   $ probe "$gcc"
-  $ probe "$gcc" -m32 -funsigned-char
+  $ probe "$gcc" $second_target

@@ -220,10 +220,11 @@ status 80 and one message, before anything is emitted or compiled.
   $ test ! -e bad-parse.o && test ! -e bad-type.o && ls -A tmp
 
 The target model comes from the backend with the options of the compile
-step, so -funsigned-char reaches the declarations.
+step, so -funsigned-char reaches the declarations. Plain char is signed
+by default on x86-64 and not on arm64, so the first compile asks for it.
 
   $ printf 'int a[(char)-1 < 0 ? 1 : -1];\n' > signed-char.tc
-  $ typec --cc=$clang --emit-c signed-char.tc -o out/signed-char.i
+  $ typec --cc=$clang -fsigned-char --emit-c signed-char.tc -o out/signed-char.i
   $ typec --cc=$clang -funsigned-char --emit-c signed-char.tc
   typec: signed-char.tc:1: array has a negative length
   [80]

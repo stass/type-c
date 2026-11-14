@@ -8,9 +8,9 @@ typec gives each expression statement of a body, and a use of the address
 of each that it calls an lvalue. The backend compiles the result only if
 it agrees on every one. The files are expressions.c and builtins.c, which
 calls the builtins that a rule types or whose type is unknown, also in
-C23 for its va_start. The backends are those that backends.sh names, on
-an x86-64 host so that -m32 gives a second target; the warnings that
-these expressions draw are not of interest here.
+C23 for its va_start. The backends are those that backends.sh names, for
+two targets (its second_target); the warnings that these expressions
+draw are not of interest here.
 
   $ check() {
   >   std=$1 source=$2
@@ -25,9 +25,9 @@ these expressions draw are not of interest here.
   > }
   $ . ../backends.sh
   $ probe "$clang"
-  $ probe "$clang" -m32 -funsigned-char
+  $ probe "$clang" $second_target
   $ probe "$gcc"
-  $ probe "$gcc" -m32 -funsigned-char
+  $ probe "$gcc" $second_target
   $ check -std=gnu23 builtins "$clang"
   $ check -std=gnu23 builtins "$gcc"
 
@@ -63,7 +63,7 @@ undeclared in the backend.
   >   done
   > }
   $ builtins "$clang" -Werror=incompatible-pointer-types
-  $ builtins "$clang" -Werror=incompatible-pointer-types -m32
+  $ builtins "$clang" -Werror=incompatible-pointer-types $second_target
   $ gcc_errors='-Werror=incompatible-pointer-types -Werror=discarded-qualifiers'
   $ builtins "$gcc" "$gcc_errors"
-  $ builtins "$gcc" "$gcc_errors" -m32
+  $ builtins "$gcc" "$gcc_errors" $second_target

@@ -27,9 +27,11 @@ they are `/usr/bin/clang` and `/usr/local/bin/gcc-16`, those of the
 macOS development host (`test/run/backends.sh`). `headers.t` parses
 and reads the declarations of every C11 and POSIX header that each
 backend's system headers hold.
-`target.t` expects the model of x86-64, and `types.t` and
-`declarations.t` also compile with `-m32`, so dune runs these three on
-x86-64 hosts only. There are no other dependencies.
+`target.t` expects the model of x86-64 or of arm64, both Linux, and
+`types.t`, `declarations.t` and `expressions.t` compile for the host's target and
+for a second one, `-m32` on x86-64 and the other signedness of plain
+char elsewhere (`second_target` in `test/run/backends.sh`). There are
+no other dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec
@@ -53,20 +55,28 @@ computes, so a backend that disagrees fails to compile them.
 
 `tools/hosts` describes each Linux host that the suite runs on as a
 Dockerfile, with the base image pinned by digest and the compilers, the
-C library and OCaml by version: `debian` (Debian 13, glibc) and `alpine` (Alpine 3.24,
-musl), both x86-64 with the distribution's GCC and Clang, and OCaml 5.4
-and dune from Alpine's packages and from opam on Debian.
+C library and OCaml by version: Debian 13 (glibc) and Alpine 3.24
+(musl), each with the distribution's GCC and Clang, and OCaml 5.4 and
+dune from Alpine's packages and from opam on Debian. A host is a
+Dockerfile and a platform, and its name says both: `debian-amd64`,
+`debian-arm64`, `alpine-amd64` and `alpine-arm64`.
 `tools/hosts/run.sh HOST [LOG]` builds the image `typec-host-HOST` and
 runs `dune build` and `dune test` in a container of it, with the source
 mounted read-only, the build inside the container and no network. It
-needs a running Docker that can mount the source tree (colima, for
-instance, shares the home directory but not `/Volumes`), prints
-whether the suite passed, and writes the whole output to `LOG`, by
-default `${TMPDIR:-/tmp}/typec-host-HOST.log`.
+needs a running Docker with buildx (`docker-buildx` in Homebrew) that
+can mount the source tree (colima, for instance, shares the home
+directory but not `/Volumes`), prints whether the suite passed, and
+writes the whole output to `LOG`, by default
+`${TMPDIR:-/tmp}/typec-host-HOST.log`.
+
+A platform other than the machine's runs under emulation, which needs
+qemu-user binfmt handlers for it in the Docker VM (colima's has them for
+arm64: `docker run --rm --platform linux/arm64 alpine:3.24 uname -m`
+prints `aarch64`) and makes the build and the suite many times slower.
 
 ```sh
-tools/hosts/run.sh debian
-tools/hosts/run.sh alpine /Volumes/Optaine/alpine.log
+tools/hosts/run.sh debian-amd64
+tools/hosts/run.sh alpine-arm64 /Volumes/Optaine/alpine-arm64.log
 ```
 
 ### FreeBSD test host

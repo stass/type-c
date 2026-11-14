@@ -3,19 +3,21 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 typec --print-target prints the target model that the backend reports in
 its predefined macros when it is run with the other arguments as options.
-The backends are those that backends.sh names, on an x86-64 host, whose
-release varies with the host, and so do the optional floating types of
-Clang and uint64_t, which are left out here: __float128 is one on Linux
-alone, and uint64_t is unsigned long long on macOS.
+The backends are those that backends.sh names, on an x86-64 or arm64
+Linux host. Their release varies with the host, and so do the optional
+floating types of Clang and uint64_t, which are left out here:
+uint64_t is unsigned long long on macOS. The signedness of plain char and
+the type of wchar_t follow the architecture, and so does __float128,
+which is x86-64 alone; they are checked on their own below.
 
   $ unset TYPEC_CC
   $ . ./backends.sh
 
   $ typec --cc=$clang --print-target |
-  >   sed -e '1s/ [0-9]*$//' -e '/^optional_floats:/d' -e '/^uint64_type:/d'
+  >   sed -e '1s/ [0-9]*$//' -e '/^optional_floats:/d' \
+  >     -e '/^uint64_type:/d' -e '/^char_signed:/d' -e '/^wchar_type:/d'
   backend: Clang
   char_bit: 8
-  char_signed: true
   sizeof_short: 2
   sizeof_int: 4
   sizeof_long: 8
@@ -27,7 +29,6 @@ alone, and uint64_t is unsigned long long on macOS.
   sizeof_int128: 16
   size_type: unsigned long
   ptrdiff_type: long
-  wchar_type: int
   intmax_type: long
   uintmax_type: unsigned long
   intptr_type: long
@@ -36,24 +37,39 @@ alone, and uint64_t is unsigned long long on macOS.
   byte_order: little-endian
   stdc_version: 201710
 
-GCC spells the types in another order and reads the same target.
+Plain char is signed on x86-64 and unsigned on arm64 Linux, where wchar_t
+is unsigned int, not int. GCC spells the types in another order and reads
+the same target.
+
+  $ case $(uname -m) in
+  >   x86_64) char_signed=true wchar_type=int float128=1 ;;
+  >   aarch64) char_signed=false wchar_type="unsigned int" float128=0 ;;
+  >   *) echo "no expected model for $(uname -m)" ;;
+  > esac
+  $ printf 'char_signed: %s\nwchar_type: %s\n' $char_signed "$wchar_type" \
+  >   > arch_facts
+  $ typec --cc=$clang --print-target | grep -E '^(char_signed|wchar_type):' |
+  >   diff arch_facts -
+  $ typec --cc=$gcc --print-target | grep -E '^(char_signed|wchar_type):' |
+  >   diff arch_facts -
 
   $ facts() {
-  >   grep -E -e '^(backend|char_signed|char16_type):' \
+  >   grep -E -e '^(backend|char16_type):' \
   >     -e '^sizeof_(int|long|pointer):' |
   >   sed '1s/ [0-9]*$//'
   > }
   $ typec --cc=$gcc --print-target | facts
   backend: GCC
-  char_signed: true
   sizeof_int: 4
   sizeof_long: 8
   sizeof_pointer: 8
   char16_type: unsigned short
 
-GCC has every optional floating type on each host.
+GCC has every optional floating type on each host, and __float128 on
+x86-64.
 
-  $ typec --cc=$gcc --print-target | grep '^optional_floats:' | tr ' ' '\n'
+  $ typec --cc=$gcc --print-target | grep '^optional_floats:' |
+  >   tr ' ' '\n' | grep -v '^__float128$'
   optional_floats:
   _Float16
   _Float32
@@ -61,24 +77,18 @@ GCC has every optional floating type on each host.
   _Float128
   _Float32x
   _Float64x
-  __float128
+  $ test $(typec --cc=$gcc --print-target | grep -c ' __float128') = $float128
 
 The options reach the backend, so they change the model.
 
-  $ typec --cc=$clang -m32 --print-target -funsigned-char | facts
-  backend: Clang
+  $ typec --cc=$clang -fsigned-char --print-target | grep '^char_signed:'
+  char_signed: true
+  $ typec --cc=$clang --print-target -funsigned-char | grep '^char_signed:'
   char_signed: false
-  sizeof_int: 4
-  sizeof_long: 4
-  sizeof_pointer: 4
-  char16_type: unsigned short
-  $ typec --cc=$gcc -m32 --print-target -funsigned-char | facts
-  backend: GCC
+  $ typec --cc=$gcc -fsigned-char --print-target | grep '^char_signed:'
+  char_signed: true
+  $ typec --cc=$gcc --print-target -funsigned-char | grep '^char_signed:'
   char_signed: false
-  sizeof_int: 4
-  sizeof_long: 4
-  sizeof_pointer: 4
-  char16_type: unsigned short
   $ typec --cc=$gcc --print-target -std=gnu11 | grep stdc_version
   stdc_version: 201112
 

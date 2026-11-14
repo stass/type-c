@@ -13,11 +13,11 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 - [High] Check the license and provenance of each pilot candidate named
   in the plan before fetching any of them.
-- [Medium] Decide where the arm64 Linux test host runs (`tools/hosts`
-  runs the x86-64 Linux ones in containers and the FreeBSD one over ssh,
-  on a machine of the owner's), and where the corpus repository is
-  hosted: it exists locally at `/Volumes/Optaine/type-c-corpus`, with no
-  remote, and its README says what it holds.
+- [Medium] Decide where the corpus repository is hosted: it exists
+  locally at `/Volumes/Optaine/type-c-corpus`, with no remote, and its
+  README says what it holds. (`tools/hosts` runs the Linux hosts in
+  containers, the arm64 ones under emulation, and the FreeBSD one over
+  ssh, on a machine of the owner's.)
 
 ## Driver
 
@@ -571,14 +571,9 @@ is [type-c-language-design.md](type-c-language-design.md).
 ## Test hosts
 
 `tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24
-(musl) in containers, and on FreeBSD 16.0-CURRENT over ssh, all x86-64.
+(musl) in containers, each on x86-64 and on arm64 (the latter under
+emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
-- [Medium] `test/run/target.t`, `types.t` and `declarations.t` run on
-  x86-64 hosts only: `target.t` expects the x86-64 model and the other
-  two compile with `-m32` as well. Give them the expected model and a
-  second target of arm64 once an arm64 host runs the suite, so that
-  `types.t` confirms the provisional enumeration rule
-  (`Arithmetic.enum_compatible_type`) there too.
 - [Medium] `tools/hosts/freebsd.sh` runs `corpus/fetch.sh` for the whole
   manifest, GCC's archive included, whichever programs it runs, so an
   archive that does not download fails a run that does not need it.
@@ -592,7 +587,33 @@ is [type-c-language-design.md](type-c-language-design.md).
   one `DIR` at once are not guarded.
 - [Low] `tools/oracle/oracle.t` has its own default of
   `TYPEC_TEST_CLANG` instead of sourcing `test/run/backends.sh`.
-- [Low] `tools/hosts/run.sh run` runs `run.sh` as a host script.
+- [High] The arm64 hosts do not run reliably on the x86-64 colima VM:
+  its qemu-user (v7.0.0, `/usr/bin/qemu-aarch64` in the VM) kills about
+  1 in 100 GCC compilations with a segmentation fault of `cc1`,
+  whatever the load. `debian-arm64` therefore does not build (opam
+  compiles OCaml 5.4.1 with GCC; the build fails with `gcc: internal
+  compiler error: Segmentation fault`), and `headers.t` fails on
+  `alpine-arm64` in a different place each run (`present` and `unit`
+  lose a header when `gcc` crashes). Reproducer: in
+  `typec-host-alpine-arm64`, run `gcc -std=gnu11 -fsyntax-only -x c -`
+  on `#include <H>` for each header of `headers.t` a few hundred
+  times. Needs a newer qemu-user in the VM (not installed:
+  `tonistiigi/binfmt --install arm64` keeps the VM's handler) or a
+  native arm64 machine.
+- [Medium] `test/run/expressions.t` fails on `alpine-arm64`: Clang 22
+  rejects `__builtin_setjmp` and `__builtin_longjmp` there ("not
+  supported for the current target"), which the builtin table gives to
+  every target, so `builtin_probe`'s calls do not compile. Reproducer:
+  `dune test test/run/expressions.t` in `typec-host-alpine-arm64`. Give
+  the table a target condition, or have the probe skip what the backend
+  refuses.
+- [Medium] `test/unit/test_small_stack.ml` fails on `alpine-arm64`
+  with `FAIL: the backtrace names the stage`: the backtrace of a
+  `Stack_overflow` in `Small_stack.run` has at most
+  `frames_of_the_stage` frames there. Reproducer: `tools/hosts/run.sh
+  alpine-arm64` (or `dune test test/unit` in that image). Not known
+  whether OCaml 5.4 on arm64, or the emulation, shortens the
+  backtrace.
 
 ## Corpus
 

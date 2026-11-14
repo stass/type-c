@@ -11,15 +11,6 @@
   (env_var TYPEC_TEST_CLANG)
   (env_var TYPEC_TEST_GCC)))
 
-; The model that target.t expects and the -m32 of types.t,
-; declarations.t, expressions.t and initialisers.t are those of x86-64;
-; arm64 hosts do not run them (TODO.md, Test hosts).
-
-(cram
- (applies_to target types declarations expressions initialisers)
- (enabled_if
-  (= %{architecture} amd64)))
-
 ; read.t runs the reader on the output of both backends.
 
 (executable

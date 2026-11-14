@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-# The Linux x86-64 glibc test host: Debian 13 with its own GCC, a Clang
-# from apt.llvm.org, the oldest that typec supports
+# The Linux glibc test host, x86-64 or arm64: Debian 13 with its own GCC,
+# a Clang from apt.llvm.org, the oldest that typec supports
 # (Target.minimum_major_version), as Debian 13's own is older, and OCaml
 # and dune from opam, since Debian 13's OCaml 5.3 lacks the Char.Ascii of
-# 5.4 that tools/fuzz uses. The base image is pinned by digest; the
-# compilers, the C library's and the kernel's headers by package version;
-# the key of apt.llvm.org by fingerprint; OCaml and dune by a commit of
+# 5.4 that tools/fuzz uses. The base image is pinned by the digest of its
+# multi-platform index; the compilers, the C library's and the kernel's
+# headers by package version, the same on both platforms; the key of
+# apt.llvm.org by fingerprint; OCaml and dune by a commit of
 # opam-repository. Their own dependencies follow Debian 13, and Clang's
 # apt.llvm.org. A pinned version that leaves the archive fails the build
 # until it is bumped here.

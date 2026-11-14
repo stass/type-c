@@ -8,3 +8,15 @@
 
 clang=${TYPEC_TEST_CLANG:-/usr/bin/clang}
 gcc=${TYPEC_TEST_GCC:-/usr/local/bin/gcc-16}
+
+# The flags of a second target, for the tests that check two: -m32 where
+# the backend targets x86-64; elsewhere, which has no 32-bit target to
+# rely on, the other signedness of plain char.
+clang_macros=$("$clang" -dM -E -x c /dev/null)
+if echo "$clang_macros" | grep -q __x86_64__; then
+  second_target="-m32 -funsigned-char"
+elif echo "$clang_macros" | grep -q __CHAR_UNSIGNED__; then
+  second_target="-fsigned-char"
+else
+  second_target="-funsigned-char"
+fi
