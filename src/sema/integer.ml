@@ -50,3 +50,28 @@ let name = function
   | Unsigned_long_long -> "unsigned long long"
   | Int128 -> "__int128"
   | Unsigned_int128 -> "unsigned __int128"
+
+(* The integer rows of the multisets of 6.7.2p2, each sorted in the order
+   of [Tree.basic_type_specifier]. *)
+let of_specifiers (specifiers : Typec_syntax.Tree.basic_type_specifier list) =
+  match List.sort compare specifiers with
+  | [ Char ] -> Some Char
+  | [ Char; Signed ] -> Some Signed_char
+  | [ Char; Unsigned ] -> Some Unsigned_char
+  | [ Short ] | [ Short; Int ] | [ Short; Signed ] | [ Short; Int; Signed ] ->
+      Some Short
+  | [ Short; Unsigned ] | [ Short; Int; Unsigned ] -> Some Unsigned_short
+  | [ Int ] | [ Signed ] | [ Int; Signed ] -> Some Int
+  | [ Unsigned ] | [ Int; Unsigned ] -> Some Unsigned_int
+  | [ Long ] | [ Int; Long ] | [ Long; Signed ] | [ Int; Long; Signed ] ->
+      Some Long
+  | [ Long; Unsigned ] | [ Int; Long; Unsigned ] -> Some Unsigned_long
+  | [ Long; Long ]
+  | [ Int; Long; Long ]
+  | [ Long; Long; Signed ]
+  | [ Int; Long; Long; Signed ] ->
+      Some Long_long
+  | [ Long; Long; Unsigned ] | [ Int; Long; Long; Unsigned ] ->
+      Some Unsigned_long_long
+  | [ Bool ] -> Some Bool
+  | _ -> None

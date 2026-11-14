@@ -80,7 +80,8 @@ feature is built here.
 | 0.6 | Parser for statements and function bodies, including old-style definitions, with block-scope typedef names. |
 | 0.7 | GNU profile: attributes, alternate keywords, assembler, `typeof`, statement expressions, the builtin table; bodies in system headers skipped. |
 | 0.8 | Types: representation, compatibility, composite types, promotions, usual arithmetic conversions. |
-| 0.9 | Expression typing, constant evaluation, `_Generic` selection. |
+| 0.9a | Declarations to types: specifiers and declarators, tags, typedefs, scopes and linkage at file scope; integer constant expressions. |
+| 0.9b | Expression typing: lvalues, conversions, members, calls, compound literals, address and arithmetic constants, `_Generic` selection; block scopes. |
 | 0.10 | Typing oracle: compare the type `typec` gives each expression with Clang's AST dump. |
 | 0.11 | Corpus runner and platform sweep; fix the tail it finds. Several commits, one per class of construct. |
 | 0.12 | Fuzz harness for the reader and the parser; resource limits. |

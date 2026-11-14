@@ -26,7 +26,11 @@ type floating_type = Double | Float | Long_double
 type floating_suffix = { floating_type : floating_type; imaginary : bool }
 
 type t =
-  | Integer of { base : base; suffix : integer_suffix }  (** C11 6.4.4.1 *)
+  | Integer of {
+      base : base;
+      digits : string;  (** without the prefix of the base and the suffix *)
+      suffix : integer_suffix;
+    }  (** C11 6.4.4.1 *)
   | Floating of { suffix : floating_suffix }  (** C11 6.4.4.2 *)
   | Not_a_constant
 

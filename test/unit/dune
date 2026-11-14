@@ -7,9 +7,9 @@
  (libraries typec_driver))
 
 (tests
- (names test_target test_types)
- (modules canned_targets test_target test_types)
- (libraries typec_sema))
+ (names test_target test_types test_declarations)
+ (modules canned_targets test_target test_types test_declarations)
+ (libraries typec_cpp typec_syntax typec_sema))
 
 (test
  (name test_reader)

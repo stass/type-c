@@ -44,7 +44,14 @@ type enum_tag = private { enum_id : int; enum_name : string option }
 
 (** The length of an array type (6.7.6.2p4). A variable length is
     evaluated at run time, so the type does not carry it. *)
-type length = Constant of int | Unknown | Variable
+type length =
+  | Constant of int
+  | Opaque
+      (** {e Provisional (design P16).} An integer constant expression
+          that the backend evaluates, such as [sizeof (struct s)]. It is
+          compatible with any other length, which the backend checks. *)
+  | Unknown
+  | Variable
 
 (** The parameters of a function type (6.7.6.3). Their types are adjusted
     and unqualified: an array or function parameter is a pointer, and a
@@ -115,6 +122,7 @@ type error =
   | Variably_modified_member  (** 6.7.2.1p9. *)
   | Invalid_bit_field  (** 6.7.2.1p4. *)
   | Incompatible  (** No composite type: 6.2.7p1. *)
+  | Int128_unavailable  (** [__int128] on a target without it. *)
 
 val error_message : error -> string
 
@@ -128,8 +136,12 @@ val max_size : int
 (** {1 Building types} *)
 
 val void : t
-val arithmetic : Arithmetic.t -> t
-val integer : Integer.t -> t
+
+val arithmetic : Target.t -> Arithmetic.t -> (t, error) result
+(** The only way to make an arithmetic type, so that no type names
+    [__int128] on a target without it, which has no width for it. *)
+
+val integer : Target.t -> Integer.t -> (t, error) result
 
 val enum : enum_tag -> t
 val record : record_tag -> t
@@ -214,6 +226,11 @@ val compatible : Target.t -> tags -> t -> t -> bool
     old-style definition are compared as C11 says, by their promoted
     types, which rejects some pairs that GCC and Clang accept with a
     warning, such as [int g(float);] before [int g(x) float x; {...}]. *)
+
+val same_type : t -> t -> bool
+(** Whether two types are the same (6.7p3), as for the redefinition of a
+    typedef name: equal, but that an {!Opaque} length is the same as any
+    constant one, which the backend checks. *)
 
 val composite : Target.t -> tags -> t -> t -> (t, error) result
 (** The composite type of two compatible types (6.2.7p3): [Incompatible]

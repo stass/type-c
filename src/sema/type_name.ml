@@ -20,6 +20,7 @@ let record_keyword = function Struct -> "struct" | Union -> "union"
 
 let length_text = function
   | Constant count -> string_of_int count
+  | Opaque -> "<constant>"
   | Unknown -> ""
   | Variable -> "*"
 

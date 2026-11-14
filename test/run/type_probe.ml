@@ -37,7 +37,10 @@ let arithmetic_types target =
       (fun floating -> [ Arithmetic.Real floating; Complex floating ])
       [ Float; Double; Long_double ]
 
-let zero a = Printf.sprintf "(%s)0" (name (Ctype.arithmetic a))
+(* Every type here exists on the target. *)
+let arithmetic target a = Result.get_ok (Ctype.arithmetic target a)
+
+let zero target a = Printf.sprintf "(%s)0" (name (arithmetic target a))
 
 let print_conversions target =
   let types = arithmetic_types target in
@@ -45,14 +48,16 @@ let print_conversions target =
   List.iter
     (fun a ->
       let promoted_a = (promoted a :> Arithmetic.t) in
-      assert_type ("+" ^ zero a) (Ctype.arithmetic promoted_a);
+      assert_type ("+" ^ zero target a) (arithmetic target promoted_a);
       List.iter
         (fun b ->
           let common =
             Arithmetic.usual_arithmetic_conversions target (promoted a)
               (promoted b)
           in
-          assert_type (zero a ^ " + " ^ zero b) (Ctype.arithmetic common))
+          assert_type
+            (zero target a ^ " + " ^ zero target b)
+            (arithmetic target common))
         types)
     types
 
@@ -96,7 +101,7 @@ let print_bit_fields target =
       in
       assert_type
         (Printf.sprintf "+bit_fields.field%d" index)
-        (Ctype.arithmetic (promoted :> Arithmetic.t)))
+        (arithmetic target (promoted :> Arithmetic.t)))
     fields
 
 (* The largest value of [bits] bits, in hexadecimal. *)
@@ -140,13 +145,15 @@ let print_enums target tags =
       (match Arithmetic.enum_compatible_type target range with
       | Some integer ->
           get (Ctype.define_enum tags tag integer);
-          assert_type ("(enum " ^ tag_name ^ ")0") (Ctype.integer integer)
+          assert_type
+            ("(enum " ^ tag_name ^ ")0")
+            (arithmetic target (Integer integer))
       | None -> failwith "no integer type for an enumeration");
       Ctype.enum tag)
     (enumerator_ranges target)
 
-let compatibility_types tags enums =
-  let int_type = Ctype.integer Int in
+let compatibility_types target tags enums =
+  let int_type = arithmetic target (Integer Int) in
   let pointer t = get (Ctype.pointer_to t) in
   let array t length = get (Ctype.array_of tags t length) in
   let func parameters = get (Ctype.function_returning int_type parameters) in
@@ -157,14 +164,15 @@ let compatibility_types tags enums =
     Ctype.record (Ctype.declare_record tags Struct (Some name))
   in
   print_string "struct a;\nstruct b;\n";
-  [ int_type; Ctype.integer Unsigned_int; Ctype.integer Long;
-    Ctype.integer Long_long; Ctype.integer Char; Ctype.integer Signed_char;
+  let integer i = arithmetic target (Integer i) in
+  [ int_type; integer Unsigned_int; integer Long; integer Long_long;
+    integer Char; integer Signed_char;
     const int_type; array int_type Unknown; array int_type (Constant 3);
     array int_type (Constant 4); array (const int_type) (Constant 3);
     func (prototype []); func Unspecified;
-    func (prototype [ Ctype.integer Char ]);
-    func (prototype [ Ctype.arithmetic (Real Double) ]);
-    func (prototype [ Ctype.arithmetic (Real Float) ]);
+    func (prototype [ integer Char ]);
+    func (prototype [ arithmetic target (Real Double) ]);
+    func (prototype [ arithmetic target (Real Float) ]);
     func (prototype [ int_type ]);
     func (Prototype { types = [ int_type ]; variadic = true });
     func (prototype [ const int_type; array int_type (Constant 2) ]);
@@ -199,7 +207,8 @@ let () =
           print_conversions target;
           print_bit_fields target;
           let enums = print_enums target tags in
-          print_compatibility target tags (compatibility_types tags enums)
+          print_compatibility target tags
+            (compatibility_types target tags enums)
       | Error error ->
           prerr_endline (Target.error_message error);
           exit 1)

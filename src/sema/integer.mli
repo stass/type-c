@@ -31,5 +31,9 @@ val to_unsigned : t -> t
 (** The corresponding unsigned type (C11 6.2.5p6): [Unsigned_char] for
     plain [char]; an unsigned type is its own. *)
 
+val of_specifiers : Typec_syntax.Tree.basic_type_specifier list -> t option
+(** The integer type that a multiset of type specifiers names (C11
+    6.7.2p2), such as [long unsigned int]; [None] for any other. *)
+
 val name : t -> string
 (** The type spelled as in C, such as [unsigned long]. *)

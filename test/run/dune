@@ -35,3 +35,14 @@
 (cram
  (applies_to parse)
  (deps parse_check.exe))
+
+; declarations.t compiles the output of declaration_probe with each
+; backend.
+
+(executable
+ (name declaration_probe)
+ (libraries typec_cpp typec_syntax typec_sema))
+
+(cram
+ (applies_to declarations)
+ (deps declaration_probe.exe))

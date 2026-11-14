@@ -20,7 +20,7 @@ type record_tag = {
 }
 
 type enum_tag = { enum_id : int; enum_name : string option }
-type length = Constant of int | Unknown | Variable
+type length = Constant of int | Opaque | Unknown | Variable
 
 type parameters =
   | Prototype of { types : t list; variadic : bool }
@@ -75,6 +75,7 @@ type error =
   | Variably_modified_member
   | Invalid_bit_field
   | Incompatible
+  | Int128_unavailable
 
 let max_size = 4096
 
@@ -119,8 +120,17 @@ let within_limit t =
   if t.size > limit then Error Too_large else Ok t
 
 let void = of_shape Void
-let arithmetic a = of_shape (Arithmetic a)
-let integer i = arithmetic (Integer i)
+(* The only way to make an arithmetic type, so that no type names
+   [__int128] on a target without it, where the target has no width for
+   it. *)
+let arithmetic target (a : Arithmetic.t) =
+  match a with
+  | Integer (Int128 | Unsigned_int128)
+    when target.Target.sizeof_int128 = None ->
+      Error Int128_unavailable
+  | Integer _ | Real _ | Complex _ -> Ok (of_shape (Arithmetic a))
+
+let integer target i = arithmetic target (Integer i)
 let enum tag = of_shape (Enum tag)
 let record tag = of_shape (Record tag)
 let pointer_to referenced = within_limit (of_shape (Pointer referenced))
@@ -227,14 +237,14 @@ let is_complete tags t =
   | Array { length = Unknown; _ } -> false
   (* The element type was complete when the array type was built, and a
      type never becomes incomplete again. *)
-  | Array { length = Constant _ | Variable; _ } -> true
+  | Array { length = Constant _ | Opaque | Variable; _ } -> true
 
 let array_of tags element length =
   match length with
   | _ when is_function element -> Error Array_of_function
   | _ when not (is_complete tags element) -> Error Array_of_incomplete
   | Constant count when count < 0 -> Error Negative_length
-  | Constant _ | Unknown | Variable ->
+  | Constant _ | Opaque | Unknown | Variable ->
       within_limit (of_shape (Array { element; length }))
 
 let rec is_variably_modified t =
@@ -325,7 +335,7 @@ let add_member_names tags names member =
 let is_flexible_array member =
   match member.member_type.shape with
   | Array { length = Unknown; _ } -> true
-  | Array { length = Constant _ | Variable; _ }
+  | Array { length = Constant _ | Opaque | Variable; _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Function _ ->
       false
 
@@ -383,8 +393,11 @@ let merge_length a b =
   | Constant x, Constant y ->
       require (x = y);
       a
-  | Constant _, (Unknown | Variable) -> a
-  | (Unknown | Variable), Constant _ -> b
+  (* The backend compares an opaque length with any other constant. *)
+  | Constant _, (Opaque | Unknown | Variable) -> a
+  | (Opaque | Unknown | Variable), Constant _ -> b
+  | Opaque, (Opaque | Unknown | Variable) -> a
+  | (Unknown | Variable), Opaque -> b
   | Variable, (Unknown | Variable) | Unknown, Variable -> Variable
   | Unknown, Unknown -> Unknown
 
@@ -392,7 +405,8 @@ let merge_length a b =
    prototype in scope (6.5.2.2p6). *)
 let promoted target tags parameter =
   match as_arithmetic tags parameter with
-  | Some a -> arithmetic (Arithmetic.default_argument_promotion target a)
+  | Some a ->
+      of_shape (Arithmetic (Arithmetic.default_argument_promotion target a))
   | None -> parameter
 
 let rec merge target tags a b =
@@ -466,6 +480,41 @@ let composite target tags a b =
   | t -> within_limit t
   | exception Not_compatible -> Error Incompatible
 
+(* The opaque lengths match as [merge_length] matches them. *)
+let same_length a b =
+  let is_constant = function
+    | Constant _ | Opaque -> true
+    | Unknown | Variable -> false
+  in
+  let merges () =
+    match merge_length a b with _ -> true | exception Not_compatible -> false
+  in
+  a = b || (is_constant a && is_constant b && merges ())
+
+let rec same_type a b =
+  a.qualifiers = b.qualifiers
+  &&
+  match (a.shape, b.shape) with
+  | Pointer x, Pointer y -> same_type x y
+  | Array x, Array y ->
+      same_length x.length y.length && same_type x.element y.element
+  | Function x, Function y ->
+      same_type x.return y.return
+      && same_parameters x.parameters y.parameters
+  | (Void | Arithmetic _ | Enum _ | Record _), _ -> a.shape = b.shape
+  | (Pointer _ | Array _ | Function _), _ -> false
+
+and same_parameters a b =
+  let same_types x y =
+    List.compare_lengths x y = 0 && List.for_all2 same_type x y
+  in
+  match (a, b) with
+  | Prototype x, Prototype y ->
+      x.variadic = y.variadic && same_types x.types y.types
+  | Old_style x, Old_style y -> same_types x y
+  | Unspecified, Unspecified -> true
+  | (Prototype _ | Old_style _ | Unspecified), _ -> false
+
 let compatible target tags a b =
   match merge target tags a b with
   | _ -> true
@@ -480,6 +529,7 @@ let error_message = function
       "bit-field has a type other than an integer type, or a width outside \
        that type or zero with a name"
   | Incompatible -> "types are not compatible"
+  | Int128_unavailable -> "__int128 is not available on this target"
   | Qualified_function -> "function type has qualifiers"
   | Atomic_array -> "_Atomic qualifies an array type"
   | Restrict_without_object_pointer ->

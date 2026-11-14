@@ -2,4 +2,5 @@
 ; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 (library
- (name typec_sema))
+ (name typec_sema)
+ (libraries typec_cpp typec_syntax))

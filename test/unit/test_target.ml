@@ -63,6 +63,7 @@ let without name =
 let lp64_dump_with name value = dump_of (without name @ [ (name, value) ])
 
 let malformed name value = Error (Target.Malformed_macro { name; value })
+let unsupported guarantee = Error (Target.Unsupported_model guarantee)
 
 (* A dump and the model or the error it must yield. *)
 type case = {
@@ -122,6 +123,56 @@ let error_cases =
       name = "size in hexadecimal";
       dump = lp64_dump_with "__SIZEOF_INT__" "0x4";
       expected = malformed "__SIZEOF_INT__" "0x4";
+    };
+    {
+      name = "CHAR_BIT below 8";
+      dump = lp64_dump_with "__CHAR_BIT__" "7";
+      expected = unsupported "an integer type narrower than C allows";
+    };
+    {
+      name = "long narrower than int";
+      dump = lp64_dump_with "__SIZEOF_LONG__" "2";
+      expected = unsupported "an integer type narrower than C allows";
+    };
+    {
+      name = "int wider than long";
+      dump = lp64_dump_with "__SIZEOF_INT__" "16";
+      expected = unsupported "an integer type narrower than one of lower rank";
+    };
+    {
+      name = "long long of 256 bits";
+      dump = lp64_dump_with "__SIZEOF_LONG_LONG__" "32";
+      expected = unsupported "an integer type wider than 128 bits";
+    };
+    {
+      name = "__int128 of 256 bits";
+      dump = lp64_dump_with "__SIZEOF_INT128__" "32";
+      expected = unsupported "an integer type wider than 128 bits";
+    };
+    {
+      name = "signed size_t";
+      dump = lp64_dump_with "__SIZE_TYPE__" "long int";
+      expected = unsupported "a typedef of the wrong signedness";
+    };
+    {
+      name = "64-bit char32_t";
+      dump = lp64_dump_with "__CHAR32_TYPE__" "long unsigned int";
+      expected = unsupported "a character type wider than 32 bits";
+    };
+    {
+      name = "64-bit wchar_t";
+      dump = lp64_dump_with "__WCHAR_TYPE__" "long int";
+      expected = unsupported "a character type wider than 32 bits";
+    };
+    {
+      name = "huge size";
+      dump = lp64_dump_with "__SIZEOF_INT__" "1152921504606846980";
+      expected = malformed "__SIZEOF_INT__" "1152921504606846980";
+    };
+    {
+      name = "unsigned ptrdiff_t";
+      dump = lp64_dump_with "__PTRDIFF_TYPE__" "long unsigned int";
+      expected = unsupported "a typedef of the wrong signedness";
     };
     {
       name = "negative size";

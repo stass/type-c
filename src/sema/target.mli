@@ -45,11 +45,25 @@ type error =
   | Missing_macro of string  (** A macro the model needs is not defined. *)
   | Malformed_macro of { name : string; value : string }
       (** A macro the model needs has a value it cannot read. *)
+  | Unsupported_model of string
+      (** The macros break a guarantee of C on the types, or describe an
+          integer type wider than {!max_integer_width}. *)
+
+val max_integer_width : int
+(** 128 bits: the widest integer type of a model, which bounds the work
+    of constant evaluation. *)
 
 val of_predefined_macros : string -> (t, error) result
 (** [of_predefined_macros dump] reads the output of [cc -dM -E]: one
     [#define NAME VALUE] per line, empty lines allowed. Macros the model
-    does not use are ignored, but every line must have that form. *)
+    does not use are ignored, but every line must have that form. The
+    model must keep the guarantees of C that the front end relies on:
+    [CHAR_BIT] of at least 8, the minimum widths of the standard integer
+    types (5.2.4.2.1) in the order of their ranks (6.2.5p8), and unsigned
+    [size_t], [uintmax_t], [char16_t] and [char32_t] with signed
+    [ptrdiff_t], [intmax_t] and [intptr_t]; and [wchar_t], [char16_t]
+    and [char32_t] of at most 32 bits. A size above 65536 is
+    malformed. *)
 
 val integer_width : t -> Integer.t -> int
 (** The width of an integer type in bits: its value bits and its sign bit

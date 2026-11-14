@@ -25,12 +25,13 @@ let get = function
   | Error error -> failwith (Ctype.error_message error)
 
 let error_of = function Ok _ -> None | Error error -> Some error
-let int_type = Ctype.integer Int
-let char_type = Ctype.integer Char
-let unsigned_type = Ctype.integer Unsigned_int
-let long_type = Ctype.integer Long
-let float_type = Ctype.arithmetic (Real Float)
-let double_type = Ctype.arithmetic (Real Double)
+let integer i = get (Ctype.integer lp64 i)
+let int_type = integer Int
+let char_type = integer Char
+let unsigned_type = integer Unsigned_int
+let long_type = integer Long
+let float_type = get (Ctype.arithmetic lp64 (Real Float))
+let double_type = get (Ctype.arithmetic lp64 (Real Double))
 let pointer t = get (Ctype.pointer_to t)
 let tags = Ctype.create_tags ()
 let array t length = get (Ctype.array_of tags t length)
@@ -217,6 +218,9 @@ let rec pointers count t =
 let construction_errors : (string * (Ctype.t, Ctype.error) result
                           * Ctype.error option) list =
   [
+    ("__int128 without it", Ctype.integer ilp32 Int128,
+     Some Int128_unavailable);
+    ("unsigned __int128 with it", Ctype.integer lp64 Unsigned_int128, None);
     ("const function", Ctype.qualify const function_type,
      Some Qualified_function);
     ("unqualified function", Ctype.qualify Ctype.no_qualifiers function_type,
@@ -427,7 +431,7 @@ let definition_cases : (string * Ctype.error option * Ctype.error option)
      Some Invalid_bit_field);
     ("_Bool : 2",
      definition_outcome Struct
-       [ member ~bit_field_width:2 (Some "b") (Ctype.integer Bool) ],
+       [ member ~bit_field_width:2 (Some "b") (integer Bool) ],
      Some Invalid_bit_field);
     ("enumerated bit-field",
      definition_outcome Struct
@@ -494,7 +498,7 @@ let composite_cases : (string * Ctype.t * Ctype.t * Ctype.t option) list =
   [
     ("int, int", int_type, int_type, Some int_type);
     ("int, long", int_type, long_type, None);
-    ("char, signed char", char_type, Ctype.integer Signed_char, None);
+    ("char, signed char", char_type, integer Signed_char, None);
     ("const int, int", qualify const int_type, int_type, None);
     ("_Atomic int, int", qualify atomic int_type, int_type, None);
     ("volatile int, volatile int", qualify volatile int_type,
@@ -601,7 +605,7 @@ let check_composite (name, a, b, expected) =
 let unsigned_short_parameter () =
   check "int(unsigned short), int() on a 16-bit int target"
     (Ctype.compatible int16 tags
-       (func int_type (prototype [ Ctype.integer Unsigned_short ]))
+       (func int_type (prototype [ integer Unsigned_short ]))
        (func int_type Unspecified))
     false
 
@@ -610,9 +614,9 @@ let unsigned_short_parameter () =
 let printing_cases : (Ctype.t * string) list =
   [
     (int_type, "int");
-    (Ctype.integer Unsigned_long, "unsigned long");
-    (Ctype.integer Unsigned_int128, "unsigned __int128");
-    (Ctype.arithmetic (Complex Double), "_Complex double");
+    (integer Unsigned_long, "unsigned long");
+    (integer Unsigned_int128, "unsigned __int128");
+    (get (Ctype.arithmetic lp64 (Complex Double)), "_Complex double");
     (qualify { const with volatile = true } int_type, "const volatile int");
     (qualify atomic int_type, "_Atomic int");
     (pointer int_type, "int *");

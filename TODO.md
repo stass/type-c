@@ -63,20 +63,10 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Target model
 
-- [Medium] `Target.of_predefined_macros` accepts any positive sizes and
-  any integer type behind each typedef, so a wrong backend can give
-  `char_bit: 1` or a signed `size_t`. Before constant evaluation reads
-  the model, check C's guarantees once there (`CHAR_BIT >= 8`, minimum
-  widths and the order short <= int <= long <= long long, a cap on sizes,
-  unsigned `size_t`, `uintmax_t`, `char16_t` and `char32_t`, signed
-  `ptrdiff_t`, `intmax_t` and `intptr_t`), preferably by separate signed
-  and unsigned types for the typedef fields, and make `Target.t` private.
-- [Medium] `Target.integer_width` raises `Invalid_argument` for the
-  `__int128` types on a target without them, and `Ctype.integer` builds
-  such a type on any target, so a type that reaches the promotions there
-  stops the compiler. Before the declaration code and the builtin table
-  can name `__int128`, make one constructor that takes the target the
-  only way to build the type.
+- [Low] `Target.t` is a public record, so code can build a model that
+  skips the checks of `Target.of_predefined_macros`. Make it private,
+  preferably with separate signed and unsigned types for the typedef
+  fields, once the tests build their models from dumps only.
 - [Medium] Backend options that change C's types without changing a
   predefined macro make the model wrong without a message:
   `-fshort-enums` (the integer type of enumerations) and
@@ -104,11 +94,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   floating suffixes `df`, `dd` and `dl`. Decide which the GNU profile
   accepts once it has those types (0.7), and how `floating_type` names
   them.
-- [Medium] `Number.classify` says which constant a number is but not
-  where its digits end, and the type of an integer constant depends on
-  its value (C11 6.4.4.1). When constant evaluation needs the value,
-  have the classifier return the digits too, so that the grammar of a
-  constant stays in one place.
 - [Medium] A token records the file it belongs to, not the inclusion:
   two inclusions of one header have one owner. Design 11.1 keeps the
   checked state per file and does not carry it into or out of an
@@ -152,30 +137,30 @@ is [type-c-language-design.md](type-c-language-design.md).
   pointer, array and function derivations of a declarator, and the
   statements that end in a substatement: `if (a) if (b) ...`, `else if`
   chains, loops and labels), so a chain is not bounded by
-  `Parser.max_nesting`, and its tree is as deep as it is long.
-  A pass that recurses over the tree, such as typing (0.9) or the test
-  dump, can exhaust the stack on a long chain. Before 0.9, either count
-  chain length against the bound or have such passes walk chains in
-  loops.
-- [Medium] The parser does not check the constraints on what it accepts:
-  combinations of type specifiers (C11 6.7.2p2) and storage classes
-  (6.7.1p2), qualifiers, `static` and `[*]` outside the outermost array
-  derivation of a parameter (6.7.6.2p1), identifier lists outside a
-  definition (6.7.6.3p3), alignment specifiers outside the places of
-  6.7.5p2, storage classes other than `extern` and `static` in a function
-  definition (6.9.1p4; `typedef int f(void) { }` makes `f` a typedef
-  name), the declaration list of an old-style definition (6.9.1p6: only
-  `register`, no initialiser, and each declarator names an identifier of
-  the list), the storage classes of a `for` declaration (6.8.5p3),
-  `case` and `default` outside a `switch` (6.8.1p2), `break` and
-  `continue` outside a loop (6.8.6.2p1, 6.8.6.3p1), duplicate and
-  missing labels (6.8.1p3, 6.8.6.1p1) and `return` with or without a
-  value (6.8.6.4p1). Check them where types are built (0.8, 0.9).
-- [Medium] The parser decides typedef names by C's scope rules (6.2.1)
-  with its own scope map and start points, and typing (0.9) must resolve
-  the same identifiers by the same rules. Before 0.9, have the parser
-  record what each identifier resolved to, or share one scope module, so
-  that the rules have one implementation.
+  `Parser.max_nesting`, and its tree is as deep as it is long. A pass
+  that recurses over the tree can exhaust the stack on a long chain: the
+  constant evaluator of `Declarations` counts its depth against
+  `max_expression_depth`, and expression typing (0.9b) and the test dump
+  must count too or walk chains in loops.
+- [Medium] Nothing checks the constraints of statements that the parser
+  accepts: the storage classes of a `for` declaration (6.8.5p3), `case`
+  and `default` outside a `switch` (6.8.1p2), `break` and `continue`
+  outside a loop (6.8.6.2p1, 6.8.6.3p1), duplicate and missing labels
+  (6.8.1p3, 6.8.6.1p1) and `return` with or without a value (6.8.6.4p1).
+  Check them where bodies are typed (0.9b). `Declarations` checks those
+  of declarations.
+- [Medium] The parser decides typedef names with a scope map of its own
+  (6.2.1), and `Declarations` resolves the same identifiers through
+  `Scope`, so where each scope starts and ends is implemented twice; a
+  `Typedef_name` that the scope of `Declarations` does not bind as a
+  typedef is an error there. Both keep the same fact, which identifier a
+  name denotes at a point, and `Scope` is generic in the binding so that
+  the parser could keep `(binding, unit) Scope.t`, but sharing the map
+  would not share the rules. Proposed: one traversal. Move `Tree` into a
+  library of its own, have the parser call the declaration reader at the
+  point where each identifier comes into scope (6.2.1p7), and ask its
+  `Scope` whether a name is a typedef name. Decide before 0.9b adds block
+  scopes, which would add a third copy of the rules.
 - [Medium] GCC and Clang accept in their GNU modes, and the parser
   refuses, a lone `;` at file scope, empty initialiser braces `{}` and a
   struct or union without members. Add them to the GNU profile (0.7)
@@ -188,9 +173,71 @@ is [type-c-language-design.md](type-c-language-design.md).
   emission copies them to the backend. Stage 5, which gives them a
   meaning, decides where they may stand and what emission does with
   them.
-- [Low] `Parser.error` is `Reader.error`, whose documentation describes
-  text that is not `cc -E` output. When a third stage reports located
-  errors, give the type a module of its own.
+- [Low] `Parser.error` and `Declarations.error` are `Reader.error`,
+  whose documentation describes text that is not `cc -E` output. Give
+  the located error a module of its own in `typec_cpp`.
+
+## Declarations
+
+- [High] Initialisers are not read: an array of unknown size keeps its
+  incomplete type where its initialiser completes it (6.7.9p22), and the
+  tags and enumerators that an initialiser declares, inside `sizeof` or a
+  cast, are not declared. Read initialisers with compound literals
+  (0.9b), which need the same rule.
+- [Medium] In an integer constant expression `sizeof` of an expression
+  is opaque, without a check of its operand, and `_Generic` is an error,
+  because only 0.9b types expressions. Take both from expression typing
+  there, so that `sizeof x` of a scalar `x` has its value and that of a
+  variable length array is no constant (6.5.3.4p2).
+- [High] Before 0.9b reads function bodies, decide how a body sees the
+  translation unit at its own point. `body_scope` is a persistent
+  snapshot, but `Ctype.tags` is one mutable table in its state at the end
+  of the file, so in `struct s; void f(void) { sizeof (struct s); }
+  struct s { int a; };` the structure would look complete inside `f`.
+  Either record completion in the scope or type each body during `read`.
+- [High] 0.9b needs a table of the objects and functions with linkage
+  that does not depend on scope (6.2.2p4, 6.2.7p2): a block-scope
+  `extern int x;`, even where the file-scope `x` is hidden, denotes the
+  same entity and merges its composite type. `Declarations.t` should
+  carry it.
+- [Medium] An `entity` and an `item` carry no location or tree node, so
+  no message can point at a previous declaration and a consumer lines
+  `items` up with the tree by position; and the parameter frame of
+  `body_scope` is a map, which loses the order of the parameters that
+  lowering needs. Add both when 0.9b or Stage 1 first needs them.
+- [Medium] `derive` reads a declarator outside in, so array lengths and
+  parameter lists are read from last to first, against the order of
+  scopes (6.2.1p7): `int a[sizeof (enum { A = 2 })][A];` finds `A`
+  undeclared, which both backends accept. Walk from the name outward
+  first, collecting the derivations, then apply them in reverse; that
+  also removes `applies_to_name`.
+- [Low] `specified.storage` holds a `Tree.storage_class`, which can say
+  `_Thread_local` although `storage_class` never puts it there. Give it a
+  type without that case.
+- [Low] `Declarations` refuses some code that both backends accept with
+  a warning: `sizeof (void)` and `sizeof` of a function type, unknown
+  escape sequences such as `'\q'`, `_Complex` alone and `_Complex int`
+  (the last two for the GNU profile, 0.7).
+- [Medium] GCC and Clang fold floating arithmetic in an array length, an
+  enumerator value or a bit-field width (`(int)(1.5 * 2)`), and accept a
+  signed overflow there with a warning (`INT_MAX + 1`). `Declarations`
+  follows C11 (6.6p6, p4) and refuses both. If the corpus (0.11) has
+  them, decide whether the GNU profile folds them.
+- [Medium] Evidence for P16 (no aggregate layout), for the Stage 0 gate.
+  The places where the declarations need a layout value and leave it to
+  the backend as `Integer_constant.Opaque`: an array length of the size
+  of a structure, union or array (`char b[sizeof (struct s)]`, the
+  `sizeof a / sizeof a[0]` idiom), which gives `Ctype.Opaque`, compatible
+  with every constant length, so typec misses a conflict such as
+  `int a[sizeof (struct s)]; int a[4];`; an enumerator value from a size
+  (`enum { SIZE = sizeof (struct s) }`, a common idiom), which is an
+  error, as it decides the integer type of the enumeration and the types
+  and sizes that follow; a bit-field width from a size, which is an
+  error; a `_Static_assert` on a size, which passes through unchecked;
+  `offsetof`, which GCC and Clang expand to `__builtin_offsetof` (0.7). The target model has no
+  alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
+  of any type and those sizes are opaque too, although they are not
+  aggregates. How often real code needs each is for the corpus to show.
 
 ## Fuzzing
 

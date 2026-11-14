@@ -239,7 +239,7 @@ let place_cases =
 let show_constant constant =
   let word name present = if present then [ name ] else [] in
   match constant with
-  | Number.Integer { base; suffix } ->
+  | Number.Integer { base; digits; suffix } ->
       let base_name =
         match base with
         | Number.Binary -> "binary"
@@ -254,7 +254,7 @@ let show_constant constant =
         | Number.Long_long -> [ "long long" ]
       in
       String.concat " "
-        ([ "integer"; base_name ]
+        ([ "integer"; base_name; digits ]
         @ word "unsigned" suffix.unsigned
         @ length
         @ word "imaginary" suffix.imaginary)
@@ -272,25 +272,25 @@ let show_constant constant =
 (* Each spelling with the constant it is. *)
 let constant_cases =
   [
-    ("0", "integer octal");
-    ("7", "integer decimal");
-    ("0777", "integer octal");
-    ("0x1F", "integer hexadecimal");
-    ("0XaBu", "integer hexadecimal unsigned");
-    ("0b101", "integer binary");
-    ("0B1", "integer binary");
-    ("1u", "integer decimal unsigned");
-    ("1U", "integer decimal unsigned");
-    ("1l", "integer decimal long");
-    ("1LL", "integer decimal long long");
-    ("1ull", "integer decimal unsigned long long");
-    ("1LLu", "integer decimal unsigned long long");
-    ("1uLL", "integer decimal unsigned long long");
-    ("1lu", "integer decimal unsigned long");
-    ("1i", "integer decimal imaginary");
-    ("1ui", "integer decimal unsigned imaginary");
-    ("2J", "integer decimal imaginary");
-    ("1Il", "integer decimal long imaginary");
+    ("0", "integer octal 0");
+    ("7", "integer decimal 7");
+    ("0777", "integer octal 0777");
+    ("0x1F", "integer hexadecimal 1F");
+    ("0XaBu", "integer hexadecimal aB unsigned");
+    ("0b101", "integer binary 101");
+    ("0B1", "integer binary 1");
+    ("1u", "integer decimal 1 unsigned");
+    ("1U", "integer decimal 1 unsigned");
+    ("1l", "integer decimal 1 long");
+    ("1LL", "integer decimal 1 long long");
+    ("1ull", "integer decimal 1 unsigned long long");
+    ("1LLu", "integer decimal 1 unsigned long long");
+    ("1uLL", "integer decimal 1 unsigned long long");
+    ("1lu", "integer decimal 1 unsigned long");
+    ("1i", "integer decimal 1 imaginary");
+    ("1ui", "integer decimal 1 unsigned imaginary");
+    ("2J", "integer decimal 2 imaginary");
+    ("1Il", "integer decimal 1 long imaginary");
     ("1.0", "floating double");
     ("1.", "floating double");
     (".5", "floating double");
@@ -310,10 +310,10 @@ let constant_cases =
     ("1.0if", "floating float imaginary");
     ("1.0Fj", "floating float imaginary");
     ("1.0lJ", "floating long double imaginary");
-    ("0xfull", "integer hexadecimal unsigned long long");
-    ("00", "integer octal");
-    ("0u", "integer octal unsigned");
-    ("1jul", "integer decimal unsigned long imaginary");
+    ("0xfull", "integer hexadecimal f unsigned long long");
+    ("00", "integer octal 00");
+    ("0u", "integer octal 0 unsigned");
+    ("1jul", "integer decimal 1 unsigned long imaginary");
     ("08e1", "floating double");
     ("0x0p0fi", "floating float imaginary");
   ]

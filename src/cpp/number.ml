@@ -14,7 +14,7 @@ type floating_type = Double | Float | Long_double
 type floating_suffix = { floating_type : floating_type; imaginary : bool }
 
 type t =
-  | Integer of { base : base; suffix : integer_suffix }
+  | Integer of { base : base; digits : string; suffix : integer_suffix }
   | Floating of { suffix : floating_suffix }
   | Not_a_constant
 
@@ -167,7 +167,7 @@ let classify_exn spelling =
   else begin
     let whole = String.sub spelling digits_start whole_digits in
     let base = integer_base base whole in
-    Integer { base; suffix = read_integer_suffix cursor }
+    Integer { base; digits = whole; suffix = read_integer_suffix cursor }
   end
 
 let classify spelling =

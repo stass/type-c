@@ -19,9 +19,9 @@ reports (`--print-target`).
 
 Requirements: OCaml 5 and dune 3; the tests also need a C compiler as
 `cc`, and `test/run/target.t`, `test/run/read.t`, `test/run/types.t`,
-`test/run/pipeline.t` and `test/run/parse.t` run `/usr/bin/clang` and
-`/usr/local/bin/gcc-16`, `types.t` with `-m32` too. There are no other
-dependencies.
+`test/run/declarations.t`, `test/run/pipeline.t` and `test/run/parse.t`
+run `/usr/bin/clang` and `/usr/local/bin/gcc-16`, `types.t` and
+`declarations.t` with `-m32` too. There are no other dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec
@@ -32,7 +32,9 @@ dune test     # unit tests and end-to-end cram tests
 
 Library tests are in `test/unit`; the parser's are tables of C text and
 the structural dump of its tree (`test/support/tree_dump.ml`) or its
-error. `test/run` holds cram tests that run `typec` and the backends.
+error. `test/run` holds cram tests that run `typec` and the backends;
+`types.t` and `declarations.t` compile static assertions of what typec
+computes, so a backend that disagrees fails to compile them.
 
 ## Choosing the backend
 

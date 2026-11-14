@@ -32,6 +32,12 @@ type error =
   | Duplicate_macro of string
   | Missing_macro of string
   | Malformed_macro of { name : string; value : string }
+  | Unsupported_model of string
+
+(* The widest integer type of a model, which bounds the work of constant
+   evaluation. *)
+let max_integer_width = 128
+let max_character_width = 32
 
 (* Raised at the first defect of a dump and caught in of_predefined_macros. *)
 exception Invalid of error
@@ -85,9 +91,13 @@ let decimal text =
   else None
 
 (* A size or a width: a positive decimal number. *)
+(* Far above the size of any type, it keeps a width in bits, a size times
+   CHAR_BIT, from overflowing. *)
+let max_count = 1 lsl 16
+
 let count_of_value name value =
   match decimal value with
-  | Some count when count > 0 -> count
+  | Some count when count > 0 && count <= max_count -> count
   | Some _ | None -> malformed name value
 
 let read_count macros name = count_of_value name (find macros name)
@@ -96,36 +106,22 @@ let read_count macros name = count_of_value name (find macros name)
 let read_optional_count macros name =
   Option.map (count_of_value name) (Macros.find_opt name macros)
 
-(* The spellings that C11 6.7.2p2 allows for each type, as sorted words:
-   the order of the specifiers does not matter. *)
-let integer_type_of_words words : Integer.t option =
-  match List.sort String.compare words with
-  | [ "char" ] -> Some Char
-  | [ "char"; "signed" ] -> Some Signed_char
-  | [ "char"; "unsigned" ] -> Some Unsigned_char
-  | [ "short" ]
-  | [ "int"; "short" ]
-  | [ "short"; "signed" ]
-  | [ "int"; "short"; "signed" ] ->
-      Some Short
-  | [ "short"; "unsigned" ] | [ "int"; "short"; "unsigned" ] ->
-      Some Unsigned_short
-  | [ "int" ] | [ "signed" ] | [ "int"; "signed" ] -> Some Int
-  | [ "unsigned" ] | [ "int"; "unsigned" ] -> Some Unsigned_int
-  | [ "long" ] | [ "int"; "long" ] | [ "long"; "signed" ]
-  | [ "int"; "long"; "signed" ] ->
-      Some Long
-  | [ "long"; "unsigned" ] | [ "int"; "long"; "unsigned" ] ->
-      Some Unsigned_long
-  | [ "long"; "long" ]
-  | [ "int"; "long"; "long" ]
-  | [ "long"; "long"; "signed" ]
-  | [ "int"; "long"; "long"; "signed" ] ->
-      Some Long_long
-  | [ "long"; "long"; "unsigned" ] | [ "int"; "long"; "long"; "unsigned" ]
-    ->
-      Some Unsigned_long_long
+(* A type is spelled as type specifiers (C11 6.7.2p2), such as
+   [long unsigned int], in any order. *)
+let specifier_of_word :
+    string -> Typec_syntax.Tree.basic_type_specifier option = function
+  | "char" -> Some Char
+  | "short" -> Some Short
+  | "int" -> Some Int
+  | "long" -> Some Long
+  | "signed" -> Some Signed
+  | "unsigned" -> Some Unsigned
   | _ -> None
+
+let integer_type_of_words words =
+  let specifiers = List.filter_map specifier_of_word words in
+  if List.length specifiers <> List.length words then None
+  else Integer.of_specifiers specifiers
 
 let read_integer_type macros name =
   let value = find macros name in
@@ -183,9 +179,6 @@ let model_of_macros macros =
     stdc_version = read_stdc_version macros;
   }
 
-let of_predefined_macros dump =
-  try Ok (model_of_macros (macros_of_dump dump))
-  with Invalid error -> Error error
 
 (* GCC and Clang give no integer type padding bits, so a width is the
    size in bits. *)
@@ -210,6 +203,60 @@ let is_signed target (integer : Integer.t) =
   | Bool | Unsigned_char | Unsigned_short | Unsigned_int | Unsigned_long
   | Unsigned_long_long | Unsigned_int128 ->
       false
+
+let unsupported guarantee = raise (Invalid (Unsupported_model guarantee))
+
+(* The widths of the standard integer types: CHAR_BIT and the minimum
+   magnitudes of 5.2.4.2.1, the order of 6.2.5p8, and at most
+   [max_integer_width] bits. *)
+let check_widths model =
+  let bits size = size * model.char_bit in
+  let widths =
+    [ model.char_bit; bits model.sizeof_short; bits model.sizeof_int;
+      bits model.sizeof_long; bits model.sizeof_long_long ]
+  in
+  let minimums = [ 8; 16; 16; 32; 64 ] in
+  if List.exists2 ( < ) widths minimums then
+    unsupported "an integer type narrower than C allows";
+  if List.sort compare widths <> widths then
+    unsupported "an integer type narrower than one of lower rank";
+  let widest = bits (Option.value model.sizeof_int128 ~default:0) in
+  if List.exists (fun width -> width > max_integer_width) (widest :: widths)
+  then unsupported "an integer type wider than 128 bits"
+
+(* The signedness of the typedefs (7.19, 7.20.1.4, 7.20.1.5, 7.28). *)
+let check_typedefs model =
+  let signed integer = is_signed model integer in
+  let unsigned_types =
+    [ model.size_type; model.uintmax_type; model.char16_type;
+      model.char32_type ]
+  in
+  let signed_types =
+    [ model.ptrdiff_type; model.intmax_type; model.intptr_type ]
+  in
+  let wrong =
+    List.exists signed unsigned_types
+    || not (List.for_all signed signed_types)
+  in
+  if wrong then unsupported "a typedef of the wrong signedness";
+  (* A code unit is an OCaml int when constants are evaluated. *)
+  let character_types =
+    [ model.wchar_type; model.char16_type; model.char32_type ]
+  in
+  let too_wide integer = integer_width model integer > max_character_width in
+  if List.exists too_wide character_types then
+    unsupported "a character type wider than 32 bits"
+
+let checked_model dump =
+  let model = model_of_macros (macros_of_dump dump) in
+  check_widths model;
+  check_typedefs model;
+  model
+
+let of_predefined_macros dump =
+  match checked_model dump with
+  | model -> Ok model
+  | exception Invalid error -> Error error
 
 let optional_count_name = function
   | Some count -> string_of_int count
@@ -256,6 +303,8 @@ let error_message = function
       Printf.sprintf "the C compiler defines %S twice" name
   | Missing_macro name ->
       Printf.sprintf "the C compiler does not define %s" name
+  | Unsupported_model guarantee ->
+      "the predefined macros describe " ^ guarantee
   | Malformed_macro { name; value } ->
       Printf.sprintf "the C compiler defines %s as %S, which typec cannot read"
         name value
