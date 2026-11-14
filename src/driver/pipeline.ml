@@ -8,6 +8,7 @@ type translation = {
   preprocess : string list;
   preprocessed : string;
   target_options : string list;
+  keywords : Typec_syntax.Keyword_set.t;
   emitted : destination;
   compile : string list option;
 }
@@ -26,14 +27,15 @@ type error =
 exception Failed of error
 
 (* C11 and C17 in ISO and GNU form, under every name that GCC and Clang
-   give them (design 2.4). *)
-let accepted_standards =
+   give them, and the keywords of each form (design 2.4). *)
+let accepted_standards : (string * Typec_syntax.Keyword_set.t) list =
   [
-    "c11"; "c1x"; "iso9899:2011"; "c17"; "c18"; "iso9899:2017";
-    "iso9899:2018"; "gnu11"; "gnu1x"; "gnu17"; "gnu18";
+    ("c11", Iso); ("c1x", Iso); ("iso9899:2011", Iso); ("c17", Iso);
+    ("c18", Iso); ("iso9899:2017", Iso); ("iso9899:2018", Iso);
+    ("gnu11", Gnu); ("gnu1x", Gnu); ("gnu17", Gnu); ("gnu18", Gnu);
   ]
 
-let default_standard = "-std=gnu11"
+let default_standard = "gnu11"
 
 (* Design 2.1: a shared header can tell Type-C from C. *)
 let type_c_macro = "-D__TYPEC__=1"
@@ -96,11 +98,30 @@ let refuse_unusable_options arguments =
       | Command_line.Truncated words ->
           raise (Failed (Missing_value (List.hd words)))
       | _ -> ())
-    arguments;
-  match last_value Dialect arguments with
-  | Some standard when not (List.mem standard accepted_standards) ->
-      raise (Failed (Unaccepted_standard standard))
-  | _ -> ()
+    arguments
+
+(* The keywords of the -std= standard; raises Unaccepted_standard for one
+   that Type-C does not accept. *)
+let standard_keywords arguments =
+  let standard =
+    Option.value (last_value Dialect arguments) ~default:default_standard
+  in
+  match List.assoc_opt standard accepted_standards with
+  | Some keywords -> keywords
+  | None -> raise (Failed (Unaccepted_standard standard))
+
+(* The keywords that the backend reads: GCC and Clang let the last -fasm
+   or -fno-asm decide, wherever -std= stands. *)
+let keywords_of arguments =
+  let keywords =
+    List.fold_left
+      (fun last -> function
+        | Command_line.Option { role = Keywords set; _ } -> Some set
+        | _ -> last)
+      None arguments
+  in
+  let standard = standard_keywords arguments in
+  Option.value keywords ~default:standard
 
 (* cc stops at the earliest output any option asks for. *)
 let goal_of arguments =
@@ -123,11 +144,11 @@ let check_outputs ~emit_c ~goal ~output arguments =
     | _ -> ()
 
 let preprocessing_role : Cc_option.role -> bool = function
-  | Preprocess | Dependency _ | Common | Dialect -> true
+  | Preprocess | Dependency _ | Common | Dialect | Keywords _ -> true
   | Link | Output | Language | Stop _ | Refused _ | Typec _ -> false
 
 let compiling_role : Cc_option.role -> bool = function
-  | Common | Dialect -> true
+  | Common | Dialect | Keywords _ -> true
   | Preprocess | Dependency _ | Link | Output | Language | Stop _
   | Refused _ | Typec _ ->
       false
@@ -136,8 +157,8 @@ let compiling_role : Cc_option.role -> bool = function
    to preprocessing would make Clang warn that they are unused. *)
 let linking_role : Cc_option.role -> bool = function
   | Preprocess | Dependency _ -> false
-  | Link | Common | Dialect | Output | Language | Stop _ | Refused _
-  | Typec _ ->
+  | Link | Common | Dialect | Keywords _ | Output | Language | Stop _
+  | Refused _ | Typec _ ->
       true
 
 (* The name cc gives an output of [source] in the current directory. *)
@@ -182,6 +203,7 @@ type shape = {
   goal : goal;
   output : string option;
   standard : string list;  (** what the backend adds for design 2.4 *)
+  keywords : Typec_syntax.Keyword_set.t;
 }
 
 (* With --emit-c the C goes where -o says, and "-o -" is stdout as for
@@ -229,6 +251,7 @@ let translation shape arguments ~linked_object index source =
     preprocess;
     preprocessed = temp_file ".preprocessed.i";
     target_options = compile_options shape arguments;
+    keywords = shape.keywords;
     emitted;
     compile;
   }
@@ -269,13 +292,16 @@ let final_command shape ~objects arguments =
 let plan ~program ~emit_c ~temp_dir arguments =
   try
     refuse_unusable_options arguments;
+    let keywords = keywords_of arguments in
     let goal = goal_of arguments in
     let output = last_value Output arguments in
     check_outputs ~emit_c ~goal ~output arguments;
     let standard =
-      if has_role Dialect arguments then [] else [ default_standard ]
+      if has_role Dialect arguments then [] else [ "-std=" ^ default_standard ]
     in
-    let shape = { program; emit_c; temp_dir; goal; output; standard } in
+    let shape =
+      { program; emit_c; temp_dir; goal; output; standard; keywords }
+    in
     (* The number of a .tc input, from 1, names its files. *)
     let sources =
       List.mapi (fun index source -> (index + 1, source))

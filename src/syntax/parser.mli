@@ -69,9 +69,18 @@ type 'scope scopes = {
 }
 
 val parse_with :
-  'scope scopes -> Reader.t -> (Tree.translation_unit, error) result
+  ?keywords:Keyword_set.t ->
+  'scope scopes ->
+  Reader.t ->
+  (Tree.translation_unit, error) result
+(** [parse_with ~keywords scopes text] parses [text] with [keywords], by
+    default [Gnu], those of gnu11, which [typec] selects unless the
+    command line says otherwise (design 2.4). *)
 
-val parse : Reader.t -> (Tree.translation_unit, error) result
+val parse :
+  ?keywords:Keyword_set.t ->
+  Reader.t ->
+  (Tree.translation_unit, error) result
 (** [parse_with] the syntactic scope rules: a name is a typedef name if
     the specifiers of its declaration hold [typedef], or if GCC and Clang
     declare it before the first token ({!Builtin_typedef.table}). *)

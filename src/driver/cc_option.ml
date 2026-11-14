@@ -17,6 +17,7 @@ type role =
   | Link
   | Common
   | Dialect
+  | Keywords of Typec_syntax.Keyword_set.t
   | Output
   | Language
   | Stop of stop
@@ -77,6 +78,8 @@ let table =
       entries (Stop Syntax_check) Flag [ "-fsyntax-only" ];
       entries Dialect Joined [ "-std=" ];
       long_entries Dialect [ "--std" ];
+      entries (Keywords Gnu) Flag [ "-fasm" ];
+      entries (Keywords Iso) Flag [ "-fno-asm" ];
       (* Dependencies. *)
       entries (Dependency Write_dependencies) Flag [ "-MD"; "-MMD" ];
       entries (Dependency Dependency_file) Joined_or_separate [ "-MF" ];

@@ -27,6 +27,8 @@ let () =
       ("-std=c11", (Dialect, 0, "c11"));
       ("-std=", (Dialect, 0, ""));
       ("--std", (Dialect, 1, ""));
+      ("-fasm", (Keywords Gnu, 0, ""));
+      ("-fno-asm", (Keywords Iso, 0, ""));
       ("-x", (Language, 1, ""));
       ("-xc", (Language, 0, "c"));
       ("-I", (Preprocess, 1, ""));
@@ -249,5 +251,25 @@ let () =
     (plan ~emit_c:true [ "y.c" ] = Error Emit_c_inputs);
   check "a .tc input after -x c is not one"
     (not (Pipeline.has_type_c_input (Command_line.read [ "-x"; "c"; "x.tc" ])))
+
+(* The keywords are those of the last -std=, else of gnu11, unless the
+   last -fasm or -fno-asm overrides them wherever it stands, as in GCC
+   and Clang. *)
+let () =
+  let keywords words = (only_translation (planned words)).keywords in
+  check "gnu11 by default" (keywords [ "x.tc" ] = Gnu);
+  check "-std=c11" (keywords [ "-std=c11"; "x.tc" ] = Iso);
+  check "--std iso9899:2018"
+    (keywords [ "--std"; "iso9899:2018"; "x.tc" ] = Iso);
+  check "-std=gnu17" (keywords [ "-std=gnu17"; "x.tc" ] = Gnu);
+  check "the last -std= decides"
+    (keywords [ "-std=gnu11"; "-std=c17"; "x.tc" ] = Iso);
+  check "-fasm in ISO C" (keywords [ "-std=c11"; "-fasm"; "x.tc" ] = Gnu);
+  check "-fno-asm before -std=gnu11"
+    (keywords [ "-fno-asm"; "-std=gnu11"; "x.tc" ] = Iso);
+  check "the last of -fasm and -fno-asm decides"
+    (keywords [ "-fno-asm"; "-fasm"; "x.tc" ] = Gnu);
+  check "-fasm with an unaccepted standard"
+    (plan [ "-fasm"; "-std=c99"; "x.tc" ] = Error (Unaccepted_standard "c99"))
 
 let () = if !failures > 0 then exit 1

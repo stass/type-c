@@ -101,8 +101,8 @@ let query_target ~program (translation : Pipeline.translation) =
   | Error error ->
       stop exit_failure (Target_query.error_message ~program error)
 
-let check_front_end target text =
-  match Front_end.check target text with
+let check_front_end keywords target text =
+  match Front_end.check keywords target text with
   | Ok () -> ()
   | Error error -> stop exit_failure (Typec_cpp.Reader.error_message error)
 
@@ -123,7 +123,7 @@ let translate ~program ~null (translation : Pipeline.translation) =
   preprocess ~null translation;
   let text = read_preprocessed translation in
   let target = query_target ~program translation in
-  check_front_end target text;
+  check_front_end translation.keywords target text;
   write_emitted translation.emitted (Typec_emit.Emitter.emit text []);
   Option.iter (run_step ~stdin:null ~stdout:Unix.stdout) translation.compile
 

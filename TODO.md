@@ -195,11 +195,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   member declarator after the first, which GCC refuses. Decide which
   belong to the profile (design 13.3) before the corpus sweep (0.11)
   finds them.
-- [Medium] `asm` and `typeof` are keywords in every dialect, as in
-  gnu11, the default; under `-std=c11` GCC and Clang read them as
-  identifiers, so a C11 program that declares `typeof` or `asm` does not
-  parse. Either pass the dialect to the parser and select the keyword
-  table by it, or document the restriction in design 2.4.
+- [Low] `-fgnu-keywords` and `-fno-gnu-keywords` make `asm` and
+  `typeof` keywords or identifiers in every dialect under Clang, and GCC
+  ignores them in C with a warning; `typec` passes them on and reads the
+  keywords of `-std=`, so with Clang it disagrees with the backend.
+  Refuse them with a `.tc` input, unless a consumer needs them.
 - [Low] The parser accepts GNU forms that GCC and Clang refuse: a
   statement expression outside a function, a range designator in
   `__builtin_offsetof`, a repeated asm qualifier, a labels section of

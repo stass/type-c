@@ -56,7 +56,7 @@ let escape value =
 let print_entry name value = Printf.printf "%s=\"%s\"\n" name (escape value)
 
 let () =
-  List.iter (fun (spelling, _) -> print_entry "keyword" spelling)
+  List.iter (fun (spelling, _, _) -> print_entry "keyword" spelling)
     Keyword.spellings;
   List.iter (fun (spelling, _) -> print_entry "punctuator" spelling)
     Punctuator.spellings;

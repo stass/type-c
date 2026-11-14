@@ -137,6 +137,35 @@ with a .tc input. Without one they reach the backend as they are.
   [2]
   $ typec --cc=$clang -std=c99 -c twice.c
 
+The keywords follow the dialect as in GCC and Clang: asm and typeof are
+identifiers in ISO C and under -fno-asm, so a C11 program that declares
+them compiles to the backend's object, and in GNU C they are keywords, to
+typec and to the backends alike.
+
+  $ cat > iso.tc <<'EOF'
+  > int typeof; int asm;
+  > int sum(void) { return typeof + asm; }
+  > EOF
+  $ $clang -E -x c -D__TYPEC__=1 -std=c11 iso.tc > iso-clang.i
+  $ $clang -x cpp-output -std=c11 -c iso-clang.i -o iso-clang-ref.o
+  $ typec --cc=$clang -std=c11 -c iso.tc -o iso-clang.o
+  $ cmp iso-clang-ref.o iso-clang.o
+  $ $gcc -E -x c -D__TYPEC__=1 -std=c11 iso.tc > iso-gcc.i
+  $ $gcc -x cpp-output -std=c11 -c iso-gcc.i -o iso-gcc-ref.o
+  $ typec --cc=$gcc -std=c11 -c iso.tc -o iso-gcc.o
+  $ cmp iso-gcc-ref.o iso-gcc.o
+  $ typec --cc=$clang -fno-asm -fsyntax-only iso.tc
+  $ typec --cc=$clang -c iso.tc
+  typec: iso.tc:1: expected `(` after `typeof`, found `;`
+  [1]
+  $ typec --cc=$gcc -std=c11 -fasm -c iso.tc
+  typec: iso.tc:1: expected `(` after `typeof`, found `;`
+  [1]
+  $ $clang -x c -std=gnu11 -fsyntax-only iso.tc 2>/dev/null
+  [1]
+  $ $gcc -x c -std=gnu11 -fsyntax-only iso.tc 2>/dev/null
+  [1]
+
 -x before an input changes how cc reads it: after -x c, x.tc is C and is
 forwarded, so -E is the backend's and __TYPEC__ is not defined.
 

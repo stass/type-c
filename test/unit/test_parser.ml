@@ -697,6 +697,29 @@ let keyword_cases =
     case "__extension__ before assembler and a lone semicolon"
       "__extension__ __asm__(\"\"); __extension__ ;"
       "(asm (\"\")) | ;";
+    case "asm is a keyword in GNU C" "int asm;"
+      "error: in.i:1: expected a declarator, found `asm`";
+    case "typeof is a keyword in GNU C" "int typeof;"
+      "error: in.i:1: expected `(` after `typeof`, found `;`";
+  ]
+
+(* The GNU keywords spelled without underscores are identifiers in ISO C,
+   as under -std=c11; the others stay keywords (design 2.4). *)
+let iso_keyword_cases =
+  [
+    case "asm and typeof as identifiers" "int typeof; int asm = typeof;"
+      "(declaration (int) typeof) | (declaration (int) (init asm typeof))";
+    case "the spellings with underscores"
+      "__typeof__(int) a; __typeof(a) b; __asm(\"\"); __asm__(\"\");"
+      "(declaration ((typeof (type int))) a) | (declaration ((typeof a)) b) \
+       | (asm (\"\")) | (asm (\"\"))";
+    case "__asm__ is a keyword" "int __asm__;"
+      "error: in.i:1: expected a declarator, found `__asm__`";
+    case "__typeof is a keyword" "int __typeof;"
+      "error: in.i:1: expected `(` after `typeof`, found `;`";
+    case "the C99 keywords" "static inline int f(int *restrict p);"
+      "(declaration (static inline int) (function f (int (pointer restrict \
+       p))))";
   ]
 
 let block_pointer_cases =
@@ -1222,7 +1245,7 @@ let failed_chain_cases () =
    parser on, so that a chain the parser reads in a loop fails loudly if
    it ever becomes recursion. *)
 let failures () =
-  let failed_cases ?(parse = Parser.parse) ~spans cases =
+  let failed_cases ?(parse = fun reader -> Parser.parse reader) ~spans cases =
     List.filter_map
       (fun case ->
         let actual = outcome ~parse ~spans case.text in
@@ -1250,6 +1273,8 @@ let failures () =
         error_cases;
       ]
     @ failed_cases ~spans:true (span_cases @ gnu_span_cases)
+    @ failed_cases ~parse:(Parser.parse ~keywords:Iso) ~spans:false
+        iso_keyword_cases
     @ failed_cases
         ~parse:(Parser.parse_with every_name_a_typedef_name)
         ~spans:false scope_rule_cases

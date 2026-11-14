@@ -75,7 +75,10 @@ before it, goes through three steps:
 `-std=gnu11` is left out when the command line gives `-std=` for C11 or
 C17 (`c11`, `c17`, `c18`, `gnu11`, `gnu17`, `gnu18`, `c1x`, `gnu1x`,
 `iso9899:2011`, `iso9899:2017`, `iso9899:2018`); any other `-std=` is a
-usage error. The options of step 1 are those that matter to
+usage error. Step 2 reads `asm` and `typeof` as keywords in the GNU forms
+and as identifiers in the ISO forms, as GCC and Clang do; `-fasm` and
+`-fno-asm` select the GNU and the ISO keywords whatever `-std=` says.
+The options of step 1 are those that matter to
 preprocessing and to code generation, those of step 3 the latter only;
 `src/driver/cc_option.ml` is the one table that tells them apart and
 says which options take a separate value. The output is named as cc

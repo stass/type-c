@@ -94,11 +94,11 @@ exception Failed of error
    in the grammar and one may stand between any two tokens, so the
    grammar passes over it. A [#pragma typec] line is passed over the same
    way until Stage 5 gives it a meaning. *)
-let lexeme_of reader (token : Token.t) =
+let lexeme_of keywords reader (token : Token.t) =
   match token.kind with
   | Token.Identifier -> (
       let spelling = Reader.spelling reader token in
-      match Keyword.of_spelling spelling with
+      match Keyword.of_spelling keywords spelling with
       | Some keyword -> Some (Keyword_token keyword)
       | None -> Some (Identifier_token spelling))
   | Token.Number -> Some Number_token
@@ -107,10 +107,12 @@ let lexeme_of reader (token : Token.t) =
   | Token.Punctuator punctuator -> Some (Punctuator_token punctuator)
   | Token.Pragma | Token.Typec_pragma -> None
 
-let grammar_tokens (reader : Reader.t) =
+let grammar_tokens keywords (reader : Reader.t) =
   Array.to_seqi reader.tokens
   |> Seq.filter_map (fun (index, token) ->
-         Option.map (fun lexeme -> { lexeme; index }) (lexeme_of reader token))
+         Option.map
+           (fun lexeme -> { lexeme; index })
+           (lexeme_of keywords reader token))
   |> Array.of_seq
 
 let peek_at state offset =
@@ -2038,11 +2040,11 @@ let syntactic_scopes : (binding, unit) Scope.t scopes =
       (fun scope name -> Scope.find scope name = Some Typedef_name_binding);
   }
 
-let parse_with scopes reader =
+let parse_with ?(keywords = Keyword_set.Gnu) scopes reader =
   let state =
     {
       reader;
-      grammar = grammar_tokens reader;
+      grammar = grammar_tokens keywords reader;
       position = 0;
       open_brackets = [];
       scopes;
@@ -2053,6 +2055,6 @@ let parse_with scopes reader =
   | translation_unit -> Ok translation_unit
   | exception Failed error -> Error error
 
-let parse reader = parse_with syntactic_scopes reader
+let parse ?keywords reader = parse_with ?keywords syntactic_scopes reader
 
 let error_message = Reader.error_message
