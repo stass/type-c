@@ -12,6 +12,7 @@
 open Typec_cpp
 open Typec_syntax
 open Typec_sema
+open Typec_test_support
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
@@ -64,13 +65,13 @@ let print_enum_integer (result : Declarations.t) name (t : Ctype.t) =
                  \"%s is %s\");\n"
                 name (Integer.name integer) name (Integer.name integer)
           | Depends_on _ -> ())
-        (Ctype.enum_integer result.tags tag)
+        (Ctype.enum_integer (Declarations.tags result) tag)
   | Void | Arithmetic _ | Pointer _ | Record _ | Va_list | Array _ | Function _
   | Unknown_type _ ->
       ()
 
-let print_identifier result (name, (entity : Declarations.entity)) =
-  match entity.declared with
+let print_declared result name (declared : Declarations.declared) =
+  match declared with
   | Object { object_type = t; _ } | Function { function_type = t; _ } ->
       assert_selects ("&" ^ name) (pointer_to t)
   | Typedef t ->
@@ -79,6 +80,13 @@ let print_identifier result (name, (entity : Declarations.entity)) =
   | Enumerator { enumerator_type; value } ->
       assert_selects name (Some enumerator_type);
       print_value name value
+
+(* A builtin typedef name that the target lacks declares nothing. *)
+let print_identifier result (name, reference) =
+  Option.iter
+    (fun (entity : Declarations.entity) ->
+      print_declared result name entity.declared)
+    (Declarations.entity result reference)
 
 let () =
   match Sys.argv with
@@ -100,7 +108,7 @@ let () =
       in
       print_string text.text;
       List.iter (print_identifier result)
-        (Scope.innermost_ordinary result.file_scope)
+        (File_scope_names.all_ordinary (File_scope_names.of_unit unit))
   | _ ->
       prerr_endline "usage: declaration_probe MACRO-DUMP PREPROCESSED-C";
       exit 2

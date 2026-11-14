@@ -29,39 +29,50 @@ type span = { first : int; last : int }
 type 'a spanned = { span : span; node : 'a }
 type identifier = string spanned
 
-(** The identity of a declaration: the token of the identifier that it
-    declares, or the name of a typedef name that GCC and Clang declare
-    before the first token ({!Builtin_typedef.table}). The parser reads
+(** The identity of a declaration of an ordinary identifier made in the
+    tree: the token of the identifier that it declares. The parser reads
     each token once, so no two declarations share an id. *)
-type declaration_id = At_token of int | Builtin of string
+type declaration_id = Ordinary_at of int
 
-(** A declaration of an identifier, made where the identifier enters scope
-    (6.2.1p7): its id, and the declaration of the same identifier in the
-    same scope and name space that it redeclares, if one entered scope
+(** The identity of a declaration of a tag, which is another name space
+    (6.2.3), so that no table of one can be read with an id of the
+    other. *)
+type tag_id = Tag_at of int
+
+(** What a use of an ordinary identifier can refer to: a declaration in
+    the tree, or a typedef name that GCC and Clang declare before the
+    first token ({!Builtin_typedef.table}). *)
+type reference = In_tree of declaration_id | Builtin of string
+
+(** A declaration of an ordinary identifier, made where the identifier
+    enters scope (6.2.1p7): its id, and the declaration of the same
+    identifier in the same scope that it redeclares, if one entered scope
     before it, which an enumerator in a declarator's own array length
     does though its token comes later. A redeclaration denotes the same
-    entity, as a tag does (6.7.2.3p4), or breaks a constraint (6.7p3),
-    which the declaration reader checks. *)
-type declared = { id : declaration_id; earlier : declaration_id option }
+    entity or breaks a constraint (6.7p3), which the declaration reader
+    checks. *)
+type declared = { id : declaration_id; earlier : reference option }
 
 (** The declaration that a use of an ordinary identifier refers to: the
     one visible at the use (6.2.1p2), or none. A use of no declaration is
     an error unless the name is predefined, as [__func__] is (6.4.2.2),
     or a builtin function; C11 has no implicit declaration. *)
-type resolution = Resolved of declaration_id | Undeclared
+type resolution = Resolved of reference | Undeclared
 
 (** A tag in a structure, union or enumeration specifier, and what it does
     (C11 6.7.2.3). *)
 type tag = { name : identifier; binding : tag_binding }
 
 and tag_binding =
-  | Declares of declared
+  | Declares of { id : tag_id; earlier : tag_id option }
       (** declares the tag in the current scope: before a body or an
           enumerator list (p6), alone in a declaration (p7, and C23's
           [enum e : T;]), or where no tag of its name is visible (p8; for
-          an enumeration a GNU forward reference, against p3) *)
-  | Names of declaration_id
-      (** the visible tag, which it does not redeclare (p9) *)
+          an enumeration a GNU forward reference, against p3). [earlier]
+          is the tag of its name that the scope declares already, which
+          it redeclares: the same tag (p4), or an error where it is
+          another kind of tag (p2). *)
+  | Names of tag_id  (** the visible tag, which it does not redeclare (p9) *)
 
 (** A GNU attribute: its name, without the [__] around it that GCC allows
     ([__packed__] is [packed]), and the span of its arguments from [(] to
@@ -264,7 +275,7 @@ and type_specifier =
       enumerators : enumerator list option;
           (** [None] without a body; a body holds at least one *)
     }
-  | Typedef_name of { name : string; declaration : declaration_id }
+  | Typedef_name of { name : string; declaration : reference }
       (** a typedef name is one only where its declaration is visible *)
   | Typeof_expression of expression  (** GNU [typeof (] expression [)] *)
   | Typeof_type of type_name  (** GNU [typeof (] type-name [)] *)

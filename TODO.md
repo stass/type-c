@@ -155,28 +155,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   `a`, and a jump into a statement expression from outside it. Check
   them where bodies are typed (0.9b). `Declarations` checks those of
   declarations.
-- [High] Scope rules, package R2: the parser records the outcome of the
-  scope rules in the tree (`Tree.declared`, `Tree.resolution`,
-  `Tree.tag_binding`; design 13.3), but `Declarations` still keeps scopes
-  of its own (`state.scope`, `within_scope`, its use of `Scope.reenter`,
-  the scope of `read_parameters`, `referenced_tag`, `has_one_specifier`).
-  Make the reader follow the links and delete its scope: a table from
-  `Tree.declaration_id` to entity and one to tag; a use's `Resolved` id
-  and a tag's `Names` id give the entity or tag, a declaration's
-  `earlier` the one it redeclares (6.7p3, the composite type of 6.2.7,
-  and tag completion, 6.7.2.3p4) or a tag of another kind (p2), and a
-  `Builtin` id the type in `Builtin_typedef.table` where the target has
-  it. Linkage across scopes (6.2.2) becomes a table keyed by name. An
-  `Undeclared` use is an error unless it names `__func__` (6.4.2.2) or a
-  builtin function. The ids also give an entity its location for
-  messages. `Declarations.result.file_scope`, which `test_declarations`
-  and `declaration_probe` read, must give way to the tables, and `Scope`
-  is then the parser's alone. Two points for the reader: give tags an id
-  type of their own, and the ids of declarations made in the tree (never
-  `Builtin`) one apart from what a use resolves to, so that a tag's id
-  cannot be looked up among ordinary entities; and read a declarator's
-  array lengths and parameters before binding its `declared`, as an
-  enumerator there enters scope first (`int x[sizeof (enum { x })];`).
+- [Medium] `test/support/file_scope_names.ml` finds what a unit declares
+  at file scope from its external declarations alone, so
+  `declaration_probe` and `test_declarations` miss file-scope names
+  declared deeper: an enumerator among members (`struct s { enum { C }
+  m; };`) or in an array length (`int a[sizeof (enum { B })];`). Let
+  the parser, the one implementation of the scope rules, give the
+  declarations visible at the end of the unit, and drop the helper.
+- [Low] A use of a name of an identifier list before the declaration
+  list declares it (`int f(b, n) int b[n]; int n; {}`) is reported as
+  declared where typec does not read declarations, where Clang says
+  undeclared; and the ids of `Tree` are public constructors, so any
+  module could mint one: make them private to the parser.
 - [Medium] The arguments of an attribute are a span the parser does not
   read, so the identifiers in them resolve to nothing: `aligned(N)` with
   an enumerator `N`, `vector_size(N * sizeof (T))`, `cleanup(f)`. The
@@ -253,12 +243,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   checks no attribute's arguments (`noreturn(1)` is accepted).
 - [Medium] Unknown types (design 13.3, P21) for 0.7b and 0.9b to
   replace by types where a point needs them: block pointers, `_Float16`,
-  `typeof` of an expression, and what an attribute outside the table
-  applies to. `typeof (x) y;` at file scope is an error, since whether
-  `y` is a function depends on the type, though both backends accept
-  it; `typeof` of an identifier could take its declared type. The tags
-  that `typeof` of an expression declares are not declared, as in
-  `sizeof`. An attribute outside the table on a structure or union
+  `typeof` of an expression other than an identifier, and what an
+  attribute outside the table applies to. `typeof (x + 1) y;` at file
+  scope is an error, since whether `y` is a function depends on the
+  type, though both backends accept it. The tags that `typeof` of an
+  expression declares are not declared, as in `sizeof`, and a later use
+  of one is an error. An attribute outside the table on a structure or union
   specifier makes the type of that specifier unknown, while a later
   `struct s` names the record as declared: right for its identity,
   members and completeness, the facts typec computes, but
@@ -337,35 +327,41 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [High] Initialisers are not read: an array of unknown size keeps its
   incomplete type where its initialiser completes it (6.7.9p22), and the
   tags and enumerators that an initialiser declares, inside `sizeof` or a
-  cast, are not declared. Read initialisers with compound literals
-  (0.9b), which need the same rule.
+  cast, are not declared, so a later use of one is an error. Read
+  initialisers with compound literals (0.9b), which need the same
+  rule.
 - [Medium] In an integer constant expression `sizeof` of an expression
   is opaque, without a check of its operand, and `_Generic` is an error,
   because only 0.9b types expressions. Take both from expression typing
   there, so that `sizeof x` of a scalar `x` has its value and that of a
   variable length array is no constant (6.5.3.4p2).
 - [High] Before 0.9b reads function bodies, decide how a body sees the
-  translation unit at its own point. `body_scope` is a persistent
-  snapshot, but `Ctype.tags` is one mutable table in its state at the end
-  of the file, so in `struct s; void f(void) { sizeof (struct s); }
-  struct s { int a; };` the structure would look complete inside `f`.
-  Either record completion in the scope or type each body during `read`.
-- [High] 0.9b needs a table of the objects and functions with linkage
-  that does not depend on scope (6.2.2p4, 6.2.7p2): a block-scope
-  `extern int x;`, even where the file-scope `x` is hidden, denotes the
-  same entity and merges its composite type. `Declarations.t` should
-  carry it.
+  translation unit at its own point. `Declarations.entity` gives each
+  declaration as of itself, but `Ctype.tags` is one mutable table in its
+  state at the end of the file, so in `struct s; void f(void) {
+  sizeof (struct s); } struct s { int a; };` the structure would look
+  complete inside `f`. Either record completion per tag declaration or
+  type each body during `read`.
+- [High] Block-scope declarations with linkage (0.9b) must join
+  `Declarations.linked`, the table of the objects and functions with
+  linkage by name (6.2.2p4, 6.2.7p2): a block-scope `extern int x;`,
+  even where the file-scope `x` is hidden, denotes the same entity and
+  merges its composite type. Its linkage is that of the visible
+  declaration (6.2.2p4), which at file scope is the one it redeclares;
+  in a block the parser records no link to a visible declaration in an
+  enclosing scope, so 0.9b needs one (the resolution of the declared
+  name where its declarator starts).
 - [Medium] An `entity` and an `item` carry no location or tree node, so
   no message can point at a previous declaration and a consumer lines
-  `items` up with the tree by position; and the parameter frame of
-  `body_scope` is a map, which loses the order of the parameters that
-  lowering needs. Add both when 0.9b or Stage 1 first needs them.
-- [Medium] `derive` reads a declarator outside in, so array lengths and
-  parameter lists are read from last to first, against the order of
-  scopes (6.2.1p7): `int a[sizeof (enum { A = 2 })][A];` finds `A`
-  undeclared, which both backends accept. Walk from the name outward
-  first, collecting the derivations, then apply them in reverse; that
-  also removes `applies_to_name`.
+  `items` up with the tree by position. The id of each declaration is
+  the token of its name; record the first in an entity when 0.9b or
+  Stage 1 first needs it.
+- [Medium] An undeclared identifier that the implementation reserves
+  (two leading underscores, C11 7.1.3p1) is taken as a builtin of the
+  backend wherever the declaration reader evaluates it: not a constant,
+  and of unknown type in `typeof`. Replace the rule by the table of
+  builtin functions (0.7b) and the predefined identifiers (`__func__`,
+  `__FUNCTION__`, `__PRETTY_FUNCTION__`).
 - [Low] `specified.storage` holds a `Tree.storage_class`, which can say
   `_Thread_local` although `storage_class` never puts it there. Give it a
   type without that case.
@@ -409,15 +405,23 @@ is [type-c-language-design.md](type-c-language-design.md).
 `tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24
 (musl), both x86-64.
 
-- [High] With `-O`, Alpine's GCC and Clang define `_FORTIFY_SOURCE`,
-  and musl's fortify-headers then declare `fgets` and others as
-  `__typeof__(fgets) __orig_fgets` with `__attribute__((access))`
-  (`/usr/include/fortify/stdio.h:40`, `:42`); typec cannot tell whether
-  such a name is a function or an object (design 13.3), so a `.tc`
-  input that includes `stdio.h` does not compile with `-O` there, and
-  `test/run/pipeline.t` and `tools/corpus/runner.t` fail on Alpine.
-  `-U_FORTIFY_SOURCE` or `-O0` avoids it. Reproducer:
-  `/Volumes/Optaine/typec-hosts/repro/alpine-fortify/run.sh REPO`.
+- [High] With `-O`, Alpine's Clang defines `_FORTIFY_SOURCE`, and
+  musl's fortify-headers then declare an overload of `fgets` and others
+  after the library's declaration: `static __inline__
+  __attribute__((__overloadable__)) char *fgets(char *const
+  __attribute__((pass_object_size(0))) __s, int __n, FILE *__f) {...}`
+  (`/usr/include/fortify/stdio.h:42`, from `_FORTIFY_INLINE` in
+  `fortify-headers.h:34`). Clang's `overloadable` makes it a function of
+  its own, which typec reads as a redeclaration of the external `fgets`
+  and refuses (6.2.2p7), so a `.tc` input that includes `stdio.h` does
+  not compile with Clang and `-O` there, and `test/run/pipeline.t` and
+  `tools/corpus/runner.t` fail on Alpine; GCC's form, `extern
+  __inline__` with `gnu_inline`, compiles. Decide in 13.3 what a
+  declaration with `overloadable` declares: likely an entity of its own
+  that redeclares nothing, its uses left to the backend until 0.9b
+  resolves overloads. `-U_FORTIFY_SOURCE` or `-O0` avoids it.
+  Reproducer: `/Volumes/Optaine/typec-hosts/repro/alpine-fortify/run.sh
+  REPO`.
 - [Medium] `test/run/headers.t` fails on Alpine in the ISO modes
   (`-std=c11`, with or without `_DARWIN_C_SOURCE`): musl's `aio.h:17`
   declares a member of `struct sigevent`, which `signal.h` defines only

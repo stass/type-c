@@ -12,12 +12,17 @@
     read: an initialiser that completes an array type (6.7.9p22) leaves
     it incomplete here.
 
+    The reader keeps no scope: it follows the links that the parser
+    records in the tree (design 13.3), from each use to the declaration it
+    resolves to and from each declaration to the one it redeclares, and
+    keeps what each declaration declares by its id.
+
     The pass reports the errors it must detect to give the types (design
     13.3): constraints that decide a type or the meaning of a declaration,
-    undeclared identifiers in constant expressions outside [sizeof], and
-    constant expressions that it evaluates and finds out of range or
-    false. Old-style definitions read their declaration lists (6.9.1p6).
-    The backend reports the others. *)
+    undeclared identifiers in constant expressions outside [sizeof] and in
+    [typeof], and constant expressions that it evaluates and finds out of
+    range or false. Old-style definitions read their declaration lists
+    (6.9.1p6). The backend reports the others. *)
 
 open Typec_cpp
 open Typec_syntax
@@ -53,7 +58,6 @@ type declared =
 type entity = { name : string; entity : int; declared : declared }
 
 type tag = Record_tag of Ctype.record_tag | Enum_tag of Ctype.enum_tag
-type scope = (entity, tag) Scope.t
 
 (** What each external declaration declares, in the order of the tree. *)
 type item =
@@ -61,16 +65,27 @@ type item =
       (** One for each declarator, as declared there; none for a GNU [;]
           alone or a file-scope [asm]. *)
   | Static_assertion
-  | Function_definition of { function_entity : entity; body_scope : scope }
-      (** [body_scope] is the block of the body before its first token:
-          the parameters and what their list declares (6.2.1p4), inside
-          the file scope that holds the function. *)
+  | Function_definition of entity
 
-type t = {
-  tags : Ctype.tags;
-  file_scope : scope;  (** At the end of the translation unit. *)
-  items : item list;
-}
+type t
+
+val tags : t -> Ctype.tags
+val items : t -> item list
+
+val entity : t -> Tree.reference -> entity option
+(** What a declaration that the reader has read declares, as of that
+    declaration: a later one of the same entity may complete its type.
+    [None] for one in a place that the reader does not read, such as a
+    function body, and for a builtin typedef name that the target
+    lacks. *)
+
+val tag : t -> Tree.tag_id -> tag option
+(** The tag that a tag declaration declares, [None] as for {!entity}. *)
+
+val linked : t -> string -> entity option
+(** The object or function with linkage (6.2.2) of that name: the one
+    entity that its declarations with linkage denote in any scope, as of
+    the last of them. *)
 
 (** Where the declarations are wrong: the location of the token where the
     construct starts, and a message that names the clause of C11. *)

@@ -48,11 +48,11 @@ type opening = Open_bracket of P.t | Open_conditional
 (* What the grammar needs of an ordinary identifier in scope: its
    declaration, and whether it is a typedef name. Parsing needs the kind
    of a name, never its type. *)
-type ordinary = { declaration : declaration_id; names_type : bool }
+type ordinary = { declaration : reference; names_type : bool }
 
 (* The scopes open at a point, in the two name spaces that scopes hold
    (6.2.3): ordinary identifiers, and tags by their declaration. *)
-type scope = (ordinary, declaration_id) Scope.t
+type scope = (ordinary, tag_id) Scope.t
 
 (* The cursor. [scope] is persistent, so leaving a scope restores the
    value saved on entering it. *)
@@ -239,19 +239,20 @@ let is_typedef_name state name = typedef_declaration state name <> None
 
 (* An identifier is the only token that a declaration is made at, and
    the cursor reads each token once, so the token is a unique id. *)
-let declaration_at (name : identifier) = At_token name.span.first
+let token_of (name : identifier) = name.span.first
 
 (* Declares the ordinary identifier [name] in the innermost scope, where
    its scope begins. *)
 let declare state ~names_type (name : identifier) =
-  let id = declaration_at name in
+  let id = Ordinary_at (token_of name) in
   let earlier =
     Option.map
       (fun ordinary -> ordinary.declaration)
       (Scope.find_in_innermost state.scope name.node)
   in
   state.scope <-
-    Scope.declare state.scope name.node { declaration = id; names_type };
+    Scope.declare state.scope name.node
+      { declaration = In_tree id; names_type };
   { id; earlier }
 
 let resolve state name =
@@ -260,7 +261,7 @@ let resolve state name =
   | None -> Undeclared
 
 let declare_tag state (name : identifier) =
-  let id = declaration_at name in
+  let id = Tag_at (token_of name) in
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
   state.scope <- Scope.declare_tag state.scope name.node id;
   Declares { id; earlier }
@@ -309,7 +310,7 @@ type specifier_word =
   | Struct_word of struct_or_union
   | Enum_word
   | Alignas_word
-  | Typedef_word of string * declaration_id
+  | Typedef_word of string * reference
   | Typeof_word
   | Attribute_word
 

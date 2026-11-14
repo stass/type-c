@@ -4,4 +4,4 @@
 (library
  (name typec_syntax)
  (libraries typec_cpp)
- (private_modules keyword))
+ (private_modules keyword scope))

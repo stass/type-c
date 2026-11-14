@@ -12,15 +12,20 @@ open Tree
 
 type name_space = Ordinary | Tag
 
+(* What an entry names: the token of a declaration in the tree, or a
+   typedef name that GCC and Clang declare, in either name space. *)
+type target = Token of int | Builtin_target
+
 (* A declaration or a use of a name that a dump node shows, which only
-   [resolutions] prints. *)
+   [resolutions] prints. A use of no declaration has no [target]. *)
 type scope_entry =
   | Declaration_entry of {
       space : name_space;
       name : string;
-      declared : declared;
+      token : int;
+      earlier : target option;
     }
-  | Use_entry of { space : name_space; name : string; resolution : resolution }
+  | Use_entry of { space : name_space; name : string; target : target option }
 
 (* A node of the dump: a label, the span of the tree node it shows, if
    it shows one, its scope entry, and its parts in source order. *)
@@ -37,11 +42,24 @@ let group parts = { label = ""; span = None; entry = None; parts }
 let section label parts = { label; span = None; entry = None; parts }
 let noted entry sexp = { sexp with entry = Some entry }
 
-let declaration_entry ?(space = Ordinary) name declared =
-  Declaration_entry { space; name; declared }
+let ordinary_target = function
+  | In_tree (Ordinary_at token) -> Token token
+  | Builtin _ -> Builtin_target
 
-let use_entry ?(space = Ordinary) name resolution =
-  Use_entry { space; name; resolution }
+let tag_target (Tag_at token) = Token token
+
+let declaration_entry name ({ id = Ordinary_at token; earlier } : declared) =
+  Declaration_entry
+    { space = Ordinary; name; token;
+      earlier = Option.map ordinary_target earlier }
+
+let use_entry name resolution =
+  let target =
+    match resolution with
+    | Resolved reference -> Some (ordinary_target reference)
+    | Undeclared -> None
+  in
+  Use_entry { space = Ordinary; name; target }
 
 let rec to_string ~spans sexp =
   let head =
@@ -338,8 +356,11 @@ and tag_part (tag : tag) =
   let name = tag.name.node in
   let entry =
     match tag.binding with
-    | Declares declared -> declaration_entry ~space:Tag name declared
-    | Names declaration -> use_entry ~space:Tag name (Resolved declaration)
+    | Declares { id = Tag_at token; earlier } ->
+        Declaration_entry
+          { space = Tag; name; token; earlier = Option.map tag_target earlier }
+    | Names id ->
+        Use_entry { space = Tag; name; target = Some (tag_target id) }
   in
   noted entry (identifier tag.name)
 
@@ -618,17 +639,17 @@ let resolutions dump =
       (function
         | Declaration_entry entry when entry.space = space && entry.name = name
           ->
-            Some entry.declared.id
+            Some entry.token
         | Declaration_entry _ | Use_entry _ -> None)
       all
     |> List.sort compare
   in
   let reference space name = function
-    | Builtin _ -> "builtin"
-    | At_token _ as id -> (
+    | Builtin_target -> "builtin"
+    | Token token -> (
         let rec position index = function
           | [] -> None
-          | declared :: _ when declared = id -> Some index
+          | declared :: _ when declared = token -> Some index
           | _ :: rest -> position (index + 1) rest
         in
         match position 1 (declared_ids space name) with
@@ -637,18 +658,18 @@ let resolutions dump =
   in
   let prefix = function Ordinary -> "" | Tag -> "tag " in
   let show = function
-    | Declaration_entry { space; name; declared } ->
+    | Declaration_entry { space; name; token; earlier } ->
         let earlier =
-          match declared.earlier with
+          match earlier with
           | None -> ""
           | Some earlier -> "<" ^ reference space name earlier
         in
-        prefix space ^ name ^ reference space name declared.id ^ earlier
-    | Use_entry { space; name; resolution } ->
+        prefix space ^ name ^ reference space name (Token token) ^ earlier
+    | Use_entry { space; name; target } ->
         let target =
-          match resolution with
-          | Resolved id -> reference space name id
-          | Undeclared -> "?"
+          match target with
+          | Some target -> reference space name target
+          | None -> "?"
         in
         prefix space ^ name ^ "->" ^ target
   in

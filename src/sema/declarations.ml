@@ -21,14 +21,25 @@ type declared =
 
 type entity = { name : string; entity : int; declared : declared }
 type tag = Record_tag of Ctype.record_tag | Enum_tag of Ctype.enum_tag
-type scope = (entity, tag) Scope.t
 
 type item =
   | Declaration of entity list
   | Static_assertion
-  | Function_definition of { function_entity : entity; body_scope : scope }
+  | Function_definition of entity
 
-type t = { tags : Ctype.tags; file_scope : scope; items : item list }
+type t = {
+  tags : Ctype.tags;
+  items : item list;
+  entities : (Tree.reference, entity) Hashtbl.t;
+  tag_types : (Tree.tag_id, tag) Hashtbl.t;
+  linked : (string, entity) Hashtbl.t;
+}
+
+let tags result = result.tags
+let items result = result.items
+let entity result reference = Hashtbl.find_opt result.entities reference
+let tag result id = Hashtbl.find_opt result.tag_types id
+let linked result name = Hashtbl.find_opt result.linked name
 type error = Reader.error = { location : Location.t; message : string }
 
 (* Far above the operators of a real constant expression, it bounds the
@@ -42,14 +53,24 @@ let max_expression_depth = 10_000
    pattern that names each field, so that a field added to one is warning
    9 wherever the record is read rather than attributes no one checks. *)
 
+(* Where a declarator is read, for the array lengths that 6.7.6.2p2 and
+   p4 allow by the scope they are in: no variable length at file scope,
+   and [*] only in a parameter list that is not that of a definition. *)
+type place = At_file_scope | In_prototype | In_definition
+
+(* The reader follows the links that the parser records in the tree
+   (design 13.3): [entities] holds what each declaration that it has read
+   declares, as of that declaration, [tag_types] the tag that each tag
+   declaration declares, and [linked] the entity that each name with
+   linkage denotes (6.2.2), which no scope hides. *)
 type state = {
   target : Target.t;
   text : Reader.t;
   tags : Ctype.tags;
-  mutable scope : scope;
-  mutable prototype_scope : bool;
-      (* In a parameter list that is not that of a definition, where [*]
-         may stand (6.7.6.2p4). *)
+  entities : (Tree.reference, entity) Hashtbl.t;
+  tag_types : (Tree.tag_id, tag) Hashtbl.t;
+  linked : (string, entity) Hashtbl.t;
+  mutable place : place;
   mutable next_entity : int;
   mutable expression_depth : int;
 }
@@ -102,16 +123,46 @@ let fresh_entity state =
   state.next_entity <- entity + 1;
   entity
 
-(* [read] in a new innermost scope; also the scope as [read] left it. *)
-let within_scope state ~prototype read =
-  let saved_scope = state.scope and saved_prototype = state.prototype_scope in
-  state.scope <- Scope.enter saved_scope;
-  state.prototype_scope <- prototype;
-  let result = read () in
-  let inner = state.scope in
-  state.scope <- saved_scope;
-  state.prototype_scope <- saved_prototype;
-  (result, inner)
+(* [read] with the declarators it reads in [place]. *)
+let within state place read =
+  let saved = state.place in
+  state.place <- place;
+  Fun.protect ~finally:(fun () -> state.place <- saved) read
+
+(* Following the links of the tree *)
+
+(* An identifier that the implementation reserves (C11 7.1.3p1) may name
+   one of the backend's builtins without a declaration: a function such
+   as [__builtin_memcpy], or [__func__] (6.4.2.2). typec has no table of
+   them yet (0.7b), so it takes every such name as one. *)
+let may_be_builtin name = String.starts_with ~prefix:"__" name
+
+(* A declaration that the parser resolved a use to, but that the reader
+   has not met, is in a place that the reader does not read yet: an
+   initialiser, or an operand that only 0.9b types. *)
+let not_read state span name =
+  fail state span
+    (quote name
+   ^ " is declared where typec does not read declarations yet (design \
+      13.3)")
+
+(* The entity that [reference] denotes at the use of [name] at [span]. *)
+let referenced state span name reference =
+  match Hashtbl.find_opt state.entities reference with
+  | Some entity -> entity
+  | None -> not_read state span name
+
+let undeclared state span name =
+  fail state span (quote name ^ " is not declared (C11 6.5.1p2)")
+
+(* The entity that the declaration of [name] at [span] redeclares: none
+   where it is the first in its scope, or where the one before it is a
+   builtin typedef name that the target lacks. *)
+let earlier_entity state span name (declared : Tree.declared) =
+  match declared.earlier with
+  | None -> None
+  | Some (Builtin _ as builtin) -> Hashtbl.find_opt state.entities builtin
+  | Some (In_tree _ as earlier) -> Some (referenced state span name earlier)
 
 (* Ordinary identifiers (6.2.2, 6.7p3, p4) *)
 
@@ -174,22 +225,26 @@ let redeclared state span name prior next =
         (quote name ^ " is redeclared as a different kind of identifier \
                        (C11 6.7p3)")
 
-let declare_ordinary state span name declared =
+(* Records what [declared] declares [name] as: a new entity, or the one
+   it redeclares with the composite of their types. *)
+let bind state span name (declared : Tree.declared) next =
   let entity =
-    match Scope.find_in_innermost state.scope name with
-    | None -> { name; entity = fresh_entity state; declared }
+    match earlier_entity state span name declared with
+    | None -> { name; entity = fresh_entity state; declared = next }
     | Some prior ->
-        let declared = redeclared state span name prior.declared declared in
-        { prior with declared }
+        { prior with declared = redeclared state span name prior.declared next }
   in
-  state.scope <- Scope.declare state.scope name entity;
+  Hashtbl.replace state.entities (In_tree declared.id) entity;
+  if linkage_of entity.declared <> No_linkage then
+    Hashtbl.replace state.linked name entity;
   entity
 
 (* 6.2.2p4, p5: [extern], or a function without a storage class, takes the
-   linkage of a visible declaration that has one. *)
-let file_scope_linkage state name ~is_function storage =
+   linkage of a visible declaration that has one, which at file scope is
+   the one it redeclares. *)
+let file_scope_linkage state span name declared ~is_function storage =
   let visible () =
-    match Scope.find state.scope name with
+    match earlier_entity state span name declared with
     | Some { declared; _ } when linkage_of declared <> No_linkage ->
         linkage_of declared
     | Some _ | None -> External
@@ -394,41 +449,31 @@ let is_floating_constant expression =
 let spelling state (span : Tree.span) =
   Reader.spelling state.text state.text.tokens.(span.first)
 
-let identifier_value state (expression : Tree.expression) name =
-  match Scope.find state.scope name with
-  | Some { declared = Enumerator { value; _ }; _ } -> value
-  | Some { declared = Object _ | Function _ | Typedef _; _ } ->
-      not_constant expression
-  | None ->
-      fail state expression.span
-        (quote name ^ " is not declared (C11 6.5.1p2)")
+let identifier_value state (expression : Tree.expression) name
+    (resolution : Tree.resolution) =
+  match resolution with
+  | Resolved reference -> (
+      match (referenced state expression.span name reference).declared with
+      | Enumerator { value; _ } -> value
+      | Object _ | Function _ | Typedef _ -> not_constant expression)
+  | Undeclared when may_be_builtin name -> not_constant expression
+  | Undeclared -> undeclared state expression.span name
 
 (* Declarators *)
 
-(* A declarator applied to a type, read outside in. [parameter_qualifiers]
+(* A declarator applied to a type, outside in. [parameter_qualifiers]
    are those between the brackets of the derivation that a parameter
-   adjusts to a pointer (6.7.6.3p7); [body] is the parameter scope of the
-   function derivation that a definition defines. *)
+   adjusts to a pointer (6.7.6.3p7); [defines] says that a function
+   derivation is the one that a definition defines. *)
 type derived = {
   name : string option;
   declared_type : Ctype.t;
   parameter_qualifiers : Ctype.qualifiers;
-  body : scope option;
+  defines : bool;
   inner_effect : Tree.attribute option;
       (* The first attribute with an effect inside the declarator, which
          GCC and Clang move to a function that the declarator declares. *)
 }
-
-(* Whether a derivation is the last before the name: the outermost of the
-   type it derives. *)
-let rec applies_to_name (inner : Tree.declarator option) =
-  match inner with
-  | None -> true
-  | Some { node = Name _; _ } -> true
-  | Some { node = Parenthesized_declarator { inner; _ }; _ } ->
-      applies_to_name (Some inner)
-  | Some { node = Pointer _ | Block_pointer _ | Array _ | Function _; _ } ->
-      false
 
 (* What a GNU attribute does to the declarations: [Neutral] changes
    nothing they compute, [Sets_noreturn] marks a function that does not
@@ -531,12 +576,12 @@ let for_declarator specified attributes =
   let onto = specified.attributed in
   { specified with attributed = read_attributes ~onto attributes }
 
-let rec read_specifiers state ~standalone (specifiers : Tree.specifiers) =
+let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
   let sorted = sort_specifiers specifiers in
   let attributed = read_attributes ~onto:no_attributes sorted.attributes in
   let storage = storage_class state span sorted.storage_classes in
-  let base = base_type state span ~standalone sorted in
+  let base = base_type state span sorted in
   let qualifiers = qualifiers_of sorted.qualifiers in
   let base_type = checked state span (Ctype.qualify qualifiers base) in
   List.iter (alignment state) sorted.alignments;
@@ -553,7 +598,7 @@ let rec read_specifiers state ~standalone (specifiers : Tree.specifiers) =
     attributed;
   }
 
-and base_type state span ~standalone sorted =
+and base_type state span sorted =
   match (sorted.basic, sorted.others) with
   | [], [] ->
       fail state span "a declaration has no type specifier (C11 6.7.2p2)"
@@ -567,7 +612,7 @@ and base_type state span ~standalone sorted =
       | None ->
           fail state span
             "type specifiers that do not combine (C11 6.7.2p2)")
-  | [], [ other ] -> other_type state span ~standalone other
+  | [], [ other ] -> other_type state span other
   | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
 
 (* An optional floating type, such as [_Float16], real or complex, for
@@ -589,35 +634,46 @@ and optional_float_type state span basic =
    completeness of a record, the facts that typec computes of it, while
    one may change the integer type of an enumeration, which is then
    unknown wherever the tag names it. *)
-and other_type state span ~standalone (specifier : Tree.type_specifier) =
+and other_type state span (specifier : Tree.type_specifier) =
   match specifier with
   | Basic _ -> invalid_arg "Declarations.other_type"
   | Atomic_type type_name ->
       checked state span (Ctype.atomic (read_type_name state type_name))
   | Struct_or_union { kind; tag; members; attributes } ->
-      let kind = record_kind kind in
-      let tag = tag_name tag in
-      let record = record_type state span ~standalone kind tag members in
+      let record = record_type state span (record_kind kind) tag members in
       let attribute = first_unrecorded_attribute attributes in
       obscured state attribute (Ctype.record record)
   | Enum { tag; enumerators; underlying; attributes } ->
       let attribute = first_unrecorded_attribute attributes in
       let fixed = Option.map (fixed_type state span) underlying in
-      let enum =
-        enum_type state span ~standalone ~attribute ~fixed (tag_name tag)
-          enumerators
-      in
+      let enum = enum_type state span ~attribute ~fixed tag enumerators in
       obscured state attribute (Ctype.enum enum)
   | Typeof_type type_name -> read_type_name state type_name
-  | Typeof_expression _ ->
-      unknown_type state span
-        (quote "typeof" ^ " of an expression")
-        Object_or_function
-  | Typedef_name { name; declaration = _ } -> (
-      match Scope.find state.scope name with
+  | Typeof_expression expression -> typeof_expression state span expression
+  | Typedef_name { name; declaration } -> (
+      match Hashtbl.find_opt state.entities declaration with
       | Some { declared = Typedef t; _ } -> t
       | Some _ | None ->
           fail state span (quote name ^ " is not a typedef name"))
+
+(* GNU [typeof] of an identifier is the type of what it denotes, without
+   conversion; typec types no other expression yet (0.9b). *)
+and typeof_expression state span expression =
+  match (strip_parentheses expression).node with
+  | Identifier { name; resolution = Resolved reference } -> (
+      match (referenced state expression.span name reference).declared with
+      | Object { object_type = t; _ }
+      | Function { function_type = t; _ }
+      | Enumerator { enumerator_type = t; _ } ->
+          t
+      | Typedef _ -> invalid_arg "Declarations: a typedef name as an operand")
+  | Identifier { name; resolution = Undeclared } when not (may_be_builtin name)
+    ->
+      undeclared state expression.span name
+  | _ ->
+      unknown_type state span
+        (quote "typeof" ^ " of an expression")
+        Object_or_function
 
 (* 6.7.5p3: the value is the backend's to check, as layout is. *)
 and alignment state (alignment : Tree.alignment Tree.spanned) =
@@ -632,36 +688,38 @@ and alignment state (alignment : Tree.alignment Tree.spanned) =
 
 (* Tags (6.7.2.3) *)
 
-and tag_name (tag : Tree.tag option) =
-  Option.map (fun (tag : Tree.tag) -> tag.name) tag
-
-(* The tag that [struct s] without a body names: the visible one, or one
-   it declares here (p8). Alone in a declaration it declares one in this
-   scope, hiding any other (p7). *)
-and referenced_tag state ~standalone (name : Tree.identifier) =
-  if standalone then Scope.find_tag_in_innermost state.scope name.node
-  else Scope.find_tag state.scope name.node
-
-and declare_tag state (name : Tree.identifier) tag =
-  state.scope <- Scope.declare_tag state.scope name.node tag
-
-and record_type state span ~standalone kind (tag : Tree.identifier option)
-    members =
-  let found =
-    match (tag, members) with
-    | None, _ -> None
-    | Some name, Some _ -> Scope.find_tag_in_innermost state.scope name.node
-    | Some name, None -> referenced_tag state ~standalone name
+(* The tag that [tag] names (p9) or redeclares (p4), as the parser has
+   decided; none where it declares the first tag of its name in its
+   scope. *)
+and prior_tag state (tag : Tree.tag) =
+  let known id =
+    match Hashtbl.find_opt state.tag_types id with
+    | Some found -> found
+    | None -> not_read state tag.name.span tag.name.node
   in
+  match tag.binding with
+  | Declares { earlier; id = _ } -> Option.map known earlier
+  | Names id -> Some (known id)
+
+(* [tag] is a declaration of [found] where it declares one. *)
+and bind_tag state (tag : Tree.tag) found =
+  match tag.binding with
+  | Declares { id; earlier = _ } -> Hashtbl.replace state.tag_types id found
+  | Names _ -> ()
+
+and record_type state span kind (tag : Tree.tag option) members =
   let record =
-    match (found, tag) with
-    | Some (Record_tag record), _ when record.kind = kind -> record
-    | Some _, Some name -> wrong_kind_of_tag state name
-    | _, Some name ->
-        let record = Ctype.declare_record state.tags kind (Some name.node) in
-        declare_tag state name (Record_tag record);
+    match tag with
+    | None -> Ctype.declare_record state.tags kind None
+    | Some tag ->
+        let record =
+          match prior_tag state tag with
+          | Some (Record_tag record) when record.kind = kind -> record
+          | Some (Record_tag _ | Enum_tag _) -> wrong_kind_of_tag state tag.name
+          | None -> Ctype.declare_record state.tags kind (Some tag.name.node)
+        in
+        bind_tag state tag (Record_tag record);
         record
-    | _, None -> Ctype.declare_record state.tags kind None
   in
   Option.iter (define_record state span record) members;
   record
@@ -675,25 +733,22 @@ and define_record state span record (members : Tree.member_declaration list)
 
 (* [fixed] is the fixed type of the specifier (C23 6.7.2.2), [attribute]
    its first attribute that typec does not know. *)
-and enum_type state span ~standalone ~attribute ~fixed
-    (tag : Tree.identifier option) enumerators =
-  let found =
-    match (tag, enumerators) with
-    | None, _ -> None
-    | Some name, Some _ -> Scope.find_tag_in_innermost state.scope name.node
-    | Some name, None -> referenced_tag state ~standalone name
-  in
+and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
+    enumerators =
   (* GNU: an enumeration declared before its list, which 6.7.2.3p3 does
      not allow, as both backends accept it. *)
   let enum =
-    match (found, tag) with
-    | Some (Enum_tag enum), _ -> enum
-    | Some (Record_tag _), Some name -> wrong_kind_of_tag state name
-    | _, Some name ->
-        let enum = Ctype.declare_enum state.tags (Some name.node) in
-        declare_tag state name (Enum_tag enum);
+    match tag with
+    | None -> Ctype.declare_enum state.tags None
+    | Some tag ->
+        let enum =
+          match prior_tag state tag with
+          | Some (Enum_tag enum) -> enum
+          | Some (Record_tag _) -> wrong_kind_of_tag state tag.name
+          | None -> Ctype.declare_enum state.tags (Some tag.name.node)
+        in
+        bind_tag state tag (Enum_tag enum);
         enum
-    | _, None -> Ctype.declare_enum state.tags None
   in
   (match (fixed, enumerators) with
   | Some fixed, _ ->
@@ -718,7 +773,7 @@ and attributed_integer state attribute (integer : Integer.t Ctype.answer) :
 (* C23 6.7.2.2: the fixed type of an enumeration names an integer type
    other than an enumerated type; its qualifiers do not count. *)
 and fixed_type state span specifiers : Integer.t Ctype.answer =
-  let specified = read_specifiers state ~standalone:false specifiers in
+  let specified = read_specifiers state specifiers in
   let fixed = declare_type state ~parameter:false specified None in
   match fixed.declared_type.shape with
   | Arithmetic (Integer integer) -> Answer integer
@@ -746,14 +801,14 @@ and read_member state (member : Tree.member_declaration) =
       static_assert state assertion;
       []
   | Members { specifiers; declarators = [] } ->
-      let specified = read_specifiers state ~standalone:false specifiers in
+      let specified = read_specifiers state specifiers in
       if is_anonymous_record specifiers then
         let derived = declare_type state ~parameter:false specified None in
         [ { Ctype.member_name = None; member_type = derived.declared_type;
             bit_field_width = None } ]
       else []
   | Members { specifiers; declarators } ->
-      let specified = read_specifiers state ~standalone:false specifiers in
+      let specified = read_specifiers state specifiers in
       List.map (read_member_declarator state specified) declarators
 
 (* 6.7.2.1p13: an unnamed member whose type is a structure or union
@@ -825,8 +880,8 @@ and check_enumerator_attributes state (name : Tree.identifier) attributes =
    sizes that follow, which typec would have to guess (design P16). *)
 and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
     =
-  let declare (previous, declared) (enumerator : Tree.enumerator) =
-    let { Tree.name; declared = _; attributes; value } = enumerator.node in
+  let declare (previous, read) (enumerator : Tree.enumerator) =
+    let { Tree.name; declared; attributes; value } = enumerator.node in
     check_enumerator_attributes state name attributes;
     let ((integer, value) as typed) =
       enumerator_value state previous enumerator.span value
@@ -834,13 +889,13 @@ and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
     let enumerator_type = integer_type state name.span integer in
     let constant = Integer_constant.known state.target integer value in
     let entity =
-      declare_ordinary state name.span name.node
+      bind state name.span name.node declared
         (Enumerator { enumerator_type; value = constant })
     in
-    (Some typed, (entity, value) :: declared)
+    (Some typed, (declared.id, entity, value) :: read)
   in
-  let _, declared = List.fold_left declare (None, []) enumerators in
-  let values = List.map snd declared in
+  let _, read = List.fold_left declare (None, []) enumerators in
+  let values = List.map (fun (_, _, value) -> value) read in
   let integer =
     attributed_integer state attribute (Answer (enum_integer state span values))
   in
@@ -857,12 +912,11 @@ and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
           "the type of enumerators that int does not hold" unknown
   in
   List.iter
-    (fun (entity, value) ->
+    (fun (id, entity, value) ->
       let value = Integer_constant.known state.target final_integer value in
       let declared = Enumerator { enumerator_type = final_type; value } in
-      let entity = { entity with declared } in
-      state.scope <- Scope.declare state.scope entity.name entity)
-    declared
+      Hashtbl.replace state.entities (In_tree id) { entity with declared })
+    read
 
 (* The enumerators of an enumeration with a fixed type have the enumerated
    type and values that the fixed type holds (C23 6.7.2.2). A value that
@@ -876,13 +930,13 @@ and define_fixed_enum state span enum (integer : Integer.t Ctype.answer)
         fail_needing state span "the value of each enumerator" unknown
   in
   let declare previous (enumerator : Tree.enumerator) =
-    let { Tree.name; declared = _; attributes; value } = enumerator.node in
+    let { Tree.name; declared; attributes; value } = enumerator.node in
     check_enumerator_attributes state name attributes;
     let value =
       fixed_enumerator_value state integer previous enumerator.span value
     in
-    let declared = Enumerator { enumerator_type = Ctype.enum enum; value } in
-    ignore (declare_ordinary state name.span name.node declared);
+    let enumerator = Enumerator { enumerator_type = Ctype.enum enum; value } in
+    ignore (bind state name.span name.node declared enumerator);
     Some value
   in
   ignore (List.fold_left declare None enumerators)
@@ -1009,7 +1063,7 @@ and declare_type state ?definition ?(records_effects = false) ~parameter
     specified declarator =
   let underived =
     { name = None; declared_type = specified.base_type;
-      parameter_qualifiers = Ctype.no_qualifiers; body = None;
+      parameter_qualifiers = Ctype.no_qualifiers; defines = false;
       inner_effect = None }
   in
   let derived =
@@ -1027,44 +1081,78 @@ and declare_type state ?definition ?(records_effects = false) ~parameter
   let declared_type = obscured state attribute derived.declared_type in
   { derived with declared_type }
 
-(* Tail recursive, so a long chain of derivations needs no stack.
+(* The derivations of [declarator] applied to [underived], outside in,
+   though they are read from the name outward, in the order of the text,
+   as an array length or a parameter list may declare what a later one
+   uses (6.2.1p7). Both walks are loops, so a long chain needs no stack.
    [definition] is the declaration list of a function definition, whose
-   function derivation applied to the name it belongs to. *)
-and derive state ~parameter ~definition derived (declarator : Tree.declarator)
-    =
-  let continue derived = function
-    | Some inner -> derive state ~parameter ~definition derived inner
-    | None -> derived
+   function derivation is the one nearest the name. *)
+and derive state ~parameter ~definition underived declarator =
+  let rec inward outer (declarator : Tree.declarator) =
+    let outer = declarator :: outer in
+    match declarator.node with
+    | Name _ -> outer
+    | Parenthesized_declarator { inner; attributes = _ } -> inward outer inner
+    | Pointer { inner; _ }
+    | Block_pointer { inner; _ }
+    | Array { inner; _ }
+    | Function { inner; _ } -> (
+        match inner with Some inner -> inward outer inner | None -> outer)
   in
+  (* [nearest] until a derivation other than a parenthesis is read. *)
+  let read (nearest, applications) (declarator : Tree.declarator) =
+    let apply =
+      read_derivation state ~parameter ~definition ~nearest declarator
+    in
+    let nearest =
+      match declarator.node with
+      | Name _ | Parenthesized_declarator _ -> nearest
+      | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
+    in
+    (nearest, apply :: applications)
+  in
+  let _, applications =
+    List.fold_left read (true, []) (inward [] declarator)
+  in
+  List.fold_left (fun derived apply -> apply derived) underived applications
+
+(* Reads what a derivation holds that is not a type, and returns what
+   applies the derivation to the type that the declarator around it
+   derives. [nearest] says that no derivation but a parenthesis stands
+   between it and the name, so that it derives the outermost type. The
+   attributes of a derivation apply to the type it derives. *)
+and read_derivation state ~parameter ~definition ~nearest
+    (declarator : Tree.declarator) =
   let span = declarator.span in
   match declarator.node with
-  | Name name -> { derived with name = Some name }
-  (* The attributes of a derivation apply to the type it derives. *)
-  | Parenthesized_declarator { attributes; inner } ->
-      let declared_type = obscured_by state attributes derived.declared_type in
-      let derived = with_inner_effect derived attributes in
-      continue { derived with declared_type } (Some inner)
-  | Pointer { qualifiers; attributes; inner } ->
-      let pointer =
-        checked state span (Ctype.pointer_to derived.declared_type)
-      in
-      let qualifiers = spanned_qualifiers qualifiers in
-      let declared_type =
-        checked state span (Ctype.qualify qualifiers pointer)
-      in
-      let declared_type = obscured_by state attributes declared_type in
-      let derived = with_inner_effect derived attributes in
-      continue { derived with declared_type } inner
+  | Name name -> fun derived -> { derived with name = Some name }
+  | Parenthesized_declarator { attributes; inner = _ } ->
+      fun derived ->
+        let declared_type =
+          obscured_by state attributes derived.declared_type
+        in
+        { (with_inner_effect derived attributes) with declared_type }
+  | Pointer { qualifiers; attributes; inner = _ } ->
+      fun derived ->
+        let pointer =
+          checked state span (Ctype.pointer_to derived.declared_type)
+        in
+        let qualifiers = spanned_qualifiers qualifiers in
+        let declared_type =
+          checked state span (Ctype.qualify qualifiers pointer)
+        in
+        let declared_type = obscured_by state attributes declared_type in
+        { (with_inner_effect derived attributes) with declared_type }
   (* Clang's block pointer, whose type typec does not model. *)
-  | Block_pointer { qualifiers = _; attributes; inner } ->
-      let declared_type =
-        unknown_type state span "a block pointer" Unknown_object
-      in
-      let declared_type = obscured_by state attributes declared_type in
-      let derived = with_inner_effect derived attributes in
-      continue { derived with declared_type } inner
-  | Array { inner; qualifiers; size } ->
-      let adjusted = parameter && applies_to_name inner in
+  | Block_pointer { qualifiers = _; attributes; inner = _ } ->
+      fun derived ->
+        let declared_type =
+          unknown_type state span "a block pointer" Unknown_object
+        in
+        let declared_type = obscured_by state attributes declared_type in
+        { (with_inner_effect derived attributes) with declared_type }
+  | Array { inner = _; qualifiers; size } ->
+      let adjusted = parameter && nearest in
       let qualified = qualifiers <> [] in
       let is_static = match size with Static_sized _ -> true | _ -> false in
       if (qualified || is_static) && not adjusted then
@@ -1072,33 +1160,34 @@ and derive state ~parameter ~definition derived (declarator : Tree.declarator)
           "qualifiers or static in an array derivation that is not the \
            outermost of a parameter (C11 6.7.6.2p1)";
       let length = array_length state span size in
-      let declared_type =
-        checked state span
-          (Ctype.array_of state.tags derived.declared_type length)
-      in
-      let parameter_qualifiers =
-        if adjusted then spanned_qualifiers qualifiers
-        else derived.parameter_qualifiers
-      in
-      continue { derived with declared_type; parameter_qualifiers } inner
-  | Function { inner; parameters } ->
-      let defines = definition <> None && applies_to_name inner in
-      let parameters, body =
+      fun derived ->
+        let declared_type =
+          checked state span
+            (Ctype.array_of state.tags derived.declared_type length)
+        in
+        let parameter_qualifiers =
+          if adjusted then spanned_qualifiers qualifiers
+          else derived.parameter_qualifiers
+        in
+        { derived with declared_type; parameter_qualifiers }
+  | Function { inner = _; parameters } ->
+      let defines = definition <> None && nearest in
+      let parameters =
         read_parameters state
           ~definition:(if defines then definition else None)
           parameters
       in
-      let declared_type =
-        checked state span
-          (Ctype.function_returning derived.declared_type parameters)
-      in
-      let body = if defines then Some body else derived.body in
-      continue { derived with declared_type; body } inner
+      fun derived ->
+        let declared_type =
+          checked state span
+            (Ctype.function_returning derived.declared_type parameters)
+        in
+        { derived with declared_type; defines = derived.defines || defines }
 
 and array_length state span (size : Tree.array_size) : Ctype.length =
   match size with
   | Unsized -> Unknown
-  | Unspecified_variable when state.prototype_scope -> Variable
+  | Unspecified_variable when state.place = In_prototype -> Variable
   | Unspecified_variable ->
       fail state span
         "[*] outside function prototype scope (C11 6.7.6.2p4)"
@@ -1109,7 +1198,7 @@ and array_length state span (size : Tree.array_size) : Ctype.length =
           | Some length -> Constant length
           | None -> fail state expression.span "an array is too large")
       | Constant { value = Opaque; _ } -> Opaque
-      | Not_constant _ when not (Scope.is_file_scope state.scope) -> Variable
+      | Not_constant _ when state.place <> At_file_scope -> Variable
       | Not_constant span ->
           fail state span
             "an array length that is not an integer constant expression \
@@ -1118,23 +1207,20 @@ and array_length state span (size : Tree.array_size) : Ctype.length =
 
 (* Parameters (6.7.6.3) *)
 
-(* The parameter types and the scope that the list declares them in;
-   [definition] as in [derive]. *)
+(* The parameter types; [definition] as in [derive]. *)
 and read_parameters state ~definition (parameters : Tree.parameters) =
   match (parameters, definition) with
-  | Identifier_list [], None -> (Ctype.Unspecified, Scope.enter state.scope)
+  | Identifier_list [], None -> Ctype.Unspecified
   | Identifier_list (first :: _), None ->
       fail state first.name.span
         "an identifier list in a function declarator that is not a \
          definition (C11 6.7.6.3p3)"
   | Identifier_list names, Some declarations ->
-      let names =
-        List.map (fun (listed : Tree.parameter_name) -> listed.name) names
-      in
       old_style_parameters state names declarations
   | Prototype { parameters; variadic }, _ ->
-      let types, scope =
-        within_scope state ~prototype:(definition = None) (fun () ->
+      let place = if definition = None then In_prototype else In_definition in
+      let types =
+        within state place (fun () ->
             List.map (read_parameter state) parameters)
       in
       let types =
@@ -1155,27 +1241,31 @@ and read_parameters state ~definition (parameters : Tree.parameters) =
             []
         | _ -> types
       in
-      (Ctype.Prototype { types; variadic }, scope)
+      Ctype.Prototype { types; variadic }
 
 and read_parameter state (parameter : Tree.parameter) =
   let span = parameter.span in
   let ({ specifiers; declarator; attributes } : Tree.parameter_node) =
     parameter.node
   in
-  let declarator =
-    match declarator with
-    | Named_parameter { declarator; declared = _ } -> Some declarator
-    | Abstract_parameter declarator -> declarator
-  in
   let specified =
     for_declarator (parameter_specifiers state span specifiers) attributes
   in
-  let derived = declare_type state ~parameter:true specified declarator in
-  Option.iter (declare_parameter state span derived) derived.name;
-  derived.declared_type
+  match declarator with
+  | Named_parameter { declarator; declared } ->
+      let derived =
+        declare_type state ~parameter:true specified (Some declarator)
+      in
+      Option.iter
+        (fun name ->
+          ignore (declare_parameter state span derived name declared))
+        derived.name;
+      derived.declared_type
+  | Abstract_parameter declarator ->
+      (declare_type state ~parameter:true specified declarator).declared_type
 
 and parameter_specifiers state span specifiers =
-  let specified = read_specifiers state ~standalone:false specifiers in
+  let specified = read_specifiers state specifiers in
   (match (specified.storage, specified.thread_local) with
   | (None | Some Register), false -> ()
   | _ ->
@@ -1187,24 +1277,32 @@ and parameter_specifiers state span specifiers =
     fail state span "a parameter has an alignment specifier (C11 6.7.5p2)";
   specified
 
-and declare_parameter state span derived name =
+(* Records the parameter and returns its type. *)
+and declare_parameter state span derived name declared =
   let object_type = adjusted_parameter state span derived in
-  let declared =
+  let parameter =
     Object { object_type; linkage = No_linkage; storage = Automatic_storage }
   in
-  ignore (declare_ordinary state span name declared)
+  ignore (bind state span name declared parameter);
+  object_type
 
 (* 6.9.1p6: the declaration list declares the names of the identifier list
-   and no others, which are the parameters in the order of the list. *)
-and old_style_parameters state (names : Tree.identifier list) declarations =
-  let types, scope =
-    within_scope state ~prototype:false (fun () ->
-        List.iter (read_old_style_declaration state names) declarations;
-        List.map (old_style_parameter_type state) names)
-  in
-  (Ctype.Old_style types, scope)
+   and no others, which are the parameters in the order of the list. A
+   name of the list is no entity: [types] maps each to the type that the
+   declarator that redeclares it gives, [None] until one does. *)
+and old_style_parameters state (names : Tree.parameter_name list)
+    declarations =
+  let types = Hashtbl.create (List.length names) in
+  List.iter
+    (fun (listed : Tree.parameter_name) ->
+      Hashtbl.replace types listed.declared.id None)
+    names;
+  within state In_definition (fun () ->
+      List.iter (read_old_style_declaration state types) declarations);
+  Ctype.Old_style (List.map (old_style_parameter_type state types) names)
 
-and read_old_style_declaration state names (declaration : Tree.declaration) =
+and read_old_style_declaration state types
+    (declaration : Tree.declaration) =
   let span = declaration.span in
   match declaration.node with
   | Static_assert assertion -> static_assert state assertion
@@ -1214,44 +1312,42 @@ and read_old_style_declaration state names (declaration : Tree.declaration) =
          (C11 6.9.1p6)"
   | Declaration { specifiers; declarators } ->
       let specified = parameter_specifiers state span specifiers in
-      let in_list name =
-        List.exists (fun (listed : Tree.identifier) -> listed.node = name) names
-      in
-      List.iter
-        (fun (init_declarator : Tree.init_declarator) ->
-          let span = init_declarator.span in
-          let {
-            Tree.declarator;
-            declared = _;
-            asm_label = _;
-            attributes;
-            initialiser;
-          } =
-            init_declarator.node
-          in
-          if initialiser <> None then
-            fail state span
-              "a declaration before a function body has an initializer \
-               (C11 6.9.1p6)";
-          let specified = for_declarator specified attributes in
-          let derived =
-            declare_type state ~parameter:true specified (Some declarator)
-          in
-          match derived.name with
-          | Some name when in_list name ->
-              declare_parameter state span derived name
-          | Some _ | None ->
-              fail state span
-                "a declaration before a function body declares a name that \
-                 is not in its identifier list (C11 6.9.1p6)")
-        declarators
+      List.iter (read_old_style_declarator state types specified) declarators
 
-and old_style_parameter_type state (name : Tree.identifier) =
-  match Scope.find_in_innermost state.scope name.node with
-  | Some { declared = Object { object_type; _ }; _ } -> object_type
-  | Some _ | None ->
-      fail state name.span
-        (quote name.node
+and read_old_style_declarator state types specified
+    (init_declarator : Tree.init_declarator) =
+  let span = init_declarator.span in
+  let { Tree.declarator; declared; asm_label = _; attributes; initialiser } =
+    init_declarator.node
+  in
+  if initialiser <> None then
+    fail state span
+      "a declaration before a function body has an initializer \
+       (C11 6.9.1p6)";
+  let specified = for_declarator specified attributes in
+  let derived =
+    declare_type state ~parameter:true specified (Some declarator)
+  in
+  match (derived.name, declared.earlier) with
+  | Some name, Some (In_tree listed) when Hashtbl.mem types listed ->
+      let first = { declared with earlier = None } in
+      let object_type = declare_parameter state span derived name first in
+      Hashtbl.replace types listed (Some object_type)
+  (* What it redeclares is a parameter or an enumerator of the list's
+     scope, so [bind] refuses it (6.7p3). *)
+  | Some name, Some _ ->
+      ignore (declare_parameter state span derived name declared)
+  | Some _, None | None, _ ->
+      fail state span
+        "a declaration before a function body declares a name that is not \
+         in its identifier list (C11 6.9.1p6)"
+
+and old_style_parameter_type state types (name : Tree.parameter_name) =
+  match Hashtbl.find_opt types name.declared.id with
+  | Some (Some object_type) -> object_type
+  | Some None | None ->
+      fail state name.name.span
+        (quote name.name.node
        ^ " in the identifier list is not declared (C11 6.9.1p6)")
 
 (* The type a parameter has in its function (6.7.6.3p7, p8). *)
@@ -1268,7 +1364,7 @@ and adjusted_parameter state span derived =
 and read_type_name state (type_name : Tree.type_name) =
   let span = type_name.span in
   let specified =
-    read_specifiers state ~standalone:false type_name.node.specifier_qualifiers
+    read_specifiers state type_name.node.specifier_qualifiers
   in
   if specified.aligned <> None then
     fail state span "a type name has an alignment specifier (C11 6.7.5p2)";
@@ -1279,9 +1375,8 @@ and read_type_name state (type_name : Tree.type_name) =
 
 (* Constant expressions *)
 
-(* The tags that the expression declares stay declared, as in C: every
-   scope it enters it has left, as [Not_integer_constant] is caught at the
-   nearest constant expression. *)
+(* What the expression declares stays declared, as in C, though it is
+   not a constant. *)
 and constant_expression state expression =
   let saved_depth = state.expression_depth in
   match evaluate state ~evaluated:true expression with
@@ -1304,8 +1399,8 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
   let target = state.target and span = expression.span in
   let settled result = constant_checked state span result in
   match expression.node with
-  | Identifier { name; resolution = _ } ->
-      identifier_value state expression name
+  | Identifier { name; resolution } ->
+      identifier_value state expression name resolution
   | Constant (Integer { base; digits; suffix }) ->
       settled (Integer_constant.of_integer_constant target base digits suffix)
   | Constant (Floating _ | Not_a_constant) -> not_constant expression
@@ -1397,7 +1492,8 @@ and cast state ~evaluated expression type_name operand =
 (* External declarations (6.9) *)
 
 (* The identifier that a file scope declarator declares (6.9p2). *)
-let file_scope_declared state span specified name (derived : derived) =
+let file_scope_declared state span specified name declared
+    (derived : derived) =
   let declared_type = derived.declared_type in
   let function_specifiers () =
     if specified.inline || specified.noreturn then
@@ -1420,7 +1516,9 @@ let file_scope_declared state span specified name (derived : derived) =
     if specified.thread_local then
       fail state span "a function declared _Thread_local (C11 6.7.1p4)";
     no_alignment "a function";
-    let linkage = file_scope_linkage state name ~is_function:true storage in
+    let linkage =
+      file_scope_linkage state span name declared ~is_function:true storage
+    in
     Function
       {
         function_type = declared_type;
@@ -1433,7 +1531,10 @@ let file_scope_declared state span specified name (derived : derived) =
   in
   let declared_object storage =
     function_specifiers ();
-    let linkage = file_scope_linkage state name ~is_function:false storage in
+    let linkage =
+      file_scope_linkage state span name declared ~is_function:false
+        storage
+    in
     let storage =
       if specified.thread_local then Thread_storage else Static_storage
     in
@@ -1455,11 +1556,13 @@ let file_scope_declared state span specified name (derived : derived) =
             ("whether " ^ quote name ^ " is a function or an object")
             unknown)
 
-let declare_file_scope state span specified (derived : derived) =
+let declare_file_scope state span specified declared (derived : derived) =
   match derived.name with
   | Some name ->
-      let declared = file_scope_declared state span specified name derived in
-      declare_ordinary state span name declared
+      let next =
+        file_scope_declared state span specified name declared derived
+      in
+      bind state span name declared next
   | None -> invalid_arg "Declarations: a declarator without a name"
 
 (* The asm label names a symbol, which no type depends on, and typing
@@ -1468,7 +1571,7 @@ let read_init_declarator state specified
     (init_declarator : Tree.init_declarator) =
   let {
     Tree.declarator;
-    declared = _;
+    declared;
     asm_label = _;
     attributes;
     initialiser = _;
@@ -1482,16 +1585,7 @@ let read_init_declarator state specified
     declare_type state ~records_effects ~parameter:false specified
       (Some declarator)
   in
-  declare_file_scope state init_declarator.span specified derived
-
-(* 6.7.2.3p7, [struct s;] alone, as GCC reads it: attributes on either side
-   leave it alone, a qualifier or storage class does not. Clang differs,
-   and only block scope shows it (TODO.md). *)
-let has_one_specifier (specifiers : Tree.specifiers) =
-  let counts (specifier : Tree.declaration_specifier Tree.spanned) =
-    match specifier.node with Attributes _ -> false | _ -> true
-  in
-  List.length (List.filter counts specifiers) = 1
+  declare_file_scope state init_declarator.span specified declared derived
 
 let read_declaration state (declaration : Tree.declaration) =
   match declaration.node with
@@ -1499,8 +1593,7 @@ let read_declaration state (declaration : Tree.declaration) =
       static_assert state assertion;
       Static_assertion
   | Declaration { specifiers; declarators } ->
-      let standalone = declarators = [] && has_one_specifier specifiers in
-      let specified = read_specifiers state ~standalone specifiers in
+      let specified = read_specifiers state specifiers in
       Declaration (List.map (read_init_declarator state specified) declarators)
 
 (* 6.9.1. The body is not read. *)
@@ -1508,7 +1601,7 @@ let read_function_definition state (definition : Tree.function_definition) =
   let {
     Tree.specifiers;
     declarator;
-    declared = _;
+    declared;
     declarations;
     body = _;
     attributes;
@@ -1517,7 +1610,7 @@ let read_function_definition state (definition : Tree.function_definition) =
   in
   let span = definition.span in
   let specified =
-    for_declarator (read_specifiers state ~standalone:false specifiers)
+    for_declarator (read_specifiers state specifiers)
       attributes
   in
   (match (specified.storage, specified.thread_local) with
@@ -1530,15 +1623,11 @@ let read_function_definition state (definition : Tree.function_definition) =
     declare_type state ~definition:declarations ~records_effects:true
       ~parameter:false specified (Some declarator)
   in
-  match derived.body with
-  | None ->
-      fail state span
-        "the declarator of a function definition does not end in a \
-         function derivation (C11 6.9.1p2)"
-  | Some parameters ->
-      let function_entity = declare_file_scope state span specified derived in
-      let body_scope = Scope.reenter state.scope ~inner:parameters in
-      Function_definition { function_entity; body_scope }
+  if not derived.defines then
+    fail state span
+      "the declarator of a function definition does not end in a function \
+       derivation (C11 6.9.1p2)";
+  Function_definition (declare_file_scope state span specified declared derived)
 
 let read_external state (external_declaration : Tree.external_declaration) =
   match external_declaration with
@@ -1552,18 +1641,18 @@ let builtin_type target : Builtin_typedef.t -> (Ctype.t, Ctype.error) result =
   | Int128 -> Ctype.integer target Integer.Int128
   | Unsigned_int128 -> Ctype.integer target Integer.Unsigned_int128
 
-(* File scope before the first token holds the builtin typedef names whose
-   type the target has; the others are not declared, and no other error
-   can come from a table that names no derived type. *)
+(* The builtin typedef names whose type the target has are entities; the
+   others are not, and no other error can come from a table that names
+   no derived type. *)
 let declare_builtin_typedefs state =
   List.iter
     (fun (name, builtin) ->
       match builtin_type state.target builtin with
       | Ok t ->
-          let entity = fresh_entity state in
-          state.scope <-
-            Scope.declare state.scope name
-              { name; entity; declared = Typedef t }
+          let entity =
+            { name; entity = fresh_entity state; declared = Typedef t }
+          in
+          Hashtbl.replace state.entities (Builtin name) entity
       | Error Int128_unavailable -> ()
       | Error error -> invalid_arg (Ctype.error_message error))
     Builtin_typedef.table
@@ -1574,13 +1663,17 @@ let read target text unit =
       target;
       text;
       tags = Ctype.create_tags ();
-      scope = Scope.file;
-      prototype_scope = false;
+      entities = Hashtbl.create 1024;
+      tag_types = Hashtbl.create 256;
+      linked = Hashtbl.create 1024;
+      place = At_file_scope;
       next_entity = 0;
       expression_depth = 0;
     }
   in
   declare_builtin_typedefs state;
   match List.map (read_external state) unit with
-  | items -> Ok { tags = state.tags; file_scope = state.scope; items }
+  | items ->
+      let { tags; entities; tag_types; linked; _ } = state in
+      Ok { tags; items; entities; tag_types; linked }
   | exception Failed error -> Error error

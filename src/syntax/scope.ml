@@ -48,8 +48,6 @@ let reenter outer ~inner =
   in
   { declared; visible } :: outer
 
-let is_file_scope = function [ _ ] -> true | _ -> false
-
 let replace_innermost scopes level =
   match scopes with
   | _ :: outer -> level :: outer
@@ -86,6 +84,3 @@ let declare_tag scopes name binding =
       declared = add_tag name binding declared;
       visible = add_tag name binding visible;
     }
-
-let innermost_ordinary scopes =
-  Names.bindings (innermost scopes).declared.ordinary

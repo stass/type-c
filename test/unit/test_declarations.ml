@@ -16,8 +16,20 @@ let read target source =
     | Error error -> failwith (Reader.error_message error)
   in
   match Parser.parse ~keywords:(Target.keywords target Gnu) text with
-  | Ok unit -> Declarations.read target text unit
+  | Ok unit ->
+      Result.map
+        (fun result -> (File_scope_names.of_unit unit, result))
+        (Declarations.read target text unit)
   | Error error -> failwith (Parser.error_message error)
+
+(* What [name] denotes at file scope at the end of what [read] read. *)
+let file_scope_entity (names, result) name =
+  Option.bind
+    (File_scope_names.ordinary names name)
+    (Declarations.entity result)
+
+let file_scope_tag (names, result) name =
+  Option.bind (File_scope_names.tag names name) (Declarations.tag result)
 
 let linkage_name : Declarations.linkage -> string = function
   | External -> "external"
@@ -64,8 +76,8 @@ let fail_case source message =
 let declares ?(target = lp64) source name expected =
   match read target source with
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
-  | Ok result -> (
-      match Scope.find result.file_scope name with
+  | Ok read -> (
+      match file_scope_entity read name with
       | None -> fail_case source (name ^ " is not declared")
       | Some entity ->
           let actual = describe entity.declared in
@@ -265,6 +277,60 @@ let tags () =
   rejects "struct s { int a[]; int b; };" "flexible";
   accepts "struct s { int b; int a[]; };"
 
+(* The reader follows the links that the parser records (design 13.3): a
+   declaration redeclares the one that its scope holds, a use names the
+   one visible there. *)
+let links () =
+  (* A declaration in a prototype redeclares nothing at file scope. *)
+  declares "void f(enum { A } a); enum { A = 1 };" "A" "enumerator int = 1";
+  declares "void f(int x); int x[2];" "x" "object int[2] external static";
+  rejects "void f(int x, enum { x } e);" "6.7p3";
+  (* An enumerator in a declarator's own array length enters scope before
+     the declarator does (6.2.1p7), and before a later length uses it. *)
+  declares "int a[sizeof (enum { A = 2 })][A];" "a"
+    "object int[4][2] external static";
+  rejects "int x[sizeof (enum { x })];" "6.7p3";
+  (* A tag is completed by a later declaration in its scope, and not by
+     one in a prototype, which declares another tag (6.7.2.3p4, p8). *)
+  accepts
+    "struct s; struct s *p; struct s { int a; }; int c[sizeof (struct s)];";
+  rejects "struct s; int c[sizeof (struct s)]; struct s { int a; };"
+    "6.5.3.4p1";
+  rejects "struct s; void f(struct s { int a; } *p); int c[sizeof (struct s)];"
+    "6.5.3.4p1";
+  declares "enum e; enum e { A = 300 }; char c[sizeof (enum e)];" "c"
+    "object char[4] external static";
+  (* A declaration that the reader does not read yet is an error to use. *)
+  rejects "int x = sizeof (enum { A = 1 }); int y[A];" "does not read";
+  rejects "int x = sizeof (enum { A = 1 }); int A;" "does not read";
+  rejects "int n = sizeof (struct t { int a; }); struct t { int a; };"
+    "does not read"
+
+(* [source] gives the object or function with linkage [name], in whatever
+   scope it is declared, as [expected] describes, or none where [expected]
+   is empty. *)
+let links_to ?(target = lp64) source name expected =
+  match read target source with
+  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Ok (_, result) ->
+      let actual =
+        match Declarations.linked result name with
+        | Some entity -> describe entity.declared
+        | None -> ""
+      in
+      if actual <> expected then
+        fail_case source
+          (Printf.sprintf "%s links to %S, expected %S" name actual expected)
+
+let linkage_table () =
+  links_to "static int x; extern int x;" "x" "object int internal static";
+  links_to "int f(); int f(int);" "f" "function int (int) external";
+  links_to "int x[]; void g(int x); int x[2];" "x"
+    "object int[2] external static";
+  links_to "void g(int x);" "x" "";
+  links_to "typedef int T;" "T" "";
+  links_to "enum { A };" "A" ""
+
 let linkage () =
   declares "static int x; extern int x;" "x" "object int internal static";
   declares "static int f(void); int f(void);" "f"
@@ -435,11 +501,11 @@ let enumerations () =
   let compatible source expected =
     match read lp64 source with
     | Error error -> fail_case source (Reader.error_message error)
-    | Ok result -> (
-        match Scope.find_tag result.file_scope "e" with
+    | Ok ((_, result) as read) -> (
+        match file_scope_tag read "e" with
         | Some (Enum_tag tag) ->
             let actual =
-              match Ctype.enum_integer result.tags tag with
+              match Ctype.enum_integer (Declarations.tags result) tag with
               | Some (Answer integer) -> Some (Integer.name integer)
               | Some (Depends_on _) | None -> None
             in
@@ -478,11 +544,11 @@ let errors_are_located () =
 let enum_integer_of ?(target = lp64) source tag expected =
   match read target source with
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
-  | Ok result -> (
+  | Ok ((_, result) as read) -> (
       let actual =
-        match Scope.find_tag result.file_scope tag with
+        match file_scope_tag read tag with
         | Some (Enum_tag enum) -> (
-            match Ctype.enum_integer result.tags enum with
+            match Ctype.enum_integer (Declarations.tags result) enum with
             | Some (Answer integer) -> Integer.name integer
             | Some (Depends_on unknown) -> "depends on " ^ unknown.construct
             | None -> "incomplete")
@@ -504,7 +570,23 @@ let gnu_profile () =
   (* typeof of a type name is that type. *)
   declares "typeof(const int *) t;" "t" "object const int * external static";
   declares "__typeof__(struct u { int a; }) v; struct u w;" "w"
-    "object struct u external static"
+    "object struct u external static";
+  (* typeof of an identifier is the type of what it denotes, unconverted,
+     as musl's fortify headers declare a function. *)
+  declares "const int x; typeof(x) y;" "y" "object const int external static";
+  declares "int a[3]; typeof((a)) b;" "b" "object int[3] external static";
+  declares "enum { A }; typeof(A) b;" "b" "object int external static";
+  declares "char *f(int); typeof(f) g;" "g" "function char *(int) external";
+  declares
+    "char *f(int); __attribute__((access(read_only, 1))) __typeof__(f) \
+     g __asm__(\"f\");"
+    "g" "function <the attribute 'access'> external";
+  declares "void f(int n, typeof(n) *p);" "f"
+    "function void (int, int *) external";
+  rejects "typeof(y) x;" "'y' is not declared (C11 6.5.1p2)";
+  (* A reserved name may be a builtin of the backend. *)
+  declares "__typeof__(__builtin_memcpy) *p;" "p"
+    "object <'typeof' of an expression> * external static"
 
 (* What typec does not type yet is an unknown type, never a guess, and an
    error only where a declaration needs what that type is (design 13.3). *)
@@ -522,12 +604,12 @@ let unknown_types () =
   declares "int q(void *, int (^)(const void *, const void *));" "q"
     "function int (void *, <a block pointer>) external";
   accepts "typedef struct { int (^e)(const char *, int); } glob_t;";
-  declares "int x; typeof(x) *p;" "p"
+  declares "int x; typeof(x + 1) *p;" "p"
     "object <'typeof' of an expression> * external static";
-  declares "int x; typedef typeof(x) t;" "t"
+  declares "int x; typedef typeof(x + 1) t;" "t"
     "typedef <'typeof' of an expression>";
   (* Whether the declaration declares a function depends on the type. *)
-  rejects "int x; typeof(x) y;"
+  rejects "int x; typeof(x + 1) y;"
     "whether 'y' is a function or an object depends on 'typeof' of an \
      expression at in.c:1";
   (* The size of an unknown type is the backend's, as an aggregate's is. *)
@@ -792,6 +874,8 @@ let () =
   declarators ();
   typedefs ();
   tags ();
+  links ();
+  linkage_table ();
   linkage ();
   composites ();
   constant_expressions ();
