@@ -143,6 +143,8 @@ let specifier_combinations () =
       ("_Bool", "_Bool"); ("_Complex float", "_Complex float");
       ("double _Complex", "_Complex double");
       ("long _Complex double", "_Complex long double");
+      (* GNU: plain _Complex is _Complex double. *)
+      ("_Complex", "_Complex double");
       ("const volatile int", "const volatile int");
       ("int const const", "const int");
       ("_Atomic int", "_Atomic int"); ("_Atomic(long)", "_Atomic long") ]
@@ -155,7 +157,8 @@ let specifier_combinations () =
   List.iter
     (fun specifiers -> rejects (specifiers ^ " x;") "6.7.2p2")
     [ "long long long"; "short long"; "signed unsigned"; "char short";
-      "float double"; "_Complex"; "_Complex int"; "void int";
+      "float double"; "_Complex _Complex double"; "_Complex _Bool";
+      "_Complex __int128"; "_Complex void"; "void int";
       "struct s { int a; } int"; "_Bool signed"; "const" ];
   rejects "typedef int T; T unsigned x;" "6.7.2p2"
 
@@ -597,6 +600,12 @@ let unknown_types () =
   declares "_Complex _Float16 z;" "z"
     "object <'_Complex _Float16'> external static";
   rejects "int _Float16 i;" "6.7.2p2";
+  (* GNU's complex integer types, which GCC and Clang both have. *)
+  declares "_Complex int c;" "c" "object <'_Complex int'> external static";
+  declares "char _Complex unsigned d;" "d"
+    "object <'_Complex unsigned char'> external static";
+  declares "_Complex long long e(_Complex short);" "e"
+    "function <'_Complex long long'> (<'_Complex short'>) external";
   declares "_Complex _Float128 f(__float128);" "f"
     "function <'_Complex _Float128'> (<'__float128'>) external";
   rejects "__float128 _Float128 q;" "6.7.2p2";
@@ -858,14 +867,16 @@ let builtin_typedefs () =
   rejects "__builtin_va_list a; void *a;" "6.7p4";
   rejects "struct b { __builtin_va_list f : 1; };" "bit-field";
   declares "typedef __signed__ __int128 s128;" "s128" "typedef __int128";
-  declares "__int128 unsigned u;" "u" "object unsigned __int128 external static";
+  declares "__int128 unsigned u;" "u"
+    "object unsigned __int128 external static";
   rejects "long __int128 l;" "6.7.2p2";
   (* A target without __int128 has no names for it, as in GCC and Clang. *)
   declares ~target:ilp32 "int __int128_t;" "__int128_t"
     "object int external static";
   declares ~target:ilp32 "long __uint128_t;" "__uint128_t"
     "object long external static";
-  declares ~target:ilp32 "int __int128;" "__int128" "object int external static";
+  declares ~target:ilp32 "int __int128;" "__int128"
+    "object int external static";
   declares ~target:ilp32 "__builtin_va_list ap;" "ap"
     "object __builtin_va_list external static"
 

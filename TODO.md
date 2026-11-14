@@ -218,6 +218,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] `Parser.error` and `Declarations.error` are `Reader.error`,
   whose documentation describes text that is not `cc -E` output. Give
   the located error a module of its own in `typec_cpp`.
+- [Medium] typec reads C23 attribute specifiers (`[[...]]`) only before
+  the specifiers of a declaration, a parameter or a member and as a null
+  statement, through reads at several sites and a refusal in the
+  old-style declaration list (`src/syntax/parser.ml`). GCC and Clang
+  also accept them after `struct`, `union` and `enum`, after a
+  declarator, among the qualifiers of a pointer and after an
+  enumerator, where typec's error does not name the construct. Read
+  both forms through one funnel at each attribute slot that both
+  backends accept, which removes the list of sites.
 
 ## Declarations
 
@@ -462,6 +471,12 @@ types (design 13.3).
   x86-64, which has not run yet; the recipe format limits only `cflags`
   and `libs` to a system, so a `test own` for Linux x86-64 needs the
   format to limit `test` to a system and to name a machine.
+- [Medium] 23 units of GCC's `c-torture/execute` define nested
+  functions (`nestfunc-*.c`, `20000822-1.c` and others), which are
+  outside the GNU profile (design 13.3) and which Clang refuses as a
+  backend without typec.
+  Skip them in the corpus as the `-std=gnu89` units are, so that a run
+  counts only the units typec should accept.
 - [Low] A `typec` option that compiles a `.c` input as Type-C would let
   a program's own build replace `cc` with `typec` without renaming its
   sources. The corpus runner copies each unit to a `.tc` file next to

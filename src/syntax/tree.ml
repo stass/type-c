@@ -74,9 +74,11 @@ and tag_binding =
           another kind of tag (p2). *)
   | Names of tag_id  (** the visible tag, which it does not redeclare (p9) *)
 
-(** A GNU attribute: its name, without the [__] around it that GCC allows
-    ([__packed__] is [packed]), and the span of its arguments from [(] to
-    [)], which the parser does not read: their grammar depends on the
+(** A GNU attribute, or a C23 one read as the GNU attribute it means: its
+    name, without the [__] around it that GCC allows ([__packed__] is
+    [packed]) and with the prefix of a vendor other than GNU
+    ([clang::noinline]), and the span of its arguments from [(] to [)],
+    which the parser does not read: their grammar depends on the
     attribute. *)
 type attribute = attribute_node spanned
 
@@ -253,7 +255,8 @@ and declaration_specifier =
   | Type_qualifier of type_qualifier
   | Function_specifier of function_specifier
   | Alignment_specifier of alignment
-  | Attributes of attribute list  (** one [__attribute__((...))] *)
+  | Attributes of attribute list
+      (** one [__attribute__((...))] or C23 [[[...]]] *)
 
 and type_specifier =
   | Basic of basic_type_specifier
@@ -448,8 +451,8 @@ and statement_node =
   | Expression_statement of expression
   | Null_statement  (** [;] *)
   | Attribute_statement of attribute list
-      (** GNU [__attribute__((...));], a null statement with attributes,
-          such as [fallthrough] before a [case] label *)
+      (** GNU [__attribute__((...));] or C23 [[[...]];], a null statement
+          with attributes, such as [fallthrough] before a [case] label *)
   | If of {
       condition : expression;
       then_branch : statement;

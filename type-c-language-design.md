@@ -1167,7 +1167,10 @@ the function's body is read.
 **GNU profile.** The front end accepts the extensions that system headers
 and common code use: attributes, including those among the qualifiers
 of a pointer, at the start of a parenthesized declarator, before a
-declarator after the first and after a label, `__extension__`,
+declarator after the first and after a label, C23's attribute
+specifiers (`[[gnu::noipa]]`, `[[noreturn]]`) before a declaration, a
+parameter or a member and as a null statement, read as the GNU
+attributes they mean, `__extension__`,
 alternate keyword spellings, assembler labels and statements, `typeof`,
 statement expressions, label addresses and computed goto (`&&label`,
 `goto *p`), local labels (`__label__`), the conditional without a
@@ -1181,7 +1184,9 @@ Clang declare before the first token (`__builtin_va_list`, and
 `__int128` where the backend's `__SIZEOF_INT128__` says that it has the
 type, the optional floating types (`_Float16`, `_Float32`,
 `_Float64`, `_Float128`, `_Float32x`, `_Float64x` and `__float128`),
-case ranges and range designators, empty structures and `{}`
+the complex integer types (`_Complex int`, typed as unknown) and plain
+`_Complex` for `_Complex double`, case ranges, range designators and
+the obsolete `member:` designator, empty structures and `{}`
 initialisers, a lone `;` at file scope and among members, and, for the
 macOS SDK, block declarators and block literals (`^{ ... }`, `^(int x)
 { ... }`), nullability qualifiers, enumerations with a fixed
@@ -1204,7 +1209,8 @@ among them, where typec reads it as an identifier in the same way. Only
 x86-64 backends confirm the rule; a backend of another architecture
 whose macros disagree with its keywords would settle it otherwise, and
 without one the rule stays. A construct outside the profile is an error
-that names it; the front end does not guess. Bodies of functions defined
+that names it; the front end does not guess. GCC's nested functions are
+outside the profile, as Clang has none. Bodies of functions defined
 in system headers are not parsed: they are brace-matched and passed
 through.
 

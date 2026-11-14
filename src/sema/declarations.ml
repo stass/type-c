@@ -339,6 +339,7 @@ let basic_type (specifiers : Tree.basic_type_specifier list) :
   | None, [ Float; Complex ] -> Some (Complex Float)
   | None, [ Double; Complex ] -> Some (Complex Double)
   | None, [ Long; Double; Complex ] -> Some (Complex Long_double)
+  | None, [ Complex ] -> Some (Complex Double) (* GNU *)
   | None, _ -> None
 
 let is_optional_float : Tree.basic_type_specifier -> bool = function
@@ -605,9 +606,7 @@ and base_type state span sorted =
       match basic_type basic with
       | Some arithmetic ->
           checked state span (Ctype.arithmetic state.target arithmetic)
-      | None ->
-          fail state span
-            "type specifiers that do not combine (C11 6.7.2p2)")
+      | None -> complex_integer_type state span basic)
   | [], [ other ] -> other_type state span other
   | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
 
@@ -621,6 +620,19 @@ and optional_float_type state span basic =
       unknown_type state span (quote name) Unknown_object
   | [ Complex; Optional_float optional ] ->
       let name = "_Complex " ^ Optional_float.spelling optional in
+      unknown_type state span (quote name) Unknown_object
+  | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
+
+(* GNU's complex integer types, such as [_Complex int], which typec does
+   not type: one for each standard integer type, which GCC and Clang
+   both have. Neither has [_Complex _Bool], and Clang has no
+   [_Complex __int128]. *)
+and complex_integer_type state span basic =
+  let complex, real = List.partition (fun s -> s = Tree.Complex) basic in
+  let excluded = [ Integer.Bool; Int128; Unsigned_int128 ] in
+  match (complex, Integer.of_specifiers real) with
+  | [ _ ], Some integer when not (List.mem integer excluded) ->
+      let name = "_Complex " ^ Integer.name integer in
       unknown_type state span (quote name) Unknown_object
   | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
 

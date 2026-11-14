@@ -376,7 +376,37 @@ let specifier_word state offset =
   | End_of_input ->
       None
 
-let starts_declaration state offset = specifier_word state offset <> None
+(* The offset after the bracketed group that [opener] opens [offset]
+   tokens ahead, or of the end of the input if it does not close;
+   [offset] if no [opener] opens there. The lookahead only decides; the
+   parse that follows matches every bracket. *)
+let past_group state opener offset =
+  let closer = closer_of opener in
+  let rec loop offset depth =
+    match peek_at state offset with
+    | Punctuator_token p when p = opener -> loop (offset + 1) (depth + 1)
+    | Punctuator_token p when p = closer && depth = 1 -> offset + 1
+    | Punctuator_token p when p = closer -> loop (offset + 1) (depth - 1)
+    | End_of_input -> offset
+    | _ -> loop (offset + 1) depth
+  in
+  if peek_at state offset = Punctuator_token opener then loop offset 0
+  else offset
+
+(* C23's [[ ]] begins an attribute specifier, which GCC and Clang read in
+   C11 as well; no other C construct has two [[] in a row. *)
+let opens_standard_attributes state offset =
+  peek_at state offset = Punctuator_token P.Left_bracket
+  && peek_at state (offset + 1) = Punctuator_token P.Left_bracket
+
+let rec past_standard_attributes state offset =
+  if opens_standard_attributes state offset then
+    past_standard_attributes state (past_group state P.Left_bracket offset)
+  else offset
+
+(* A declaration's specifiers may follow C23 attribute specifiers. *)
+let starts_declaration state offset =
+  specifier_word state (past_standard_attributes state offset) <> None
 
 (* GNU [__extension__] may come before a declaration or an expression. It
    only silences pedantic warnings about what follows it, so the tree
@@ -617,6 +647,96 @@ let attributes state =
   in
   loop []
 
+(* C23 attribute specifiers (C23 6.7.13), which typec reads where GCC and
+   Clang both do in C11: before the specifiers of a declaration, a
+   parameter or a member, and before the [;] of a null statement. Each
+   attribute is read as the GNU attribute it means, so that one table of
+   effects serves both forms: [gnu::name] is the GNU attribute [name], a
+   standard attribute is the GNU attribute of the same meaning, and
+   another vendor's keeps its prefix, which no GNU attribute has. An
+   attribute without a prefix that C23 does not define is left out, as
+   GCC and Clang ignore it. *)
+
+(* The C23 attributes and the GNU attributes they mean; [unsequenced] and
+   [reproducible] have none and keep their own names, which make the type
+   they apply to unknown, as an attribute that typec does not know
+   does. *)
+let standard_attribute_meanings =
+  [ ("deprecated", "deprecated"); ("fallthrough", "fallthrough");
+    ("maybe_unused", "unused"); ("nodiscard", "warn_unused_result");
+    ("noreturn", "noreturn"); ("_Noreturn", "noreturn");
+    ("unsequenced", "unsequenced"); ("reproducible", "reproducible") ]
+
+(* The name that a C23 attribute has as a GNU attribute, if any; the
+   prefix and its [::], two [:] tokens in C11, are read here. *)
+let standard_attribute_name state =
+  let start = state.position in
+  let first = attribute_name state in
+  let meaning =
+    if accept state P.Colon then begin
+      expect state P.Colon "`::` in an attribute name";
+      let name = attribute_name state in
+      if first.node = "gnu" then Some name.node
+      else Some (first.node ^ "::" ^ name.node)
+    end
+    else List.assoc_opt first.node standard_attribute_meanings
+  in
+  Option.map (fun meaning -> finish state start meaning) meaning
+
+let standard_attribute state =
+  let start = state.position in
+  let name = standard_attribute_name state in
+  let arguments =
+    if peek state = Punctuator_token P.Left_paren then
+      Some
+        (skip_balanced state
+           "`)` to end the arguments of an attribute")
+    else None
+  in
+  Option.map (fun name -> finish state start { name; arguments }) name
+
+(* From the [[[] to the []]]: attributes separated by commas, where an
+   empty one is allowed. *)
+let standard_attribute_list state =
+  expect state P.Left_bracket "`[[`";
+  expect state P.Left_bracket "`[[`";
+  let rec loop attributes =
+    if accept state P.Comma then loop attributes
+    else if peek state = Punctuator_token P.Right_bracket then attributes
+    else
+      let attributes =
+        match standard_attribute state with
+        | Some attribute -> attribute :: attributes
+        | None -> attributes
+      in
+      if accept state P.Comma then loop attributes else attributes
+  in
+  let attributes = List.rev (loop []) in
+  expect state P.Right_bracket "`,` or `]]` after an attribute";
+  expect state P.Right_bracket "`]]` to end the attributes";
+  attributes
+
+(* Any number of C23 attribute specifiers in a row, as one list. *)
+let standard_attributes state =
+  let rec loop reversed =
+    if opens_standard_attributes state 0 then
+      loop (List.rev_append (standard_attribute_list state) reversed)
+    else List.rev reversed
+  in
+  loop []
+
+(* The C23 attribute specifiers before the specifiers of a declaration,
+   each a specifier of the attributes it holds. *)
+let leading_attributes state =
+  let rec loop reversed =
+    if opens_standard_attributes state 0 then
+      let start = state.position in
+      let attributes = standard_attribute_list state in
+      loop (finish state start (Attributes attributes) :: reversed)
+    else List.rev reversed
+  in
+  loop []
+
 (* The qualifiers after a [*] or [^], and the attributes among them, each
    in source order. *)
 let pointer_qualifiers state =
@@ -628,34 +748,19 @@ let pointer_qualifiers state =
   in
   loop [] []
 
-(* The offset after the parentheses that open [offset] tokens ahead, or of
-   the end of the input if they do not close; [offset] if no [(] opens
-   there. *)
-let past_parentheses state offset =
-  let rec loop offset depth =
-    match peek_at state offset with
-    | Punctuator_token P.Left_paren -> loop (offset + 1) (depth + 1)
-    | Punctuator_token P.Right_paren when depth = 1 -> offset + 1
-    | Punctuator_token P.Right_paren -> loop (offset + 1) (depth - 1)
-    | End_of_input -> offset
-    | _ -> loop (offset + 1) depth
-  in
-  if peek_at state offset = Punctuator_token P.Left_paren then loop offset 0
-  else offset
-
 (* The offset after the GNU attributes that begin [offset] tokens ahead:
    each [__attribute__] and the parentheses after it. The lookahead only
    decides; the parse that follows matches every bracket. *)
 let rec past_attributes state offset =
   if peek_at state offset = Keyword_token Keyword.Attribute then
-    past_attributes state (past_parentheses state (offset + 1))
+    past_attributes state (past_group state P.Left_paren (offset + 1))
   else offset
 
-(* GNU attributes and the [;] after them, which in a block are a null
+(* Attributes and the [;] after them, which in a block are a null
    statement with attributes rather than C23's attribute declaration. *)
 let begins_attribute_statement state =
-  peek state = Keyword_token Keyword.Attribute
-  && peek_at state (past_attributes state 0) = Punctuator_token P.Semicolon
+  let after = past_attributes state (past_standard_attributes state 0) in
+  after > 0 && peek_at state after = Punctuator_token P.Semicolon
 
 (* A tag specifier without a body is alone in its declaration
    (6.7.2.3p7) where only attributes come before it, which the caller
@@ -862,6 +967,11 @@ type closing = Closed of statement_node | Reopened of open_kind
 (* [only_attributes] holds while every specifier read is attributes, so
    that a tag specifier can tell whether it is alone in its declaration. *)
 let rec specifiers state context =
+  let leading =
+    match context with
+    | Declaration_specifiers -> leading_attributes state
+    | Specifier_qualifiers | Enumeration_type -> []
+  in
   let rec loop ~seen_type_specifier ~only_attributes specifiers =
     match allowed context (specifier_word state 0) with
     | Some (Typedef_word _) when seen_type_specifier -> List.rev specifiers
@@ -875,7 +985,7 @@ let rec specifiers state context =
           (specifier :: specifiers)
     | None -> List.rev specifiers
   in
-  loop ~seen_type_specifier:false ~only_attributes:true []
+  leading @ loop ~seen_type_specifier:false ~only_attributes:true []
 
 (* [alone] says that only attributes come before the specifier in the
    specifiers of a declaration, for {!ends_alone}. *)
@@ -956,7 +1066,8 @@ and member_declaration state =
   if accept_keyword state Keyword.Static_assert then
     finish state start (Member_static_assert (static_assertion state))
   else
-    let specifiers = specifiers state Specifier_qualifiers in
+    let leading = leading_attributes state in
+    let specifiers = leading @ specifiers state Specifier_qualifiers in
     if specifiers = [] then fail_expected state "a member declaration";
     let declarators =
       if peek state = Punctuator_token P.Semicolon then []
@@ -1287,10 +1398,32 @@ and initialiser_list state =
 
 and designated_initialiser state =
   let start = state.position in
-  let designators = designators state in
-  if designators <> [] then expect state P.Equal "`=` after a designator";
+  let designators =
+    if begins_obsolete_designator state then [ obsolete_designator state ]
+    else begin
+      let designators = designators state in
+      if designators <> [] then expect state P.Equal "`=` after a designator";
+      designators
+    end
+  in
   let initialiser = initialiser state in
   finish state start { designators; initialiser }
+
+(* GNU's obsolete [member:], which means [.member =] (GCC manual,
+   "Designated Initializers"). The member's name may also be a typedef
+   name, as members have a name space of their own. *)
+and begins_obsolete_designator state =
+  match peek state with
+  | Identifier_token _ -> peek_at state 1 = Punctuator_token P.Colon
+  | Keyword_token _ | Punctuator_token _ | Number_token | Character_token _
+  | String_token _ | End_of_input ->
+      false
+
+and obsolete_designator state =
+  let start = state.position in
+  let member = identifier state "a member name" in
+  expect state P.Colon "`:` after a member name";
+  finish state start (Member_designator member)
 
 (* Any number of designators in a row. *)
 and designators state =
@@ -1878,6 +2011,14 @@ and close_one state opened statement =
   | Open_for { clause; condition; step } ->
       Closed (For { clause; condition; step; body = statement })
 
+(* C23 attributes before GNU ones, as GCC and Clang read them, then the
+   [;]. *)
+and attribute_statement state start =
+  let standard = standard_attributes state in
+  let attributes = standard @ attributes state in
+  expect state P.Semicolon "`;` after the attributes of a statement";
+  finish state start (Attribute_statement attributes)
+
 (* A statement without a substatement. *)
 and simple_statement state =
   let start = state.position in
@@ -1889,9 +2030,9 @@ and simple_statement state =
       advance state;
       finish state start Null_statement
   | Keyword_token Keyword.Attribute ->
-      let attributes = attributes state in
-      expect state P.Semicolon "`;` after the attributes of a statement";
-      finish state start (Attribute_statement attributes)
+      attribute_statement state start
+  | Punctuator_token P.Left_bracket when opens_standard_attributes state 0 ->
+      attribute_statement state start
   | Keyword_token Keyword.Goto ->
       advance state;
       if accept state P.Star then begin
@@ -2012,8 +2153,20 @@ and block_items state =
 and block_item state =
   if begins_label state || begins_attribute_statement state then
     Block_statement (statement state)
-  else if begins_declaration state then Block_declaration (declaration state)
+  else if begins_declaration state then
+    Block_declaration (block_declaration state)
   else Block_statement (statement state)
+
+(* GCC's nested functions are outside the profile, as Clang has none; a
+   [{] after the first declarator names them rather than the [;]. *)
+and block_declaration state =
+  match declaration_start state with
+  | First_declarator { first = { named_function = Some _; _ }; _ }
+    when peek state = Punctuator_token P.Left_brace ->
+      fail state
+        "a function definition in a block (a GNU nested function) is outside \
+         the GNU profile (design 13.3)"
+  | start -> declaration_of_start state start
 
 (* External declarations (C11 6.9). *)
 
@@ -2025,10 +2178,13 @@ let function_body state =
     Skipped (skip_balanced state "`}` to end the function body")
   else Parsed (compound_statement state)
 
-(* The declaration list of an old-style definition, up to the [{]. *)
+(* The declaration list of an old-style definition, up to the [{]. GCC
+   and Clang take no C23 attributes before a declaration there. *)
 let parameter_declarations state =
   let rec loop declarations =
     if peek state = Punctuator_token P.Left_brace then List.rev declarations
+    else if opens_standard_attributes state 0 then
+      fail_expected state "a parameter declaration or `{`"
     else loop (declaration state :: declarations)
   in
   loop []

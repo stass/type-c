@@ -198,6 +198,11 @@ let initialiser_cases =
       "struct p v = { .x = 1, [2].y = 3, [0] = { 4 }, 5 };"
       "(declaration ((struct p)) (init v ({} (designate .x 1) (designate \
        ([] 2) .y 3) (designate ([] 0) ({} 4)) 5)))";
+    case "GNU's obsolete member designator"
+      "typedef int T; struct p v = { x: 1, y : { z: 2 }, T: 3 };"
+      "(declaration (typedef int) T) | (declaration ((struct p)) (init v ({} \
+       (designate .x 1) (designate .y ({} (designate .z 2))) (designate .T \
+       3))))";
     case "a string initialiser" "char s[] = \"ab\" L\"c\";"
       "(declaration (char) (init (array s) (string \"ab\" L\"c\")))";
     case "an empty list" "int a[] = {};"
@@ -590,8 +595,6 @@ let definition_cases =
       "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nint g(void) {\n"
       "error: sys.h:1: expected `}` to end the function body, found end of \
        input";
-    case "a nested function definition" "void f(void) { int g(void) { } }"
-      "error: in.i:1: expected `;` after a declaration, found `{`";
   ]
 
 (* Spans are token indices; a pragma inside a node belongs to it. *)
@@ -628,6 +631,40 @@ let span_cases =
 (* The GNU profile (design 13.3). *)
 let attribute_cases =
   [
+    (* C23's attribute specifiers, which GCC and Clang read in gnu11 as
+       well, at the start of a declaration and as a statement. *)
+    case "a GNU attribute in C23's form"
+      "[[gnu::noipa]] static int f(void); [[__gnu__::__cold__, \
+       gnu::aligned(8)]] [[]] int x;"
+      "(declaration ((attributes noipa) static int) (function f (void))) | \
+       (declaration ((attributes cold (aligned ( 8 ))) attributes int) x)";
+    case "standard attributes as their GNU equivalents"
+      "[[noreturn]] void f(void); [[maybe_unused, nodiscard]] int g(void); \
+       [[deprecated(\"x\")]] int h;"
+      "(declaration ((attributes noreturn) void) (function f (void))) | \
+       (declaration ((attributes unused warn_unused_result) int) (function g \
+       (void))) | (declaration ((attributes (deprecated ( \"x\" ))) int) h)";
+    case "an unknown standard attribute is ignored, another vendor's kept"
+      "[[noipa]] [[clang::noinline]] int f(void);"
+      "(declaration (attributes (attributes clang::noinline) int) (function f \
+       (void)))";
+    case "C23 attributes of a parameter, a member and a block declaration"
+      "struct s { [[gnu::aligned(8)]] int a; }; \
+       void f([[maybe_unused]] int x) { [[gnu::unused]] int y; }"
+      "(declaration ((struct s (member ((attributes (aligned ( 8 ))) int) \
+       a)))) | (define (void) (function f ((attributes unused) int x)) (block \
+       (declaration ((attributes unused) int) y)))";
+    case "an attribute statement"
+      "int f(int x) { switch (x) { case 1: x++; [[fallthrough]]; case 2: \
+       return x; } return 0; }"
+      "(define (int) (function f (int x)) (block (switch x (block (label (case \
+       1) (expr (post++ x))) (attribute-statement fallthrough) (label (case 2) \
+       (return x)))) (return 0)))";
+    case "no C23 attributes in an old-style declaration list"
+      "int f(a, b) int a; [[gnu::unused]] int b; { return a; }"
+      "error: in.i:1: expected a parameter declaration or `{`, found `[`";
+    case "an attribute declaration" "[[gnu::unused]];"
+      "(declaration ((attributes unused)))";
     case "an attribute among the specifiers"
       "__attribute__((noreturn)) static void f(void);"
       "(declaration ((attributes noreturn) static void) (function f (void)))";
@@ -1037,6 +1074,11 @@ let gnu_span_cases =
 
 let gnu_error_cases =
   [
+    (* GCC's nested functions are outside the profile: Clang has none. *)
+    case "a nested function definition"
+      "void f(void) { int g(int x) { return x; } }"
+      "error: in.i:1: a function definition in a block (a GNU nested \
+       function) is outside the GNU profile (design 13.3)";
     case "a label address of a constant" "void *p = && 1;"
       "error: in.i:1: expected a label after `&&`, found `1`";
     case "a label address takes no postfix" "void *p = &&a[0];"

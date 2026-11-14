@@ -318,10 +318,10 @@ needs -fblocks.
   declaration small
   declaration promote
 
-A parse error is reported at its presumed location. A C23 attribute is
-outside the profile.
+A parse error is reported at its presumed location. A nested function
+is outside the profile.
 
-  $ printf '# 1 "t.c"\nint x;\n[[nodiscard]] int f(void);\n' > bad.i
+  $ printf '# 1 "t.c"\nint x;\nvoid f(void) { int g(void) { } }\n' > bad.i
   $ ./parse_check.exe clang.macros bad.i
-  parse_check: t.c:2: expected a declaration, found `[`
+  parse_check: t.c:2: a function definition in a block (a GNU nested function) is outside the GNU profile (design 13.3)
   [1]
