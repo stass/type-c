@@ -9,6 +9,9 @@ the sections relevant to a task before proposing changes to the language.
 
 * Ask, don't assume. If something is unclear, ask before writing a single line.
   Never make silent assumptions about intent, architecture, or requirements.
+* **Open questions park only their slice.** A question waiting on me
+  blocks only the work whose outcome depends on its answer. Keep building
+  everything else meanwhile, and state the blocked slice when you ask.
 * Flag uncertainty explicitly. Confidence without certainty causes more damage
   than admitting a gap.
 * Suggest better approaches, especially ones with lasting impact over a
