@@ -346,6 +346,7 @@ let constant_expressions () =
   opaque "sizeof(_Atomic int)";
   opaque "_Alignof(int)";
   opaque "sizeof 1";
+  opaque "__alignof__ 1";
   opaque "sizeof(struct q { int a; }) - sizeof(struct q)";
   opaque "(int)3.5";
   evaluates_int "'a'" "97";
@@ -503,6 +504,13 @@ let attributes () =
     "the attribute 'vector_size' is not typed yet";
   rejects "__attribute__((packed)) enum p { P } x;"
     "the attribute 'packed' is not typed yet";
+  (* An attribute with an effect where none is recorded is refused, not
+     accepted and lost. *)
+  rejects "void (__attribute__((noreturn)) b)(void);"
+    "the attribute 'noreturn' here is not typed yet";
+  rejects "inline void (* __attribute__((gnu_inline)) p)(void);"
+    "the attribute 'gnu_inline' here is not typed yet";
+  accepts "int * __attribute__((aligned(8))) q, (__attribute__((unused)) r);";
   List.iter
     (fun source -> rejects source "the attribute 'mode' is not typed yet")
     [ "struct __attribute__((mode(DI))) s { int a; };";

@@ -153,8 +153,12 @@ labels, assembler statements and file-scope assembler, typeof, statement
 expressions, case ranges, range designators, the GNU forms of empty
 structures, initialisers and declarations, _Float16, the va_arg and
 offsetof builtins, label addresses and computed goto in a dispatch table
-as an interpreter writes it, local labels and the conditional without a
-middle operand. Both backends compile the file without a warning.
+as an interpreter writes it, local labels, the conditional without a
+middle operand, `__real__` and `__imag__`, `__alignof__` of an
+expression, `__builtin_types_compatible_p`, an extra `;` in a member
+list, and attributes among pointer qualifiers, in a parenthesized
+declarator, before a later declarator and after a label. Both backends
+compile the file without a warning.
 
   $ cat > gnu.c <<'EOF'
   > __extension__ typedef long long wide;
@@ -170,6 +174,7 @@ middle operand. Both backends compile the file without a warning.
   >   __extension__ int a __attribute__((aligned(8)));
   >   unsigned b : 3 __attribute__((packed));
   > };
+  > struct semicolons { int a;; ; int b; };
   > extern int renamed(void) __asm__("_renamed_symbol") __attribute__((cold));
   > __attribute__((noreturn)) void stop(void);
   > int printf_like(const char *, ...)
@@ -183,6 +188,11 @@ middle operand. Both backends compile the file without a warning.
   > int empty_list[1] = {};
   > int ranges[8] = { [0 ... 3] = 1, [4 ... 7] = 2 };
   > int offset = __builtin_offsetof(struct aligned, a);
+  > int * __attribute__((aligned(8))) aligned_pointer;
+  > void (__attribute__((unused)) *callback)(void);
+  > int first, __attribute__((unused)) second;
+  > int value_alignment = __alignof__ constant;
+  > int compatible = __builtin_types_compatible_p(int, const int);
   > __asm__(".globl typec_marker\ntypec_marker:");
   > ;
   > static int sum(int count, ...) {
@@ -218,8 +228,18 @@ middle operand. Both backends compile the file without a warning.
   > stop:
   >   return ({ __label__ out; goto out; out: total; }) ?: -1;
   > }
+  > static double parts(_Complex double z) { return __real__ z + __imag z; }
+  > static int labels(int n) {
+  >   switch (n) {
+  >   case 0: __attribute__((fallthrough));
+  >   default: n += 1;
+  >   }
+  > unused: __attribute__((unused));
+  >   return n;
+  > }
   > int main(void) {
-  >   return statements(3) + offset + ranges[0] + run(program);
+  >   return statements(3) + offset + ranges[0] + run(program) + labels(1)
+  >     + (int)parts(1.0);
   > }
   > EOF
   $ "$clang" -std=gnu11 -fsyntax-only gnu.c
@@ -237,6 +257,7 @@ middle operand. Both backends compile the file without a warning.
   declaration of a tag
   declaration of a tag
   declaration of a tag
+  declaration of a tag
   declaration renamed
   declaration stop
   declaration printf_like
@@ -249,20 +270,29 @@ middle operand. Both backends compile the file without a warning.
   declaration empty_list
   declaration ranges
   declaration offset
+  declaration aligned_pointer
+  declaration callback
+  declaration first second
+  declaration value_alignment
+  declaration compatible
   assembler
   empty declaration
   function sum
   function statements
   declaration program
   function run
+  function parts
+  function labels
   function main
 
-The macOS SDK's Clang extensions: block pointers, nullability
-qualifiers, a fixed underlying type of an enumeration and a parameter
-list of `...` alone. GCC accepts none of them.
+The macOS SDK's Clang extensions: block pointers and block literals,
+nullability qualifiers, a fixed underlying type of an enumeration and a
+parameter list of `...` alone. GCC accepts none of them.
 
   $ cat > clang.c <<'EOF'
   > int (^ _Nonnull callback)(int);
+  > void (^done)(void) = ^{ };
+  > int (^twice)(int) = ^(int x) { return 2 * x; };
   > void with_block(void (^ _Nullable block)(void) __attribute__((noescape)));
   > int * _Nullable maybe;
   > char * _Nonnull const sure = "";
@@ -273,16 +303,18 @@ list of `...` alone. GCC accepts none of them.
   $ "$clang" -std=gnu11 -E clang.c > clang-only.i
   $ ./parse_check.exe clang-only.i
   declaration callback
+  declaration done
+  declaration twice
   declaration with_block
   declaration maybe
   declaration sure
   declaration small
   declaration promote
 
-A parse error is reported at its presumed location. A block literal is
-an extension outside the profile.
+A parse error is reported at its presumed location. A C23 attribute is
+outside the profile.
 
-  $ printf '# 1 "t.c"\nint x;\nvoid *y = ^{ };\n' > bad.i
+  $ printf '# 1 "t.c"\nint x;\n[[nodiscard]] int f(void);\n' > bad.i
   $ ./parse_check.exe bad.i
-  parse_check: t.c:2: expected an expression, found `^`
+  parse_check: t.c:2: expected a declaration, found `[`
   [1]

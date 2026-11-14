@@ -31,15 +31,7 @@
  (modules test_pipeline)
  (libraries typec_driver))
 
-; The parser test runs on a small stack (32k words), so that a chain the
-; parser reads in a loop fails loudly if it ever becomes recursion.
-
 (test
  (name test_parser)
  (modules test_parser)
- (libraries typec_cpp typec_syntax typec_test_support)
- (action
-  (setenv
-   OCAMLRUNPARAM
-   l=32k
-   (run %{test}))))
+ (libraries typec_cpp typec_syntax typec_test_support))

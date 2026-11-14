@@ -166,6 +166,10 @@ let aggregate_cases =
     case "an enumerator is in scope after it" "enum { A, B = A };"
       "(declaration ((enum A (B A))))";
     case "an empty struct" "struct s {};" "(declaration ((struct s {})))";
+    case "extra semicolons in a member list"
+      "struct s { int a;; ; int b; } v; struct t { ; } w;"
+      "(declaration ((struct s (member (int) a) (member (int) b))) v) | \
+       (declaration ((struct t {})) w)";
     case "a struct with neither tag nor body" "struct;"
       "error: in.i:1: expected a tag or `{` after `struct` or `union`, found \
        `;`";
@@ -245,6 +249,23 @@ let expression_cases =
       "(sizeof (sizeof (++ a)))";
     expression_case "_Alignof" "_Alignof(char *)"
       "(alignof (type char pointer))";
+    expression_case "alignof of an expression" "__alignof__ a + _Alignof -b"
+      "(+ (alignof-expression a) (alignof-expression (- b)))";
+    expression_case "alignof of a parenthesized expression" "__alignof(a)"
+      "(alignof-expression (paren a))";
+    expression_case "alignof of a compound literal"
+      "__alignof__ (struct s){0}.a"
+      "(alignof-expression (. (literal (type (struct s)) ({} 0)) a))";
+    expression_case "real and imaginary parts" "__real__ z + __imag z * 2"
+      "(+ (__real__ z) (* (__imag__ z) 2))";
+    expression_case "a part of a cast and of a postfix expression"
+      "__real (double)a - __imag__ a[1]++"
+      "(- (__real__ (cast (type double) a)) (__imag__ (post++ (index a 1))))";
+    expression_case "a part is a unary expression" "__real__ a = __imag__ b"
+      "(= (__real__ a) (__imag__ b))";
+    expression_case "types compatible"
+      "__builtin_types_compatible_p(int, const int *) + 1"
+      "(+ (types-compatible (type int) (type const int pointer)) 1)";
     expression_case "casts" "(unsigned char)(long)-a"
       "(cast (type unsigned char) (cast (type long) (- a)))";
     expression_case "a cast binds tighter than a binary operator"
@@ -572,12 +593,56 @@ let attribute_cases =
       "int m(void) __attribute__((noinline)) { return 0; }"
       "(define (int) (function m (void)) (attributes noinline) (block (return \
        0)))";
-    case "an attribute declaration in a block"
+    case "an attribute statement in a block"
       "void f(int a) { switch (a) { case 1: f(2); \
        __attribute__((fallthrough)); case 2: ; } }"
       "(define (void) (function f (int a)) (block (switch a (block (label \
-       (case 1) (expr (call f 2))) (declaration ((attributes fallthrough))) \
+       (case 1) (expr (call f 2))) (attribute-statement fallthrough) \
        (label (case 2) ;)))))";
+    case "attributes among the qualifiers of a pointer"
+      "int * __attribute__((aligned(8))) p; int * const __attribute__((x)) \
+       volatile *q; void (^ __attribute__((y)) const b)(void);"
+      "(declaration (int) (pointer (attribute (aligned ( 8 ))) p)) | \
+       (declaration (int) (pointer const (attribute x) volatile (pointer q))) \
+       | (declaration (void) (function (paren (block-pointer (attribute y) \
+       const b)) (void)))";
+    case "attributes at the start of a parenthesized declarator"
+      "void (__attribute__((noreturn)) *f)(void); int (__attribute__((a)) \
+       __attribute__((b)) (c));"
+      "(declaration (void) (function (paren (attributes noreturn) (pointer \
+       f)) (void))) | (declaration (int) (paren (attributes a b) (paren c)))";
+    case "an attributed parenthesized declarator of a parameter"
+      "void g(void (__attribute__((unused)) *cb)(void));"
+      "(declaration (void) (function g (void (function (paren (attributes \
+       unused) (pointer cb)) (void)))))";
+    case "an attributed parenthesized abstract declarator"
+      "int x = sizeof(int (__attribute__((unused)) *));"
+      "(declaration (int) (init x (sizeof-type (type int (paren (attributes \
+       unused) pointer)))))";
+    case "attributes that begin a parameter list"
+      "void g(int (__attribute__((unused)) int), int (__attribute__((x))));"
+      "(declaration (void) (function g (int (function ((attributes unused) \
+       int))) (int (function ((attributes x))))))";
+    case "attributes before a later declarator"
+      "int a, __attribute__((unused)) b, __attribute__((x)) *c \
+       __attribute__((y)) = 0;"
+      "(declaration (int) a (declarator (attributes unused) b) (init \
+       (attributes x) (pointer c) (attributes y) 0))";
+    statement_case "attributes after a label"
+      "l: __attribute__((unused)); m: __attribute__((hot)) \
+       __attribute__((cold)) a = 1;"
+      "(label (l (attributes unused)) ;) (label (m (attributes hot cold)) \
+       (expr (= a 1)))";
+    statement_case "an attribute statement after a case label"
+      "switch (a) { case 1: __attribute__((fallthrough)); default: \
+       __attribute__((x)); }"
+      "(switch a (block (label (case 1) (attribute-statement fallthrough)) \
+       (label default (attribute-statement x))))";
+    statement_case "attribute statements as substatements"
+      "if (a) __attribute__((x)); else __attribute__((y)) __attribute__(());"
+      "(if a (attribute-statement x) (attribute-statement y))";
+    case "an attribute declaration at file scope" "__attribute__((x));"
+      "(declaration ((attributes x)))";
   ]
 
 let keyword_cases =
@@ -653,6 +718,34 @@ let block_pointer_cases =
        (pointer _Nonnull const q)) | (declaration (void) (pointer \
        _Null_unspecified r)) | (declaration (int) (pointer _Nullable_result \
        s))";
+  ]
+
+let block_literal_cases =
+  [
+    case "block literals"
+      "void (^b)(void) = ^{ }; int (^c)(int, ...) = ^(int x, ...) { return \
+       x; }; void (^d)(void) = ^() { a; };"
+      "(declaration (void) (init (function (paren (block-pointer b)) (void)) \
+       (block-literal block))) | (declaration (int) (init (function (paren \
+       (block-pointer c)) (int) ...) (block-literal (int x) ... (block \
+       (return x))))) | (declaration (void) (init (function (paren \
+       (block-pointer d)) (void)) (block-literal (identifiers) (block (expr \
+       a)))))";
+    statement_case "a block literal called where it is written"
+      "^{ a; }(); x = ^(void) { } ;"
+      "(expr (call (block-literal (block (expr a))))) (expr (= x \
+       (block-literal (void) block)))";
+    case "a parameter of a block literal is in scope in its body"
+      "typedef int T; int (^c)(int) = ^(int T) { return T * 2; }; T *p;"
+      "(declaration (typedef int) T) | (declaration (int) (init (function \
+       (paren (block-pointer c)) (int)) (block-literal (int T) (block (return \
+       (* T 2)))))) | (declaration (T) (pointer p))";
+    case "a block literal's body is a block scope"
+      "typedef int T; void (^b)(void) = ^{ typedef char T; T c; }; T *p;"
+      "(declaration (typedef int) T) | (declaration (void) (init (function \
+       (paren (block-pointer b)) (void)) (block-literal (block (declaration \
+       (typedef char) T) (declaration (T) c))))) | (declaration (T) (pointer \
+       p))";
   ]
 
 let assembler_cases =
@@ -753,6 +846,37 @@ let gnu_span_cases =
        (label-address@13-14 a@14-14)) (label@16-18 a@16-17 ;@18-18)))";
     case "spans of a conditional without a middle operand" "int x = a ?: b;"
       "(declaration@0-7 (int@0-0) (init@1-6 x@1-1 (?:@3-6 a@3-3 _ b@6-6)))";
+    case "spans of GNU operators"
+      "int x = __real__ a + __alignof__ b + __builtin_types_compatible_p(int, \
+       char *);"
+      "(declaration@0-16 (int@0-0) (init@1-15 x@1-1 (+@3-15 (+@3-7 \
+       (__real__@3-4 a@4-4) (alignof-expression@6-7 b@7-7)) \
+       (types-compatible@9-15 (type@11-11 int@11-11) (type@13-14 char@13-13 \
+       pointer@14-14)))))";
+    case "spans of a block literal" "int (^b)(int) = ^(int x) { x; };"
+      "(declaration@0-18 (int@0-0) (init@1-17 (function@1-7 (paren@1-4 \
+       (block-pointer@2-3 b@3-3)) (@6-6 int@6-6)) (block-literal@9-17 (@11-12 \
+       int@11-11 x@12-12) (block@14-17 (expr@15-16 x@15-15)))))";
+    case "spans of attributes in declarators"
+      "int * __attribute__((a)) p, (__attribute__((b)) q), __attribute__((c)) \
+       r;"
+      "(declaration@0-27 (int@0-0) (pointer@1-8 (attribute a@5-5) p@8-8) \
+       (paren@10-18 (attributes b@14-14) q@17-17) (declarator@20-26 \
+       (attributes c@23-23) r@26-26))";
+    case "spans of attributes after a label"
+      "void f(void) { l: __attribute__((a)) ; }"
+      "(define@0-15 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-15 (label@6-14 (l@6-13 (attributes a@11-11)) ;@14-14)))";
+    case "spans of an attribute statement"
+      "void f(void) { __attribute__((a)); }"
+      "(define@0-13 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-13 (attribute-statement@6-12 a@9-9)))";
+    case "spans of an attributed abstract declarator and of alignof"
+      "int x = sizeof(int (__attribute__((a)) *)) + __alignof__ (int){0};"
+      "(declaration@0-24 (int@0-0) (init@1-23 x@1-1 (+@3-23 \
+       (sizeof-type@3-15 (type@5-14 int@5-5 (paren@6-14 (attributes a@10-10) \
+       pointer@13-13))) (alignof-expression@17-23 (literal@18-23 (type@19-19 \
+       int@19-19) ({}@21-23 0@22-22))))))";
   ]
 
 let gnu_error_cases =
@@ -813,6 +937,45 @@ let gnu_error_cases =
       "error: in.i:1: expected an integer type after `:`, found `enum`";
     case "a structure as a fixed type" "enum E : struct s { B };"
       "error: in.i:1: expected an integer type after `:`, found `struct`";
+    case "alignof takes a unary expression" "int x = __alignof__ (int)a;"
+      "error: in.i:1: expected `;` after a declaration, found `a`";
+    case "types compatible takes two type names"
+      "int x = __builtin_types_compatible_p(int);"
+      "error: in.i:1: expected `,` after the first type name of \
+       `__builtin_types_compatible_p`, found `)`";
+    case "types compatible takes no expression"
+      "int x = __builtin_types_compatible_p(int, a);"
+      "error: in.i:1: expected a type name, found `a`";
+    case "a block literal without a body" "void *b = ^;"
+      "error: in.i:1: expected `{` or `(` after `^`, found `;`";
+    case "a block literal with a return type" "void *b = ^int { };"
+      "error: in.i:1: expected `{` or `(` after `^`, found `int`";
+    case "a block literal without a body after its parameters"
+      "void *b = ^(void) x;"
+      "error: in.i:1: expected `{` of a block literal, found `x`";
+    case "a block literal with an identifier list" "void *b = ^(x) { };"
+      "error: in.i:1: expected a parameter declaration, found `x`";
+    case "attributes before a later function definition"
+      "int a, __attribute__((unused)) f(void) { return 0; }"
+      "error: in.i:1: expected `;` after a declaration, found `{`";
+    case "attributes before a later member declarator"
+      "struct s { int a, __attribute__((x)) b; };"
+      "error: in.i:1: expected a declarator, found `__attribute__`";
+    case "attributes after a case label before an expression"
+      "void f(int a) { switch (a) { case 1: __attribute__((x)) a = 1; } }"
+      "error: in.i:1: expected `;` after the attributes of a statement, \
+       found `a`";
+    case "attributes that begin a declaration after a label"
+      "void f(void) { l: ; case 1: __attribute__((x)) int y; }"
+      "error: in.i:1: expected `;` after the attributes of a statement, \
+       found `int`";
+    case "the end of the input inside attributes after a parenthesis"
+      "int x = sizeof(int (__attribute__((a)"
+      "error: in.i:1: expected `))` to end `__attribute__`, found end of \
+       input";
+    case "an attribute without parentheses after a parenthesis"
+      "int x = sizeof(int (__attribute__ *));"
+      "error: in.i:1: expected `((` after `__attribute__`, found `*`";
     case "a long chain of fixed types"
       ("enum E : "
       ^ String.concat "" (List.init 100_000 (fun _ -> "enum : "))
@@ -922,6 +1085,11 @@ let nesting_texts levels =
     ("a function body", "int f(void) " ^ around "{" "" "}");
     ("statements", "void f(void) " ^ around "{ if (a) " ";" " }");
     ("typeof", around "typeof(" "int" ")" ^ " x;");
+    ( "attributed declarators",
+      "int " ^ around "(__attribute__((a)) " "x" ")" ^ ";" );
+    ( "attributed abstract declarators",
+      "int x = sizeof(int " ^ around "(__attribute__((a)) " "*" ")" ^ ");" );
+    ("block literals", "int x = " ^ around "^{ " "1" "; }" ^ ";");
     ( "attribute arguments",
       "int x __attribute__((a" ^ around "(" "" ")" ^ "));" );
     (* Each level opens two brackets. *)
@@ -983,6 +1151,9 @@ let failed_chain_cases () =
       ("comma operators", "int x = (" ^ chain ", " ");");
       ("sizeof", "int x = " ^ repeat length "sizeof " ^ "a;");
       ("unary operators", "int x = " ^ repeat length "- " ^ "a;");
+      ( "real and imaginary parts",
+        "int x = " ^ repeat length "__real__ __imag__ " ^ "a;" );
+      ("alignof", "int x = " ^ repeat length "__alignof__ " ^ "a;");
       ("increments", "int x = " ^ repeat length "++" ^ "a;");
       ("casts", "int x = " ^ repeat length "(int)" ^ "a;");
       ("postfix operators", "int x = a" ^ repeat length "[0]" ^ ";");
@@ -1014,6 +1185,19 @@ let failed_chain_cases () =
       ( "case ranges",
         in_body ("switch (a) " ^ repeat length "case 1 ... 2: " ^ ";") );
       ("block pointers", "int " ^ String.make length '^' ^ "p;");
+      ( "attributed pointers",
+        "int " ^ repeat length "* __attribute__((a)) const " ^ "p;" );
+      ( "attributed labels",
+        in_body (repeat length "a: __attribute__((a)) " ^ ";") );
+      ( "attributed declarators",
+        "int a" ^ repeat length ", __attribute__((a)) a" ^ ";" );
+      ( "attributes after a parenthesis",
+        "int x = sizeof(int (" ^ repeat length "__attribute__((a)) " ^ "*));" );
+      ( "attribute statements",
+        in_body (repeat length "__attribute__((a)); ") );
+      ( "extra semicolons in a member list",
+        "struct s { int a;" ^ String.make length ';' ^ " };" );
+      ("block literals in a row", in_body (repeat length "^{ a; }(); "));
       ("nullability qualifiers", "int *" ^ repeat length "_Nonnull " ^ "p;");
       ("statement expressions in a row", in_body (repeat length "({ a; }); "));
       ("__extension__", "int x = " ^ repeat length "__extension__ " ^ "a;");
@@ -1034,7 +1218,10 @@ let failed_chain_cases () =
           | Error error -> Some (name, error.message)))
     texts
 
-let () =
+(* Every case runs on the small stack that the fuzz harness runs the
+   parser on, so that a chain the parser reads in a loop fails loudly if
+   it ever becomes recursion. *)
+let failures () =
   let failed_cases ?(parse = Parser.parse) ~spans cases =
     List.filter_map
       (fun case ->
@@ -1056,6 +1243,7 @@ let () =
         attribute_cases;
         keyword_cases;
         block_pointer_cases;
+        block_literal_cases;
         assembler_cases;
         gnu_statement_cases;
         gnu_error_cases;
@@ -1069,12 +1257,15 @@ let () =
         ~parse:(Parser.parse_with innermost_names_typedef_names)
         ~spans:false innermost_scope_cases
   in
+  (failed, failed_nesting_cases () @ failed_chain_cases ())
+
+let () =
+  let failed, failed_limits = Small_stack.run failures in
   List.iter
     (fun (case, actual) ->
       Printf.eprintf "FAIL: %s\n  expected: %s\n  actual:   %s\n" case.name
         case.expected actual)
     failed;
-  let failed_limits = failed_nesting_cases () @ failed_chain_cases () in
   List.iter
     (fun (name, message) -> Printf.eprintf "FAIL: %s: %s\n" name message)
     failed_limits;

@@ -380,7 +380,7 @@ let rec applies_to_name (inner : Tree.declarator option) =
   match inner with
   | None -> true
   | Some { node = Name _; _ } -> true
-  | Some { node = Parenthesized_declarator inner; _ } ->
+  | Some { node = Parenthesized_declarator { inner; _ }; _ } ->
       applies_to_name (Some inner)
   | Some { node = Pointer _ | Block_pointer _ | Array _ | Function _; _ } ->
       false
@@ -435,9 +435,17 @@ let read_attributes state ~onto (attributes : Tree.attribute list) =
   in
   List.fold_left apply onto attributes
 
-(* Attributes whose effects the declarations do not record. *)
+(* Attributes where the declarations record no effect: each must be one
+   that has none, so that no effect is accepted and lost. *)
 let check_attributes state attributes =
-  ignore (read_attributes state ~onto:no_attributes attributes)
+  let check (attribute : Tree.attribute) =
+    let read = read_attributes state ~onto:no_attributes [ attribute ] in
+    if read <> no_attributes then
+      not_typed state attribute.span
+        ("the attribute " ^ quote attribute.node.name.node ^ " here")
+        "0.7b"
+  in
+  List.iter check attributes
 
 (* [specified] for one declarator: its attributes extend those of the
    specifiers. *)
@@ -804,8 +812,11 @@ and derive state ~parameter ~definition derived (declarator : Tree.declarator)
   let span = declarator.span in
   match declarator.node with
   | Name name -> { derived with name = Some name }
-  | Parenthesized_declarator inner -> continue derived (Some inner)
-  | Pointer { qualifiers; inner } ->
+  | Parenthesized_declarator { attributes; inner } ->
+      check_attributes state attributes;
+      continue derived (Some inner)
+  | Pointer { qualifiers; attributes; inner } ->
+      check_attributes state attributes;
       let pointer =
         checked state span (Ctype.pointer_to derived.declared_type)
       in
@@ -1094,7 +1105,8 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
       ignore (read_type_name state type_name);
       Integer_constant.opaque target.size_type
   (* The operand is not evaluated and its type is not computed here. *)
-  | Sizeof_expression _ -> Integer_constant.opaque target.size_type
+  | Sizeof_expression _ | Alignof_expression _ ->
+      Integer_constant.opaque target.size_type
   | Comma (left, right) when not evaluated ->
       ignore (evaluate state ~evaluated left);
       evaluate state ~evaluated right
@@ -1102,8 +1114,12 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
       fail state span "_Generic in a constant expression is not supported"
   | Comma _ | String _ | Compound_literal _ | Subscript _ | Call _ | Member _
   | Pointer_member _ | Post_increment _ | Post_decrement _
-  | Unary ((Address | Indirection | Pre_increment | Pre_decrement), _)
-  | Assignment _ | Statement_expression _ | Label_address _ | Va_arg _ ->
+  | Unary
+      ( ( Address | Indirection | Pre_increment | Pre_decrement | Real_part
+        | Imaginary_part ),
+        _ )
+  | Assignment _ | Statement_expression _ | Label_address _ | Va_arg _
+  | Types_compatible _ | Block_literal _ ->
       not_constant expression
 
 (* 6.6p6: a cast to an integer type, of an integer constant expression or

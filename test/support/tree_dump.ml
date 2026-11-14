@@ -121,6 +121,8 @@ let unary_label = function
   | Logical_not -> "!"
   | Pre_increment -> "++"
   | Pre_decrement -> "--"
+  | Real_part -> "__real__"
+  | Imaginary_part -> "__imag__"
 
 let binary_label = function
   | Multiply -> "*"
@@ -228,6 +230,7 @@ let rec expression reader (e : expression) =
   | Sizeof_expression operand -> here "sizeof" [ sub operand ]
   | Sizeof_type t -> here "sizeof-type" [ type_name reader t ]
   | Alignof t -> here "alignof" [ type_name reader t ]
+  | Alignof_expression operand -> here "alignof-expression" [ sub operand ]
   | Cast { type_name = t; operand } ->
       here "cast" [ type_name reader t; sub operand ]
   | Binary (operator, left, right) ->
@@ -245,6 +248,13 @@ let rec expression reader (e : expression) =
       here "offsetof"
         (type_name reader t :: identifier member
         :: List.map (designator reader) designators)
+  | Types_compatible (first, second) ->
+      here "types-compatible"
+        [ type_name reader first; type_name reader second ]
+  | Block_literal { parameters = list; body } ->
+      here "block-literal"
+        (Option.fold ~none:[] ~some:(parameters reader) list
+        @ [ block reader body ])
 
 and association reader (a : generic_association) =
   match a.node with
@@ -335,22 +345,32 @@ and declarator reader (d : declarator) =
   in
   match d.node with
   | Name name -> here name []
-  | Parenthesized_declarator inner -> here "paren" [ declarator reader inner ]
-  | Pointer { qualifiers = list; inner } ->
-      here "pointer" (qualifiers list @ inner_part inner)
-  | Block_pointer { qualifiers = list; inner } ->
-      here "block-pointer" (qualifiers list @ inner_part inner)
+  | Parenthesized_declarator { attributes; inner } ->
+      here "paren"
+        (attribute_group reader attributes @ [ declarator reader inner ])
+  | Pointer { qualifiers = list; attributes; inner } ->
+      here "pointer"
+        (pointer_qualifiers reader list attributes @ inner_part inner)
+  | Block_pointer { qualifiers = list; attributes; inner } ->
+      here "block-pointer"
+        (pointer_qualifiers reader list attributes @ inner_part inner)
   | Array { inner; qualifiers = list; size } ->
       here "array" (inner_part inner @ qualifiers list @ array_size reader size)
-  | Function { inner; parameters = Prototype { parameters; variadic } } ->
-      here "function"
-        (inner_part inner
-        @ List.map (parameter reader) parameters
-        @ if variadic then [ leaf "..." ] else [])
-  | Function { inner; parameters = Identifier_list names } ->
-      here "function"
-        (inner_part inner
-        @ [ group (leaf "identifiers" :: List.map identifier names) ])
+  | Function { inner; parameters = list } ->
+      here "function" (inner_part inner @ parameters reader list)
+
+(* The qualifiers of a pointer and the attributes among them, one by
+   one, so that they keep their order. *)
+and pointer_qualifiers reader list attributes =
+  in_source_order
+    (qualifiers list @ List.map (single_attribute reader) attributes)
+
+and parameters reader = function
+  | Prototype { parameters; variadic } ->
+      List.map (parameter reader) parameters
+      @ if variadic then [ leaf "..." ] else []
+  | Identifier_list names ->
+      [ group (leaf "identifiers" :: List.map identifier names) ]
 
 and array_size reader = function
   | Unsized -> []
@@ -389,25 +409,27 @@ and designator reader (d : designator) =
 and static_assertion reader { condition; message } =
   [ expression reader condition; group (string_literal reader message) ]
 
-(* A declarator with nothing after it is shown alone; one with an
+(* A declarator with nothing around it is shown alone; one with an
    initialiser as [init], and one with only an asm label or attributes as
-   [declarator]. *)
+   [declarator]. The attributes before it and after it are two groups. *)
 and init_declarator reader (d : init_declarator) =
-  let trailing =
-    Option.to_list
-      (Option.map
-         (fun label -> section "asm" (string_literal reader label))
-         d.node.asm_label)
-    @ attribute_group reader d.node.attributes
+  let inner = d.node.declarator in
+  let before (a : attribute) = a.span.last < inner.span.first in
+  let leading, trailing = List.partition before d.node.attributes in
+  let around =
+    attribute_group reader leading
+    @ (declarator reader inner
+      :: Option.to_list
+           (Option.map
+              (fun label -> section "asm" (string_literal reader label))
+              d.node.asm_label))
+    @ attribute_group reader trailing
   in
-  match (d.node.initialiser, trailing) with
-  | None, [] -> declarator reader d.node.declarator
-  | None, trailing ->
-      node d.span "declarator" (declarator reader d.node.declarator :: trailing)
-  | Some value, trailing ->
-      node d.span "init"
-        ((declarator reader d.node.declarator :: trailing)
-        @ [ initialiser reader value ])
+  match (d.node.initialiser, around) with
+  | None, [ alone ] -> alone
+  | None, around -> node d.span "declarator" around
+  | Some value, around ->
+      node d.span "init" (around @ [ initialiser reader value ])
 
 and declaration reader (d : declaration) =
   match d.node with
@@ -420,7 +442,8 @@ and declaration reader (d : declaration) =
 
 and label reader (l : label) =
   match l.node with
-  | Named_label name -> node l.span name []
+  | Named_label { name; attributes } ->
+      node l.span name (attribute_group reader attributes)
   | Case_label value -> node l.span "case" [ expression reader value ]
   | Case_range { low; high } ->
       node l.span "case-range"
@@ -441,6 +464,8 @@ and statement reader (s : statement) =
   | Compound body -> block reader body
   | Expression_statement e -> here "expr" [ value e ]
   | Null_statement -> here ";" []
+  | Attribute_statement attributes ->
+      here "attribute-statement" (List.map (attribute reader) attributes)
   | If { condition; then_branch; else_branch } ->
       here "if" [ value condition; sub then_branch; optional sub else_branch ]
   | Switch { controlling; body } ->

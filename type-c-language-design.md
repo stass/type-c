@@ -1151,19 +1151,24 @@ says which names are typedef names. A second walk that kept its own
 scope boundaries would have to agree with the parser's at every point.
 
 **GNU profile.** The front end accepts the extensions that system headers
-and common code use: attributes, `__extension__`, alternate keyword
-spellings, assembler labels and statements, `typeof`, statement
-expressions, label addresses and computed goto (`&&label`, `goto *p`),
-local labels (`__label__`), the conditional without a middle operand
-(`a ?: b`, typed as `a ? a : b` with `a` evaluated once), the
-variable-argument and `offsetof` builtins, a table of
+and common code use: attributes, including those among the qualifiers
+of a pointer, at the start of a parenthesized declarator, before a
+declarator after the first and after a label, `__extension__`,
+alternate keyword spellings, assembler labels and statements, `typeof`,
+statement expressions, label addresses and computed goto (`&&label`,
+`goto *p`), local labels (`__label__`), the conditional without a
+middle operand (`a ?: b`, typed as `a ? a : b` with `a` evaluated
+once), `__real__` and `__imag__`, `__alignof__` of an expression,
+`__builtin_types_compatible_p`, the variable-argument and `offsetof`
+builtins, a table of
 builtin functions with their types, the typedef names that GCC and
 Clang declare before the first token (`__builtin_va_list`, and
 `__int128_t` and `__uint128_t` where the target has `__int128`),
 `__int128` and the `_Float` types,
 case ranges and range designators, empty structures and `{}`
-initialisers, a lone `;` at file scope, and, for the macOS SDK, block
-declarators, nullability qualifiers, enumerations with a fixed
+initialisers, a lone `;` at file scope and among members, and, for the
+macOS SDK, block declarators and block literals (`^{ ... }`, `^(int x)
+{ ... }`), nullability qualifiers, enumerations with a fixed
 underlying type and a parameter list of `...` alone. One table holds
 the builtin typedef names: the parser reads the names from it and the
 declaration reader the types. A construct outside the profile is an error that names it; the

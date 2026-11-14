@@ -65,7 +65,8 @@ type basic_type_specifier =
 
 type struct_or_union = Struct | Union
 
-(** C11 6.5.3, and the prefix [++] and [--] of 6.5.3.1. *)
+(** C11 6.5.3, the prefix [++] and [--] of 6.5.3.1, and GNU [__real__]
+    and [__imag__], the parts of a complex value. *)
 type unary_operator =
   | Address
   | Indirection
@@ -75,6 +76,8 @@ type unary_operator =
   | Logical_not
   | Pre_increment
   | Pre_decrement
+  | Real_part
+  | Imaginary_part
 
 (** C11 6.5.5 to 6.5.14. *)
 type binary_operator =
@@ -131,6 +134,7 @@ and expression_node =
   | Sizeof_expression of expression
   | Sizeof_type of type_name
   | Alignof of type_name
+  | Alignof_expression of expression  (** GNU *)
   | Cast of { type_name : type_name; operand : expression }
   | Binary of binary_operator * expression * expression
   | Conditional of {
@@ -154,6 +158,14 @@ and expression_node =
     }
       (** [__builtin_offsetof], which [offsetof] expands to: the member
           and the member designators and subscripts after it *)
+  | Types_compatible of type_name * type_name
+      (** [__builtin_types_compatible_p] *)
+  | Block_literal of { parameters : parameters option; body : block }
+      (** Clang's [^ (] parameters [) {] ... [}], which the macOS SDK's
+          callbacks take, or [^{] ... [}] without parameters. Clang
+          reads both [^{] and [^()] as [^(void)]. The body
+          is in the scope of the parameters, as a function's is
+          (6.2.1p4), and its [return] statements give the return type. *)
 
 (** Adjacent string literal tokens, which translation phase 6 joins
     (C11 5.1.1.2): at least one, each with its encoding prefix. *)
@@ -214,6 +226,8 @@ and type_specifier =
 (** C11 6.7.5. *)
 and alignment = Alignas_type of type_name | Alignas_expression of expression
 
+(** A GNU [;] alone among the member declarations makes no node: the
+    span of the structure holds it. *)
 and member_declaration = member_declaration_node spanned
 
 and member_declaration_node =
@@ -249,18 +263,26 @@ and enumerator_node = {
     In [int *a[3]] the outer node is [Pointer] and its [inner] is
     [Array] of [Name a]: [a] is an array of pointers. [inner] is [None]
     where an abstract declarator ends without a name. [Block_pointer] is
-    Clang's [^], which the macOS SDK declares callbacks with. *)
+    Clang's [^], which the macOS SDK declares callbacks with. The GNU
+    attributes among the qualifiers of a pointer apply to the pointer
+    type, and those at the start of a parenthesized declarator to the
+    declarator inside. *)
 and declarator = declarator_node spanned
 
 and declarator_node =
   | Name of string
-  | Parenthesized_declarator of declarator
+  | Parenthesized_declarator of {
+      attributes : attribute list;
+      inner : declarator;
+    }
   | Pointer of {
       qualifiers : type_qualifier spanned list;
+      attributes : attribute list;
       inner : declarator option;
     }
   | Block_pointer of {
       qualifiers : type_qualifier spanned list;
+      attributes : attribute list;
       inner : declarator option;
     }
   | Array of {
@@ -321,13 +343,15 @@ and designator_node =
 and static_assertion = { condition : expression; message : string_literal }
 
 (** The asm label names the symbol of what the declarator declares, and
-    the attributes after it apply to that too. *)
+    the attributes apply to that too. *)
 and init_declarator = init_declarator_node spanned
 
 and init_declarator_node = {
   declarator : declarator;
   asm_label : string_literal option;  (** GNU [asm (] string [)] *)
   attributes : attribute list;
+      (** before a declarator after the first, and after the declarator
+          and its asm label, in source order *)
   initialiser : initialiser option;
 }
 
@@ -339,10 +363,10 @@ and declaration_node =
       declarators : init_declarator list;
     }
       (** no declarators declares a tag or the members of an enumeration
-          only; specifiers that are all attributes, without declarators,
-          are GNU's attribute statement, such as
-          [__attribute__((fallthrough));], which C23 calls an attribute
-          declaration *)
+          only. Specifiers that are all attributes, without declarators,
+          are C23's attribute declaration, which GCC and Clang accept at
+          file scope; in a block the same tokens are an
+          [Attribute_statement]. *)
   | Static_assert of static_assertion
 
 (** C11 6.8. A statement that ends in a substatement holds it whole, so
@@ -354,6 +378,9 @@ and statement_node =
   | Compound of block
   | Expression_statement of expression
   | Null_statement  (** [;] *)
+  | Attribute_statement of attribute list
+      (** GNU [__attribute__((...));], a null statement with attributes,
+          such as [fallthrough] before a [case] label *)
   | If of {
       condition : expression;
       then_branch : statement;
@@ -375,11 +402,13 @@ and statement_node =
   | Return of expression option
   | Asm of assembler
 
-(** C11 6.8.1. The span runs to the [:]. *)
+(** C11 6.8.1. The span runs to the [:], and past the attributes of a
+    named label. *)
 and label = label_node spanned
 
 and label_node =
-  | Named_label of string
+  | Named_label of { name : string; attributes : attribute list }
+      (** the GNU attributes after the [:] apply to the label *)
   | Case_label of expression
   | Case_range of { low : expression; high : expression }
       (** GNU [case low ... high] *)
@@ -440,7 +469,7 @@ and asm_operand_node = {
 let rec declared_name declarator =
   match declarator.node with
   | Name name -> Some name
-  | Parenthesized_declarator inner
+  | Parenthesized_declarator { inner; _ }
   | Pointer { inner = Some inner; _ }
   | Block_pointer { inner = Some inner; _ }
   | Array { inner = Some inner; _ }

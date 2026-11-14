@@ -185,16 +185,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   `within_scope`, its use of `Scope.reenter`, and the scope of
   `read_parameters`.
 - [Medium] GNU forms that common code uses and the profile leaves out,
-  each an error that names its first token: `__real__` and `__imag__`,
-  `__builtin_types_compatible_p`, `__alignof__` of an expression, block
-  literals (`^{ ... }`), an extra `;` in a member list, attributes in a
-  pointer's qualifier list (`int *__attribute__((aligned(8))) p`) and at
-  the start of a parenthesized declarator, attributes before a declarator
-  after the first (`int a, __attribute__((unused)) b;`), and attributes
-  after a label or before a statement other than `;` (`case 1:
-  __attribute__((fallthrough));`, `__attribute__((musttail)) return`).
-  Decide which belong to the profile (design 13.3) before the corpus
-  sweep (0.11) finds them.
+  each an error that names its first token: attributes before a
+  statement that no named label precedes (`__attribute__((musttail))
+  return`, GCC 15 and Clang), and attributes in the qualifiers of an
+  array parameter (`int a[__attribute__((x)) 3]`, both). Clang alone
+  also takes a block literal with a return type (`^ int (int x) { ...
+  }`, `^ int { ... }`) or with attributes, which needs the parameter
+  scope of an abstract function declarator, and attributes before a
+  member declarator after the first, which GCC refuses. Decide which
+  belong to the profile (design 13.3) before the corpus sweep (0.11)
+  finds them.
 - [Medium] `asm` and `typeof` are keywords in every dialect, as in
   gnu11, the default; under `-std=c11` GCC and Clang read them as
   identifiers, so a C11 program that declares `typeof` or `asm` does not
@@ -233,9 +233,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   backend's. `noreturn` on a pointer to a function or on a function
   typedef is not recorded, though GCC and Clang make it part of the type
   and treat a call through it as not returning. The table checks no
-  attribute's arguments (`noreturn(1)` is accepted). The rest of the GNU
-  profile that no type models (`_Float16`, `typeof`, block pointers,
-  fixed enumeration types) is an error that names it.
+  attribute's arguments (`noreturn(1)` is accepted). Where the reader
+  records no effect (a pointer, a parenthesized declarator, a structure),
+  an attribute that has one is an error, though GCC and Clang apply
+  `noreturn` in `void (__attribute__((noreturn)) f)(void)` to `f`. The
+  rest of the GNU profile that no type models (`_Float16`, `typeof`,
+  block pointers, fixed enumeration types) is an error that names it.
+- [Medium] `__builtin_types_compatible_p`, and `__real__` and
+  `__imag__` of an integer constant, are integer constant expressions in
+  GCC and Clang (`int a[__builtin_types_compatible_p(int, int)];`); the
+  constant evaluator of `Declarations` calls them not constant. Answer
+  the builtin where types are compared, in the front end when a Type-C
+  type is involved (design 13.5).
 - [Medium] Attributes inside what the reader does not read, such as an
   initialiser or the operand of `sizeof`, are not checked against the
   table. Checking them in the parser, where every attribute is made,
@@ -331,12 +340,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   aggregates. How often real code needs each is for the corpus to show.
 
 ## Fuzzing
-
-- [Low] The parser test sets its 32K-word stack with `OCAMLRUNPARAM=l=32k`
-  in `test/unit/dune`, apart from `Small_stack.limit_words`, which the
-  fuzz harness runs the parser under. Run the parser test through
-  `Small_stack.run` once the parser's scope rework has landed, so that
-  one value says how deep the parser may recurse.
 
 - [High] Decide where the OCaml AFL shm patch lives and offer it
   upstream. AFL++ on macOS hands the coverage map over only as a POSIX

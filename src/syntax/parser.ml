@@ -314,7 +314,8 @@ let keyword_specifier_word state offset keyword =
   | Attribute -> Some Attribute_word
   | Break | Case | Continue | Default | Do | Else | For | Goto | If | Return
   | Sizeof | Switch | While | Alignof | Generic | Imaginary | Static_assert
-  | Asm | Extension | Label | Builtin_va_arg | Builtin_offsetof ->
+  | Asm | Extension | Label | Builtin_va_arg | Builtin_offsetof
+  | Builtin_types_compatible_p | Real | Imag ->
       None
 
 (* The specifier that the token [offset] places ahead begins. A typedef
@@ -564,6 +565,46 @@ let attributes state =
   in
   loop []
 
+(* The qualifiers after a [*] or [^], and the attributes among them, each
+   in source order. *)
+let pointer_qualifiers state =
+  let rec loop qualifiers attributes =
+    let qualifiers = List.rev_append (type_qualifiers state) qualifiers in
+    if accept_keyword state Keyword.Attribute then
+      loop qualifiers (List.rev_append (attribute_list state) attributes)
+    else (List.rev qualifiers, List.rev attributes)
+  in
+  loop [] []
+
+(* The offset after the parentheses that open [offset] tokens ahead, or of
+   the end of the input if they do not close; [offset] if no [(] opens
+   there. *)
+let past_parentheses state offset =
+  let rec loop offset depth =
+    match peek_at state offset with
+    | Punctuator_token P.Left_paren -> loop (offset + 1) (depth + 1)
+    | Punctuator_token P.Right_paren when depth = 1 -> offset + 1
+    | Punctuator_token P.Right_paren -> loop (offset + 1) (depth - 1)
+    | End_of_input -> offset
+    | _ -> loop (offset + 1) depth
+  in
+  if peek_at state offset = Punctuator_token P.Left_paren then loop offset 0
+  else offset
+
+(* The offset after the GNU attributes that begin [offset] tokens ahead:
+   each [__attribute__] and the parentheses after it. The lookahead only
+   decides; the parse that follows matches every bracket. *)
+let rec past_attributes state offset =
+  if peek_at state offset = Keyword_token Keyword.Attribute then
+    past_attributes state (past_parentheses state (offset + 1))
+  else offset
+
+(* GNU attributes and the [;] after them, which in a block are a null
+   statement with attributes rather than C23's attribute declaration. *)
+let begins_attribute_statement state =
+  peek state = Keyword_token Keyword.Attribute
+  && peek_at state (past_attributes state 0) = Punctuator_token P.Semicolon
+
 (* GNU assembler (GCC manual 6.11). *)
 
 (* An optional asm label after a declarator. *)
@@ -645,6 +686,22 @@ let unary_operator = function
   | Punctuator_token P.Minus -> Some Unary_minus
   | Punctuator_token P.Tilde -> Some Bitwise_not
   | Punctuator_token P.Exclaim -> Some Logical_not
+  | Keyword_token Keyword.Real -> Some Real_part
+  | Keyword_token Keyword.Imag -> Some Imaginary_part
+  | _ -> None
+
+(* The operators whose operand is a unary-expression or a type name in
+   parentheses: [sizeof] and [_Alignof], whose operand GNU C allows to
+   be an expression. Each gives the node of either operand. *)
+let measure_operator = function
+  | Keyword_token Keyword.Sizeof ->
+      Some
+        ( (fun operand -> Sizeof_expression operand),
+          fun type_name -> Sizeof_type type_name )
+  | Keyword_token Keyword.Alignof ->
+      Some
+        ( (fun operand -> Alignof_expression operand),
+          fun type_name -> Alignof type_name )
   | _ -> None
 
 (* The left operand of an assignment is a unary-expression (6.5.16); any
@@ -655,8 +712,9 @@ let is_unary_expression expression =
   | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
   | Generic _ | Compound_literal _ | Subscript _ | Call _ | Member _
   | Pointer_member _ | Post_increment _ | Post_decrement _ | Unary _
-  | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Statement_expression _
-  | Label_address _ | Va_arg _ | Offsetof _ ->
+  | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Alignof_expression _
+  | Statement_expression _ | Label_address _ | Va_arg _ | Offsetof _
+  | Types_compatible _ | Block_literal _ ->
       true
 
 (* Which declarators a context takes: a declaration names what it
@@ -666,21 +724,23 @@ type declarator_form = Named | Abstract | Named_or_abstract
 (* In a declarator, [(] begins a parameter list rather than a nested
    declarator where the declarator may be abstract and the [(] is
    followed by [)] or a declaration specifier, a typedef name included
-   (6.7.6.3p11). *)
+   (6.7.6.3p11). GNU attributes may begin either, so GCC decides at the
+   token after them, and so does the parser. *)
 let opens_nested_declarator state form =
   match form with
   | Named -> true
   | Abstract | Named_or_abstract ->
+      let next = past_attributes state 1 in
       not
-        (peek_at state 1 = Punctuator_token P.Right_paren
-        || starts_declaration state 1)
+        (peek_at state next = Punctuator_token P.Right_paren
+        || starts_declaration state next)
 
 (* Whether a declarator is its name, in parentheses or not: a derivation
    around it applies to the name. *)
 let rec is_name declarator =
   match declarator.node with
   | Name _ -> true
-  | Parenthesized_declarator inner -> is_name inner
+  | Parenthesized_declarator { inner; _ } -> is_name inner
   | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
 
 (* A declarator with the asm label and attributes after it, which belong
@@ -809,11 +869,12 @@ and struct_or_union state kind =
   let trailing = if members = None then [] else attributes state in
   Struct_or_union { kind; attributes = leading @ trailing; tag; members }
 
-(* After the [{]: the member declarations, which GNU C allows to be none,
-   and the [}]. *)
+(* After the [{]: the member declarations, which GNU C allows to be none
+   and to have a [;] alone among them, and the [}]. *)
 and member_declarations state =
   let rec loop members =
     if accept state P.Right_brace then List.rev members
+    else if accept state P.Semicolon then loop members
     else loop (member_declaration state :: members)
   in
   loop []
@@ -957,13 +1018,15 @@ and declarator_and_function state form =
     match peek state with
     | Punctuator_token P.Star ->
         advance state;
-        let qualifiers = type_qualifiers state in
-        let pointer inner = Pointer { qualifiers; inner } in
+        let qualifiers, attributes = pointer_qualifiers state in
+        let pointer inner = Pointer { qualifiers; attributes; inner } in
         pointers ((start, pointer) :: innermost_first)
     | Punctuator_token P.Caret ->
         advance state;
-        let qualifiers = type_qualifiers state in
-        let block_pointer inner = Block_pointer { qualifiers; inner } in
+        let qualifiers, attributes = pointer_qualifiers state in
+        let block_pointer inner =
+          Block_pointer { qualifiers; attributes; inner }
+        in
         pointers ((start, block_pointer) :: innermost_first)
     | _ -> innermost_first
   in
@@ -983,14 +1046,15 @@ and direct_declarator state form =
         (Some (finish state start (Name name)), None)
     | Punctuator_token P.Left_paren when opens_nested_declarator state form ->
         advance state;
+        let attributes = attributes state in
         let inner, named_function =
           match declarator_and_function state form with
           | Some inner, named_function -> (inner, named_function)
           | None, _ -> fail_expected state "a declarator"
         in
         expect state P.Right_paren "`)` after a declarator";
-        (Some (finish state start (Parenthesized_declarator inner)),
-         named_function)
+        let parenthesized = Parenthesized_declarator { attributes; inner } in
+        (Some (finish state start parenthesized), named_function)
     | _ -> (None, None)
   in
   if form = Named && base = None then fail_expected state "a declarator";
@@ -1238,12 +1302,12 @@ and binary_expression state minimum =
   loop (cast_expression state)
 
 (* A cast-expression (6.5.4) is read as a loop over its prefixes (casts,
-   unary operators, [++], [--] and [sizeof]) up to the operand they apply
-   to, and the nodes are made from the innermost prefix out. After [++],
-   [--] and [sizeof] comes a unary-expression, where [(] type-name [)]
-   can only begin a compound literal; GNU [__extension__] makes no node
-   and takes a cast-expression. GNU [&&] label, like [_Alignof], is a
-   whole unary-expression. *)
+   unary operators, [++], [--], [sizeof] and [_Alignof]) up to the
+   operand they apply to, and the nodes are made from the innermost
+   prefix out. After [++], [--], [sizeof] and [_Alignof] comes a
+   unary-expression, where [(] type-name [)] can only begin a compound
+   literal; GNU [__extension__] makes no node and takes a
+   cast-expression. GNU [&&] label is a whole unary-expression. *)
 and cast_expression state =
   let rec collect prefixes ~cast_allowed =
     let start = state.position in
@@ -1267,34 +1331,33 @@ and cast_expression state =
         advance state;
         let decrement operand = Unary (Pre_decrement, operand) in
         collect ((start, decrement) :: prefixes) ~cast_allowed:false
-    | Keyword_token Keyword.Sizeof when opens_type_name_at state 1 ->
-        advance state;
-        let operand_start = state.position in
-        let type_name = parenthesized_type_name state in
-        if peek state = Punctuator_token P.Left_brace then
-          let sizeof operand = Sizeof_expression operand in
-          ( (start, sizeof) :: prefixes,
-            compound_literal state operand_start type_name )
-        else (prefixes, finish state start (Sizeof_type type_name))
-    | Keyword_token Keyword.Sizeof ->
-        advance state;
-        let sizeof operand = Sizeof_expression operand in
-        collect ((start, sizeof) :: prefixes) ~cast_allowed:false
-    | Keyword_token Keyword.Alignof ->
-        advance state;
-        let type_name = parenthesized_type_name state in
-        (prefixes, finish state start (Alignof type_name))
     | Punctuator_token P.Ampersand_ampersand ->
         advance state;
         let label = identifier state "a label after `&&`" in
         (prefixes, finish state start (Label_address label))
     | lexeme -> (
-        match unary_operator lexeme with
-        | Some operator ->
+        match (unary_operator lexeme, measure_operator lexeme) with
+        | Some operator, _ ->
             advance state;
             let apply operand = Unary (operator, operand) in
             collect ((start, apply) :: prefixes) ~cast_allowed:true
-        | None -> (prefixes, postfix_expression state))
+        | None, Some measure ->
+            advance state;
+            measured prefixes start measure
+        | None, None -> (prefixes, postfix_expression state))
+  (* After [sizeof] or [_Alignof]: a type name in parentheses or a
+     unary-expression, which is a compound literal where a [{] follows
+     the type name. *)
+  and measured prefixes start (of_expression, of_type) =
+    if opens_type_name_at state 0 then begin
+      let operand_start = state.position in
+      let type_name = parenthesized_type_name state in
+      if peek state = Punctuator_token P.Left_brace then
+        ( (start, of_expression) :: prefixes,
+          compound_literal state operand_start type_name )
+      else (prefixes, finish state start (of_type type_name))
+    end
+    else collect ((start, of_expression) :: prefixes) ~cast_allowed:false
   in
   let prefixes, operand = collect [] ~cast_allowed:true in
   List.fold_left
@@ -1400,6 +1463,12 @@ and primary_expression state =
   | Keyword_token Keyword.Builtin_offsetof ->
       advance state;
       offsetof state start
+  | Keyword_token Keyword.Builtin_types_compatible_p ->
+      advance state;
+      types_compatible state start
+  | Punctuator_token P.Caret ->
+      advance state;
+      block_literal state start
   | _ -> fail_expected state "an expression"
 
 (* After the [__builtin_va_arg]. *)
@@ -1420,6 +1489,40 @@ and offsetof state start =
   let designators = designators state in
   expect state P.Right_paren "`)` after the member of `__builtin_offsetof`";
   finish state start (Offsetof { type_name; member; designators })
+
+(* After the [__builtin_types_compatible_p]. *)
+and types_compatible state start =
+  let builtin = "`__builtin_types_compatible_p`" in
+  expect state P.Left_paren ("`(` after " ^ builtin);
+  let first = type_name state in
+  expect state P.Comma ("`,` after the first type name of " ^ builtin);
+  let second = type_name state in
+  expect state P.Right_paren ("`)` after the type names of " ^ builtin);
+  finish state start (Types_compatible (first, second))
+
+(* After the [^]: the body, after the parameters if it has them. The
+   body continues their scope, as a function's does (6.2.1p4). *)
+and block_literal state start =
+  match peek state with
+  | Punctuator_token P.Left_brace ->
+      let body = block state in
+      finish state start (Block_literal { parameters = None; body })
+  | Punctuator_token P.Left_paren ->
+      advance state;
+      (* Clang takes no identifier list here, which [Abstract] refuses. *)
+      let parameters, parameter_scope =
+        run_in_scope state (inner_scope state) (fun () ->
+            parameters state Abstract)
+      in
+      if peek state <> Punctuator_token P.Left_brace then
+        fail_expected state "`{` of a block literal";
+      let body =
+        in_scope state (reentered_scope state ~inner:parameter_scope)
+          (fun () -> compound_statement state)
+      in
+      finish state start
+        (Block_literal { parameters = Some parameters; body })
+  | _ -> fail_expected state "`{` or `(` after `^`"
 
 (* After the [_Generic] (6.5.1.1). *)
 and generic_selection state start =
@@ -1450,14 +1553,23 @@ and generic_association state =
 (* Declarations (C11 6.7). *)
 
 (* The only way the parser reads the declarator of a declaration, so
-   that each one enters scope at the same point. *)
+   that each one enters scope at the same point. GNU attributes may come
+   before a declarator after the first; before the first, the specifiers
+   hold them. *)
 and scoped_declarator state specifiers =
   let declarator_start = state.position in
+  let leading = attributes state in
   let declarator, named_function = named_declarator_and_function state in
   let asm_label = asm_label state in
-  let attributes = attributes state in
+  let trailing = attributes state in
   declare state (Declarator { specifiers; declarator });
-  { declarator_start; declarator; named_function; asm_label; attributes }
+  {
+    declarator_start;
+    declarator;
+    named_function;
+    asm_label;
+    attributes = leading @ trailing;
+  }
 
 and init_declarator state scoped =
   let initialiser =
@@ -1567,7 +1679,8 @@ and label state =
     else begin
       let name = identifier state "a label" in
       expect state P.Colon "`:` after a label";
-      Named_label name.node
+      let attributes = attributes state in
+      Named_label { name = name.node; attributes }
     end
   in
   finish state start node
@@ -1676,6 +1789,10 @@ and simple_statement state =
   | Punctuator_token P.Semicolon ->
       advance state;
       finish state start Null_statement
+  | Keyword_token Keyword.Attribute ->
+      let attributes = attributes state in
+      expect state P.Semicolon "`;` after the attributes of a statement";
+      finish state start (Attribute_statement attributes)
   | Keyword_token Keyword.Goto ->
       advance state;
       if accept state P.Star then begin
@@ -1791,9 +1908,11 @@ and block_items state =
   in
   loop []
 
-(* A label comes first: [T:] begins one where [T] is a typedef name. *)
+(* A label comes first: [T:] begins one where [T] is a typedef name. Then
+   attributes before a [;], which begin a declaration elsewhere. *)
 and block_item state =
-  if begins_label state then Block_statement (statement state)
+  if begins_label state || begins_attribute_statement state then
+    Block_statement (statement state)
   else if begins_declaration state then Block_declaration (declaration state)
   else Block_statement (statement state)
 

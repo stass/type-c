@@ -64,6 +64,9 @@ type t =
   | Null_unspecified
   | Builtin_va_arg
   | Builtin_offsetof
+  | Builtin_types_compatible_p
+  | Real
+  | Imag
 
 (* The one mapping from spellings to keywords. The GNU spellings of C11
    keywords map to the C11 keyword: GCC and Clang give them the same
@@ -147,6 +150,11 @@ let spellings =
     ("_Null_unspecified", Null_unspecified);
     ("__builtin_va_arg", Builtin_va_arg);
     ("__builtin_offsetof", Builtin_offsetof);
+    ("__builtin_types_compatible_p", Builtin_types_compatible_p);
+    ("__real", Real);
+    ("__real__", Real);
+    ("__imag", Imag);
+    ("__imag__", Imag);
   ]
 
 let table = Hashtbl.of_seq (List.to_seq spellings)

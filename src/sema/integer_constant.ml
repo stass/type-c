@@ -133,7 +133,8 @@ let unary_value target integer operator operand =
       match truth operand with
       | Some truth -> Ok (of_truth (not truth))
       | None -> Ok (opaque integer))
-  | Address | Indirection | Pre_increment | Pre_decrement ->
+  | Address | Indirection | Pre_increment | Pre_decrement | Real_part
+  | Imaginary_part ->
       invalid_arg "Integer_constant.unary"
 
 (* Binary operators *)
