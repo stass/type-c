@@ -183,7 +183,7 @@ instrumentation. That compiler lives in its own opam root, so the normal
 build keeps the system OCaml. AFL++ on macOS hands its coverage map over
 only as a POSIX shared memory descriptor, which the OCaml runtime does
 not read, so the compiler needs a patch to `runtime/afl.c` there:
-`tools/fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch`, under the licence
+`tools/fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch`, under the license
 of the OCaml file it modifies (its header says so). Setting up, once,
 from the root of this repository:
 

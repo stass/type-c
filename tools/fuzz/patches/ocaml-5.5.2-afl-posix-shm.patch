@@ -3,7 +3,7 @@ AFL-instrumented OCaml program map the coverage bitmap that AFL++ passes
 as a POSIX shared memory descriptor in __AFL_SHM_FD, as AFL++ always does
 on macOS; the SysV path (__AFL_SHM_ID) is kept.
 
-Licence: this patch modifies a file of the OCaml distribution and is
+License: this patch modifies a file of the OCaml distribution and is
 offered under that file's terms, LGPL-2.1-only with the OCaml static
 linking exception (see LICENSE in the OCaml sources); it is not part of
 typec and nothing in typec links it. Apply with patch -p1 in the OCaml

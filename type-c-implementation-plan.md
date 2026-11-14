@@ -73,7 +73,7 @@ feature is built here.
 
 | | Package |
 | --- | --- |
-| 0.1 | Skeleton: dune project, licence headers, a README with the build and test commands, and a driver that forwards every argument to the backend. |
+| 0.1 | Skeleton: dune project, license headers, a README with the build and test commands, and a driver that forwards every argument to the backend. |
 | 0.2 | Reader for preprocessed text: tokens, literals, line markers, pragmas, and the file each token belongs to. |
 | 0.3 | Span emitter and the round trip: read, emit, compile with `-x cpp-output`. First object-identity test. |
 | 0.4 | Target model from the backend's predefined macros. |
@@ -88,7 +88,7 @@ feature is built here.
 | 0.11 | Corpus runner and platform sweep; fix the tail it finds. Several commits, one per class of construct. |
 | 0.12 | Fuzz harness for the reader and the parser; resource limits. |
 
-**Corpus**, to be confirmed with a licence check before anything is
+**Corpus**, to be confirmed with a license check before anything is
 fetched: a C conformance test suite, the SQLite amalgamation, Lua, zlib,
 musl, QBE, chibicc, and randomly generated programs from Csmith. Plus one
 translation unit per host that includes every standard and POSIX header.
@@ -140,7 +140,7 @@ keeping the parser for Type-C text, and an implementation inside Clang.
 
 **Pilot A.** Port the tree of an existing C compiler, its AST or IR with
 the passes that walk it, to variants and `match`. chibicc and QBE are the
-candidates; the choice and its licence check open the package. The port
+candidates; the choice and its license check open the package. The port
 lives in its own repository and records:
 
 - lines changed, and the casts and tag tests removed;
