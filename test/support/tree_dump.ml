@@ -309,20 +309,79 @@ let init_declarator reader (d : init_declarator) =
       node d.span "init"
         [ declarator reader d.node.declarator; initialiser reader value ]
 
-let external_declaration reader = function
-  | External_declaration { span; node = Static_assert assertion } ->
-      node span "static-assert" (static_assertion reader assertion)
-  | External_declaration
-      { span; node = Declaration { specifiers = list; declarators } } ->
-      node span "declaration"
+let declaration reader (d : declaration) =
+  match d.node with
+  | Static_assert assertion ->
+      node d.span "static-assert" (static_assertion reader assertion)
+  | Declaration { specifiers = list; declarators } ->
+      node d.span "declaration"
         (group (specifiers reader list)
         :: List.map (init_declarator reader) declarators)
+
+(* An absent part of a statement, so that the parts keep their places. *)
+let absent = leaf "_"
+
+let optional dump = function Some part -> dump part | None -> absent
+
+let label reader (l : label) =
+  match l.node with
+  | Named_label name -> node l.span name []
+  | Case_label value -> node l.span "case" [ expression reader value ]
+  | Default_label -> node l.span "default" []
+
+let for_clause reader = function
+  | Clause_declaration d -> declaration reader d
+  | Clause_expression e -> expression reader e
+
+let rec statement reader (s : statement) =
+  let here = node s.span in
+  let sub = statement reader in
+  let value = expression reader in
+  match s.node with
+  | Labeled { label = l; statement = inner } ->
+      here "label" [ label reader l; sub inner ]
+  | Compound body -> block reader body
+  | Expression_statement e -> here "expr" [ value e ]
+  | Null_statement -> here ";" []
+  | If { condition; then_branch; else_branch } ->
+      here "if" [ value condition; sub then_branch; optional sub else_branch ]
+  | Switch { controlling; body } ->
+      here "switch" [ value controlling; sub body ]
+  | While { condition; body } -> here "while" [ value condition; sub body ]
+  | Do { body; condition } -> here "do" [ sub body; value condition ]
+  | For { clause; condition; step; body } ->
+      here "for"
+        [
+          optional (for_clause reader) clause;
+          optional value condition;
+          optional value step;
+          sub body;
+        ]
+  | Goto target -> here "goto" [ identifier target ]
+  | Continue -> here "continue" []
+  | Break -> here "break" []
+  | Return e -> here "return" (Option.to_list (Option.map value e))
+
+and block reader (b : block) =
+  node b.span "block" (List.map (block_item reader) b.node)
+
+and block_item reader = function
+  | Block_declaration d -> declaration reader d
+  | Block_statement s -> statement reader s
+
+let function_body reader = function
+  | Parsed body -> block reader body
+  | Skipped span -> node span "{...}" []
+
+let external_declaration reader = function
+  | External_declaration d -> declaration reader d
   | Function_definition { span; node = definition } ->
       node span "define"
-        [
-          group (specifiers reader definition.specifiers);
-          declarator reader definition.declarator;
-          node definition.body "{...}" [];
-        ]
+        ([
+           group (specifiers reader definition.specifiers);
+           declarator reader definition.declarator;
+         ]
+        @ List.map (declaration reader) definition.declarations
+        @ [ function_body reader definition.body ])
 
 let translation_unit reader unit = List.map (external_declaration reader) unit

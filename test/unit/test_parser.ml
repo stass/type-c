@@ -83,13 +83,13 @@ let declarator_cases =
     case "_Static_assert" "_Static_assert(sizeof(int) == 4, \"int\" \"32\");"
       "(static-assert (== (sizeof-type (type int)) 4) (\"int\" \"32\"))";
     case "a function definition" "int main(void) { return 0; }"
-      "(define (int) (function main (void)) {...})";
+      "(define (int) (function main (void)) (block (return 0)))";
     case "a definition with nested braces"
       "static int f(int x) { if (x) { return 1; } return 0; } int y;"
-      "(define (static int) (function f (int x)) {...}) | (declaration (int) \
-       y)";
+      "(define (static int) (function f (int x)) (block (if x (block \
+       (return 1)) _) (return 0))) | (declaration (int) y)";
     case "a parenthesized function name" "int (f)(void) { }"
-      "(define (int) (function (paren f) (void)) {...})";
+      "(define (int) (function (paren f) (void)) block)";
     case "complex" "double _Complex z; _Bool b;"
       "(declaration (double _Complex) z) | (declaration (_Bool) b)";
   ]
@@ -260,6 +260,169 @@ let expression_cases =
       "(string \"a\" \"b\")";
   ]
 
+(* Statements, in the body of [void f(void)]: the dump of its block. *)
+let statement_case name body expected =
+  case name
+    ("void f(void) { " ^ body ^ " }")
+    ("(define (void) (function f (void)) (block " ^ expected ^ "))")
+
+let statement_cases =
+  [
+    statement_case "expression and null statements" "x = 1; ;"
+      "(expr (= x 1)) ;";
+    statement_case "declarations and statements mixed"
+      "int a; a = 1; int b = a; { }"
+      "(declaration (int) a) (expr (= a 1)) (declaration (int) (init b a)) \
+       block";
+    statement_case "if" "if (a) b;" "(if a (expr b) _)";
+    statement_case "if and else" "if (a) b; else c;"
+      "(if a (expr b) (expr c))";
+    statement_case "a dangling else binds to the nearest if"
+      "if (a) if (b) x; else y;" "(if a (if b (expr x) (expr y)) _)";
+    statement_case "an else-if chain" "if (a) x; else if (b) y; else z;"
+      "(if a (expr x) (if b (expr y) (expr z)))";
+    statement_case "switch, case and default"
+      "switch (a) { case 1: case 2: break; default: return; }"
+      "(switch a (block (label (case 1) (label (case 2) break)) (label \
+       default return)))";
+    statement_case "a case value with a conditional"
+      "switch (a) case 1 ? 2 : 3: ;" "(switch a (label (case (?: 1 2 3)) ;))";
+    statement_case "while" "while (a) a--;" "(while a (expr (post-- a)))";
+    statement_case "do" "do a++; while (a < 3);"
+      "(do (expr (post++ a)) (< a 3))";
+    statement_case "for without clauses" "for (;;) ;" "(for _ _ _ ;)";
+    statement_case "for with expressions" "for (i = 0; i < n; i++) continue;"
+      "(for (= i 0) (< i n) (post++ i) continue)";
+    statement_case "for with a declaration" "for (int i = 0, j; ; ) break;"
+      "(for (declaration (int) (init i 0) j) _ _ break)";
+    statement_case "goto and a label" "goto end; end: return 1;"
+      "(goto end) (label end (return 1))";
+    statement_case "labels in a row" "a: b: ;" "(label a (label b ;))";
+    statement_case "a block-scope _Static_assert" "_Static_assert(1, \"m\");"
+      "(static-assert 1 (\"m\"))";
+    statement_case "return with a comma expression" "return a, b;"
+      "(return (, a b))";
+  ]
+
+(* Typedef names in block, parameter and statement scopes (C11 6.2.1). *)
+let scope_cases =
+  [
+    case "a declarator's name is in scope from its end"
+      "typedef int T; void f(void) { T T = sizeof(T), U = T; T * x; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (declaration (T) (init T (sizeof (paren T))) (init U T)) (expr \
+       (* T x))))";
+    case "an object hides a typedef name to the end of its block"
+      "typedef int T; void f(void) { { int T; T * x; } T * y; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (block (declaration (int) T) (expr (* T x))) (declaration (T) \
+       (pointer y))))";
+    case "a typedef name in a block ends with it"
+      "void f(void) { { typedef int T; T * p; } T * q; }"
+      "(define (void) (function f (void)) (block (block (declaration \
+       (typedef int) T) (declaration (T) (pointer p))) (expr (* T q))))";
+    case "an enumerator hides a typedef name in a block"
+      "typedef int A; void f(void) { enum { A }; A * y; }"
+      "(declaration (typedef int) A) | (define (void) (function f (void)) \
+       (block (declaration ((enum A))) (expr (* A y))))";
+    case "the parameter scope continues in the body"
+      "typedef int A; int f(enum { A } x) { A * y; }"
+      "(declaration (typedef int) A) | (define (int) (function f ((enum A) \
+       x)) (block (expr (* A y))))";
+    case "a parameter hides a typedef name in the body"
+      "typedef int T; void f(int T) { T * x; }"
+      "(declaration (typedef int) T) | (define (void) (function f (int T)) \
+       (block (expr (* T x))))";
+    case "the parameters of the return type are not in the body"
+      "typedef int T; int (*f(void))(int T) { T * x; }"
+      "(declaration (typedef int) T) | (define (int) (function (paren \
+       (pointer (function f (void)))) (int T)) (block (declaration (T) \
+       (pointer x))))";
+    case "a for declaration is in scope in the for statement only"
+      "typedef int T; void f(void) { for (int T = 0; T; ) T * 2; T * x; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (for (declaration (int) (init T 0)) T _ (expr (* T 2))) \
+       (declaration (T) (pointer x))))";
+    case "a condition's declarations are in scope in both branches"
+      "typedef int T; void f(void) { if (sizeof(enum { T = 1 })) T * 2; \
+       else T * 3; T * x; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (if (sizeof-type (type (enum (T 1)))) (expr (* T 2)) (expr (* \
+       T 3))) (declaration (T) (pointer x))))";
+    case "a substatement's declarations end with it"
+      "typedef int T; void f(void) { if (1) (void)sizeof(enum { T = 1 }); \
+       else (T)1; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (if 1 (expr (cast (type void) (sizeof-type (type (enum (T \
+       1)))))) (expr (cast (type T) 1)))))";
+    case "a do body's declarations end before its condition"
+      "typedef int T; void f(void) { do (void)sizeof(enum { T = 2 }); \
+       while ((T)0); }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (do (expr (cast (type void) (sizeof-type (type (enum (T \
+       2)))))) (cast (type T) 0))))";
+    case "a while condition's declarations end with the statement"
+      "typedef int T; void f(void) { while (sizeof(enum { T })) T * x; \
+       T * y; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (while (sizeof-type (type (enum T))) (expr (* T x))) \
+       (declaration (T) (pointer y))))";
+    case "a switch's declarations end with the statement"
+      "typedef int T; void f(void) { switch (sizeof(enum { T })) T * x; \
+       T * y; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (switch (sizeof-type (type (enum T))) (expr (* T x))) \
+       (declaration (T) (pointer y))))";
+    case "a label opens no scope"
+      "typedef int T; void f(void) { L: (void)sizeof(enum { T }); T * 2; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (label L (expr (cast (type void) (sizeof-type (type (enum \
+       T)))))) (expr (* T 2))))";
+    case "a label named as a typedef name"
+      "typedef int T; void f(void) { T: ; T x; goto T; }"
+      "(declaration (typedef int) T) | (define (void) (function f (void)) \
+       (block (label T ;) (declaration (T) x) (goto T)))";
+    case "an object named as a typedef name is no type after it"
+      "typedef int T; void f(void) { T T; T x; }"
+      "error: in.i:1: expected `;` after an expression, found `x`";
+  ]
+
+(* Old-style definitions and bodies that system headers define. *)
+let definition_cases =
+  [
+    case "an old-style definition" "int f(a, b) int a; char *b; { return a; }"
+      "(define (int) (function f (identifiers a b)) (declaration (int) a) \
+       (declaration (char) (pointer b)) (block (return a)))";
+    case "an old-style definition without declarations"
+      "int f(a) { return a; }"
+      "(define (int) (function f (identifiers a)) (block (return a)))";
+    case "a typedef name in the declaration list"
+      "typedef int T; int f(a) T a; { T * p; }"
+      "(declaration (typedef int) T) | (define (int) (function f \
+       (identifiers a)) (declaration (T) a) (block (declaration (T) (pointer \
+       p))))";
+    case "an enumerator of the declaration list is in scope in the body"
+      "typedef int T; int f(a) enum { T } a; { return T * a; }"
+      "(declaration (typedef int) T) | (define (int) (function f \
+       (identifiers a)) (declaration ((enum T)) a) (block (return (* T \
+       a))))";
+    case "a declaration list only after an identifier list"
+      "int f(int a) int b; { }"
+      "error: in.i:1: expected `;` after a declaration, found `int`";
+    case "a body in a system header is skipped"
+      "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\n\
+       static int g(void) { __asm__ volatile (\"\"); return 0; }\n\
+       # 2 \"in.i\" 2\nint h(void) { return 0; }\n"
+      "(define (static int) (function g (void)) {...}) | (define (int) \
+       (function h (void)) (block (return 0)))";
+    case "an unterminated body in a system header"
+      "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nint g(void) {\n"
+      "error: sys.h:1: expected `}` to end the function body, found end of \
+       input";
+    case "a nested function definition" "void f(void) { int g(void) { } }"
+      "error: in.i:1: expected `;` after a declaration, found `{`";
+  ]
+
 (* Spans are token indices; a pragma inside a node belongs to it. *)
 let span_cases =
   [
@@ -267,7 +430,22 @@ let span_cases =
       "(declaration@0-6 (int@0-0) (init@1-5 (pointer@1-2 p@2-2) (&@4-5 \
        x@5-5)))";
     case "spans of a function definition" "int f(void) { { } }"
-      "(define@0-8 (int@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) {...}@5-8)";
+      "(define@0-8 (int@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-8 block@6-7))";
+    case "spans of statements"
+      "void f(void) { if (a) b;\n#pragma inner\nelse L: case 1: ; }"
+      "(define@0-20 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-20 (if@6-19 a@8-8 (expr@10-11 b@10-10) (label@14-19 L@14-15 \
+       (label@16-19 (case@16-18 1@17-17) ;@19-19)))))";
+    case "spans of loops and jumps"
+      "void f(void) { do ; while (a); for (;;) goto L; }"
+      "(define@0-21 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-21 (do@6-12 ;@7-7 a@10-10) (for@13-20 _ _ _ (goto@18-20 \
+       L@19-19))))";
+    case "spans of while and switch"
+      "void f(void) { while (a) switch (b) break; }"
+      "(define@0-16 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-16 (while@6-15 a@8-8 (switch@10-15 b@12-12 break@14-15))))";
     case "a pragma inside an expression"
       "int x = 1 +\n#pragma inner\n2;\n#pragma outer\n"
       "(declaration@0-7 (int@0-0) (init@1-6 x@1-1 (+@3-6 1@3-3 2@6-6)))";
@@ -289,8 +467,8 @@ let error_cases =
     case "a lone semicolon" "int x;;"
       "error: in.i:1: expected a declaration, found `;`";
     case "an unterminated body" "int f(void) {\n{\n"
-      "error: in.i:2: expected `}` to end the function body, found end of \
-       input";
+      "error: in.i:2: expected `}` to end a compound statement, found end \
+       of input";
     case "a body after a non-function" "int x { }"
       "error: in.i:1: expected `;` after a declaration, found `{`";
     case "a body after a pointer to a function" "int (*f)(void) { }"
@@ -334,6 +512,24 @@ let error_cases =
       (Printf.sprintf
          "error: in.i:1: more than %d nested brackets or conditionals"
          Parser.max_nesting);
+    case "if without parentheses" "void f(void) { if a; }"
+      "error: in.i:1: expected `(` after `if`, found `a`";
+    case "do without while" "void f(void) { do x; y; }"
+      "error: in.i:1: expected `while` after the body of `do`, found `y`";
+    case "else without if" "void f(void) { else x; }"
+      "error: in.i:1: expected an expression, found `else`";
+    case "a declaration after a label" "void f(void) { L: int x; }"
+      "error: in.i:1: expected an expression, found `int`";
+    case "do without its semicolon" "void f(void) { do ; while (1) }"
+      "error: in.i:1: expected `;` after `do` ... `while`, found `}`";
+    case "default without a colon" "void f(void) { switch (a) { default ; } }"
+      "error: in.i:1: expected `:` after `default`, found `;`";
+    case "case without a value" "void f(void) { switch (a) { case: ; } }"
+      "error: in.i:1: expected an expression, found `:`";
+    case "return without a semicolon" "int f(void) { return }"
+      "error: in.i:1: expected an expression, found `}`";
+    case "goto without a label" "void f(void) { goto 1; }"
+      "error: in.i:1: expected a label after `goto`, found `1`";
     case "an empty file" "" "";
     case "only pragmas" "#pragma once\n#pragma typec checked\n" "";
   ]
@@ -366,6 +562,7 @@ let nesting_texts levels =
     ("structs", "struct s { " ^ around "struct { " "int x;" " } m;" ^ " };");
     ("type names", around "_Atomic(" "int" ")" ^ " x;");
     ("a function body", "int f(void) " ^ around "{" "" "}");
+    ("statements", "void f(void) " ^ around "{ if (a) " ";" " }");
   ]
 
 (* Each construct parses just within the bound and fails just beyond it,
@@ -408,6 +605,7 @@ let failed_chain_cases () =
   let chain separator last =
     String.concat separator (List.init length (fun _ -> "a")) ^ last
   in
+  let in_body statements = "void f(void) { " ^ statements ^ " }" in
   let texts =
     [
       ("binary operators", "int x = " ^ chain " + " ";");
@@ -422,6 +620,19 @@ let failed_chain_cases () =
       ("pointers", "int " ^ String.make length '*' ^ "p;");
       ("arrays", "int a" ^ repeat length "[1]" ^ ";");
       ("a body", "int f(void) {" ^ repeat length "{}" ^ "}");
+      ("statements in a block", in_body (repeat length "a; "));
+      ("ifs", in_body (repeat length "if (a) " ^ ";"));
+      ("else-if chains", in_body (repeat length "if (a) ; else " ^ ";"));
+      ( "dangling elses",
+        in_body (repeat length "if (a) " ^ ";" ^ repeat length " else ;") );
+      ("labels", in_body (repeat length "a: " ^ ";"));
+      ("case labels", in_body ("switch (a) " ^ repeat length "case 1: " ^ ";"));
+      ("default labels", in_body (repeat length "default: " ^ ";"));
+      ("switches", in_body (repeat length "switch (a) " ^ ";"));
+      ("whiles", in_body (repeat length "while (a) " ^ ";"));
+      ("fors", in_body (repeat length "for (int i = 0;;) " ^ ";"));
+      ( "dos",
+        in_body (repeat length "do " ^ ";" ^ repeat length " while (a);") );
     ]
   in
   List.filter_map
@@ -450,6 +661,9 @@ let () =
         aggregate_cases;
         initialiser_cases;
         expression_cases;
+        statement_cases;
+        scope_cases;
+        definition_cases;
         error_cases;
       ]
     @ failed_cases ~spans:true span_cases

@@ -1,9 +1,9 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(** The syntax tree of a C11 translation unit: declarations and
-    expressions (C11 6.5, 6.7, 6.9). Function bodies are spans of tokens
-    until the parser reads statements.
+(** The syntax tree of a C11 translation unit: declarations, expressions
+    and statements (C11 6.5, 6.7, 6.8, 6.9). The body of a function that
+    a system header defines is a span of tokens (design 13.3).
 
     Every node is {!spanned}: it records the tokens it was parsed from,
     which emission copies when it leaves the node untouched (design 13.4).
@@ -282,14 +282,68 @@ and declaration_node =
           only *)
   | Static_assert of static_assertion
 
-(** A function definition (C11 6.9.1) whose body is the span of its
-    braces, which the parser brace-matches but does not read. *)
+(** C11 6.8. A statement that ends in a substatement holds it whole, so
+    the tree of [if (a) if (b) x;] is as deep as the chain is long. *)
+type statement = statement_node spanned
+
+and statement_node =
+  | Labeled of { label : label; statement : statement }
+  | Compound of block
+  | Expression_statement of expression
+  | Null_statement  (** [;] *)
+  | If of {
+      condition : expression;
+      then_branch : statement;
+      else_branch : statement option;
+    }
+  | Switch of { controlling : expression; body : statement }
+  | While of { condition : expression; body : statement }
+  | Do of { body : statement; condition : expression }
+  | For of {
+      clause : for_clause option;  (** clause-1 of 6.8.5.3 *)
+      condition : expression option;
+      step : expression option;
+      body : statement;
+    }
+  | Goto of identifier
+  | Continue
+  | Break
+  | Return of expression option
+
+(** C11 6.8.1. The span runs to the [:]. *)
+and label = label_node spanned
+
+and label_node =
+  | Named_label of string
+  | Case_label of expression
+  | Default_label
+
+(** The braces of a compound statement and the block items between them
+    (C11 6.8.2). *)
+and block = block_item list spanned
+
+(** Declarations and statements in any order. *)
+and block_item = Block_declaration of declaration | Block_statement of statement
+
+and for_clause =
+  | Clause_declaration of declaration
+  | Clause_expression of expression
+
+(** The body of a function definition: parsed, or, where a system header
+    defines the function, matched brace for brace and kept as the span of
+    its braces, which emission copies (design 13.3). *)
+type function_body = Parsed of block | Skipped of span
+
+(** C11 6.9.1. [declarations] is the declaration list of an old-style
+    definition, which declares the names of its identifier list; it is
+    empty after a parameter type list. *)
 type function_definition = function_definition_node spanned
 
 and function_definition_node = {
   specifiers : specifiers;
   declarator : declarator;
-  body : span;
+  declarations : declaration list;
+  body : function_body;
 }
 
 type external_declaration =

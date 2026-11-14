@@ -9,13 +9,15 @@ type error = Reader.error = { location : Location.t; message : string }
 
 (* Input-dependent recursion is bounded (design 13.7). The parser recurses
    only inside a bracket or the [?] of a conditional that it has read and
-   not yet closed; prefixes, postfixes, chains of operators and the
-   derivations of a declarator are read in loops, and between two such
-   tokens the recursion is no deeper than the ten precedences of
-   [binary_expression]. So [advance] bounds the recursion by bounding the
-   brackets open. C11 5.2.4.1 asks for 63
-   levels of parentheses in an expression; 256 is the bracket depth Clang
-   accepts by default, enough for real code, and keeps the stack small. *)
+   not yet closed; prefixes, postfixes, chains of operators, the
+   derivations of a declarator and the statements that end in a
+   substatement are read in loops, so between two such tokens the
+   recursion has a constant depth: the ten precedences of
+   [binary_expression] and a few frames of declarations and statements.
+   So [advance] bounds the recursion by bounding the brackets open. C11
+   5.2.4.1 asks for 63 levels of parentheses in an expression; 256 is the
+   bracket depth Clang accepts by default, enough for real code, and
+   keeps the stack small. *)
 let max_nesting = 256
 
 (* How much of a token's spelling an error message quotes, so that a long
@@ -55,6 +57,14 @@ type state = {
   mutable open_brackets : opening list;
       (** read and not yet closed, innermost first *)
   mutable scope : binding Scope.t;
+}
+
+(* The function derivation applied to the name that a declarator
+   declares: its parameters, and the scope at their [)], which the body of
+   a definition continues (6.2.1p4). *)
+type named_function = {
+  parameters : parameters;
+  parameter_scope : binding Scope.t;
 }
 
 (* Raised at the first token that the grammar does not accept. *)
@@ -187,12 +197,17 @@ let is_typedef_name state name =
 let declare state name binding =
   state.scope <- Scope.add name binding state.scope
 
-(* An error abandons the state, so the scope needs no restoring on one. *)
-let within_scope state parse =
+(* Runs [parse] in a scope nested in the current one and returns its
+   result with the nested scope as [parse] left it. An error abandons the
+   state, so the scope needs no restoring on one. *)
+let nested_scope state parse =
   let saved = state.scope in
   let result = parse () in
+  let nested = state.scope in
   state.scope <- saved;
-  result
+  (result, nested)
+
+let within_scope state parse = fst (nested_scope state parse)
 
 (* What a token begins among declaration specifiers: the one place that
    says which tokens are specifiers. *)
@@ -256,6 +271,21 @@ let specifier_word state offset =
       None
 
 let starts_declaration state offset = specifier_word state offset <> None
+
+(* A declaration begins with a specifier or with [_Static_assert]. *)
+let begins_declaration state =
+  starts_declaration state 0 || peek state = Keyword_token Keyword.Static_assert
+
+(* A label begins a labeled statement (6.8.1): [case], [default], or an
+   identifier and a [:], whatever the identifier names, since labels have
+   a name space of their own (6.2.3). *)
+let begins_label state =
+  match peek state with
+  | Keyword_token (Keyword.Case | Keyword.Default) -> true
+  | Identifier_token _ -> peek_at state 1 = Punctuator_token P.Colon
+  | Keyword_token _ | Punctuator_token _ | Number_token | Character_token _
+  | String_token _ | End_of_input ->
+      false
 
 (* A specifier-qualifier list begins a type name (6.7.7). It may hold an
    alignment specifier, as in C17 (DR 444). *)
@@ -430,6 +460,14 @@ let opens_nested_declarator state form =
         (peek_at state 1 = Punctuator_token P.Right_paren
         || starts_declaration state 1)
 
+(* Whether a declarator is its name, in parentheses or not: a derivation
+   around it applies to the name. *)
+let rec is_name declarator =
+  match declarator.node with
+  | Name _ -> true
+  | Parenthesized_declarator inner -> is_name inner
+  | Pointer _ | Array _ | Function _ -> false
+
 (* The grammar: declarations and expressions, which nest in each other. *)
 
 let rec specifiers state context =
@@ -585,14 +623,19 @@ and parenthesized_type_name state =
 
 (* Declarators. *)
 
-and named_declarator state =
-  match declarator state Named with
-  | Some declarator -> declarator
-  | None -> fail_expected state "a declarator"
+and named_declarator state = fst (named_declarator_and_function state)
 
-(* None where an abstract declarator is empty. The leftmost [*] is the
-   outermost node (6.7.6.1). *)
-and declarator state form =
+and named_declarator_and_function state =
+  match declarator_and_function state Named with
+  | Some declarator, named_function -> (declarator, named_function)
+  | None, _ -> fail_expected state "a declarator"
+
+and declarator state form = fst (declarator_and_function state form)
+
+(* A declarator, None where an abstract one is empty, and its
+   {!named_function} if a function derivation applies to its name. The
+   leftmost [*] is the outermost node (6.7.6.1). *)
+and declarator_and_function state form =
   let rec pointers innermost_first =
     if peek state = Punctuator_token P.Star then begin
       let start = state.position in
@@ -603,48 +646,60 @@ and declarator state form =
     else innermost_first
   in
   let innermost_first = pointers [] in
-  let direct = direct_declarator state form in
-  List.fold_left
-    (fun inner (start, qualifiers) ->
-      Some (finish state start (Pointer { qualifiers; inner })))
-    direct innermost_first
+  let direct, named_function = direct_declarator state form in
+  let pointer inner (start, qualifiers) =
+    Some (finish state start (Pointer { qualifiers; inner }))
+  in
+  (List.fold_left pointer direct innermost_first, named_function)
 
 and direct_declarator state form =
   let start = state.position in
-  let base =
+  let base, named_function =
     match peek state with
     | Identifier_token name when form <> Abstract ->
         advance state;
-        Some (finish state start (Name name))
+        (Some (finish state start (Name name)), None)
     | Punctuator_token P.Left_paren when opens_nested_declarator state form ->
         advance state;
-        let inner =
-          match declarator state form with
-          | Some inner -> inner
-          | None -> fail_expected state "a declarator"
+        let inner, named_function =
+          match declarator_and_function state form with
+          | Some inner, named_function -> (inner, named_function)
+          | None, _ -> fail_expected state "a declarator"
         in
         expect state P.Right_paren "`)` after a declarator";
-        Some (finish state start (Parenthesized_declarator inner))
-    | _ -> None
+        (Some (finish state start (Parenthesized_declarator inner)),
+         named_function)
+    | _ -> (None, None)
   in
   if form = Named && base = None then fail_expected state "a declarator";
-  declarator_suffixes state form start base
+  declarator_suffixes state form start base named_function
 
-(* The array and function suffixes, the leftmost innermost. *)
-and declarator_suffixes state form start inner =
+(* The array and function suffixes, the leftmost innermost. Only the
+   first can apply to the name. *)
+and declarator_suffixes state form start inner named_function =
   match peek state with
   | Punctuator_token P.Left_bracket ->
       advance state;
       let qualifiers, size = array_suffix state in
       let array = Array { inner; qualifiers; size } in
-      declarator_suffixes state form start (Some (finish state start array))
+      declarator_suffixes state form start
+        (Some (finish state start array))
+        named_function
   | Punctuator_token P.Left_paren ->
       advance state;
-      let parameters = within_scope state (fun () -> parameters state form) in
+      let parameters, parameter_scope =
+        nested_scope state (fun () -> parameters state form)
+      in
       let function_ = Function { inner; parameters } in
+      let named_function =
+        match inner with
+        | Some inner when is_name inner -> Some { parameters; parameter_scope }
+        | Some _ | None -> named_function
+      in
       declarator_suffixes state form start
         (Some (finish state start function_))
-  | _ -> inner
+        named_function
+  | _ -> (inner, named_function)
 
 (* After the [[], up to and including the []] (6.7.6.2). *)
 and array_suffix state =
@@ -1006,30 +1061,7 @@ and generic_association state =
     let value = assignment_expression state in
     finish state start (Association (type_name, value))
 
-(* External declarations (C11 6.9). *)
-
-let rec is_name declarator =
-  match declarator.node with
-  | Name _ -> true
-  | Parenthesized_declarator inner -> is_name inner
-  | Pointer _ | Array _ | Function _ -> false
-
-(* Whether the derivation applied to the declared name itself is a
-   function's: a function definition declares a function by its
-   declarator, not by a typedef name (6.9.1p2). *)
-let rec declares_function declarator =
-  match declarator.node with
-  | Name _ -> false
-  | Parenthesized_declarator inner
-  | Pointer { inner = Some inner; _ }
-  | Array { inner = Some inner; _ } ->
-      declares_function inner
-  | Function { inner = Some inner; _ } ->
-      is_name inner || declares_function inner
-  | Pointer { inner = None; _ }
-  | Array { inner = None; _ }
-  | Function { inner = None; _ } ->
-      false
+(* Declarations (C11 6.7). *)
 
 (* What the declarators of a declaration with these specifiers declare,
    worked out once per declaration. *)
@@ -1051,6 +1083,36 @@ let init_declarator state binding start declarator =
   in
   finish state start { declarator; initialiser }
 
+(* A declaration read up to the end of its first declarator, where a
+   function definition parts from it, or read whole if it has no
+   declarator. *)
+type declaration_start =
+  | Complete of declaration
+  | First_declarator of {
+      start : int;
+      specifiers : specifiers;
+      declarator_start : int;
+      declarator : declarator;
+      named_function : named_function option;
+    }
+
+let declaration_start state =
+  let start = state.position in
+  if accept_keyword state Keyword.Static_assert then
+    Complete (finish state start (Static_assert (static_assertion state)))
+  else begin
+    let specifiers = specifiers state Declaration_specifiers in
+    if specifiers = [] then fail_expected state "a declaration";
+    if accept state P.Semicolon then
+      Complete
+        (finish state start (Declaration { specifiers; declarators = [] }))
+    else
+      let declarator_start = state.position in
+      let declarator, named_function = named_declarator_and_function state in
+      First_declarator
+        { start; specifiers; declarator_start; declarator; named_function }
+  end
+
 (* The rest of a declaration whose first declarator has been read. *)
 let declaration_rest state start specifiers first_start first =
   let binding = binding_of specifiers in
@@ -1069,6 +1131,249 @@ let declaration_rest state start specifiers first_start first =
   expect state P.Semicolon "`;` after a declaration";
   finish state start (Declaration { specifiers; declarators })
 
+let declaration state =
+  match declaration_start state with
+  | Complete declaration -> declaration
+  | First_declarator { start; specifiers; declarator_start; declarator; _ } ->
+      declaration_rest state start specifiers declarator_start declarator
+
+(* Statements (C11 6.8). *)
+
+(* A statement read up to its substatement, which ends it or, for [if]
+   and [do], which more tokens may follow. [outer] is the scope around
+   the statement, which closing it restores: a selection or iteration
+   statement is a block, and so is each of its substatements (6.8.4p3,
+   6.8.5p5). A label opens no scope, so its [outer] is None. *)
+type open_statement = {
+  start : int;
+  outer : binding Scope.t option;
+  kind : open_kind;
+}
+
+and open_kind =
+  | Open_labeled of label
+  | Open_if of {
+      condition : expression;
+      condition_scope : binding Scope.t;
+          (** [outer] and what the condition declared *)
+    }
+  | Open_else of { condition : expression; then_branch : statement }
+  | Open_switch of expression
+  | Open_while of expression
+  | Open_do
+  | Open_for of {
+      clause : for_clause option;
+      condition : expression option;
+      step : expression option;
+    }
+
+(* What the substatement of an open statement leaves: the statement
+   closed, or, after the [else] of an [if], open again. *)
+type closing = Closed of statement_node | Reopened of open_kind
+
+(* [(] expression [)] after the keyword [keyword]. *)
+let controlling_expression state keyword =
+  expect state P.Left_paren (Printf.sprintf "`(` after `%s`" keyword);
+  let value = expression state in
+  expect state P.Right_paren
+    (Printf.sprintf "`)` after the controlling expression of `%s`" keyword);
+  value
+
+(* An optional expression and the token [closing] after it. *)
+let optional_expression state closing expected =
+  if accept state closing then None
+  else
+    let value = expression state in
+    expect state closing expected;
+    Some value
+
+(* After the [for]: the three clauses in their parentheses. *)
+let for_clauses state =
+  expect state P.Left_paren "`(` after `for`";
+  let clause =
+    if accept state P.Semicolon then None
+    else if begins_declaration state then
+      Some (Clause_declaration (declaration state))
+    else begin
+      let value = expression state in
+      expect state P.Semicolon "`;` after the first clause of `for`";
+      Some (Clause_expression value)
+    end
+  in
+  let condition =
+    optional_expression state P.Semicolon "`;` after the condition of `for`"
+  in
+  let step =
+    optional_expression state P.Right_paren "`)` after the clauses of `for`"
+  in
+  (clause, condition, step)
+
+(* A label and its [:], where [begins_label] holds. *)
+let label state =
+  let start = state.position in
+  let node =
+    if accept_keyword state Keyword.Case then begin
+      let value = constant_expression state in
+      expect state P.Colon "`:` after the value of `case`";
+      Case_label value
+    end
+    else if accept_keyword state Keyword.Default then begin
+      expect state P.Colon "`:` after `default`";
+      Default_label
+    end
+    else begin
+      let name = identifier state "a label" in
+      expect state P.Colon "`:` after a label";
+      Named_label name.node
+    end
+  in
+  finish state start node
+
+(* A statement is read in two loops: one over the statements that end in
+   a substatement, which it keeps open innermost first, down to a
+   statement that does not, and one that closes them from the innermost
+   out. Only a compound statement recurses, inside the brace that the
+   cursor counts, so a chain of [if], [else], loops and labels needs no
+   stack: the calls between the loops are tail calls, which [@tailcall]
+   keeps so. *)
+let rec statement state = open_statements state []
+
+and open_statements state opened =
+  let start = state.position in
+  let outer = state.scope in
+  let read_substatement_of kind =
+    (open_statements [@tailcall]) state
+      ({ start; outer = Some outer; kind } :: opened)
+  in
+  match peek state with
+  | _ when begins_label state ->
+      let label = label state in
+      (open_statements [@tailcall]) state
+        ({ start; outer = None; kind = Open_labeled label } :: opened)
+  | Keyword_token Keyword.If ->
+      advance state;
+      let condition = controlling_expression state "if" in
+      read_substatement_of
+        (Open_if { condition; condition_scope = state.scope })
+  | Keyword_token Keyword.Switch ->
+      advance state;
+      read_substatement_of
+        (Open_switch (controlling_expression state "switch"))
+  | Keyword_token Keyword.While ->
+      advance state;
+      read_substatement_of (Open_while (controlling_expression state "while"))
+  | Keyword_token Keyword.Do ->
+      advance state;
+      read_substatement_of Open_do
+  | Keyword_token Keyword.For ->
+      advance state;
+      let clause, condition, step = for_clauses state in
+      read_substatement_of (Open_for { clause; condition; step })
+  | _ ->
+      let statement = simple_statement state in
+      (close_statements [@tailcall]) state opened statement
+
+(* [statement] has been read: it is the substatement of the innermost
+   open statement. Closing a statement restores the scope around it. *)
+and close_statements state opened statement =
+  match opened with
+  | [] -> statement
+  | innermost :: outside -> (
+      match close_one state innermost statement with
+      | Reopened kind ->
+          (open_statements [@tailcall]) state
+            ({ innermost with kind } :: outside)
+      | Closed node ->
+          Option.iter (fun outer -> state.scope <- outer) innermost.outer;
+          (close_statements [@tailcall]) state outside
+            (finish state innermost.start node))
+
+(* The rest of [opened] after its substatement [statement]. *)
+and close_one state opened statement =
+  match opened.kind with
+  | Open_labeled label -> Closed (Labeled { label; statement })
+  | Open_if { condition; condition_scope } ->
+      state.scope <- condition_scope;
+      if accept_keyword state Keyword.Else then
+        Reopened (Open_else { condition; then_branch = statement })
+      else
+        Closed (If { condition; then_branch = statement; else_branch = None })
+  | Open_else { condition; then_branch } ->
+      Closed (If { condition; then_branch; else_branch = Some statement })
+  | Open_switch controlling -> Closed (Switch { controlling; body = statement })
+  | Open_while condition -> Closed (While { condition; body = statement })
+  | Open_do ->
+      (* The scope of the body ends before the condition. *)
+      Option.iter (fun outer -> state.scope <- outer) opened.outer;
+      if not (accept_keyword state Keyword.While) then
+        fail_expected state "`while` after the body of `do`";
+      let condition = controlling_expression state "while" in
+      expect state P.Semicolon "`;` after `do` ... `while`";
+      Closed (Do { body = statement; condition })
+  | Open_for { clause; condition; step } ->
+      Closed (For { clause; condition; step; body = statement })
+
+(* A statement without a substatement. *)
+and simple_statement state =
+  let start = state.position in
+  match peek state with
+  | Punctuator_token P.Left_brace ->
+      let body = block state in
+      { span = body.span; node = Compound body }
+  | Punctuator_token P.Semicolon ->
+      advance state;
+      finish state start Null_statement
+  | Keyword_token Keyword.Goto ->
+      advance state;
+      let target = identifier state "a label after `goto`" in
+      expect state P.Semicolon "`;` after `goto`";
+      finish state start (Goto target)
+  | Keyword_token Keyword.Continue ->
+      advance state;
+      expect state P.Semicolon "`;` after `continue`";
+      finish state start Continue
+  | Keyword_token Keyword.Break ->
+      advance state;
+      expect state P.Semicolon "`;` after `break`";
+      finish state start Break
+  | Keyword_token Keyword.Return ->
+      advance state;
+      let value =
+        optional_expression state P.Semicolon "`;` after `return`"
+      in
+      finish state start (Return value)
+  | _ ->
+      let value = expression state in
+      expect state P.Semicolon "`;` after an expression";
+      finish state start (Expression_statement value)
+
+(* From the [{] to the [}], in a block scope of its own. *)
+and block state =
+  let start = state.position in
+  expect state P.Left_brace "`{`";
+  let items = within_scope state (fun () -> block_items state) in
+  finish state start items
+
+(* After the [{], up to and including the [}]. *)
+and block_items state =
+  let rec loop items =
+    match peek state with
+    | Punctuator_token P.Right_brace ->
+        advance state;
+        List.rev items
+    | End_of_input -> fail_expected state "`}` to end a compound statement"
+    | _ -> loop (block_item state :: items)
+  in
+  loop []
+
+(* A label comes first: [T:] begins one where [T] is a typedef name. *)
+and block_item state =
+  if begins_label state then Block_statement (statement state)
+  else if begins_declaration state then Block_declaration (declaration state)
+  else Block_statement (statement state)
+
+(* External declarations (C11 6.9). *)
+
 (* Consumes a body unread, up to the bracket that closes its [{]. *)
 let skip_body state =
   let start = state.position in
@@ -1085,33 +1390,67 @@ let skip_body state =
   loop ();
   span_from state start
 
-(* At the [{] after the declarator of a function. The function is in
-   scope in its own body. *)
-let function_definition state start specifiers declarator =
+(* At the [{]. A body that a system header holds is not parsed (design
+   13.3): it is written for its own compiler and may use any of its
+   extensions. *)
+let function_body state =
+  if (token_at state state.position).owner.system_header then
+    Skipped (skip_body state)
+  else Parsed (block state)
+
+(* The declaration list of an old-style definition, up to the [{]. *)
+let parameter_declarations state =
+  let rec loop declarations =
+    if peek state = Punctuator_token P.Left_brace then List.rev declarations
+    else loop (declaration state :: declarations)
+  in
+  loop []
+
+let takes_declaration_list = function
+  | Identifier_list _ -> true
+  | Prototype _ -> false
+
+(* A declarator whose name is a function begins a definition at a [{],
+   or, after an identifier list, at a declaration (6.9.1p1), read in the
+   scope of the parameters as the declaration list will be. *)
+let begins_definition state named_function =
+  let begins_declaration_list () =
+    state.scope <- named_function.parameter_scope;
+    starts_declaration state 0
+  in
+  peek state = Punctuator_token P.Left_brace
+  || takes_declaration_list named_function.parameters
+     && within_scope state begins_declaration_list
+
+(* After the declarator of a function. Its parameters and its body are in
+   one block scope, which continues the scope of the parameter list
+   (6.2.1p4). What the declarator declares after its parameter list, the
+   function's own name and any enumerators of its return type, is in
+   scope at file scope and missing from the body's scope. That loses no
+   typedef name: none of them is one, and none can hide a file-scope
+   typedef name, which a declaration at file scope cannot give another
+   meaning (6.2.1p2), so a lookup in the body finds no typedef name
+   either way. *)
+let function_definition state start specifiers declarator named_function =
   declare_declarator state (binding_of specifiers) declarator;
-  let body = skip_body state in
-  Function_definition (finish state start { specifiers; declarator; body })
+  let file_scope = state.scope in
+  state.scope <- named_function.parameter_scope;
+  let declarations = parameter_declarations state in
+  let body = function_body state in
+  state.scope <- file_scope;
+  Function_definition
+    (finish state start { specifiers; declarator; declarations; body })
 
 let external_declaration state =
-  let start = state.position in
-  if accept_keyword state Keyword.Static_assert then
-    let assertion = static_assertion state in
-    External_declaration (finish state start (Static_assert assertion))
-  else begin
-    let specifiers = specifiers state Declaration_specifiers in
-    if specifiers = [] then fail_expected state "a declaration";
-    if accept state P.Semicolon then
+  match declaration_start state with
+  | Complete declaration -> External_declaration declaration
+  | First_declarator
+      { start; specifiers; declarator; named_function = Some named; _ }
+    when begins_definition state named ->
+      function_definition state start specifiers declarator named
+  | First_declarator { start; specifiers; declarator_start; declarator; _ } ->
       External_declaration
-        (finish state start (Declaration { specifiers; declarators = [] }))
-    else
-      let first_start = state.position in
-      let first = named_declarator state in
-      if peek state = Punctuator_token P.Left_brace && declares_function first
-      then function_definition state start specifiers first
-      else
-        External_declaration
-          (declaration_rest state start specifiers first_start first)
-  end
+        (declaration_rest state start specifiers declarator_start declarator)
 
 let translation_unit state =
   let rec loop declarations =

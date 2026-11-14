@@ -148,19 +148,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 - [Medium] The parser reads chains in loops (left-associative binary
   operators, the comma operator, postfix operators, casts and the prefix
-  operators, assignments, the last operands of conditionals, and the
-  pointer, array and function derivations of a declarator), so a chain is
-  not
-  bounded by `Parser.max_nesting`, and its tree is as deep as it is long.
+  operators, assignments, the last operands of conditionals, the
+  pointer, array and function derivations of a declarator, and the
+  statements that end in a substatement: `if (a) if (b) ...`, `else if`
+  chains, loops and labels), so a chain is not bounded by
+  `Parser.max_nesting`, and its tree is as deep as it is long.
   A pass that recurses over the tree, such as typing (0.9) or the test
   dump, can exhaust the stack on a long chain. Before 0.9, either count
   chain length against the bound or have such passes walk chains in
   loops.
-- [High] The parser's recursion is bounded because it recurses only
-  inside a bracket or a `?` that the cursor counts. Statements (0.6)
-  recurse without one (`if (a) if (b) ...`, `while`, labels), so 0.6
-  must read those in loops or count them against the same bound, and add
-  them to the nesting tests in `test/unit/test_parser.ml`.
 - [Medium] The parser does not check the constraints on what it accepts:
   combinations of type specifiers (C11 6.7.2p2) and storage classes
   (6.7.1p2), qualifiers, `static` and `[*]` outside the outermost array
@@ -168,14 +164,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   definition (6.7.6.3p3), alignment specifiers outside the places of
   6.7.5p2, storage classes other than `extern` and `static` in a function
   definition (6.9.1p4; `typedef int f(void) { }` makes `f` a typedef
-  name). Check them where types are built (0.8, 0.9).
-- [Medium] The prototype scope of a function declarator ends at its `)`.
-  Everything a definition's parameter list declares, enumerators
-  included, is in scope in its body (6.2.1p4): with `typedef int A;`,
-  `int f(enum { A } x) { A * y; }` multiplies. When 0.6 reads bodies,
-  keep the scope at the `)` of the function derivation applied to the
-  name (the one `declares_function` finds) and parse the body in it,
-  rather than declaring the parameters again from the tree.
+  name), the declaration list of an old-style definition (6.9.1p6: only
+  `register`, no initialiser, and each declarator names an identifier of
+  the list), the storage classes of a `for` declaration (6.8.5p3),
+  `case` and `default` outside a `switch` (6.8.1p2), `break` and
+  `continue` outside a loop (6.8.6.2p1, 6.8.6.3p1), duplicate and
+  missing labels (6.8.1p3, 6.8.6.1p1) and `return` with or without a
+  value (6.8.6.4p1). Check them where types are built (0.8, 0.9).
 - [Medium] The parser decides typedef names by C's scope rules (6.2.1)
   with its own scope map and start points, and typing (0.9) must resolve
   the same identifiers by the same rules. Before 0.9, have the parser

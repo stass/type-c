@@ -5,10 +5,11 @@
     (design 13.3): recursive descent over the complete token array, with
     the scope of typedef names fed back into the grammar.
 
-    The grammar is C11's declarations and expressions (C11 6.5, 6.7, 6.9).
-    The body of a function definition is matched brace for brace and kept
-    as a span. A construct outside C11, such as [__attribute__], is an
-    error that names the token where it starts.
+    The grammar is C11's declarations, expressions and statements (C11
+    6.5, 6.7, 6.8, 6.9). The body of a function that a system header
+    defines is matched brace for brace and kept as a span. A construct
+    outside C11, such as [__attribute__], is an error that names the
+    token where it starts.
 
     Pragma tokens ([#pragma] lines, including those that [_Pragma] writes
     in the middle of an expression, and [#pragma typec] lines) are not
