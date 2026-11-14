@@ -1280,6 +1280,95 @@ let variants () =
 (* Type-C text takes a variant only whole (design 3.2 rule 6): it may
    initialise, assign, pass, return, size and address one; C text may use
    the structure it lowers to (10.6). *)
+(* Design 3.3: qualified constructors everywhere, unqualified ones where
+   the target type of the position is the variant. *)
+let constructors () =
+  let file = "in.tc" in
+  let variant = "type e = | A | B(int i, e *next); type s = | S(e v); " in
+  let in_function body =
+    variant ^ "void take(e); e f(e v, int n) { " ^ body ^ " }"
+  in
+  let constructor_error body text =
+    rejects ~file (in_function body) (text ^ " (design 3.3)")
+  in
+  accepts ~file
+    (in_function
+       "e x = A, y = e.B(n, &x); x = B(1, 0); take(A); take(e.A); \
+        x = n ? A : B(2, &y); x = (n, A); s w = S(B(3, 0)); \
+        e a[2] = { A, B(1, 0) }; (void)w; (void)sizeof e.A; return (A);");
+  accepts ~file (variant ^ "static e x = A, y = e.B(1, &x);");
+  (* Under elided braces the subobject that an element reaches is its
+     target, with no object of the constructor's name to fall back on. *)
+  accepts ~file
+    (variant
+   ^ "e m[2][2] = { A, A, A, A }; struct w { struct t { e v; int n; } t; } \
+      q = { A, 1 };");
+  accepts ~file (variant ^ "typedef e alias; e x = alias.A;");
+  (* A qualified constructor is an expression wherever one may stand,
+     also after a parenthesis that could open a type name. *)
+  accepts ~file
+    (in_function
+       "e x; x = (e.A); (void)sizeof(e.A); e.A; \
+        __typeof__(e.A) y = x; return y;");
+  (* An ordinary identifier of the name does not stand in the way (P2). *)
+  accepts ~file (variant ^ "int A; e x = A; int *p = &A;");
+  (* Without a target type, the name is looked up as in C. *)
+  rejects ~file (in_function "(void)A; return v;") "is not declared";
+  rejects ~file (in_function "int i = B(1, 0); return v;")
+    "is not declared";
+  constructor_error "return e.C;"
+    "the variant 'e' has no constructor 'C'";
+  constructor_error "return e.B;" "the constructor 'B' takes arguments";
+  constructor_error "return (e.B)(1, 0);"
+    "a constructor is not a function, so it cannot be called through \
+     parentheses";
+  constructor_error "return A();"
+    "the constructor 'A' has no fields, so it is written without parentheses";
+  constructor_error "return B(1);"
+    "the constructor 'B' takes one argument for each of its 2 fields";
+  constructor_error "s w = S(1); return v;"
+    "the argument for the field 'v' of 'S' does not have its type";
+  constructor_error "return B(v, 0);"
+    "the argument for the field 'i' of 'B' does not have its type";
+  rejects ~file (variant ^ "type t; void g(void) { (void)t.A; }")
+    "the variant 't' is incomplete here";
+  rejects ~file (variant ^ "typedef int i; int x = i.A;")
+    "'i' is not a variant, so it has no constructors";
+  (* A constant initialiser needs constant arguments. *)
+  rejects ~file (in_function "static e x; static e y = B(n, &x); return v;")
+    "not a constant expression"
+
+(* Design 3.2 rule 7: [{0}] is the only braced initialiser of a variant. *)
+let zero_values () =
+  let file = "in.tc" in
+  let variant = "type e = | A | B(int i); struct s { e v; int n; }; " in
+  let refused source =
+    rejects ~file (variant ^ source)
+      "the only braced initialiser of a variant is {0} (design 3.2 rule 7)"
+  in
+  accepts ~file
+    (variant
+   ^ "e x = {0}; e y = { 0 }; e a[2] = {0}; struct s z = {0}; \
+      struct s w = { {0}, 1 }; struct s u = { A, 1 }; \
+      struct s t = { .v = B(1), .n = 2 }; e c = (e){0};");
+  refused "e x = {1};";
+  refused "e x = { 0, 0 };";
+  refused "e x = { .tag = 0 };";
+  refused "e x = {};";
+  refused "struct s z = { 0, 1 };";
+  refused "struct s z = { .v.tag = 1 };";
+  refused "struct s z = { .v = { 1 } };";
+  refused "e c = (e){ 1 };";
+  (* Where the subobject that an initialiser reaches is unknown, the
+     backend could open the variant. *)
+  rejects ~file
+    (variant ^ "struct s z = { (_Complex int)2, 1234 };")
+    "depends on what typec does not know, in an object that holds a variant";
+  (* C text initialises the representation (design 10.6). *)
+  accepts ~file
+    (variant ^ "\n# 1 \"v.h\" 1\ne x = { .tag = e_B, .u.B = { 1 } };\n\
+                # 3 \"in.tc\" 2\n")
+
 let variant_operations () =
   let file = "in.tc" in
   let variant = "type e = | A | B(int i); " in
@@ -1306,7 +1395,9 @@ let variant_operations () =
   refused "(void)!v; return v;";
   refused "v += w; return v;";
   refused "(void)(int)v; return v;";
-  refused "(void)v; return v;";
+  accepts ~file (in_function "(void)v; (void)*p; return v;");
+  accepts ~file
+    (in_function "return _Generic(v, e: v, default: w);");
   refused "return (e)v;";
   refused "return (e)1;";
   refused "return (const e)v;";
@@ -1323,6 +1414,8 @@ let () =
   type_declarations ();
   variants ();
   variant_operations ();
+  constructors ();
+  zero_values ();
   builtin_typedefs ();
   gnu_profile ();
   unknown_types ();

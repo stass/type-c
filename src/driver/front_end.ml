@@ -10,4 +10,5 @@ let lower dialect target text =
   let type_declarations =
     Typec_sema.Declarations.type_declarations declarations
   in
-  Ok (Typec_emit.Lowering.edits text type_declarations)
+  let constructions = Typec_sema.Declarations.constructions declarations in
+  Ok (Typec_emit.Lowering.edits text type_declarations constructions)

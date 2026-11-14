@@ -563,6 +563,13 @@ let keyword_specifier_word state offset keyword =
   | Defer ->
       None
 
+(* A type name followed by [.] begins a postfix expression in Type-C
+   text only, where it names a constructor (design 2.2, 3.3); C rejects
+   it. So that every check for a type name agrees, it is no specifier. *)
+let begins_qualified_constructor state offset =
+  peek_at state (offset + 1) = Punctuator_token P.Dot
+  && is_type_c_text_at state state.grammar.(state.position + offset).index
+
 (* The specifier that the token [offset] places ahead begins. A typedef
    name is one only where no other type specifier precedes it, which the
    caller decides. *)
@@ -571,6 +578,7 @@ let specifier_word state offset =
   | Keyword_token keyword -> keyword_specifier_word state offset keyword
   | Identifier_token name -> (
       match typedef_declaration state name with
+      | Some _ when begins_qualified_constructor state offset -> None
       | Some ordinary -> Some (Typedef_word (name, ordinary))
       | None -> None)
   | Punctuator_token _ | Number_token | Character_token _ | String_token _
@@ -1098,8 +1106,9 @@ let is_unary_expression expression =
   match expression.node with
   | Binary _ | Conditional _ | Cast _ | Assignment _ | Comma _ -> false
   | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
-  | Generic _ | Compound_literal _ | Subscript _ | Call _ | Member _
-  | Pointer_member _ | Post_increment _ | Post_decrement _ | Unary _
+  | Generic _ | Compound_literal _ | Qualified_constructor _ | Subscript _
+  | Call _ | Member _ | Pointer_member _ | Post_increment _
+  | Post_decrement _ | Unary _
   | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Alignof_expression _
   | Statement_expression _ | Label_address _ | Va_arg _ | Offsetof _
   | Types_compatible _ | Choose _ | Block_literal _ ->
@@ -1958,6 +1967,29 @@ and postfix_operators state start operand =
       continue_with (Post_decrement operand)
   | _ -> operand
 
+(* At the type name of [T.C]: the constructor, and the postfix operators
+   after it, such as the arguments of [T.C(...)]. *)
+and qualified_constructor state name =
+  let start = state.position in
+  let declaration =
+    match typedef_declaration state name with
+    | Some ordinary -> ordinary.declaration
+    | None -> invalid_arg "Parser: a qualified constructor of no type name"
+  in
+  advance state;
+  let specifier =
+    finish state start (Type_specifier (Typedef_name { name; declaration }))
+  in
+  let variant =
+    finish state start { specifier_qualifiers = [ specifier ]; abstract = None }
+  in
+  expect state P.Dot "`.` after the type name";
+  let constructor = identifier state "a constructor name after `.`" in
+  let named =
+    finish state start (Qualified_constructor { variant; constructor })
+  in
+  postfix_operators state start named
+
 (* After the [(] of a call, up to and including the [)]. *)
 and arguments state =
   if accept state P.Right_paren then []
@@ -1976,7 +2008,9 @@ and primary_expression state =
   let start = state.position in
   match peek state with
   | Identifier_token name when is_typedef_name state name ->
-      fail_type_name state "an expression" name
+      if begins_qualified_constructor state 0 then
+        qualified_constructor state name
+      else fail_type_name state "an expression" name
   | Identifier_token name ->
       let resolution = resolve state name in
       advance state;

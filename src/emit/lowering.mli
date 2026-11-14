@@ -19,6 +19,8 @@
 val edits :
   Typec_cpp.Reader.t ->
   Typec_syntax.Tree.type_declaration list ->
+  Typec_sema.Expressions.construction list ->
   Emitter.edit list
-(** [edits text declarations] lowers [declarations], parsed from [text],
-    to edits in the order that {!Emitter.emit} takes. *)
+(** [edits text declarations constructions] lowers [declarations] and the
+    constructor expressions [constructions], parsed from [text], to edits
+    in the order that {!Emitter.emit} takes. *)

@@ -25,23 +25,41 @@
 
 open Typec_syntax
 
-(** What initialisation asks of expression typing. [value] types an
-    expression of the initialiser and gives its type, before the
-    conversions of its context; [initialises] checks one that initialises
-    a subobject, as an excess one does not; [source] gives the expression
-    whose value an expression is, through parentheses and the
-    selections of [_Generic] and [__builtin_choose_expr], or the unknown
-    type a selection depends on; [index] gives the value of the
-    expression of an array designator, or the span of
-    what keeps it from being an integer constant expression; [fail] is as
-    in {!Expressions.context}. *)
+(** What initialisation asks of expression typing.
+
+    - [value] types an expression of the initialiser, in its one
+      position, and gives its type before the conversions of its
+      context. The position is its target type (design 3.3): the type
+      of the subobject where the walk meets it or, where that
+      subobject's braces may be elided, of the first variant inside it;
+      [None] for an excess one.
+    - [initialises] checks an expression that [value] has typed and that
+      initialises a subobject, as an excess one does not.
+    - [source] gives the expression whose value an expression is,
+      through parentheses and the selections of [_Generic] and
+      [__builtin_choose_expr], or the unknown type that a selection
+      depends on. It types the operands of a selection, not the
+      expression, which keeps its position for [value].
+    - [initialises_whole] notes an expression that [value] has typed and
+      that initialises a whole subobject of the type with no brace
+      elided before it, where a braced list could stand in for it.
+    - [type_c_text] says whether a span begins in Type-C text.
+    - [index] gives the value of the expression of an array designator,
+      or the span of what keeps it from being an integer constant
+      expression.
+    - [fail] is as in {!Expressions.context}.
+
+    In Type-C text an initialiser opens no variant's members but through
+    the [{0}] that zeroes it (design 3.2 rules 6 and 7). *)
 type typing = {
   target : Target.t;
   tags : Ctype.tags;
   fail : 'a. Tree.span -> string -> 'a;
-  value : Tree.expression -> Ctype.t;
+  value : Ctype.t option -> Tree.expression -> Ctype.t;
   initialises : Tree.expression -> unit;
   source : Tree.expression -> Tree.expression Unknown.answer;
+  initialises_whole : Ctype.t -> Tree.expression -> unit;
+  type_c_text : Tree.span -> bool;
   index : Tree.expression -> (Integer_constant.t, Tree.span) result;
 }
 

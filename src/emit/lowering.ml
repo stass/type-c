@@ -198,10 +198,55 @@ let type_declaration (tokens : Token.t array)
   | Variant constructors ->
       variant tokens ~location ~head declaration constructors
 
+(* The grammar tokens from [first] to [last], without the pragmas
+   between them, which stay. *)
+let grammar_tokens (tokens : Token.t array) first last =
+  List.init (last - first + 1) (fun offset -> first + offset)
+  |> List.filter (fun index ->
+         match tokens.(index).kind with
+         | Token.Pragma | Token.Typec_pragma -> false
+         | Token.Identifier | Token.Number | Token.Character _
+         | Token.String _ | Token.Punctuator _ ->
+             true)
+
+(* Design 13.5: a constructor expression becomes the compound literal
+   [((N){ .tag = N_C, .u.C = { a, b } })], or inside an initialiser the
+   braced list alone. The arguments keep their tokens; only the name of
+   the constructor, the [(] and the [)] are replaced. *)
+let construction (tokens : Token.t array)
+    (construction : Typec_sema.Expressions.construction) =
+  let { Typec_sema.Expressions.span; variant; constructor; callee; braced; _ } =
+    construction
+  in
+  let location = tokens.(span.first).location in
+  let enumerator = Tree.enumerator_name ~variant constructor in
+  let opening =
+    if braced then "{ " else Printf.sprintf "((%s){ " variant
+  in
+  let closing = if braced then "}" else "})" in
+  let tag = Printf.sprintf ".%s = %s" Tree.tag_member enumerator in
+  match callee with
+  | None ->
+      replace tokens ~location
+        (opening ^ tag ^ " " ^ closing)
+        (grammar_tokens tokens span.first span.last)
+  | Some callee ->
+      let fields =
+        Printf.sprintf "%s, .%s.%s = { " tag Tree.union_member constructor
+      in
+      let left_paren = grammar_token_after tokens callee.last in
+      replace tokens ~location (opening ^ fields)
+        (grammar_tokens tokens span.first left_paren)
+      @ replace tokens
+          ~location:tokens.(span.last).location
+          (" } " ^ closing) [ span.last ]
+
 (* A type declaration may hold another, in a statement expression of
-   its definition, so the edits of all are sorted; an insertion before a
-   token comes before an edit that replaces it. *)
-let edits (text : Reader.t) declarations =
+   its definition, and a constructor's arguments other constructors, so
+   the edits of all are sorted; an insertion before a token comes before
+   an edit that replaces it. *)
+let edits (text : Reader.t) declarations constructions =
   List.concat_map (type_declaration text.tokens) declarations
+  @ List.concat_map (construction text.tokens) constructions
   |> List.stable_sort (fun (a : Emitter.edit) (b : Emitter.edit) ->
          compare (a.first, a.count) (b.first, b.count))

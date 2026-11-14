@@ -257,6 +257,8 @@ let rec expression reader (e : expression) =
         (sub controlling :: List.map (association reader) associations)
   | Compound_literal { type_name = t; values } ->
       here "literal" [ type_name reader t; initialiser_list reader values ]
+  | Qualified_constructor { variant; constructor } ->
+      here "constructor" [ type_name reader variant; leaf constructor.node ]
   | Subscript { operand; index } -> here "index" [ sub operand; sub index ]
   | Call { callee; arguments } ->
       here "call" (sub callee :: List.map sub arguments)

@@ -35,6 +35,7 @@ let type_declarations result =
   |> List.sort (fun (a : Tree.type_declaration) b ->
          compare a.span.first b.span.first)
 
+let constructions result = Expressions.constructions result.typed
 let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name
@@ -1654,8 +1655,9 @@ and read_variant state (declaration : Tree.type_declaration) constructors
   let entity = bind (Ctype.record record) in
   let tag_enum = variant_tag_enum state declaration constructors in
   let tag = variant_member Tree.tag_member (Ctype.enum tag_enum) in
+  let read = List.map (read_constructor state) constructors in
   let members =
-    match List.filter_map (constructor_payload state) constructors with
+    match List.filter_map (constructor_payload state) read with
     | [] -> [ tag ]
     | payloads ->
         let span = declaration.span in
@@ -1663,7 +1665,8 @@ and read_variant state (declaration : Tree.type_declaration) constructors
         [ tag; variant_member Tree.union_member (Ctype.record union) ]
   in
   checked state declaration.span
-    (Ctype.define_record state.target state.tags record members);
+    (Ctype.define_variant state.target state.tags record
+       (List.map fst read) members);
   entity
 
 and variant_member name member_type =
@@ -1714,16 +1717,24 @@ and declare_tag_enumerators state span variant constructors =
   in
   List.iteri declare constructors
 
+(* A constructor and its fields, with the span that a payload made of
+   them is reported at. *)
+and read_constructor state (constructor : Tree.constructor) =
+  let fields =
+    List.map (read_field state constructor) constructor.node.fields
+  in
+  ({ Ctype.constructor_name = constructor.node.name.node; fields },
+   constructor.span)
+
 (* The member of the union for a constructor with fields: the struct of
    its fields in order, named after the constructor. *)
-and constructor_payload state (constructor : Tree.constructor) =
-  match constructor.node.fields with
+and constructor_payload state
+    (({ constructor_name; fields } : Ctype.constructor), span) =
+  match fields with
   | [] -> None
-  | fields ->
-      let members = List.map (read_field state constructor) fields in
-      let span = constructor.span in
-      let payload = defined_record state span Ctype.Struct members in
-      Some (variant_member constructor.node.name.node (Ctype.record payload))
+  | _ :: _ ->
+      let payload = defined_record state span Ctype.Struct fields in
+      Some (variant_member constructor_name (Ctype.record payload))
 
 and read_field state constructor (field : Tree.field) =
   let specified = read_specifiers state field.node.specifiers in
@@ -1798,6 +1809,15 @@ let read_declaration state (declaration : Tree.declaration) =
       Declaration
         (List.map (read_init_declarator state File_scope specified) declarators)
 
+(* The return type of a defined function, where its type is known: a
+   typedef name of an unknown type may declare it (6.9.1p2). *)
+let return_type (function_type : Ctype.t) =
+  match function_type.shape with
+  | Function { return; _ } -> Some return
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Unknown_type _ ->
+      None
+
 (* 6.9.1. The body is typed where the definition stands, so that it sees
    the unit as of that point. *)
 let read_function_definition state (definition : Tree.function_definition) =
@@ -1834,7 +1854,8 @@ let read_function_definition state (definition : Tree.function_definition) =
   (match body with
   | Parsed block ->
       within state In_block (fun () ->
-          Expressions.function_body (typing state) ~name:entity.name block)
+          Expressions.function_body (typing state) ~name:entity.name
+            ~return_type:(return_type derived.declared_type) block)
   | Skipped _ -> ());
   Function_definition entity
 

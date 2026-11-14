@@ -29,7 +29,9 @@ let emitted source =
   match Declarations.read lp64 text unit with
   | Ok declarations ->
       Emitter.emit text
-        (Lowering.edits text (Declarations.type_declarations declarations))
+        (Lowering.edits text
+           (Declarations.type_declarations declarations)
+           (Declarations.constructions declarations))
   | Error error -> failwith (Reader.error_message error)
 
 let is_marker line = String.starts_with ~prefix:"# " line
@@ -51,6 +53,49 @@ let lowers name source expected =
     Printf.eprintf "FAIL: %s\n  expected: %s\n  actual:   %s\n" name expected
       actual
   end
+
+(* Design 13.5: a compound literal, or in an initialiser the braced list
+   alone; the arguments keep their tokens. *)
+let constructors () =
+  let variant = "type e = | A | B(int x, int y);\n" in
+  let lowered = "struct e; typedef struct e e; enum e_tag { e_A, e_B }; \
+                 struct e { enum e_tag tag; union { struct { int x ; int y ; \
+                 } B; } u; };"
+  in
+  lowers "an initialiser" (variant ^ "e a = A, b = e.B(1, 2);")
+    (lowered
+   ^ " e a = { .tag = e_A } , b = { .tag = e_B, .u.B = { 1, 2 } } ;");
+  lowers "an assignment and a return"
+    (variant ^ "e f(e v) { v = B(1, 2); return (A); }")
+    (lowered
+   ^ " e f(e v) { v = ((e){ .tag = e_B, .u.B = { 1, 2 } }) ; return ( \
+      ((e){ .tag = e_A }) ); }");
+  (* C text keeps C's meaning of a name that a target type would make a
+     constructor in Type-C text. *)
+  lowers "a parameter named as a constructor in C text"
+    (variant ^ "# 1 \"c.h\" 1\ne pick(e A) { return A; }\n")
+    (lowered ^ " e pick(e A) { return A; }");
+  (* A braced list stands in only for a whole variant reached with no
+     brace elided before it, here the second element, and not for an
+     atomic one, which Clang refuses. *)
+  lowers "brace elision into an array of variants"
+    (variant ^ "struct t { e a[2]; int n; } s = { A, B(1, 2), 5 };")
+    (lowered
+   ^ " struct t { e a[2]; int n; } s = { ((e){ .tag = e_A }) , { .tag = \
+      e_B, .u.B = { 1, 2 } } , 5 };");
+  lowers "an atomic object" (variant ^ "_Atomic e g = A;")
+    (lowered ^ " _Atomic e g = ((e){ .tag = e_A }) ;");
+  lowers "a pragma before the arguments"
+    (variant ^ "e x = B\n#pragma weak w\n(1, 2);")
+    (lowered ^ " e x = { .tag = e_B, .u.B = { #pragma weak w 1, 2 } } ;");
+  lowers "a constructor in the arguments of another"
+    (variant ^ "type p = | P(e first, e second);\n"
+    ^ "p f(void) { return P(e.B(1, 2), A); }")
+    (lowered
+   ^ " struct p; typedef struct p p; enum p_tag { p_P }; struct p { enum \
+      p_tag tag; union { struct { e first ; e second ; } P; } u; }; p \
+      f(void) { return ((p){ .tag = p_P, .u.P = { { .tag = e_B, .u.B = { \
+      1, 2 } } , { .tag = e_A } } }) ; }")
 
 let () =
   lowers "a variant without fields" "type e = | A | B;"
@@ -99,4 +144,5 @@ let () =
   lowers "a type declaration in a statement expression of a definition"
     "void f(void) { type a = typeof(({ type b = int; (b)1; })) *; }"
     "void f(void) { typedef typeof(({ typedef int b ; (b)1; })) * a ; }";
+  constructors ();
   if !failures > 0 then exit 1

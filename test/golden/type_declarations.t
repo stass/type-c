@@ -225,7 +225,7 @@ access, no comparison and no cast to or from one.
   $ ./golden.exe equal.tc
   equal.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
   [1]
-  $ printf 'type e = | A;\nvoid f(e v) { (void)v; }\n' > cast.tc
+  $ printf 'type e = | A;\nvoid f(e v) { (void)(long)v; }\n' > cast.tc
   $ ./golden.exe cast.tc
   cast.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
   [1]

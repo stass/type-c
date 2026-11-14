@@ -56,10 +56,13 @@ type record_definition = {
   by_name : found_member Names.t;
 }
 
+type constructor = { constructor_name : string; fields : member list }
+
 type tags = {
   mutable next_id : int;
   records : (int, record_definition) Hashtbl.t;
   enums : (int, Integer.t Unknown.answer) Hashtbl.t;
+  constructors : (int, constructor list) Hashtbl.t;
 }
 
 type error =
@@ -265,7 +268,10 @@ let atomic t =
 (* Tags *)
 
 let create_tags () =
-  { next_id = 0; records = Hashtbl.create 16; enums = Hashtbl.create 16 }
+  { next_id = 0;
+    records = Hashtbl.create 16;
+    enums = Hashtbl.create 16;
+    constructors = Hashtbl.create 16 }
 
 let fresh_id tags =
   let id = tags.next_id in
@@ -383,6 +389,13 @@ let is_pointer =
   classify (function
     | Pointer _ -> true
     | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _
+    | Function _ | Unknown_type _ ->
+        false)
+
+let is_record =
+  classify (function
+    | Record _ -> true
+    | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _
     | Function _ | Unknown_type _ ->
         false)
 
@@ -511,6 +524,21 @@ let define_record target tags tag members =
       Hashtbl.replace tags.records tag.record_id definition;
       Ok ()
   | exception Invalid error -> Error error
+
+let define_variant target tags tag constructors members =
+  if not tag.variant then invalid_arg "Ctype: a variant of no variant tag";
+  Result.map
+    (fun () -> Hashtbl.replace tags.constructors tag.record_id constructors)
+    (define_record target tags tag members)
+
+let constructors tags t =
+  match t.shape with
+  | Record ({ variant = true; _ } as tag) ->
+      Hashtbl.find_opt tags.constructors tag.record_id
+  | Record { variant = false; _ }
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _ | Function _
+  | Unknown_type _ ->
+      None
 
 (* Compatible and composite types *)
 

@@ -128,6 +128,24 @@ type t
 
 val create : unit -> t
 
+(** A constructor expression (design 3.3) that lowering replaces (13.5):
+    its span; the name of its variant and of the constructor; the span
+    of the name where the constructor is called with arguments, [None]
+    for one without fields; its arguments; and whether it initialises a
+    whole object of its variant with no brace elided before it, where it
+    lowers to the braced list alone. *)
+type construction = {
+  span : Tree.span;
+  variant : string;
+  constructor : string;
+  callee : Tree.span option;
+  arguments : Tree.expression list;
+  braced : bool;
+}
+
+val constructions : t -> construction list
+(** The constructor expressions typed, in source order. *)
+
 val find : t -> Tree.expression -> typed option
 (** The type of an expression that has been typed: the type that a
     Type-C rule sees (design 13.3). A generic selection has that of the
@@ -200,8 +218,11 @@ val initialiser :
     storage duration, whose initialiser is constant (6.7.9p4): an
     expression that is [Not_constant] is an error. *)
 
-val function_body : context -> name:string -> Tree.block -> unit
-(** Types the body of the function [name]. *)
+val function_body :
+  context -> name:string -> return_type:Ctype.t option -> Tree.block -> unit
+(** Types the body of the function [name], whose [return] statements have
+    its return type as their target type (design 3.3); [None] where the
+    function's type is unknown. *)
 
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)

@@ -229,13 +229,58 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [Medium] Stage 1 needs the target type of an expression's position
-  (design 3.3) beside the type that `Expressions.find` gives it, and
-  typing does not compute one: it converts no argument to its parameter
-  type, keeps no return type for `return`, and reads no initialiser
-  against the object it initialises (6.7.9). Record the target type of
-  each such position when Stage 1 types constructor expressions, where
-  typing reads the call, assignment, `return` and initialiser.
+- [High] Lowered constructors name the variant's typedef name and its
+  enumerators (design 13.5), which an inner scope may declare otherwise:
+  after `int e_A;` in a block, `.tag = e_A` reads the local object, and
+  after `int e;` the compound literal `(e){...}` does not compile. Claim
+  the derived names and the typedef name in every scope where a
+  constructor of the variant is used, or lower to names that cannot be
+  shadowed.
+- [Medium] `Expressions.positioned` refuses a second typing of a node
+  in another position at run time, and some callers type a node twice in
+  the same position on purpose (`selected`, `statement_expression`,
+  `integer_constant` after `case_value`). Split the entry points: typing
+  a child asserts it is untyped, reading a typed one goes through
+  `operand_typed`; then the stored position and its check go.
+- [Medium] Design 3.3's target under elided braces is the first
+  variant, because only a variant target changes a meaning today. `str`
+  string literals (section 8, P13) and generic deduction (7.2) also take
+  meaning from the target: before they land, state the rule as the first
+  subobject on the elision chain whose type gives the target a meaning.
+- [Low] `Initialiser.first_variant` follows the elision chain that
+  `first_level` encodes too. Split a pure first-subobject step that both
+  use, keeping the rule 6 refusal at the callers that open a record.
+- [Low] Under `{0}` rule 7, a constant that is no valid 0 (`{0i}`, an
+  integer too large) is refused as reaching into the variant rather
+  than with the constant's own error.
+- [Medium] An unqualified constructor whose name is a visible typedef
+  name does not parse (`type A = int; type e = | A; e x = A;`): the
+  parser reads a typedef name in an expression as an error, before the
+  target type is known, against design P2. Say so in 3.3 or let the
+  parser read such a name as an identifier where `(`, `,`, `;`, `)` or
+  `:` follows.
+- [Medium] Design 13.5 says a constructor inside an initialiser lowers
+  to its braced list so that static initialisers stay constant; one in
+  parentheses (`static e x = (B(1));`) or reached through elided braces
+  (`static struct w q = { e.A };`), and one for an atomic object
+  (`static _Atomic e g = A;`), lower to a compound literal, which
+  `gcc -pedantic` calls not constant. Narrow the 13.5 row or drop the
+  parentheses and add the elided braces in the lowering.
+- [Medium] `Expressions.constructor_argument` repeats `Initialiser`'s
+  rule that a structure is initialised whole when its type is
+  compatible (6.7.9p13). Check the arguments as the initialiser of the
+  payload structure through `Initialiser` instead.
+- [Low] A variant's constructors and its structure's members are two
+  tables in `Ctype.tags` under one id; `define_record` can still
+  complete a variant without constructors. Keep the constructors in the
+  record's definition, or refuse a variant tag in `define_record`.
+- [Low] `{0}` (design 3.2 rule 7) is read as any integer constant 0
+  (`{0L}`, `{0x0}`) without a designator; say so in the design.
+- [Medium] Constructor arguments are converted to their field types by
+  the backend, except where a field or an argument is a structure or
+  union, which `Expressions` checks. A wrong scalar or pointer argument
+  is then the backend's error on lowered code; check 6.5.16.1p1 in
+  typec once typing models assignment conversions.
 - [Medium] The result type of each operator on integer constants is
   decided twice, by `Expressions` and by `Integer_constant.unary`,
   `binary` and `conditional`, which the classing of constants calls: the
@@ -741,23 +786,20 @@ types (design 13.3).
 - [Low] Type-C text cannot name a tag that a type declaration claims
   (design 10.1 rule 6); C text in the same unit can, and names the
   lowered structure. Say so in the design or refuse it there too.
-- [High] Type-C text gives a variant any braced initialiser and reaches
-  its members through an initialiser, against design 3.2 rules 6 and 7:
-  `e x = {1};`, `{ .tag = 1 }`, and brace elision into a variant member
-  (`struct s { e v; int n; } x = { 0, 1 };` sets `x.v`'s payload).
-  `Initialiser` opens a record only in `first_level` and `designate`;
-  refuse a variant there from Type-C text (`Ctype.as_variant`) and take
-  `{0}` for the variant itself. Settle first whether `{0}` for a
-  structure whose first member is a variant, which reaches the tag by
-  elision, stays valid; C programs rely on it.
+- [High] Owner decisions taken by default, each in one place: `{0}`
+  zeroes a structure whose first member is a variant, reaching its tag
+  through elided braces (`Initialiser.zeroes_variant_members`); `(void)v`
+  discards a variant (`Expressions.discards`); `_Generic` on a variant is
+  a type query, as `sizeof` is (its controlling expression is a whole
+  use). Confirm each and say so in design 3.2 rules 6 and 7.
 - [Medium] A selection that depends on what typec does not know hides a
   variant from design 3.2 rule 6: Type-C text may write
   `__builtin_choose_expr(__builtin_constant_p(n), v, v).tag` and the
   same through `_Generic`, as the result has an unknown type; and the
   body of a Clang block literal is not typed at all. Where every
   candidate is a variant, refuse the operation in Type-C text. The
-  check of rule 6 could also move to where `Expressions` and
-  `Initialiser` open a record's members, deciding the text by the
+  check of rule 6 could also move to where `Expressions` opens a
+  record's members, as `Initialiser` checks it, deciding the text by the
   member's token rather than the first token of the operation (a line
   marker inside an expression makes them differ).
 - [Medium] `offsetof(struct s, v.tag)` in Type-C text reaches the tag of

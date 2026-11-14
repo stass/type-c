@@ -36,43 +36,66 @@ type constant =
    and the loop or switch that break, continue and case need. *)
 type enclosing = {
   function_name : string option;
+  return_type : Ctype.t option;
   in_loop : bool;
   in_switch : bool;
 }
+
+type construction = {
+  span : Tree.span;
+  variant : string;
+  constructor : string;
+  callee : Tree.span option;
+  arguments : Tree.expression list;
+  braced : bool;
+}
+
+(* The target type of an expression's position, which selects an
+   unqualified constructor (design 3.3), or none. *)
+type position = Untargeted | Targeted of Ctype.t
 
 (* [depth] and [enclosing] belong to the walk in progress. Only the
    reader's failure leaves a walk early, and it ends the read, so neither
    is restored on it. [selections] and [compatibilities] hold the answers
    to the constructs that ask whether types are compatible, by the span
-   of the construct. *)
+   of the construct. [types] keeps the position that each expression is
+   typed in, its one position. *)
 type t = {
-  types : (Tree.span, typed) Hashtbl.t;
+  types : (Tree.span, position * typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
   selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
+  constructions : (Tree.span, construction) Hashtbl.t;
   mutable depth : int;
   mutable enclosing : enclosing;
 }
 
 let outside_functions =
-  { function_name = None; in_loop = false; in_switch = false }
+  { function_name = None; return_type = None; in_loop = false;
+    in_switch = false }
 
 let create () =
   { types = Hashtbl.create 4096;
     constants = Hashtbl.create 4096;
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
+    constructions = Hashtbl.create 64;
     depth = 0;
     enclosing = outside_functions }
 
 let find view (expression : Tree.expression) =
-  Hashtbl.find_opt view.types expression.span
+  Option.map snd (Hashtbl.find_opt view.types expression.span)
 
 let constant view (expression : Tree.expression) =
   Hashtbl.find_opt view.constants expression.span
 
 let selection view (expression : Tree.expression) =
   Hashtbl.find_opt view.selections expression.span
+
+let constructions view =
+  Hashtbl.to_seq_values view.constructions
+  |> List.of_seq
+  |> List.sort (fun a b -> compare a.span.first b.span.first)
 
 let types_compatible view (expression : Tree.expression) =
   Hashtbl.find_opt view.compatibilities expression.span
@@ -216,10 +239,12 @@ let fail_operands context span clause =
    whose operand, or the type it converts to or reaches into, is the
    variant [t] is refused there. C text may use the structure that a
    variant lowers to (design 10.6). *)
+let is_type_c_text context (span : Tree.span) =
+  File.is_type_c_text context.text.tokens.(span.first).owner
+
 let refuse_variant context (span : Tree.span) (t : Ctype.t) =
   match Ctype.as_variant t with
-  | Some name when File.is_type_c_text context.text.tokens.(span.first).owner
-    ->
+  | Some name when is_type_c_text context span ->
       context.fail span
         (Rule.message Variant_operation
            (Printf.sprintf
@@ -978,7 +1003,7 @@ let operand_constant context (operand : Tree.expression) =
 
 let operand_typed context (operand : Tree.expression) =
   match Hashtbl.find_opt context.typed.types operand.span with
-  | Some typed -> typed
+  | Some (_, typed) -> typed
   | None -> invalid_arg "Expressions: an operand typed after its operation"
 
 let is_integer_expression context operand =
@@ -1292,17 +1317,24 @@ let comma_constant context span left right =
       Not_integer { kind = refused_or_backend kinds; first = span }
 
 (* The expression whose value [expression] is, through parentheses and
-   the selections that typing has made, of _Generic and
-   __builtin_choose_expr (6.5.1p5, 6.5.1.1p4). *)
-let rec value_source context (expression : Tree.expression) =
+   the selections of _Generic and __builtin_choose_expr (6.5.1p5,
+   6.5.1.1p4) that [select] gives. *)
+let rec source_through select (expression : Tree.expression) =
   match expression.node with
-  | Parenthesized inner -> value_source context inner
+  | Parenthesized inner -> source_through select inner
   | Generic _ | Choose _ -> (
-      match Hashtbl.find_opt context.typed.selections expression.span with
-      | Some (Answer chosen) -> value_source context chosen
-      | Some (Depends_on unknown) -> Unknown.Depends_on unknown
-      | None -> invalid_arg "Expressions: an untyped selection")
+      match select expression with
+      | Unknown.Answer chosen -> source_through select chosen
+      | Depends_on unknown -> Unknown.Depends_on unknown)
   | _ -> Answer expression
+
+(* The source of an expression that has been typed, through the
+   selections that typing has made. *)
+let value_source context =
+  source_through (fun (selecting : Tree.expression) ->
+      match Hashtbl.find_opt context.typed.selections selecting.span with
+      | Some selection -> selection
+      | None -> invalid_arg "Expressions: an untyped selection")
 
 let is_floating_constant context expression =
   match value_source context expression with
@@ -1348,7 +1380,7 @@ let selected_constant context span construct =
 
 (* The class of an expression that has been typed, from those of its
    operands. *)
-let classify context (whole : Tree.expression) typed =
+let classify_node context (whole : Tree.expression) typed =
   let span = whole.span and target = context.target in
   let itself kind = Not_integer { kind; first = span } in
   let unevaluable error =
@@ -1391,6 +1423,8 @@ let classify context (whole : Tree.expression) typed =
   | Compound_literal _ ->
       let static_storage = context.typed.enclosing.function_name = None in
       itself (Designator { static_storage; named = false })
+  | Qualified_constructor _ ->
+      invalid_arg "Expressions: a constructor that is no constructor expression"
   | Subscript { operand; index } ->
       itself (subscript_kind context operand index)
   | Member { operand; _ } -> itself (member_kind context operand)
@@ -1429,6 +1463,15 @@ let classify context (whole : Tree.expression) typed =
   | Label_address _ -> itself Address_constant
   | Call _ | Statement_expression _ | Va_arg _ | Block_literal _ ->
       itself Backend_constant
+
+(* The class of an expression that has been typed. A constructor makes a
+   structure, constant where its arguments are. *)
+let classify context (whole : Tree.expression) typed =
+  match Hashtbl.find_opt context.typed.constructions whole.span with
+  | Some { arguments; _ } ->
+      let kinds = List.map (operand_kind context) arguments in
+      Not_integer { kind = refused_or_backend kinds; first = whole.span }
+  | None -> classify_node context whole typed
 
 (* 6.7.9p4, 6.5.2.5p3: an initialiser that no backend takes as
    constant. *)
@@ -1530,23 +1573,123 @@ let call context span callee (callee_typed : typed) arguments =
   | None ->
       value (call_type context span callee_typed (List.length arguments))
 
+(* {e Pending the owner (default):} a cast to [void] discards its operand,
+   so it takes a variant whole (design 3.2 rule 6). This is the one place
+   that decides it. *)
+let discards cast_type = Ctype.is_void cast_type = Answer true
+
+(* Constructor expressions (design 3.3) *)
+
+(* A constructor that an expression names: the variant's unqualified
+   type and name, and the constructor. *)
+type chosen_constructor = {
+  variant_type : Ctype.t;
+  variant_name : string;
+  chosen : Ctype.constructor;
+}
+
+let find_constructor constructors name =
+  List.find_opt
+    (fun (constructor : Ctype.constructor) ->
+      constructor.constructor_name = name)
+    constructors
+
+let constructor_message text = Rule.message Constructor_expression text
+
+(* The variant of [t] that names its constructors, unqualified. *)
+let named_in t constructors name =
+  match (Ctype.as_variant t, find_constructor constructors name) with
+  | Some variant_name, Some chosen ->
+      Some { variant_type = Ctype.unqualified t; variant_name; chosen }
+  | None, _ | Some _, None -> None
+
+(* An unqualified name in Type-C text is a constructor where the target
+   type of its position is a variant with a constructor of that name,
+   whatever else the name denotes there (design 3.3, P2). C text keeps
+   C's meaning of every name. *)
+let unqualified_constructor context position (span : Tree.span) name =
+  match position with
+  | Targeted t when is_type_c_text context span ->
+      Option.bind (Ctype.constructors context.tags t) (fun constructors ->
+          named_in t constructors name)
+  | Targeted _ | Untargeted -> None
+
+(* [T.C]: the type name denotes a complete variant with a constructor [C]. *)
+let qualified_constructor context (variant : Tree.type_name)
+    (constructor : Tree.identifier) =
+  let t = context.type_name variant in
+  let described = quote (spelling context variant.span) in
+  match (Ctype.constructors context.tags t, Ctype.as_variant t) with
+  | Some constructors, _ -> (
+      match named_in t constructors constructor.node with
+      | Some named -> named
+      | None ->
+          context.fail constructor.span
+            (constructor_message
+               (Printf.sprintf "the variant %s has no constructor %s"
+                  described (quote constructor.node))))
+  | None, Some _ ->
+      context.fail variant.span
+        (constructor_message
+           (Printf.sprintf "the variant %s is incomplete here" described))
+  | None, None ->
+      context.fail variant.span
+        (constructor_message
+           (Printf.sprintf "%s is not a variant, so it has no constructors"
+              described))
+
+(* The constructor expression that [whole] is, if it is one: its
+   constructor and its arguments, [None] where it is written without
+   parentheses. A call of a name is a constructor expression where the
+   name alone would be one. *)
+let constructor_expression context position (whole : Tree.expression) =
+  match whole.node with
+  | Identifier { name; _ } ->
+      Option.map
+        (fun named -> (named, None))
+        (unqualified_constructor context position whole.span name)
+  | Qualified_constructor { variant; constructor } ->
+      Some (qualified_constructor context variant constructor, None)
+  | Call { callee = { node = Identifier { name; _ }; _ }; arguments } ->
+      Option.map
+        (fun named -> (named, Some arguments))
+        (unqualified_constructor context position whole.span name)
+  | Call
+      { callee = { node = Qualified_constructor { variant; constructor }; _ };
+        arguments } ->
+      Some (qualified_constructor context variant constructor, Some arguments)
+  | _ -> None
+
 (* Statements (6.8) and the expressions that hold them *)
 
 let rec expression context (expression : Tree.expression) =
+  positioned context Untargeted expression
+
+(* An expression is typed once, in its one position: a second position
+   would give it a second meaning, so asking in one is an internal
+   error. *)
+and positioned context position (expression : Tree.expression) =
   match Hashtbl.find_opt context.typed.types expression.span with
-  | Some typed -> typed
+  | Some (typed_position, typed) when typed_position = position -> typed
+  | Some _ -> invalid_arg "Expressions: an expression typed in two positions"
   | None ->
       let typed =
         nested context expression.span (fun () ->
-            expression_node context expression)
+            match constructor_expression context position expression with
+            | Some (named, arguments) ->
+                construct context expression named arguments
+            | None -> expression_node context position expression)
       in
-      Hashtbl.replace context.typed.types expression.span typed;
+      Hashtbl.replace context.typed.types expression.span (position, typed);
       Hashtbl.replace context.typed.constants expression.span
         (classify context expression typed);
       typed
 
-and expression_node context (whole : Tree.expression) =
+and expression_node context position (whole : Tree.expression) =
   let span = whole.span in
+  (* Parentheses, the branches of ?: and the right operand of a comma
+     have the target type of the expression around them (design 3.3). *)
+  let as_enclosing = positioned context position in
   (* An operand that the operation takes as a whole, as design 3.2 rule 6
      lets it take a variant: copies, sizes, addresses, passes on or
      discards. *)
@@ -1563,17 +1706,20 @@ and expression_node context (whole : Tree.expression) =
   | Constant number -> value (constant_type context span number)
   | Character encoding -> value (character_type context span encoding)
   | String literal -> lvalue (string_type context literal)
-  | Parenthesized inner -> as_whole inner
-  | Generic { controlling; associations } ->
-      generic context span controlling associations
+  | Parenthesized inner -> as_enclosing inner
+  | Generic _ -> selected context whole
   | Compound_literal { type_name; values } ->
       compound_literal context type_name values
   | Subscript { operand; index } ->
       let array = typed operand in
       subscript context span array (typed index)
+  | Qualified_constructor _ ->
+      invalid_arg "Expressions: a constructor that is no constructor expression"
   | Call { callee; arguments } ->
+      refuse_parenthesized_constructor context callee;
       let callee_typed = typed callee in
-      let arguments = List.map as_whole arguments in
+      let positions = argument_positions context callee_typed arguments in
+      let arguments = List.map2 (positioned context) positions arguments in
       call context span callee callee_typed arguments
   | Member { operand; member } ->
       direct_member context span (typed operand) member
@@ -1598,23 +1744,25 @@ and expression_node context (whole : Tree.expression) =
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
       refuse_variant context span cast_type;
-      ignore (typed operand);
+      ignore (if discards cast_type then as_whole operand else typed operand);
       value (Ctype.unqualified cast_type)
   | Binary (op, left, right) ->
       let left = typed left in
       value (binary_type context span op left (typed right))
   | Conditional { condition; if_true; if_false } ->
-      value (conditional context span condition if_true if_false)
+      value (conditional context span position condition if_true if_false)
   | Assignment ((Assign as op), left, right) ->
       let left_typed = as_whole left in
-      assignment context span op left_typed (as_whole right)
+      let right_position = Targeted left_typed.expression_type in
+      assignment context span op left_typed
+        (positioned context right_position right)
   | Assignment ((Compound_assign _ as op), left, right) ->
       let left_typed = typed left in
       assignment context span op left_typed (typed right)
   (* 6.5.17p2: the right operand's value. *)
   | Comma (left, right) ->
       ignore (as_whole left);
-      let right = as_whole right in
+      let right = as_enclosing right in
       { expression_type = Ctype.lvalue_conversion right.expression_type;
         lvalue = false;
         bit_field = value_of right.bit_field }
@@ -1627,8 +1775,7 @@ and expression_node context (whole : Tree.expression) =
       refuse_variant context span (context.type_name type_name);
       List.iter (designator context) designators;
       value (size_type context span)
-  | Choose { condition; first; second } ->
-      choose context span condition first second
+  | Choose _ -> selected context whole
   | Types_compatible (first, second) ->
       let first = context.type_name first in
       let second = context.type_name second in
@@ -1639,6 +1786,115 @@ and expression_node context (whole : Tree.expression) =
      typed. *)
   | Block_literal _ ->
       value (unknown context span "a block literal" Unknown_object)
+
+(* Design 3.3: the value of the variant that the constructor makes from
+   its arguments, one for each field, each converted to the type of its
+   field as if by assignment. *)
+and construct context (whole : Tree.expression) named arguments =
+  let name = quote named.chosen.constructor_name in
+  let fields = named.chosen.fields in
+  let refuse text = context.fail whole.span (constructor_message text) in
+  (match (fields, arguments) with
+  | [], None -> ()
+  | [], Some _ ->
+      refuse
+        (Printf.sprintf
+           "the constructor %s has no fields, so it is written without \
+            parentheses"
+           name)
+  | _ :: _, None ->
+      refuse (Printf.sprintf "the constructor %s takes arguments" name)
+  | _ :: _, Some arguments ->
+      if List.length arguments <> List.length fields then
+        refuse
+          (Printf.sprintf
+             "the constructor %s takes one argument for each of its %d \
+              fields"
+             name (List.length fields));
+      List.iter2 (constructor_argument context named) fields arguments);
+  Hashtbl.replace context.typed.constructions whole.span
+    { span = whole.span;
+      variant = named.variant_name;
+      constructor = named.chosen.constructor_name;
+      callee = called_name whole;
+      arguments = Option.value arguments ~default:[];
+      braced = false };
+  value named.variant_type
+
+(* [(T.C)(args)]: constructor_expression takes only [T.C(args)] as a
+   call, so a callee in parentheses would be a constructor without its
+   arguments. *)
+and refuse_parenthesized_constructor context (callee : Tree.expression) =
+  let rec named (inner : Tree.expression) =
+    match inner.node with
+    | Parenthesized inner -> named inner
+    | Qualified_constructor _ -> true
+    | _ -> false
+  in
+  match callee.node with
+  | Parenthesized inner when named inner ->
+      context.fail callee.span
+        (constructor_message
+           "a constructor is not a function, so it cannot be called through \
+            parentheses")
+  | _ -> ()
+
+(* The tokens that name a constructor that is called. *)
+and called_name (whole : Tree.expression) =
+  match whole.node with
+  | Call { callee; _ } -> Some callee.span
+  | _ -> None
+
+(* The argument initialises its field in the braced list that the
+   constructor lowers to. Where the field or the argument is a structure
+   or union, a value of another type would initialise its first member
+   through elided braces instead (C11 6.7.9p13), so the types must be
+   compatible (6.5.16.1p1); the other conversions are the backend's, as
+   for any assignment. *)
+and constructor_argument context named (field : Ctype.member) argument =
+  let field_type = field.member_type in
+  let argument_type =
+    Ctype.lvalue_conversion
+      (positioned context (Targeted field_type) argument).expression_type
+  in
+  initialises_whole context field_type argument;
+  let is_record t = Ctype.is_record t = Answer true in
+  if is_record field_type || is_record argument_type then
+    match
+      Ctype.compatible context.target context.tags field_type argument_type
+    with
+    | Answer true | Depends_on _ -> ()
+    | Answer false ->
+        context.fail argument.span
+          (constructor_message
+             (Printf.sprintf
+                "the argument for the field %s of %s does not have its type"
+                (quote (Option.value field.member_name ~default:""))
+                (quote named.chosen.constructor_name)))
+
+(* 6.5.2.2p7: the arguments of a call through a prototype are converted
+   to the types of its parameters, which are their target types (design
+   3.3); those past them, and those of other calls, have none. *)
+and argument_positions context (callee : typed) arguments =
+  let parameters =
+    match operand context callee with
+    | Pointer_operand
+        { referenced =
+            { shape = Function { parameters = Prototype { types; _ }; _ }; _ };
+          _ } ->
+        types
+    | Pointer_operand _ | Arithmetic_operand _ | Other_operand _
+    | Unknown_operand _ ->
+        []
+  in
+  let rec positions parameters arguments =
+    match (parameters, arguments) with
+    | parameter :: parameters, _ :: arguments ->
+        Targeted parameter :: positions parameters arguments
+    | [], arguments -> List.map (fun _ -> Untargeted) arguments
+    | _ :: _, [] -> []
+  in
+  positions parameters arguments
 
 (* GNU [__real__] and [__imag__] and the operators of 6.5.3. *)
 and unary context span (op : Tree.unary_operator) typed =
@@ -1657,6 +1913,34 @@ and unary context span (op : Tree.unary_operator) typed =
   | Real_part -> complex_part context span ~imaginary:false typed
   | Imaginary_part -> complex_part context span ~imaginary:true typed
 
+(* A selection gives the chosen operand as it is, an lvalue or a
+   bit-field where it is one, as GCC and Clang do. *)
+and selected context (selecting : Tree.expression) =
+  match selection_of context selecting with
+  | Unknown.Answer chosen -> expression context chosen
+  | Depends_on unknown ->
+      value (Ctype.unknown { unknown with kind = Object_or_function })
+
+(* The operand that a _Generic or __builtin_choose_expr selects, made
+   once. Making it types the operands, in their own positions, but not
+   the selection, so an initialiser can find a string literal that a
+   selection gives before it types the selection in its position. *)
+and selection_of context (selecting : Tree.expression) =
+  let span = selecting.span in
+  match Hashtbl.find_opt context.typed.selections span with
+  | Some selection -> selection
+  | None ->
+      let selection =
+        match selecting.node with
+        | Generic { controlling; associations } ->
+            generic context span controlling associations
+        | Choose { condition; first; second } ->
+            choose context span condition first second
+        | _ -> invalid_arg "Expressions: a selection of no selection"
+      in
+      Hashtbl.replace context.typed.selections span selection;
+      selection
+
 (* 6.5.1.1p4: the selection is its result expression, an lvalue or a
    function designator if that is one. Every association is typed, as
    GCC and Clang check the ones they do not select. The type that
@@ -1670,25 +1954,14 @@ and generic context span controlling associations =
   let controlling_type =
     Ctype.lvalue_conversion controlling_typed.expression_type
   in
-  let selection = select context span controlling_type associations default in
-  Hashtbl.replace context.typed.selections span selection;
-  match selection with
-  | Answer result -> expression context result
-  | Depends_on unknown ->
-      value (Ctype.unknown { unknown with kind = Object_or_function })
+  select context span controlling_type associations default
 
-(* GCC and Clang give the chosen operand as it is, an lvalue or a
-   bit-field where it is one; both operands are typed. *)
+(* Both operands are typed. *)
 and choose context span condition first second =
   ignore (expression context condition);
   ignore (expression context first);
   ignore (expression context second);
-  let selection = choice context span condition first second in
-  Hashtbl.replace context.typed.selections span selection;
-  match selection with
-  | Answer chosen -> expression context chosen
-  | Depends_on unknown ->
-      value (Ctype.unknown { unknown with kind = Object_or_function })
+  choice context span condition first second
 
 and generic_association context (association : Tree.generic_association) =
   let association_type, result =
@@ -1709,17 +1982,16 @@ and compound_literal context type_name values =
   lvalue (initialiser context ~constant t (Tree.Braced values))
 
 (* 6.5.15p3 to p6. A GNU [a ?: b] has [a] as its second operand. *)
-and conditional context span condition if_true if_false =
+and conditional context span position condition if_true if_false =
   let condition_typed = expression context condition in
   require_scalar context condition.span ~clause:"6.5.15p2" condition_typed;
+  let branch_typed = positioned context position in
   let second =
     match if_true with
-    | Some branch -> { branch; branch_typed = expression context branch }
+    | Some branch -> { branch; branch_typed = branch_typed branch }
     | None -> { branch = condition; branch_typed = condition_typed }
   in
-  let third =
-    { branch = if_false; branch_typed = expression context if_false }
-  in
+  let third = { branch = if_false; branch_typed = branch_typed if_false } in
   let second_operand = operand context second.branch_typed in
   match (second_operand, operand context third.branch_typed) with
   | Arithmetic_operand a, Arithmetic_operand b ->
@@ -1775,7 +2047,8 @@ and null_pointer_constant context (candidate : Tree.expression) =
   | Answer source -> (
       match source.node with
       | Cast { operand; _ }
-        when is_plain_void_pointer (expression context source).expression_type
+        when is_plain_void_pointer
+               (operand_typed context source).expression_type
         ->
           zero_constant context operand
       | _ -> zero_constant context source)
@@ -1784,7 +2057,7 @@ and null_pointer_constant context (candidate : Tree.expression) =
    this is no constant expression context. Whether an operand of unknown
    type is one is unknown too. *)
 and zero_constant context candidate =
-  let typed = expression context candidate in
+  let typed = operand_typed context candidate in
   match
     (Ctype.is_integer typed.expression_type, operand_constant context candidate)
   with
@@ -1838,16 +2111,37 @@ and integer_constant context candidate =
       context.fail span message
   | Not_integer { first; _ } -> Error first
 
+(* Design 13.5: a constructor that initialises a whole object of its
+   variant, with no brace elided before it, lowers to its braced list
+   alone, which keeps a static initialiser constant. An atomic object
+   takes no braced list in Clang, so it keeps the compound literal. *)
+and initialises_whole context t (initialising : Tree.expression) =
+  let span = initialising.span in
+  match Hashtbl.find_opt context.typed.constructions span with
+  | Some construction ->
+      let variant_type = (operand_typed context initialising).expression_type in
+      if
+        Ctype.compatible context.target context.tags
+          (Ctype.without_top_qualifiers t) variant_type
+        = Answer true
+      then
+        Hashtbl.replace context.typed.constructions span
+          { construction with braced = true }
+  | None -> ()
+
 and initialiser context ~constant t initialiser =
-  (* Each callback types its expression first, which classes it too. *)
-  let value initialising = (expression context initialising).expression_type in
-  let initialises initialising =
-    ignore (value initialising);
-    if constant then require_constant context initialising
+  (* [value] types an expression, which classes it too; the other
+     callbacks take one that it has typed, or type none. *)
+  let value subobject initialising =
+    let position =
+      match subobject with
+      | Some subobject_type -> Targeted subobject_type
+      | None -> Untargeted
+    in
+    (positioned context position initialising).expression_type
   in
-  let source initialising =
-    ignore (value initialising);
-    value_source context initialising
+  let initialises initialising =
+    if constant then require_constant context initialising
   in
   let typing : Initialiser.typing =
     {
@@ -1856,7 +2150,9 @@ and initialiser context ~constant t initialiser =
       fail = context.fail;
       value;
       initialises;
-      source;
+      source = source_through (selection_of context);
+      initialises_whole = initialises_whole context;
+      type_c_text = is_type_c_text context;
       index = integer_constant context;
     }
   in
@@ -1919,7 +2215,14 @@ and statement_node context (statement : Tree.statement) =
         context.fail statement.span
           "break outside a loop or switch (C11 6.8.6.3p1)"
   | Return value ->
-      Option.iter (fun value -> ignore (expression context value)) value
+      let position =
+        match enclosing.return_type with
+        | Some t -> Targeted t
+        | None -> Untargeted
+      in
+      Option.iter
+        (fun value -> ignore (positioned context position value))
+        value
   | Asm { operands; qualifiers = _; template = _ } ->
       Option.iter
         (fun (operands : Tree.asm_operands) ->
@@ -1975,6 +2278,8 @@ and case_value context value =
   | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
       context.fail value.span "a case label is not an integer (C11 6.8.4.2p3)"
 
-let function_body context ~name block =
-  let enclosing = { outside_functions with function_name = Some name } in
+let function_body context ~name ~return_type block =
+  let enclosing =
+    { outside_functions with function_name = Some name; return_type }
+  in
   within context enclosing (fun () -> block_items context block)

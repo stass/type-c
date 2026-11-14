@@ -29,6 +29,12 @@ type t =
   | Variant_operation
       (** An operation on a variant in Type-C text other than those that
           design 3.2 rule 6 allows. *)
+  | Zero_value
+      (** A braced initialiser of a variant other than [{0}] in Type-C
+          text (design 3.2 rule 7). *)
+  | Constructor_expression
+      (** A constructor expression that names no constructor, or whose
+          arguments do not match its fields (design 3.3). *)
   | Not_implemented of { section : string; package : string }
       (** A construct of design [section] that work [package] implements. *)
 
@@ -40,6 +46,8 @@ let clause = function
   | Duplicate_constructor -> "design 3.2 rule 2"
   | Field_type -> "design 3.2 rule 4"
   | Variant_operation -> "design 3.2 rule 6"
+  | Zero_value -> "design 3.2 rule 7"
+  | Constructor_expression -> "design 3.3"
   | Not_implemented { section; package } ->
       Printf.sprintf "design %s; work package %s" section package
 

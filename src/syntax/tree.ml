@@ -182,6 +182,10 @@ and expression_node =
       associations : generic_association list;  (** at least one *)
     }
   | Compound_literal of { type_name : type_name; values : initialiser_list }
+  | Qualified_constructor of { variant : type_name; constructor : identifier }
+      (** [T.C] (design 3.3), in Type-C text only; [T.C(...)] is a [Call]
+          of it. The type name denotes a variant where the expression is
+          typed. *)
   | Subscript of { operand : expression; index : expression }
   | Call of { callee : expression; arguments : expression list }
   | Member of { operand : expression; member : identifier }  (** [.] *)

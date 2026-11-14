@@ -10,7 +10,9 @@ let list visit_node visit = List.iter (visit_node visit)
 let rec expression visit (e : Tree.expression) =
   visit e;
   match e.node with
-  | Identifier _ | Constant _ | Character _ | String _ | Label_address _ -> ()
+  | Identifier _ | Constant _ | Character _ | String _ | Label_address _
+  | Qualified_constructor _ ->
+      ()
   | Parenthesized operand
   | Post_increment operand
   | Post_decrement operand

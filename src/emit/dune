@@ -3,4 +3,4 @@
 
 (library
  (name typec_emit)
- (libraries typec_cpp typec_syntax))
+ (libraries typec_cpp typec_syntax typec_sema))

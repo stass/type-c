@@ -299,6 +299,16 @@ An expression has a target type in these positions and in no others:
 | Argument of a constructor | The field type |
 | Parenthesised expression; second and third operand of `?:`; right operand of `,` | The target type of the enclosing expression |
 
+Where a braced list elides braces (C11 6.7.9p20), which subobject an
+initialiser initialises depends on its type, so its target type cannot
+come from that subobject. It is the first variant that eliding the braces
+of the subobject at the list's position leads to, or that subobject where
+none does. No initialiser enters a variant except `{0}` (3.2 rule 7), so a
+constructor initialises that variant whole, and a target that is no
+variant selects no constructor: `struct w { struct s { e v; int n; } s; }
+y = { A, 1 };` builds `y.s.v` with the constructor `A` of `e`, whatever
+object `A` is visible.
+
 Everywhere else an unqualified name is looked up as C looks it up, and a
 constructor needs the qualified form. String literals use the same
 mechanism to become `str` (section 8).

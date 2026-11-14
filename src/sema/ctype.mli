@@ -192,11 +192,29 @@ val declare_record : tags -> record_kind -> string option -> record_tag
 val declare_variant : tags -> string -> record_tag
 (** The structure that the variant of this name lowers to (design 10.1). *)
 
+(** A constructor of a variant: its name and its fields in order, whose
+    position in the list of its variant is its tag (design 10.1 rule 1). *)
+type constructor = { constructor_name : string; fields : member list }
+
 val declare_enum : tags -> string option -> enum_tag
 
 val define_record :
   Target.t -> tags -> record_tag -> member list -> (unit, error) result
 (** Completes a structure or union with its members in order. *)
+
+val define_variant :
+  Target.t ->
+  tags ->
+  record_tag ->
+  constructor list ->
+  member list ->
+  (unit, error) result
+(** Completes the structure of a variant, as {!define_record} does, and
+    gives the variant its constructors. *)
+
+val constructors : tags -> t -> constructor list option
+(** The constructors of a variant, qualified or not, in order; [None]
+    where [t] is no variant or one that is incomplete here. *)
 
 val define_enum :
   tags -> enum_tag -> Integer.t Unknown.answer -> (unit, error) result
@@ -246,6 +264,7 @@ val is_real : t -> bool Unknown.answer
 val is_arithmetic : t -> bool Unknown.answer
 val is_scalar : t -> bool Unknown.answer
 val is_pointer : t -> bool Unknown.answer
+val is_record : t -> bool Unknown.answer
 val is_array : t -> bool Unknown.answer
 val is_function : t -> bool Unknown.answer
 

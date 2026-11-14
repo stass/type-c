@@ -7,14 +7,59 @@ type typing = {
   target : Target.t;
   tags : Ctype.tags;
   fail : 'a. Tree.span -> string -> 'a;
-  value : Tree.expression -> Ctype.t;
+  value : Ctype.t option -> Tree.expression -> Ctype.t;
   initialises : Tree.expression -> unit;
   source : Tree.expression -> Tree.expression Unknown.answer;
+  initialises_whole : Ctype.t -> Tree.expression -> unit;
+  type_c_text : Tree.span -> bool;
   index : Tree.expression -> (Integer_constant.t, Tree.span) result;
 }
 
 (* Clang's default limit on nested brackets, which the parser keeps. *)
 let max_levels = 256
+
+(* Variants (design 3.2 rules 6 and 7) *)
+
+(* The braced list [{0}]: one integer constant 0, without a designator.
+   It is read from its digits, as typing the constant here would give it
+   a position before the walk reaches its subobject. *)
+let is_zero typing (list : Tree.initialiser_list) =
+  match list.node with
+  | [ { node =
+          { designators = [];
+            initialiser =
+              Expression_initialiser
+                { node = Constant (Integer { base; digits; suffix }); _ } };
+        _ } ] -> (
+      match
+        Integer_constant.of_integer_constant typing.target base digits suffix
+      with
+      | Ok { value = Known value; _ } ->
+          Exact_integer.equal value Exact_integer.zero
+      | Ok { value = Opaque; _ } | Error _ -> false)
+  | _ -> false
+
+(* {e Pending the owner (default):} [{0}] zeroes any object, so its
+   initialiser may reach the tag of a variant member through elided
+   braces, as C programs that zero a structure rely on. This is the one
+   place that decides it. *)
+let zeroes_variant_members typing list = is_zero typing list
+
+(* Type-C text reaches the tag and fields of a variant only through
+   constructors and match (rule 6): an initialiser at [span] does not
+   open a variant's members, but where [zeroes] says it is the [{0}] that
+   zeroes them (rule 7). The two functions that open a structure's or
+   union's members, {!first_level} and {!designate}, ask it. *)
+let refuse_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
+  match Ctype.as_variant t with
+  | Some name when typing.type_c_text span && not zeroes ->
+      typing.fail span
+        (Rule.message Zero_value
+           (Printf.sprintf
+              "an initialiser reaches into the variant '%s'; the only braced \
+               initialiser of a variant is {0}"
+              name))
+  | Some _ | None -> ()
 
 (* Subobjects (6.7.9p17) *)
 
@@ -54,13 +99,15 @@ let subobject_type typing = function
       (member_at typing tag position).member_type
 
 (* The first subobject of an aggregate, where a braced list for it starts
-   or its braces are elided; [None] where it has none. *)
-let first_level typing (t : Ctype.t) =
+   or its braces are elided, by an initialiser at [span]; [None] where it
+   has none. *)
+let first_level typing ~zeroes span (t : Ctype.t) =
   match t.shape with
   | Array { length = Constant 0; _ } -> None
   | Array { element; length } ->
       Some (Array_level { element; length; index = Index 0 })
   | Record tag -> (
+      refuse_opening typing ~zeroes span t;
       match Ctype.member_at typing.tags tag 0 with
       | Some _ -> Some (Record_level { tag; position = 0 })
       | None -> None)
@@ -122,7 +169,8 @@ let check_depth typing span depth =
 
 (* What decides how an expression initialises an array: whether it is a
    string literal or a compound literal, through parentheses, which GCC
-   and Clang take, and generic selections. *)
+   and Clang take, and generic selections. It is read from the tree, so
+   asking it types none of the expression. *)
 type form =
   | String_form
   | Compound_form
@@ -170,10 +218,10 @@ let takes_strings typing element : bool Unknown.answer =
     | Some unknown -> unknown
     | None -> Answer false
 
-(* Whether [expression] is a string literal that initialises a whole
-   array of [element]. *)
-let string_for typing element expression : bool Unknown.answer =
-  match form typing expression with
+(* Whether an expression of [form] is a string literal that initialises a
+   whole array of [element]. *)
+let string_for typing element form : bool Unknown.answer =
+  match form with
   | String_form -> takes_strings typing element
   | Unknown_form unknown -> Depends_on unknown
   | Compound_form | Other_form -> Answer false
@@ -181,10 +229,12 @@ let string_for typing element expression : bool Unknown.answer =
 (* The literal initialises an array of [element]: a character type from a
    literal of characters, without a prefix or with [u8], another from a
    literal of its own code unit. The length of the literal's type is the
-   one it gives an array of unknown size (6.7.9p22). *)
-let string_initialiser typing element literal =
+   one it gives an array of unknown size (6.7.9p22). [target] is the
+   literal's target type, as for any initialiser. *)
+let string_initialiser typing ~target element literal =
+  let literal_type = typing.value (Some target) literal in
   typing.initialises literal;
-  match (typing.value literal).shape with
+  match literal_type.shape with
   | Array { element = unit; length } ->
       let fits =
         if is_character typing unit = Answer true then
@@ -287,6 +337,7 @@ let designate typing t designators =
         check_depth typing designator.span (List.length levels);
         match (designator.node, t.shape) with
         | Member_designator name, Record tag -> (
+            refuse_opening typing ~zeroes:false designator.span t;
             match Ctype.find_member typing.tags tag name.node with
             | Some { path; _ } ->
                 let member_type, levels = along typing tag path levels in
@@ -317,12 +368,31 @@ let designate typing t designators =
    subobject typec does not know. Their expressions are typed. *)
 let rec untargeted typing (initialiser : Tree.initialiser) =
   match initialiser with
-  | Expression_initialiser expression -> ignore (typing.value expression)
+  | Expression_initialiser expression -> ignore (typing.value None expression)
   | Braced list -> List.iter (untargeted_element typing) list.node
 
 and untargeted_element typing (element : Tree.designated_initialiser) =
   List.iter (designator_expressions typing) element.node.designators;
   untargeted typing element.node.initialiser
+
+(* Whether an object of type [t] is a variant or has one among its
+   subobjects. *)
+let rec holds_variant typing (t : Ctype.t) =
+  match (Ctype.as_variant t, t.shape) with
+  | Some _, _ -> true
+  | None, Array { element; _ } -> holds_variant typing element
+  | None, Record tag -> members_hold_variant typing tag 0
+  | ( None,
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Function _
+      | Unknown_type _ ) ) ->
+      false
+
+and members_hold_variant typing tag position =
+  match Ctype.member_at typing.tags tag position with
+  | Some member ->
+      holds_variant typing member.member_type
+      || members_hold_variant typing tag (position + 1)
+  | None -> false
 
 (* Braced lists (6.7.9p17, p20) *)
 
@@ -330,21 +400,52 @@ and untargeted_element typing (element : Tree.designated_initialiser) =
    or, its braces elided, its first subobject (6.7.9p13, p14, p20). *)
 type reach = Whole | Elided | Unknown_reach
 
-let reach_of typing (t : Ctype.t) expression =
+(* The first variant among [t] and the subobjects that its braces, then
+   theirs, elided would put an initialiser in. *)
+let rec first_variant typing (t : Ctype.t) =
+  match (Ctype.as_variant t, t.shape) with
+  | Some _, _ -> Some t
+  | None, Array { length = Constant 0; _ } -> None
+  | None, Array { element; _ } -> first_variant typing element
+  | None, Record tag -> (
+      match Ctype.member_at typing.tags tag 0 with
+      | Some first -> first_variant typing first.member_type
+      | None -> None)
+  | ( None,
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Function _
+      | Unknown_type _ ) ) ->
+      None
+
+(* The target type (design 3.3) of an expression initialiser that the
+   walk meets at a subobject of type [t]: the first variant inside [t]
+   where its braces may be elided, else [t]. A constructor initialises
+   that variant whole, as no initialiser in Type-C text enters a variant
+   but {0} (3.2 rule 7); and a target that is no variant selects no
+   constructor, so an expression that initialises an aggregate around
+   the variant means there what it means with the variant as its target.
+   The target stays the expression's as the walk elides braces. *)
+let target_at typing (t : Ctype.t) =
+  Option.value (first_variant typing t) ~default:t
+
+let reach_of typing ~target (t : Ctype.t) expression =
   match t.shape with
   | Array { element; _ } -> (
-      match (string_for typing element expression, form typing expression) with
+      let form = form typing expression in
+      match (string_for typing element form, form) with
       | Answer true, _ ->
-          ignore (string_initialiser typing element expression);
+          ignore (string_initialiser typing ~target element expression);
           Whole
       (* GCC takes a compound literal of an array type for a subarray, which
          Clang refuses. *)
       | Depends_on _, _ | Answer false, Compound_form ->
-          ignore (typing.value expression);
+          ignore (typing.value (Some target) expression);
           Unknown_reach
       | Answer false, (String_form | Other_form | Unknown_form _) -> Elided)
   | Record _ -> (
-      let value_type = Ctype.lvalue_conversion (typing.value expression) in
+      let value_type =
+        Ctype.lvalue_conversion
+          (typing.value (Some target) expression)
+      in
       match compatible typing t value_type with
       | Answer true ->
           typing.initialises expression;
@@ -352,33 +453,44 @@ let reach_of typing (t : Ctype.t) expression =
       | Answer false -> Elided
       | Depends_on _ -> Unknown_reach)
   | Void | Arithmetic _ | Enum _ | Pointer _ | Function _ ->
-      ignore (typing.value expression);
+      ignore (typing.value (Some target) expression);
       typing.initialises expression;
       Whole
   | Va_list | Unknown_type _ ->
-      ignore (typing.value expression);
+      ignore (typing.value (Some target) expression);
       Unknown_reach
 
 (* Initialises the subobject at [level], within [outer], with
    [initialiser], entering it where its braces are elided; gives the
    levels of the subobject that it initialised, or [None] where that
-   depends on what typec does not know. [depth] counts the levels. *)
-let rec place typing ~depth (level, outer) (initialiser : Tree.initialiser) =
+   depends on what typec does not know. [elided] is the target type of
+   an expression initialiser for which the walk has elided the braces of
+   the subobjects around [level], [None] where it has elided none. [depth] counts the
+   levels. *)
+let rec place typing ~zeroes ~elided ~depth (level, outer)
+    (initialiser : Tree.initialiser) =
   let t = subobject_type typing level in
   match initialiser with
   | Braced list ->
       ignore (braced typing t list);
       Some (level, outer)
   | Expression_initialiser expression -> (
-      match reach_of typing t expression with
-      | Whole -> Some (level, outer)
+      let target =
+        match elided with
+        | Some target -> target
+        | None -> target_at typing t
+      in
+      match reach_of typing ~target t expression with
+      | Whole ->
+          if Option.is_none elided then typing.initialises_whole t expression;
+          Some (level, outer)
       | Unknown_reach -> None
       | Elided -> (
           check_depth typing expression.span (depth + 1);
-          match first_level typing t with
+          match first_level typing ~zeroes expression.span t with
           | Some inner ->
-              place typing ~depth:(depth + 1) (inner, level :: outer)
-                initialiser
+              place typing ~zeroes ~elided:(Some target) ~depth:(depth + 1)
+                (inner, level :: outer) initialiser
           | None -> None))
 
 (* The braced list for an object of type [t], its current object; gives
@@ -391,8 +503,8 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
           { designators = []; initialiser = Expression_initialiser literal };
         _ }
       :: excess )
-    when string_for typing element literal = Answer true ->
-      let length = string_initialiser typing element literal in
+    when string_for typing element (form typing literal) = Answer true ->
+      let length = string_initialiser typing ~target:t element literal in
       List.iter (untargeted_element typing) excess;
       completed typing t length
   | (Array _ | Record _), _ -> aggregate typing t list
@@ -404,13 +516,14 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
       t
 
 and aggregate typing t (list : Tree.initialiser_list) =
+  let zeroes = zeroes_variant_members typing list in
   let start =
-    match first_level typing t with
+    match first_level typing ~zeroes:(is_zero typing list) list.span t with
     | Some level -> Position (level, [])
     | None -> Past_end
   in
   let walked =
-    List.fold_left (initialise_element typing t)
+    List.fold_left (initialise_element typing ~zeroes t)
       { cursor = start; extent = Extent 0 }
       list.node
   in
@@ -421,9 +534,26 @@ and aggregate typing t (list : Tree.initialiser_list) =
   in
   completed typing t length
 
+(* One initialiser of the braced list for [t]. Where the walk loses its
+   place, the backend may open a variant that it holds (design 3.2 rule
+   6), which typec cannot refuse, so Type-C text may not lose it there. *)
+and initialise_element typing ~zeroes t walk
+    (element : Tree.designated_initialiser) =
+  let walked = place_element typing ~zeroes t walk element in
+  (match walked.cursor with
+  | Lost when typing.type_c_text element.span && not zeroes ->
+      if holds_variant typing t then
+        typing.fail element.span
+          (Rule.message Zero_value
+             "the subobject that an initialiser reaches depends on what \
+              typec does not know, in an object that holds a variant")
+  | Lost | Position _ | Past_end -> ());
+  walked
+
 (* One initialiser of the braced list for [t], at its designated
    subobject or at the cursor. *)
-and initialise_element typing t walk (element : Tree.designated_initialiser) =
+and place_element typing ~zeroes t walk
+    (element : Tree.designated_initialiser) =
   let { Tree.designators; initialiser } = element.node in
   let cursor =
     match designators with
@@ -434,7 +564,9 @@ and initialise_element typing t walk (element : Tree.designated_initialiser) =
   | Position (level, outer) -> (
       let extent = widen walk.extent (outermost level outer) in
       let depth = 1 + List.length outer in
-      match place typing ~depth (level, outer) initialiser with
+      match
+        place typing ~zeroes ~elided:None ~depth (level, outer) initialiser
+      with
       | Some (level, outer) ->
           { cursor = advance typing (level :: outer); extent }
       | None -> { cursor = Lost; extent = Opaque_extent })
@@ -458,7 +590,7 @@ and scalar typing t elements =
       | [] -> ());
       (match first.node.initialiser with
       | Expression_initialiser expression ->
-          ignore (typing.value expression);
+          ignore (typing.value (Some t) expression);
           typing.initialises expression
       | Braced inner -> ignore (braced typing t inner));
       List.iter (untargeted_element typing) excess
@@ -482,7 +614,7 @@ let array_from typing t expression =
     typing.fail expression.span
       "an array is initialised by an expression that is not a string \
        literal (C11 6.7.9p16)";
-  match (typing.value expression).shape with
+  match (typing.value (Some t) expression).shape with
   | Array { length; _ } -> completed typing t length
   | Unknown_type _ -> completed typing t Opaque
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
@@ -492,11 +624,12 @@ let array_from typing t expression =
          array (C11 6.7.9p16)"
 
 let array_initialiser typing t element expression =
-  match string_for typing element expression with
+  match string_for typing element (form typing expression) with
   | Answer true ->
-      completed typing t (string_initialiser typing element expression)
+      let length = string_initialiser typing ~target:t element expression in
+      completed typing t length
   | Depends_on _ ->
-      ignore (typing.value expression);
+      ignore (typing.value (Some t) expression);
       completed typing t Opaque
   | Answer false -> array_from typing t expression
 
@@ -514,6 +647,7 @@ let initialise typing (t : Ctype.t) (initialiser : Tree.initialiser) =
   | ( Expression_initialiser expression,
       ( Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
       | Function _ | Unknown_type _ ) ) ->
-      ignore (typing.value expression);
+      ignore (typing.value (Some t) expression);
       typing.initialises expression;
+      typing.initialises_whole t expression;
       t
