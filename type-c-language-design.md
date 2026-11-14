@@ -1164,8 +1164,11 @@ Type-C value, and that is any expression.
 
 **Target model.** Sizes of scalar types, the signedness of `char` and the
 types behind `size_t`, `ptrdiff_t` and `wchar_t` are read from the
-backend's predefined macros, obtained from the same compiler with the same
-options. `typec` has no target table of its own.
+backend's predefined macros, obtained from the same compiler with the
+options of the step that compiles the output. Preprocessing options such
+as `-D` and `-undef` are left out: they cannot change the ABI of that
+step, and `-D__SIZEOF_LONG__=4` would make the model lie. `typec` has no
+target table of its own.
 
 **No aggregate layout.** *Provisional (P16).* The size, alignment and
 member offsets of struct, union and array types are opaque constants to
