@@ -6,16 +6,17 @@ its predefined macros when it is run with the other arguments as options.
 The backends are those that backends.sh names, on an x86-64 or arm64
 Linux host. Their release varies with the host, and so do the optional
 floating types of Clang and uint64_t, which are left out here:
-uint64_t is unsigned long long on macOS. The signedness of plain char and
-the type of wchar_t follow the architecture, and so does __float128,
-which is x86-64 alone; they are checked on their own below.
+uint64_t is unsigned long long on macOS. The architecture, the signedness
+of plain char and the type of wchar_t follow the host, and so does
+__float128, which is x86-64 alone; they are checked on their own below.
 
   $ unset TYPEC_CC
   $ . ./backends.sh
 
   $ typec --cc=$clang --print-target |
   >   sed -e '1s/ [0-9]*$//' -e '/^optional_floats:/d' \
-  >     -e '/^uint64_type:/d' -e '/^char_signed:/d' -e '/^wchar_type:/d'
+  >     -e '/^uint64_type:/d' -e '/^architecture:/d' -e '/^char_signed:/d' \
+  >     -e '/^wchar_type:/d'
   backend: Clang
   char_bit: 8
   sizeof_short: 2
@@ -32,6 +33,8 @@ which is x86-64 alone; they are checked on their own below.
   intmax_type: long
   uintmax_type: unsigned long
   intptr_type: long
+  uint16_type: unsigned short
+  uint32_type: unsigned int
   char16_type: unsigned short
   char32_type: unsigned int
   byte_order: little-endian
@@ -42,16 +45,18 @@ is unsigned int, not int. GCC spells the types in another order and reads
 the same target.
 
   $ case $(uname -m) in
-  >   x86_64) char_signed=true wchar_type=int float128=1 ;;
-  >   aarch64) char_signed=false wchar_type="unsigned int" float128=0 ;;
+  >   x86_64) architecture=x86 char_signed=true wchar_type=int float128=1 ;;
+  >   aarch64) architecture=AArch64 char_signed=false
+  >     wchar_type="unsigned int" float128=0 ;;
   >   *) echo "no expected model for $(uname -m)" ;;
   > esac
-  $ printf 'char_signed: %s\nwchar_type: %s\n' $char_signed "$wchar_type" \
-  >   > arch_facts
-  $ typec --cc=$clang --print-target | grep -E '^(char_signed|wchar_type):' |
-  >   diff arch_facts -
-  $ typec --cc=$gcc --print-target | grep -E '^(char_signed|wchar_type):' |
-  >   diff arch_facts -
+  $ printf 'architecture: %s\nchar_signed: %s\nwchar_type: %s\n' \
+  >   $architecture $char_signed "$wchar_type" > arch_facts
+  $ arch_lines() {
+  >   grep -E '^(architecture|char_signed|wchar_type):'
+  > }
+  $ typec --cc=$clang --print-target | arch_lines | diff arch_facts -
+  $ typec --cc=$gcc --print-target | arch_lines | diff arch_facts -
 
   $ facts() {
   >   grep -E -e '^(backend|char16_type):' \

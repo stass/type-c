@@ -11,6 +11,13 @@
 
 type byte_order = Little_endian | Big_endian
 
+(** The architectures that typec tells apart, by the macro that the
+    backend defines for each: [__x86_64__] or [__i386__], [__arm__] (32
+    bits), [__aarch64__] or [__arm64ec__], [__powerpc__], [__s390__] and
+    [__ve__] (Clang only). Clang offers some builtins on some of them only
+    ({!Builtin_function}). *)
+type architecture = X86 | Arm | Aarch64 | Powerpc | Systemz | Ve | Other
+
 (** The C compiler that is the backend. Clang also defines [__GNUC__],
     so [__clang__] tells the two apart. *)
 type compiler = Gcc | Clang
@@ -32,6 +39,7 @@ type t = {
           types otherwise than Clang ({!Backend_difference}); its version
           is named for [--print-target] only, as typec types C alike for
           every supported release of a compiler. *)
+  architecture : architecture;
   char_bit : int;  (** [__CHAR_BIT__]: the width of a byte. *)
   char_signed : bool;  (** Plain [char] is signed: no [__CHAR_UNSIGNED__]. *)
   sizeof_short : int;
@@ -55,6 +63,8 @@ type t = {
   intmax_type : Integer.t;  (** [intmax_t] *)
   uintmax_type : Integer.t;  (** [uintmax_t] *)
   intptr_type : Integer.t;  (** [intptr_t] *)
+  uint16_type : Integer.t;  (** [uint16_t] *)
+  uint32_type : Integer.t;  (** [uint32_t] *)
   uint64_type : Integer.t;  (** [uint64_t] *)
   char16_type : Integer.t;  (** [char16_t] *)
   char32_type : Integer.t;  (** [char32_t] *)
@@ -92,8 +102,9 @@ val of_predefined_macros : string -> (t, error) result
     model must keep the guarantees of C that the front end relies on:
     [CHAR_BIT] of at least 8, the minimum widths of the standard integer
     types (5.2.4.2.1) in the order of their ranks (6.2.5p8), and unsigned
-    [size_t], [uintmax_t], [char16_t] and [char32_t] with signed
-    [ptrdiff_t], [intmax_t] and [intptr_t]; and [wchar_t], [char16_t]
+    [size_t], [uintmax_t], [char16_t], [char32_t] and the exact-width
+    unsigned types with signed [ptrdiff_t], [intmax_t] and [intptr_t];
+    the exact-width types of their widths; and [wchar_t], [char16_t]
     and [char32_t] of at most 32 bits. A size above 65536 is
     malformed. A dump with neither [__clang__] nor [__GNUC__] is
     reported as missing [__GNUC__], and a backend older than
@@ -116,6 +127,9 @@ val is_signed : t -> Integer.t -> bool
 
 val compiler_name : compiler -> string
 (** The compiler's name in messages: [GCC] or [Clang]. *)
+
+val architecture_name : architecture -> string
+(** The architecture's name in messages, such as [AArch64], or [other]. *)
 
 val to_string : t -> string
 (** One [field: value] line per field of {!t}, in declaration order, with

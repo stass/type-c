@@ -5,6 +5,8 @@ type c_type =
   | Void
   | Integer of Integer.t
   | Size
+  | Uint16
+  | Uint32
   | Uint64
   | Real of Arithmetic.floating
   | Complex of Arithmetic.floating
@@ -22,13 +24,15 @@ type rule =
 
 type signature = Prototype of prototype | Rule of rule | Unknown
 
-type entry = {
-  name : string;
-  gcc : signature option;
-  clang : signature option;
-}
+type architectures = Every | Only of Target.architecture list
+type offer = { signature : signature; architectures : architectures }
+type entry = { name : string; gcc : offer option; clang : offer option }
 
-type lookup = Builtin of signature | Unavailable | Not_builtin
+type lookup =
+  | Builtin of signature
+  | Of_other_compiler
+  | Of_other_architectures
+  | Not_builtin
 
 (* The table's vocabulary *)
 
@@ -42,13 +46,28 @@ let volatile_void_pointer = Pointer (Volatile Void)
 let string = Pointer (Integer Char)
 let const_string = Pointer (Const (Integer Char))
 
+let everywhere signature = Some { signature; architectures = Every }
+
 let both name signature =
-  { name; gcc = Some signature; clang = Some signature }
+  { name; gcc = everywhere signature; clang = everywhere signature }
 
-let gcc name signature = { name; gcc = Some signature; clang = None }
-let clang name signature = { name; gcc = None; clang = Some signature }
+let gcc name signature = { name; gcc = everywhere signature; clang = None }
+let clang name signature = { name; gcc = None; clang = everywhere signature }
 
-let each name ~gcc ~clang = { name; gcc = Some gcc; clang = Some clang }
+let each name ~gcc ~clang =
+  { name; gcc = everywhere gcc; clang = everywhere clang }
+
+(* Clang lowers __builtin_setjmp and __builtin_longjmp on the
+   architectures of hasSjLjLowering in its TargetInfo only, as Clang 21
+   to 23 show with --target. GCC lowers them on every architecture, which
+   is inferred: x86-64 and AArch64 are checked. *)
+let setjmp_family name ~gcc ~clang =
+  let clang_architectures = Only [ X86; Arm; Powerpc; Systemz; Ve ] in
+  {
+    name;
+    gcc = everywhere gcc;
+    clang = Some { signature = clang; architectures = clang_architectures };
+  }
 
 let prototype return parameters =
   Prototype { return; parameters; variadic = false }
@@ -206,11 +225,13 @@ let bits =
       integer_family "__builtin_parity" ~unsigned:true;
       [
         both "__builtin_abs" (prototype int [ int ]);
-        (* GCC's are of uint16_t and uint32_t, which are these types on
-           every target of both. *)
-        both "__builtin_bswap16"
-          (prototype (Integer Unsigned_short) [ Integer Unsigned_short ]);
-        both "__builtin_bswap32" (prototype unsigned [ unsigned ]);
+        (* Clang's is of unsigned short, which is not its uint16_t on
+           AVR. *)
+        each "__builtin_bswap16"
+          ~gcc:(prototype Uint16 [ Uint16 ])
+          ~clang:
+            (prototype (Integer Unsigned_short) [ Integer Unsigned_short ]);
+        both "__builtin_bswap32" (prototype Uint32 [ Uint32 ]);
         both "__builtin_bswap64" (prototype Uint64 [ Uint64 ]);
         both "__builtin_add_overflow" (type_generic bool);
         both "__builtin_sub_overflow" (type_generic bool);
@@ -299,10 +320,10 @@ let control =
     both "__builtin_unreachable" (prototype Void []);
     gcc "__builtin_exit" (prototype Void [ int ]);
     (* GCC takes a void *, Clang a void ** to the buffer. *)
-    each "__builtin_setjmp"
+    setjmp_family "__builtin_setjmp"
       ~gcc:(prototype int [ void_pointer ])
       ~clang:(prototype int [ Pointer void_pointer ]);
-    each "__builtin_longjmp"
+    setjmp_family "__builtin_longjmp"
       ~gcc:(prototype Void [ void_pointer; int ])
       ~clang:(prototype Void [ Pointer void_pointer; int ]);
     gcc "__builtin_apply_args" (variadic void_pointer []);
@@ -314,19 +335,23 @@ let table =
   List.concat [ memory_and_strings; object_size_checking; floating; bits;
                 atomics; control ]
 
-(* The one test of availability. *)
-let signature_for (target : Target.t) entry =
+let offer (target : Target.t) entry =
   match target.backend.compiler with
   | Gcc -> entry.gcc
   | Clang -> entry.clang
 
+let lookup (target : Target.t) entry =
+  match offer target entry with
+  | None -> Of_other_compiler
+  | Some { signature; architectures = Every } -> Builtin signature
+  | Some { signature; architectures = Only architectures } ->
+      if List.mem target.architecture architectures then Builtin signature
+      else Of_other_architectures
+
 let find target name =
   match List.find_opt (fun entry -> entry.name = name) table with
   | None -> Not_builtin
-  | Some entry -> (
-      match signature_for target entry with
-      | Some signature -> Builtin signature
-      | None -> Unavailable)
+  | Some entry -> lookup target entry
 
 let rec c_type target t =
   let ( let* ) = Result.bind in
@@ -334,6 +359,8 @@ let rec c_type target t =
   | Void -> Ok Ctype.void
   | Integer integer -> Ctype.integer target integer
   | Size -> Ctype.integer target target.Target.size_type
+  | Uint16 -> Ctype.integer target target.uint16_type
+  | Uint32 -> Ctype.integer target target.uint32_type
   | Uint64 -> Ctype.integer target target.uint64_type
   | Real floating -> Ctype.arithmetic target (Real floating)
   | Complex floating -> Ctype.arithmetic target (Complex floating)

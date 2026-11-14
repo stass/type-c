@@ -1,13 +1,15 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* builtin_probe MACRO-DUMP calls | others | unavailable: for the target
-   model of the dump, the builtins of the table by what the backend has.
-   [calls] writes C that calls each one with a prototype, with arguments
-   of its parameter types, in a function for each, and once more with an
-   extra argument where it is variadic; [others] lists the names of those
-   that a rule types or whose type is unknown; [unavailable] lists the
-   names that only the other compiler has. *)
+(* builtin_probe MACRO-DUMP calls | others | unavailable | withheld: for
+   the target model of the dump, the builtins of the table by what the
+   backend has. [calls] writes C that calls each one with a prototype,
+   with arguments of its parameter types, in a function for each, and
+   once more with an extra argument where it is variadic; [others] lists
+   the names of those that a rule types or whose type is unknown;
+   [unavailable] lists the names that only the other compiler has;
+   [withheld] writes the calls of those with a prototype that the backend
+   has on other architectures only. *)
 
 open Typec_sema
 
@@ -30,8 +32,8 @@ let spelled target t =
 let argument target index (t : Builtin_function.c_type) =
   match t with
   | Pointer _ | Va_list -> Printf.sprintf "a%d" index
-  | Void | Integer _ | Size | Uint64 | Real _ | Complex _ | Const _
-  | Volatile _ ->
+  | Void | Integer _ | Size | Uint16 | Uint32 | Uint64 | Real _ | Complex _
+  | Const _ | Volatile _ ->
       Printf.sprintf "(%s)1" (spelled target t)
 
 let parameter target index t =
@@ -58,18 +60,31 @@ let probe target index name (prototype : Builtin_function.prototype) =
 let available target =
   List.filter_map
     (fun (entry : Builtin_function.entry) ->
-      Option.map
-        (fun signature -> (entry.name, signature))
-        (Builtin_function.signature_for target entry))
+      match Builtin_function.lookup target entry with
+      | Builtin signature -> Some (entry.name, signature)
+      | Of_other_compiler | Of_other_architectures | Not_builtin -> None)
     Builtin_function.table
 
-let calls target =
+(* Each entry that the backend has on other architectures only, with the
+   signature that it has there. *)
+let withheld_entries target =
+  List.filter_map
+    (fun (entry : Builtin_function.entry) ->
+      match Builtin_function.(lookup target entry, offer target entry) with
+      | Of_other_architectures, Some offer -> Some (entry.name, offer.signature)
+      | _ -> None)
+    Builtin_function.table
+
+let write_calls target entries =
   List.iteri
     (fun index (name, (signature : Builtin_function.signature)) ->
       match signature with
       | Prototype prototype -> probe target index name prototype
       | Rule _ | Unknown -> ())
-    (available target)
+    entries
+
+let calls target = write_calls target (available target)
+let withheld target = write_calls target (withheld_entries target)
 
 let others target =
   List.iter
@@ -82,7 +97,7 @@ let others target =
 let unavailable target =
   List.iter
     (fun (entry : Builtin_function.entry) ->
-      if Builtin_function.find target entry.name = Unavailable then
+      if Builtin_function.lookup target entry = Of_other_compiler then
         print_endline entry.name)
     Builtin_function.table
 
@@ -98,8 +113,9 @@ let () =
       | "calls" -> calls target
       | "others" -> others target
       | "unavailable" -> unavailable target
+      | "withheld" -> withheld target
       | _ -> or_exit (Error ("no mode " ^ mode)))
   | _ ->
       prerr_endline
-        "usage: builtin_probe MACRO-DUMP calls|others|unavailable";
+        "usage: builtin_probe MACRO-DUMP calls|others|unavailable|withheld";
       exit 2

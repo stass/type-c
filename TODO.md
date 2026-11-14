@@ -515,12 +515,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   unknown type: the constant `Unevaluable` holds both an invalid
   expression and one that depends on an unknown type. Give the second a
   constant of its own, which `choice` maps to an unknown selection.
-- [Medium] `__builtin_bswap16` and `__builtin_bswap32` are of `unsigned
-  short` and `unsigned int` in the table, which GCC's `uint16_t` and
-  `uint32_t` are on every target of the test hosts but not on all that
-  the target model accepts (`unsigned long` on arm-none-eabi). Read the
-  exact-width types from `__UINT16_TYPE__` and `__UINT32_TYPE__` as
-  `uint64_t` is, or refuse such a target.
 - [Low] A call of a builtin that a rule types does not check its number
   of arguments (`__builtin_isnan()` is `int`), which the backend
   refuses; nor is a callee chosen by `_Generic` or
@@ -600,13 +594,13 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   times. Needs a newer qemu-user in the VM (not installed:
   `tonistiigi/binfmt --install arm64` keeps the VM's handler) or a
   native arm64 machine.
-- [Medium] `test/run/expressions.t` fails on `alpine-arm64`: Clang 22
-  rejects `__builtin_setjmp` and `__builtin_longjmp` there ("not
-  supported for the current target"), which the builtin table gives to
-  every target, so `builtin_probe`'s calls do not compile. Reproducer:
-  `dune test test/run/expressions.t` in `typec-host-alpine-arm64`. Give
-  the table a target condition, or have the probe skip what the backend
-  refuses.
+- [Medium] `Target.architecture` is the first of a list of predefined
+  macros that the backend defines, while Clang decides where it has
+  `__builtin_setjmp` by the TargetInfo of the triple; the two agree on
+  every triple tried with `--target` (arm64ec needed `__arm64ec__` before
+  `__x86_64__`), but nothing makes them agree on another. The calls of
+  `expressions.t` for AArch64 and ARMv7 cover two of the architectures;
+  PowerPC, SystemZ and VE are untested.
 - [Medium] `test/unit/test_small_stack.ml` fails on `alpine-arm64`
   with `FAIL: the backtrace names the stage`: the backtrace of a
   `Stack_overflow` in `Small_stack.run` has at most

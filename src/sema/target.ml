@@ -2,11 +2,13 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 type byte_order = Little_endian | Big_endian
+type architecture = X86 | Arm | Aarch64 | Powerpc | Systemz | Ve | Other
 type compiler = Gcc | Clang
 type backend = { compiler : compiler; major_version : int }
 
 type t = {
   backend : backend;
+  architecture : architecture;
   char_bit : int;
   char_signed : bool;
   sizeof_short : int;
@@ -25,6 +27,8 @@ type t = {
   intmax_type : Integer.t;
   uintmax_type : Integer.t;
   intptr_type : Integer.t;
+  uint16_type : Integer.t;
+  uint32_type : Integer.t;
   uint64_type : Integer.t;
   char16_type : Integer.t;
   char32_type : Integer.t;
@@ -180,6 +184,26 @@ let read_stdc_version macros =
   | Some version -> version
   | None -> malformed name value
 
+(* The first that the target defines names its architecture: Clang's
+   arm64ec, an AArch64 target, also defines __x86_64__. *)
+let architecture_macros =
+  [
+    ("__arm64ec__", Aarch64);
+    ("__x86_64__", X86);
+    ("__i386__", X86);
+    ("__arm__", Arm);
+    ("__aarch64__", Aarch64);
+    ("__powerpc__", Powerpc);
+    ("__s390__", Systemz);
+    ("__ve__", Ve);
+  ]
+
+let read_architecture macros =
+  let defined (name, _) = Macros.mem name macros in
+  match List.find_opt defined architecture_macros with
+  | Some (_, architecture) -> architecture
+  | None -> Other
+
 let read_major_version macros name =
   let value = find macros name in
   match decimal value with
@@ -203,6 +227,7 @@ let model_of_macros macros backend =
   let integer_type = read_integer_type macros in
   {
     backend;
+    architecture = read_architecture macros;
     char_bit = count "__CHAR_BIT__";
     char_signed = not (Macros.mem "__CHAR_UNSIGNED__" macros);
     sizeof_short = count "__SIZEOF_SHORT__";
@@ -221,6 +246,8 @@ let model_of_macros macros backend =
     intmax_type = integer_type "__INTMAX_TYPE__";
     uintmax_type = integer_type "__UINTMAX_TYPE__";
     intptr_type = integer_type "__INTPTR_TYPE__";
+    uint16_type = integer_type "__UINT16_TYPE__";
+    uint32_type = integer_type "__UINT32_TYPE__";
     uint64_type = integer_type "__UINT64_TYPE__";
     char16_type = integer_type "__CHAR16_TYPE__";
     char32_type = integer_type "__CHAR32_TYPE__";
@@ -284,8 +311,9 @@ let check_widths model =
 let check_typedefs model =
   let signed integer = is_signed model integer in
   let unsigned_types =
-    [ model.size_type; model.uintmax_type; model.uint64_type;
-      model.char16_type; model.char32_type ]
+    [ model.size_type; model.uintmax_type; model.uint16_type;
+      model.uint32_type; model.uint64_type; model.char16_type;
+      model.char32_type ]
   in
   let signed_types =
     [ model.ptrdiff_type; model.intmax_type; model.intptr_type ]
@@ -295,8 +323,14 @@ let check_typedefs model =
     || not (List.for_all signed signed_types)
   in
   if wrong then unsupported "a typedef of the wrong signedness";
-  if integer_width model model.uint64_type <> 64 then
-    unsupported "a uint64_t that is not 64 bits wide";
+  let exact_width (integer, width) =
+    if integer_width model integer <> width then
+      unsupported
+        (Printf.sprintf "a uint%d_t that is not %d bits wide" width width)
+  in
+  List.iter exact_width
+    [ (model.uint16_type, 16); (model.uint32_type, 32);
+      (model.uint64_type, 64) ];
   (* A code unit is an OCaml int when constants are evaluated. *)
   let character_types =
     [ model.wchar_type; model.char16_type; model.char32_type ]
@@ -339,6 +373,15 @@ let compiler_name = function
   | Gcc -> "GCC"
   | Clang -> "Clang"
 
+let architecture_name = function
+  | X86 -> "x86"
+  | Arm -> "ARM"
+  | Aarch64 -> "AArch64"
+  | Powerpc -> "PowerPC"
+  | Systemz -> "SystemZ"
+  | Ve -> "VE"
+  | Other -> "other"
+
 let backend_name { compiler; major_version } =
   Printf.sprintf "%s %d" (compiler_name compiler) major_version
 
@@ -346,6 +389,7 @@ let to_string target =
   let fields =
     [
       ("backend", backend_name target.backend);
+      ("architecture", architecture_name target.architecture);
       ("char_bit", string_of_int target.char_bit);
       ("char_signed", string_of_bool target.char_signed);
       ("sizeof_short", string_of_int target.sizeof_short);
@@ -364,6 +408,8 @@ let to_string target =
       ("intmax_type", Integer.name target.intmax_type);
       ("uintmax_type", Integer.name target.uintmax_type);
       ("intptr_type", Integer.name target.intptr_type);
+      ("uint16_type", Integer.name target.uint16_type);
+      ("uint32_type", Integer.name target.uint32_type);
       ("uint64_type", Integer.name target.uint64_type);
       ("char16_type", Integer.name target.char16_type);
       ("char32_type", Integer.name target.char32_type);

@@ -15,6 +15,31 @@ let lp64 = Canned_targets.(target (as_clang lp64_macros))
 let ilp32 = Canned_targets.(target (as_clang ilp32_macros))
 let lp64_gcc = Canned_targets.(target (as_gcc lp64_macros))
 let ilp32_gcc = Canned_targets.(target (as_gcc ilp32_macros))
+let aarch64 = Canned_targets.(target (as_clang aarch64_macros))
+let aarch64_gcc = Canned_targets.(target (as_gcc aarch64_macros))
+
+(* The ILP32 macros with these in place of theirs. *)
+let ilp32_with replacements =
+  let replaced (name, value) =
+    (name, Option.value (List.assoc_opt name replacements) ~default:value)
+  in
+  List.map replaced Canned_targets.ilp32_macros
+
+(* GCC's uint32_t of arm-none-eabi, and the uint16_t of AVR, whose int
+   has 16 bits. *)
+let ilp32_long_uint32_gcc =
+  let macros = ilp32_with [ ("__UINT32_TYPE__", "long unsigned int") ] in
+  Canned_targets.(target (as_gcc macros))
+
+let int16_macros =
+  ilp32_with
+    [
+      ("__SIZEOF_INT__", "2");
+      ("__UINT16_TYPE__", "unsigned int");
+      ("__UINT32_TYPE__", "long unsigned int");
+    ]
+let int16 = Canned_targets.target int16_macros
+let int16_gcc = Canned_targets.(target (as_gcc int16_macros))
 
 (* Declarations that most cases use. *)
 let prelude =
@@ -347,10 +372,20 @@ let builtins () =
   types ~target:ilp32 "__builtin_strlen(p)" "unsigned int";
   types "__builtin_bswap64(ul)" "unsigned long";
   types ~target:ilp32 "__builtin_bswap64(ul)" "unsigned long long";
+  types "__builtin_bswap16(u)" "unsigned short";
+  types "__builtin_bswap32(u)" "unsigned int";
+  types ~target:ilp32_long_uint32_gcc "__builtin_bswap32(u)" "unsigned long";
+  types ~target:int16 "__builtin_bswap16(u)" "unsigned short";
+  types ~target:int16_gcc "__builtin_bswap16(u)" "unsigned int";
   rejects "__builtin_abs()" "6.5.2.2p2";
   (* Of one compiler, or of each in its own way. *)
   types ~target:lp64_gcc "__builtin_setjmp" "int (void *)";
   types ~target:ilp32 "__builtin_setjmp" "int (void **)";
+  (* Of one compiler on some architectures only. *)
+  types ~target:aarch64_gcc "__builtin_setjmp" "int (void *)";
+  rejects ~target:aarch64 "__builtin_longjmp"
+    "'__builtin_longjmp' is not a builtin of Clang, the backend, on this \
+     target's architecture (AArch64)";
   types ~target:lp64_gcc "__builtin_puts(p)" "int";
   rejects ~target:ilp32 "__builtin_puts(p)"
     "'__builtin_puts' is not a builtin of Clang, the backend";

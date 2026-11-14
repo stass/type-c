@@ -1233,13 +1233,16 @@ underlying type and a parameter list of `...` alone. One table holds
 the builtin typedef names: the parser reads the names from it and the
 declaration reader the types. Another holds the builtin functions that
 the corpus calls and the macros of the system headers expand to, each with
-the compilers that have it and its type: a prototype; a rule of its
+the compilers that have it, the architectures that each has it on (Clang
+lowers `__builtin_setjmp` on some only, an architecture that the target
+model reads from the backend's macros), and its type: a prototype; a rule of its
 own, which gives a call of a type-generic builtin such as
 `__builtin_add_overflow` or `__atomic_load_n` its type from the
 arguments; or unknown (P21), as for the vector builtins. An undeclared
 identifier is an error unless the table has it for the backend, and one
-that only the other compiler has is an error naming it, so a builtin
-is never guessed. *Provisional:* an optional floating type
+that only the other compiler has, or that the backend has on other
+architectures only, is an error saying so, so a builtin is never
+guessed. *Provisional:* an optional floating type
 is a keyword exactly where the backend's predefined macros say that it
 has the type, `__FLTN_MANT_DIG__` for `_FloatN`, `__FLTNX_MANT_DIG__`
 for `_FloatNx` and `__SIZEOF_FLOAT128__` for `__float128`, as on every

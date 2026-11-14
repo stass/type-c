@@ -8,13 +8,21 @@ let lp64 = Canned_targets.target Canned_targets.lp64_macros
 let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
 let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
 
-(* A target whose int is as wide as its short, as on 16-bit machines. *)
+(* A target whose int is as wide as its short, as on 16-bit machines,
+   where uint32_t is unsigned long. *)
 let int16 =
-  Canned_targets.target
-    (List.map
-       (fun (name, value) ->
-         if name = "__SIZEOF_INT__" then (name, "2") else (name, value))
-       Canned_targets.lp64_macros)
+  let int16_macros =
+    [
+      ("__SIZEOF_INT__", "2");
+      ("__SIZEOF_LONG__", "4");
+      ("__UINT32_TYPE__", "long unsigned int");
+      ("__UINT64_TYPE__", "long long unsigned int");
+    ]
+  in
+  let int16_value (name, value) =
+    (name, Option.value (List.assoc_opt name int16_macros) ~default:value)
+  in
+  Canned_targets.target (List.map int16_value Canned_targets.lp64_macros)
 
 let check name actual expected =
   if actual = expected then true

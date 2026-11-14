@@ -7,6 +7,7 @@ open Typec_test_support
 let lp64 : Target.t =
   {
     backend = { compiler = Gcc; major_version = 14 };
+    architecture = X86;
     char_bit = 8;
     char_signed = true;
     sizeof_short = 2;
@@ -25,6 +26,8 @@ let lp64 : Target.t =
     intmax_type = Long;
     uintmax_type = Unsigned_long;
     intptr_type = Long;
+    uint16_type = Unsigned_short;
+    uint32_type = Unsigned_int;
     uint64_type = Unsigned_long;
     char16_type = Unsigned_short;
     char32_type = Unsigned_int;
@@ -35,6 +38,7 @@ let lp64 : Target.t =
 let ilp32 : Target.t =
   {
     backend = { compiler = Clang; major_version = 20 };
+    architecture = Arm;
     char_bit = 8;
     char_signed = false;
     sizeof_short = 2;
@@ -53,6 +57,8 @@ let ilp32 : Target.t =
     intmax_type = Long_long;
     uintmax_type = Unsigned_long_long;
     intptr_type = Int;
+    uint16_type = Unsigned_short;
+    uint32_type = Unsigned_int;
     uint64_type = Unsigned_long_long;
     char16_type = Unsigned_short;
     char32_type = Unsigned_int;
@@ -141,6 +147,34 @@ let model_cases =
       dump = lp64_clang_dump "22";
       expected =
         Ok { lp64 with backend = { compiler = Clang; major_version = 22 } };
+    };
+    {
+      name = "AArch64";
+      dump = dump_of Canned_targets.aarch64_macros;
+      expected = Ok { lp64 with architecture = Aarch64 };
+    };
+    {
+      name = "arm64ec, which also defines __x86_64__, is AArch64";
+      dump = dump_of (("__arm64ec__", "1") :: Canned_targets.lp64_macros);
+      expected = Ok { lp64 with architecture = Aarch64 };
+    };
+    {
+      name = "i386 is x86";
+      dump = dump_of (("__i386__", "1") :: without "__x86_64__");
+      expected = Ok lp64;
+    };
+    {
+      name = "an architecture that typec does not tell apart";
+      dump = dump_of (("__riscv", "1") :: without "__x86_64__");
+      expected = Ok { lp64 with architecture = Other };
+    };
+    {
+      name = "uint32_t of unsigned long, as on arm-none-eabi";
+      dump =
+        dump_of
+          (("__UINT32_TYPE__", "long unsigned int")
+          :: List.remove_assoc "__UINT32_TYPE__" Canned_targets.ilp32_macros);
+      expected = Ok { ilp32 with uint32_type = Unsigned_long };
     };
   ]
 
@@ -274,6 +308,16 @@ let error_cases =
       name = "32-bit uint64_t";
       dump = lp64_dump_with "__UINT64_TYPE__" "unsigned int";
       expected = unsupported "a uint64_t that is not 64 bits wide";
+    };
+    {
+      name = "32-bit uint16_t";
+      dump = lp64_dump_with "__UINT16_TYPE__" "unsigned int";
+      expected = unsupported "a uint16_t that is not 16 bits wide";
+    };
+    {
+      name = "signed uint32_t";
+      dump = lp64_dump_with "__UINT32_TYPE__" "int";
+      expected = unsupported "a typedef of the wrong signedness";
     };
     {
       name = "64-bit char32_t";

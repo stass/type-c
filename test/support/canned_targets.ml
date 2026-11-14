@@ -1,7 +1,7 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* Predefined macro dumps of two targets, shared by the unit tests and
+(* Predefined macro dumps of three targets, shared by the unit tests and
    the fuzz harness. *)
 
 (* The macros of the optional floating types that GCC 14 defines on
@@ -17,13 +17,13 @@ let gcc_optional_float_macros =
     ("__SIZEOF_FLOAT128__", "16");
   ]
 
-(* The macros of a GCC 14 dump for an LP64 target that the model reads,
-   with a few it ignores: a function-like macro and one without a
-   value. *)
+(* The macros of a GCC 14 dump for x86-64 that the model reads, with a
+   few it ignores: a function-like macro and one without a value. *)
 let lp64_macros =
   gcc_optional_float_macros
   @ [
     ("__GNUC__", "14");
+    ("__x86_64__", "1");
     ("__CHAR_BIT__", "8");
     ("__SIZEOF_SHORT__", "2");
     ("__SIZEOF_INT__", "4");
@@ -40,6 +40,8 @@ let lp64_macros =
     ("__INTMAX_TYPE__", "long int");
     ("__UINTMAX_TYPE__", "long unsigned int");
     ("__INTPTR_TYPE__", "long int");
+    ("__UINT16_TYPE__", "short unsigned int");
+    ("__UINT32_TYPE__", "unsigned int");
     ("__UINT64_TYPE__", "long unsigned int");
     ("__CHAR16_TYPE__", "short unsigned int");
     ("__CHAR32_TYPE__", "unsigned int");
@@ -57,6 +59,7 @@ let ilp32_macros =
     ("__clang__", "1");
     ("__clang_major__", "20");
     ("__GNUC__", "4");
+    ("__arm__", "1");
     ("__CHAR_BIT__", "8");
     ("__CHAR_UNSIGNED__", "1");
     ("__SIZEOF_SHORT__", "2");
@@ -73,12 +76,19 @@ let ilp32_macros =
     ("__INTMAX_TYPE__", "long long int");
     ("__UINTMAX_TYPE__", "long long unsigned int");
     ("__INTPTR_TYPE__", "int");
+    ("__UINT16_TYPE__", "unsigned short");
+    ("__UINT32_TYPE__", "unsigned int");
     ("__UINT64_TYPE__", "long long unsigned int");
     ("__CHAR16_TYPE__", "unsigned short");
     ("__CHAR32_TYPE__", "unsigned int");
     ("__BYTE_ORDER__", "__ORDER_BIG_ENDIAN__");
     ("__STDC_VERSION__", "201710L");
   ]
+
+(* The LP64 target with the architecture macro of AArch64 for that of
+   x86-64, which is all that a test of the architecture needs. *)
+let aarch64_macros =
+  ("__aarch64__", "1") :: List.remove_assoc "__x86_64__" lp64_macros
 
 let dump_of macros =
   String.concat ""

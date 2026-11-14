@@ -19,6 +19,9 @@ type c_type =
   | Void
   | Integer of Integer.t
   | Size  (** [size_t] *)
+  | Uint16  (** [uint16_t] *)
+  | Uint32
+      (** [uint32_t], which is [unsigned long] on some 32-bit targets. *)
   | Uint64
       (** [uint64_t], which is [unsigned long] or [unsigned long long] by
           target. *)
@@ -55,7 +58,9 @@ type signature =
 (** What an undeclared identifier names for a target. *)
 type lookup =
   | Builtin of signature
-  | Unavailable  (** A builtin of the other compiler only. *)
+  | Of_other_compiler  (** A builtin of the other compiler only. *)
+  | Of_other_architectures
+      (** A builtin that the backend has on other architectures only. *)
   | Not_builtin
 
 val find : Target.t -> string -> lookup
@@ -65,17 +70,24 @@ val function_type : Target.t -> prototype -> (Ctype.t, Ctype.error) result
 
 (** {1 The table} *)
 
-(** A builtin with its signature in each compiler that has it, which
-    are equal but for [__builtin_setjmp] and [__builtin_longjmp]. *)
-type entry = {
-  name : string;
-  gcc : signature option;
-  clang : signature option;
-}
+(** The architectures that a compiler has a builtin on. *)
+type architectures = Every | Only of Target.architecture list
+
+(** What a compiler has of a builtin. *)
+type offer = { signature : signature; architectures : architectures }
+
+(** A builtin with what each compiler that has it offers, which is the
+    same but for [__builtin_setjmp], [__builtin_longjmp] and
+    [__builtin_bswap16]. *)
+type entry = { name : string; gcc : offer option; clang : offer option }
 
 val table : entry list
 (** One entry for each name. *)
 
-val signature_for : Target.t -> entry -> signature option
-(** The signature that the backend of the target gives the entry, if it
-    has it: the one test of availability, which {!find} applies. *)
+val lookup : Target.t -> entry -> lookup
+(** What the entry is for the target, never [Not_builtin]: the one test
+    of availability, which {!find} applies. *)
+
+val offer : Target.t -> entry -> offer option
+(** What the backend of the target has of the entry, on any
+    architecture. *)

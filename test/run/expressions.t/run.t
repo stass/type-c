@@ -64,6 +64,28 @@ undeclared in the backend.
   > }
   $ builtins "$clang" -Werror=incompatible-pointer-types
   $ builtins "$clang" -Werror=incompatible-pointer-types $second_target
+
+Clang offers some builtins on some architectures only, such as
+__builtin_setjmp, which it lacks on AArch64. The calls need no header, so
+a target of another architecture needs no sysroot.
+
+  $ builtins "$clang" -Werror=incompatible-pointer-types \
+  >   --target=aarch64-linux-gnu
+  $ builtins "$clang" -Werror=incompatible-pointer-types \
+  >   --target=armv7-none-eabi
+
+The backend refuses each call that the table withholds on the
+architecture.
+
+  $ withheld() {
+  >   "$clang" "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
+  >   ../builtin_probe.exe macros withheld > withheld.c &&
+  >   "$clang" "$@" -std=gnu11 -fsyntax-only withheld.c 2>&1 |
+  >     grep -o '__builtin_[a-z0-9_]* is not supported for the current target'
+  > }
+  $ withheld --target=aarch64-linux-gnu
+  __builtin_setjmp is not supported for the current target
+  __builtin_longjmp is not supported for the current target
   $ gcc_errors='-Werror=incompatible-pointer-types -Werror=discarded-qualifiers'
   $ builtins "$gcc" "$gcc_errors"
   $ builtins "$gcc" "$gcc_errors" $second_target

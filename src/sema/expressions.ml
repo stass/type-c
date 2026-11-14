@@ -422,11 +422,18 @@ let builtin context span name =
   | Builtin (Rule _ | Unknown) ->
       value (unknown context span ("the builtin " ^ quote name)
                Unknown_function)
-  | Unavailable ->
+  | Of_other_compiler ->
       context.fail span
         (quote name ^ " is not a builtin of "
         ^ Target.compiler_name target.backend.compiler
         ^ ", the backend (design 13.3)")
+  | Of_other_architectures ->
+      context.fail span
+        (quote name ^ " is not a builtin of "
+        ^ Target.compiler_name target.backend.compiler
+        ^ ", the backend, on this target's architecture ("
+        ^ Target.architecture_name target.architecture
+        ^ ") (design 13.3)")
   | Not_builtin ->
       context.fail span (quote name ^ " is not declared (C11 6.5.1p2)")
 
@@ -1416,7 +1423,9 @@ let rec builtin_rule context (callee : Tree.expression) =
   | Identifier { name; resolution = Undeclared } -> (
       match Builtin_function.find context.target name with
       | Builtin (Rule rule) -> Some (name, rule)
-      | Builtin (Prototype _ | Unknown) | Unavailable | Not_builtin -> None)
+      | Builtin (Prototype _ | Unknown)
+      | Of_other_compiler | Of_other_architectures | Not_builtin ->
+          None)
   | Parenthesized inner -> builtin_rule context inner
   | _ -> None
 
