@@ -8,8 +8,7 @@ feature mode, and its declarations are read. parse_check fails at the
 first construct it does not parse, and typec --emit-c, which runs the
 whole front end, at the first error, so a passing run prints nothing.
 
-  $ clang=/usr/bin/clang
-  $ gcc=/usr/local/bin/gcc-16
+  $ . ./backends.sh
 
 The C11 headers (C11 7.1.2) and then the POSIX.1-2017 headers.
 

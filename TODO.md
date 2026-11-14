@@ -13,7 +13,8 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 - [High] Check the licence and provenance of each pilot candidate named
   in the plan before fetching any of them.
-- [Medium] Decide where the Linux and FreeBSD test hosts run, and where
+- [Medium] Decide where the arm64 Linux and the FreeBSD test hosts run
+  (`tools/hosts` runs the x86-64 Linux ones in containers), and where
   the corpus repository is hosted: it exists locally at
   `/Volumes/Optaine/type-c-corpus`, with no remote, and its README says
   what it holds.
@@ -59,13 +60,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] The option table leaves out GCC's unique abbreviations of long
   options (`--for-link X`), the options of GCC's other front ends, and
   Apple Clang's `-cc1-args`, which takes the rest of the line.
-- [Medium] `test/run/target.t`, `test/run/read.t`, `test/run/types.t`,
-  `test/run/pipeline.t` and `test/run/parse.t` run `/usr/bin/clang` and
-  `/usr/local/bin/gcc-16`, and `target.t` expects the model of the x86-64
-  macOS host. Choose the backends and the expected facts per host once
-  the Linux and FreeBSD test hosts exist; `types.t` then confirms the
-  provisional enumeration rule (`Arithmetic.enum_compatible_type`) on
-  each.
 - [Low] `Unix.execvp` hands an executable without a `#!` line to
   `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
   a backend works on some hosts only. Document it or decide one behaviour.
@@ -393,6 +387,59 @@ is [type-c-language-design.md](type-c-language-design.md).
   trunk) attaches only a SysV segment, so the fuzz build needs a patched
   compiler (README, "Fuzzing"). Once OCaml takes it, drop the patch and
   pin the release that has it.
+
+## Test hosts
+
+`tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24
+(musl), both x86-64.
+
+- [High] With `-O`, Alpine's GCC and Clang define `_FORTIFY_SOURCE`,
+  and musl's fortify-headers then declare `fgets` and others as
+  `__typeof__(fgets) __orig_fgets` with `__attribute__((access))`
+  (`/usr/include/fortify/stdio.h:40`, `:42`); typec cannot tell whether
+  such a name is a function or an object (design 13.3), so a `.tc`
+  input that includes `stdio.h` does not compile with `-O` there, and
+  `test/run/pipeline.t` and `tools/corpus/runner.t` fail on Alpine.
+  `-U_FORTIFY_SOURCE` or `-O0` avoids it. Reproducer:
+  `/Volumes/Optaine/typec-hosts/repro/alpine-fortify/run.sh REPO`.
+- [Medium] `test/run/headers.t` fails on Alpine in the ISO modes
+  (`-std=c11`, with or without `_DARWIN_C_SOURCE`): musl's `aio.h:17`
+  declares a member of `struct sigevent`, which `signal.h` defines only
+  under a POSIX feature macro, and GCC refuses the unit too. The unit
+  is chosen by preprocessing each header alone in GNU C. Choose the
+  headers per mode by compiling each alone, or leave the POSIX headers
+  out of the modes without a POSIX feature macro; both backends on
+  macOS refuse the unit in the three modes with a feature macro, so
+  check that the change keeps what macOS reads.
+- [High] glibc declares binary128 types that the parser does not read
+  as type names: under Clang `bits/floatn.h:97` is
+  `typedef __float128 _Float128;`, and under GCC `math.h` declares
+  functions of GCC's `_Float128` (`bits/mathcalls-helper-functions.h:20`).
+  On Debian no `.tc` input that includes `stdio.h` compiles with Clang,
+  and `test/run/pipeline.t`, `headers.t` and `tools/corpus/runner.t`
+  fail. Reproducer:
+  `/Volumes/Optaine/typec-hosts/repro/debian-glibc/run.sh REPO`.
+- [Medium] `test/run/declarations.t` fails with Debian 13's Clang 19:
+  in an enumeration whose values do not all fit `int` (`enum mixed`,
+  `after_max`, `unsigned_after` of `declarations.c`), typec gives every
+  enumerator the enumeration's type, as GCC, Apple Clang 21 and Clang
+  22 do, and Clang 19 gives an enumerator that fits `int` the type
+  `int`.
+  `Cc_option` names Clang 18 to 21 as supported: decide the oldest
+  Clang, or make the rule depend on the backend's version. Reproducer:
+  `enum.c` in `/Volumes/Optaine/typec-hosts/repro/debian-glibc`.
+- [Low] `typec.opam` asks for OCaml 5.0, but `tools/fuzz` uses
+  `Char.Ascii` of 5.4, so Debian 13's OCaml 5.3 does not build the
+  tree and the Debian host takes OCaml from opam. Raise the bound to
+  5.4, or do without `Char.Ascii` if a distribution's OCaml should do.
+- [Medium] `test/run/target.t`, `types.t` and `declarations.t` run on
+  x86-64 hosts only: `target.t` expects the x86-64 model and the other
+  two compile with `-m32` as well. Give them the expected model and a
+  second target of arm64 once an arm64 host runs the suite, so that
+  `types.t` confirms the provisional enumeration rule
+  (`Arithmetic.enum_compatible_type`) there too.
+- [Low] `tools/corpus/runner.t` runs `/usr/bin/clang`, not the Clang
+  that `TYPEC_TEST_CLANG` names (`test/run/backends.sh`).
 
 ## Corpus
 

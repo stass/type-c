@@ -4,8 +4,7 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 The reader takes what Clang and GCC write for -E, system headers
 included.
 
-  $ clang=/usr/bin/clang
-  $ gcc=/usr/local/bin/gcc-16
+  $ . ./backends.sh
 
   $ cat > t.c <<'EOF'
   > #include <stdio.h>

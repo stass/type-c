@@ -17,19 +17,22 @@ reports (`--print-target`).
 
 ## Building and testing
 
-Requirements: OCaml 5 and dune 3; the tests also need a C compiler as
-`cc`, and `test/run/target.t`, `test/run/read.t`, `test/run/types.t`,
-`test/run/declarations.t`, `test/run/pipeline.t`, `test/run/parse.t`
-and `test/run/headers.t` run `/usr/bin/clang` and
-`/usr/local/bin/gcc-16`, `types.t` and `declarations.t` with `-m32` too,
-and `tools/corpus/runner.t` runs `/usr/bin/clang`. `headers.t` parses
+Requirements: OCaml 5.4 and dune 3; the tests also need a C compiler as
+`cc`, a Clang and a GCC, and `tools/corpus/runner.t` runs
+`/usr/bin/clang`. The cram tests in `test/run` run the Clang that
+`TYPEC_TEST_CLANG` names and the GCC that `TYPEC_TEST_GCC` names; unset,
+they are `/usr/bin/clang` and `/usr/local/bin/gcc-16`, those of the
+macOS development host (`test/run/backends.sh`). `headers.t` parses
 and reads the declarations of every C11 and POSIX header that each
 backend's system headers hold.
-There are no other dependencies.
+`target.t` expects the model of x86-64, and `types.t` and
+`declarations.t` also compile with `-m32`, so dune runs these three on
+x86-64 hosts only. There are no other dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec
 dune test     # unit tests and end-to-end cram tests
+TYPEC_TEST_GCC=/usr/bin/gcc dune test   # with another GCC
 ```
 
 `dune exec typec -- ARGS` runs the compiler from the build tree.
@@ -39,6 +42,26 @@ the structural dump of its tree (`test/support/tree_dump.ml`) or its
 error. `test/run` holds cram tests that run `typec` and the backends;
 `types.t` and `declarations.t` compile static assertions of what typec
 computes, so a backend that disagrees fails to compile them.
+
+### Linux test hosts
+
+`tools/hosts` describes each Linux host that the suite runs on as a
+Dockerfile, with the base image pinned by digest and the compilers, the
+C library and OCaml by version: `debian` (Debian 13, glibc) and `alpine` (Alpine 3.24,
+musl), both x86-64 with the distribution's GCC and Clang, and OCaml 5.4
+and dune from Alpine's packages and from opam on Debian.
+`tools/hosts/run.sh HOST [LOG]` builds the image `typec-host-HOST` and
+runs `dune build` and `dune test` in a container of it, with the source
+mounted read-only, the build inside the container and no network. It
+needs a running Docker that can mount the source tree (colima, for
+instance, shares the home directory but not `/Volumes`), prints
+whether the suite passed, and writes the whole output to `LOG`, by
+default `${TMPDIR:-/tmp}/typec-host-HOST.log`.
+
+```sh
+tools/hosts/run.sh debian
+tools/hosts/run.sh alpine /Volumes/Optaine/alpine.log
+```
 
 ## Choosing the backend
 

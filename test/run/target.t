@@ -3,11 +3,10 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 typec --print-target prints the target model that the backend reports in
 its predefined macros when it is run with the other arguments as options.
-The backends are those of the x86-64 macOS host.
+The backends are those that backends.sh names, on an x86-64 host.
 
   $ unset TYPEC_CC
-  $ clang=/usr/bin/clang
-  $ gcc=/usr/local/bin/gcc-16
+  $ . ./backends.sh
 
   $ typec --cc=$clang --print-target
   char_bit: 8
@@ -63,7 +62,8 @@ The options reach the backend, so they change the model.
 
 A backend that fails, cannot be started, prints something other than
 macro definitions, prints without end, or omits a macro the model needs
-gives one message and no model.
+gives one message and no model. endless prints without end whatever its
+arguments, which GNU yes would refuse as options.
 
   $ typec --cc=false --print-target
   typec: the C compiler "false" exited with status 1 listing its predefined macros
@@ -74,8 +74,9 @@ gives one message and no model.
   $ typec --cc=echo --print-target
   typec: unexpected line "-dM -E -x c /dev/null" among the predefined macros
   [1]
-  $ typec --cc=yes --print-target
-  typec: the C compiler "yes" printed more than 1048576 bytes listing its predefined macros
+  $ printf '#!/bin/sh\nexec yes\n' > endless && chmod +x endless
+  $ typec --cc=./endless --print-target
+  typec: the C compiler "./endless" printed more than 1048576 bytes listing its predefined macros
   [1]
   $ typec --cc=$clang --print-target -std=c89
   typec: the C compiler does not define __STDC_VERSION__

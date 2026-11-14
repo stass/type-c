@@ -3,13 +3,12 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 typec compiles a .tc input in three steps: the backend preprocesses it,
 typec reads and emits the result, and the backend compiles the emitted C
-with -x cpp-output. The backends are those of the macOS host. TMPDIR is
-a fresh directory, so that every run can check that typec leaves nothing
-in it.
+with -x cpp-output. The backends are those that backends.sh names.
+TMPDIR is a fresh directory, so that every run can check that typec
+leaves nothing in it.
 
   $ unset TYPEC_CC
-  $ clang=/usr/bin/clang
-  $ gcc=/usr/local/bin/gcc-16
+  $ . ./backends.sh
   $ mkdir tmp out
   $ export TMPDIR=$PWD/tmp
 
@@ -90,9 +89,13 @@ backend unchanged.
 
 Each step gets options that it does not use, such as -F, which only
 preprocessing and linking use, or a linker flag that typec does not
-know; Clang must not warn about them, or -Werror would fail the build.
+know: -dead_strip on macOS, where the linker calls -s obsolete, and -s
+elsewhere. Clang must not warn about them, or -Werror would fail the
+build.
 
-  $ typec --cc=$clang -Werror -Fout -dead_strip x.tc twice.c -o prog
+  $ link_flag=-s
+  $ if [ "$(uname -s)" = Darwin ]; then link_flag=-dead_strip; fi
+  $ typec --cc=$clang -Werror -Fout $link_flag x.tc twice.c -o prog
   $ typec --cc=$clang -Werror -Fout -c x.tc -o out/x.o
   $ ls -A tmp
 
@@ -110,8 +113,8 @@ A dependency file comes from the preprocessing step. It is named as cc
 names it, and its target is the real output.
 
   $ typec --cc=$clang -MD -c x.tc -o out/x.o
-  $ head -1 out/x.d
-  out/x.o: x.tc \
+  $ head -1 out/x.d | cut -d ' ' -f 1-2
+  out/x.o: x.tc
   $ grep -c ' x.h' out/x.d
   1
   $ typec --cc=$gcc -MMD -MF out/deps -MT target -c x.tc

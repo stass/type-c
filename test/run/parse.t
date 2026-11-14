@@ -5,8 +5,7 @@ The parser reads what Clang and GCC write for -E of a C11 file and of a
 file that uses the GNU profile (design 13.3). headers.t parses the
 system headers.
 
-  $ clang=/usr/bin/clang
-  $ gcc=/usr/local/bin/gcc-16
+  $ . ./backends.sh
 
   $ cat > t.c <<'EOF'
   > typedef unsigned long size_type;
@@ -285,9 +284,11 @@ compile the file without a warning.
   function labels
   function main
 
-The macOS SDK's Clang extensions: block pointers and block literals,
-nullability qualifiers, a fixed underlying type of an enumeration and a
-parameter list of `...` alone. GCC accepts none of them.
+The Clang extensions that the macOS SDK uses: block pointers and block
+literals, nullability qualifiers, a fixed underlying type of an
+enumeration and a parameter list of `...` alone. GCC accepts none of
+them. The SDK's Clang enables blocks by default; other hosts' Clang
+needs -fblocks.
 
   $ cat > clang.c <<'EOF'
   > int (^ _Nonnull callback)(int);
@@ -299,8 +300,8 @@ parameter list of `...` alone. GCC accepts none of them.
   > typedef enum : unsigned char { SMALL } small;
   > __attribute__((overloadable)) int promote(...);
   > EOF
-  $ "$clang" -std=gnu11 -fsyntax-only clang.c
-  $ "$clang" -std=gnu11 -E clang.c > clang-only.i
+  $ "$clang" -std=gnu11 -fblocks -fsyntax-only clang.c
+  $ "$clang" -std=gnu11 -fblocks -E clang.c > clang-only.i
   $ ./parse_check.exe clang-only.i
   declaration callback
   declaration done
