@@ -4,6 +4,7 @@
 open Typec_cpp
 open Typec_syntax
 open Typec_sema
+open Typec_test_support
 
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
 let ilp32 = Canned_targets.target Canned_targets.ilp32_macros

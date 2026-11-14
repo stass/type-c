@@ -15,5 +15,11 @@ The input can also come from standard input.
 A target is chosen by name.
 
   $ ./fuzz.exe lexer seeds/reader/markers.i
-  usage: fuzz TARGET [FILE]; targets: reader
+  usage: fuzz TARGET [FILE]; targets: reader, parser
   [2]
+
+Only the parser runs on the small stack: the checks after it walk a tree
+as deep as the input, which overflows it.
+
+  $ { printf 'int a['; head -c 16000 /dev/zero | tr '\0' '!'; echo '1];'; } |
+  >   ./fuzz.exe parser

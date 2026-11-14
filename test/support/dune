@@ -5,4 +5,4 @@
 
 (library
  (name typec_test_support)
- (libraries typec_cpp typec_syntax))
+ (libraries typec_cpp typec_syntax typec_sema))

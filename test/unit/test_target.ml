@@ -2,6 +2,7 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 open Typec_sema
+open Typec_test_support
 
 let lp64 : Target.t =
   {

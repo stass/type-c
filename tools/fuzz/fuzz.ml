@@ -9,7 +9,8 @@
    (see crash); the message on standard error says which. *)
 
 (* Each target is a module with [check : string -> unit]. *)
-let targets = [ ("reader", Reader_target.check) ]
+let targets =
+  [ ("reader", Reader_target.check); ("parser", Parser_target.check) ]
 
 (* A longer input is skipped, not passed to the target. Every stage under
    test is linear, so a longer input reaches no path a shorter one
@@ -23,14 +24,16 @@ let max_input_bytes = 16 * 1024
 (* The major heap of a linear stage stays within a fixed allowance for
    the runtime and the harness plus a constant number of words per input
    byte; reaching past it means memory superlinear in the input. The
-   densest input measured, max_input_bytes of ';', peaks at about 21_000
-   words at start-up plus 26 words per byte. The allowance per byte is
-   about twice that rate and the fixed one about five times the start-up
-   heap, so the slack the GC keeps is not reported. The peak counts what
-   the checks of a target allocate too, and it holds for the default GC
-   settings, which fuzz.sh keeps by unsetting OCAMLRUNPARAM. *)
+   densest input measured, max_input_bytes of a declarator of '*' in the
+   parser target, peaks at about 21_000 words at start-up plus 50 words
+   per byte; in the reader target, all ';' needs 26. The allowance per
+   byte is about twice the higher rate and the fixed one about five
+   times the start-up heap, so the slack the GC keeps is not reported.
+   The peak counts what the checks of a target allocate too, and it holds
+   for the default GC settings, which fuzz.sh keeps by unsetting
+   OCAMLRUNPARAM. *)
 let heap_words_fixed = 100_000
-let heap_words_per_input_byte = 50
+let heap_words_per_input_byte = 100
 
 let usage () =
   let names = String.concat ", " (List.map fst targets) in

@@ -9,13 +9,7 @@
 open Typec_cpp
 open Typec_test_support
 
-let violated property = failwith ("property violated: " ^ property)
-
-let is_printable_ascii byte = ' ' <= byte && byte <= '~'
-
-let check_rejection error =
-  if not (String.for_all is_printable_ascii (Reader.error_message error))
-  then violated "an error message is printable ASCII"
+let violated = Property.violated
 
 (* Number.classify takes any spelling, so every pp-number is a valid
    input to it; its result is not checked, only that it returns. *)
@@ -38,4 +32,4 @@ let check_accepted (result : Reader.t) =
 let check text =
   match Reader.read ~name:"fuzz.i" text with
   | Ok result -> check_accepted result
-  | Error error -> check_rejection error
+  | Error error -> Property.check_refusal error

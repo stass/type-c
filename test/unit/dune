@@ -8,13 +8,18 @@
 
 (tests
  (names test_target test_types test_declarations)
- (modules canned_targets test_target test_types test_declarations)
- (libraries typec_cpp typec_syntax typec_sema))
+ (modules test_target test_types test_declarations)
+ (libraries typec_cpp typec_syntax typec_sema typec_test_support))
 
 (test
  (name test_reader)
  (modules test_reader)
  (libraries typec_cpp typec_test_support))
+
+(test
+ (name test_small_stack)
+ (modules test_small_stack)
+ (libraries typec_test_support))
 
 (test
  (name test_emitter)

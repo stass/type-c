@@ -5,9 +5,10 @@
 # Builds the fuzz harness with an AFL-instrumented OCaml and runs AFL++
 # on it (README, "Fuzzing").
 #
-#   fuzz.sh build                build the instrumented harness
-#   fuzz.sh seeds                add preprocessed C headers to the reader
-#                                seeds
+#   fuzz.sh build                build the instrumented harness and its
+#                                dictionary
+#   fuzz.sh seeds                add preprocessed C headers to the seeds
+#                                of every target
 #   fuzz.sh run TARGET MINUTES   fuzz TARGET for MINUTES, resuming an
 #                                earlier run of it
 #   fuzz.sh triage TARGET        minimise each crash and hang and print
@@ -26,14 +27,17 @@ mkdir -p "$work"
 work=$(CDPATH='' cd "$work" && pwd)
 switch=${TYPEC_FUZZ_SWITCH:-afl}
 export OPAMROOT="${OPAMROOT:-/Volumes/Optaine/opam}"
-harness=$work/_build/default/tools/fuzz/fuzz.exe
+# The harness and the dictionary of every target, as build puts them.
+built=$work/_build/default/tools/fuzz
+harness=$built/fuzz.exe
+dictionary=$built/fuzz.dict
 
 # The limits of one execution; the README says why these values. AFL++
 # runs an input that times out again with AFL_HANG_TMOUT and saves it as
 # a hang only if that run times out too. Twice the limit spares a run
 # that a busy host made late, where AFL++'s default second would drop
 # a step ten times too slow.
-timeout_ms=100
+timeout_ms=300
 memory_mb=0
 export AFL_HANG_TMOUT=$((timeout_ms * 2))
 
@@ -55,7 +59,7 @@ usage() {
 build() {
     cd "$repo"
     opam exec --switch "$switch" -- \
-        dune build --root . --build-dir "$work/_build" ./tools/fuzz/fuzz.exe
+        dune build --root . --build-dir "$work/_build" @@tools/fuzz/harness
 }
 
 # Small headers, whose preprocessed text is below the harness's input
@@ -64,7 +68,7 @@ build() {
 # the compiler succeeds, so a failure leaves no partial one.
 seeds() {
     compiler=${CC:-cc}
-    dir=$work/seeds/reader
+    dir=$work/seeds/headers
     mkdir -p "$dir"
     for header in stddef stdint stdbool stdarg limits errno; do
         seed=$dir/$header-$(basename "$compiler").i
@@ -74,16 +78,19 @@ seeds() {
     done
 }
 
-# The committed seeds of TARGET and any generated ones, in a fresh
-# directory, as afl-fuzz -i wants them.
+# The committed seeds of TARGET and the generated ones, which every
+# target takes since each reads preprocessed text, in a fresh directory,
+# as afl-fuzz -i wants them.
 gather_seeds() {
     input=$work/in/$1
     rm -rf "$input"
     mkdir -p "$input"
     cp "$repo/tools/fuzz/seeds/$1/"* "$input/"
-    if [ -d "$work/seeds/$1" ]; then
-        cp "$work/seeds/$1/"* "$input/"
-    fi
+    # Only complete seeds: a failed compiler leaves a .part behind.
+    for seed in "$work/seeds/headers/"*.i; do
+        [ -f "$seed" ] || continue
+        cp "$seed" "$input/"
+    done
 }
 
 run() {
@@ -97,14 +104,7 @@ run() {
         gather_seeds "$target"
         input=$work/in/$target
     fi
-    # The positional parameters, no longer needed, carry the optional -x.
-    dictionary=$repo/tools/fuzz/$target.dict
-    if [ -f "$dictionary" ]; then
-        set -- -x "$dictionary"
-    else
-        set --
-    fi
-    afl-fuzz -i "$input" -o "$output" "$@" -t "$timeout_ms" \
+    afl-fuzz -i "$input" -o "$output" -x "$dictionary" -t "$timeout_ms" \
         -m "$memory_mb" -V "$seconds" -- "$harness" "$target" @@
 }
 

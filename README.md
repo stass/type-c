@@ -132,8 +132,16 @@ exception, broken property or memory beyond a bound linear in the input.
 The `reader` target checks that every text is read or refused with a
 printable message, and that an accepted text is spelled by its tokens
 and gaps, has only layout in the gaps and is emitted unchanged. The
-normal build compiles the harness, and `dune test` runs it on the seeds
-in `tools/fuzz/seeds/`.
+`parser` target parses every text the reader accepts and reads the
+file-scope declarations of every unit that parses, for an LP64 target;
+each stage must accept or refuse with a printable message, every node's
+span must hold its parts in token order, and parsing again must give
+the same tree. The parser runs on a fiber whose stack is limited to 32K
+words (`test/support/small_stack.ml`), which holds its deepest nesting
+(`Parser.max_nesting`), so that recursion growing with the input
+overflows it and is reported. The normal build compiles
+the harness, and `dune test` runs it on the seeds in
+`tools/fuzz/seeds/`.
 
 AFL++ drives it, with coverage from an OCaml compiler configured for AFL
 instrumentation. That compiler lives in its own opam root, so the normal
@@ -169,13 +177,19 @@ tools/fuzz/fuzz.sh run reader 30     # 30 minutes; resumes a run
 tools/fuzz/fuzz.sh triage reader     # minimise crashes and hangs
 ```
 
+The generated seeds, in `seeds/headers` there, go to every target. So
+does the AFL++ dictionary, `fuzz.dict`, which the build generates from
+the keyword and punctuator tables of the parser and the reader and the
+pieces of `cc -E` output listed in `dictionary.ml`.
+
 The limits of one execution, whose values are in `fuzz.ml` and
 `fuzz.sh`:
 
 * Input: at most `max_input_bytes`, 16 KiB; a longer one is skipped.
-  The densest input of that size, all `;`, takes about 20 ms in the
-  instrumented harness.
-* Time: `timeout_ms`, 100 ms (`-t`). AFL++ runs an input that exceeds
+  The slowest input of that size measured, an array size of 8K
+  additions in the `parser` target, takes about 65 ms in the
+  instrumented harness; all `;` takes about 20 ms in the `reader`.
+* Time: `timeout_ms`, 300 ms (`-t`). AFL++ runs an input that exceeds
   it again with twice that (`AFL_HANG_TMOUT`) and saves it as a hang
   only if it exceeds that too, so that a busy host does not make one.
   The limit is about five times the worst linear run, while a step

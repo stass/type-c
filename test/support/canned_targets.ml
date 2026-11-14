@@ -1,7 +1,8 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* Predefined macro dumps of two targets, shared by the unit tests. *)
+(* Predefined macro dumps of two targets, shared by the unit tests and
+   the fuzz harness. *)
 
 (* The macros of a GCC dump for an LP64 target that the model reads, with
    a few it ignores: a function-like macro and one without a value. *)

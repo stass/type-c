@@ -316,6 +316,12 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Fuzzing
 
+- [Low] The parser test sets its 32K-word stack with `OCAMLRUNPARAM=l=32k`
+  in `test/unit/dune`, apart from `Small_stack.limit_words`, which the
+  fuzz harness runs the parser under. Run the parser test through
+  `Small_stack.run` once the parser's scope rework has landed, so that
+  one value says how deep the parser may recurse.
+
 - [High] Decide where the OCaml AFL shm patch lives and offer it
   upstream. AFL++ on macOS hands the coverage map over only as a POSIX
   shared memory descriptor (`__AFL_SHM_FD`), and the runtime of OCaml
