@@ -10,7 +10,8 @@ val of_ctype : Ctype.t -> string
 (** Qualifiers are spelled [const volatile restrict _Atomic] before the
     type they qualify, and after the [*] of a pointer. An anonymous
     structure, union or enumeration is spelled [struct <anonymous>], and an
-    opaque array length [[<constant>]], which are not C. *)
+    opaque array length [[<constant>]] and a type that typec does not know
+    by its construct between [<] and [>], which are not C. *)
 
 val declaration : Ctype.t -> string -> string
 (** [declaration t name] declares [name] with type [t], such as

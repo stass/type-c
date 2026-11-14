@@ -21,6 +21,13 @@ type record_tag = {
 
 type enum_tag = { enum_id : int; enum_name : string option }
 type length = Constant of int | Opaque | Unknown | Variable
+type unknown_kind = Unknown_object | Unknown_function | Object_or_function
+
+type unknown = {
+  construct : string;
+  location : Typec_cpp.Location.t;
+  kind : unknown_kind;
+}
 
 type parameters =
   | Prototype of { types : t list; variadic : bool }
@@ -38,6 +45,9 @@ and shape =
   | Va_list
   | Array of { element : t; length : length }
   | Function of { return : t; parameters : parameters }
+  | Unknown_type of unknown
+
+type 'a answer = Answer of 'a | Depends_on of unknown
 
 type member = {
   member_name : string option;
@@ -54,7 +64,7 @@ type record_definition = { members : member list; by_name : member Names.t }
 type tags = {
   mutable next_id : int;
   records : (int, record_definition) Hashtbl.t;
-  enums : (int, Integer.t) Hashtbl.t;
+  enums : (int, Integer.t answer) Hashtbl.t;
 }
 
 type error =
@@ -91,7 +101,7 @@ let parameter_types = function
 let total_size types = List.fold_left (fun size t -> size + t.size) 0 types
 
 let shape_size = function
-  | Void | Arithmetic _ | Enum _ | Record _ | Va_list -> 1
+  | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _ -> 1
   | Pointer referenced -> referenced.size + 1
   | Array { element; _ } -> element.size + 1
   | Function { return; parameters } ->
@@ -104,23 +114,34 @@ let unqualified t = { t with qualifiers = no_qualifiers }
 
 let is_function t =
   match t.shape with
-  | Function _ -> true
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _ ->
-      false
+  | Function _ | Unknown_type { kind = Unknown_function; _ } -> Answer true
+  | Unknown_type ({ kind = Object_or_function; _ } as unknown) ->
+      Depends_on unknown
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Unknown_type { kind = Unknown_object; _ } ->
+      Answer false
 
 let is_array t =
   match t.shape with
-  | Array _ -> true
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
-  | Function _ ->
-      false
+  | Array _ -> Answer true
+  | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
+    ->
+      Depends_on unknown
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
+  | Unknown_type { kind = Unknown_function; _ } ->
+      Answer false
+
+(* A type known to be a function or an array type, for the constraints
+   that only such a type breaks. *)
+let surely_function t = is_function t = Answer true
+let surely_array t = is_array t = Answer true
 
 (* The funnel of every type that can grow: the limit, lower for a
    function, bounds the work of every walk over a type, not just its
    depth, since a typedef shares a type that a walk visits once for each
    use. *)
 let within_limit t =
-  let limit = if is_function t then max_function_size else max_size in
+  let limit = if surely_function t then max_function_size else max_size in
   if t.size > limit then Error Too_large else Ok t
 
 let void = of_shape Void
@@ -138,6 +159,7 @@ let integer target i = arithmetic target (Integer i)
 let enum tag = of_shape (Enum tag)
 let record tag = of_shape (Record tag)
 let va_list = of_shape Va_list
+let unknown unknown = of_shape (Unknown_type unknown)
 let pointer_to referenced = within_limit (of_shape (Pointer referenced))
 
 (* An array decays to a pointer of its size, a function to one of one
@@ -145,11 +167,21 @@ let pointer_to referenced = within_limit (of_shape (Pointer referenced))
 let decay t =
   match t.shape with
   | Array { element; _ } -> of_shape (Pointer element)
-  | Function _ -> of_shape (Pointer t)
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list -> t
+  | Function _ | Unknown_type { kind = Unknown_function; _ } ->
+      of_shape (Pointer t)
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
+      t
 
+(* An unknown object type loses its qualifiers whether it decays, as an
+   array, or not. *)
 let lvalue_conversion t =
-  if is_array t || is_function t then decay t else unqualified t
+  match t.shape with
+  | Array _ | Function _ | Unknown_type { kind = Unknown_function; _ } ->
+      decay t
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
+      unqualified t
 
 (* 6.7.6.3p7, p8 and p15: a parameter has the type of the value it
    receives, which is the type of an lvalue conversion. *)
@@ -166,8 +198,10 @@ let function_returning return parameters =
   let parameters = adjust_parameters parameters in
   match return.shape with
   | Array _ -> Error Function_returning_array
-  | Function _ -> Error Function_returning_function
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list ->
+  | Function _ | Unknown_type { kind = Unknown_function; _ } ->
+      Error Function_returning_function
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
       if has_void_parameter parameters then Error Void_parameter
       else
         let return = unqualified return in
@@ -185,15 +219,21 @@ let add_qualifiers a b =
    one, which the backend checks. *)
 let restrict_allowed t =
   match t.shape with
-  | Pointer referenced -> not (is_function referenced)
+  | Pointer referenced -> not (surely_function referenced)
   | Va_list -> true
-  | Void | Arithmetic _ | Enum _ | Record _ | Array _ | Function _ -> false
+  | Void | Arithmetic _ | Enum _ | Record _ | Array _ | Function _
+  | Unknown_type _ ->
+      false
 
 let rec qualify qualifiers t =
   if qualifiers = no_qualifiers then Ok t
   else
     match t.shape with
-    | Function _ -> Error Qualified_function
+    | Function _ | Unknown_type { kind = Unknown_function; _ } ->
+        Error Qualified_function
+    (* The backend checks restrict and _Atomic on an unknown type. *)
+    | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
+        Ok { t with qualifiers = add_qualifiers t.qualifiers qualifiers }
     | Array _ when qualifiers.atomic -> Error Atomic_array
     | Array { element; length } ->
         Result.map
@@ -205,7 +245,7 @@ let rec qualify qualifiers t =
         else Ok { t with qualifiers = add_qualifiers t.qualifiers qualifiers }
 
 let atomic t =
-  if is_array t || is_function t || t.qualifiers <> no_qualifiers then
+  if surely_array t || surely_function t || t.qualifiers <> no_qualifiers then
     Error Atomic_of_unsuitable_type
   else qualify { no_qualifiers with atomic = true } t
 
@@ -235,32 +275,38 @@ let find_member tags tag name =
   Option.bind (record_definition tags tag) (fun definition ->
       Names.find_opt name definition.by_name)
 
-let is_complete tags t =
+let rec is_complete tags t =
   match t.shape with
-  | Void | Function _ -> false
-  | Arithmetic _ | Pointer _ | Va_list -> true
-  | Enum tag -> Hashtbl.mem tags.enums tag.enum_id
-  | Record tag -> Hashtbl.mem tags.records tag.record_id
-  | Array { length = Unknown; _ } -> false
-  (* The element type was complete when the array type was built, and a
-     type never becomes incomplete again. *)
-  | Array { length = Constant _ | Opaque | Variable; _ } -> true
+  | Void | Function _ | Unknown_type { kind = Unknown_function; _ } ->
+      Answer false
+  | Arithmetic _ | Pointer _ | Va_list -> Answer true
+  | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
+    ->
+      Depends_on unknown
+  | Enum tag -> Answer (Hashtbl.mem tags.enums tag.enum_id)
+  | Record tag -> Answer (Hashtbl.mem tags.records tag.record_id)
+  | Array { length = Unknown; _ } -> Answer false
+  (* The element type was complete when the array type was built, unless
+     it is unknown, and a type never becomes incomplete again. *)
+  | Array { length = Constant _ | Opaque | Variable; element } ->
+      is_complete tags element
 
 let array_of tags element length =
   match length with
-  | _ when is_function element -> Error Array_of_function
-  | _ when not (is_complete tags element) -> Error Array_of_incomplete
+  | _ when surely_function element -> Error Array_of_function
+  | _ when is_complete tags element = Answer false -> Error Array_of_incomplete
   | Constant count when count < 0 -> Error Negative_length
   | Constant _ | Opaque | Unknown | Variable ->
       within_limit (of_shape (Array { element; length }))
 
 let rec is_variably_modified t =
   match t.shape with
-  | Array { length = Variable; _ } -> true
+  | Array { length = Variable; _ } -> Answer true
   | Array { element = referenced; _ } | Pointer referenced ->
       is_variably_modified referenced
   | Function { return; _ } -> is_variably_modified return
-  | Void | Arithmetic _ | Enum _ | Record _ | Va_list -> false
+  | Unknown_type unknown -> Depends_on unknown
+  | Void | Arithmetic _ | Enum _ | Record _ | Va_list -> Answer false
 
 let define_enum tags tag integer =
   if Hashtbl.mem tags.enums tag.enum_id then Error Redefinition
@@ -270,44 +316,76 @@ let define_enum tags tag integer =
 
 (* Classification *)
 
-let is_void t = t.shape = Void
-
-let is_integer t =
+(* What [known] says of the shape of an object type that typec computes;
+   [known] never sees an unknown type. An unknown function type is of
+   none of the classes of object types. *)
+let classify known t =
   match t.shape with
-  | Arithmetic (Integer _) | Enum _ -> true
-  | Arithmetic (Real _ | Complex _)
-  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ ->
-      false
-
-let is_real t =
-  match t.shape with
-  | Arithmetic (Integer _ | Real _) | Enum _ -> true
-  | Arithmetic (Complex _)
-  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ ->
-      false
-
-let is_arithmetic t =
-  match t.shape with
-  | Arithmetic _ | Enum _ -> true
-  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ -> false
-
-let is_pointer t =
-  match t.shape with
-  | Pointer _ -> true
-  | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _ | Function _
+  | Unknown_type { kind = Unknown_function; _ } -> Answer false
+  | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
     ->
-      false
+      Depends_on unknown
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Function _ ->
+      Answer (known t.shape)
 
-let is_scalar t = is_arithmetic t || is_pointer t
-let is_object t = not (is_function t)
+let is_void = classify (fun shape -> shape = Void)
+
+let is_integer =
+  classify (function
+    | Arithmetic (Integer _) | Enum _ -> true
+    | Arithmetic (Real _ | Complex _)
+    | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+    | Unknown_type _ ->
+        false)
+
+let is_real =
+  classify (function
+    | Arithmetic (Integer _ | Real _) | Enum _ -> true
+    | Arithmetic (Complex _)
+    | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+    | Unknown_type _ ->
+        false)
+
+let is_arithmetic =
+  classify (function
+    | Arithmetic _ | Enum _ -> true
+    | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+    | Unknown_type _ ->
+        false)
+
+let is_pointer =
+  classify (function
+    | Pointer _ -> true
+    | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _
+    | Function _ | Unknown_type _ ->
+        false)
+
+let is_scalar =
+  classify (function
+    | Arithmetic _ | Enum _ | Pointer _ -> true
+    | Void | Record _ | Va_list | Array _ | Function _ | Unknown_type _ ->
+        false)
+
+let is_object t =
+  match is_function t with
+  | Answer is_function -> Answer (not is_function)
+  | Depends_on unknown -> Depends_on unknown
 
 let as_arithmetic tags t =
   match t.shape with
-  | Arithmetic arithmetic -> Some arithmetic
-  | Enum tag ->
-      Option.map (fun integer -> Arithmetic.Integer integer)
-        (enum_integer tags tag)
-  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _ -> None
+  | Arithmetic arithmetic -> Answer (Some arithmetic)
+  | Enum tag -> (
+      match enum_integer tags tag with
+      | Some (Answer integer) -> Answer (Some (Arithmetic.Integer integer))
+      | Some (Depends_on unknown) -> Depends_on unknown
+      | None -> Answer None)
+  | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
+    ->
+      Depends_on unknown
+  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+  | Unknown_type { kind = Unknown_function; _ } ->
+      Answer None
 
 (* Structure and union definitions *)
 
@@ -347,16 +425,19 @@ let is_flexible_array member =
   | Array { length = Unknown; _ } -> true
   | Array { length = Constant _ | Opaque | Variable; _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
-  | Function _ ->
+  | Function _ | Unknown_type _ ->
       false
 
 (* 6.7.2.1p4: an integer type and a width from 0 to that of the type, 0
-   only for an unnamed bit-field. *)
+   only for an unnamed bit-field. The backend checks a width against a
+   type that typec does not know. *)
 let check_bit_field target tags member width =
   let fits =
     match as_arithmetic tags member.member_type with
-    | Some (Integer integer) -> width <= Target.integer_width target integer
-    | Some (Real _ | Complex _) | None -> false
+    | Answer (Some (Integer integer)) ->
+        width <= Target.integer_width target integer
+    | Answer (Some (Real _ | Complex _) | None) -> false
+    | Depends_on _ -> true
   in
   let named = Option.is_some member.member_name in
   if (not fits) || width < 0 || (width = 0 && named) then
@@ -369,9 +450,9 @@ let check_member target tags ~last member =
   let member_type = member.member_type in
   let flexible = is_flexible_array member in
   if flexible && not last then raise (Invalid Misplaced_flexible_array);
-  if (not flexible) && not (is_complete tags member_type) then
+  if (not flexible) && is_complete tags member_type = Answer false then
     raise (Invalid Incomplete_member);
-  if is_variably_modified member_type then
+  if is_variably_modified member_type = Answer true then
     raise (Invalid Variably_modified_member);
   Option.iter (check_bit_field target tags member) member.bit_field_width
 
@@ -416,13 +497,53 @@ let merge_length a b =
    prototype in scope (6.5.2.2p6). *)
 let promoted target tags parameter =
   match as_arithmetic tags parameter with
-  | Some a ->
-      of_shape (Arithmetic (Arithmetic.default_argument_promotion target a))
-  | None -> parameter
+  | Answer (Some a) ->
+      let promoted = Arithmetic.default_argument_promotion target a in
+      Answer (of_shape (Arithmetic promoted))
+  | Answer None -> Answer parameter
+  | Depends_on unknown -> Depends_on unknown
 
-let rec merge target tags a b =
+(* The first unknown type that a comparison of two types passed over: the
+   verdict that their known parts leave open depends on it. *)
+type dependence = { mutable first_unknown : unknown option }
+
+let no_dependence () = { first_unknown = None }
+
+let passed_over dependence unknown =
+  if dependence.first_unknown = None then
+    dependence.first_unknown <- Some unknown
+
+let verdict dependence =
+  match dependence.first_unknown with
+  | Some unknown -> Depends_on unknown
+  | None -> Answer true
+
+type comparison = { target : Target.t; tags : tags; dependence : dependence }
+
+(* Whether one type is known to be a function type and the other known
+   not to be one, which no unknown part of them changes. *)
+let different_kinds a b =
+  match (is_function a, is_function b) with
+  | Answer a_is_function, Answer b_is_function ->
+      a_is_function <> b_is_function
+  | (Answer _ | Depends_on _), (Answer _ | Depends_on _) -> false
+
+(* An unknown type is the composite of itself and any type of its kind,
+   which the backend compares with it. *)
+let rec merge comparison a b =
+  require (not (different_kinds a b));
+  match (a.shape, b.shape) with
+  | Unknown_type unknown, _ ->
+      passed_over comparison.dependence unknown;
+      a
+  | _, Unknown_type unknown ->
+      passed_over comparison.dependence unknown;
+      b
+  | _ -> merge_known comparison a b
+
+and merge_known comparison a b =
   require (a.qualifiers = b.qualifiers);
-  let merge = merge target tags in
+  let merge = merge comparison in
   match (a.shape, b.shape) with
   | Void, Void -> a
   | Arithmetic x, Arithmetic y ->
@@ -433,10 +554,10 @@ let rec merge target tags a b =
       a
   (* The enumerated type is the composite whatever the order, as in GCC. *)
   | Enum tag, Arithmetic (Integer integer) ->
-      require (enum_integer tags tag = Some integer);
+      require_enum_integer comparison tag integer;
       a
   | Arithmetic (Integer integer), Enum tag ->
-      require (enum_integer tags tag = Some integer);
+      require_enum_integer comparison tag integer;
       b
   | Record x, Record y ->
       require (x.record_id = y.record_id);
@@ -449,19 +570,34 @@ let rec merge target tags a b =
       of_shape (Array { element; length })
   | Function x, Function y ->
       let return = merge x.return y.return in
-      let parameters = merge_parameters target tags x.parameters y.parameters in
+      let parameters = merge_parameters comparison x.parameters y.parameters in
       of_shape (Function { return; parameters })
   | ( ( Void | Arithmetic _ | Enum _ | Record _ | Va_list | Pointer _
-      | Array _ | Function _ ),
+      | Array _ | Function _ | Unknown_type _ ),
       _ ) ->
       raise Not_compatible
+
+and require_enum_integer comparison tag integer =
+  match enum_integer comparison.tags tag with
+  | Some (Answer compatible) -> require (compatible = integer)
+  | Some (Depends_on unknown) -> passed_over comparison.dependence unknown
+  | None -> raise Not_compatible
 
 (* 6.7.6.3p15 and 6.2.7p3: a prototype gives the composite its parameter
    types; without one the parameters are not compared, except that an
    old-style definition must match a prototype in count and promoted
    types. *)
-and merge_parameters target tags a b =
-  let merge = merge target tags in
+and merge_parameters comparison a b =
+  let merge = merge comparison in
+  (* A parameter is compared with its promoted type, which may depend on
+     an unknown integer type of an enumeration. *)
+  let promoted t =
+    match promoted comparison.target comparison.tags t with
+    | Answer promoted -> promoted
+    | Depends_on unknown ->
+        passed_over comparison.dependence unknown;
+        t
+  in
   match (a, b) with
   | Prototype x, Prototype y ->
       require (x.variadic = y.variadic);
@@ -470,16 +606,14 @@ and merge_parameters target tags a b =
       Prototype { types; variadic = x.variadic }
   | Prototype prototype, Unspecified | Unspecified, Prototype prototype ->
       require (not prototype.variadic);
-      List.iter
-        (fun t -> ignore (merge t (promoted target tags t)))
-        prototype.types;
+      List.iter (fun t -> ignore (merge t (promoted t))) prototype.types;
       Prototype prototype
   | Prototype prototype, Old_style types
   | Old_style types, Prototype prototype ->
       require (not prototype.variadic);
       require (List.compare_lengths prototype.types types = 0);
       List.iter2
-        (fun t old -> ignore (merge t (promoted target tags old)))
+        (fun t old -> ignore (merge t (promoted old)))
         prototype.types types;
       Prototype prototype
   | Old_style _, (Unspecified | Old_style _) | Unspecified, Unspecified -> a
@@ -488,9 +622,15 @@ and merge_parameters target tags a b =
 (* A composite can exceed both types in size, as when each gives
    parameter types the other lacks, so it passes the limit again. *)
 let composite target tags a b =
-  match merge target tags a b with
+  match merge { target; tags; dependence = no_dependence () } a b with
   | t -> within_limit t
   | exception Not_compatible -> Error Incompatible
+
+let compatible target tags a b =
+  let dependence = no_dependence () in
+  match merge { target; tags; dependence } a b with
+  | _ -> verdict dependence
+  | exception Not_compatible -> Answer false
 
 (* The opaque lengths match as [merge_length] matches them. *)
 let same_length a b =
@@ -503,23 +643,34 @@ let same_length a b =
   in
   a = b || (is_constant a && is_constant b && merges ())
 
-let rec same_type a b =
-  a.qualifiers = b.qualifiers
+(* Whether the known parts of two types are the same; [dependence] notes
+   the unknown parts. *)
+let rec same dependence a b =
+  (not (different_kinds a b))
   &&
   match (a.shape, b.shape) with
-  | Pointer x, Pointer y -> same_type x y
+  | Unknown_type unknown, _ | _, Unknown_type unknown ->
+      passed_over dependence unknown;
+      true
+  | _ -> a.qualifiers = b.qualifiers && same_shape dependence a b
+
+(* [same] has passed over the unknown types. *)
+and same_shape dependence a b =
+  let same = same dependence in
+  match (a.shape, b.shape) with
+  | Pointer x, Pointer y -> same x y
   | Array x, Array y ->
-      same_length x.length y.length && same_type x.element y.element
+      same_length x.length y.length && same x.element y.element
   | Function x, Function y ->
-      same_type x.return y.return
-      && same_parameters x.parameters y.parameters
-  | (Void | Arithmetic _ | Enum _ | Record _ | Va_list), _ ->
+      same x.return y.return
+      && same_parameters dependence x.parameters y.parameters
+  | (Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _), _ ->
       a.shape = b.shape
   | (Pointer _ | Array _ | Function _), _ -> false
 
-and same_parameters a b =
+and same_parameters dependence a b =
   let same_types x y =
-    List.compare_lengths x y = 0 && List.for_all2 same_type x y
+    List.compare_lengths x y = 0 && List.for_all2 (same dependence) x y
   in
   match (a, b) with
   | Prototype x, Prototype y ->
@@ -528,11 +679,9 @@ and same_parameters a b =
   | Unspecified, Unspecified -> true
   | (Prototype _ | Old_style _ | Unspecified), _ -> false
 
-let compatible target tags a b =
-  match merge target tags a b with
-  | _ -> true
-  | exception Not_compatible -> false
-
+let same_type a b =
+  let dependence = no_dependence () in
+  if same dependence a b then verdict dependence else Answer false
 let error_message = function
   | Too_large ->
       Printf.sprintf "type has more than %d parts, counting each use of a \

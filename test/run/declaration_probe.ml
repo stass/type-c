@@ -56,16 +56,17 @@ let print_value name (constant : Integer_constant.t) =
 let print_enum_integer (result : Declarations.t) name (t : Ctype.t) =
   match t.shape with
   | Enum tag ->
-      let integer = Ctype.enum_integer result.tags tag in
       Option.iter
-        (fun integer ->
-          Printf.printf
-            "_Static_assert(_Generic((%s)0, %s: 1, default: 0), \
-             \"%s is %s\");\n"
-            name (Integer.name integer) name (Integer.name integer))
-        integer
+        (function
+          | Ctype.Answer integer ->
+              Printf.printf
+                "_Static_assert(_Generic((%s)0, %s: 1, default: 0), \
+                 \"%s is %s\");\n"
+                name (Integer.name integer) name (Integer.name integer)
+          | Depends_on _ -> ())
+        (Ctype.enum_integer result.tags tag)
   | Void | Arithmetic _ | Pointer _ | Record _ | Va_list | Array _ | Function _
-    ->
+  | Unknown_type _ ->
       ()
 
 let print_identifier result (name, (entity : Declarations.entity)) =

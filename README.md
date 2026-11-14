@@ -23,7 +23,8 @@ Requirements: OCaml 5 and dune 3; the tests also need a C compiler as
 and `test/run/headers.t` run `/usr/bin/clang` and
 `/usr/local/bin/gcc-16`, `types.t` and `declarations.t` with `-m32` too,
 and `tools/corpus/runner.t` runs `/usr/bin/clang`. `headers.t` parses
-every C11 and POSIX header that each backend's system headers hold.
+and reads the declarations of every C11 and POSIX header that each
+backend's system headers hold.
 There are no other dependencies.
 
 ```sh

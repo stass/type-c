@@ -144,7 +144,7 @@ let print_enums target tags =
       Printf.printf "enum %s { %s };\n" tag_name (String.concat ", " values);
       (match Arithmetic.enum_compatible_type target range with
       | Some integer ->
-          get (Ctype.define_enum tags tag integer);
+          get (Ctype.define_enum tags tag (Answer integer));
           assert_type
             ("(enum " ^ tag_name ^ ")0")
             (arithmetic target (Integer integer))
@@ -188,7 +188,9 @@ let print_compatibility target tags types =
     (fun a ->
       List.iter
         (fun b ->
-          let expected = if Ctype.compatible target tags a b then 1 else 0 in
+          let expected =
+            if Ctype.compatible target tags a b = Answer true then 1 else 0
+          in
           Printf.printf
             "_Static_assert(_Generic((%s)0, %s: 1, default: 0) == %d, \
              \"%s and %s\");\n"

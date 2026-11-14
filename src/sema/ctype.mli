@@ -17,7 +17,14 @@
     reads declarations.
 
     The front end knows no layout of aggregates (design P16): a structure
-    or union has members but no size, alignment or offsets. *)
+    or union has members but no size, alignment or offsets.
+
+    {e Provisional (design 13.3).} A type that typec does not compute, such
+    as a block pointer, [_Float16] or one that an unknown attribute
+    changes, is {!Unknown_type}: never guessed. Every question whose answer
+    depends on it answers {!Depends_on}, and the caller reports an error
+    only where it needs the answer. Building a type checks no constraint
+    that depends on an unknown type: the backend checks those. *)
 
 type qualifiers = {
   const : bool;
@@ -52,6 +59,24 @@ type length =
           compatible with any other length, which the backend checks. *)
   | Unknown
   | Variable
+
+(** What typec knows of a type it does not compute: whether it is a
+    function type, which the declarator that gives it decides where there
+    is one. *)
+type unknown_kind =
+  | Unknown_object  (** An object type, such as a block pointer. *)
+  | Unknown_function
+      (** A function type, such as a function that an attribute changes. *)
+  | Object_or_function  (** As [typeof] of an expression may give. *)
+
+(** A type that typec does not compute: the construct that gives it, as a
+    message names it ("a block pointer"), and the location of the token
+    that starts it, for the error at a point that needs the type. *)
+type unknown = {
+  construct : string;
+  location : Typec_cpp.Location.t;
+  kind : unknown_kind;
+}
 
 (** The parameters of a function type (6.7.6.3). Their types are adjusted
     and unqualified: an array or function parameter is a pointer, and a
@@ -92,6 +117,14 @@ and shape =
   | Array of { element : t; length : length }
   | Function of { return : t; parameters : parameters }
       (** The return type is unqualified (6.7.6.3p5). *)
+  | Unknown_type of unknown
+      (** A type that typec does not compute. Its qualifiers are those
+          written on it; any within it, as [typeof] of a [const] object
+          has, are part of what is unknown, so no relation compares them. *)
+
+(** The answer to a question about a type, or the unknown type it depends
+    on. *)
+type 'a answer = Answer of 'a | Depends_on of unknown
 
 (** A member of a structure or union (6.7.2.1). An unnamed member of
     structure or union type that is not a bit-field is taken as an
@@ -160,6 +193,8 @@ val record : record_tag -> t
 val va_list : t
 (** The type of [__builtin_va_list], without qualifiers. *)
 
+val unknown : unknown -> t
+
 val pointer_to : t -> (t, error) result
 
 val array_of : tags -> t -> length -> (t, error) result
@@ -185,9 +220,11 @@ val define_record :
   Target.t -> tags -> record_tag -> member list -> (unit, error) result
 (** Completes a structure or union with its members in order. *)
 
-val define_enum : tags -> enum_tag -> Integer.t -> (unit, error) result
-(** Completes an enumerated type with its compatible integer type; see
-    {!Arithmetic.enum_compatible_type}. *)
+val define_enum :
+  tags -> enum_tag -> Integer.t answer -> (unit, error) result
+(** Completes an enumerated type with its compatible integer type (see
+    {!Arithmetic.enum_compatible_type}), or with the unknown type that
+    decides it: a fixed type or an attribute that typec does not know. *)
 
 val record_members : tags -> record_tag -> member list option
 (** The members of a complete structure or union, in order. *)
@@ -195,30 +232,34 @@ val record_members : tags -> record_tag -> member list option
 val find_member : tags -> record_tag -> string -> member option
 (** The member of that name, looked up through anonymous members too. *)
 
-val enum_integer : tags -> enum_tag -> Integer.t option
-(** The integer type compatible with a complete enumerated type. *)
+val enum_integer : tags -> enum_tag -> Integer.t answer option
+(** The integer type compatible with a complete enumerated type; [None]
+    while it is incomplete. *)
 
-(** {1 Classification (6.2.5)} *)
+(** {1 Classification (6.2.5)}
 
-val is_void : t -> bool
-val is_integer : t -> bool
-val is_real : t -> bool
-val is_arithmetic : t -> bool
-val is_scalar : t -> bool
-val is_pointer : t -> bool
-val is_array : t -> bool
-val is_function : t -> bool
+    Each answers {!Depends_on} where the answer depends on an unknown
+    type. *)
 
-val is_object : t -> bool
+val is_void : t -> bool answer
+val is_integer : t -> bool answer
+val is_real : t -> bool answer
+val is_arithmetic : t -> bool answer
+val is_scalar : t -> bool answer
+val is_pointer : t -> bool answer
+val is_array : t -> bool answer
+val is_function : t -> bool answer
+
+val is_object : t -> bool answer
 (** Not a function type; [void] is an incomplete object type. *)
 
-val is_complete : tags -> t -> bool
+val is_complete : tags -> t -> bool answer
 (** A complete object type, at this point of the translation unit. *)
 
-val is_variably_modified : t -> bool
+val is_variably_modified : t -> bool answer
 (** A variable length array, or derived from one (6.7.6p3). *)
 
-val as_arithmetic : tags -> t -> Arithmetic.t option
+val as_arithmetic : tags -> t -> Arithmetic.t option answer
 (** The arithmetic type of an operand, without its qualifiers. An
     enumerated type gives its compatible integer type, or [None] while it
     is incomplete. *)
@@ -229,20 +270,23 @@ val unqualified : t -> t
 
 val decay : t -> t
 (** The pointer that an array or a function converts to (6.3.2.1p3, p4);
-    any other type is unchanged. *)
+    any other type is unchanged, and so is an unknown type that may be an
+    array. *)
 
 val lvalue_conversion : t -> t
 (** The type of the value of an lvalue (6.3.2.1p2-4): {!decay}, or the
     unqualified type. *)
 
-val compatible : Target.t -> tags -> t -> t -> bool
+val compatible : Target.t -> tags -> t -> t -> bool answer
 (** Whether two types are compatible (6.2.7p1, 6.7.3p10, 6.7.6.1p2,
     6.7.6.2p6, 6.7.6.3p15). The parameters of a prototype and of an
     old-style definition are compared as C11 says, by their promoted
     types, which rejects some pairs that GCC and Clang accept with a
-    warning, such as [int g(float);] before [int g(x) float x; {...}]. *)
+    warning, such as [int g(float);] before [int g(x) float x; {...}].
+    Parts that differ where they are known make two types incompatible
+    whatever their unknown parts are. *)
 
-val same_type : t -> t -> bool
+val same_type : t -> t -> bool answer
 (** Whether two types are the same (6.7p3), as for the redefinition of a
     typedef name: equal, but that an {!Opaque} length is the same as any
     constant one, which the backend checks. *)
@@ -251,4 +295,8 @@ val composite : Target.t -> tags -> t -> t -> (t, error) result
 (** The composite type of two compatible types (6.2.7p3): [Incompatible]
     when they are not, [Too_large] when the composite exceeds
     {!max_size}. An enumerated type and its compatible integer type have
-    the enumerated type as their composite, as in GCC. *)
+    the enumerated type as their composite, as in GCC. Where one type is
+    unknown the composite is that unknown type: keeping the known side
+    would guess that the unknown one adds nothing to it, as
+    [extern int a[];] with an unknown type for [a] that gives its length
+    would. *)

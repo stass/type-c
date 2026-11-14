@@ -13,9 +13,8 @@ in it.
   $ mkdir tmp out
   $ export TMPDIR=$PWD/tmp
 
-x.tc includes system headers but declares atoi in a header of its own:
-Clang's <stdlib.h> declares block pointers, which the front end refuses
-(TODO.md, Corpus); <stdlib.h> is compiled on its own below.
+x.tc includes system headers and declares atoi in a header of its own;
+<stdlib.h> is compiled on its own below.
 
   $ cat > x.h <<'EOF'
   > int atoi(const char *);
@@ -59,21 +58,18 @@ typec selects (design 2.4).
   $ cmp gcc-ref.o gcc.o
   $ ls -A tmp
 
-<stdlib.h> compiles to the same object too, with Clang only under
--fno-blocks, which leaves out the SDK's block pointers.
+<stdlib.h> compiles to the same object too, with the block pointers that
+the SDK declares for Clang.
 
   $ printf '#include <stdlib.h>\nint main(void) { return abs(0); }\n' > lib.tc
   $ $gcc -E -x c -D__TYPEC__=1 -std=gnu11 lib.tc > lib-gcc.i
   $ $gcc -x cpp-output -std=gnu11 -c lib-gcc.i -o lib-gcc-ref.o
   $ typec --cc=$gcc -c lib.tc -o lib-gcc.o
   $ cmp lib-gcc-ref.o lib-gcc.o
-  $ $clang -E -x c -D__TYPEC__=1 -std=gnu11 -fno-blocks lib.tc > lib-clang.i
-  $ $clang -x cpp-output -std=gnu11 -fno-blocks -c lib-clang.i \
-  >   -o lib-clang-ref.o
-  $ typec --cc=$clang -fno-blocks -c lib.tc -o lib-clang.o
+  $ $clang -E -x c -D__TYPEC__=1 -std=gnu11 lib.tc > lib-clang.i
+  $ $clang -x cpp-output -std=gnu11 -c lib-clang.i -o lib-clang-ref.o
+  $ typec --cc=$clang -c lib.tc -o lib-clang.o
   $ cmp lib-clang-ref.o lib-clang.o
-  $ typec --cc=$clang -c lib.tc 2>&1 | grep -o 'a block pointer is not typed'
-  a block pointer is not typed
   $ ls -A tmp
 
 Without -o, the object is named after the input in the current

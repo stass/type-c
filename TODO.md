@@ -223,22 +223,71 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
-- [Medium] `Declarations` accepts the GNU attributes of a table that
-  gives each one's effect (`attribute_effects`): `noreturn` and
-  `gnu_inline` mark a function, the rest change no type or constant it
-  computes. It refuses every other one, `packed`, `mode`, `vector_size`
-  and Clang's `overloadable` among them, so the SDK's `tgmath.h` is refused.
-  The table is the answer to the design question on attributes until
-  0.7b reads them; `aligned` is on it only while record layout is the
-  backend's. `noreturn` on a pointer to a function or on a function
-  typedef is not recorded, though GCC and Clang make it part of the type
-  and treat a call through it as not returning. The table checks no
-  attribute's arguments (`noreturn(1)` is accepted). Where the reader
-  records no effect (a pointer, a parenthesized declarator, a structure),
-  an attribute that has one is an error, though GCC and Clang apply
-  `noreturn` in `void (__attribute__((noreturn)) f)(void)` to `f`. The
-  rest of the GNU profile that no type models (`_Float16`, `typeof`,
-  block pointers, fixed enumeration types) is an error that names it.
+- [Medium] `Declarations` knows the effects of the GNU attributes of a
+  table (`attribute_effects`): `noreturn` and `gnu_inline` mark a
+  function, the rest change no type or constant it computes. Any other
+  one, `packed`, `mode`, `vector_size` and Clang's `overloadable` among
+  them, makes the type it applies to unknown (design 13.3, P21). The
+  table is the answer to the design question on attributes until 0.7b
+  reads them; `aligned` is on it only while record layout is the
+  backend's, and `packed` could join it on the same ground. Only the
+  declaration of a function at file scope records `noreturn` and
+  `gnu_inline`; anywhere else, on a pointer, a parenthesized
+  declarator, a typedef, an object, a structure, either makes the type
+  it applies to unknown, though GCC and Clang make `noreturn` part of
+  the type of a pointer to a function and of a function typedef, and
+  ignore both on an `int`. Inside the declarator of a function, as in
+  `void * __attribute__((noreturn)) f(void);`, both move to the
+  function in GCC and Clang, which typec refuses rather than record.
+  Whether a declaration records the effects is decided twice, by
+  `read_init_declarator` for `declare_type` and by `file_scope_declared`;
+  block-scope declarations should get it from one place. The table
+  checks no attribute's arguments (`noreturn(1)` is accepted).
+- [Medium] Unknown types (design 13.3, P21) for 0.7b and 0.9b to
+  replace by types where a point needs them: block pointers, `_Float16`,
+  `typeof` of an expression, and what an attribute outside the table
+  applies to. `typeof (x) y;` at file scope is an error, since whether
+  `y` is a function depends on the type, though both backends accept
+  it; `typeof` of an identifier could take its declared type. The tags
+  that `typeof` of an expression declares are not declared, as in
+  `sizeof`. An attribute outside the table on a structure or union
+  specifier makes the type of that specifier unknown, while a later
+  `struct s` names the record as declared: right for its identity,
+  members and completeness, the facts typec computes, but
+  `transparent_union` changes how 0.9b must convert arguments.
+- [Medium] An anonymous structure or union member whose specifier has an
+  attribute outside the table, such as `packed`, has an unknown type, so
+  its members are not members of the containing type and a duplicate
+  name among them is not reported. Keeping the record shape on a record
+  specifier and recording the attribute apart, or a `Neutral` entry for
+  `packed` restricted to records, would keep the members.
+- [Medium] The composite with an unknown type is that type, so a known
+  declaration after it is compared with nothing known:
+  `int f(int); int f(int) __attribute__((foo)); int f(long);` is
+  accepted, though the first and last conflict. Keep the last known type
+  of an entity beside the composite and check each known declaration
+  against it.
+- [Medium] An attribute outside the table makes a whole function type
+  unknown, return and parameters included, though most such attributes
+  (`access`, `alias`, `target`, `overloadable`) belong to the
+  declaration; the arity and return checks of those functions are lost.
+  Decide in 13.3 whether an attribute on a function declarator keeps
+  the function type and marks the declaration instead.
+- [Low] An unknown type is not known to be other than `void`, so
+  `void f(typeof((void)0));` is read as one parameter rather than
+  `(void)`; asking would refuse `_Float16 f(_Float16);`. A kind for an
+  unknown type that is known not to be `void` would settle it.
+- [Low] A typedef redefined with an unknown type keeps the later type,
+  where the known one, which must be the same (6.7p3), would keep more.
+- [Low] The location of an unknown `_Float16` or `typeof` is that of the
+  first specifier of its declaration, not of its own token.
+- [Low] An enumeration with a fixed type whose list is given twice, or
+  that has a fixed type in one declaration and none in another with the
+  same compatible type, is not reported, and `enum e : int; enum e {
+  A };` is reported as a tag defined twice; the backend reports each.
+  Recording in the tags whether the type is fixed and whether the list
+  was read would report them. `enum e : int x;`, a fixed type outside
+  `enum e : int;` alone, which C23 and Clang refuse, is accepted.
 - [Medium] `__builtin_types_compatible_p`, and `__real__` and
   `__imag__` of an integer constant, are integer constant expressions in
   GCC and Clang (`int a[__builtin_types_compatible_p(int, int)];`); the
@@ -257,10 +306,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   right after the tag and allows qualifiers and storage classes before
   it. Only block scope shows the difference; decide which to follow, and
   test it, when block-scope declarations are read.
-- [High] The reader accepts everything the parser parses, entering
-  what it cannot type yet with an opaque type, so that the scope rules
-  of steps 2 to 5 run on every translation unit the parser reads. It
-  refuses `_Float16`, `typeof` and block pointers.
 - [Medium] `Function.gnu_inline` records the attribute, under which an
   inline definition is external unless it says `extern inline` (GNU89),
   in place of C11 6.7.4p7, but nothing reads it. Whatever decides
@@ -351,19 +396,11 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Corpus
 
-The front end refuses 65 of the 246 units of the corpus with Clang and
-8 with GCC 16 (macOS x86-64); the first errors are below. With
-`-fno-blocks` Clang refuses the 8 that GCC does. Reproducers are in
-`/Volumes/Optaine/type-c-corpus-cache/probe/front-end-tail`.
+The front end accepts the 246 units of the corpus with Clang and with
+GCC 16 (macOS x86-64), and each gives the object that the backend builds
+alone; block pointers and `_Float16` in the SDK's headers have unknown
+types (design 13.3).
 
-- [High] With Clang, the SDK's `__BLOCKS__` declarations declare block
-  pointers (`_stdlib.h:298`, `glob.h:61`): 59 units, all of zlib, qbe
-  and chibicc among them, none with `-fno-blocks` (0.7b).
-- [High] `math.h:645` declares `_Float16` functions: 6 lua units and
-  sqlite's shell on each backend (0.7b).
-- [Medium] `sqlite3.c` includes SDK headers that declare enumerations
-  with a fixed type (`malloc/malloc.h:92` with GCC, `mach/port.h:417`
-  with Clang under `-fno-blocks`): 1 unit on each backend (0.7b).
 - [High] Pin the rest of the corpus of plan 0.11 in the corpus
   repository, each with its licence recorded there: musl (MIT, without
   `src/string/aarch64`, which has its own terms), programs generated by

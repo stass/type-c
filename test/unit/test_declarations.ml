@@ -439,7 +439,9 @@ let enumerations () =
         match Scope.find_tag result.file_scope "e" with
         | Some (Enum_tag tag) ->
             let actual =
-              Option.map Integer.name (Ctype.enum_integer result.tags tag)
+              match Ctype.enum_integer result.tags tag with
+              | Some (Answer integer) -> Some (Integer.name integer)
+              | Some (Depends_on _) | None -> None
             in
             if actual <> Some expected then
               fail_case source ("compatible type is not " ^ expected)
@@ -472,8 +474,24 @@ let errors_are_located () =
       fail_case "located error" (Printf.sprintf "line %d" location.line)
   | Ok _ -> fail_case "located error" "accepted"
 
-(* The GNU profile that the parser reads: what no type models yet is an
-   error that names it. *)
+(* The integer type of the enumeration tagged [tag], in words. *)
+let enum_integer_of ?(target = lp64) source tag expected =
+  match read target source with
+  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Ok result -> (
+      let actual =
+        match Scope.find_tag result.file_scope tag with
+        | Some (Enum_tag enum) -> (
+            match Ctype.enum_integer result.tags enum with
+            | Some (Answer integer) -> Integer.name integer
+            | Some (Depends_on unknown) -> "depends on " ^ unknown.construct
+            | None -> "incomplete")
+        | Some (Record_tag _) | None -> "no enumeration"
+      in
+      if actual <> expected then
+        fail_case source (Printf.sprintf "%S, expected %S" actual expected))
+
+(* The GNU profile that the parser reads. *)
 let gnu_profile () =
   declares "int * _Nonnull const p;" "p" "object int *const external static";
   declares "struct e {} x;" "x" "object struct e external static";
@@ -483,53 +501,181 @@ let gnu_profile () =
   declares
     "struct s { int a; }; char c[__builtin_offsetof(struct s, a) + 1];" "c"
     "object char[<constant>] external static";
-  rejects "_Float16 h;" "'_Float16' is not typed yet";
-  rejects "typeof(int) t;" "'typeof' is not typed yet";
-  rejects "void (^b)(void);" "a block pointer is not typed yet";
-  rejects "enum e : int { A };" "the fixed type of an enumeration"
+  (* typeof of a type name is that type. *)
+  declares "typeof(const int *) t;" "t" "object const int * external static";
+  declares "__typeof__(struct u { int a; }) v; struct u w;" "w"
+    "object struct u external static"
+
+(* What typec does not type yet is an unknown type, never a guess, and an
+   error only where a declaration needs what that type is (design 13.3). *)
+let unknown_types () =
+  declares "_Float16 h;" "h" "object <'_Float16'> external static";
+  declares "_Float16 f(_Float16, const _Float16 *);" "f"
+    "function <'_Float16'> (<'_Float16'>, const <'_Float16'> *) external";
+  declares "_Complex _Float16 z;" "z"
+    "object <'_Complex _Float16'> external static";
+  rejects "int _Float16 i;" "6.7.2p2";
+  declares "void (^b)(void);" "b" "object <a block pointer> external static";
+  declares "int q(void *, int (^)(const void *, const void *));" "q"
+    "function int (void *, <a block pointer>) external";
+  accepts "typedef struct { int (^e)(const char *, int); } glob_t;";
+  declares "int x; typeof(x) *p;" "p"
+    "object <'typeof' of an expression> * external static";
+  declares "int x; typedef typeof(x) t;" "t"
+    "typedef <'typeof' of an expression>";
+  (* Whether the declaration declares a function depends on the type. *)
+  rejects "int x; typeof(x) y;"
+    "whether 'y' is a function or an object depends on 'typeof' of an \
+     expression at in.c:1";
+  (* The size of an unknown type is the backend's, as an aggregate's is. *)
+  declares "char c[sizeof(_Float16)];" "c"
+    "object char[<constant>] external static";
+  declares "char c[sizeof(_Float16[2])];" "c"
+    "object char[<constant>] external static";
+  rejects "enum { A = sizeof(_Float16) };" "P16";
+  (* The value of a cast needs its type. *)
+  rejects "char c[(_Float16)2];"
+    "the value of a cast depends on '_Float16' at in.c:1";
+  (* A redeclaration with an unknown type is not checked, and the composite
+     is unknown: the known parts must still agree. *)
+  declares "double x; _Float16 x;" "x" "object <'_Float16'> external static";
+  declares "_Float16 x; double x;" "x" "object <'_Float16'> external static";
+  declares "int f(double); int f(_Float16);" "f"
+    "function int (<'_Float16'>) external";
+  rejects "int f(_Float16); double f(_Float16);" "6.7p4";
+  rejects "int f(_Float16); int f(_Float16, int);" "6.7p4";
+  declares "typedef double T; typedef _Float16 T;" "T" "typedef <'_Float16'>";
+  rejects "typedef _Float16 *T; typedef _Float16 T[2];" "6.7p3";
+  (* A bit-field or member of an unknown type is the backend's to check. *)
+  accepts "struct s { _Float16 f : 3; void (^b)(void); };";
+  rejects "struct s { _Float16 f : -1; };" "bit-field";
+  (* An array of unknown elements, a pointer to them and a qualified one. *)
+  declares "_Float16 a[2][3];" "a" "object <'_Float16'>[2][3] external static";
+  declares "const _Float16 *const volatile p;" "p"
+    "object const <'_Float16'> *const volatile external static";
+  (* The qualifiers written on an unknown type are known, but not those
+     within it, so two unknown types are not compared by them. *)
+  rejects "_Atomic(const _Float16) x;" "_Atomic(T)";
+  declares "const _Float16 x; _Float16 x;" "x"
+    "object const <'_Float16'> external static";
+  (* So is whether an unknown type is a function type. *)
+  rejects "typedef int F(void); typedef int F __attribute__((foo));" "6.7p3";
+  rejects "typedef int F(void); typedef F G __attribute__((foo)); const G g;"
+    "function type has qualifiers"
+
+(* An enumeration with a fixed type (C23 6.7.2.2, Clang): complete from the
+   type on, its enumerators of the enumerated type with values that the
+   type holds. *)
+let fixed_enumerations () =
+  enum_integer_of "enum e : unsigned char { A, B = 200 };" "e"
+    "unsigned char";
+  declares "enum e : unsigned char { A, B = 200, C };" "C"
+    "enumerator enum e = 201";
+  declares "enum e : long { A = -1 };" "A" "enumerator enum e = -1";
+  enum_integer_of "enum e : const short;" "e" "short";
+  declares "enum e : int; char c[sizeof(enum e)];" "c"
+    "object char[4] external static";
+  (* CF_ENUM in the macOS SDK. *)
+  declares "typedef enum E : int E; enum E : int { X, Y };" "Y"
+    "enumerator enum E = 1";
+  (* A value that typec does not evaluate decides no type here. *)
+  declares "struct s { int a; }; enum e : int { A = sizeof(struct s), B };"
+    "B" "enumerator enum e = opaque";
+  rejects "enum e : unsigned char { A = 256 };" "not representable";
+  rejects "enum e : unsigned char { A = 255, B };" "not representable";
+  rejects "enum e : unsigned char { A = -1 };" "not representable";
+  rejects "enum e : int; enum e : long;" "another fixed type";
+  rejects "enum e : int { A }; enum e { B };" "defined twice";
+  rejects "enum e : float { A };" "not an integer type";
+  (* A fixed type that typec does not know leaves the integer type unknown,
+     so the enumerators, which need it, are an error. *)
+  enum_integer_of "typedef int I __attribute__((mode(DI))); enum e : I;" "e"
+    "depends on the attribute 'mode'";
+  declares
+    "typedef int I __attribute__((mode(DI))); enum e : I; \
+     char c[sizeof(enum e)];"
+    "c" "object char[<constant>] external static";
+  rejects "typedef int I __attribute__((mode(DI))); enum e : I { A };"
+    "the value of each enumerator depends on the attribute 'mode'"
 
 (* The GNU attributes: those that change nothing the declarations compute
-   are accepted, [noreturn] marks a function, and any other is an error
-   that names it, in every position of a declaration that the reader
-   reads. *)
+   are accepted, [noreturn] marks a function, and any other makes the type
+   it applies to unknown, in every position of a declaration that the
+   reader reads. *)
 let attributes () =
   accepts
     "struct __attribute__((aligned(8))) s { int a __attribute__((aligned)); \
      } __attribute__((unused)); enum e { A __attribute__((deprecated)) }; \
      __attribute__((cold)) void f(int x __attribute__((unused))) \
      __attribute__((cold));";
-  rejects "typedef int TI __attribute__((mode(TI)));"
-    "the attribute 'mode' is not typed yet";
-  rejects "typedef int V __attribute__((__vector_size__(16)));"
-    "the attribute 'vector_size' is not typed yet";
-  rejects "__attribute__((packed)) enum p { P } x;"
-    "the attribute 'packed' is not typed yet";
-  (* An attribute with an effect where none is recorded is refused, not
-     accepted and lost. *)
-  rejects "void (__attribute__((noreturn)) b)(void);"
-    "the attribute 'noreturn' here is not typed yet";
-  rejects "inline void (* __attribute__((gnu_inline)) p)(void);"
-    "the attribute 'gnu_inline' here is not typed yet";
-  accepts "int * __attribute__((aligned(8))) q, (__attribute__((unused)) r);";
+  declares "typedef int TI __attribute__((mode(TI)));" "TI"
+    "typedef <the attribute 'mode'>";
+  declares "typedef int V __attribute__((__vector_size__(16)));" "V"
+    "typedef <the attribute 'vector_size'>";
+  declares "__attribute__((packed)) enum p { P } x;" "x"
+    "object <the attribute 'packed'> external static";
+  declares "__attribute__((packed)) enum p { P } x;" "P" "enumerator int = 0";
+  let unknown_mode = "<the attribute 'mode'>" in
   List.iter
-    (fun source -> rejects source "the attribute 'mode' is not typed yet")
-    [ "struct __attribute__((mode(DI))) s { int a; };";
-      "struct s { int a; } __attribute__((mode(DI)));";
-      "enum __attribute__((mode(DI))) e { A };";
-      "enum e { A } __attribute__((mode(DI)));";
-      "struct s { int a __attribute__((mode(DI))); };";
-      "struct s { int a : 3 __attribute__((mode(DI))); };";
-      "enum e { A __attribute__((mode(DI))) };";
-      "void f(void) __attribute__((mode(DI))) {}";
-      "int f(a) int a __attribute__((mode(DI))); { return a; }";
-      "void g(int a __attribute__((mode(DI))));";
-      "int x __attribute__((mode(DI)));";
-      "__attribute__((mode(DI))) int x;" ];
-  (* Of the specifiers' attributes, the first that is not typed is the one
-     reported. *)
-  rejects "__attribute__((mode(DI))) __attribute__((vector_size(8))) int x;"
-    "'mode'";
-  rejects "__attribute__((mode(DI), vector_size(8))) int x;" "'mode'";
+    (fun (source, name, expected) -> declares source name expected)
+    [ ("struct __attribute__((mode(DI))) s { int a; } x;", "x",
+       "object " ^ unknown_mode ^ " external static");
+      ("struct s { int a; } __attribute__((mode(DI))) x;", "x",
+       "object " ^ unknown_mode ^ " external static");
+      ("enum __attribute__((mode(DI))) e { A } x;", "x",
+       "object " ^ unknown_mode ^ " external static");
+      ("struct s { int a __attribute__((mode(DI))); } x;", "x",
+       "object struct s external static");
+      ("void f(void) __attribute__((mode(DI))) {}", "f",
+       "function " ^ unknown_mode ^ " external");
+      ("int f(a) int a __attribute__((mode(DI))); { return a; }", "f",
+       "function int () external");
+      ("void g(int a __attribute__((mode(DI))));", "g",
+       "function void (" ^ unknown_mode ^ ") external");
+      ("int x __attribute__((mode(DI)));", "x",
+       "object " ^ unknown_mode ^ " external static");
+      ("__attribute__((mode(DI))) int x;", "x",
+       "object " ^ unknown_mode ^ " external static");
+      ("__attribute__((mode(DI))) int x, *y;", "y",
+       "object " ^ unknown_mode ^ " external static") ];
+  accepts "struct s { int a : 3 __attribute__((mode(DI))); };";
+  (* A structure keeps its members; an enumeration's integer type is
+     unknown wherever its tag names it, as packed and mode change it. *)
+  declares "struct __attribute__((mode(DI))) s { int a; }; struct s y;" "y"
+    "object struct s external static";
+  enum_integer_of "enum __attribute__((mode(DI))) e { A };" "e"
+    "depends on the attribute 'mode'";
+  enum_integer_of "enum e { A } __attribute__((packed));" "e"
+    "depends on the attribute 'packed'";
+  declares "enum __attribute__((packed)) e { A }; enum e y;" "y"
+    "object enum e external static";
+  rejects "enum __attribute__((packed)) e { A = 0x100000000 };"
+    "the type of enumerators that int does not hold depends on the \
+     attribute 'packed'";
+  accepts "enum e { A __attribute__((swift_name(\"a\"))) };";
+  rejects "enum e { A __attribute__((mode(DI))) };"
+    "the enumerator 'A' depends on the attribute 'mode' at in.c:1";
+  (* Of the attributes, the first that typec does not know is named. *)
+  declares "__attribute__((mode(DI))) __attribute__((vector_size(8))) int x;"
+    "x" ("object " ^ unknown_mode ^ " external static");
+  declares "__attribute__((mode(DI), vector_size(8))) int x;" "x"
+    ("object " ^ unknown_mode ^ " external static");
+  (* A function stays a function: Clang's overloads redeclare one with
+     other types, which typec does not check. *)
+  declares
+    "__attribute__((overloadable)) float t(float); \
+     __attribute__((overloadable)) double t(double);"
+    "t" "function <the attribute 'overloadable'> external";
+  rejects "int f(void) __attribute__((weak_import)); int f;"
+    "different kind of identifier";
+  declares "int x; int x __attribute__((mode(DI)));" "x"
+    ("object " ^ unknown_mode ^ " external static");
+  declares
+    "typedef int V __attribute__((vector_size(16))); \
+     char c[sizeof(V)];"
+    "c" "object char[<constant>] external static";
+  rejects "typedef int V __attribute__((vector_size(16))); char c[(V)1];"
+    "the value of a cast depends on the attribute 'vector_size'";
   (* [gnu_inline] swaps what [inline] and [extern inline] define (GNU89),
      so it is recorded, through redeclarations and next to [noreturn]. *)
   declares "extern inline __attribute__((gnu_inline)) int f(void) { return 0; }"
@@ -540,12 +686,10 @@ let attributes () =
     "h" "function int (void) external inline gnu_inline";
   declares "__attribute__((gnu_inline, noreturn)) extern inline void g(void);"
     "g" "function void (void) external inline noreturn gnu_inline";
-  (* GCC and Clang ignore it without inline, and on anything else. *)
+  (* GCC and Clang ignore it on a function without inline. *)
   declares
     "int k(void) __attribute__((gnu_inline)); extern inline int k(void);" "k"
     "function int (void) external inline";
-  declares "__attribute__((gnu_inline)) int x;" "x"
-    "object int external static";
   (* [noreturn] marks a function as [_Noreturn] does (design 4.4), from the
      specifiers for every declarator and from a declarator for its own. *)
   declares "void die(void) __attribute__((noreturn));" "die"
@@ -558,8 +702,51 @@ let attributes () =
     "function void (void) external noreturn";
   declares "void e(void); void e(void) __attribute__((noreturn));" "e"
     "function void (void) external noreturn";
-  declares "__attribute__((noreturn)) int x;" "x" "object int external static";
-  accepts "void f(__attribute__((noreturn)) void (*g)(void));"
+  (* Only the declaration of a function at file scope records the effect
+     of noreturn and gnu_inline; elsewhere the type the attribute applies
+     to is unknown, as GCC and Clang make noreturn part of the type of a
+     pointer to a function. *)
+  let unknown_noreturn = "<the attribute 'noreturn'>" in
+  declares "__attribute__((noreturn)) int x;" "x"
+    ("object " ^ unknown_noreturn ^ " external static");
+  declares "__attribute__((gnu_inline)) int x;" "x"
+    "object <the attribute 'gnu_inline'> external static";
+  declares "void f(__attribute__((noreturn)) void (*g)(void));" "f"
+    ("function void (" ^ unknown_noreturn ^ ") external");
+  (* Inside the declarator of a function, GCC and Clang give the effect to
+     the function, which typec does not record yet. *)
+  rejects "void (__attribute__((noreturn)) b)(void);"
+    "the declaration of the function 'b' depends on the attribute \
+     'noreturn'";
+  rejects "void * __attribute__((noreturn)) f(void);"
+    "the declaration of the function 'f' depends on the attribute \
+     'noreturn'";
+  declares "__attribute__((noreturn)) void a(void), *b;" "b"
+    ("object " ^ unknown_noreturn ^ " external static");
+  declares "__attribute__((noreturn)) void a(void), *b;" "a"
+    "function void (void) external noreturn";
+  declares "void g(__attribute__((noreturn)) void cb(void));" "g"
+    ("function void (" ^ unknown_noreturn ^ " *) external");
+  declares "struct s { __attribute__((noreturn)) void (*f)(void); } x;" "x"
+    "object struct s external static";
+  declares "char c[sizeof(__attribute__((noreturn)) int)];" "c"
+    "object char[<constant>] external static";
+  accepts "int h(a) int a __attribute__((noreturn)); { return a; }";
+  declares "void (* __attribute__((noreturn)) p)(void);" "p"
+    ("object " ^ unknown_noreturn ^ " external static");
+  declares "typedef void F(void) __attribute__((noreturn));" "F"
+    ("typedef " ^ unknown_noreturn);
+  declares "struct __attribute__((noreturn)) s { int a; } x;" "x"
+    ("object " ^ unknown_noreturn ^ " external static");
+  rejects "enum e { A __attribute__((noreturn)) };"
+    "the enumerator 'A' depends on the attribute 'noreturn'";
+  rejects "inline void (* __attribute__((gnu_inline)) p)(void);" "6.7.4p1";
+  declares "int * __attribute__((aligned(8))) q, (__attribute__((unused)) r);"
+    "q" "object int * external static";
+  declares "void (* __attribute__((mode(DI))) *pp)(void);" "pp"
+    "object <the attribute 'mode'> * external static";
+  declares "int (^ __attribute__((mode(DI))) b)(void);" "b"
+    "object <the attribute 'mode'> external static"
 
 (* The typedef names that GCC and Clang declare before the first token.
    The representation of __builtin_va_list is the target's, so the reader
@@ -594,6 +781,8 @@ let builtin_typedefs () =
 let () =
   builtin_typedefs ();
   gnu_profile ();
+  unknown_types ();
+  fixed_enumerations ();
   attributes ();
   specifier_combinations ();
   storage_classes ();

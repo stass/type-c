@@ -1209,6 +1209,30 @@ the bodies that pass a `va_list` on settles it: if one needs the
 representation, it comes from the backend, as the target model does;
 otherwise the opaque type stays.
 
+**Unknown types.** *Provisional (P21).* A type that the front end does
+not compute is unknown, never guessed: Clang's block pointers,
+`_Float16`, `typeof` of an expression, and the type that an attribute
+applies to when the front end does not record the attribute's effect
+there: one without an entry in the table of effects that the front end
+knows, as `mode` and `vector_size` change a type in ways it does not
+model, or `noreturn` and `gnu_inline` anywhere but in the specifiers
+of a function declared at file scope or after its declarator. Every question about an unknown type, such
+as its size, class, completeness or compatibility, answers that it
+depends on that type, and the front end reports an error only at the
+first point that needs the answer, naming the construct: whether a
+file-scope declaration declares a function, the value of a cast in a
+constant expression, the enumerators of an enumeration whose integer
+type is unknown. Elsewhere the backend checks: a redeclaration with an
+unknown type is not compared where the type is unknown, and the
+composite is the unknown type, since keeping the known side would guess
+that the unknown one adds nothing to it. The size of an unknown type is
+an opaque constant, as an aggregate's is (P16). An unknown type keeps
+whether it is a function type where its declarator says so, since no
+attribute makes a function of an object. Typing bodies (0.9b) and the
+corpus settle it: a point that often needs an unknown type's properties
+makes the front end type that construct; the default is that unknown
+types stay.
+
 **Division of diagnostics.** The front end diagnoses every Type-C rule and
 the C errors it must detect to do so: syntax, undeclared names, types. It
 is not required to diagnose every C constraint. The backend compiles every
@@ -1322,6 +1346,7 @@ numbers refer to the implementation plan.
 | P18 | Lifetimes by homogeneous regions (11.3) | Stage 6: a formal model, then a prototype | No lifetime tier |
 | P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition | Own front end |
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
+| P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties | Unknown types stay |
 
 ## 16. Non-goals
 

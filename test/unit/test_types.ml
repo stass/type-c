@@ -207,8 +207,8 @@ let member ?bit_field_width name member_type =
 
 let () =
   get (Ctype.define_record lp64 tags struct_s [ member (Some "x") int_type ]);
-  get (Ctype.define_enum tags enum_u Unsigned_int);
-  get (Ctype.define_enum tags other_enum_u Unsigned_int)
+  get (Ctype.define_enum tags enum_u (Answer Unsigned_int));
+  get (Ctype.define_enum tags other_enum_u (Answer Unsigned_int))
 
 let function_type = func int_type (prototype [])
 
@@ -312,7 +312,7 @@ let oversized_composite () =
   check "oversized composite" (error_of (Ctype.composite lp64 tags a b))
     (Some Too_large)
   && check "oversized composite, compatible" (Ctype.compatible lp64 tags a b)
-       true
+       (Answer true)
 
 let construction_facts () =
   check "const array qualifies the element"
@@ -338,23 +338,28 @@ let construction_facts () =
   && check "a function decays to a pointer"
        (Ctype.lvalue_conversion function_type) (pointer function_type)
   && check "pointer to VLA is variably modified"
-       (Ctype.is_variably_modified (pointer (array int_type Variable))) true
+       (Ctype.is_variably_modified (pointer (array int_type Variable)))
+       (Answer true)
   && check "array of known length is complete"
-       (Ctype.is_complete tags (array int_type (Constant 2))) true
+       (Ctype.is_complete tags (array int_type (Constant 2))) (Answer true)
   && check "array of unknown length is incomplete"
-       (Ctype.is_complete tags (array int_type Unknown)) false
+       (Ctype.is_complete tags (array int_type Unknown)) (Answer false)
   && check "a declared enumeration is incomplete"
-       (Ctype.is_complete tags (Ctype.enum incomplete_enum)) false
+       (Ctype.is_complete tags (Ctype.enum incomplete_enum)) (Answer false)
   && check "an enumeration is an integer type"
-       (Ctype.is_integer (Ctype.enum incomplete_enum)) true
+       (Ctype.is_integer (Ctype.enum incomplete_enum)) (Answer true)
   && check "an enumeration's arithmetic type"
        (Ctype.as_arithmetic tags (qualify const (Ctype.enum enum_u)))
-       (Some (Integer Unsigned_int))
+       (Answer (Some (Integer Unsigned_int)))
   && check "an incomplete enumeration has no arithmetic type"
-       (Ctype.as_arithmetic tags (Ctype.enum incomplete_enum)) None
-  && check "a pointer is scalar" (Ctype.is_scalar (pointer Ctype.void)) true
-  && check "void is an object type" (Ctype.is_object Ctype.void) true
-  && check "void is incomplete" (Ctype.is_complete tags Ctype.void) false
+       (Ctype.as_arithmetic tags (Ctype.enum incomplete_enum))
+       (Answer None)
+  && check "a pointer is scalar" (Ctype.is_scalar (pointer Ctype.void))
+       (Answer true)
+  && check "void is an object type" (Ctype.is_object Ctype.void)
+       (Answer true)
+  && check "void is incomplete" (Ctype.is_complete tags Ctype.void)
+       (Answer false)
 
 (* Tags and members *)
 
@@ -601,14 +606,14 @@ let check_composite (name, a, b, expected) =
   in
   check name (Ctype.composite lp64 tags a b) expected_composite
   && check (name ^ ", compatible") (Ctype.compatible lp64 tags b a)
-       (Option.is_some expected)
+       (Answer (Option.is_some expected))
 
 let unsigned_short_parameter () =
   check "int(unsigned short), int() on a 16-bit int target"
     (Ctype.compatible int16 tags
        (func int_type (prototype [ integer Unsigned_short ]))
        (func int_type Unspecified))
-    false
+    (Answer false)
 
 (* Printing *)
 
@@ -666,9 +671,64 @@ let declaration_facts () =
        (Type_name.declaration (array int_type (Constant 3)) "a")
        "int a[3]"
 
+(* Types that typec does not compute: each question that depends on one
+   answers so, and the known parts still decide what they can. *)
+let unknown_facts () =
+  let unknown_of kind =
+    let location = { Typec_cpp.Location.file = "in.c"; line = 1 } in
+    { Ctype.construct = "x"; location; kind }
+  in
+  let object_unknown = unknown_of Unknown_object in
+  let function_unknown = unknown_of Unknown_function in
+  let u = Ctype.unknown object_unknown in
+  let f = Ctype.unknown function_unknown in
+  let packed_enum = Ctype.declare_enum tags (Some "packed") in
+  get (Ctype.define_enum tags packed_enum (Depends_on object_unknown));
+  let packed = Ctype.enum packed_enum in
+  check "an unknown type may be an integer" (Ctype.is_integer u)
+    (Depends_on object_unknown)
+  && check "an unknown function is no integer" (Ctype.is_integer f)
+       (Answer false)
+  && check "an unknown function is incomplete" (Ctype.is_complete tags f)
+       (Answer false)
+  && check "an array of unknown elements may be complete"
+       (Ctype.is_complete tags (array u (Constant 2)))
+       (Depends_on object_unknown)
+  && check "an unknown function decays" (Ctype.decay f) (pointer f)
+  && check "an unknown function is not qualified"
+       (error_of (Ctype.qualify const f))
+       (Some Qualified_function)
+  && check "compatible with an unknown type"
+       (Ctype.compatible lp64 tags (pointer u) (pointer int_type))
+       (Depends_on object_unknown)
+  && check "known parts decide incompatibility"
+       (Ctype.compatible lp64 tags (pointer u) (array u (Constant 1)))
+       (Answer false)
+  && check "an object is not a function, unknown or not"
+       (Ctype.compatible lp64 tags u function_type)
+       (Answer false)
+  && check "the composite is the unknown side"
+       (Ctype.composite lp64 tags (array int_type Unknown) u)
+       (Ok u)
+  && check "an enumeration of unknown integer type and int"
+       (Ctype.compatible lp64 tags packed int_type)
+       (Depends_on object_unknown)
+  && check "promotion of an enumeration of unknown integer type"
+       (Ctype.compatible lp64 tags
+          (func int_type (prototype [ packed ]))
+          (func int_type Unspecified))
+       (Depends_on object_unknown)
+  && check "the same type as an unknown one"
+       (Ctype.same_type (pointer u) (pointer int_type))
+       (Depends_on object_unknown)
+  && check "not the same type, whatever the unknown one is"
+       (Ctype.same_type (pointer u) (array int_type (Constant 1)))
+       (Answer false)
+
 let () =
   let results =
-    [ check_ranks (); floating_promotions (); construction_facts ();
+    [ unknown_facts (); check_ranks (); floating_promotions ();
+      construction_facts ();
       member_facts (); doubling_typedefs (); oversized_composite ();
       unsigned_short_parameter (); declaration_facts () ]
     @ List.map check_promotion promotion_cases

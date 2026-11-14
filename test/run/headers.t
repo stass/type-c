@@ -4,8 +4,9 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 The all-headers translation unit (plan, Stage 0 exit gate item 3)
 includes every C11 standard header and every POSIX header that the host
 has, and parses as each backend preprocesses it in each dialect and
-feature mode. parse_check fails at the first construct it does not
-parse, so a passing run prints nothing.
+feature mode, and its declarations are read. parse_check fails at the
+first construct it does not parse, and typec --emit-c, which runs the
+whole front end, at the first error, so a passing run prints nothing.
 
   $ clang=/usr/bin/clang
   $ gcc=/usr/local/bin/gcc-16
@@ -122,14 +123,17 @@ Neither unit is a handful of headers: both hold stdio.h and unistd.h.
   all-clang.c:2
   all-gcc.c:2
 
-Each unit parses in ISO and GNU C11, and with the feature macros that
-widen what the headers declare.
+Each unit parses and its declarations are read in ISO and GNU C11, and
+with the feature macros that widen what the headers declare. typec reads
+a .tc file, so the unit is copied to one.
 
   $ parse_all() {
+  >   cp "$2" all.tc
   >   for mode in "-std=gnu11" "-std=c11" "-std=gnu11 -D_GNU_SOURCE" \
   >     "-std=c11 -D_DARWIN_C_SOURCE" "-std=c11 -D_POSIX_C_SOURCE=200809L"; do
   >     "$1" $mode -E "$2" > all.i || return 1
   >     ./parse_check.exe all.i > /dev/null || return 1
+  >     typec --cc="$1" $mode --emit-c all.tc -o /dev/null || return 1
   >   done
   > }
   $ parse_all "$clang" all-clang.c

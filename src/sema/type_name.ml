@@ -44,7 +44,9 @@ let pointer_declarator qualifiers declarator =
 let parenthesized_under_pointer t =
   match t.shape with
   | Array _ | Function _ -> true
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list -> false
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Unknown_type _ ->
+      false
 
 (* The declarator grows outward from the name as the type is unwrapped
    from the outermost derivation to the specifier. *)
@@ -72,6 +74,8 @@ let rec declaration t declarator =
   | Va_list ->
       specified t.qualifiers Typec_syntax.Builtin_typedef.va_list_name
         declarator
+  | Unknown_type unknown ->
+      specified t.qualifiers ("<" ^ unknown.construct ^ ">") declarator
 
 and parameter_list = function
   | Prototype { types = []; variadic = false } -> "void"
