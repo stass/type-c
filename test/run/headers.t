@@ -3,10 +3,11 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 The all-headers translation unit (plan, Stage 0 exit gate item 3)
 includes every C11 standard header and every POSIX header that the host
-has, and parses as each backend preprocesses it in each dialect and
-feature mode, and its declarations are read. parse_check fails at the
-first construct it does not parse, and typec --emit-c, which runs the
-whole front end, at the first error, so a passing run prints nothing.
+has and the backend compiles, and parses as each backend preprocesses it
+in each dialect and feature mode, and its declarations are read.
+parse_check fails at the first construct it does not parse, and typec
+--emit-c, which runs the whole front end, at the first error, so a
+passing run prints nothing.
 
   $ . ./backends.sh
 
@@ -102,39 +103,83 @@ The C11 headers (C11 7.1.2) and then the POSIX.1-2017 headers.
   > wordexp.h
   > EOF
 
-A header that a backend does not have, or cannot preprocess alone, is
-left out of that backend's unit.
+The modes: ISO and GNU C11, and the feature macros that widen what the
+headers declare.
 
-  $ includes() {
+  $ cat > modes.txt <<'EOF'
+  > -std=gnu11
+  > -std=c11
+  > -std=gnu11 -D_GNU_SOURCE
+  > -std=c11 -D_DARWIN_C_SOURCE
+  > -std=c11 -D_POSIX_C_SOURCE=200809L
+  > EOF
+
+A backend has a header when it preprocesses it alone in GNU C.
+
+  $ present() {
   >   while read -r header; do
-  >     if printf '#include <%s>\n' "$header" |
-  >       "$1" -std=gnu11 -E -x c - > /dev/null 2>&1; then
-  >       printf '#include <%s>\n' "$header"
-  >     fi
+  >     printf '#include <%s>\n' "$header" |
+  >       "$1" -std=gnu11 -E -x c - > /dev/null 2>&1 && echo "$header"
   >   done < headers.txt
   > }
-  $ includes "$clang" > all-clang.c
-  $ includes "$gcc" > all-gcc.c
+  $ present "$clang" > present-clang.txt
+  $ present "$gcc" > present-gcc.txt
 
-Neither unit is a handful of headers: both hold stdio.h and unistd.h.
+The unit of a backend in a mode is built a header at a time: a header
+stays if the backend compiles the unit so far with it (-fsyntax-only).
+So the backend accepts the whole unit, and typec is asked to accept
+what the backend accepts: a header that needs a feature macro that the
+mode lacks (musl's aio.h in ISO C) is not demanded of typec there.
+unit CC MODE PRESENT writes the unit to all.tc and the refused headers,
+as "MODE: HEADER", to refused.txt.
 
-  $ grep -c -e '<stdio.h>' -e '<unistd.h>' all-clang.c all-gcc.c
-  all-clang.c:2
-  all-gcc.c:2
+  $ unit() {
+  >   : > all.tc
+  >   : > refused.txt
+  >   while read -r header; do
+  >     cp all.tc try.c
+  >     printf '#include <%s>\n' "$header" >> try.c
+  >     if "$1" $2 -fsyntax-only -x c try.c > /dev/null 2>&1; then
+  >       cp try.c all.tc
+  >     else
+  >       echo "$2: $header" >> refused.txt
+  >     fi
+  >   done < "$3"
+  > }
 
-Each unit parses and its declarations are read in ISO and GNU C11, and
-with the feature macros that widen what the headers declare. typec reads
-a .tc file, so the unit is copied to one.
+A header that drops out is reported, so that it is seen. The refusals
+differ by host (the SDK of macOS, the C library of Linux), and the
+expected output must not, so the report holds the refusals missing from
+the list below, and a passing run prints none. An entry is added only
+after checking that the backend itself refuses the header in that mode
+on some host, never because typec refuses it. musl declares a member of
+struct sigevent in aio.h, which signal.h defines only under a POSIX
+feature macro, so aio.h is refused in the modes without one.
+
+  $ cat > known-refusals.txt <<'EOF'
+  > -std=c11: aio.h
+  > -std=c11 -D_DARWIN_C_SOURCE: aio.h
+  > EOF
+  $ report() {
+  >   grep -F -x -v -f known-refusals.txt refused.txt |
+  >     while read -r line; do echo "$1: $line"; done
+  > }
+
+Each unit holds stdio.h and unistd.h, parses, and its declarations are
+read. typec reads a .tc file, which all.tc is. The modes come on
+descriptor 3, so that nothing in the loop reads them.
 
   $ parse_all() {
-  >   cp "$2" all.tc
-  >   for mode in "-std=gnu11" "-std=c11" "-std=gnu11 -D_GNU_SOURCE" \
-  >     "-std=c11 -D_DARWIN_C_SOURCE" "-std=c11 -D_POSIX_C_SOURCE=200809L"; do
-  >     "$1" $mode -E "$2" > all.i || return 1
+  >   while read -r mode <&3; do
+  >     unit "$1" "$mode" "$2"
+  >     report "$1"
+  >     grep -q -e '<stdio.h>' all.tc || return 1
+  >     grep -q -e '<unistd.h>' all.tc || return 1
+  >     "$1" $mode -E -x c all.tc > all.i || return 1
   >     "$1" $mode -dM -E -x c /dev/null > all.macros || return 1
   >     ./parse_check.exe all.macros all.i > /dev/null || return 1
   >     typec --cc="$1" $mode --emit-c all.tc -o /dev/null || return 1
-  >   done
+  >   done 3< modes.txt
   > }
-  $ parse_all "$clang" all-clang.c
-  $ parse_all "$gcc" all-gcc.c
+  $ parse_all "$clang" present-clang.txt
+  $ parse_all "$gcc" present-gcc.txt

@@ -439,15 +439,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 `tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24
 (musl), both x86-64.
 
-- [Medium] `test/run/headers.t` fails on Alpine in the ISO modes
-  (`-std=c11`, with or without `_DARWIN_C_SOURCE`): musl's `aio.h:17`
-  declares a member of `struct sigevent`, which `signal.h` defines only
-  under a POSIX feature macro, and GCC refuses the unit too. The unit
-  is chosen by preprocessing each header alone in GNU C. Choose the
-  headers per mode by compiling each alone, or leave the POSIX headers
-  out of the modes without a POSIX feature macro; both backends on
-  macOS refuse the unit in the three modes with a feature macro, so
-  check that the change keeps what macOS reads.
 - [Medium] `test/run/target.t`, `types.t` and `declarations.t` run on
   x86-64 hosts only: `target.t` expects the x86-64 model and the other
   two compile with `-m32` as well. Give them the expected model and a
