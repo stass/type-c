@@ -17,7 +17,8 @@
     unknown type is the backend's to check. The pass reports what it must
     detect to give the types (design 13.3): undeclared names, operands
     that an operator does not take, members that a structure lacks, calls
-    of what is not a function, operands that must be lvalues, and the
+    of what is not a function, operands that must be lvalues, the
+    constraints that decide what a generic selection selects, and the
     statement constraints on controlling expressions, the places of
     [case], [default], [break] and [continue], and [case] values.
     Assignment and argument conversions and the constraints of [return]
@@ -52,7 +53,29 @@ type t
 val create : unit -> t
 
 val find : t -> Tree.expression -> typed option
-(** The type of an expression that has been typed. *)
+(** The type of an expression that has been typed: the type that a
+    Type-C rule sees (design 13.3). A generic selection has that of the
+    expression it selects, and the associations it does not select are
+    typed as well, as C requires them to be valid. *)
+
+(** The answers to the constructs that ask whether two types are
+    compatible, which the front end gives where a Type-C type is involved
+    (design 13.5): each is the answer, or the unknown type that it depends
+    on (P21), and [None] for an expression that is not such a construct
+    or has not been typed. *)
+
+val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
+(** The result expression of a generic selection (6.5.1.1p3), selected
+    by the type that {!find} gives the controlling expression. The
+    selection is unknown where that type is, or the compatibility of any
+    association with it, and where the controlling expression is a
+    bit-field, which GCC gives a type of its own width. *)
+
+val types_compatible : t -> Tree.expression -> bool Ctype.answer option
+(** Whether the two types of [__builtin_types_compatible_p] are
+    compatible without their top-level qualifiers, as GCC and Clang
+    compare them. That of an [_Atomic] type, which GCC drops and Clang
+    keeps, is unknown where it changes the answer. *)
 
 (** What the declaration reader gives typing. [fail] reports the first
     error at the start of a span and does not return; [entity] gives what

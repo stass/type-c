@@ -69,9 +69,18 @@ val linked : t -> string -> entity option
 type error = Reader.error = { location : Location.t; message : string }
 
 val expression : t -> Tree.expression -> Expressions.typed option
-(** The type of an expression that the reader has typed: every
-    expression of a parsed function body and every one that a declaration
-    holds, but those of initialisers at file scope. *)
+(** The type of an expression that the reader has typed, as
+    {!Expressions.find} gives it: every expression of a parsed function
+    body and every one that a declaration holds, but those of
+    initialisers at file scope. *)
+
+val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
+(** What a generic selection that the reader has typed selects; see
+    {!Expressions.selection}. *)
+
+val types_compatible : t -> Tree.expression -> bool Ctype.answer option
+(** The answer of a [__builtin_types_compatible_p] that the reader has
+    typed; see {!Expressions.types_compatible}. *)
 
 val read : Target.t -> Reader.t -> Tree.translation_unit -> (t, error) result
 (** [read target text unit] reads [unit], parsed from [text], for

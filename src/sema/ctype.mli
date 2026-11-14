@@ -268,6 +268,11 @@ val as_arithmetic : tags -> t -> Arithmetic.t option answer
 
 val unqualified : t -> t
 
+val without_top_qualifiers : keep_atomic:bool -> t -> t
+(** The type without its top-level qualifiers, which for an array are
+    those of its innermost element (6.7.3p9), but [_Atomic] if
+    [keep_atomic]. *)
+
 val decay : t -> t
 (** The pointer that an array or a function converts to (6.3.2.1p3, p4);
     any other type is unchanged, and so is an unknown type that may be an

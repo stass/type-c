@@ -329,7 +329,6 @@ let gnu () =
   types "l: ; &&l" "void *";
   types "__builtin_types_compatible_p(int, long)" "int";
   types "__builtin_offsetof(struct s, m)" "unsigned long";
-  types "_Generic(x, int: 1)" "<_Generic>";
   types ~declarations:"__builtin_va_list ap; "
     "__builtin_va_arg(ap, const int)" "int";
   (* A va_list parameter is adjusted as the target's va_list is (design
@@ -337,6 +336,57 @@ let gnu () =
   types ~parameters:"__builtin_va_list ap" "ap" "<a va_list parameter> lvalue";
   types ~parameters:"int n, int b[n]" "b" "int * lvalue";
   types ~parameters:"const int a[static 2]" "a" "const int * lvalue"
+
+(* 6.5.1.1: the selection has the type, the lvalue and the null pointer
+   constant of the expression it selects. *)
+let generic () =
+  types "_Generic(x, int: 1)" "int";
+  types "_Generic(x, int: x)" "int lvalue";
+  types "_Generic(x, default: 1.0f, long: 1)" "float";
+  types "_Generic(x, long: 1, default: s)" "struct s lvalue";
+  types "_Generic(x, int: s.b)" "unsigned int lvalue :3";
+  types "_Generic(f, int (*)(int): f, default: 1)" "int (int)";
+  (* The controlling type after lvalue conversion (C17 6.5.1.1p2, as GCC
+     and Clang in every mode). *)
+  types "_Generic(cx, int: 1L, const int: 'c')" "long";
+  types "_Generic(a, int *: d, default: c)" "double lvalue";
+  types "_Generic(\"s\", char *: 1u, default: 1)" "unsigned int";
+  types "_Generic(e, unsigned: 1L, default: 1)" "long";
+  types ~target:ilp32 "_Generic(1L, int: 1, long: 2L)" "long";
+  (* GCC gives a bit-field a type of its own width. *)
+  types "_Generic(s.b, unsigned: 1, default: 2)" "<the type of a bit-field>";
+  types "_Generic(s.b = 1, unsigned: 1, default: 2)"
+    "<the type of a bit-field>";
+  (* Unknown where the controlling type or a compatibility is. *)
+  types "_Generic(__builtin_foo, int: 1, default: 2)"
+    "<the builtin '__builtin_foo'>";
+  types "_Generic(x, typeof(__builtin_foo): 1, int: 2)"
+    "<the builtin '__builtin_foo'>";
+  (* Whether an operand of unknown type is a null pointer constant is
+     unknown. *)
+  types "x ? (void *)_Generic(__builtin_foo, int: 0, default: 0) : ip"
+    "<a null pointer constant of an opaque value>";
+  types "x ? (void *)__builtin_foo : ip"
+    "<a null pointer constant of an opaque value>";
+  types "_Generic(x, int *: 1, struct s *: 2, typeof(__builtin_foo) *: 3, \
+         default: 4L)" "long";
+  types "1 ? _Generic(0, int: (void *)0) : ip" "int *";
+  types "1 ? _Generic(0, int: 0) : ip" "int *";
+  types "1 ? _Generic(0, int: vp) : ip" "void *";
+  accepts "_Generic(x, int: x) = 1";
+  rejects "_Generic(x, int: 1) = 1" "not an lvalue";
+  accepts "_Generic(x, int: 1, const int: 2)";
+  (* The associations that are not selected must be valid C. *)
+  rejects "_Generic(x, int: 1, long: y)" "'y'";
+  rejects "_Generic(x, int: 1, long: x.m)" "6.5.2.3p1";
+  rejects "_Generic(x, int: 1, signed: 2)" "6.5.1.1p2";
+  rejects "_Generic(x, unsigned: 1, enum { B } : 2, int: 3)" "6.5.1.1p2";
+  rejects "_Generic(x, default: 1, int: 2, default: 3)" "second default";
+  rejects "_Generic(x, long: 1)" "compatible with no";
+  rejects "_Generic(h, int (*)(int): 1, int (*)(double): 2)"
+    "more than one";
+  rejects "_Generic(h, int (*)(int): 1, int (*)(double): 2, default: 3)"
+    "more than one"
 
 (* 6.8: the constraints that typing checks. *)
 let statements () =
@@ -437,6 +487,7 @@ let () =
   binary ();
   conditional_and_assignment ();
   gnu ();
+  generic ();
   statements ();
   block_declarations ();
   block_linkage ();

@@ -112,6 +112,16 @@ let make qualifiers shape = { qualifiers; shape; size = shape_size shape }
 let of_shape shape = make no_qualifiers shape
 let unqualified t = { t with qualifiers = no_qualifiers }
 
+let rec without_top_qualifiers ~keep_atomic t =
+  match t.shape with
+  | Array array ->
+      let element = without_top_qualifiers ~keep_atomic array.element in
+      { t with shape = Array { array with element } }
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
+  | Unknown_type _ ->
+      let atomic = keep_atomic && t.qualifiers.atomic in
+      { t with qualifiers = { no_qualifiers with atomic } }
+
 let is_function t =
   match t.shape with
   | Function _ | Unknown_type { kind = Unknown_function; _ } -> Answer true

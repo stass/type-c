@@ -18,9 +18,13 @@ type enclosing = {
 
 (* [depth] and [enclosing] belong to the walk in progress. Only the
    reader's failure leaves a walk early, and it ends the read, so neither
-   is restored on it. *)
+   is restored on it. [selections] and [compatibilities] hold the answers
+   to the constructs that ask whether types are compatible, by the span
+   of the construct. *)
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
+  selections : (Tree.span, Tree.expression Ctype.answer) Hashtbl.t;
+  compatibilities : (Tree.span, bool Ctype.answer) Hashtbl.t;
   mutable depth : int;
   mutable enclosing : enclosing;
 }
@@ -29,10 +33,20 @@ let outside_functions =
   { function_name = None; in_loop = false; in_switch = false }
 
 let create () =
-  { types = Hashtbl.create 4096; depth = 0; enclosing = outside_functions }
+  { types = Hashtbl.create 4096;
+    selections = Hashtbl.create 16;
+    compatibilities = Hashtbl.create 16;
+    depth = 0;
+    enclosing = outside_functions }
 
 let find view (expression : Tree.expression) =
   Hashtbl.find_opt view.types expression.span
+
+let selection view (expression : Tree.expression) =
+  Hashtbl.find_opt view.selections expression.span
+
+let types_compatible view (expression : Tree.expression) =
+  Hashtbl.find_opt view.compatibilities expression.span
 
 type context = {
   typed : t;
@@ -119,9 +133,12 @@ let size_type context span =
 let void_pointer context span =
   checked context span (Ctype.pointer_to Ctype.void)
 
-let unknown context (span : Tree.span) construct kind =
+let unknown_at context (span : Tree.span) construct kind : Ctype.unknown =
   let location = context.text.tokens.(span.first).location in
-  Ctype.unknown { construct; location; kind }
+  { construct; location; kind }
+
+let unknown context span construct kind =
+  Ctype.unknown (unknown_at context span construct kind)
 
 (* The value of an operation on an operand of unknown type: unknown in
    turn, and an object, as no operator gives a function. *)
@@ -670,6 +687,106 @@ let other_conditional context span (a : Ctype.t) (b : Ctype.t) =
     | Depends_on unknown -> unknown_value unknown
     | Answer false -> fail_operands context span "6.5.15p3"
 
+(* Generic selection (6.5.1.1) and __builtin_types_compatible_p *)
+
+(* A generic association with its type name read; [default] has none.
+   [result] is the expression that the selection is if it selects the
+   association. *)
+type association = {
+  association_span : Tree.span;
+  association_type : Ctype.t option;
+  result : Tree.expression;
+}
+
+let compatible context a b = Ctype.compatible context.target context.tags a b
+
+(* 6.5.1.1p2: no two associations name compatible types. Where that
+   depends on an unknown type the backend checks it. *)
+let check_distinct context associations =
+  let check earlier association =
+    match association.association_type with
+    | None -> earlier
+    | Some t ->
+        if List.exists (fun u -> compatible context t u = Answer true) earlier
+        then
+          context.fail association.association_span
+            "the type of a generic association is compatible with that of \
+             another (C11 6.5.1.1p2)";
+        t :: earlier
+  in
+  ignore (List.fold_left check [] associations)
+
+(* 6.5.1.1p2: at most one default association. *)
+let default_association context associations =
+  let is_default association = Option.is_none association.association_type in
+  match List.filter is_default associations with
+  | [] -> None
+  | [ default ] -> Some default.result
+  | _ :: second :: _ ->
+      context.fail second.association_span
+        "a second default generic association (C11 6.5.1.1p2)"
+
+(* The type that selects is that of the controlling expression after
+   lvalue conversion, as C17 says and GCC and Clang do in every mode. GCC
+   gives a bit-field narrower than its type a type of its own width,
+   which Clang does not, so the selection by a bit-field is unknown. *)
+let controlling_type context (controlling : Tree.expression) typed =
+  match typed.bit_field with
+  | Not_bit_field ->
+      Ctype.Answer (Ctype.lvalue_conversion typed.expression_type)
+  | Bit_field _ | Bit_field_value _ ->
+      Depends_on
+        (unknown_at context controlling.span "the type of a bit-field"
+           Unknown_object)
+
+(* 6.5.1.1p2, p3: the result of the one association whose type is
+   compatible with the controlling type, else that of the default; the
+   selection is unknown where the compatibility of any association is.
+   C11 allows several compatible associations beside a default, which
+   GCC and Clang refuse. *)
+let select context span controlling_type associations default =
+  let unknown = ref None and compatible_results = ref [] in
+  let compare association =
+    match association.association_type with
+    | None -> ()
+    | Some t -> (
+        match compatible context controlling_type t with
+        | Depends_on dependence -> unknown := Some dependence
+        | Answer true ->
+            compatible_results := association.result :: !compatible_results
+        | Answer false -> ())
+  in
+  List.iter compare associations;
+  match (!unknown, !compatible_results, default) with
+  | Some dependence, _, _ -> Ctype.Depends_on dependence
+  | None, [ result ], _ -> Answer result
+  | None, [], Some default -> Answer default
+  | None, [], None ->
+      context.fail span
+        "the controlling expression is compatible with no generic \
+         association (C11 6.5.1.1p2)"
+  | None, _ :: _ :: _, _ ->
+      context.fail span
+        "the controlling expression is compatible with more than one \
+         generic association"
+
+(* GCC and Clang compare the types without their top-level qualifiers.
+   GCC drops [_Atomic] with the others and Clang keeps it; where that
+   changes the answer, typec gives none. *)
+let types_compatible_answer context span first second =
+  let answer ~keep_atomic =
+    compatible context
+      (Ctype.without_top_qualifiers ~keep_atomic first)
+      (Ctype.without_top_qualifiers ~keep_atomic second)
+  in
+  match (answer ~keep_atomic:false, answer ~keep_atomic:true) with
+  | Depends_on unknown, _ | _, Depends_on unknown -> Ctype.Depends_on unknown
+  | Answer gcc, Answer clang when gcc = clang -> Answer gcc
+  | Answer _, Answer _ ->
+      Depends_on
+        (unknown_at context span "the compatibility of an _Atomic type"
+           Unknown_object)
+
 (* Statements (6.8) and the expressions that hold them *)
 
 let rec expression context (expression : Tree.expression) =
@@ -751,8 +868,10 @@ and expression_node context (whole : Tree.expression) =
       List.iter (designator context) designators;
       value (size_type context span)
   | Types_compatible (first, second) ->
-      ignore (context.type_name first);
-      ignore (context.type_name second);
+      let first = context.type_name first in
+      let second = context.type_name second in
+      Hashtbl.replace context.typed.compatibilities span
+        (types_compatible_answer context span first second);
       value (int_type context span)
   (* Clang's block, whose type typec does not model; its body is not
      typed. *)
@@ -776,19 +895,35 @@ and unary context span (op : Tree.unary_operator) typed =
   | Real_part -> complex_part context span ~imaginary:false typed
   | Imaginary_part -> complex_part context span ~imaginary:true typed
 
-(* 0.9b-3 selects the association; until then the selection is of
-   unknown type. *)
+(* 6.5.1.1p4: the selection is its result expression, an lvalue or a
+   function designator if that is one. Every association is typed, as
+   GCC and Clang check the ones they do not select. *)
 and generic context span controlling associations =
-  ignore (expression context controlling);
-  List.iter
-    (fun (association : Tree.generic_association) ->
-      match association.node with
-      | Association (type_name, chosen) ->
-          ignore (context.type_name type_name);
-          ignore (expression context chosen)
-      | Default_association chosen -> ignore (expression context chosen))
-    associations;
-  value (unknown context span "_Generic" Object_or_function)
+  let controlling_typed = expression context controlling in
+  let associations = List.map (generic_association context) associations in
+  check_distinct context associations;
+  let default = default_association context associations in
+  let selection =
+    match controlling_type context controlling controlling_typed with
+    | Answer controlling_type ->
+        select context span controlling_type associations default
+    | Depends_on unknown -> Depends_on unknown
+  in
+  Hashtbl.replace context.typed.selections span selection;
+  match selection with
+  | Answer result -> expression context result
+  | Depends_on unknown ->
+      value (Ctype.unknown { unknown with kind = Object_or_function })
+
+and generic_association context (association : Tree.generic_association) =
+  let association_type, result =
+    match association.node with
+    | Association (type_name, result) ->
+        (Some (context.type_name type_name), result)
+    | Default_association result -> (None, result)
+  in
+  ignore (expression context result);
+  { association_span = association.span; association_type; result }
 
 (* 6.5.2.5p4: an lvalue of the type name's type. An array of unknown
    length takes it from the initialiser, which typec does not read yet
@@ -869,6 +1004,11 @@ and pointer_conditional context span (second, a) (third, b) =
 and null_pointer_constant context (candidate : Tree.expression) =
   match candidate.node with
   | Parenthesized inner -> null_pointer_constant context inner
+  | Generic _ -> (
+      match selection context.typed candidate with
+      | Some (Answer result) -> null_pointer_constant context result
+      | Some (Depends_on _) -> Opaque_constant
+      | None -> invalid_arg "Expressions: an untyped _Generic")
   | Cast { operand; _ }
     when is_plain_void_pointer (expression context candidate).expression_type
     ->
@@ -877,19 +1017,19 @@ and null_pointer_constant context (candidate : Tree.expression) =
 
 (* Evaluated as an operand that is not evaluated, an operation that would
    fail gives an opaque value rather than an error: this is no constant
-   expression context. *)
+   expression context. Whether an operand of unknown type is one is
+   unknown too. *)
 and zero_constant context candidate =
-  let integer =
-    Ctype.is_integer (expression context candidate).expression_type
-  in
-  if integer <> Answer true then Not_null
-  else
-    match context.constant ~evaluated:false candidate with
-    | Some { value = Known value; _ }
-      when Exact_integer.equal value Exact_integer.zero ->
-        Null
-    | Some { value = Opaque; _ } -> Opaque_constant
-    | Some { value = Known _; _ } | None -> Not_null
+  match Ctype.is_integer (expression context candidate).expression_type with
+  | Answer false -> Not_null
+  | Depends_on _ -> Opaque_constant
+  | Answer true -> (
+      match context.constant ~evaluated:false candidate with
+      | Some { value = Known value; _ }
+        when Exact_integer.equal value Exact_integer.zero ->
+          Null
+      | Some { value = Opaque; _ } -> Opaque_constant
+      | Some { value = Known _; _ } | None -> Not_null)
 
 (* 6.5.16p2, p3: the left operand is a modifiable lvalue, whose type after
    lvalue conversion the result has; a compound assignment takes what its

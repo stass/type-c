@@ -30,6 +30,10 @@ let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name
 let expression result expression = Expressions.find result.typed expression
+let selection result expression = Expressions.selection result.typed expression
+
+let types_compatible result expression =
+  Expressions.types_compatible result.typed expression
 type error = Reader.error = { location : Location.t; message : string }
 
 (* The reader *)
@@ -1658,8 +1662,21 @@ and evaluate state ~evaluated (expression : Tree.expression) =
   | Comma (left, right) when not evaluated ->
       ignore (evaluate state ~evaluated left);
       evaluate state ~evaluated right
-  | Generic _ ->
-      fail state span "_Generic in a constant expression is not supported"
+  (* 6.5.1.1p4: the value of the result expression. *)
+  | Generic _ -> (
+      match Expressions.selection state.typed expression with
+      | Some (Answer chosen) -> evaluate state ~evaluated chosen
+      | Some (Depends_on unknown) ->
+          fail_needing state span "the value of _Generic" unknown
+      | None -> invalid_arg "Declarations.evaluate: an untyped _Generic")
+  | Types_compatible _ -> (
+      let int = Integer.Int in
+      match Expressions.types_compatible state.typed expression with
+      | Some (Answer compatible) ->
+          Integer_constant.known target int
+            (Exact_integer.of_int (Bool.to_int compatible))
+      | Some (Depends_on _) -> Integer_constant.opaque int
+      | None -> invalid_arg "Declarations.evaluate: an untyped builtin")
   | Comma _ | String _ | Compound_literal _ | Subscript _ | Call _ | Member _
   | Pointer_member _ | Post_increment _ | Post_decrement _
   | Unary
@@ -1667,7 +1684,7 @@ and evaluate state ~evaluated (expression : Tree.expression) =
         | Imaginary_part ),
         _ )
   | Assignment _ | Statement_expression _ | Label_address _ | Va_arg _
-  | Types_compatible _ | Block_literal _ ->
+  | Block_literal _ ->
       not_constant expression
 
 (* 6.6p6: a cast to an integer type, of an integer constant expression or

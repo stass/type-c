@@ -134,6 +134,10 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Parser
 
+- [Low] A type name as the controlling operand of `_Generic` (C2y,
+  `_Generic(const int, const int: 1, int: 2)`), which GCC 16 and Clang
+  accept in gnu11, is a syntax error. Read it, with its type unconverted,
+  if the corpus has one.
 - [Medium] The parser reads chains in loops (left-associative binary
   operators, the comma operator, postfix operators, casts and the prefix
   operators, assignments, the last operands of conditionals, the
@@ -231,6 +235,13 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
+- [Medium] Stage 1 needs the target type of an expression's position
+  (design 3.3) beside the type that `Expressions.find` gives it, and
+  typing does not compute one: it converts no argument to its parameter
+  type, keeps no return type for `return`, and reads no initialiser
+  against the object it initialises (6.7.9). Record the target type of
+  each such position when Stage 1 types constructor expressions, where
+  typing reads the call, assignment, `return` and initialiser.
 - [Medium] The typed view records no constant value: whether an
   expression is a null pointer constant is computed where the
   conditional operator needs it (6.5.15p6), through the constant
@@ -242,18 +253,25 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Integer_constant.unary`, `binary` and `conditional`, which the
   evaluator calls: the conversions are shared, the mapping from operator
   to type is not.
-- [Medium] Where GCC and Clang type an expression differently, typing
-  follows one of them whatever `Target.compiler` is: the value of a
-  postfix `++` or `--` of a bit-field is no bit-field, as in Clang,
-  while GCC keeps the width, so `s.b++ + 0` of an unsigned bit-field
-  narrower than `int` is `unsigned int` here and `int` in GCC; a
-  bit-field wider than `int` and narrower than its type, such as
-  `unsigned long long w : 40`, promotes to its declared type as in
-  Clang, and to a type of its width in GCC (`Arithmetic.promote`); a
-  member found through an anonymous structure with a `const` type is
+- [High] Where GCC and Clang type an expression differently, typing
+  follows one of them whatever `Target.compiler` is. GCC gives the value
+  of a bit-field narrower than its type a type of its own width,
+  compatible with no type that a program names, and keeps it where
+  Clang does not: through a postfix `++` or `--` and a statement
+  expression (`s.b++`, `({ s.b; })`), and through the arithmetic of a
+  bit-field wider than `int`, such as `unsigned long long w : 40`
+  (`Arithmetic.promote` promotes it to its declared type as in Clang).
+  A member found through an anonymous structure with a `const` type is
   `const` as in GCC (`struct { const struct { int z; }; } t; t.z`),
-  which Clang lets `t.z = 1` assign. Choose by the backend or give an
-  unknown type; neither the probe nor the corpus has them yet.
+  which Clang lets `t.z = 1` assign. `_Generic`, `typeof` and
+  `__builtin_types_compatible_p` turn these types into values that GCC
+  does not give, so `_Generic(s.b++, int: 1, default: 0)` is 1 here and
+  0 in GCC, as an array length or enumerator too. `_Generic` of a
+  bit-field is unknown on either backend, and the builtin with `_Atomic`
+  is unknown where the backends differ: a third policy. Decide one rule
+  for the class, a type chosen by `Target.compiler` where typing gives a
+  value its type or an unknown type wherever the backends differ, and
+  apply it there, so that the special case of `_Generic` goes.
 - [Medium] `Ctype.find_member` passes over an anonymous member of
   unknown type, such as one whose specifier has an attribute outside the
   table, so `t.z` of `struct T { struct { int z; }
@@ -265,6 +283,22 @@ is [type-c-language-design.md](type-c-language-design.md).
   spelling), and the length of `__func__` counts the spelling: Clang
   gives a function spelled with `\U0001F600` a name of its UTF-8 bytes.
   Normalise identifiers to UTF-8 where the reader lexes them.
+
+- [Medium] A null pointer constant whose operand is cast from a type
+  that depends on an unknown type, `x ? (void *)(int)_Generic(u, int: 0,
+  default: 0) : ip` or `(void *)(int)(typeof(u))0`, is an error, since
+  the evaluator fails at the first unknown type even where the caller
+  needs no value. Let the evaluation answer the dependence to its
+  caller, which fails where the value is required and gives an opaque
+  one in the null pointer check.
+- [Medium] The evaluator takes a floating constant as the operand of a
+  cast only through parentheses (`is_floating_constant`), so
+  `enum { V = (int)_Generic(0, int: 1.5) };`, which GCC and Clang
+  accept, is refused. Look through parentheses and a known selection in
+  one function that `null_pointer_constant` uses too.
+- [Low] `check_distinct` compares the associations of a generic
+  selection in pairs: 20000 of them take 26 s, where GCC and Clang, as
+  quadratic, take 4 s.
 
 ## Declarations
 
@@ -298,8 +332,8 @@ is [type-c-language-design.md](type-c-language-design.md).
   builtins of the backend, and what an attribute outside the table
   applies to. `typeof (__builtin_f) y;` at file scope is an error, since
   whether `y` is a function depends on the type, though both backends
-  accept it. `_Generic` gives an unknown type until 0.9b-3 selects, and
-  a block literal one whose body is not typed. An attribute outside the
+  accept it. A block literal has an unknown type, as its body is not
+  typed. An attribute outside the
   table on a structure or union specifier makes the type of that
   specifier unknown, while a later `struct s` names the record as
   declared: right for its identity, members and completeness, the facts
@@ -338,12 +372,9 @@ is [type-c-language-design.md](type-c-language-design.md).
   Recording in the tags whether the type is fixed and whether the list
   was read would report them. `enum e : int x;`, a fixed type outside
   `enum e : int;` alone, which C23 and Clang refuse, is accepted.
-- [Medium] `__builtin_types_compatible_p`, and `__real__` and
-  `__imag__` of an integer constant, are integer constant expressions in
-  GCC and Clang (`int a[__builtin_types_compatible_p(int, int)];`); the
-  constant evaluator of `Declarations` calls them not constant. Answer
-  the builtin where types are compared, in the front end when a Type-C
-  type is involved (design 13.5).
+- [Medium] `__real__` and `__imag__` of an integer constant are integer
+  constant expressions in GCC and Clang; the constant evaluator of
+  `Declarations` calls them not constant.
 - [Medium] Attributes inside what the reader does not read, such as an
   initialiser or the operand of `sizeof`, are not checked against the
   table. Checking them in the parser, where every attribute is made,
@@ -382,11 +413,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   initialisers with compound literals (0.9b), which need the same
   rule.
 - [Medium] In an integer constant expression `sizeof` of an expression
-  is opaque, though its operand is typed, and `_Generic` is an error.
-  Give `sizeof x` its value once initialisers complete array types
-  (0.9b-2), so that `sizeof a / sizeof a[0]` of `int a[] = {...}` stays
-  a constant, and that of a variable length array no constant
-  (6.5.3.4p2); select `_Generic` with 0.9b-3.
+  is opaque, though its operand is typed. Give `sizeof x` its value once
+  initialisers complete array types (0.9b-2), so that
+  `sizeof a / sizeof a[0]` of `int a[] = {...}` stays a constant, and
+  that of a variable length array no constant (6.5.3.4p2).
 - [Medium] A use of a name with a Clang overload (`overloadable`, design
   13.3) in scope before the declaration it resolves to has an unknown
   type, as the parser resolves it to the last declaration of the name,

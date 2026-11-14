@@ -482,7 +482,32 @@ let constant_expressions () =
   rejects "enum { V = L'ab' };" "one character";
   rejects "enum { V = u'\\U0001F600' };" "code unit";
   rejects "enum { V = U'\\ud800' };" "6.4.3p2";
-  rejects "enum { V = _Generic(1, int: 2) };" "_Generic";
+  evaluates_int "_Generic(1, int: 2)" "2";
+  evaluates_int "_Generic(1.0, int: 2, default: 3)" "3";
+  evaluates_int "_Generic((const char)1, char: 2, default: 3)" "2";
+  declares "int f(int); enum { V = _Generic(1, int: 2, default: f(1)) };" "V"
+    "enumerator int = 2";
+  rejects "int f(int); enum { V = _Generic(1, int: f(1), default: 2) };"
+    "6.7.2.2p2";
+  rejects "enum { V = _Generic(__builtin_foo, int: 1, default: 2) };"
+    "the value of _Generic depends on the builtin '__builtin_foo'";
+  evaluates_int "__builtin_types_compatible_p(int, int)" "1";
+  evaluates_int "__builtin_types_compatible_p(int, long)" "0";
+  evaluates_int "__builtin_types_compatible_p(const int, volatile int)" "1";
+  evaluates_int "__builtin_types_compatible_p(const int *, int *)" "0";
+  evaluates_int "__builtin_types_compatible_p(int[], const int[3])" "1";
+  evaluates_int "__builtin_types_compatible_p(int *const[2][3], int *[2][3])"
+    "1";
+  evaluates_int "__builtin_types_compatible_p(enum { B }, unsigned)" "1";
+  evaluates_int "__builtin_types_compatible_p(_Atomic int, _Atomic int)" "1";
+  evaluates_int "__builtin_types_compatible_p(_Atomic int, long)" "0";
+  (* GCC drops _Atomic as a top-level qualifier, Clang keeps it. *)
+  declares "int a[__builtin_types_compatible_p(_Atomic int, int) + 1];" "a"
+    "object int[<constant>] external static";
+  declares "int a[__builtin_types_compatible_p(typeof(__builtin_foo), int)];"
+    "a" "object int[<constant>] external static";
+  declares "int a[__builtin_types_compatible_p(int, signed)];" "a"
+    "object int[1] external static";
   rejects "_Static_assert(1 == 2, \"no\");" "\"no\"";
   accepts "_Static_assert(sizeof(int) == 4, \"\"); \
            _Static_assert(sizeof(struct { int a; }) == 4, \"\");";

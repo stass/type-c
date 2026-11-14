@@ -5,8 +5,9 @@
    expression statement of its function bodies, for the target model read
    from a macro dump: that the expression has the type typec gives it,
    qualifiers included, and, where typec calls it an lvalue, a use of its
-   address. A backend that compiles the result agrees with typec on every
-   one. The statements of compound statements are probed, those under
+   address, and the value of each [__builtin_types_compatible_p] that
+   typec answers. A backend that compiles the result agrees with typec on
+   every one. The statements of compound statements are probed, those under
    other statements not; types that are not C when spelled, unknown
    types, variably modified ones and bit-fields, which typeof refuses in
    GCC, are left out. *)
@@ -35,7 +36,7 @@ let spelled t =
   | Ok _, (Answer true | Depends_on _) | Error _, _ -> None
 
 (* The C that checks what typec gives [expression]. *)
-let assertions text (typed : Expressions.typed) expression =
+let assertions text result (typed : Expressions.typed) expression =
   let written = source_text text expression.Tree.span in
   let type_check =
     match spelled typed.expression_type with
@@ -51,7 +52,14 @@ let assertions text (typed : Expressions.typed) expression =
       [ Printf.sprintf "(void)sizeof &(%s);" written ]
     else []
   in
-  String.concat " " (type_check @ lvalue_check)
+  let value_check =
+    match Declarations.types_compatible result expression with
+    | Some (Answer compatible) ->
+        [ Printf.sprintf "_Static_assert((%s) == %d, \"typec\");" written
+            (Bool.to_int compatible) ]
+    | Some (Depends_on _) | None -> []
+  in
+  String.concat " " (type_check @ lvalue_check @ value_check)
 
 (* The byte after each probed statement, with what to insert there. *)
 let rec block_insertions text result (block : Tree.block) =
@@ -69,7 +77,8 @@ and statement_insertions text result (statement : Tree.statement) =
       match Declarations.expression result expression with
       | Some typed ->
           let last = text.Reader.tokens.(statement.span.last) in
-          [ (last.start + last.length, " " ^ assertions text typed expression) ]
+          let inserted = assertions text result typed expression in
+          [ (last.start + last.length, " " ^ inserted) ]
       | None -> failwith ("untyped: " ^ source_text text expression.span))
   | _ -> []
 

@@ -91,7 +91,27 @@ void operators(int x, const int cx, char c, signed char sc, unsigned char uc,
 	p += 1; x <<= 1; ul ^= 1; ip -= l;
 	(x, d); (d, x); (x, a); (x, f); (x, cx); (x, s);
 
+	/* Generic selections, each association of a type of its own */
+	_Generic(x, int: d, default: c); _Generic(cx, int: 1L, const int: 'c');
+	_Generic(a, int *: fl, default: 0); _Generic(f, int (*)(int): f, default: 0);
+	_Generic(en, enum e: ul, default: 0); _Generic(p, const char *: p, char *: 1);
+	_Generic(1.0f, double: 1, float: 2u, default: 3L);
+	_Generic(s, struct s: s, default: 0); _Generic(cs, struct s: un, default: 0);
+	_Generic(x, long: 1, default: ip); _Generic(l, int: 1, long: 2u);
+	_Generic(z, _Complex double: zf, default: 0); _Generic("ab", char *: ca);
+	_Generic(x, int: x) = 1; x ? _Generic(0, int: (void *)0) : ip;
+	x ? _Generic(0, int: 0) : ip; x ? _Generic(0, int: vp) : ip;
+
 	/* GNU */
+	__builtin_types_compatible_p(const int, int);
+	__builtin_types_compatible_p(int[], const int[3]);
+	__builtin_types_compatible_p(enum e, int);
+	__builtin_types_compatible_p(enum e, unsigned);
+	__builtin_types_compatible_p(int (*)(), int (*)(int));
+	__builtin_types_compatible_p(char, signed char);
+	__builtin_types_compatible_p(long, long long);
+	__builtin_types_compatible_p(_Atomic int, _Atomic int);
+	__builtin_types_compatible_p(struct s, const struct s);
 	({ 1; }); ({ x; d; }); ({ a; }); ({ int y = 2; y + 1; }); ({ ; });
 	({ s; });
 	__builtin_types_compatible_p(int, long);
