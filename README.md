@@ -147,10 +147,10 @@ AFL++ drives it, with coverage from an OCaml compiler configured for AFL
 instrumentation. That compiler lives in its own opam root, so the normal
 build keeps the system OCaml. AFL++ on macOS hands its coverage map over
 only as a POSIX shared memory descriptor, which the OCaml runtime does
-not read, so the compiler needs a patch to `runtime/afl.c` there. The
-patch is kept outside this repository, at
-`/Volumes/Optaine/typec-fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch`.
-Setting up, once:
+not read, so the compiler needs a patch to `runtime/afl.c` there:
+`tools/fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch`, under the licence
+of the OCaml file it modifies (its header says so). Setting up, once,
+from the root of this repository:
 
 ```sh
 brew install afl++
@@ -162,7 +162,7 @@ opam install --switch afl -y dune
 src=/Volumes/Optaine/typec-fuzz/ocaml-afl-src/ocaml-5.5.2
 opam source --switch afl ocaml-compiler.5.5.2 --dir "$src"
 patch -d "$src" -p1 \
-  < /Volumes/Optaine/typec-fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch
+  < tools/fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch
 opam pin add --switch afl -y --kind=path ocaml-compiler.5.5.2 "$src"
 ```
 

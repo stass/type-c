@@ -1,0 +1,106 @@
+A patch to the runtime of OCaml 5.5.2 (runtime/afl.c) that lets an
+AFL-instrumented OCaml program map the coverage bitmap that AFL++ passes
+as a POSIX shared memory descriptor in __AFL_SHM_FD, as AFL++ always does
+on macOS; the SysV path (__AFL_SHM_ID) is kept.
+
+Licence: this patch modifies a file of the OCaml distribution and is
+offered under that file's terms, LGPL-2.1-only with the OCaml static
+linking exception (see LICENSE in the OCaml sources); it is not part of
+typec and nothing in typec links it. Apply with patch -p1 in the OCaml
+source tree; patch(1) ignores these lines.
+
+--- a/runtime/afl.c
++++ b/runtime/afl.c
+@@ -51,7 +51,11 @@
+ #include <sys/types.h>
+ #include <signal.h>
+ #include <sys/shm.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
+ #include <sys/wait.h>
++#include <limits.h>
++#include <stdlib.h>
+ #include <stdio.h>
+ #include <string.h>
+ 
+@@ -83,18 +87,59 @@
+   return msg;
+ }
+ 
+-CAMLexport value caml_setup_afl(value unit)
++/* AFL++ built with POSIX shared memory (always so on macOS) passes the
++   bitmap as an inherited descriptor in __AFL_SHM_FD and unlinks its name
++   at once, so only the descriptor can reach it. Like AFL++'s own runtime,
++   this maps whatever descriptor the variable names: the environment of
++   an instrumented program is trusted. A name without a descriptor
++   (AFL_SHM_KEEP_NAME) is not supported and stops as a bad shm id. */
++static unsigned char* afl_map_shm_fd(const char* shm_fd_str)
++{
++  char* shm_fd_end;
++  long int shm_fd;
++  struct stat st;
++  void* area;
++
++  shm_fd = strtol(shm_fd_str, &shm_fd_end, 10);
++  if (!(*shm_fd_str != '\0' && *shm_fd_end == '\0')
++      || shm_fd < 0 || shm_fd > INT_MAX)
++    caml_fatal_error("afl-fuzz: bad shm fd");
++  if (fstat((int)shm_fd, &st) != 0 || st.st_size < INITIAL_AFL_AREA_SIZE)
++    caml_fatal_error("afl-fuzz: shm fd is not a map of the bitmap size");
++  area = mmap(NULL, INITIAL_AFL_AREA_SIZE, PROT_READ | PROT_WRITE,
++              MAP_SHARED, (int)shm_fd, 0);
++  if (area == MAP_FAILED)
++    caml_fatal_error("afl-fuzz: could not map shm fd");
++  return area;
++}
++
++static unsigned char* afl_attach_shm_id(const char* shm_id_str)
+ {
+-  const char* shm_id_str;
+   char* shm_id_end;
+   long int shm_id;
++  void* area;
++
++  shm_id = strtol(shm_id_str, &shm_id_end, 10);
++  if (!(*shm_id_str != '\0' && *shm_id_end == '\0'))
++    caml_fatal_error("afl-fuzz: bad shm id");
++  area = shmat((int)shm_id, NULL, 0);
++  if (area == (void*)-1)
++    caml_fatal_error("afl-fuzz: could not attach shm area");
++  return area;
++}
++
++CAMLexport value caml_setup_afl(value unit)
++{
++  const char* shm_fd_str;
++  const char* shm_id_str;
+   uint32_t startup_msg = 0;
+ 
+   if (afl_initialised) return Val_unit;
+   afl_initialised = 1;
+ 
++  shm_fd_str = caml_secure_getenv("__AFL_SHM_FD");
+   shm_id_str = caml_secure_getenv("__AFL_SHM_ID");
+-  if (shm_id_str == NULL) {
++  if (shm_fd_str == NULL && shm_id_str == NULL) {
+     /* Not running under afl-fuzz.  Allocate space for the bitmap
+        (the instrumented OCaml code will write into it),
+        and continue as normal. */
+@@ -106,13 +151,10 @@
+   /* if afl-fuzz is attached, we want it to know about uncaught exceptions */
+   caml_abort_on_uncaught_exn = 1;
+ 
+-  shm_id = strtol(shm_id_str, &shm_id_end, 10);
+-  if (!(*shm_id_str != '\0' && *shm_id_end == '\0'))
+-    caml_fatal_error("afl-fuzz: bad shm id");
+-
+-  caml_afl_area_ptr = shmat((int)shm_id, NULL, 0);
+-  if (caml_afl_area_ptr == (void*)-1)
+-    caml_fatal_error("afl-fuzz: could not attach shm area");
++  if (shm_fd_str != NULL)
++    caml_afl_area_ptr = afl_map_shm_fd(shm_fd_str);
++  else
++    caml_afl_area_ptr = afl_attach_shm_id(shm_id_str);
+ 
+   /* poke the bitmap so that afl-fuzz knows we exist, even if the
+      application has sparse instrumentation */
