@@ -3,4 +3,10 @@
 
 (test
  (name test_invocation)
+ (modules test_invocation)
  (libraries typec_driver))
+
+(test
+ (name test_target)
+ (modules test_target)
+ (libraries typec_sema))

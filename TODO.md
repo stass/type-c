@@ -23,10 +23,35 @@ is [type-c-language-design.md](type-c-language-design.md).
   with no message. Detect it, or document how to install `typec` as `cc`.
 - [Low] When `.tc` inputs are recognised, the driver must know which C
   compiler options take a separate value, so that `-o --cc=x` or
-  `-o x.tc` is not misread; keep that table in one place.
+  `-o x.tc` is not misread; keep that table in one place. The same table
+  chooses the options of the target query (`Target_query.query`): those
+  of the compilation without its inputs, `-o`, `-c`, `-S`, `-E` and the
+  `-M` family, plus the `-std=` that design 2.4 adds, so that the model
+  and the compilation see the same options.
+- [Medium] `test/run/target.t` runs `/usr/bin/clang` and
+  `/usr/local/bin/gcc-16` and expects the model of the x86-64 macOS host.
+  Choose the backends and the expected facts per host once the Linux and
+  FreeBSD test hosts exist.
 - [Low] `Unix.execvp` hands an executable without a `#!` line to
   `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
   a backend works on some hosts only. Document it or decide one behaviour.
+
+## Target model
+
+- [Medium] `Target.of_predefined_macros` accepts any positive sizes and
+  any integer type behind each typedef, so a wrong backend can give
+  `char_bit: 1` or a signed `size_t`. Before constant evaluation reads
+  the model, check C's guarantees once there (`CHAR_BIT >= 8`, minimum
+  widths and the order short <= int <= long <= long long, a cap on sizes,
+  unsigned `size_t`, `uintmax_t`, `char16_t` and `char32_t`, signed
+  `ptrdiff_t`, `intmax_t` and `intptr_t`), preferably by separate signed
+  and unsigned types for the typedef fields, and make `Target.t` private.
+- [Low] The target query gives the backend typec's stdin, which it never
+  needs; a stray `-` among the options makes it read the terminal. Give
+  it `/dev/null`.
+- [Low] An empty macro dump, as from `--print-target -o FILE`, reports
+  one missing macro chosen by record field evaluation order. Report an
+  empty dump as such.
 
 ## Design questions without a gate yet
 
