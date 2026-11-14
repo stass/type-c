@@ -194,6 +194,7 @@ type sorted = {
   qualifiers : Tree.type_qualifier list;
   function_specifiers : Tree.function_specifier list;
   alignments : Tree.alignment Tree.spanned list;
+  attributes : Tree.attribute list;
 }
 
 let sort_specifiers (specifiers : Tree.specifiers) =
@@ -209,10 +210,12 @@ let sort_specifiers (specifiers : Tree.specifiers) =
     | Alignment_specifier a ->
         let alignment = { Tree.span = specifier.span; node = a } in
         { sorted with alignments = alignment :: sorted.alignments }
+    | Attributes list ->
+        { sorted with attributes = List.rev_append list sorted.attributes }
   in
   let empty =
     { storage_classes = []; basic = []; others = []; qualifiers = [];
-      function_specifiers = []; alignments = [] }
+      function_specifiers = []; alignments = []; attributes = [] }
   in
   let sorted = List.fold_left add empty specifiers in
   { sorted with alignments = List.rev sorted.alignments }
@@ -253,6 +256,8 @@ let qualifiers_of (qualifiers : Tree.type_qualifier list) =
     | Restrict -> { q with restrict = true }
     | Volatile -> { q with volatile = true }
     | Atomic -> { q with atomic = true }
+    (* Clang's nullability does not change a C type. *)
+    | Nullability _ -> q
   in
   List.fold_left add Ctype.no_qualifiers qualifiers
 
@@ -363,11 +368,43 @@ let rec applies_to_name (inner : Tree.declarator option) =
   | Some { node = Name _; _ } -> true
   | Some { node = Parenthesized_declarator inner; _ } ->
       applies_to_name (Some inner)
-  | Some { node = Pointer _ | Array _ | Function _; _ } -> false
+  | Some { node = Pointer _ | Block_pointer _ | Array _ | Function _; _ } ->
+      false
+
+(* A construct of the GNU profile that the parser reads and no type
+   models yet. *)
+let not_typed state span construct package =
+  fail state span
+    (Printf.sprintf "%s is not typed yet (plan %s)" construct package)
+
+(* The GNU attributes that change neither a type nor a value that the
+   declarations compute: the alignment and layout of records are the
+   backend's (6.7.5p3), and the rest shape diagnostics or code. Any other
+   attribute may, as [mode] and [vector_size] change a type, so it is an
+   error until typing reads it (TODO.md). *)
+let neutral_attributes =
+  [ "alloc_align"; "alloc_size"; "aligned"; "always_inline"; "availability";
+    "cold"; "const"; "constructor"; "deprecated"; "destructor";
+    "disable_tail_calls"; "enum_extensibility"; "flag_enum"; "format";
+    "format_arg"; "gnu_inline"; "hot"; "leaf"; "malloc"; "noescape";
+    "noinline"; "nonnull"; "noreturn"; "not_tail_called"; "nothrow"; "pure";
+    "returns_nonnull"; "section"; "sentinel"; "swift_attr"; "unavailable";
+    "unused"; "used"; "visibility"; "warn_unused_result"; "weak" ]
+
+let read_attributes state (attributes : Tree.attribute list) =
+  let read (attribute : Tree.attribute) =
+    let name = attribute.node.name.node in
+    if not (List.mem name neutral_attributes) then
+      not_typed state attribute.span
+        ("the attribute " ^ quote name)
+        "0.7b"
+  in
+  List.iter read attributes
 
 let rec read_specifiers state ~standalone (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
   let sorted = sort_specifiers specifiers in
+  read_attributes state sorted.attributes;
   let storage = storage_class state span sorted.storage_classes in
   let base = base_type state span ~standalone sorted in
   let qualifiers = qualifiers_of sorted.qualifiers in
@@ -390,6 +427,8 @@ and base_type state span ~standalone sorted =
   | [], [] ->
       fail state span "a declaration has no type specifier (C11 6.7.2p2)"
   | [ Void ], [] -> Ctype.void
+  | basic, [] when List.mem Tree.Float16 basic ->
+      not_typed state span (quote "_Float16") "0.7b"
   | basic, [] -> (
       match basic_type basic with
       | Some arithmetic ->
@@ -405,11 +444,17 @@ and other_type state span ~standalone (specifier : Tree.type_specifier) =
   | Basic _ -> invalid_arg "Declarations.other_type"
   | Atomic_type type_name ->
       checked state span (Ctype.atomic (read_type_name state type_name))
-  | Struct_or_union { kind; tag; members } ->
+  | Struct_or_union { kind; tag; members; attributes } ->
+      read_attributes state attributes;
       let kind = record_kind kind in
-      Ctype.record (record_type state ~standalone kind tag members)
-  | Enum { tag; enumerators } ->
+      Ctype.record (record_type state span ~standalone kind tag members)
+  | Enum { underlying = Some _; _ } ->
+      not_typed state span "the fixed type of an enumeration" "0.7b"
+  | Enum { tag; enumerators; underlying = None; attributes } ->
+      read_attributes state attributes;
       Ctype.enum (enum_type state span ~standalone tag enumerators)
+  | Typeof_expression _ | Typeof_type _ ->
+      not_typed state span (quote "typeof") "0.7b"
   | Typedef_name name -> (
       match Scope.find state.scope name with
       | Some { declared = Typedef t; _ } -> t
@@ -439,7 +484,8 @@ and referenced_tag state ~standalone (name : Tree.identifier) =
 and declare_tag state (name : Tree.identifier) tag =
   state.scope <- Scope.declare_tag state.scope name.node tag
 
-and record_type state ~standalone kind (tag : Tree.identifier option) members =
+and record_type state span ~standalone kind (tag : Tree.identifier option)
+    members =
   let found =
     match (tag, members) with
     | None, _ -> None
@@ -456,11 +502,12 @@ and record_type state ~standalone kind (tag : Tree.identifier option) members =
         record
     | _, None -> Ctype.declare_record state.tags kind None
   in
-  Option.iter (define_record state record) members;
+  Option.iter (define_record state span record) members;
   record
 
-and define_record state record (members : Tree.member_declaration list) =
-  let span = (List.hd members).span in
+(* [span] is the specifier's: GNU C allows a body without members. *)
+and define_record state span record (members : Tree.member_declaration list)
+    =
   let members = List.concat_map (read_member state) members in
   checked state span
     (Ctype.define_record state.target state.tags record members)
@@ -526,11 +573,13 @@ and is_anonymous_record (specifiers : Tree.specifiers) =
 and read_member_declarator state specified
     (declarator : Tree.member_declarator) =
   match declarator.node with
-  | Field field ->
+  | Field { declarator = field; attributes } ->
+      read_attributes state attributes;
       let derived = derive_object state specified field in
       { Ctype.member_name = derived.name; member_type = derived.declared_type;
         bit_field_width = None }
-  | Bit_field { declarator = field; width } ->
+  | Bit_field { declarator = field; width; attributes } ->
+      read_attributes state attributes;
       Option.iter
         (fun span ->
           fail state span
@@ -570,6 +619,7 @@ and bit_field_width state width =
 and define_enum state span enum (enumerators : Tree.enumerator list) =
   let declare (previous, declared) (enumerator : Tree.enumerator) =
     let name = enumerator.node.name in
+    read_attributes state enumerator.node.attributes;
     let ((integer, value) as typed) =
       enumerator_value state previous enumerator
     in
@@ -718,6 +768,7 @@ and derive state ~parameter ~definition derived (declarator : Tree.declarator)
         checked state span (Ctype.qualify qualifiers pointer)
       in
       continue { derived with declared_type } inner
+  | Block_pointer _ -> not_typed state span "a block pointer" "0.7b"
   | Array { inner; qualifiers; size } ->
       let adjusted = parameter && applies_to_name inner in
       let qualified = qualifiers <> [] in
@@ -801,6 +852,7 @@ and read_parameters state ~definition (parameters : Tree.parameters) =
 and read_parameter state (parameter : Tree.parameter) =
   let span = parameter.span in
   let specified = parameter_specifiers state span parameter.node.specifiers in
+  read_attributes state parameter.node.attributes;
   let derived =
     match parameter.node.declarator with
     | Some declarator -> derive_parameter state specified declarator
@@ -859,6 +911,7 @@ and read_old_style_declaration state names (declaration : Tree.declaration) =
       List.iter
         (fun (declarator : Tree.init_declarator) ->
           let span = declarator.span in
+          read_attributes state declarator.node.attributes;
           let derived =
             derive_parameter state specified declarator.node.declarator
           in
@@ -977,6 +1030,10 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
   | Alignof type_name ->
       ignore (read_type_name state type_name);
       Integer_constant.opaque target.size_type
+  (* [offsetof] expands to it and is an integer constant (C11 7.19p3). *)
+  | Offsetof { type_name; _ } ->
+      ignore (read_type_name state type_name);
+      Integer_constant.opaque target.size_type
   (* The operand is not evaluated and its type is not computed here. *)
   | Sizeof_expression _ -> Integer_constant.opaque target.size_type
   | Comma (left, right) when not evaluated ->
@@ -987,7 +1044,7 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
   | Comma _ | String _ | Compound_literal _ | Subscript _ | Call _ | Member _
   | Pointer_member _ | Post_increment _ | Post_decrement _
   | Unary ((Address | Indirection | Pre_increment | Pre_decrement), _)
-  | Assignment _ ->
+  | Assignment _ | Statement_expression _ | Va_arg _ ->
       not_constant expression
 
 (* 6.6p6: a cast to an integer type, of an integer constant expression or
@@ -1053,7 +1110,9 @@ let declare_file_scope state span specified (derived : derived) =
       declare_ordinary state span name declared
   | None -> invalid_arg "Declarations: a declarator without a name"
 
+(* The asm label names a symbol, which no type depends on. *)
 let read_init_declarator state specified (declarator : Tree.init_declarator) =
+  read_attributes state declarator.node.attributes;
   let derived = derive_object state specified declarator.node.declarator in
   declare_file_scope state declarator.span specified derived
 
@@ -1069,10 +1128,11 @@ let read_declaration state (declaration : Tree.declaration) =
 
 (* 6.9.1. The body is not read. *)
 let read_function_definition state (definition : Tree.function_definition) =
-  let { Tree.specifiers; declarator; declarations; body = _ } =
+  let { Tree.specifiers; declarator; declarations; body = _; attributes } =
     definition.node
   in
   let span = definition.span in
+  read_attributes state attributes;
   let specified = read_specifiers state ~standalone:false specifiers in
   (match (specified.storage, specified.thread_local) with
   | (None | Some (Extern | Static)), false -> ()
@@ -1098,6 +1158,7 @@ let read_external state (external_declaration : Tree.external_declaration) =
   match external_declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
+  | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
 let read target text unit =
   let state =

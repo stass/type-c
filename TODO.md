@@ -163,10 +163,35 @@ is [type-c-language-design.md](type-c-language-design.md).
   point where each identifier comes into scope (6.2.1p7), and ask its
   `Scope` whether a name is a typedef name. Decide before 0.9b adds block
   scopes, which would add a third copy of the rules.
-- [Medium] GCC and Clang accept in their GNU modes, and the parser
-  refuses, a lone `;` at file scope, empty initialiser braces `{}` and a
-  struct or union without members. Add them to the GNU profile (0.7)
-  with the constructs its row names.
+- [Medium] GNU forms that common code uses and the profile leaves out,
+  each an error that names its first token: the conditional without a
+  middle operand (`a ?: b`), computed goto (`&&label`, `goto *p`),
+  `__label__`, `__real__` and `__imag__`, `__builtin_types_compatible_p`,
+  `__alignof__` of an expression, block literals (`^{ ... }`), an extra
+  `;` in a member list, attributes in a pointer's qualifier list
+  (`int *__attribute__((aligned(8))) p`) and at the start of a
+  parenthesized declarator, attributes before a declarator after the
+  first (`int a, __attribute__((unused)) b;`), and attributes after a
+  label or before a statement other than `;` (`case 1:
+  __attribute__((fallthrough));`, `__attribute__((musttail)) return`).
+  Decide which belong to the profile (design 13.3) before the corpus
+  sweep (0.11) finds them.
+- [Medium] `asm` and `typeof` are keywords in every dialect, as in
+  gnu11, the default; under `-std=c11` GCC and Clang read them as
+  identifiers, so a C11 program that declares `typeof` or `asm` does not
+  parse. Either pass the dialect to the parser and select the keyword
+  table by it, or document the restriction in design 2.4.
+- [Low] The parser accepts GNU forms that GCC and Clang refuse: a
+  statement expression outside a function, a range designator in
+  `__builtin_offsetof`, a repeated asm qualifier, a labels section of
+  `asm` without `goto`, and qualifiers and operands on file-scope `asm`.
+  Check them with the other constraints (0.9b).
+- [Low] `__alignof__` is `_Alignof` in the tree, but GCC and Clang give
+  the preferred alignment for it, which differs from `_Alignof` on i386
+  (`double`, `long long`). No supported target has the difference;
+  revisit if one does.
+- [Low] `__builtin_va_list`, the one builtin typedef name, is listed in
+  the parser. Have the builtin table of 0.7b be its one source.
 - [Low] `Tree.Constant` holds a `Number.t` that is never
   `Not_a_constant`. Have `Number.classify` return an option, so that the
   tree cannot represent the case.
@@ -181,6 +206,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
+- [Medium] `Declarations` accepts the GNU attributes of a list that
+  changes no type or constant it computes (`neutral_attributes`) and
+  refuses every other one, `packed`, `mode`, `vector_size` and Clang's
+  `overloadable` among them, so the SDK's `tgmath.h` is refused. The
+  list is the answer to the design question on attributes until 0.7b
+  reads them; `aligned` is on it only while record layout is the
+  backend's. The rest of the GNU profile that no type models
+  (`_Float16`, `typeof`, block pointers, fixed enumeration types) is an
+  error that names it.
 - [High] Initialisers are not read: an array of unknown size keeps its
   incomplete type where its initialiser completes it (6.7.9p22), and the
   tags and enumerators that an initialiser declares, inside `sizeof` or a
@@ -292,8 +326,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   constructor without fields; a misspelled constructor must not become a
   catch-all binding (design 12).
 - [Medium] Define which GNU attributes the front end must understand
-  rather than merely carry: `noreturn` for reachability, and any that
-  change a type.
+  rather than merely carry (the tree holds each one's name and its
+  argument tokens unread). The macOS headers use four that typing needs:
+  `aligned`, which changes a layout; `noreturn`, for reachability;
+  Clang's `overloadable`, without which the SDK's `tgmath.h` declares
+  one function with conflicting types; and `gnu_inline`, which changes
+  what an inline definition defines. Common code adds `packed`, `mode`,
+  `vector_size` and `transparent_union`, which change a type or a
+  layout. The rest the headers use (`availability`, `deprecated`,
+  `format`, `noescape` and others) only shape diagnostics or code
+  generation.
 - [Medium] Header macros that collide with constructor names, such as
   `None` in the X11 headers, break those constructors with an obscure
   error. Find a way to report the macro (design 3.3).

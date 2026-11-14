@@ -460,7 +460,36 @@ let errors_are_located () =
       fail_case "located error" (Printf.sprintf "line %d" location.line)
   | Ok _ -> fail_case "located error" "accepted"
 
+(* The GNU profile that the parser reads: what no type models yet is an
+   error that names it. *)
+let gnu_profile () =
+  declares "int * _Nonnull const p;" "p" "object int *const external static";
+  declares "struct e {} x;" "x" "object struct e external static";
+  declares "int x __asm__(\"y\") __attribute__((unused));;" "x"
+    "object int external static";
+  (* An array of a constant length, not a variable length array. *)
+  declares
+    "struct s { int a; }; char c[__builtin_offsetof(struct s, a) + 1];" "c"
+    "object char[<constant>] external static";
+  accepts
+    "struct __attribute__((aligned(8))) s { int a __attribute__((aligned)); \
+     } __attribute__((unused)); enum e { A __attribute__((deprecated)) }; \
+     __attribute__((noreturn)) void f(int x __attribute__((unused))) \
+     __attribute__((cold));";
+  rejects "typedef int TI __attribute__((mode(TI)));"
+    "the attribute 'mode' is not typed yet";
+  rejects "typedef int V __attribute__((__vector_size__(16)));"
+    "the attribute 'vector_size' is not typed yet";
+  rejects "__attribute__((packed)) enum p { P } x;"
+    "the attribute 'packed' is not typed yet";
+  rejects "void g(int a __attribute__((mode(DI))));" "'mode'";
+  rejects "_Float16 h;" "'_Float16' is not typed yet";
+  rejects "typeof(int) t;" "'typeof' is not typed yet";
+  rejects "void (^b)(void);" "a block pointer is not typed yet";
+  rejects "enum e : int { A };" "the fixed type of an enumeration"
+
 let () =
+  gnu_profile ();
   specifier_combinations ();
   storage_classes ();
   declarators ();

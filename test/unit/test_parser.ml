@@ -165,8 +165,7 @@ let aggregate_cases =
       "(declaration ((enum e A (B 2) (C (+ B 1)))))";
     case "an enumerator is in scope after it" "enum { A, B = A };"
       "(declaration ((enum A (B A))))";
-    case "an empty struct" "struct s {};"
-      "error: in.i:1: expected a member declaration, found `}`";
+    case "an empty struct" "struct s {};" "(declaration ((struct s {})))";
     case "a struct with neither tag nor body" "struct;"
       "error: in.i:1: expected a tag or `{` after `struct` or `union`, found \
        `;`";
@@ -183,7 +182,12 @@ let initialiser_cases =
     case "a string initialiser" "char s[] = \"ab\" L\"c\";"
       "(declaration (char) (init (array s) (string \"ab\" L\"c\")))";
     case "an empty list" "int a[] = {};"
-      "error: in.i:1: expected an expression, found `}`";
+      "(declaration (int) (init (array a) {}))";
+    case "a comma alone" "int a[] = { , };"
+      "error: in.i:1: expected an expression, found `,`";
+    case "a range designator" "int a[] = { [0 ... 2] = 1, [3] = 2 };"
+      "(declaration (int) (init (array a) ({} (designate ([...] 0 2) 1) \
+       (designate ([] 3) 2))))";
     case "a designator without =" "int a[] = { [0] 1 };"
       "error: in.i:1: expected `=` after a designator, found `1`";
   ]
@@ -454,18 +458,251 @@ let span_cases =
        b@5-5 c@7-7 d@9-9))))";
   ]
 
+(* The GNU profile (design 13.3). *)
+let attribute_cases =
+  [
+    case "an attribute among the specifiers"
+      "__attribute__((noreturn)) static void f(void);"
+      "(declaration ((attributes noreturn) static void) (function f (void)))";
+    case "attributes after a declarator"
+      "int f(const char *, ...) __attribute__((__format__(__printf__, 1, \
+       2), , unused)) __attribute__((cold));"
+      "(declaration (int) (declarator (function f (const char pointer) ...) \
+       (attributes (format ( __printf__ , 1 , 2 )) unused cold)))";
+    case "version numbers in an argument"
+      "void g(void) __attribute__((availability(macos,introduced=10.4.1)));"
+      "(declaration (void) (declarator (function g (void)) (attributes \
+       (availability ( macos , introduced = 10.4.1 )))))";
+    case "a keyword as an attribute name"
+      "int h(void) __attribute__((__const__));"
+      "(declaration (int) (declarator (function h (void)) (attributes const)))";
+    case "an empty attribute list" "int i __attribute__(()), j;"
+      "(declaration (int) i j)";
+    case "attributes of a structure"
+      "struct __attribute__((packed)) s { char c; } \
+       __attribute__((aligned(4))) v;"
+      "(declaration ((struct (attribute packed) s (member (char) c) \
+       (attribute (aligned ( 4 ))))) v)";
+    case "attributes after a body belong to it"
+      "struct s { int a; } __attribute__((packed)) *p;"
+      "(declaration ((struct s (member (int) a) (attribute packed))) (pointer \
+       p))";
+    case "attributes of members"
+      "struct t { int a __attribute__((aligned(8))); int b : 3 \
+       __attribute__((packed)), : 0 __attribute__((x)); };"
+      "(declaration ((struct t (member (int) (field a (attributes (aligned ( 8 \
+       ))))) (member (int) (bits b 3 (attributes packed)) (bits 0 (attributes \
+       x))))))";
+    case "attributes of an enumeration and an enumerator"
+      "enum __attribute__((flag_enum)) e { A __attribute__((deprecated)) = 1, \
+       B } __attribute__((x));"
+      "(declaration ((enum (attribute flag_enum) e (A (attributes deprecated) \
+       1) B (attribute x))))";
+    case "attributes of parameters"
+      "void k(int x __attribute__((unused)), int __attribute__((y)));"
+      "(declaration (void) (function k (int x (attributes unused)) (int \
+       (attributes y))))";
+    case "attributes before a function body"
+      "int m(void) __attribute__((noinline)) { return 0; }"
+      "(define (int) (function m (void)) (attributes noinline) (block (return \
+       0)))";
+    case "an attribute declaration in a block"
+      "void f(int a) { switch (a) { case 1: f(2); \
+       __attribute__((fallthrough)); case 2: ; } }"
+      "(define (void) (function f (int a)) (block (switch a (block (label \
+       (case 1) (expr (call f 2))) (declaration ((attributes fallthrough))) \
+       (label (case 2) ;)))))";
+  ]
+
+let keyword_cases =
+  [
+    case "alternate spellings"
+      "__const int a1; __volatile__ __signed__ char a2; char *__restrict a3; \
+       static __inline__ int a4(void); __thread int a5; int a6 = \
+       __alignof__(int);"
+      "(declaration (const int) a1) | (declaration (volatile signed char) a2) \
+       | (declaration (char) (pointer restrict a3)) | (declaration (static \
+       inline int) (function a4 (void))) | (declaration (_Thread_local int) \
+       a5) | (declaration (int) (init a6 (alignof (type int))))";
+    case "__extension__ before declarations and expressions"
+      "__extension__ typedef long long ll; struct { __extension__ int a; } v; \
+       int x = __extension__ 1;"
+      "(declaration (typedef long long) ll) | (declaration ((struct (member \
+       (int) a))) v) | (declaration (int) (init x 1))";
+    case "typeof of a type and of an expression"
+      "typeof(int *) a; __typeof__(a) b; __typeof(1 + 2) c;"
+      "(declaration ((typeof (type int pointer))) a) | (declaration ((typeof \
+       a)) b) | (declaration ((typeof (+ 1 2))) c)";
+    case "a typedef name after typeof is a declarator"
+      "typedef int T; typeof(1) T;"
+      "(declaration (typedef int) T) | (declaration ((typeof 1)) T)";
+    case "_Float16" "_Float16 h(_Float16);"
+      "(declaration (_Float16) (function h (_Float16)))";
+    case "the builtin va_list type"
+      "typedef __builtin_va_list va_list; int x = __builtin_va_arg(ap, int *);"
+      "(declaration (typedef __builtin_va_list) va_list) | (declaration (int) \
+       (init x (va_arg ap (type int pointer))))";
+    case "offsetof" "int x = __builtin_offsetof(struct s, a.b[1].c);"
+      "(declaration (int) (init x (offsetof (type (struct s)) a .b ([] 1) \
+       .c)))";
+    case "a lone semicolon at file scope" "int x;;"
+      "(declaration (int) x) | ;";
+    case "an ellipsis alone" "int f(...);"
+      "(declaration (int) (function f ...))";
+    case "a fixed underlying type"
+      "typedef enum : unsigned char { C } small; enum f : long;"
+      "(declaration (typedef (enum (: unsigned char) C)) small) | \
+       (declaration ((enum f (: long))))";
+    case "an enumeration bit-field" "struct u { enum e : 2; };"
+      "(declaration ((struct u (member ((enum e)) (bits 2)))))";
+    case "an attribute after a fixed type"
+      "enum G : const int __attribute__((packed)) { D };"
+      "(declaration ((enum G (: const int) (attribute packed) D)))";
+    case "__complex__" "__complex__ double z;"
+      "(declaration (_Complex double) z)";
+    case "__extension__ before assembler and a lone semicolon"
+      "__extension__ __asm__(\"\"); __extension__ ;"
+      "(asm (\"\")) | ;";
+  ]
+
+let block_pointer_cases =
+  [
+    case "block pointers"
+      "void (^b)(int); int (^ _Nonnull c)(void); void (^const d)(void);"
+      "(declaration (void) (function (paren (block-pointer b)) (int))) | \
+       (declaration (int) (function (paren (block-pointer _Nonnull c)) \
+       (void))) | (declaration (void) (function (paren (block-pointer const \
+       d)) (void)))";
+    case "a block pointer parameter"
+      "void k(int (^)(int) __attribute__((noescape)));"
+      "(declaration (void) (function k (int (function (paren block-pointer) \
+       (int)) (attributes noescape))))";
+    case "nullability qualifiers"
+      "int * _Nullable p; char * _Nonnull const q; void *_Null_unspecified r; \
+       int *_Nullable_result s;"
+      "(declaration (int) (pointer _Nullable p)) | (declaration (char) \
+       (pointer _Nonnull const q)) | (declaration (void) (pointer \
+       _Null_unspecified r)) | (declaration (int) (pointer _Nullable_result \
+       s))";
+  ]
+
+let assembler_cases =
+  [
+    case "asm labels"
+      "int n(void) __asm(\"_n\"); int o __asm__(\"_\" \"o\") = 1;"
+      "(declaration (int) (declarator (function n (void)) (asm \"_n\"))) | \
+       (declaration (int) (init o (asm \"_\" \"o\") 1))";
+    case "an asm label and attributes"
+      "int p(void) __asm(\"_p\") __attribute__((x));"
+      "(declaration (int) (declarator (function p (void)) (asm \"_p\") \
+       (attributes x)))";
+    case "no asm label on a definition" "int q(void) __asm(\"_q\") { }"
+      "error: in.i:1: expected `;` after a declaration, found `{`";
+    case "file-scope assembler" "__asm__(\".globl x\");"
+      "(asm (\".globl x\"))";
+    statement_case "basic assembler" "asm(\"nop\");" "(asm (\"nop\"))";
+    statement_case "a clobber only"
+      "__asm__ __volatile__(\"\" ::: \"memory\");"
+      "(asm volatile (\"\") outputs inputs (clobbers (\"memory\")) labels)";
+    statement_case "operands"
+      "asm(\"mov %1, %0\" : \"=r\"(d), \"=m\"(*p) : [src] \"r\"(s + 1) : \
+       \"cc\");"
+      "(asm (\"mov %1, %0\") (outputs (operand (\"=r\") d) (operand (\"=m\") \
+       (* p))) (inputs (operand [src] (\"r\") (+ s 1))) (clobbers (\"cc\")) \
+       labels)";
+    statement_case "asm goto"
+      "asm goto(\"jmp %l0\" :::: done, out); done: ;"
+      "(asm goto (\"jmp %l0\") outputs inputs clobbers (labels done out)) \
+       (label done ;)";
+    statement_case "asm inline volatile" "asm inline volatile (\"\");"
+      "(asm inline volatile (\"\"))";
+  ]
+
+let gnu_statement_cases =
+  [
+    case "a statement expression" "int x = ({ int y = 1; y + 1; });"
+      "(declaration (int) (init x (({}) (block (declaration (int) (init y 1)) \
+       (expr (+ y 1))))))";
+    statement_case "a statement expression is a block scope"
+      "typedef int T; int a = ({ typedef char T; T c = 1; c; }); T * p;"
+      "(declaration (typedef int) T) (declaration (int) (init a (({}) (block \
+       (declaration (typedef char) T) (declaration (T) (init c 1)) (expr \
+       c))))) (declaration (T) (pointer p))";
+    statement_case "nested statement expressions"
+      "a = ({ ({ 1; }); }) + ({ 2; });"
+      "(expr (= a (+ (({}) (block (expr (({}) (block (expr 1)))))) (({}) \
+       (block (expr 2))))))";
+    statement_case "a case range" "switch (a) { case 1 ... 3: break; }"
+      "(switch a (block (label (case-range 1 3) break)))";
+    statement_case "__extension__ in a block"
+      "__extension__ int a = 1; __extension__ __extension__ (long)a++;"
+      "(declaration (int) (init a 1)) (expr (cast (type long) (post++ a)))";
+  ]
+
+(* [__extension__] makes no node: the node around it holds it. *)
+let gnu_span_cases =
+  [
+    case "spans of __extension__"
+      "__extension__ int x = __extension__ 1;"
+      "(declaration@0-6 (int@1-1) (init@2-5 x@2-2 1@5-5))";
+    case "spans of attributes" "int f(void) __attribute__((a, b(1)));"
+      "(declaration@0-16 (int@0-0) (declarator@1-15 (function@1-4 f@1-1 \
+       (@3-3 void@3-3)) (attributes a@8-8 (b@10-13 ( 1 )@11-13))))";
+  ]
+
+let gnu_error_cases =
+  [
+    case "an attribute without its parentheses" "int x __attribute__(a);"
+      "error: in.i:1: expected `((` after `__attribute__`, found `a`";
+    case "unclosed attribute arguments" "int x __attribute__((a(1, 2;"
+      "error: in.i:1: expected `)` to end the arguments of an attribute, \
+       found end of input";
+    case "a mismatched bracket in attribute arguments"
+      "int x __attribute__((a(1]));"
+      "error: in.i:1: expected `)`, found `]`";
+    case "an attribute without a name" "int x __attribute__((1));"
+      "error: in.i:1: expected an attribute name, found `1`";
+    case "attributes without a comma" "int x __attribute__((a b));"
+      "error: in.i:1: expected `,` or `)` after an attribute, found `b`";
+    case "asm without parentheses" "void f(void) { asm volatile; }"
+      "error: in.i:1: expected `(` after `asm`, found `;`";
+    case "an operand without parentheses"
+      "void f(void) { asm(\"\" : \"=r\" x); }"
+      "error: in.i:1: expected `(` after the constraint of an operand, found \
+       `x`";
+    case "too many assembler sections"
+      "void f(void) { asm(\"\" : : : : l : x); }"
+      "error: in.i:1: expected `:` or `)` in `asm`, found `:`";
+    case "typeof without parentheses" "typeof int x;"
+      "error: in.i:1: expected `(` after `typeof`, found `int`";
+    case "an unterminated statement expression" "int x = ({ 1; );"
+      "error: in.i:1: expected an expression, found `)`";
+    case "a mismatched bracket in a skipped body"
+      "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nint g(void) { ) }\n"
+      "error: sys.h:1: expected `}`, found `)`";
+    case "an inner mismatched bracket in attribute arguments"
+      "int a __attribute__((aligned( ( } )));"
+      "error: in.i:1: expected `)`, found `}`";
+    case "a closer ends no conditional in a skipped body"
+      "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nint f(void) { a ? } int g(void) { \
+       }\n"
+      "error: sys.h:1: expected `:` of a conditional, found `}`";
+    case "an enumeration as a fixed type"
+      "enum E : enum F : int { A } { B };"
+      "error: in.i:1: expected an integer type after `:`, found `enum`";
+    case "a structure as a fixed type" "enum E : struct s { B };"
+      "error: in.i:1: expected an integer type after `:`, found `struct`";
+    case "a long chain of fixed types"
+      ("enum E : "
+      ^ String.concat "" (List.init 100_000 (fun _ -> "enum : "))
+      ^ "int x;")
+      "error: in.i:1: expected an integer type after `:`, found `enum`";
+  ]
+
 let error_cases =
   [
     case "an implicit int" "x;"
       "error: in.i:1: expected a declaration, found `x`";
-    case "a GNU attribute"
-      "int f(void) __attribute__((noreturn));"
-      "error: in.i:1: expected `;` after a declaration, found \
-       `__attribute__`";
-    case "__extension__" "__extension__ int x;"
-      "error: in.i:1: expected a declaration, found `__extension__`";
-    case "a lone semicolon" "int x;;"
-      "error: in.i:1: expected a declaration, found `;`";
     case "an unterminated body" "int f(void) {\n{\n"
       "error: in.i:2: expected `}` to end a compound statement, found end \
        of input";
@@ -505,8 +742,8 @@ let error_cases =
     case "a typedef name ends an identifier list"
       "typedef int T; int f(a, T);"
       "error: in.i:1: expected a parameter name, found the type name `T`";
-    case "an ellipsis alone" "int f(...);"
-      "error: in.i:1: expected a parameter declaration, found `...`";
+    case "an ellipsis after an identifier list" "int f(a, ...);"
+      "error: in.i:1: expected a parameter name, found `...`";
     case "too many brackets"
       ("int x = " ^ String.make (Parser.max_nesting + 1) '(')
       (Printf.sprintf
@@ -563,6 +800,16 @@ let nesting_texts levels =
     ("type names", around "_Atomic(" "int" ")" ^ " x;");
     ("a function body", "int f(void) " ^ around "{" "" "}");
     ("statements", "void f(void) " ^ around "{ if (a) " ";" " }");
+    ("typeof", around "typeof(" "int" ")" ^ " x;");
+    ( "attribute arguments",
+      "int x __attribute__((a" ^ around "(" "" ")" ^ "));" );
+    (* Each level opens two brackets. *)
+    ( "statement expressions",
+      "int x = "
+      ^ repeat ((levels + 1) / 2) "({ "
+      ^ "1"
+      ^ repeat ((levels + 1) / 2) "; })"
+      ^ ";" );
   ]
 
 (* Each construct parses just within the bound and fails just beyond it,
@@ -633,6 +880,25 @@ let failed_chain_cases () =
       ("fors", in_body (repeat length "for (int i = 0;;) " ^ ";"));
       ( "dos",
         in_body (repeat length "do " ^ ";" ^ repeat length " while (a);") );
+      ( "attribute specifiers",
+        "int x" ^ repeat length " __attribute__((a))" ^ ";" );
+      ("attributes in a list", "int x __attribute__((" ^ chain ", " "));");
+      ("attribute arguments", "int x __attribute__((a(" ^ chain ", " ")));");
+      ( "asm operands",
+        in_body
+          ("asm(\"\" : : "
+          ^ String.concat ", " (List.init length (fun _ -> "\"r\"(a)"))
+          ^ ");") );
+      ( "case ranges",
+        in_body ("switch (a) " ^ repeat length "case 1 ... 2: " ^ ";") );
+      ("block pointers", "int " ^ String.make length '^' ^ "p;");
+      ("nullability qualifiers", "int *" ^ repeat length "_Nonnull " ^ "p;");
+      ("statement expressions in a row", in_body (repeat length "({ a; }); "));
+      ("__extension__", "int x = " ^ repeat length "__extension__ " ^ "a;");
+      ( "range designators",
+        "int a[] = {" ^ repeat length "[0 ... 1] = 1, " ^ "};" );
+      ( "offsetof designators",
+        "int x = __builtin_offsetof(struct s, a" ^ repeat length ".a" ^ ");" );
     ]
   in
   List.filter_map
@@ -664,9 +930,15 @@ let () =
         statement_cases;
         scope_cases;
         definition_cases;
+        attribute_cases;
+        keyword_cases;
+        block_pointer_cases;
+        assembler_cases;
+        gnu_statement_cases;
+        gnu_error_cases;
         error_cases;
       ]
-    @ failed_cases ~spans:true span_cases
+    @ failed_cases ~spans:true (span_cases @ gnu_span_cases)
   in
   List.iter
     (fun (case, actual) ->

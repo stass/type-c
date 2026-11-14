@@ -93,6 +93,10 @@ let qualifier_label = function
   | Restrict -> "restrict"
   | Volatile -> "volatile"
   | Atomic -> "_Atomic"
+  | Nullability Nonnull -> "_Nonnull"
+  | Nullability Nullable -> "_Nullable"
+  | Nullability Nullable_result -> "_Nullable_result"
+  | Nullability Null_unspecified -> "_Null_unspecified"
 
 let basic_label = function
   | Void -> "void"
@@ -106,6 +110,7 @@ let basic_label = function
   | Unsigned -> "unsigned"
   | Bool -> "_Bool"
   | Complex -> "_Complex"
+  | Float16 -> "_Float16"
 
 let unary_label = function
   | Address -> "&"
@@ -152,6 +157,52 @@ let string_literal reader pieces =
       node piece.span (spelling reader piece.span.first) [])
     pieces
 
+(* The parts in the order of their tokens, for a node whose fields do not
+   follow the source, such as the attributes of a structure, which come
+   before its tag and after its body. *)
+let in_source_order parts =
+  let first part =
+    match extent part with Some span -> span.first | None -> max_int
+  in
+  List.stable_sort (fun a b -> compare (first a) (first b)) parts
+
+(* An attribute's arguments are shown as their tokens. *)
+let attribute reader (a : attribute) =
+  let arguments { first; last } =
+    let spellings = List.init (last - first + 1) (fun i -> first + i) in
+    node { first; last }
+      (String.concat " " (List.map (spelling reader) spellings))
+      []
+  in
+  node a.span a.node.name.node
+    (Option.to_list (Option.map arguments a.node.arguments))
+
+(* One attribute among parts that it may come before or after. *)
+let single_attribute reader a =
+  { label = "attribute"; span = None; parts = [ attribute reader a ] }
+
+let attribute_group reader = function
+  | [] -> []
+  | attributes ->
+      [
+        {
+          label = "attributes";
+          span = None;
+          parts = List.map (attribute reader) attributes;
+        };
+      ]
+
+let asm_qualifier_label = function
+  | Asm_volatile -> "volatile"
+  | Asm_inline -> "inline"
+  | Asm_goto -> "goto"
+
+(* An absent part of a statement, so that the parts keep their places. *)
+let absent = leaf "_"
+
+let optional dump = function Some part -> dump part | None -> absent
+let section label parts = { label; span = None; parts }
+
 let rec expression reader (e : expression) =
   let here = node e.span in
   let sub = expression reader in
@@ -186,6 +237,13 @@ let rec expression reader (e : expression) =
   | Assignment (operator, left, right) ->
       here (assignment_label operator) [ sub left; sub right ]
   | Comma (left, right) -> here "," [ sub left; sub right ]
+  | Statement_expression body -> here "({})" [ block reader body ]
+  | Va_arg { list; type_name = t } ->
+      here "va_arg" [ sub list; type_name reader t ]
+  | Offsetof { type_name = t; member; designators } ->
+      here "offsetof"
+        (type_name reader t :: identifier member
+        :: List.map (designator reader) designators)
 
 and association reader (a : generic_association) =
   match a.node with
@@ -212,18 +270,37 @@ and specifier reader (s : declaration_specifier spanned) =
       here "alignas" [ type_name reader t ]
   | Alignment_specifier (Alignas_expression e) ->
       here "alignas" [ expression reader e ]
+  | Attributes list -> here "attributes" (List.map (attribute reader) list)
   | Type_specifier (Basic basic) -> here (basic_label basic) []
   | Type_specifier (Typedef_name name) -> here name []
   | Type_specifier (Atomic_type t) -> here "atomic" [ type_name reader t ]
-  | Type_specifier (Struct_or_union { kind; tag; members }) ->
+  | Type_specifier (Typeof_expression e) ->
+      here "typeof" [ expression reader e ]
+  | Type_specifier (Typeof_type t) -> here "typeof" [ type_name reader t ]
+  | Type_specifier (Struct_or_union { kind; attributes; tag; members }) ->
       let label = match kind with Struct -> "struct" | Union -> "union" in
+      let body =
+        match members with
+        | None -> []
+        | Some [] -> [ leaf "{}" ]
+        | Some members -> List.map (member reader) members
+      in
       here label
-        (Option.to_list (Option.map identifier tag)
-        @ List.map (member reader) (Option.value members ~default:[]))
-  | Type_specifier (Enum { tag; enumerators }) ->
+        (in_source_order
+           (Option.to_list (Option.map identifier tag)
+           @ body
+           @ List.map (single_attribute reader) attributes))
+  | Type_specifier (Enum { attributes; tag; underlying; enumerators }) ->
+      let underlying_part list =
+        { label = ":"; span = None; parts = specifiers reader list }
+      in
       here "enum"
-        (Option.to_list (Option.map identifier tag)
-        @ List.map (enumerator reader) (Option.value enumerators ~default:[]))
+        (in_source_order
+           (Option.to_list (Option.map identifier tag)
+           @ Option.to_list (Option.map underlying_part underlying)
+           @ List.map (enumerator reader)
+               (Option.value enumerators ~default:[])
+           @ List.map (single_attribute reader) attributes))
 
 and member reader (m : member_declaration) =
   match m.node with
@@ -236,15 +313,19 @@ and member reader (m : member_declaration) =
 
 and member_declarator reader (d : member_declarator) =
   match d.node with
-  | Field inner -> declarator reader inner
-  | Bit_field { declarator = inner; width } ->
+  | Field { declarator = inner; attributes = [] } -> declarator reader inner
+  | Field { declarator = inner; attributes } ->
+      node d.span "field"
+        (declarator reader inner :: attribute_group reader attributes)
+  | Bit_field { declarator = inner; width; attributes } ->
       node d.span "bits"
         (Option.to_list (Option.map (declarator reader) inner)
-        @ [ expression reader width ])
+        @ (expression reader width :: attribute_group reader attributes))
 
 and enumerator reader (e : enumerator) =
   node e.span e.node.name.node
-    (Option.to_list (Option.map (expression reader) e.node.value))
+    (attribute_group reader e.node.attributes
+    @ Option.to_list (Option.map (expression reader) e.node.value))
 
 and declarator reader (d : declarator) =
   let here = node d.span in
@@ -256,6 +337,8 @@ and declarator reader (d : declarator) =
   | Parenthesized_declarator inner -> here "paren" [ declarator reader inner ]
   | Pointer { qualifiers = list; inner } ->
       here "pointer" (qualifiers list @ inner_part inner)
+  | Block_pointer { qualifiers = list; inner } ->
+      here "block-pointer" (qualifiers list @ inner_part inner)
   | Array { inner; qualifiers = list; size } ->
       here "array" (inner_part inner @ qualifiers list @ array_size reader size)
   | Function { inner; parameters = Prototype { parameters; variadic } } ->
@@ -277,7 +360,8 @@ and array_size reader = function
 and parameter reader (p : parameter) =
   node p.span ""
     (specifiers reader p.node.specifiers
-    @ Option.to_list (Option.map (declarator reader) p.node.declarator))
+    @ Option.to_list (Option.map (declarator reader) p.node.declarator)
+    @ attribute_group reader p.node.attributes)
 
 and initialiser reader = function
   | Expression_initialiser e -> expression reader e
@@ -297,19 +381,34 @@ and designated_initialiser reader (d : designated_initialiser) =
 and designator reader (d : designator) =
   match d.node with
   | Index index -> node d.span "[]" [ expression reader index ]
+  | Index_range { low; high } ->
+      node d.span "[...]" [ expression reader low; expression reader high ]
   | Member_designator name -> node d.span ("." ^ name.node) []
 
 and static_assertion reader { condition; message } =
   [ expression reader condition; group (string_literal reader message) ]
 
-let init_declarator reader (d : init_declarator) =
-  match d.node.initialiser with
-  | None -> declarator reader d.node.declarator
-  | Some value ->
+(* A declarator with nothing after it is shown alone; one with an
+   initialiser as [init], and one with only an asm label or attributes as
+   [declarator]. *)
+and init_declarator reader (d : init_declarator) =
+  let trailing =
+    Option.to_list
+      (Option.map
+         (fun label -> section "asm" (string_literal reader label))
+         d.node.asm_label)
+    @ attribute_group reader d.node.attributes
+  in
+  match (d.node.initialiser, trailing) with
+  | None, [] -> declarator reader d.node.declarator
+  | None, trailing ->
+      node d.span "declarator" (declarator reader d.node.declarator :: trailing)
+  | Some value, trailing ->
       node d.span "init"
-        [ declarator reader d.node.declarator; initialiser reader value ]
+        ((declarator reader d.node.declarator :: trailing)
+        @ [ initialiser reader value ])
 
-let declaration reader (d : declaration) =
+and declaration reader (d : declaration) =
   match d.node with
   | Static_assert assertion ->
       node d.span "static-assert" (static_assertion reader assertion)
@@ -318,22 +417,20 @@ let declaration reader (d : declaration) =
         (group (specifiers reader list)
         :: List.map (init_declarator reader) declarators)
 
-(* An absent part of a statement, so that the parts keep their places. *)
-let absent = leaf "_"
-
-let optional dump = function Some part -> dump part | None -> absent
-
-let label reader (l : label) =
+and label reader (l : label) =
   match l.node with
   | Named_label name -> node l.span name []
   | Case_label value -> node l.span "case" [ expression reader value ]
+  | Case_range { low; high } ->
+      node l.span "case-range"
+        [ expression reader low; expression reader high ]
   | Default_label -> node l.span "default" []
 
-let for_clause reader = function
+and for_clause reader = function
   | Clause_declaration d -> declaration reader d
   | Clause_expression e -> expression reader e
 
-let rec statement reader (s : statement) =
+and statement reader (s : statement) =
   let here = node s.span in
   let sub = statement reader in
   let value = expression reader in
@@ -361,6 +458,7 @@ let rec statement reader (s : statement) =
   | Continue -> here "continue" []
   | Break -> here "break" []
   | Return e -> here "return" (Option.to_list (Option.map value e))
+  | Asm a -> here "asm" (assembler reader a)
 
 and block reader (b : block) =
   node b.span "block" (List.map (block_item reader) b.node)
@@ -368,6 +466,37 @@ and block reader (b : block) =
 and block_item reader = function
   | Block_declaration d -> declaration reader d
   | Block_statement s -> statement reader s
+
+(* The qualifiers, the template and, for extended assembler, its four
+   sections. *)
+and assembler reader (a : assembler) =
+  let qualifier (q : asm_qualifier spanned) =
+    node q.span (asm_qualifier_label q.node) []
+  in
+  let symbolic_name (name : identifier) =
+    node name.span ("[" ^ name.node ^ "]") []
+  in
+  let operand (o : asm_operand) =
+    node o.span "operand"
+      (Option.to_list (Option.map symbolic_name o.node.symbolic_name)
+      @ [
+          group (string_literal reader o.node.constraint_);
+          expression reader o.node.value;
+        ])
+  in
+  let operands = function
+    | None -> []
+    | Some { outputs; inputs; clobbers; labels } ->
+        [
+          section "outputs" (List.map operand outputs);
+          section "inputs" (List.map operand inputs);
+          section "clobbers"
+            (List.map (fun c -> group (string_literal reader c)) clobbers);
+          section "labels" (List.map identifier labels);
+        ]
+  in
+  List.map qualifier a.qualifiers
+  @ (group (string_literal reader a.template) :: operands a.operands)
 
 let function_body reader = function
   | Parsed body -> block reader body
@@ -381,7 +510,10 @@ let external_declaration reader = function
            group (specifiers reader definition.specifiers);
            declarator reader definition.declarator;
          ]
+        @ attribute_group reader definition.attributes
         @ List.map (declaration reader) definition.declarations
         @ [ function_body reader definition.body ])
+  | Top_level_asm { span; node = a } -> node span "asm" (assembler reader a)
+  | Empty_declaration span -> node span ";" []
 
 let translation_unit reader unit = List.map (external_declaration reader) unit

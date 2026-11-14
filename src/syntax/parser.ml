@@ -14,7 +14,10 @@ type error = Reader.error = { location : Location.t; message : string }
    substatement are read in loops, so between two such tokens the
    recursion has a constant depth: the ten precedences of
    [binary_expression] and a few frames of declarations and statements.
-   So [advance] bounds the recursion by bounding the brackets open. C11
+   A specifier holds another only inside a bracket (a structure body,
+   [_Atomic (], [typeof (]), and the fixed type of an enumeration takes
+   no specifier that holds another (see [allowed]). So [advance] bounds
+   the recursion by bounding the brackets open. C11
    5.2.4.1 asks for 63 levels of parentheses in an expression; 256 is the
    bracket depth Clang accepts by default, enough for real code, and
    keeps the stack small. *)
@@ -38,9 +41,9 @@ type lexeme =
 (* A token the grammar reads and its index in [Reader.t.tokens]. *)
 type grammar_token = { lexeme : lexeme; index : int }
 
-(* What the cursor holds open: a bracket, or the [?] of a conditional,
-   which its [:] closes. *)
-type opening = Open_bracket | Open_conditional
+(* What the cursor holds open: a bracket and the bracket that closes it,
+   or the [?] of a conditional, which its [:] closes. *)
+type opening = Open_bracket of P.t | Open_conditional
 
 (* What an ordinary identifier in scope is. Stage 1 adds the universe
    names of design 2.3. *)
@@ -155,17 +158,40 @@ let open_one state opening =
          max_nesting);
   state.open_brackets <- opening :: state.open_brackets
 
+let closer_of = function
+  | P.Left_paren -> P.Right_paren
+  | P.Left_bracket -> P.Right_bracket
+  | P.Left_brace -> P.Right_brace
+  | _ -> invalid_arg "Parser.closer_of"
+
+let quoted_closer = function
+  | P.Right_paren -> "`)`"
+  | P.Right_bracket -> "`]`"
+  | P.Right_brace -> "`}`"
+  | _ -> invalid_arg "Parser.quoted_closer"
+
+(* A closing bracket that is not the one the innermost opening needs is
+   an error here, so that no skip of unread tokens can end at the wrong
+   bracket or let a closer end a [?]. *)
+let close state closer =
+  match state.open_brackets with
+  | Open_bracket expected :: outer when expected = closer ->
+      state.open_brackets <- outer
+  | Open_bracket expected :: _ -> fail_expected state (quoted_closer expected)
+  | Open_conditional :: _ -> fail_expected state "`:` of a conditional"
+  | [] -> fail_expected state "a token that opens no bracket"
+
 (* The one way the cursor moves, called only after [peek] has matched a
-   token. A closing bracket closes the innermost one open, whatever its
-   kind: the grammar reports a mismatch, and in a body it skips, the body
-   ends where the brackets say. A [:] closes a [?] and nothing else. *)
+   token. A [:] closes a [?] and nothing else. *)
 let advance state =
   (match (peek state, state.open_brackets) with
-  | Punctuator_token (P.Left_paren | P.Left_bracket | P.Left_brace), _ ->
-      open_one state Open_bracket
+  | Punctuator_token
+      ((P.Left_paren | P.Left_bracket | P.Left_brace) as opener), _ ->
+      open_one state (Open_bracket (closer_of opener))
   | Punctuator_token P.Question, _ -> open_one state Open_conditional
-  | Punctuator_token (P.Right_paren | P.Right_bracket | P.Right_brace),
-    _ :: outer
+  | Punctuator_token
+      ((P.Right_paren | P.Right_bracket | P.Right_brace) as closer), _ ->
+      close state closer
   | Punctuator_token P.Colon, Open_conditional :: outer ->
       state.open_brackets <- outer
   | _ -> ());
@@ -221,6 +247,8 @@ type specifier_word =
   | Enum_word
   | Alignas_word
   | Typedef_word of string
+  | Typeof_word
+  | Attribute_word
 
 let keyword_specifier_word state offset keyword =
   match (keyword : Keyword.t) with
@@ -233,6 +261,10 @@ let keyword_specifier_word state offset keyword =
   | Const -> Some (Qualifier_word Const)
   | Restrict -> Some (Qualifier_word Restrict)
   | Volatile -> Some (Qualifier_word Volatile)
+  | Nonnull -> Some (Qualifier_word (Nullability Nonnull))
+  | Nullable -> Some (Qualifier_word (Nullability Nullable))
+  | Nullable_result -> Some (Qualifier_word (Nullability Nullable_result))
+  | Null_unspecified -> Some (Qualifier_word (Nullability Null_unspecified))
   | Atomic ->
       if peek_at state (offset + 1) = Punctuator_token P.Left_paren then
         Some Atomic_type_word
@@ -250,12 +282,16 @@ let keyword_specifier_word state offset keyword =
   | Unsigned -> Some (Basic_word Unsigned)
   | Bool -> Some (Basic_word Bool)
   | Complex -> Some (Basic_word Complex)
+  | Float16 -> Some (Basic_word Float16)
   | Struct -> Some (Struct_word Struct)
   | Union -> Some (Struct_word Union)
   | Enum -> Some Enum_word
   | Alignas -> Some Alignas_word
+  | Typeof -> Some Typeof_word
+  | Attribute -> Some Attribute_word
   | Break | Case | Continue | Default | Do | Else | For | Goto | If | Return
-  | Sizeof | Switch | While | Alignof | Generic | Imaginary | Static_assert ->
+  | Sizeof | Switch | While | Alignof | Generic | Imaginary | Static_assert
+  | Asm | Extension | Builtin_va_arg | Builtin_offsetof ->
       None
 
 (* The specifier that the token [offset] places ahead begins. A typedef
@@ -272,9 +308,26 @@ let specifier_word state offset =
 
 let starts_declaration state offset = specifier_word state offset <> None
 
-(* A declaration begins with a specifier or with [_Static_assert]. *)
+(* GNU [__extension__] may come before a declaration or an expression. It
+   only silences pedantic warnings about what follows it, so the tree
+   keeps it only in the span of the node around it. *)
+
+let rec extensions_ahead state offset =
+  if peek_at state offset = Keyword_token Keyword.Extension then
+    extensions_ahead state (offset + 1)
+  else offset
+
+let skip_extensions state =
+  while accept_keyword state Keyword.Extension do
+    ()
+  done
+
+(* A declaration begins with a specifier or with [_Static_assert], after
+   any [__extension__]. *)
 let begins_declaration state =
-  starts_declaration state 0 || peek state = Keyword_token Keyword.Static_assert
+  let offset = extensions_ahead state 0 in
+  starts_declaration state offset
+  || peek_at state offset = Keyword_token Keyword.Static_assert
 
 (* A label begins a labeled statement (6.8.1): [case], [default], or an
    identifier and a [:], whatever the identifier names, since labels have
@@ -288,13 +341,14 @@ let begins_label state =
       false
 
 (* A specifier-qualifier list begins a type name (6.7.7). It may hold an
-   alignment specifier, as in C17 (DR 444). *)
+   alignment specifier, as in C17 (DR 444), and GNU attributes. *)
 let starts_type_name state offset =
   match specifier_word state offset with
   | Some (Storage_word _ | Function_word _) | None -> false
   | Some
       ( Qualifier_word _ | Basic_word _ | Atomic_type_word | Struct_word _
-      | Enum_word | Alignas_word | Typedef_word _ ) ->
+      | Enum_word | Alignas_word | Typedef_word _ | Typeof_word
+      | Attribute_word ) ->
       true
 
 (* [(] followed by a type name, [offset] tokens ahead: a cast, a compound
@@ -304,18 +358,28 @@ let opens_type_name_at state offset =
   && starts_type_name state (offset + 1)
 
 (* Which specifiers a context takes: a specifier-qualifier list has no
-   storage class or function specifier. *)
-type specifier_context = Declaration_specifiers | Specifier_qualifiers
+   storage class or function specifier. The fixed type of an enumeration
+   is an integer type that is not an enumeration (C23 6.7.2.2p5), so it
+   takes only the specifiers that hold no other specifier: the list
+   cannot nest, and needs no bracket to bound its recursion. *)
+type specifier_context =
+  | Declaration_specifiers
+  | Specifier_qualifiers
+  | Enumeration_type
 
 let allowed context word =
   match (context, word) with
   | Specifier_qualifiers, Some (Storage_word _ | Function_word _) -> None
+  | Enumeration_type, Some (Basic_word _ | Qualifier_word _ | Typedef_word _)
+    ->
+      word
+  | Enumeration_type, _ -> None
   | (Declaration_specifiers | Specifier_qualifiers), _ -> word
 
 let is_type_specifier = function
   | Type_specifier _ -> true
   | Storage_class _ | Type_qualifier _ | Function_specifier _
-  | Alignment_specifier _ ->
+  | Alignment_specifier _ | Attributes _ ->
       false
 
 let declares_typedef specifiers =
@@ -359,7 +423,8 @@ let type_qualifiers state =
         loop (finish state start qualifier :: qualifiers)
     | Some
         ( Storage_word _ | Function_word _ | Basic_word _ | Atomic_type_word
-        | Struct_word _ | Enum_word | Alignas_word | Typedef_word _ )
+        | Struct_word _ | Enum_word | Alignas_word | Typedef_word _
+        | Typeof_word | Attribute_word )
     | None ->
         List.rev qualifiers
   in
@@ -379,6 +444,129 @@ let string_literal state =
   match loop [] with
   | [] -> fail_expected state "a string literal"
   | pieces -> pieces
+
+(* Items that commas separate, none where a [:] or a [)] follows: the
+   sections of extended assembler. *)
+let comma_separated state read =
+  match peek state with
+  | Punctuator_token (P.Colon | P.Right_paren) -> []
+  | _ ->
+      let rec loop items =
+        let items = read state :: items in
+        if accept state P.Comma then loop items else List.rev items
+      in
+      loop []
+
+(* Consumes the tokens from an opening bracket to the one that closes it,
+   unread, and returns their span; [expected] names the closer for the
+   end of input. The cursor matches every bracket, so the skip ends at
+   the right one, and the bound on nesting holds here too. *)
+let skip_balanced state expected =
+  let start = state.position in
+  let outside = List.length state.open_brackets in
+  advance state;
+  let rec loop () =
+    if List.length state.open_brackets > outside then begin
+      if peek state = End_of_input then fail_expected state expected;
+      advance state;
+      loop ()
+    end
+  in
+  loop ();
+  span_from state start
+
+(* GNU attributes (GCC manual 6.39). *)
+
+(* GCC takes [__name__] for the attribute [name], so that a header can
+   name one that a macro of the program would replace. *)
+let attribute_name state =
+  let start = state.position in
+  match peek state with
+  | Identifier_token _ | Keyword_token _ ->
+      let spelling = next_spelling state in
+      let length = String.length spelling in
+      let name =
+        if
+          length > 4
+          && String.starts_with ~prefix:"__" spelling
+          && String.ends_with ~suffix:"__" spelling
+        then String.sub spelling 2 (length - 4)
+        else spelling
+      in
+      advance state;
+      finish state start name
+  | Punctuator_token _ | Number_token | Character_token _ | String_token _
+  | End_of_input ->
+      fail_expected state "an attribute name"
+
+let attribute state =
+  let start = state.position in
+  let name = attribute_name state in
+  let arguments =
+    if peek state = Punctuator_token P.Left_paren then
+      Some
+        (skip_balanced state
+           "`)` to end the arguments of an attribute")
+    else None
+  in
+  finish state start { name; arguments }
+
+(* After the [__attribute__], up to and including its [))]: attributes
+   separated by commas, where an empty one is allowed. *)
+let attribute_list state =
+  expect state P.Left_paren "`((` after `__attribute__`";
+  expect state P.Left_paren "`((` after `__attribute__`";
+  let rec loop attributes =
+    if accept state P.Comma then loop attributes
+    else if peek state = Punctuator_token P.Right_paren then
+      List.rev attributes
+    else
+      let attributes = attribute state :: attributes in
+      if accept state P.Comma then loop attributes else List.rev attributes
+  in
+  let attributes = loop [] in
+  expect state P.Right_paren "`,` or `)` after an attribute";
+  expect state P.Right_paren "`))` to end `__attribute__`";
+  attributes
+
+(* Any number of [__attribute__((...))] in a row, as one list. *)
+let attributes state =
+  let rec loop reversed =
+    if accept_keyword state Keyword.Attribute then
+      loop (List.rev_append (attribute_list state) reversed)
+    else List.rev reversed
+  in
+  loop []
+
+(* GNU assembler (GCC manual 6.11). *)
+
+(* An optional asm label after a declarator. *)
+let asm_label state =
+  if accept_keyword state Keyword.Asm then begin
+    expect state P.Left_paren "`(` after `asm`";
+    let label = string_literal state in
+    expect state P.Right_paren "`)` after an asm label";
+    Some label
+  end
+  else None
+
+let asm_qualifiers state =
+  let rec loop qualifiers =
+    let start = state.position in
+    let qualifier =
+      match peek state with
+      | Keyword_token Keyword.Volatile -> Some Asm_volatile
+      | Keyword_token Keyword.Inline -> Some Asm_inline
+      | Keyword_token Keyword.Goto -> Some Asm_goto
+      | _ -> None
+    in
+    match qualifier with
+    | Some qualifier ->
+        advance state;
+        loop (finish state start qualifier :: qualifiers)
+    | None -> List.rev qualifiers
+  in
+  loop []
 
 (* Operators. *)
 
@@ -441,7 +629,8 @@ let is_unary_expression expression =
   | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
   | Generic _ | Compound_literal _ | Subscript _ | Call _ | Member _
   | Pointer_member _ | Post_increment _ | Post_decrement _ | Unary _
-  | Sizeof_expression _ | Sizeof_type _ | Alignof _ ->
+  | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Statement_expression _
+  | Va_arg _ | Offsetof _ ->
       true
 
 (* Which declarators a context takes: a declaration names what it
@@ -466,9 +655,68 @@ let rec is_name declarator =
   match declarator.node with
   | Name _ -> true
   | Parenthesized_declarator inner -> is_name inner
-  | Pointer _ | Array _ | Function _ -> false
+  | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
 
-(* The grammar: declarations and expressions, which nest in each other. *)
+(* What the declarators of a declaration with these specifiers declare,
+   worked out once per declaration. *)
+let binding_of specifiers =
+  if declares_typedef specifiers then Typedef_name_binding
+  else Ordinary_binding
+
+let declare_declarator state binding declarator =
+  Option.iter
+    (fun name -> declare state name binding)
+    (declared_name declarator)
+
+(* A declaration read up to the end of its first declarator and the asm
+   label and attributes after it, where a function definition parts from
+   it, or read whole if it has no declarator. *)
+type declaration_start =
+  | Complete of declaration
+  | First_declarator of {
+      start : int;
+      specifiers : specifiers;
+      declarator_start : int;
+      declarator : declarator;
+      named_function : named_function option;
+      asm_label : string_literal option;
+      attributes : attribute list;
+    }
+
+(* A statement read up to its substatement, which ends it or, for [if]
+   and [do], which more tokens may follow. [outer] is the scope around
+   the statement, which closing it restores: a selection or iteration
+   statement is a block, and so is each of its substatements (6.8.4p3,
+   6.8.5p5). A label opens no scope, so its [outer] is None. *)
+type open_statement = {
+  start : int;
+  outer : binding Scope.t option;
+  kind : open_kind;
+}
+
+and open_kind =
+  | Open_labeled of label
+  | Open_if of {
+      condition : expression;
+      condition_scope : binding Scope.t;
+          (** [outer] and what the condition declared *)
+    }
+  | Open_else of { condition : expression; then_branch : statement }
+  | Open_switch of expression
+  | Open_while of expression
+  | Open_do
+  | Open_for of {
+      clause : for_clause option;
+      condition : expression option;
+      step : expression option;
+    }
+
+(* What the substatement of an open statement leaves: the statement
+   closed, or, after the [else] of an [if], open again. *)
+type closing = Closed of statement_node | Reopened of open_kind
+
+(* The grammar: declarations, expressions and statements, which nest in
+   each other through statement expressions. *)
 
 let rec specifiers state context =
   let rec loop seen_type_specifier specifiers =
@@ -501,8 +749,20 @@ and specifier state word =
     | Alignas_word -> Alignment_specifier (alignment state)
     | Struct_word kind -> Type_specifier (struct_or_union state kind)
     | Enum_word -> Type_specifier (enum_specifier state)
+    | Typeof_word -> Type_specifier (typeof_specifier state)
+    | Attribute_word -> Attributes (attribute_list state)
   in
   finish state start node
+
+(* After the [typeof]. *)
+and typeof_specifier state =
+  expect state P.Left_paren "`(` after `typeof`";
+  let specifier =
+    if starts_type_name state 0 then Typeof_type (type_name state)
+    else Typeof_expression (expression state)
+  in
+  expect state P.Right_paren "`)` after the operand of `typeof`";
+  specifier
 
 and alignment state =
   expect state P.Left_paren "`(` after `_Alignas`";
@@ -513,7 +773,10 @@ and alignment state =
   expect state P.Right_paren "`)` after the operand of `_Alignas`";
   alignment
 
+(* The attributes after the keyword and after a body apply to the type
+   (GCC manual 6.39.5). *)
 and struct_or_union state kind =
+  let leading = attributes state in
   let tag = optional_identifier state in
   let members =
     if accept state P.Left_brace then Some (member_declarations state)
@@ -521,18 +784,21 @@ and struct_or_union state kind =
   in
   if tag = None && members = None then
     fail_expected state "a tag or `{` after `struct` or `union`";
-  Struct_or_union { kind; tag; members }
+  let trailing = if members = None then [] else attributes state in
+  Struct_or_union { kind; attributes = leading @ trailing; tag; members }
 
-(* After the [{]: at least one member declaration and the [}]. *)
+(* After the [{]: the member declarations, which GNU C allows to be none,
+   and the [}]. *)
 and member_declarations state =
   let rec loop members =
-    let members = member_declaration state :: members in
-    if accept state P.Right_brace then List.rev members else loop members
+    if accept state P.Right_brace then List.rev members
+    else loop (member_declaration state :: members)
   in
   loop []
 
 and member_declaration state =
   let start = state.position in
+  skip_extensions state;
   if accept_keyword state Keyword.Static_assert then
     finish state start (Member_static_assert (static_assertion state))
   else
@@ -554,24 +820,50 @@ and member_declarators state =
 
 and member_declarator state =
   let start = state.position in
-  if accept state P.Colon then
+  let bit_field declarator =
     let width = constant_expression state in
-    finish state start (Bit_field { declarator = None; width })
+    let attributes = attributes state in
+    finish state start (Bit_field { declarator; width; attributes })
+  in
+  if accept state P.Colon then bit_field None
   else
     let declarator = named_declarator state in
-    if accept state P.Colon then
-      let width = constant_expression state in
-      finish state start (Bit_field { declarator = Some declarator; width })
-    else finish state start (Field declarator)
+    if accept state P.Colon then bit_field (Some declarator)
+    else
+      let attributes = attributes state in
+      finish state start (Field { declarator; attributes })
 
+(* A [:] after the tag is a fixed underlying type where a type name
+   follows it; in a member declaration, where an expression follows it,
+   it begins the width of a bit-field. *)
 and enum_specifier state =
+  let leading = attributes state in
   let tag = optional_identifier state in
+  let underlying =
+    if
+      peek state = Punctuator_token P.Colon && starts_type_name state 1
+    then begin
+      advance state;
+      match specifiers state Enumeration_type with
+      | [] -> fail_expected state "an integer type after `:`"
+      | list -> Some list
+    end
+    else None
+  in
+  let after_type = if underlying = None then [] else attributes state in
   let enumerators =
     if accept state P.Left_brace then Some (enumerators state) else None
   in
   if tag = None && enumerators = None then
     fail_expected state "a tag or `{` after `enum`";
-  Enum { tag; enumerators }
+  let trailing = if enumerators = None then [] else attributes state in
+  Enum
+    {
+      attributes = leading @ after_type @ trailing;
+      tag;
+      underlying;
+      enumerators;
+    }
 
 (* After the [{]: at least one enumerator, an optional [,] and the [}]. *)
 and enumerators state =
@@ -591,11 +883,12 @@ and enumerators state =
 and enumerator state =
   let start = state.position in
   let name = identifier state "an enumerator" in
+  let attributes = attributes state in
   let value =
     if accept state P.Equal then Some (constant_expression state) else None
   in
   declare state name.node Ordinary_binding;
-  finish state start { name; value }
+  finish state start { name; attributes; value }
 
 (* After the [_Static_assert]. *)
 and static_assertion state =
@@ -634,23 +927,29 @@ and declarator state form = fst (declarator_and_function state form)
 
 (* A declarator, None where an abstract one is empty, and its
    {!named_function} if a function derivation applies to its name. The
-   leftmost [*] is the outermost node (6.7.6.1). *)
+   leftmost [*] or [^] is the outermost node (6.7.6.1). *)
 and declarator_and_function state form =
   let rec pointers innermost_first =
-    if peek state = Punctuator_token P.Star then begin
-      let start = state.position in
-      advance state;
-      let qualifiers = type_qualifiers state in
-      pointers ((start, qualifiers) :: innermost_first)
-    end
-    else innermost_first
+    let start = state.position in
+    match peek state with
+    | Punctuator_token P.Star ->
+        advance state;
+        let qualifiers = type_qualifiers state in
+        let pointer inner = Pointer { qualifiers; inner } in
+        pointers ((start, pointer) :: innermost_first)
+    | Punctuator_token P.Caret ->
+        advance state;
+        let qualifiers = type_qualifiers state in
+        let block_pointer inner = Block_pointer { qualifiers; inner } in
+        pointers ((start, block_pointer) :: innermost_first)
+    | _ -> innermost_first
   in
   let innermost_first = pointers [] in
   let direct, named_function = direct_declarator state form in
-  let pointer inner (start, qualifiers) =
-    Some (finish state start (Pointer { qualifiers; inner }))
+  let derive inner (start, pointer) =
+    Some (finish state start (pointer inner))
   in
-  (List.fold_left pointer direct innermost_first, named_function)
+  (List.fold_left derive direct innermost_first, named_function)
 
 and direct_declarator state form =
   let start = state.position in
@@ -724,9 +1023,14 @@ and array_suffix state =
 
 (* After the [(], up to and including the [)], in the prototype scope
    that the caller opens (6.2.1p4). An identifier list belongs to a
-   declarator with a name. *)
+   declarator with a name. A [...] alone is C23's, which Clang accepts
+   and the SDK's [tgmath.h] uses. *)
 and parameters state form =
   if accept state P.Right_paren then Identifier_list []
+  else if accept state P.Ellipsis then begin
+    expect state P.Right_paren "`)` after `...`";
+    Prototype { parameters = []; variadic = true }
+  end
   else if starts_declaration state 0 then begin
     let parameters, variadic = parameter_list state in
     expect state P.Right_paren "`,` or `)` after a parameter";
@@ -754,10 +1058,11 @@ and parameter state =
   let specifiers = specifiers state Declaration_specifiers in
   if specifiers = [] then fail_expected state "a parameter declaration";
   let declarator = declarator state Named_or_abstract in
+  let attributes = attributes state in
   Option.iter
     (fun name -> declare state name Ordinary_binding)
     (Option.bind declarator declared_name);
-  finish state start ({ specifiers; declarator } : parameter_node)
+  finish state start ({ specifiers; declarator; attributes } : parameter_node)
 
 (* A typedef name is refused in an identifier list: it would begin a
    parameter declaration. *)
@@ -781,7 +1086,8 @@ and initialiser state =
     Braced (initialiser_list state)
   else Expression_initialiser (assignment_expression state)
 
-(* From the [{] to the [}]: at least one value and an optional [,]. *)
+(* From the [{] to the [}]: values, which GNU C allows to be none, and an
+   optional [,] after the last. *)
 and initialiser_list state =
   let start = state.position in
   expect state P.Left_brace "`{`";
@@ -793,21 +1099,25 @@ and initialiser_list state =
       if accept state P.Right_brace then List.rev values else loop values
     end
   in
-  let values = loop [] in
+  let values = if accept state P.Right_brace then [] else loop [] in
   finish state start values
 
 and designated_initialiser state =
   let start = state.position in
-  let rec designators reversed =
-    match peek state with
-    | Punctuator_token (P.Left_bracket | P.Dot) ->
-        designators (designator state :: reversed)
-    | _ -> List.rev reversed
-  in
-  let designators = designators [] in
+  let designators = designators state in
   if designators <> [] then expect state P.Equal "`=` after a designator";
   let initialiser = initialiser state in
   finish state start { designators; initialiser }
+
+(* Any number of designators in a row. *)
+and designators state =
+  let rec loop reversed =
+    match peek state with
+    | Punctuator_token (P.Left_bracket | P.Dot) ->
+        loop (designator state :: reversed)
+    | _ -> List.rev reversed
+  in
+  loop []
 
 and designator state =
   let start = state.position in
@@ -817,8 +1127,14 @@ and designator state =
   else begin
     expect state P.Left_bracket "`[` or `.`";
     let index = constant_expression state in
+    let node =
+      if accept state P.Ellipsis then
+        let high = constant_expression state in
+        Index_range { low = index; high }
+      else Index index
+    in
     expect state P.Right_bracket "`]` after a designator";
-    finish state start (Index index)
+    finish state start node
   end
 
 (* Expressions (C11 6.5). *)
@@ -895,11 +1211,15 @@ and binary_expression state minimum =
    unary operators, [++], [--] and [sizeof]) up to the operand they apply
    to, and the nodes are made from the innermost prefix out. After [++],
    [--] and [sizeof] comes a unary-expression, where [(] type-name [)]
-   can only begin a compound literal. *)
+   can only begin a compound literal; GNU [__extension__] makes no node
+   and takes a cast-expression. *)
 and cast_expression state =
   let rec collect prefixes ~cast_allowed =
     let start = state.position in
     match peek state with
+    | Keyword_token Keyword.Extension ->
+        advance state;
+        collect prefixes ~cast_allowed:true
     | Punctuator_token P.Left_paren when opens_type_name_at state 0 ->
         let type_name = parenthesized_type_name state in
         if peek state = Punctuator_token P.Left_brace then
@@ -1025,6 +1345,12 @@ and primary_expression state =
   | String_token _ ->
       let pieces = string_literal state in
       finish state start (String pieces)
+  | Punctuator_token P.Left_paren
+    when peek_at state 1 = Punctuator_token P.Left_brace ->
+      advance state;
+      let body = block state in
+      expect state P.Right_paren "`)` after a statement expression";
+      finish state start (Statement_expression body)
   | Punctuator_token P.Left_paren ->
       advance state;
       let inner = expression state in
@@ -1033,7 +1359,32 @@ and primary_expression state =
   | Keyword_token Keyword.Generic ->
       advance state;
       generic_selection state start
+  | Keyword_token Keyword.Builtin_va_arg ->
+      advance state;
+      va_arg state start
+  | Keyword_token Keyword.Builtin_offsetof ->
+      advance state;
+      offsetof state start
   | _ -> fail_expected state "an expression"
+
+(* After the [__builtin_va_arg]. *)
+and va_arg state start =
+  expect state P.Left_paren "`(` after `__builtin_va_arg`";
+  let list = assignment_expression state in
+  expect state P.Comma "`,` after the list of `__builtin_va_arg`";
+  let type_name = type_name state in
+  expect state P.Right_paren "`)` after the type name of `__builtin_va_arg`";
+  finish state start (Va_arg { list; type_name })
+
+(* After the [__builtin_offsetof]. *)
+and offsetof state start =
+  expect state P.Left_paren "`(` after `__builtin_offsetof`";
+  let type_name = type_name state in
+  expect state P.Comma "`,` after the type name of `__builtin_offsetof`";
+  let member = identifier state "a member name" in
+  let designators = designators state in
+  expect state P.Right_paren "`)` after the member of `__builtin_offsetof`";
+  finish state start (Offsetof { type_name; member; designators })
 
 (* After the [_Generic] (6.5.1.1). *)
 and generic_selection state start =
@@ -1063,41 +1414,18 @@ and generic_association state =
 
 (* Declarations (C11 6.7). *)
 
-(* What the declarators of a declaration with these specifiers declare,
-   worked out once per declaration. *)
-let binding_of specifiers =
-  if declares_typedef specifiers then Typedef_name_binding
-  else Ordinary_binding
-
-let declare_declarator state binding declarator =
-  Option.iter
-    (fun name -> declare state name binding)
-    (declared_name declarator)
-
 (* A declarator's identifier is in scope from the end of the declarator,
    before its initialiser (6.2.1p7). *)
-let init_declarator state binding start declarator =
+and init_declarator state binding start declarator asm_label attributes =
   declare_declarator state binding declarator;
   let initialiser =
     if accept state P.Equal then Some (initialiser state) else None
   in
-  finish state start { declarator; initialiser }
+  finish state start { declarator; asm_label; attributes; initialiser }
 
-(* A declaration read up to the end of its first declarator, where a
-   function definition parts from it, or read whole if it has no
-   declarator. *)
-type declaration_start =
-  | Complete of declaration
-  | First_declarator of {
-      start : int;
-      specifiers : specifiers;
-      declarator_start : int;
-      declarator : declarator;
-      named_function : named_function option;
-    }
-
-let declaration_start state =
+and declaration_start state =
   let start = state.position in
+  skip_extensions state;
   if accept_keyword state Keyword.Static_assert then
     Complete (finish state start (Static_assert (static_assertion state)))
   else begin
@@ -1109,70 +1437,55 @@ let declaration_start state =
     else
       let declarator_start = state.position in
       let declarator, named_function = named_declarator_and_function state in
+      let asm_label = asm_label state in
+      let attributes = attributes state in
       First_declarator
-        { start; specifiers; declarator_start; declarator; named_function }
+        {
+          start;
+          specifiers;
+          declarator_start;
+          declarator;
+          named_function;
+          asm_label;
+          attributes;
+        }
   end
 
-(* The rest of a declaration whose first declarator has been read. *)
-let declaration_rest state start specifiers first_start first =
-  let binding = binding_of specifiers in
-  let rec loop declarators =
-    if accept state P.Comma then
-      let declarator_start = state.position in
-      let declarator = named_declarator state in
-      loop
-        (init_declarator state binding declarator_start declarator
-        :: declarators)
-    else List.rev declarators
-  in
-  let declarators =
-    loop [ init_declarator state binding first_start first ]
-  in
-  expect state P.Semicolon "`;` after a declaration";
-  finish state start (Declaration { specifiers; declarators })
+and declaration state = declaration_of_start state (declaration_start state)
 
-let declaration state =
-  match declaration_start state with
+(* The declaration that [declaration_start] began: the first declarator's
+   initialiser and the declarators after it. *)
+and declaration_of_start state = function
   | Complete declaration -> declaration
-  | First_declarator { start; specifiers; declarator_start; declarator; _ } ->
-      declaration_rest state start specifiers declarator_start declarator
+  | First_declarator first ->
+      let binding = binding_of first.specifiers in
+      let next_declarator () =
+        let declarator_start = state.position in
+        let declarator = named_declarator state in
+        let label = asm_label state in
+        let attributes = attributes state in
+        init_declarator state binding declarator_start declarator label
+          attributes
+      in
+      let rec loop declarators =
+        if accept state P.Comma then loop (next_declarator () :: declarators)
+        else List.rev declarators
+      in
+      let declarators =
+        loop
+          [
+            init_declarator state binding first.declarator_start
+              first.declarator first.asm_label first.attributes;
+          ]
+      in
+      expect state P.Semicolon "`;` after a declaration";
+      finish state first.start
+        (Declaration { specifiers = first.specifiers; declarators })
 
 (* Statements (C11 6.8). *)
 
-(* A statement read up to its substatement, which ends it or, for [if]
-   and [do], which more tokens may follow. [outer] is the scope around
-   the statement, which closing it restores: a selection or iteration
-   statement is a block, and so is each of its substatements (6.8.4p3,
-   6.8.5p5). A label opens no scope, so its [outer] is None. *)
-type open_statement = {
-  start : int;
-  outer : binding Scope.t option;
-  kind : open_kind;
-}
-
-and open_kind =
-  | Open_labeled of label
-  | Open_if of {
-      condition : expression;
-      condition_scope : binding Scope.t;
-          (** [outer] and what the condition declared *)
-    }
-  | Open_else of { condition : expression; then_branch : statement }
-  | Open_switch of expression
-  | Open_while of expression
-  | Open_do
-  | Open_for of {
-      clause : for_clause option;
-      condition : expression option;
-      step : expression option;
-    }
-
-(* What the substatement of an open statement leaves: the statement
-   closed, or, after the [else] of an [if], open again. *)
-type closing = Closed of statement_node | Reopened of open_kind
-
 (* [(] expression [)] after the keyword [keyword]. *)
-let controlling_expression state keyword =
+and controlling_expression state keyword =
   expect state P.Left_paren (Printf.sprintf "`(` after `%s`" keyword);
   let value = expression state in
   expect state P.Right_paren
@@ -1180,7 +1493,7 @@ let controlling_expression state keyword =
   value
 
 (* An optional expression and the token [closing] after it. *)
-let optional_expression state closing expected =
+and optional_expression state closing expected =
   if accept state closing then None
   else
     let value = expression state in
@@ -1188,7 +1501,7 @@ let optional_expression state closing expected =
     Some value
 
 (* After the [for]: the three clauses in their parentheses. *)
-let for_clauses state =
+and for_clauses state =
   expect state P.Left_paren "`(` after `for`";
   let clause =
     if accept state P.Semicolon then None
@@ -1209,13 +1522,19 @@ let for_clauses state =
   (clause, condition, step)
 
 (* A label and its [:], where [begins_label] holds. *)
-let label state =
+and label state =
   let start = state.position in
   let node =
     if accept_keyword state Keyword.Case then begin
       let value = constant_expression state in
+      let node =
+        if accept state P.Ellipsis then
+          let high = constant_expression state in
+          Case_range { low = value; high }
+        else Case_label value
+      in
       expect state P.Colon "`:` after the value of `case`";
-      Case_label value
+      node
     end
     else if accept_keyword state Keyword.Default then begin
       expect state P.Colon "`:` after `default`";
@@ -1236,7 +1555,7 @@ let label state =
    cursor counts, so a chain of [if], [else], loops and labels needs no
    stack: the calls between the loops are tail calls, which [@tailcall]
    keeps so. *)
-let rec statement state = open_statements state []
+and statement state = open_statements state []
 
 and open_statements state opened =
   let start = state.position in
@@ -1342,10 +1661,56 @@ and simple_statement state =
         optional_expression state P.Semicolon "`;` after `return`"
       in
       finish state start (Return value)
+  | Keyword_token Keyword.Asm ->
+      advance state;
+      let assembler = assembler state in
+      expect state P.Semicolon "`;` after `asm`";
+      finish state start (Asm assembler)
   | _ ->
       let value = expression state in
       expect state P.Semicolon "`;` after an expression";
       finish state start (Expression_statement value)
+
+(* After the [asm]: its qualifiers, and its template and operands in
+   parentheses. *)
+and assembler state =
+  let qualifiers = asm_qualifiers state in
+  expect state P.Left_paren "`(` after `asm`";
+  let template = string_literal state in
+  let operands =
+    if peek state = Punctuator_token P.Colon then Some (asm_operands state)
+    else None
+  in
+  expect state P.Right_paren "`:` or `)` in `asm`";
+  { qualifiers; template; operands }
+
+(* At the first [:] after the template. *)
+and asm_operands state =
+  let section read = if accept state P.Colon then read () else [] in
+  let outputs = section (fun () -> comma_separated state asm_operand) in
+  let inputs = section (fun () -> comma_separated state asm_operand) in
+  let clobbers = section (fun () -> comma_separated state string_literal) in
+  let labels =
+    section (fun () ->
+        comma_separated state (fun state -> identifier state "a label"))
+  in
+  { outputs; inputs; clobbers; labels }
+
+and asm_operand state =
+  let start = state.position in
+  let symbolic_name =
+    if accept state P.Left_bracket then begin
+      let name = identifier state "an operand name" in
+      expect state P.Right_bracket "`]` after an operand name";
+      Some name
+    end
+    else None
+  in
+  let constraint_ = string_literal state in
+  expect state P.Left_paren "`(` after the constraint of an operand";
+  let value = expression state in
+  expect state P.Right_paren "`)` after the value of an operand";
+  finish state start { symbolic_name; constraint_; value }
 
 (* From the [{] to the [}], in a block scope of its own. *)
 and block state =
@@ -1374,28 +1739,12 @@ and block_item state =
 
 (* External declarations (C11 6.9). *)
 
-(* Consumes a body unread, up to the bracket that closes its [{]. *)
-let skip_body state =
-  let start = state.position in
-  let outside = List.length state.open_brackets in
-  advance state;
-  let rec loop () =
-    if List.length state.open_brackets > outside then begin
-      if peek state = End_of_input then
-        fail_expected state "`}` to end the function body";
-      advance state;
-      loop ()
-    end
-  in
-  loop ();
-  span_from state start
-
 (* At the [{]. A body that a system header holds is not parsed (design
    13.3): it is written for its own compiler and may use any of its
    extensions. *)
 let function_body state =
   if (token_at state state.position).owner.system_header then
-    Skipped (skip_body state)
+    Skipped (skip_balanced state "`}` to end the function body")
   else Parsed (block state)
 
 (* The declaration list of an old-style definition, up to the [{]. *)
@@ -1422,16 +1771,17 @@ let begins_definition state named_function =
   || takes_declaration_list named_function.parameters
      && within_scope state begins_declaration_list
 
-(* After the declarator of a function. Its parameters and its body are in
-   one block scope, which continues the scope of the parameter list
-   (6.2.1p4). What the declarator declares after its parameter list, the
-   function's own name and any enumerators of its return type, is in
-   scope at file scope and missing from the body's scope. That loses no
-   typedef name: none of them is one, and none can hide a file-scope
-   typedef name, which a declaration at file scope cannot give another
-   meaning (6.2.1p2), so a lookup in the body finds no typedef name
-   either way. *)
-let function_definition state start specifiers declarator named_function =
+(* After the declarator of a function and its attributes. Its parameters
+   and its body are in one block scope, which continues the scope of the
+   parameter list (6.2.1p4). What the declarator declares after its
+   parameter list, the function's own name and any enumerators of its
+   return type, is in scope at file scope and missing from the body's
+   scope. That loses no typedef name: none of them is one, and none can
+   hide a file-scope typedef name, which a declaration at file scope
+   cannot give another meaning (6.2.1p2), so a lookup in the body finds no
+   typedef name either way. *)
+let function_definition state start specifiers declarator attributes
+    named_function =
   declare_declarator state (binding_of specifiers) declarator;
   let file_scope = state.scope in
   state.scope <- named_function.parameter_scope;
@@ -1439,18 +1789,42 @@ let function_definition state start specifiers declarator named_function =
   let body = function_body state in
   state.scope <- file_scope;
   Function_definition
-    (finish state start { specifiers; declarator; declarations; body })
+    (finish state start
+       { specifiers; declarator; attributes; declarations; body })
 
+(* [__extension__] may come before every external declaration; the node
+   holds it in its span. A function definition has no asm label: GCC and
+   Clang take one only in a declaration. *)
 let external_declaration state =
-  match declaration_start state with
-  | Complete declaration -> External_declaration declaration
-  | First_declarator
-      { start; specifiers; declarator; named_function = Some named; _ }
-    when begins_definition state named ->
-      function_definition state start specifiers declarator named
-  | First_declarator { start; specifiers; declarator_start; declarator; _ } ->
-      External_declaration
-        (declaration_rest state start specifiers declarator_start declarator)
+  let start = state.position in
+  match peek_at state (extensions_ahead state 0) with
+  | Punctuator_token P.Semicolon ->
+      skip_extensions state;
+      advance state;
+      Empty_declaration (span_from state start)
+  | Keyword_token Keyword.Asm ->
+      skip_extensions state;
+      advance state;
+      let assembler = assembler state in
+      expect state P.Semicolon "`;` after `asm`";
+      Top_level_asm (finish state start assembler)
+  | _ -> (
+      match declaration_start state with
+      | First_declarator
+          {
+            start;
+            specifiers;
+            declarator;
+            named_function = Some named;
+            asm_label = None;
+            attributes;
+            _;
+          }
+        when begins_definition state named ->
+          function_definition state start specifiers declarator attributes
+            named
+      | declaration_start ->
+          External_declaration (declaration_of_start state declaration_start))
 
 let translation_unit state =
   let rec loop declarations =
@@ -1459,6 +1833,10 @@ let translation_unit state =
   in
   loop []
 
+(* The typedef names that GCC and Clang declare before the first token:
+   [stdarg.h] declares [va_list] with [__builtin_va_list]. *)
+let builtin_typedef_names = [ "__builtin_va_list" ]
+
 let parse reader =
   let state =
     {
@@ -1466,7 +1844,10 @@ let parse reader =
       grammar = grammar_tokens reader;
       position = 0;
       open_brackets = [];
-      scope = Scope.empty;
+      scope =
+        List.fold_left
+          (fun scope name -> Scope.add name Typedef_name_binding scope)
+          Scope.empty builtin_typedef_names;
     }
   in
   match translation_unit state with

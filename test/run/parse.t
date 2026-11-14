@@ -1,8 +1,9 @@
 SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-The parser reads what Clang and GCC write for -E of a C11 file without
-system headers, which need the GNU profile.
+The parser reads what Clang and GCC write for -E of a C11 file and of a
+file that uses the GNU profile (design 13.3). headers.t parses the
+system headers.
 
   $ clang=/usr/bin/clang
   $ gcc=/usr/local/bin/gcc-16
@@ -135,21 +136,135 @@ is written for its own compiler and may use its extensions.
 
   $ mkdir include
   $ cat > include/barrier.h <<'EOF'
-  > static inline void barrier(void) { __asm__ volatile ("" ::: "memory"); }
+  > static inline int pick(int a, int b) { return a ?: b; }
   > EOF
-  $ printf '#include <barrier.h>\nint main(void) { barrier(); }\n' > h.c
-  $ "$clang" -std=c11 -E -isystem include h.c > h-clang.i
+  $ printf '#include <barrier.h>\nint main(void) { return pick(0, 1); }\n' > h.c
+  $ "$clang" -std=gnu11 -E -isystem include h.c > h-clang.i
   $ ./parse_check.exe h-clang.i
-  function barrier
+  function pick
   function main
-  $ "$gcc" -std=c11 -E -isystem include h.c > h-gcc.i
+  $ "$gcc" -std=gnu11 -E -isystem include h.c > h-gcc.i
   $ ./parse_check.exe h-gcc.i
-  function barrier
+  function pick
   function main
 
-A parse error is reported at its presumed location.
+The GNU profile: attributes, __extension__, alternate keywords, asm
+labels, assembler statements and file-scope assembler, typeof, statement
+expressions, case ranges, range designators, the GNU forms of empty
+structures, initialisers and declarations, _Float16, and the va_arg and
+offsetof builtins. Both backends compile the file without a warning.
 
-  $ printf '# 1 "t.c"\nint x;\nint f(void) __attribute__((noreturn));\n' > bad.i
+  $ cat > gnu.c <<'EOF'
+  > __extension__ typedef long long wide;
+  > typedef __builtin_va_list arguments;
+  > struct __attribute__((packed)) packed { char c; int i; }
+  >   __attribute__((aligned(4)));
+  > struct empty {};
+  > union __attribute__((transparent_union)) either { int *i; long *l; };
+  > enum __attribute__((unused)) level {
+  >   LOW __attribute__((deprecated)) = 1, HIGH
+  > };
+  > struct aligned {
+  >   __extension__ int a __attribute__((aligned(8)));
+  >   unsigned b : 3 __attribute__((packed));
+  > };
+  > extern int renamed(void) __asm__("_renamed_symbol") __attribute__((cold));
+  > __attribute__((noreturn)) void stop(void);
+  > int printf_like(const char *, ...)
+  >   __attribute__((__format__(__printf__, 1, 2)));
+  > __const int constant = 1;
+  > static __inline__ int twice(int x) { return 2 * x; }
+  > __typeof__(constant) copy;
+  > typeof(int *) pointer;
+  > _Float16 half;
+  > int alignment = __alignof__(long);
+  > int empty_list[1] = {};
+  > int ranges[8] = { [0 ... 3] = 1, [4 ... 7] = 2 };
+  > int offset = __builtin_offsetof(struct aligned, a);
+  > __asm__(".globl typec_marker\ntypec_marker:");
+  > ;
+  > static int sum(int count, ...) {
+  >   arguments list;
+  >   __builtin_va_start(list, count);
+  >   int total = 0;
+  >   for (int i = 0; i < count; i++) total += __builtin_va_arg(list, int);
+  >   __builtin_va_end(list);
+  >   return total;
+  > }
+  > static int statements(int n) {
+  >   int out = 0;
+  >   int value = ({ int t = twice(n); t + 1; });
+  >   __asm__ __volatile__("" ::: "memory");
+  >   __asm__ ("" : "=r"(out) : "0"(value) : "cc");
+  >   __asm__ goto ("" :::: done);
+  >   switch (n) {
+  >   case 0 ... 9: out += 1; __attribute__((fallthrough));
+  >   default: out += 2;
+  >   }
+  > done:
+  >   return out + sum(2, 1, 2) + __extension__ 0;
+  > }
+  > int main(void) { return statements(3) + offset + ranges[0]; }
+  > EOF
+  $ "$clang" -std=gnu11 -fsyntax-only gnu.c
+  $ "$gcc" -std=gnu11 -fsyntax-only gnu.c
+  $ "$clang" -std=gnu11 -E gnu.c > gnu-clang.i
+  $ ./parse_check.exe gnu-clang.i > gnu-clang.out
+  $ "$gcc" -std=gnu11 -E gnu.c > gnu-gcc.i
+  $ ./parse_check.exe gnu-gcc.i > gnu-gcc.out
+  $ cmp gnu-clang.out gnu-gcc.out
+  $ cat gnu-clang.out
+  declaration wide
+  declaration arguments
+  declaration of a tag
+  declaration of a tag
+  declaration of a tag
+  declaration of a tag
+  declaration of a tag
+  declaration renamed
+  declaration stop
+  declaration printf_like
+  declaration constant
+  function twice
+  declaration copy
+  declaration pointer
+  declaration half
+  declaration alignment
+  declaration empty_list
+  declaration ranges
+  declaration offset
+  assembler
+  empty declaration
+  function sum
+  function statements
+  function main
+
+The macOS SDK's Clang extensions: block pointers, nullability
+qualifiers, a fixed underlying type of an enumeration and a parameter
+list of `...` alone. GCC accepts none of them.
+
+  $ cat > clang.c <<'EOF'
+  > int (^ _Nonnull callback)(int);
+  > void with_block(void (^ _Nullable block)(void) __attribute__((noescape)));
+  > int * _Nullable maybe;
+  > char * _Nonnull const sure = "";
+  > typedef enum : unsigned char { SMALL } small;
+  > __attribute__((overloadable)) int promote(...);
+  > EOF
+  $ "$clang" -std=gnu11 -fsyntax-only clang.c
+  $ "$clang" -std=gnu11 -E clang.c > clang-only.i
+  $ ./parse_check.exe clang-only.i
+  declaration callback
+  declaration with_block
+  declaration maybe
+  declaration sure
+  declaration small
+  declaration promote
+
+A parse error is reported at its presumed location. The conditional
+without a middle operand is GNU C outside the profile.
+
+  $ printf '# 1 "t.c"\nint x;\nint y = x ?: 1;\n' > bad.i
   $ ./parse_check.exe bad.i
-  parse_check: t.c:2: expected `;` after a declaration, found `__attribute__`
+  parse_check: t.c:2: expected an expression, found `:`
   [1]

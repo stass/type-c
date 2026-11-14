@@ -78,7 +78,8 @@ feature is built here.
 | 0.4 | Target model from the backend's predefined macros. |
 | 0.5 | Tree and parser for declarations and expressions: specifiers, declarators, typedef scopes, struct, union, enum, initialisers and designators, all C11 expressions including `_Generic` and compound literals; function bodies brace-matched. |
 | 0.6 | Parser for statements and function bodies, including old-style definitions, with block-scope typedef names. |
-| 0.7 | GNU profile: attributes, alternate keywords, assembler, `typeof`, statement expressions, the builtin table; bodies in system headers skipped. |
+| 0.7a | GNU profile syntax: attributes, `__extension__`, alternate keywords, assembler labels and statements, `typeof`, statement expressions, case ranges, the GNU forms of empty structures and initialisers, the syntax of `__builtin_va_arg` and `__builtin_offsetof`, and the macOS SDK's block pointers, nullability qualifiers and fixed enumeration types; the all-headers translation unit parses. |
+| 0.7b | GNU profile types: the builtin table, `__int128` and `_Float` types, vector types, block pointers, fixed enumeration types, `typeof`, the attributes that typing reads, the types of `__builtin_offsetof` and `__builtin_va_arg`, `__auto_type`. Done after 0.9b, on its expression typing. |
 | 0.8 | Types: representation, compatibility, composite types, promotions, usual arithmetic conversions. |
 | 0.9a | Declarations to types: specifiers and declarators, tags, typedefs, scopes and linkage at file scope; integer constant expressions. |
 | 0.9b | Expression typing: lvalues, conversions, members, calls, compound literals, address and arithmetic constants, `_Generic` selection; block scopes. |

@@ -52,7 +52,8 @@ type scope = (entity, tag) Scope.t
 (** What each external declaration declares, in the order of the tree. *)
 type item =
   | Declaration of entity list
-      (** One for each declarator, as declared there. *)
+      (** One for each declarator, as declared there; none for a GNU [;]
+          alone or a file-scope [asm]. *)
   | Static_assertion
   | Function_definition of { function_entity : entity; body_scope : scope }
       (** [body_scope] is the block of the body before its first token:
