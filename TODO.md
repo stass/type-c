@@ -727,13 +727,12 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
-- [Medium] `str` is a typedef name of the universe scope (design 8),
-  so where no declaration hides it, C11 6.7.6.3p11 reads an old-style
-  definition `int f(str) char *str; { ... }` and a parameter `int (str)`
-  with `str` as the type, against the superset claim of design 2.2.
-  Decide before work package 3.4 gives `str` its meaning, which makes it
-  a typedef name to the parser; until then `Universe` leaves every
-  universe name an ordinary identifier to the grammar.
+- [Medium] When package 3.4 makes universe names typedef names to the
+  parser, it implements design 2.3's exception to C11 6.7.6.3p11 (a
+  universe name in a parenthesised parameter declarator is the parameter)
+  and 2.2's old-style case (an error), each with a test; until then
+  `Universe` leaves every universe name an ordinary identifier to the
+  grammar.
 - [Low] After the `=` of a type declaration, `private` and `distinct`
   may also be typedef names (design 2.3 recognises them only there).
   The parser takes `distinct` as the word only before a token that

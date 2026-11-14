@@ -87,7 +87,9 @@ translation unit, so that a shared header can adapt.
 
 Every C11 translation unit in the supported dialect (2.4) is a Type-C
 translation unit with the same meaning, provided its Type-C text does not use
-`try` or `defer` as identifiers. This holds because each new construct begins
+`try` or `defer` as identifiers, nor a universe name (2.3) as a parameter of
+an old-style definition, which C11 6.9.1p6 makes an error because the name
+is a typedef name there. This holds because each new construct begins
 with a token sequence that C rejects:
 
 | Construct | Begins with | Why C rejects it |
@@ -127,7 +129,13 @@ declarations, and the Type-C construct is unavailable in that scope.
 encloses file scope. Any declaration of the same identifier shadows the
 universe name from that point, under C's ordinary scope rules, so
 `int result = f();` remains valid C; inside that scope `result(T, E)` is
-simply unavailable.
+simply unavailable. Where C11 6.7.6.3p11 would read an identifier in a
+parameter declaration either as a typedef name or as the parameter it
+declares, a universe name is the parameter: `int f(int (str));` declares an
+`int` parameter named `str`, as in C, so a header shared with C means the
+same in both. A parameter whose type is a universe type and that has no
+name is written without parentheses, `size_t len(str);`, where no other
+reading exists.
 
 **Generated names.** Identifiers that begin with `__tc_` are reserved for the
 compiler in a Type-C translation unit; one in its text, C text included, is
