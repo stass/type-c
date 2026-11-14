@@ -6,6 +6,7 @@ open Typec_test_support
 
 let lp64 : Target.t =
   {
+    backend = { compiler = Gcc; major_version = 14 };
     char_bit = 8;
     char_signed = true;
     sizeof_short = 2;
@@ -31,6 +32,7 @@ let lp64 : Target.t =
 
 let ilp32 : Target.t =
   {
+    backend = { compiler = Clang; major_version = 20 };
     char_bit = 8;
     char_signed = false;
     sizeof_short = 2;
@@ -62,6 +64,15 @@ let without name =
 
 (* The LP64 dump with one macro defined as [value]. *)
 let lp64_dump_with name value = dump_of (without name @ [ (name, value) ])
+
+(* The LP64 dump as a Clang of [major] would print it. *)
+let lp64_clang_dump major =
+  dump_of
+    (without "__GNUC__"
+    @ [ ("__clang__", "1"); ("__clang_major__", major); ("__GNUC__", "4") ])
+
+let unsupported_backend compiler major_version =
+  Error (Target.Unsupported_backend { compiler; major_version })
 
 let malformed name value = Error (Target.Malformed_macro { name; value })
 let unsupported guarantee = Error (Target.Unsupported_model guarantee)
@@ -96,10 +107,65 @@ let model_cases =
       dump = lp64_dump_with "__PTRDIFF_TYPE__" "signed long";
       expected = Ok lp64;
     };
+    {
+      name = "GCC 16";
+      dump = lp64_dump_with "__GNUC__" "16";
+      expected =
+        Ok { lp64 with backend = { compiler = Gcc; major_version = 16 } };
+    };
+    {
+      name = "Clang that does not claim to be GCC";
+      dump =
+        dump_of
+          (without "__GNUC__" @ [ ("__clang__", "1"); ("__clang_major__", "20") ]);
+      expected =
+        Ok { lp64 with backend = { compiler = Clang; major_version = 20 } };
+    };
+    {
+      name = "Clang 22";
+      dump = lp64_clang_dump "22";
+      expected =
+        Ok { lp64 with backend = { compiler = Clang; major_version = 22 } };
+    };
   ]
 
 let error_cases =
   [
+    {
+      name = "Clang 19";
+      dump = lp64_clang_dump "19";
+      expected = unsupported_backend Clang 19;
+    };
+    {
+      name = "GCC 13";
+      dump = lp64_dump_with "__GNUC__" "13";
+      expected = unsupported_backend Gcc 13;
+    };
+    {
+      name = "an unsupported backend before a missing macro";
+      dump =
+        dump_of
+          (("__GNUC__", "13")
+          :: List.filter
+               (fun (name, _) -> name <> "__GNUC__" && name <> "__SIZEOF_INT__")
+               Canned_targets.lp64_macros);
+      expected = unsupported_backend Gcc 13;
+    };
+    {
+      name = "neither Clang nor GCC";
+      dump = dump_of (without "__GNUC__");
+      expected = Error (Target.Missing_macro "__GNUC__");
+    };
+    {
+      name = "Clang without its version";
+      dump = dump_of (("__clang__", "1") :: Canned_targets.lp64_macros);
+      expected = Error (Target.Missing_macro "__clang_major__");
+    };
+    {
+      name = "a version that is not a number";
+      dump = lp64_dump_with "__GNUC__" "14.2";
+      expected = malformed "__GNUC__" "14.2";
+    };
     {
       name = "missing size";
       dump = dump_of (without "__SIZEOF_INT__");

@@ -18,7 +18,8 @@ reports (`--print-target`).
 ## Building and testing
 
 Requirements: OCaml 5.4 and dune 3; the tests also need a C compiler as
-`cc`, a Clang and a GCC, and `tools/corpus/runner.t` runs
+`cc`, a Clang and a GCC of releases that `typec` supports (see
+[Choosing the backend](#choosing-the-backend)), and `tools/corpus/runner.t` runs
 `/usr/bin/clang`. The cram tests in `test/run` run the Clang that
 `TYPEC_TEST_CLANG` names and the GCC that `TYPEC_TEST_GCC` names; unset,
 they are `/usr/bin/clang` and `/usr/local/bin/gcc-16`, those of the
@@ -73,6 +74,11 @@ value of `-o` is never one) and forwards every other argument, `--cc`
 without `=` included, in its original order. The backend is run with an
 argument vector, never through a shell, so `TYPEC_CC` names one program:
 it cannot carry extra arguments such as `ccache gcc`.
+
+The backend is GCC or Clang, Apple's included, no older than the
+releases that `minimum_major_version` in
+[src/sema/target.ml](src/sema/target.ml) names. `typec` refuses an
+older one with a message naming the oldest supported releases.
 
 Without a `.tc` input `typec` replaces itself with the backend. Exit
 status: the backend's own; a backend ended by a signal ends `typec`
@@ -141,15 +147,17 @@ usage error; 127 when the backend cannot be started.
 
 `typec --print-target [OPTIONS]` runs the backend as
 `BACKEND OPTIONS -dM -E -x c /dev/null` and prints the target model that
-its predefined macros give: the sizes of the scalar types, the
+its predefined macros give: the backend and its major version, the
+sizes of the scalar types, the
 signedness of `char`, the types behind `size_t` and the other standard
 typedefs, the byte order and `__STDC_VERSION__`, one `field: value` per
 line. The other arguments are the backend options that select the
 target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu11`;
 inputs, `-o` and dependency options do not belong there.
 
-Exit status: 0 with the model on stdout; 1 when the backend fails or
-prints macros the model cannot be read from; 2 and 127 as above.
+Exit status: 0 with the model on stdout; 1 when the backend fails, is
+not supported or prints macros the model cannot be read from; 2 and 127
+as above.
 
 ## Fuzzing
 

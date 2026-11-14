@@ -435,15 +435,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   and `test/run/pipeline.t`, `headers.t` and `tools/corpus/runner.t`
   fail. Reproducer:
   `/Volumes/Optaine/typec-hosts/repro/debian-glibc/run.sh REPO`.
-- [Medium] `test/run/declarations.t` fails with Debian 13's Clang 19:
-  in an enumeration whose values do not all fit `int` (`enum mixed`,
-  `after_max`, `unsigned_after` of `declarations.c`), typec gives every
-  enumerator the enumeration's type, as GCC, Apple Clang 21 and Clang
-  22 do, and Clang 19 gives an enumerator that fits `int` the type
-  `int`.
-  `Cc_option` names Clang 18 to 21 as supported: decide the oldest
-  Clang, or make the rule depend on the backend's version. Reproducer:
-  `enum.c` in `/Volumes/Optaine/typec-hosts/repro/debian-glibc`.
 - [Medium] `test/run/target.t`, `types.t` and `declarations.t` run on
   x86-64 hosts only: `target.t` expects the x86-64 model and the other
   two compile with `-m32` as well. Give them the expected model and a

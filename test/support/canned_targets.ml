@@ -4,10 +4,12 @@
 (* Predefined macro dumps of two targets, shared by the unit tests and
    the fuzz harness. *)
 
-(* The macros of a GCC dump for an LP64 target that the model reads, with
-   a few it ignores: a function-like macro and one without a value. *)
+(* The macros of a GCC 14 dump for an LP64 target that the model reads,
+   with a few it ignores: a function-like macro and one without a
+   value. *)
 let lp64_macros =
   [
+    ("__GNUC__", "14");
     ("__CHAR_BIT__", "8");
     ("__SIZEOF_SHORT__", "2");
     ("__SIZEOF_INT__", "4");
@@ -34,9 +36,12 @@ let lp64_macros =
   ]
 
 (* An ILP32 target with unsigned char, no __int128 and big-endian bytes,
-   as for 32-bit ARM, with Clang's spellings of the types. *)
+   as for 32-bit ARM, with Clang 20's spellings of the types. *)
 let ilp32_macros =
   [
+    ("__clang__", "1");
+    ("__clang_major__", "20");
+    ("__GNUC__", "4");
     ("__CHAR_BIT__", "8");
     ("__CHAR_UNSIGNED__", "1");
     ("__SIZEOF_SHORT__", "2");

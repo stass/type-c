@@ -2,8 +2,11 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 type byte_order = Little_endian | Big_endian
+type compiler = Gcc | Clang
+type backend = { compiler : compiler; major_version : int }
 
 type t = {
+  backend : backend;
   char_bit : int;
   char_signed : bool;
   sizeof_short : int;
@@ -33,6 +36,12 @@ type error =
   | Missing_macro of string
   | Malformed_macro of { name : string; value : string }
   | Unsupported_model of string
+  | Unsupported_backend of backend
+
+(* The reasons for each release are in the interface. *)
+let minimum_major_version = function
+  | Clang -> 20
+  | Gcc -> 14
 
 (* The widest integer type of a model, which bounds the work of constant
    evaluation. *)
@@ -152,10 +161,29 @@ let read_stdc_version macros =
   | Some version -> version
   | None -> malformed name value
 
-let model_of_macros macros =
+let read_major_version macros name =
+  let value = find macros name in
+  match decimal value with
+  | Some version -> version
+  | None -> malformed name value
+
+let read_backend macros =
+  if Macros.mem "__clang__" macros then
+    let major_version = read_major_version macros "__clang_major__" in
+    { compiler = Clang; major_version }
+  else
+    let major_version = read_major_version macros "__GNUC__" in
+    { compiler = Gcc; major_version }
+
+let check_backend backend =
+  if backend.major_version < minimum_major_version backend.compiler then
+    raise (Invalid (Unsupported_backend backend))
+
+let model_of_macros macros backend =
   let count = read_count macros in
   let integer_type = read_integer_type macros in
   {
+    backend;
     char_bit = count "__CHAR_BIT__";
     char_signed = not (Macros.mem "__CHAR_UNSIGNED__" macros);
     sizeof_short = count "__SIZEOF_SHORT__";
@@ -247,8 +275,13 @@ let check_typedefs model =
   if List.exists too_wide character_types then
     unsupported "a character type wider than 32 bits"
 
+(* The backend is checked first, so that an unsupported one is reported
+   as such rather than by a macro of the model that it lacks. *)
 let checked_model dump =
-  let model = model_of_macros (macros_of_dump dump) in
+  let macros = macros_of_dump dump in
+  let backend = read_backend macros in
+  check_backend backend;
+  let model = model_of_macros macros backend in
   check_widths model;
   check_typedefs model;
   model
@@ -266,9 +299,17 @@ let byte_order_name = function
   | Little_endian -> "little-endian"
   | Big_endian -> "big-endian"
 
+let compiler_name = function
+  | Gcc -> "GCC"
+  | Clang -> "Clang"
+
+let backend_name { compiler; major_version } =
+  Printf.sprintf "%s %d" (compiler_name compiler) major_version
+
 let to_string target =
   let fields =
     [
+      ("backend", backend_name target.backend);
       ("char_bit", string_of_int target.char_bit);
       ("char_signed", string_of_bool target.char_signed);
       ("sizeof_short", string_of_int target.sizeof_short);
@@ -295,6 +336,13 @@ let to_string target =
   String.concat ""
     (List.map (fun (field, value) -> field ^ ": " ^ value ^ "\n") fields)
 
+let supported_backends =
+  let oldest compiler =
+    let major_version = minimum_major_version compiler in
+    backend_name { compiler; major_version } ^ " or later"
+  in
+  oldest Clang ^ " and " ^ oldest Gcc
+
 (* Values come from the backend, so %S escapes any control character. *)
 let error_message = function
   | Malformed_line line ->
@@ -308,3 +356,6 @@ let error_message = function
   | Malformed_macro { name; value } ->
       Printf.sprintf "the C compiler defines %s as %S, which typec cannot read"
         name value
+  | Unsupported_backend backend ->
+      Printf.sprintf "the C compiler is %s; typec supports %s"
+        (backend_name backend) supported_backends

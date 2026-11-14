@@ -24,7 +24,8 @@ Estimates are omitted on purpose: each gate is measured, not predicted.
 - **Security is a requirement from Stage 0.** The compiler reads untrusted
   source: no shell, no execution of input, bounded recursion, fuzzing as a
   gate.
-- **Supported backends and hosts.** Clang and GCC. macOS on arm64, Linux on
+- **Supported backends and hosts.** Clang and GCC, from the releases that
+  `Target.minimum_major_version` names (design 13.3). macOS on arm64, Linux on
   x86-64 and arm64 with glibc and musl, and FreeBSD.
 - **A gate is passed or the stage continues.** A gate may also end with the
   decision to stop or change course; Stage 0 and Stage 6 say how.

@@ -1129,7 +1129,7 @@ language is defined here and not by the tool.
   a makefile rule and works under make, ninja and cmake. Dependency files
   (`-MD`) come from the preprocessing step and name the real output.
 - The *backend* is the C compiler named by `--cc=` or `TYPEC_CC`, by default
-  `cc`. GCC and Clang are supported.
+  `cc`. GCC and Clang are supported, from the releases that 13.3 names.
 - *Provisional (P15).* The backend preprocesses: `typec` runs it with
   `-E -x c` and the user's options, parses the result, and compiles its own
   output with `-x cpp-output`. Macros are expanded once, by the compiler that
@@ -1199,7 +1199,20 @@ backend's predefined macros, obtained from the same compiler with the
 options of the step that compiles the output. Preprocessing options such
 as `-D` and `-undef` are left out: they cannot change the ABI of that
 step, and `-D__SIZEOF_LONG__=4` would make the model lie. `typec` has no
-target table of its own.
+target table of its own. The model also names the backend, Clang when
+`__clang__` is defined and GCC otherwise, with its major version
+(`__clang_major__` or `__GNUC__`), and `typec` refuses a release older
+than `Target.minimum_major_version`, the one statement of the oldest
+supported releases. For Clang that is the first release that types C as
+the front end does: Clang 19 gives an enumerator that `int` holds the
+type `int` in an enumeration whose values `int` does not all hold, where
+Clang 20 and GCC follow C23 6.7.2.2 (N3029) in every dialect and give
+every enumerator the enumerated type. For GCC it is the oldest release
+that a test host runs. *Provisional:* Apple numbers its Clang releases
+on its own and is held to the same minimum, which only Apple clang 21
+confirms; an Apple release at or above the minimum that types C as
+Clang 19 does would settle it otherwise, and without one the minimum
+stays.
 
 **No aggregate layout.** *Provisional (P16).* The size, alignment and
 member offsets of struct, union and array types are opaque constants to

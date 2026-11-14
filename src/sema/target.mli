@@ -1,7 +1,8 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(** The target model: the facts about scalar types that the backend fixes.
+(** The target model: which compiler the backend is, and the facts about
+    scalar types that it fixes.
 
     It is read from the backend's predefined macros, as printed by
     [cc -dM -E -x c /dev/null] with the options of the compilation, so the
@@ -10,10 +11,24 @@
 
 type byte_order = Little_endian | Big_endian
 
+(** The C compiler that is the backend. Clang also defines [__GNUC__],
+    so [__clang__] tells the two apart. *)
+type compiler = Gcc | Clang
+
+type backend = {
+  compiler : compiler;
+  major_version : int;
+      (** [__clang_major__] for Clang, [__GNUC__] for GCC. Apple numbers
+          its Clang releases on its own. *)
+}
+
 (** Sizes are in bytes, that is in units of [char]. The widths of the
     typedefs such as [size_t] follow from the integer type behind each;
     see {!integer_width}. *)
 type t = {
+  backend : backend;
+      (** A supported release, see {!minimum_major_version}, named for
+          [--print-target]: typec types C alike for every one. *)
   char_bit : int;  (** [__CHAR_BIT__]: the width of a byte. *)
   char_signed : bool;  (** Plain [char] is signed: no [__CHAR_UNSIGNED__]. *)
   sizeof_short : int;
@@ -48,6 +63,14 @@ type error =
   | Unsupported_model of string
       (** The macros break a guarantee of C on the types, or describe an
           integer type wider than {!max_integer_width}. *)
+  | Unsupported_backend of backend
+      (** A compiler older than {!minimum_major_version}. *)
+
+val minimum_major_version : compiler -> int
+(** The oldest release of each compiler that typec supports: for Clang
+    the first that follows C23 6.7.2.2 (N3029) on the type of an
+    enumerator, for GCC the oldest that a test host runs (design
+    13.3). *)
 
 val max_integer_width : int
 (** 128 bits: the widest integer type of a model, which bounds the work
@@ -63,7 +86,9 @@ val of_predefined_macros : string -> (t, error) result
     [size_t], [uintmax_t], [char16_t] and [char32_t] with signed
     [ptrdiff_t], [intmax_t] and [intptr_t]; and [wchar_t], [char16_t]
     and [char32_t] of at most 32 bits. A size above 65536 is
-    malformed. *)
+    malformed. A dump with neither [__clang__] nor [__GNUC__] is
+    reported as missing [__GNUC__], and a backend older than
+    {!minimum_major_version} is unsupported. *)
 
 val integer_width : t -> Integer.t -> int
 (** The width of an integer type in bits: its value bits and its sign bit

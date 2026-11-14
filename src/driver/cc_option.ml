@@ -57,11 +57,12 @@ let changes_preprocessed_text =
 let keeps_intermediate_files =
   "typec keeps no intermediate files; --emit-c writes the C"
 
-(* The options of typec, and those of the C compilers of GCC 14 to 16
-   and Clang 18 to 21, Apple's included, that the pipeline must tell
-   apart or that take a separate value; the options of GCC's other
-   front ends are left out. A Common option needs an entry only when it
-   takes a separate value: unknown options are Common already. *)
+(* The options of typec, and those of the C compilers that typec
+   supports (Target.minimum_major_version) up to GCC 16 and Clang 21,
+   Apple's included, that the pipeline must tell apart or that take a
+   separate value; the options of GCC's other front ends are left out.
+   A Common option needs an entry only when it takes a separate value:
+   unknown options are Common already. *)
 let table =
   List.concat
     [

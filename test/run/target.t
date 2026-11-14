@@ -3,12 +3,14 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 typec --print-target prints the target model that the backend reports in
 its predefined macros when it is run with the other arguments as options.
-The backends are those that backends.sh names, on an x86-64 host.
+The backends are those that backends.sh names, on an x86-64 host, whose
+release varies with the host.
 
   $ unset TYPEC_CC
   $ . ./backends.sh
 
-  $ typec --cc=$clang --print-target
+  $ typec --cc=$clang --print-target | sed '1s/ [0-9]*$//'
+  backend: Clang
   char_bit: 8
   char_signed: true
   sizeof_short: 2
@@ -34,9 +36,12 @@ The backends are those that backends.sh names, on an x86-64 host.
 GCC spells the types in another order and reads the same target.
 
   $ facts() {
-  >   grep -E '^(char_signed|sizeof_(int|long|pointer)|char16_type):'
+  >   grep -E -e '^(backend|char_signed|char16_type):' \
+  >     -e '^sizeof_(int|long|pointer):' |
+  >   sed '1s/ [0-9]*$//'
   > }
   $ typec --cc=$gcc --print-target | facts
+  backend: GCC
   char_signed: true
   sizeof_int: 4
   sizeof_long: 8
@@ -46,12 +51,14 @@ GCC spells the types in another order and reads the same target.
 The options reach the backend, so they change the model.
 
   $ typec --cc=$clang -m32 --print-target -funsigned-char | facts
+  backend: Clang
   char_signed: false
   sizeof_int: 4
   sizeof_long: 4
   sizeof_pointer: 4
   char16_type: unsigned short
   $ typec --cc=$gcc -m32 --print-target -funsigned-char | facts
+  backend: GCC
   char_signed: false
   sizeof_int: 4
   sizeof_long: 4
@@ -80,4 +87,16 @@ arguments, which GNU yes would refuse as options.
   [1]
   $ typec --cc=$clang --print-target -std=c89
   typec: the C compiler does not define __STDC_VERSION__
+  [1]
+
+A backend older than typec supports gives no model either. clang19 is
+the Clang of the host that claims to be Clang 19.
+
+  $ cat > clang19 <<EOF
+  > #!/bin/sh
+  > "$clang" "\$@" | sed 's/__clang_major__ .*/__clang_major__ 19/'
+  > EOF
+  $ chmod +x clang19
+  $ typec --cc=./clang19 --print-target
+  typec: the C compiler is Clang 19; typec supports Clang 20 or later and GCC 14 or later
   [1]
