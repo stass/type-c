@@ -893,8 +893,15 @@ struct expr {
    stale memory, as with any C struct that has padding.
 6. The declaration claims the struct tag `expr`, the enum tag `expr_tag` and
    the enumerators `expr_C` in its scope. Declaring any of them otherwise in
-   that scope is an error. Type-C code cannot name them; they exist for C
-   clients and debuggers.
+   that scope is an error, whichever comes first, and so is a name that two
+   variants derive alike (`a_b` with `C` and `a` with `b_C`). Type-C code
+   cannot name them; they exist for C clients and debuggers. An incomplete
+   variant `type expr;` claims the struct tag, as it declares the struct;
+   the definition that completes it claims the rest, since only it knows
+   the constructors.
+7. Where a definition completes `type expr;`, the forward declaration has
+   already become `struct expr; typedef struct expr expr;`, and the
+   definition becomes the rest.
 
 ### 10.2 Distinct types and aliases
 

@@ -49,6 +49,15 @@ let rec grammar_token_before (tokens : Token.t array) index =
   | Token.Punctuator _ ->
       before
 
+(* The token after [index] that is not a pragma. *)
+let rec grammar_token_after (tokens : Token.t array) index =
+  let after = index + 1 in
+  match tokens.(after).kind with
+  | Token.Pragma | Token.Typec_pragma -> grammar_token_after tokens after
+  | Token.Identifier | Token.Number | Token.Character _ | Token.String _
+  | Token.Punctuator _ ->
+      after
+
 (* The token that the declared name goes before in an abstract
    declarator: where the identifier would be that the type name omits
    (C11 6.7.7p2). It is innermost, past a pointer that has no inner
@@ -107,6 +116,73 @@ let record_alias tokens ~location ~head name
   | None ->
       replace_head ~tag:name @ Option.to_list (Option.map insert_tag members)
 
+(* Variants (design 10.1). The tokens of each field are kept, so the
+   struct of a constructor's fields keeps their lines. *)
+
+let has_payload constructors =
+  List.exists
+    (fun (constructor : Tree.constructor) -> constructor.node.fields <> [])
+    constructors
+
+(* What comes before the constructors: the structure and typedef, which
+   the incomplete variant declares already where the variant [completes]
+   one; the enumeration of the tags, numbered from 0 in order (rule 1);
+   and the structure up to its union where it has one (rule 3). *)
+let variant_head ~completes name constructors =
+  let enumerator (constructor : Tree.constructor) =
+    Tree.enumerator_name ~variant:name constructor.node.name.node
+  in
+  let tag_enum = "enum " ^ Tree.enum_tag_name name in
+  let forward =
+    if completes then "" else record_declarations Struct ~tag:name name ^ " "
+  in
+  let union = if has_payload constructors then " union {" else "" in
+  Printf.sprintf "%s%s { %s }; struct %s { %s %s;%s" forward tag_enum
+    (String.concat ", " (List.map enumerator constructors))
+    name tag_enum Tree.tag_member union
+
+let variant_tail constructors =
+  if has_payload constructors then Printf.sprintf "} %s; };" Tree.union_member
+  else "};"
+
+(* The tokens at [indexes], the first of which is [first], replaced by
+   [text] at the location of [first]. *)
+let replace_at (tokens : Token.t array) ~first text indexes =
+  replace tokens ~location:tokens.(first).location text (first :: indexes)
+
+(* A constructor with fields becomes the struct of them that the union
+   holds, named after it; [| C (] opens it, the [,] after each field
+   ends that field, and the [)] closes the struct. One without fields
+   becomes nothing (rule 3). *)
+let constructor_edits tokens (constructor : Tree.constructor) =
+  let { Tree.name; fields } = constructor.node in
+  let bar = constructor.span.first and close = constructor.span.last in
+  let field_end (field : Tree.field) =
+    let after = grammar_token_after tokens field.span.last in
+    if after = close then
+      replace_at tokens ~first:after (Printf.sprintf "; } %s;" name.node) []
+    else replace_at tokens ~first:after ";" []
+  in
+  match fields with
+  | [] -> replace_at tokens ~first:bar "" [ name.span.first ]
+  | _ :: _ ->
+      let open_paren = grammar_token_after tokens name.span.first in
+      replace_at tokens ~first:bar "struct {" [ name.span.first; open_paren ]
+      @ List.concat_map field_end fields
+
+(* [type N = ... ;]: the head replaces [type N =] and the tail the [;]. *)
+let variant tokens ~location ~head (declaration : Tree.type_declaration)
+    constructors =
+  let { Tree.name; declared; _ } = declaration.node in
+  let completes = declared.earlier <> None in
+  let equals = grammar_token_after tokens name.span.first in
+  replace tokens ~location
+    (variant_head ~completes name.node constructors)
+    (head @ [ equals ])
+  @ List.concat_map (constructor_edits tokens) constructors
+  @ replace_at tokens ~first:declaration.span.last (variant_tail constructors)
+      []
+
 let type_declaration (tokens : Token.t array)
     (declaration : Tree.type_declaration) =
   let { Tree.name; definition; _ } = declaration.node in
@@ -119,6 +195,8 @@ let type_declaration (tokens : Token.t array)
         (head @ [ declaration.span.last ])
   | Alias type_name -> alias tokens ~location ~head name.node type_name
   | Record_alias record -> record_alias tokens ~location ~head name.node record
+  | Variant constructors ->
+      variant tokens ~location ~head declaration constructors
 
 (* A type declaration may hold another, in a statement expression of
    its definition, so the edits of all are sorted; an insertion before a

@@ -1236,8 +1236,50 @@ let type_declarations () =
   declares ~file "type t = int; void f(void) { type t = long; t x; } t y;" "y"
     "object int external static"
 
+(* Variants (design 3.2) are the structures they lower to (10.1). *)
+let variants () =
+  let file = "in.tc" in
+  declares ~file "type e = | A | B;" "e" "typedef struct e";
+  declares ~file "type e = | A | B;" "e_B" "enumerator int = 1";
+  declares ~file "type e; type e = | A(int x); e v;" "v"
+    "object struct e external static";
+  accepts ~file
+    "type expr = | Number(long value) | Add(expr *left, expr *right); \
+     expr x = {0};";
+  (* A variant is a value type, so it may be a field. *)
+  accepts ~file "type a = | X(int v); type b = | Y(a inner, a *next);";
+  accepts ~file "struct s { int a[2]; }; type e = | A(struct s v);";
+  (* A field type is a value type (rule 4); a variant holds itself only
+     through a pointer (rule 5). *)
+  rejects ~file "type e = | A(e inner);"
+    "the field 'inner' of 'A' is not a complete object type, so it is not \
+     a value type (design 3.2 rule 4)";
+  rejects ~file "type e; type e = | A(e inner);" "not a complete object";
+  rejects ~file "type e = | A(struct { e x; } s);" "incomplete";
+  rejects ~file "struct s; type e = | A(struct s v);" "not a complete object";
+  rejects ~file "type e = | A(void f(void));" "not a complete object";
+  rejects ~file "type e = | A(int a[2]);" "is an array, which a struct";
+  rejects ~file "type e = | A(const int x);" "'x' of 'A' is qualified";
+  rejects ~file "type e = | A(int *restrict p);" "is qualified";
+  rejects ~file "type e = | A(_Atomic int x);" "is atomic";
+  rejects ~file "void f(int n) { type e = | A(int (*p)[n]); }"
+    "is variably modified";
+  rejects ~file "struct s { const int c; }; type e = | A(struct s v);"
+    "has a const-qualified member";
+  rejects ~file
+    "struct in { const int c[2]; }; struct out { int i; struct in n; }; \
+     type e = | A(struct out v);"
+    "has a const-qualified member";
+  rejects ~file "union u { int i; const long c; }; type e = | A(union u v);"
+    "has a const-qualified member";
+  rejects ~file "struct f { int n; int a[]; }; type e = | A(struct f v);"
+    "has a flexible array member";
+  accepts ~file "struct s { const int *p; }; type e = | A(struct s v);";
+  rejects ~file "type e = | A(int x, long x);" "duplicate member"
+
 let () =
   type_declarations ();
+  variants ();
   builtin_typedefs ();
   gnu_profile ();
   unknown_types ();

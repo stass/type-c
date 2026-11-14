@@ -53,6 +53,24 @@ let lowers name source expected =
   end
 
 let () =
+  lowers "a variant without fields" "type e = | A | B;"
+    "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
+     e_tag tag; };";
+  lowers "a variant with fields"
+    "type expr = | Number(long value) | Nil | Add(expr *left, expr *right);"
+    "struct expr; typedef struct expr expr; enum expr_tag { expr_Number, \
+     expr_Nil, expr_Add }; struct expr { enum expr_tag tag; union { struct \
+     { long value ; } Number; struct { expr *left ; expr *right ; } Add; } \
+     u; };";
+  lowers "a variant that completes an incomplete one"
+    "type list; type list = | Nil | Cons(int head, list *tail);"
+    "struct list; typedef struct list list; enum list_tag { list_Nil, \
+     list_Cons }; struct list { enum list_tag tag; union { struct { int \
+     head ; list *tail ; } Cons; } u; };";
+  lowers "a pragma between the tokens of a constructor"
+    "type e = | A\n#pragma pack()\n(int x);"
+    "struct e; typedef struct e e; enum e_tag { e_A }; struct e { enum e_tag \
+     tag; union { struct { #pragma pack() int x ; } A; } u; };";
   lowers "an alias" "type id = unsigned int;" "typedef unsigned int id ;";
   lowers "the name in a declarator" "type handler = void (*)(int);"
     "typedef void (* handler )(int);";

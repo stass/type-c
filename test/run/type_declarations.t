@@ -45,6 +45,74 @@ through the declared name, and a block declares an alias of its own.
   3
   6
 
+A variant is the tagged structure of design 10.1, which C code builds
+and reads through its documented representation (design 10.6). The
+header is C text, so it may name the tag, the enumerators and the
+members; its assertions compare the layout with the structure that
+10.1 writes out, on each backend.
+
+  $ cat > client.h <<'EOF'
+  > #include <stddef.h>
+  > struct expr_layout {
+  >   enum expr_tag tag;
+  >   union {
+  >     struct { long value; } Number;
+  >     struct { expr *left; expr *right; } Add;
+  >   } u;
+  > };
+  > _Static_assert(sizeof (expr) == sizeof (struct expr_layout), "size");
+  > _Static_assert(_Alignof (expr) == _Alignof (struct expr_layout), "align");
+  > _Static_assert(offsetof(struct expr, tag) == 0, "tag first");
+  > _Static_assert(offsetof(struct expr, u)
+  >                == offsetof(struct expr_layout, u), "union");
+  > _Static_assert(offsetof(struct expr, u.Add.right)
+  >                == offsetof(struct expr_layout, u.Add.right), "field");
+  > _Static_assert(expr_Number == 0 && expr_Nil == 1 && expr_Add == 2,
+  >                "tags in order");
+  > _Static_assert(sizeof (flag) == sizeof (enum flag_tag), "no union");
+  > static expr number(long value) {
+  >   expr e = { .tag = expr_Number, .u.Number = { value } };
+  >   return e;
+  > }
+  > static expr add(expr *left, expr *right) {
+  >   expr e = { .tag = expr_Add, .u.Add = { left, right } };
+  >   return e;
+  > }
+  > static long eval(const expr *e) {
+  >   switch (e->tag) {
+  >   case expr_Number: return e->u.Number.value;
+  >   case expr_Nil: return 0;
+  >   case expr_Add: return eval(e->u.Add.left) + eval(e->u.Add.right);
+  >   }
+  >   return -1;
+  > }
+  > static int is_on(flag f) { return f.tag == flag_On; }
+  > EOF
+  $ cat > variant.tc <<'EOF'
+  > #include <stdio.h>
+  > type expr;
+  > type expr =
+  >     | Number(long value)
+  >     | Nil
+  >     | Add(expr *left, expr *right);
+  > type flag = | Off | On;
+  > #include "client.h"
+  > int main(void) {
+  >   type local = | None | Some(int value);
+  >   expr zero = {0};
+  >   expr two = number(2), three = number(3);
+  >   expr sum = add(&two, &three);
+  >   flag off = {0};
+  >   local none = {0};
+  >   printf("%ld %ld %d\n", eval(&sum), eval(&zero), is_on(off));
+  >   return sizeof none != sizeof (int) * 2;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Werror -o clang-variant variant.tc && ./clang-variant
+  5 0 0
+  $ typec --cc=$gcc -Wall -Werror -o gcc-variant variant.tc && ./gcc-variant
+  5 0 0
+
 --emit-c shows the typedef that an alias becomes, at its own line.
 
   $ printf 'type count = unsigned long;\ncount n;\n' > emit.tc

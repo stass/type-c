@@ -525,14 +525,24 @@ and type_declaration = type_declaration_node spanned
 
 and type_declaration_node = {
   name : identifier;
-  declared : declared;  (** never a redeclaration (design 3.1 rule 5) *)
+  declared : declared;
+      (** never a redeclaration (design 3.1 rule 5), except a [Variant]
+          that completes the [Incomplete_variant] of its name in its
+          scope (rule 4), which is its [earlier] *)
   definition : type_definition;
 }
 
 and type_definition =
   | Incomplete_variant
       (** [type N;], which claims the structure tag [N] that its
-          lowering declares (design 10.1) *)
+          lowering declares (design 10.1 rule 6) *)
+  | Variant of constructor list
+      (** [= | C ... ;]: the constructors in order, at least one, whose
+          names are unique (design 3.2 rule 2). The definition may use
+          the name. It claims the tag [N] where it completes no
+          incomplete variant, and the enumeration tag and enumerators of
+          the names {!enum_tag_name} and {!enumerator_name} give (design
+          10.1 rule 6). *)
   | Alias of type_name
       (** [= type-name;] for a type name that is not a [Record_alias]:
           the name denotes the type, as [typedef] makes it, and the
@@ -542,6 +552,20 @@ and type_definition =
           [members] always hold, and nothing else; it may use the name.
           Without a tag of its own, the specifier takes the declared name
           as its tag, which the declaration claims (design 10.2). *)
+
+(** A constructor of a variant, from its [|] to its name or [)]. *)
+and constructor = constructor_node spanned
+
+and constructor_node = {
+  name : identifier;
+  fields : field list;  (** in parentheses, at least one, or none *)
+}
+
+(** A field of a constructor: a declaration like a parameter's that names
+    a member, not an ordinary identifier (design 3.2 rule 4). *)
+and field = field_node spanned
+
+and field_node = { specifiers : specifiers; declarator : declarator }
 
 and for_clause =
   | Clause_declaration of declaration
@@ -597,10 +621,31 @@ let rec declared_identifier declarator =
 let declared_name declarator =
   Option.map (fun name -> name.node) (declared_identifier declarator)
 
-(** The tag that a type declaration of [name] claims, where it claims
-    one (design 10.1 rule 6, 10.2): a declaration of the tag at the
-    token of the name. *)
-let claimed_tag (name : identifier) = Tag_at name.span.first
+(** The tag that the type declaration [id] claims, where it claims one
+    (design 10.1 rule 6, 10.2): a declaration of the tag at the token of
+    its name, which is the token of [id]. *)
+let claimed_tag (Ordinary_at token) = Tag_at token
+
+(** The names that a variant [N] derives for C (design 10.1 rule 6),
+    besides the structure tag {!claimed_tag}: the enumeration tag
+    [N_tag], declared at the token [type], and an enumerator [N_C] for
+    each constructor [C], declared at the constructor's name. No other
+    declaration is made at either token. *)
+let enum_tag_name variant = variant ^ "_tag"
+
+let enumerator_name ~variant constructor = variant ^ "_" ^ constructor
+
+(** The members of the structure of a variant: the tag, and the union of
+    the fields where a constructor has fields (design 10.1 rule 3). *)
+let tag_member = "tag"
+
+let union_member = "u"
+
+(** [type_keyword] is the token that begins the declaration's span. *)
+let derived_enum_tag ~type_keyword = Tag_at type_keyword
+
+(** [constructor_name] is the token of the constructor's name. *)
+let derived_enumerator constructor_name = Ordinary_at constructor_name
 
 (** The body of a function definition: parsed, or, where a system header
     defines the function, matched brace for brace and kept as the span of

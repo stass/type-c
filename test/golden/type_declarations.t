@@ -126,24 +126,97 @@ breaks it, naming the rule.
   [1]
   $ printf 'type pair = struct { int a; };\nstruct pair { int b; };\n' > tag.tc
   $ ./golden.exe tag.tc
-  tag.tc:2: the tag `pair` is declared again, as a type declaration claims it (design 10.2)
+  tag.tc:2: the tag `pair` is declared again, as a type declaration claims it (design 10.1 rule 6)
   [1]
   $ printf 'type node;\nstruct node *p;\n' > named.tc
   $ ./golden.exe named.tc
-  named.tc:2: the tag `node` is not available to Type-C text, as a type declaration claims it (design 10.2)
+  named.tc:2: the tag `node` is not available to Type-C text, as a type declaration claims it (design 10.1 rule 6)
   [1]
   $ printf 'int __tc_x;\n' > generated.tc
   $ ./golden.exe generated.tc
   generated.tc:1: `__tc_x` begins with `__tc_`, which is reserved for the names that typec generates (design 2.3)
   [1]
 
+A variant (design 10.1) becomes the structure and typedef, the
+enumeration of its tags and the structure of a tag and a union of the
+fields of each constructor. The fields keep their tokens and lines;
+the definition that completes a forward declaration declares no second
+typedef.
+
+  $ cat > variant.tc <<'EOF'
+  > type expr;
+  > type expr =
+  >     | Number(long value)
+  >     | Nil
+  >     | Add(expr *left,
+  >           expr *right);
+  > EOF
+  $ ./golden.exe variant.tc
+  
+  # 1 "variant.tc"
+  struct expr; typedef struct expr expr;
+  # 1 "variant.tc"
+  
+  
+  # 2 "variant.tc"
+  enum expr_tag { expr_Number, expr_Nil, expr_Add }; struct expr { enum expr_tag tag; union {
+  # 2 "variant.tc"
+  
+      
+  # 3 "variant.tc"
+  struct {
+  # 3 "variant.tc"
+  long value
+  # 3 "variant.tc"
+  ; } Number;
+  # 3 "variant.tc"
+  
+      
+  # 4 "variant.tc"
+  
+  # 4 "variant.tc"
+  
+      
+  # 5 "variant.tc"
+  struct {
+  # 5 "variant.tc"
+  expr *left
+  # 5 "variant.tc"
+  ;
+  # 5 "variant.tc"
+  
+            expr *right
+  # 6 "variant.tc"
+  ; } Add;
+  # 6 "variant.tc"
+  
+  # 6 "variant.tc"
+  } u; };
+  # 6 "variant.tc"
+  
+
+Derived names, field types and constructor names are checked.
+
+  $ printf 'type e = | A | A;\n' > constructors.tc
+  $ ./golden.exe constructors.tc
+  constructors.tc:1: `A` names two constructors of one variant (design 3.2 rule 2)
+  [1]
+  $ printf 'int e_A;\ntype e = | A;\n' > derived.tc
+  $ ./golden.exe derived.tc
+  derived.tc:2: the variant `e` claims the enumerator `e_A`, which this scope declares already (design 10.1 rule 6)
+  [1]
+  $ printf 'type e = | A(e inner);\n' > recursive.tc
+  $ ./golden.exe recursive.tc
+  recursive.tc:1: the field 'inner' of 'A' is not a complete object type, so it is not a value type (design 3.2 rule 4)
+  [1]
+  $ printf 'type e = | A(int values[4]);\n' > array.tc
+  $ ./golden.exe array.tc
+  array.tc:1: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type (design 3.2 rule 4)
+  [1]
+
 The constructs of later work packages are refused with the package that
 implements them.
 
-  $ printf 'type e = | A | B;\n' > variant.tc
-  $ ./golden.exe variant.tc
-  variant.tc:1: variants are not implemented yet (design 3.2; work package 1.2)
-  [1]
   $ printf 'type d = distinct int;\n' > distinct.tc
   $ ./golden.exe distinct.tc
   distinct.tc:1: distinct types are not implemented yet (design 3.4; work package 1.4)

@@ -16,9 +16,16 @@ type t =
   | One_definition
       (** A name declared twice in one scope where either is a type
           declaration (design 3.1 rule 5). *)
-  | Claimed_tag
-      (** A tag that a type declaration claims, declared otherwise in its
-          scope or named in Type-C text (design 10.1 rule 6, 10.2). *)
+  | Claimed_name
+      (** A tag or enumerator that a type declaration claims for the C
+          it lowers to, declared otherwise in its scope or named in
+          Type-C text (design 10.1 rule 6, 10.2). *)
+  | Duplicate_constructor
+      (** Two constructors of one variant with one name (design 3.2
+          rule 2). *)
+  | Field_type
+      (** A field of a constructor whose type is not a value type (design
+          3.2 rules 4 and 5). *)
   | Not_implemented of { section : string; package : string }
       (** A construct of design [section] that work [package] implements. *)
 
@@ -26,7 +33,9 @@ let clause = function
   | Generated_name -> "design 2.3"
   | Own_name -> "design 3.1 rule 2"
   | One_definition -> "design 3.1 rule 5"
-  | Claimed_tag -> "design 10.2"
+  | Claimed_name -> "design 10.1 rule 6"
+  | Duplicate_constructor -> "design 3.2 rule 2"
+  | Field_type -> "design 3.2 rule 4"
   | Not_implemented { section; package } ->
       Printf.sprintf "design %s; work package %s" section package
 

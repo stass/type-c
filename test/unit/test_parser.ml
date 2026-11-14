@@ -1495,6 +1495,20 @@ let type_declaration_cases =
       "(declaration (typedef int) private) | (declaration (typedef int) \
        distinct) | (type a (type private pointer)) | (type b (type distinct)) \
        | (type c (type distinct pointer))";
+    case "a variant without fields" "type e = | A | B;"
+      "(type e claims claims A B)";
+    case "a variant with fields that uses its name"
+      "type expr = | Number(long value) | Add(expr *left, expr *right);"
+      "(type expr claims claims (Number (field (long) value)) (Add (field \
+       (expr) (pointer left)) (field (expr) (pointer right))))";
+    case "an incomplete variant and the variant that completes it"
+      "type list; type list = | Nil | Cons(int head, list *tail); list l;"
+      "(type list claims) | (type list claims Nil (Cons (field (int) head) \
+       (field (list) (pointer tail)))) | (declaration (list) l)";
+    case "a variant in a block hides an incomplete one outside"
+      "type e; void f(void) { type e = | A; e x; }"
+      "(type e claims) | (define (void) (function f (void)) (block (type e \
+       claims claims A) (declaration (e) x)))";
     case "a universe name that a declaration hides"
       "int result = 1; void f(void) { int str; str = result; }"
       "(declaration (int) (init result 1)) | (define (void) (function f \
@@ -1581,9 +1595,60 @@ let type_c_error_cases =
       "typedef int t; void f(void) { type t = t; }"
       "error: in.tc:1: `t` is used in its own definition, which is not a \
        structure or union specifier (design 3.1 rule 2)";
-    case "a variant" "type e = | A | B;"
-      "error: in.tc:1: variants are not implemented yet (design 3.2; work \
-       package 1.2)";
+    case "two constructors of one name" "type e = | A | B(int x) | A;"
+      "error: in.tc:1: `A` names two constructors of one variant (design \
+       3.2 rule 2)";
+    case "a derived enumerator declared before" "int e_A; type e = | A;"
+      "error: in.tc:1: the variant `e` claims the enumerator `e_A`, which \
+       this scope declares already (design 10.1 rule 6)";
+    case "a derived enumerator declared after" "type e = | A; int e_A;"
+      "error: in.tc:1: the enumerator `e_A` is declared again, as a type \
+       declaration claims it (design 10.1 rule 6)";
+    case "a derived enumerator named in Type-C text"
+      "type e = | A; int x = e_A;"
+      "error: in.tc:1: the enumerator `e_A` is not available to Type-C \
+       text, as a type declaration claims it (design 10.1 rule 6)";
+    case "a derived enumeration tag declared before"
+      "enum e_tag { X }; type e = | A;"
+      "error: in.tc:1: the type declaration of `e` claims the tag `e_tag`, \
+       which this scope declares already (design 10.1 rule 6)";
+    case "a derived enumeration tag declared after"
+      "type e = | A; enum e_tag { X };"
+      "error: in.tc:1: the tag `e_tag` is declared again, as a type \
+       declaration claims it (design 10.1 rule 6)";
+    case "a derived enumeration tag named in Type-C text"
+      "type e = | A; enum e_tag t;"
+      "error: in.tc:1: the tag `e_tag` is not available to Type-C text, as \
+       a type declaration claims it (design 10.1 rule 6)";
+    case "the derived names of two variants meet"
+      "type a_b = | C; type a = | b_C;"
+      "error: in.tc:1: the variant `a` claims the enumerator `a_b_C`, which \
+       this scope declares already (design 10.1 rule 6)";
+    case "a variant completed twice" "type e; type e = | A; type e = | B;"
+      "error: in.tc:1: `e` is declared twice in one scope, and one of them \
+       is a type declaration (design 3.1 rule 5)";
+    case "an incomplete variant completed by an alias" "type e; type e = int;"
+      "error: in.tc:1: `e` is declared twice in one scope, and one of them \
+       is a type declaration (design 3.1 rule 5)";
+    case "an incomplete variant declared twice" "type e; type e;"
+      "error: in.tc:1: `e` is declared twice in one scope, and one of them \
+       is a type declaration (design 3.1 rule 5)";
+    case "a field names a derived enumerator of a later constructor"
+      "double e_B; void f(void) { type e = | A(typeof(e_B) v) | B; }"
+      "error: in.tc:1: the enumerator `e_B` is not available to Type-C \
+       text, as a type declaration claims it (design 10.1 rule 6)";
+    case "a derived name that typec would generate" "type __tc = | x;"
+      "error: in.tc:1: `__tc_tag` begins with `__tc_`, which is reserved \
+       for the names that typec generates (design 2.3)";
+    case "a derived enumerator that typec would generate" "type _ = | tc_x;"
+      "error: in.tc:1: `__tc_x` begins with `__tc_`, which is reserved for \
+       the names that typec generates (design 2.3)";
+    case "a constructor with empty parentheses" "type e = | A();"
+      "error: in.tc:1: expected a field, found `)`";
+    case "a field without a name" "type e = | A(int);"
+      "error: in.tc:1: expected a declarator, found `)`";
+    case "constructors without a bar between them" "type e = | A B;"
+      "error: in.tc:1: expected `;` after a type declaration, found `B`";
     case "a distinct type" "type d = distinct unsigned int;"
       "error: in.tc:1: distinct types are not implemented yet (design 3.4; \
        work package 1.4)";
@@ -1605,24 +1670,24 @@ let type_c_error_cases =
        `t`";
     case "a claimed tag declared before" "struct pair; type pair = struct \
        { int a; };"
-      "error: in.tc:1: the type declaration of `pair` claims the tag of its \
-       name, which this scope declares already (design 10.2)";
+      "error: in.tc:1: the type declaration of `pair` claims the tag `pair`, \
+       which this scope declares already (design 10.1 rule 6)";
     case "a claimed tag declared after"
       "type pair = struct { int a; }; struct pair { int b; };"
       "error: in.tc:1: the tag `pair` is declared again, as a type \
-       declaration claims it (design 10.2)";
+       declaration claims it (design 10.1 rule 6)";
     case "a claimed tag of a forward declaration declared after"
       "type node; struct node { int b; };"
       "error: in.tc:1: the tag `node` is declared again, as a type \
-       declaration claims it (design 10.2)";
+       declaration claims it (design 10.1 rule 6)";
     case "a claimed tag named in Type-C text"
       "type node; struct node *p;"
       "error: in.tc:1: the tag `node` is not available to Type-C text, as a \
-       type declaration claims it (design 10.2)";
+       type declaration claims it (design 10.1 rule 6)";
     case "a claimed tag named in the structure's body"
       "type node = struct { struct node *next; };"
       "error: in.tc:1: the tag `node` is not available to Type-C text, as a \
-       type declaration claims it (design 10.2)";
+       type declaration claims it (design 10.1 rule 6)";
   ]
 
 (* C text, which keeps the words that Type-C reserves as identifiers. *)

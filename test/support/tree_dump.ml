@@ -589,7 +589,7 @@ and type_declaration reader (d : type_declaration) =
   let declared_name =
     noted (declaration_entry name.node declared) (identifier name)
   in
-  let (Tag_at token) = claimed_tag name in
+  let (Tag_at token) = claimed_tag declared.id in
   let claim =
     noted
       (Declaration_entry
@@ -603,8 +603,35 @@ and type_declaration reader (d : type_declaration) =
     | Record_alias { span; node = specifier } ->
         let claimed = if specifier.tag = None then [ claim ] else [] in
         [ specifier_dump reader (node span) ~claimed specifier ]
+    | Variant constructors ->
+        let own = if declared.earlier = None then [ claim ] else [] in
+        let (Tag_at token) = derived_enum_tag ~type_keyword:d.span.first in
+        let enum_claim =
+          noted
+            (Declaration_entry
+               { space = Tag; name = enum_tag_name name.node; token;
+                 earlier = None })
+            (leaf "claims")
+        in
+        own @ (enum_claim :: List.map (constructor reader name) constructors)
   in
   node d.span "type" (declared_name :: parts)
+
+(* A constructor as [(C fields)], noted with the enumerator it claims. *)
+and constructor reader variant (c : constructor) =
+  let { name; fields } = c.node in
+  let (Ordinary_at token) = derived_enumerator name.span.first in
+  let field (f : field) =
+    node f.span "field"
+      [ group (specifiers reader f.node.specifiers);
+        declarator reader f.node.declarator ]
+  in
+  noted
+    (Declaration_entry
+       { space = Ordinary;
+         name = enumerator_name ~variant:variant.node name.node; token;
+         earlier = None })
+    (node c.span name.node (List.map field fields))
 
 (* The qualifiers, the template and, for extended assembler, its four
    sections. *)

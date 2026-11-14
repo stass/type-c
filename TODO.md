@@ -739,15 +739,44 @@ types (design 13.3).
   begins a type name, and `private` only before `|` or `distinct`, so
   `type a = distinct;` and `type b = private *;` are aliases. Confirm in
   the design (3.4, 9.2) when 1.4 and 1.7 implement them.
-- [Low] `type N;` claims the structure tag `N` only; the enumeration tag
-  `N_tag` and the enumerators of design 10.1 rule 6 are claimed when 1.2
-  completes the variant. Decide whether the forward declaration claims
-  `N_tag` already.
 - [Low] Type-C text cannot name a tag that a type declaration claims
   (design 10.1 rule 6); C text in the same unit can, and names the
   lowered structure. Say so in the design or refuse it there too.
-- [Low] Until 1.2, an incomplete variant is the incomplete structure it
-  lowers to, in `Declarations` as in C.
+- [High] Design 3.2 rule 6 is not enforced: `Declarations` reads a
+  variant as the structure it lowers to (10.1), so Type-C text may read
+  `v.tag` and `v.u`, compare variants and give one a braced initialiser
+  other than `{0}`; only C text may. Give `Ctype` a variant (or mark
+  the records that are variants) and refuse the operations in
+  `Expressions` from Type-C text; 1.3 needs the same fact for target
+  types.
+- [Medium] A name that a variant derives (design 10.1 rule 6) may be a
+  keyword of the backend: `type _Static = | assert;` lowers to the
+  enumerator `_Static_assert`, which the backend refuses. The claim
+  functions of the parser are the one funnel for derived names (they
+  refuse `__tc_` there); give the parser's state the keyword set and
+  refuse a derived keyword there too, and the instance names of 10.3
+  (`type vector_ = | i;` derives `vector__i`) when 2.1 defines them.
+- [Medium] Whether a variant completes `type N;` is read from
+  `declared.earlier` by Lowering, Declarations and the tree dump, which
+  holds only while no other type declaration has an `earlier`; and
+  Declarations keeps the incomplete variant's structure in a table of
+  its own beside `tag_types`. Carry it in the tree
+  (`Variant of { completes; constructors }`).
+- [Medium] The names a variant claims are listed in the parser, in
+  Declarations and in two test helpers, and the layout of 10.1 is built
+  both as text (Lowering) and as a `Ctype` (Declarations). Let `Tree`
+  give the derived names of a declaration once, for all of them.
+- [Low] Type-C text names a derived enumerator or tag inside the
+  arguments of a GNU attribute (`aligned(e_A)`), which the parser does
+  not read; see the attribute-argument item above.
+- [Low] A pragma between a field and its `,` or `)` lands before the
+  `;` that lowering puts there, which the backend refuses, as it
+  refuses the pragma in a parameter list. Insert the `;` after the
+  field instead.
+- [Low] A `va_list` field is a value type to `Value_type`, which models
+  `va_list` as neither an array nor a structure (design P20), though on
+  x86-64 it is an array and cannot be assigned. Decide in design 3.2
+  rule 4 whether a field may have it.
 - [Low] A type declaration in a span that the parser does not read, the
   arguments of a GNU attribute or the body of a function that a system
   header defines, is emitted unlowered and fails in the backend. Refuse

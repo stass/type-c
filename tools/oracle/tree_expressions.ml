@@ -228,6 +228,13 @@ and type_declaration visit (d : type_declaration) =
   | Alias name -> type_name visit name
   | Record_alias specifier ->
       type_specifier visit (Struct_or_union specifier.node)
+  | Variant constructors ->
+      let field (f : field) =
+        specifiers visit f.node.specifiers;
+        declarator visit f.node.declarator
+      in
+      List.iter (fun (c : constructor) -> List.iter field c.node.fields)
+        constructors
 
 and for_clause visit = function
   | Clause_declaration d -> declaration visit d

@@ -49,8 +49,17 @@ type opening = Open_bracket of P.t | Open_conditional
    needs of a name: never its type. A [Declared_type] is a typedef name to C
    that a type declaration declares, which is the only declaration of
    its name in its scope (design 3.1 rule 5); it is [Defining_type]
-   within its own definition where that may not use it (rule 2). *)
-type kind = Not_a_type | Typedef_name | Declared_type | Defining_type
+   within its own definition where that may not use it (rule 2), and
+   [Incomplete_variant_type] where a variant definition may still
+   complete it (rule 4). A [Derived_enumerator] is an enumerator that a
+   variant claims for C (design 10.1 rule 6). *)
+type kind =
+  | Not_a_type
+  | Typedef_name
+  | Declared_type
+  | Defining_type
+  | Incomplete_variant_type
+  | Derived_enumerator
 
 (* What the grammar needs of an ordinary identifier in scope: its
    declaration and its kind. *)
@@ -173,20 +182,23 @@ let generated_prefix = "__tc_"
    generate (design 2.3), in C text as in Type-C text, so neither a
    declaration nor a use can meet a generated name. Every identifier is
    one of the grammar tokens, read or not. *)
+let refuse_generated_name state ~at spelling =
+  if String.starts_with ~prefix:generated_prefix spelling then
+    fail_at_token state at
+      (Rule.message Generated_name
+         (Printf.sprintf
+            "%s begins with `%s`, which is reserved for the names that \
+             typec generates"
+            (quoted spelling) generated_prefix))
+
 let refuse_generated_names state =
   Array.iter
     (fun { lexeme; index } ->
       match lexeme with
-      | Identifier_token spelling
-        when String.starts_with ~prefix:generated_prefix spelling ->
-          fail_at_token state index
-            (Rule.message Generated_name
-               (Printf.sprintf
-                  "%s begins with `%s`, which is reserved for the names \
-                   that typec generates"
-                  (quoted spelling) generated_prefix))
-      | Keyword_token _ | Identifier_token _ | Punctuator_token _
-      | Number_token | Character_token _ | String_token _ | End_of_input ->
+      | Identifier_token spelling ->
+          refuse_generated_name state ~at:index spelling
+      | Keyword_token _ | Punctuator_token _ | Number_token
+      | Character_token _ | String_token _ | End_of_input ->
           ())
     state.grammar
 
@@ -284,8 +296,9 @@ let file_scope keywords =
     Scope.file Builtin_typedef.table
 
 let names_type = function
-  | Not_a_type -> false
-  | Typedef_name | Declared_type | Defining_type -> true
+  | Not_a_type | Derived_enumerator -> false
+  | Typedef_name | Declared_type | Defining_type | Incomplete_variant_type ->
+      true
 
 (* The visible declaration of [name] where it is a typedef name. *)
 let typedef_declaration state name =
@@ -300,13 +313,21 @@ let is_typedef_name state name = typedef_declaration state name <> None
 let token_of (name : identifier) = name.span.first
 
 let is_type_declared = function
-  | Declared_type | Defining_type -> true
-  | Not_a_type | Typedef_name -> false
+  | Declared_type | Defining_type | Incomplete_variant_type -> true
+  | Not_a_type | Typedef_name | Derived_enumerator -> false
+
+let fail_claimed state (name : identifier) what text =
+  fail_at_token state (token_of name)
+    (Rule.message Claimed_name
+       (Printf.sprintf "the %s %s %s, as a type declaration claims it" what
+          (quoted name.node) text))
 
 (* A type declaration is the only declaration of its name in its scope
    (design 3.1 rule 5): unlike [typedef], it is not repeated. *)
 let refuse_second_definition state (name : identifier) kind earlier =
   match earlier with
+  | Some { kind = Derived_enumerator; _ } ->
+      fail_claimed state name "enumerator" "is declared again"
   | Some (earlier : ordinary)
     when is_type_declared kind || is_type_declared earlier.kind ->
       fail_at_token state (token_of name)
@@ -342,19 +363,28 @@ let refuse_universe_name state name =
         (quoted name ^ " is a universe name that typec does not implement yet")
   | None -> ()
 
+(* A variant declares its enumerators for C clients (design 10.1 rule
+   6), so Type-C text cannot name them. *)
+let refuse_derived_enumerator state name =
+  let token = state.grammar.(state.position).index in
+  if is_type_c_text_at state token then
+    fail_at_token state token
+      (Rule.message Claimed_name
+         (Printf.sprintf
+            "the enumerator %s is not available to Type-C text, as a type \
+             declaration claims it"
+            (quoted name)))
+
 (* At the identifier [name], which the cursor has not passed. *)
 let resolve state name =
   match Scope.find state.scope name with
+  | Some { declaration; kind = Derived_enumerator } ->
+      refuse_derived_enumerator state name;
+      Resolved declaration
   | Some { declaration; _ } -> Resolved declaration
   | None ->
       refuse_universe_name state name;
       Undeclared
-
-let fail_claimed state (name : identifier) text =
-  fail_at_token state (token_of name)
-    (Rule.message Claimed_tag
-       (Printf.sprintf "the tag %s %s, as a type declaration claims it"
-          (quoted name.node) text))
 
 (* A C declaration of a tag that a type declaration claims in the same
    scope is an error (design 10.1 rule 6). *)
@@ -362,32 +392,80 @@ let declare_tag state (name : identifier) =
   let id = Tag_at (token_of name) in
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
   (match earlier with
-  | Some { claimed = true; _ } -> fail_claimed state name "is declared again"
+  | Some { claimed = true; _ } ->
+      fail_claimed state name "tag" "is declared again"
   | Some { claimed = false; _ } | None -> ());
   state.scope <-
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
   Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
 
-(* The tag [name] of the structure that a type declaration of [name]
-   lowers to, which it claims in the current scope (design 10.1 rule 6,
-   10.2): no other declaration of the tag may be in that scope. *)
-let claim_tag state (name : identifier) =
-  let id = claimed_tag name in
-  if Scope.find_tag_in_innermost state.scope name.node <> None then
+(* The tag [tag] that the type declaration of [name] lowers to, which it
+   claims in the current scope (design 10.1 rule 6, 10.2): no other
+   declaration of the tag may be in that scope. *)
+let claim_tag state (name : identifier) ~tag id =
+  refuse_generated_name state ~at:(token_of name) tag;
+  if Scope.find_tag_in_innermost state.scope tag <> None then
     fail_at_token state (token_of name)
-      (Rule.message Claimed_tag
+      (Rule.message Claimed_name
          (Printf.sprintf
-            "the type declaration of %s claims the tag of its name, which \
-             this scope declares already"
-            (quoted name.node)));
+            "the type declaration of %s claims the tag %s, which this \
+             scope declares already"
+            (quoted name.node) (quoted tag)));
   state.scope <-
-    Scope.declare_tag state.scope name.node { tag = id; claimed = true }
+    Scope.declare_tag state.scope tag { tag = id; claimed = true }
+
+(* The tag of the structure that a type declaration of [name] lowers to
+   is its name. *)
+let claim_own_tag state (name : identifier) =
+  claim_tag state name ~tag:name.node
+    (claimed_tag (Ordinary_at (token_of name)))
+
+(* The enumerator that the variant [variant] declares for its
+   constructor [constructor] at the token [at], which it claims as it
+   claims a tag. *)
+let claim_enumerator state ~(variant : identifier) ~at constructor =
+  let enumerator = enumerator_name ~variant:variant.node constructor in
+  refuse_generated_name state ~at enumerator;
+  if Scope.find_in_innermost state.scope enumerator <> None then
+    fail_at_token state at
+      (Rule.message Claimed_name
+         (Printf.sprintf
+            "the variant %s claims the enumerator %s, which this scope \
+             declares already"
+            (quoted variant.node) (quoted enumerator)));
+  let id = derived_enumerator at in
+  state.scope <-
+    Scope.declare state.scope enumerator
+      { declaration = In_tree id; kind = Derived_enumerator }
+
+(* A variant definition completes the incomplete variant of its name in
+   the current scope, which claims the tag of the name already (design
+   3.1 rule 4); elsewhere it declares the name and claims the tag. Either
+   claims the enumeration tag of its constructors (10.1 rule 6). *)
+let declare_variant state (name : identifier) ~type_keyword =
+  let declared =
+    match Scope.find_in_innermost state.scope name.node with
+    | Some { kind = Incomplete_variant_type; declaration } ->
+        let id = Ordinary_at (token_of name) in
+        state.scope <-
+          Scope.declare state.scope name.node
+            { declaration = In_tree id; kind = Declared_type };
+        { id; earlier = Some declaration }
+    | Some _ | None ->
+        let declared = declare state ~kind:Declared_type name in
+        claim_own_tag state name;
+        declared
+  in
+  claim_tag state name ~tag:(enum_tag_name name.node)
+    (derived_enum_tag ~type_keyword);
+  declared
+
 
 (* A tag that a type declaration claims exists for C (design 10.1 rule
    6), so Type-C text cannot name it. *)
 let named_tag state (name : identifier) entry =
   if entry.claimed && is_type_c_text_at state (token_of name) then
-    fail_claimed state name "is not available to Type-C text";
+    fail_claimed state name "tag" "is not available to Type-C text";
   Names entry.tag
 
 (* A tag that [declares] by its form declares itself in the current
@@ -1134,16 +1212,43 @@ let defines_record_alone state =
          = Punctuator_token P.Semicolon
   | _ -> false
 
-(* The definitions that a later work package implements: a variant,
-   which begins with [|]; [private] before [|] or [distinct]; and
-   [distinct] before a type name. [private] and [distinct] are words
-   only there (design 2.3), so elsewhere after the [=] they may name a
-   type. *)
+(* The names of the constructors of the definition at the cursor, each
+   with its token, in order: the identifier after each [|], past the
+   fields in parentheses. Where the definition is malformed, the list
+   ends where the grammar then fails. *)
+let constructor_names state =
+  let rec loop offset names =
+    match (peek_at state offset, peek_at state (offset + 1)) with
+    | Punctuator_token P.Pipe, Identifier_token name ->
+        let token = state.grammar.(state.position + offset + 1).index in
+        let next = past_group state P.Left_paren (offset + 2) in
+        loop next ((name, token) :: names)
+    | _ -> List.rev names
+  in
+  loop 0 []
+
+(* The enumerators of the variant [variant], claimed before any field is
+   read: the C it lowers to declares them before the structure, so a
+   field names them as C does (design 10.1 rule 6). Names within one
+   variant are unique (design 3.2 rule 2). *)
+let claim_enumerators state ~variant =
+  let seen = Hashtbl.create 8 in
+  let claim (constructor, at) =
+    if Hashtbl.mem seen constructor then
+      fail_at_token state at
+        (Rule.message Duplicate_constructor
+           (quoted constructor ^ " names two constructors of one variant"));
+    Hashtbl.replace seen constructor ();
+    claim_enumerator state ~variant ~at constructor
+  in
+  List.iter claim (constructor_names state)
+
+(* The definitions that a later work package implements: [private]
+   before [|] or [distinct]; and [distinct] before a type name. [private]
+   and [distinct] are words only there (design 2.3), so elsewhere after
+   the [=] they may name a type. *)
 let refuse_unimplemented_definition state =
   let word_at offset word = peek_at state offset = Identifier_token word in
-  if peek state = Punctuator_token P.Pipe then
-    fail_not_implemented state ~section:"3.2" ~package:"1.2"
-      "variants are not implemented yet";
   if
     word_at 0 "private"
     && (peek_at state 1 = Punctuator_token P.Pipe || word_at 1 "distinct")
@@ -1258,7 +1363,7 @@ and record_specifier state kind ~alone ~claimed_by =
     peek state = Punctuator_token P.Left_brace || ends_alone state ~alone
   in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
-  if tag = None then Option.iter (claim_tag state) claimed_by;
+  if tag = None then Option.iter (claim_own_tag state) claimed_by;
   let body_start = state.position in
   let members =
     if accept state P.Left_brace then
@@ -2097,6 +2202,7 @@ and declaration_of_start state = function
 (* At the [type] that [begins_type_declaration] recognises. *)
 and type_declaration state =
   let start = state.position in
+  let type_keyword = state.grammar.(start).index in
   advance state;
   let name = identifier state "the name of a type declaration" in
   if peek state = Punctuator_token P.Left_paren then
@@ -2106,7 +2212,7 @@ and type_declaration state =
     if accept state P.Semicolon then incomplete_variant state name
     else begin
       expect state P.Equal "`=` or `;` after the name of a type declaration";
-      let declared_definition = type_definition state name in
+      let declared_definition = type_definition state name ~type_keyword in
       expect state P.Semicolon "`;` after a type declaration";
       declared_definition
     end
@@ -2114,15 +2220,21 @@ and type_declaration state =
   finish state start ({ name; declared; definition } : type_declaration_node)
 
 and incomplete_variant state name =
-  let declared = declare state ~kind:Declared_type name in
-  claim_tag state name;
+  let declared = declare state ~kind:Incomplete_variant_type name in
+  claim_own_tag state name;
   (declared, Incomplete_variant)
 
 (* After the [=]: the declaration of [name], which is in scope from the
    end of its identifier, and the definition. *)
-and type_definition state name =
+and type_definition state name ~type_keyword =
   refuse_unimplemented_definition state;
-  match specifier_word state 0 with
+  if peek state = Punctuator_token P.Pipe then begin
+    let declared = declare_variant state name ~type_keyword in
+    claim_enumerators state ~variant:name;
+    (declared, Variant (constructors state))
+  end
+  else
+    match specifier_word state 0 with
   | Some (Struct_word kind) when defines_record_alone state ->
       let declared = declare state ~kind:Declared_type name in
       let start = state.position in
@@ -2136,6 +2248,40 @@ and type_definition state name =
       let type_name = type_name state in
       end_definition state name declared;
       (declared, Alias type_name)
+
+(* The constructors of a variant, each after a [|]. *)
+and constructors state =
+  let rec loop constructors =
+    if peek state = Punctuator_token P.Pipe then
+      loop (constructor state :: constructors)
+    else List.rev constructors
+  in
+  loop []
+
+and constructor state =
+  let start = state.position in
+  advance state;
+  let name = identifier state "the name of a constructor" in
+  let fields = if accept state P.Left_paren then fields state else [] in
+  finish state start ({ name; fields } : constructor_node)
+
+and fields state =
+  let rec loop fields =
+    let fields = field state :: fields in
+    if accept state P.Comma then loop fields
+    else begin
+      expect state P.Right_paren "`,` or `)` after a field";
+      List.rev fields
+    end
+  in
+  loop []
+
+and field state =
+  let start = state.position in
+  let specifiers = specifiers state Specifier_qualifiers in
+  if specifiers = [] then fail_expected state "a field";
+  let declarator = member_name_declarator state in
+  finish state start ({ specifiers; declarator } : field_node)
 
 (* Statements (C11 6.8). *)
 

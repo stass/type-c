@@ -86,6 +86,8 @@ type state = {
   typed : Expressions.t;
   type_names : (Tree.span, Ctype.t) Hashtbl.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
+  incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
+      (* the structure of each [type N;], which its variant completes *)
   mutable place : place;
   mutable next_entity : int;
 }
@@ -1622,25 +1624,147 @@ and read_type_declaration state (declaration : Tree.type_declaration) =
   in
   match definition with
   | Incomplete_variant ->
-      (* Until variants (work package 1.2), an incomplete variant is the
-         incomplete structure that it lowers to (design 10.1). *)
-      let record =
-        Ctype.declare_record state.tags (record_kind Struct) (Some name.node)
-      in
-      Hashtbl.replace state.tag_types (Tree.claimed_tag name)
-        (Record_tag record);
+      let record = variant_record state name declared in
+      Hashtbl.replace state.incomplete_variants (In_tree declared.id) record;
       bind (Ctype.record record)
+  | Variant constructors -> read_variant state declaration constructors bind
   | Alias type_name -> bind (read_type_name state type_name)
-  | Record_alias specifier -> read_record_alias state name specifier bind
+  | Record_alias specifier ->
+      read_record_alias state name declared specifier bind
+
+(* A variant is the structure that it lowers to (design 10.1): that of
+   the incomplete variant it completes, or a new one under the tag that
+   it claims. *)
+and variant_record state (name : Tree.identifier) (declared : Tree.declared) =
+  match declared.earlier with
+  | Some forward -> Hashtbl.find state.incomplete_variants forward
+  | None ->
+      let record =
+        Ctype.declare_record state.tags Ctype.Struct (Some name.node)
+      in
+      Hashtbl.replace state.tag_types (Tree.claimed_tag declared.id)
+        (Record_tag record);
+      record
+
+(* The structure has a tag of the enumeration of the constructors and,
+   where one has fields, a union of the struct of each one's fields
+   (design 10.1 rule 3). *)
+and read_variant state (declaration : Tree.type_declaration) constructors
+    bind =
+  let { Tree.name; declared; _ } = declaration.node in
+  let record = variant_record state name declared in
+  let entity = bind (Ctype.record record) in
+  let tag_enum = variant_tag_enum state declaration constructors in
+  let tag = variant_member Tree.tag_member (Ctype.enum tag_enum) in
+  let members =
+    match List.filter_map (constructor_payload state) constructors with
+    | [] -> [ tag ]
+    | payloads ->
+        let span = declaration.span in
+        let union = defined_record state span Ctype.Union payloads in
+        [ tag; variant_member Tree.union_member (Ctype.record union) ]
+  in
+  checked state declaration.span
+    (Ctype.define_record state.target state.tags record members);
+  entity
+
+and variant_member name member_type =
+  { Ctype.member_name = Some name; member_type; bit_field_width = None }
+
+and defined_record state span kind members =
+  let record = Ctype.declare_record state.tags kind None in
+  checked state span
+    (Ctype.define_record state.target state.tags record members);
+  record
+
+(* The enumeration of the tags, whose enumerators number the constructors
+   from 0 in order (design 10.1 rule 1) and have type int, as C gives an
+   enumerator that int holds. *)
+and variant_tag_enum state (declaration : Tree.type_declaration)
+    constructors =
+  let span = declaration.span and variant = declaration.node.name.node in
+  let tag = Tree.enum_tag_name variant in
+  let enum = Ctype.declare_enum state.tags (Some tag) in
+  Hashtbl.replace state.tag_types
+    (Tree.derived_enum_tag ~type_keyword:span.first)
+    (Enum_tag enum);
+  let values =
+    List.mapi (fun index _ -> Exact_integer.of_int index) constructors
+  in
+  checked state span
+    (Ctype.define_enum state.tags enum
+       (Answer (enum_integer state span values)));
+  declare_tag_enumerators state span variant constructors;
+  enum
+
+(* The enumerator [N_C] of each constructor, whose value is its index. *)
+and declare_tag_enumerators state span variant constructors =
+  let enumerator_type = integer_type state span Int in
+  let declare index (constructor : Tree.constructor) =
+    let name = Tree.enumerator_name ~variant constructor.node.name.node in
+    let declared : Tree.declared =
+      let token = constructor.node.name.span.first in
+      { id = Tree.derived_enumerator token; earlier = None }
+    in
+    let value =
+      Integer_constant.known state.target Int (Exact_integer.of_int index)
+    in
+    let declared_as = Enumerator { enumerator_type; value } in
+    ignore
+      (record state name declared
+         { name; entity = fresh_entity state; declared = declared_as })
+  in
+  List.iteri declare constructors
+
+(* The member of the union for a constructor with fields: the struct of
+   its fields in order, named after the constructor. *)
+and constructor_payload state (constructor : Tree.constructor) =
+  match constructor.node.fields with
+  | [] -> None
+  | fields ->
+      let members = List.map (read_field state constructor) fields in
+      let span = constructor.span in
+      let payload = defined_record state span Ctype.Struct members in
+      Some (variant_member constructor.node.name.node (Ctype.record payload))
+
+and read_field state constructor (field : Tree.field) =
+  let specified = read_specifiers state field.node.specifiers in
+  let derived =
+    declare_type state ~parameter:false specified (Some field.node.declarator)
+  in
+  check_field_type state constructor field derived;
+  { Ctype.member_name = derived.name; member_type = derived.declared_type;
+    bit_field_width = None }
+
+(* A field type is a value type (design 3.2 rule 4), so a variant holds
+   itself only through a pointer (rule 5). *)
+and check_field_type state (constructor : Tree.constructor)
+    (field : Tree.field) (derived : derived) =
+  let subject =
+    Printf.sprintf "the field %s of %s"
+      (quote (Option.value derived.name ~default:""))
+      (quote constructor.node.name.node)
+  in
+  match Value_type.problem state.tags derived.declared_type with
+  | Answer None -> ()
+  | Answer (Some problem) ->
+      fail state field.span
+        (Rule.message Field_type
+           (Printf.sprintf "%s %s, so it is not a value type" subject
+              (Value_type.describe problem)))
+  | Depends_on unknown ->
+      fail_needing state field.span ("whether " ^ subject ^ " is a value type")
+        unknown
 
 (* The name denotes the record before its members are read, so that they
    may use it (rule 2). A specifier without a tag of its own declares the
    tag that the declaration claims. *)
-and read_record_alias state name
+and read_record_alias state name (declared : Tree.declared)
     (specifier : Tree.record_specifier Tree.spanned) bind =
   let { Tree.kind; attributes; tag; members } = specifier.node in
   let claimed : Tree.tag =
-    { name; binding = Declares { id = Tree.claimed_tag name; earlier = None } }
+    { name;
+      binding = Declares { id = Tree.claimed_tag declared.id; earlier = None } }
   in
   let tag = Option.value tag ~default:claimed in
   let span = specifier.span in
@@ -1762,6 +1886,7 @@ let read target text unit =
       typed = Expressions.create ();
       type_names = Hashtbl.create 256;
       type_declarations = Hashtbl.create 16;
+      incomplete_variants = Hashtbl.create 16;
       place = At_file_scope;
       next_entity = 0;
     }
