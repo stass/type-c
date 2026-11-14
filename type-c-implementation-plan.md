@@ -83,7 +83,9 @@ feature is built here.
 | 0.7b | GNU profile types: the table of builtin functions, `__int128` and `_Float` types, vector types, block pointers, fixed enumeration types, `typeof`, the attributes that typing reads, the types of `__builtin_offsetof` and `__builtin_va_arg`, `__auto_type`. Done after 0.9b, on its expression typing. |
 | 0.8 | Types: representation, compatibility, composite types, promotions, usual arithmetic conversions. |
 | 0.9a | Declarations to types: specifiers and declarators, tags, typedefs, scopes and linkage at file scope; integer constant expressions. |
-| 0.9b | Expression typing: lvalues, conversions, members, calls, compound literals, address and arithmetic constants, `_Generic` selection; block scopes. |
+| 0.9b-1 | Expression typing in function bodies: lvalues and their conversions, operators with promotions and the usual arithmetic conversions, identifiers through the parser's resolutions, members, calls with prototypes and default argument promotions, casts, `sizeof` and `_Alignof` of expressions, `typeof` of expressions, statement expressions; block-scope declarations bound and typed; statement constraints the typer needs. |
+| 0.9b-2 | Initialisers and compound literals, completing array types; address and arithmetic constant expressions. |
+| 0.9b-3 | `_Generic` selection; the expression type a Type-C rule queries. |
 | 0.10 | Typing oracle: compare the type `typec` gives each expression with Clang's AST dump. |
 | 0.11 | Corpus runner and platform sweep; fix the tail it finds. Several commits, one per class of construct. |
 | 0.12 | Fuzz harness for the reader and the parser; resource limits. |

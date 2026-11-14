@@ -31,7 +31,7 @@ let file_scope_entity (names, result) name =
 let file_scope_tag (names, result) name =
   Option.bind (File_scope_names.tag names name) (Declarations.tag result)
 
-let linkage_name : Declarations.linkage -> string = function
+let linkage_name : Entity.linkage -> string = function
   | External -> "external"
   | Internal -> "internal"
   | No_linkage -> "none"
@@ -42,7 +42,7 @@ let value_name (constant : Integer_constant.t) =
   | Opaque -> "opaque"
 
 (* An identifier as words: its kind, type, linkage and the rest. *)
-let describe (declared : Declarations.declared) =
+let describe (declared : Entity.declared) =
   match declared with
   | Object { object_type; linkage; storage } ->
       let storage_name =
@@ -526,7 +526,7 @@ let enumerations () =
 (* A constant expression deeper than the bound is an error, not a crash;
    the parser reads the chain in a loop. *)
 let deep_expression () =
-  let terms = Declarations.max_expression_depth + 1 in
+  let terms = Expressions.max_depth + 1 in
   let chain = String.concat " + " (List.init terms (fun _ -> "1")) in
   rejects ("enum { V = " ^ chain ^ " };") "too deeply";
   let chain = String.concat " + " (List.init 1000 (fun _ -> "1")) in
@@ -591,7 +591,12 @@ let gnu_profile () =
   rejects "typeof(y) x;" "'y' is not declared (C11 6.5.1p2)";
   (* A reserved name may be a builtin of the backend. *)
   declares "__typeof__(__builtin_memcpy) *p;" "p"
-    "object <'typeof' of an expression> * external static"
+    "object <the builtin '__builtin_memcpy'> * external static";
+  (* typeof of an expression is its type, unconverted. *)
+  declares "int x; typeof(x + 1) *p;" "p" "object int * external static";
+  declares "int a[2]; typedef typeof((0, a)) t;" "t" "typedef int *";
+  declares "short s; typeof(-s) n;" "n" "object int external static";
+  rejects "typeof(1 + (struct { int a; }){0}) y;" "6.5.6p2"
 
 (* What typec does not type yet is an unknown type, never a guess, and an
    error only where a declaration needs what that type is (design 13.3). *)
@@ -615,14 +620,13 @@ let unknown_types () =
   declares "int q(void *, int (^)(const void *, const void *));" "q"
     "function int (void *, <a block pointer>) external";
   accepts "typedef struct { int (^e)(const char *, int); } glob_t;";
-  declares "int x; typeof(x + 1) *p;" "p"
-    "object <'typeof' of an expression> * external static";
-  declares "int x; typedef typeof(x + 1) t;" "t"
-    "typedef <'typeof' of an expression>";
+  declares "_Float16 h; typeof(h + 1) *p;" "p"
+    "object <'_Float16'> * external static";
+  declares "_Float16 h; typedef typeof(h * 2) t;" "t" "typedef <'_Float16'>";
   (* Whether the declaration declares a function depends on the type. *)
-  rejects "int x; typeof(x + 1) y;"
-    "whether 'y' is a function or an object depends on 'typeof' of an \
-     expression at in.c:1";
+  rejects "typeof(__builtin_f) y;"
+    "whether 'y' is a function or an object depends on the builtin \
+     '__builtin_f' at in.c:1";
   (* The size of an unknown type is the backend's, as an aggregate's is. *)
   declares "char c[sizeof(_Float16)];" "c"
     "object char[<constant>] external static";

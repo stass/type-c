@@ -4,23 +4,10 @@
 open Typec_cpp
 open Typec_syntax
 
-type linkage = External | Internal | No_linkage
-type storage = Static_storage | Thread_storage | Automatic_storage
+open Entity
 
-type declared =
-  | Object of { object_type : Ctype.t; linkage : linkage; storage : storage }
-  | Function of {
-      function_type : Ctype.t;
-      linkage : linkage;
-      inline : bool;
-      noreturn : bool;
-      gnu_inline : bool;
-      overload : bool;
-    }
-  | Typedef of Ctype.t
-  | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
+type entity = Entity.t
 
-type entity = { name : string; entity : int; declared : declared }
 type tag = Record_tag of Ctype.record_tag | Enum_tag of Ctype.enum_tag
 
 type item =
@@ -34,6 +21,7 @@ type t = {
   entities : (Tree.reference, entity) Hashtbl.t;
   tag_types : (Tree.tag_id, tag) Hashtbl.t;
   linked : (string, entity) Hashtbl.t;
+  typed : Expressions.t;
 }
 
 let tags result = result.tags
@@ -41,12 +29,8 @@ let items result = result.items
 let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name
+let expression result expression = Expressions.find result.typed expression
 type error = Reader.error = { location : Location.t; message : string }
-
-(* Far above the operators of a real constant expression, it bounds the
-   recursion of the evaluator on the chains that the parser reads in
-   loops, whose trees are as deep as they are long. *)
-let max_expression_depth = 10_000
 
 (* The reader *)
 
@@ -57,17 +41,23 @@ let max_expression_depth = 10_000
 (* Where a declarator is read, for the array lengths that 6.7.6.2p2 and
    p4 allow by the scope they are in: no variable length at file scope,
    and [*] only in a parameter list that is not that of a definition. *)
-type place = At_file_scope | In_prototype | In_definition
+type place = At_file_scope | In_prototype | In_definition | In_block
 
 (* The reader follows the links that the parser records in the tree
    (design 13.3): [entities] holds what each declaration that it has read
    declares, as of that declaration, [tag_types] the tag that each tag
    declaration declares, and [linked] the entity that each name with
-   linkage denotes (6.2.2), which no scope hides. [beside] holds, for each
-   declaration of an overload, the entity that a later declaration of its
-   name without [overloadable] redeclares in its place, and [overloaded]
+   linkage denotes (6.2.2), which no scope hides, as of its last
+   declaration, and [at_file_scope] as of its last one at file scope,
+   which a block sees unless a declaration without linkage hides it.
+   [beside] holds, for each declaration of an overload, the entity that a
+   later declaration of its name without [overloadable] redeclares in its
+   place, and [overloaded]
    each overload and each declaration with one before it in its scope,
-   whose uses name the overload set (design 13.3). *)
+   whose uses name the overload set (design 13.3). [typed] is the typed
+   view of the expressions, and [type_names] the type of each type name
+   read, which typing and constant evaluation both ask for and whose
+   declarations are made once. *)
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -75,11 +65,13 @@ type state = {
   entities : (Tree.reference, entity) Hashtbl.t;
   tag_types : (Tree.tag_id, tag) Hashtbl.t;
   linked : (string, entity) Hashtbl.t;
+  at_file_scope : (string, entity) Hashtbl.t;
   beside : (Tree.reference, entity option) Hashtbl.t;
   overloaded : (Tree.reference, unit) Hashtbl.t;
+  typed : Expressions.t;
+  type_names : (Tree.span, Ctype.t) Hashtbl.t;
   mutable place : place;
   mutable next_entity : int;
-  mutable expression_depth : int;
 }
 
 (* Raised at the first error; caught in [read]. *)
@@ -89,12 +81,7 @@ let fail state (span : Tree.span) message =
   let location = state.text.tokens.(span.first).location in
   raise (Failed { location; message })
 
-(* A spelling from the text in a message, cut short. *)
-let max_quoted = 64
-
-let quote text =
-  if String.length text <= max_quoted then "'" ^ text ^ "'"
-  else "'" ^ String.sub text 0 max_quoted ^ "...'"
+let quote = Expressions.quote
 
 let checked state span = function
   | Ok t -> t
@@ -138,15 +125,9 @@ let within state place read =
 
 (* Following the links of the tree *)
 
-(* An identifier that the implementation reserves (C11 7.1.3p1) may name
-   one of the backend's builtins without a declaration: a function such
-   as [__builtin_memcpy], or [__func__] (6.4.2.2). typec has no table of
-   them yet (0.7b), so it takes every such name as one. *)
-let may_be_builtin name = String.starts_with ~prefix:"__" name
-
 (* A declaration that the parser resolved a use to, but that the reader
    has not met, is in a place that the reader does not read yet: an
-   initialiser, or an operand that only 0.9b types. *)
+   initialiser at file scope (0.9b-2). *)
 let not_read state span name =
   fail state span
     (quote name
@@ -158,9 +139,6 @@ let referenced state span name reference =
   match Hashtbl.find_opt state.entities reference with
   | Some entity -> entity
   | None -> not_read state span name
-
-let undeclared state span name =
-  fail state span (quote name ^ " is not declared (C11 6.5.1p2)")
 
 (* The entity that the declaration of [name] at [span] redeclares: none
    where it is the first in its scope. An overload in between is passed
@@ -255,41 +233,65 @@ let follows_overload state (declared : Tree.declared) =
   | Some earlier -> Hashtbl.mem state.overloaded earlier
   | None -> false
 
-(* Records what [declared] declares [name] as: a new entity, or the one
-   it redeclares with the composite of their types. *)
-let bind state span name (declared : Tree.declared) next =
+let record state name (declared : Tree.declared) entity =
+  let reference = Tree.In_tree declared.id in
+  Hashtbl.replace state.entities reference entity;
+  if follows_overload state declared then
+    Hashtbl.replace state.overloaded reference ();
+  if linkage_of entity.declared <> No_linkage then
+    Hashtbl.replace state.linked name entity;
+  entity
+
+(* Records what [declared] declares [name] as: a new entity, or [prior],
+   the visible declaration it redeclares, with the composite of their
+   types. *)
+let bind_to state span name (declared : Tree.declared) prior next =
   if is_overload next then bind_overload state span name declared next
   else
     let entity =
-      match earlier_entity state span name declared with
+      match prior with
       | None -> { name; entity = fresh_entity state; declared = next }
       | Some prior ->
           { prior with
             declared = redeclared state span name prior.declared next }
     in
-    let reference = Tree.In_tree declared.id in
-    Hashtbl.replace state.entities reference entity;
-    if follows_overload state declared then
-      Hashtbl.replace state.overloaded reference ();
-    if linkage_of entity.declared <> No_linkage then
-      Hashtbl.replace state.linked name entity;
-    entity
+    record state name declared entity
+
+(* [bind_to] the declaration before [declared] in its scope. *)
+let bind state span name declared next =
+  bind_to state span name declared (earlier_entity state span name declared)
+    next
+
+(* A declaration with linkage of a name whose declarations with linkage
+   it does not see, as one in a block of another function: the same
+   entity (6.2.2p4, p5), of a compatible type (6.2.7p2), with its own
+   type, as no declaration in scope composes with it (6.2.7p4). *)
+let bind_unseen state span name declared (other : entity) next =
+  ignore (redeclared state span name other.declared next);
+  record state name declared { other with declared = next }
+
+(* Where a declaration of an ordinary identifier stands, for its linkage
+   and storage duration (6.2.2, 6.2.4). *)
+type scope = File_scope | Block_scope
+
+(* The declaration that a declaration of [name] takes its linkage from
+   (6.2.2p4): the one before it in its scope, or for one in a block the
+   last with linkage in any scope. The parser links no declaration to one
+   of an enclosing scope, so the tables of names with linkage stand for
+   the visible one. *)
+let linkage_source state scope span name declared =
+  match (earlier_entity state span name declared, scope) with
+  | Some prior, _ -> Some prior
+  | None, Block_scope -> Hashtbl.find_opt state.linked name
+  | None, File_scope -> None
 
 (* 6.2.2p4, p5: [extern], or a function without a storage class, takes the
-   linkage of a visible declaration that has one, which at file scope is
-   the one it redeclares. *)
-let file_scope_linkage state span name declared ~is_function storage =
-  let visible () =
-    match earlier_entity state span name declared with
-    | Some { declared; _ } when linkage_of declared <> No_linkage ->
-        linkage_of declared
-    | Some _ | None -> External
-  in
-  match (storage : Tree.storage_class option) with
-  | Some Static -> Internal
-  | Some Extern -> visible ()
-  | None when is_function -> visible ()
-  | None | Some (Typedef | Thread_local | Auto | Register) -> External
+   linkage of the prior declaration where it has one. *)
+let prior_linkage state scope span name declared =
+  match linkage_source state scope span name declared with
+  | Some { declared; _ } when linkage_of declared <> No_linkage ->
+      linkage_of declared
+  | Some _ | None -> External
 
 (* Declaration specifiers *)
 
@@ -494,8 +496,8 @@ let identifier_value state (expression : Tree.expression) name
       match (referenced state expression.span name reference).declared with
       | Enumerator { value; _ } -> value
       | Object _ | Function _ | Typedef _ -> not_constant expression)
-  | Undeclared when may_be_builtin name -> not_constant expression
-  | Undeclared -> undeclared state expression.span name
+  (* Typing has refused a name that is no builtin. *)
+  | Undeclared -> not_constant expression
 
 (* Declarators *)
 
@@ -623,6 +625,140 @@ let for_declarator specified attributes =
   let onto = specified.attributed in
   { specified with attributed = read_attributes ~onto attributes }
 
+(* Identifiers declared at file scope or in a block *)
+
+let no_function_specifiers state span specified =
+  if specified.inline || specified.noreturn then
+    fail state span
+      "a function specifier in the declaration of an identifier that is \
+       not a function (C11 6.7.4p1)"
+
+let no_alignment state span specified what =
+  if specified.aligned <> None then
+    fail state span ("an alignment specifier for " ^ what ^ " (C11 6.7.5p2)")
+
+(* 6.2.2p3-p5, 6.7.1p7: the linkage of a function. [storage] is not
+   [typedef], and at file scope neither [auto] nor [register]. *)
+let function_linkage state scope span name declared storage =
+  match ((storage : Tree.storage_class option), scope) with
+  | Some Static, File_scope -> Internal
+  | (None | Some Extern), _ -> prior_linkage state scope span name declared
+  | Some (Static | Auto | Register | Typedef | Thread_local), Block_scope ->
+      fail state span
+        "a function declared in a block has a storage class other than \
+         extern (C11 6.7.1p7)"
+  | Some (Auto | Register | Typedef | Thread_local), File_scope ->
+      invalid_arg "Declarations: a storage class refused at file scope"
+
+let function_declared state scope span specified name declared
+    (derived : derived) storage =
+  (* Its noreturn, gnu_inline and overload would be guessed false. *)
+  Option.iter
+    (fun attribute ->
+      fail_needing state span
+        ("the declaration of the function " ^ quote name)
+        (attribute_unknown state attribute Unknown_function))
+    derived.inner_effect;
+  if specified.thread_local then
+    fail state span "a function declared _Thread_local (C11 6.7.1p4)";
+  no_alignment state span specified "a function";
+  (* An overload redeclares nothing, so it has no visible declaration to
+     take a linkage from. *)
+  let declared =
+    if specified.attributed.overloadable then
+      { declared with Tree.earlier = None }
+    else declared
+  in
+  Function
+    {
+      function_type = derived.declared_type;
+      linkage = function_linkage state scope span name declared storage;
+      inline = specified.inline;
+      noreturn = specified.noreturn || specified.attributed.gnu_noreturn;
+      (* GCC and Clang ignore it on a declaration without inline. *)
+      gnu_inline = specified.inline && specified.attributed.gnu_inline;
+      overload = specified.attributed.overloadable;
+    }
+
+(* 6.2.2p3-p6, 6.2.4, 6.7.1p3: the linkage and storage duration of an
+   object. [storage] is as for [function_linkage]. *)
+let object_declared state scope span specified name declared
+    (derived : derived) storage =
+  no_function_specifiers state span specified;
+  let duration =
+    if specified.thread_local then Thread_storage else Static_storage
+  in
+  let linkage, storage =
+    match ((storage : Tree.storage_class option), scope) with
+    | Some Static, File_scope -> (Internal, duration)
+    | Some Static, Block_scope -> (No_linkage, duration)
+    | Some Extern, _ ->
+        (prior_linkage state scope span name declared, duration)
+    | None, File_scope -> (External, duration)
+    | (None | Some (Auto | Register)), Block_scope ->
+        if specified.thread_local then
+          fail state span
+            "_Thread_local in a block without static or extern (C11 \
+             6.7.1p3)";
+        (No_linkage, Automatic_storage)
+    | Some (Auto | Register | Typedef | Thread_local), File_scope
+    | Some (Typedef | Thread_local), Block_scope ->
+        invalid_arg "Declarations: a storage class refused before"
+  in
+  Object { object_type = derived.declared_type; linkage; storage }
+
+(* What a declarator declares [name] as in [scope] (6.2.2, 6.2.4, 6.7.1,
+   6.9p2). *)
+let declared_as state scope span specified name declared (derived : derived) =
+  match (specified.storage, scope) with
+  | Some Typedef, _ ->
+      no_function_specifiers state span specified;
+      no_alignment state span specified "a typedef";
+      Typedef derived.declared_type
+  | Some (Auto | Register | Thread_local), File_scope ->
+      fail state span "auto or register at file scope (C11 6.9p2)"
+  | storage, _ -> (
+      match Ctype.is_function derived.declared_type with
+      | Answer true ->
+          function_declared state scope span specified name declared derived
+            storage
+      | Answer false ->
+          object_declared state scope span specified name declared derived
+            storage
+      | Depends_on unknown ->
+          fail_needing state span
+            ("whether " ^ quote name ^ " is a function or an object")
+            unknown)
+
+(* Records what a declarator declares in [scope]. *)
+let declare_in state scope span specified declared (derived : derived) =
+  match derived.name with
+  | Some name -> (
+      let next =
+        declared_as state scope span specified name declared derived
+      in
+      let has_linkage =
+        linkage_of next <> No_linkage && not (is_overload next)
+      in
+      let entity =
+        match (earlier_entity state span name declared, scope) with
+        | Some prior, _ -> bind_to state span name declared (Some prior) next
+        | None, _ when not has_linkage ->
+            bind_to state span name declared None next
+        | None, Block_scope when Hashtbl.mem state.at_file_scope name ->
+            bind_to state span name declared
+              (Hashtbl.find_opt state.at_file_scope name)
+              next
+        | None, (File_scope | Block_scope) -> (
+            match Hashtbl.find_opt state.linked name with
+            | Some other -> bind_unseen state span name declared other next
+            | None -> bind_to state span name declared None next)
+      in
+      if scope = File_scope && has_linkage then
+        Hashtbl.replace state.at_file_scope name entity;
+      entity)
+  | None -> invalid_arg "Declarations: a declarator without a name"
+
 let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
   let sorted = sort_specifiers specifiers in
@@ -707,35 +843,16 @@ and other_type state span (specifier : Tree.type_specifier) =
       let enum = enum_type state span ~attribute ~fixed tag enumerators in
       obscured state attribute (Ctype.enum enum)
   | Typeof_type type_name -> read_type_name state type_name
-  | Typeof_expression expression -> typeof_expression state span expression
+  | Typeof_expression expression -> typeof_expression state expression
   | Typedef_name { name; declaration } -> (
       match Hashtbl.find_opt state.entities declaration with
       | Some { declared = Typedef t; _ } -> t
       | Some _ | None ->
           fail state span (quote name ^ " is not a typedef name"))
 
-(* GNU [typeof] of an identifier is the type of what it denotes, without
-   conversion; typec types no other expression yet (0.9b), nor resolves
-   overloads. *)
-and typeof_expression state span expression =
-  match (strip_parentheses expression).node with
-  | Identifier { name; resolution = Resolved reference } -> (
-      match (referenced state expression.span name reference).declared with
-      | Function _ when Hashtbl.mem state.overloaded reference ->
-          unknown_type state span ("the overloaded " ^ quote name)
-            Unknown_function
-      | Object { object_type = t; _ }
-      | Function { function_type = t; _ }
-      | Enumerator { enumerator_type = t; _ } ->
-          t
-      | Typedef _ -> invalid_arg "Declarations: a typedef name as an operand")
-  | Identifier { name; resolution = Undeclared } when not (may_be_builtin name)
-    ->
-      undeclared state expression.span name
-  | _ ->
-      unknown_type state span
-        (quote "typeof" ^ " of an expression")
-        Object_or_function
+(* GNU [typeof] of an expression is its type, unconverted. *)
+and typeof_expression state expression =
+  (Expressions.expression (typing state) expression).expression_type
 
 (* 6.7.5p3: the value is the backend's to check, as layout is. *)
 and alignment state (alignment : Tree.alignment Tree.spanned) =
@@ -1343,10 +1460,25 @@ and parameter_specifiers state span specifiers =
 and declare_parameter state span derived name declared =
   let object_type = adjusted_parameter state span derived in
   let parameter =
-    Object { object_type; linkage = No_linkage; storage = Automatic_storage }
+    Object
+      {
+        object_type = parameter_object_type state span object_type;
+        linkage = No_linkage;
+        storage = Automatic_storage;
+      }
   in
   ignore (bind state span name declared parameter);
   object_type
+
+(* Design P20: a va_list parameter is adjusted as the target's va_list
+   is, to a pointer where it is an array (x86-64), so in the body the
+   parameter has a type that typec does not know. *)
+and parameter_object_type state span (t : Ctype.t) =
+  match t.shape with
+  | Va_list -> unknown_type state span "a va_list parameter" Unknown_object
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Array _
+  | Function _ | Unknown_type _ ->
+      t
 
 (* 6.9.1p6: the declaration list declares the names of the identifier list
    and no others, which are the parameters in the order of the list. A
@@ -1424,6 +1556,14 @@ and adjusted_parameter state span derived =
 (* Type names (6.7.7) *)
 
 and read_type_name state (type_name : Tree.type_name) =
+  match Hashtbl.find_opt state.type_names type_name.span with
+  | Some t -> t
+  | None ->
+      let t = read_new_type_name state type_name in
+      Hashtbl.replace state.type_names type_name.span t;
+      t
+
+and read_new_type_name state (type_name : Tree.type_name) =
   let span = type_name.span in
   let specified =
     read_specifiers state type_name.node.specifier_qualifiers
@@ -1438,26 +1578,18 @@ and read_type_name state (type_name : Tree.type_name) =
 (* Constant expressions *)
 
 (* What the expression declares stays declared, as in C, though it is
-   not a constant. *)
-and constant_expression state expression =
-  let saved_depth = state.expression_depth in
-  match evaluate state ~evaluated:true expression with
+   not a constant. Typing checks its operands first, which the evaluator
+   then reads as typed, and bounds its depth, which bounds the
+   evaluator's recursion too. [evaluated] is as in [evaluate]. *)
+and constant_expression ?(evaluated = true) state expression =
+  ignore (Expressions.expression (typing state) expression);
+  match evaluate state ~evaluated expression with
   | value -> Constant value
-  | exception Not_integer_constant span ->
-      state.expression_depth <- saved_depth;
-      Not_constant span
+  | exception Not_integer_constant span -> Not_constant span
 
 (* [evaluated] is false in an operand that is not evaluated (6.6p3), where
    an operation that would fail has no value instead. *)
 and evaluate state ~evaluated (expression : Tree.expression) =
-  if state.expression_depth >= max_expression_depth then
-    fail state expression.span "a constant expression is nested too deeply";
-  state.expression_depth <- state.expression_depth + 1;
-  let value = evaluate_node state ~evaluated expression in
-  state.expression_depth <- state.expression_depth - 1;
-  value
-
-and evaluate_node state ~evaluated (expression : Tree.expression) =
   let target = state.target and span = expression.span in
   let settled result = constant_checked state span result in
   match expression.node with
@@ -1519,7 +1651,8 @@ and evaluate_node state ~evaluated (expression : Tree.expression) =
   | Offsetof { type_name; _ } ->
       ignore (read_type_name state type_name);
       Integer_constant.opaque target.size_type
-  (* The operand is not evaluated and its type is not computed here. *)
+  (* The operand is typed, but its size waits for the initialisers that
+     complete arrays (0.9b-2). *)
   | Sizeof_expression _ | Alignof_expression _ ->
       Integer_constant.opaque target.size_type
   | Comma (left, right) when not evaluated ->
@@ -1551,111 +1684,66 @@ and cast state ~evaluated expression type_name operand =
   | Depends_on unknown ->
       fail_needing state expression.span "the value of a cast" unknown
 
-(* External declarations (6.9) *)
 
-(* The identifier that a file scope declarator declares (6.9p2). *)
-let file_scope_declared state span specified name declared
-    (derived : derived) =
-  let declared_type = derived.declared_type in
-  let function_specifiers () =
-    if specified.inline || specified.noreturn then
-      fail state span
-        "a function specifier in the declaration of an identifier that is \
-         not a function (C11 6.7.4p1)"
-  in
-  let no_alignment what =
-    if specified.aligned <> None then
-      fail state span ("an alignment specifier for " ^ what ^ " (C11 6.7.5p2)")
-  in
-  let declared_function storage =
-    (* Its noreturn, gnu_inline and overload would be guessed false. *)
-    Option.iter
-      (fun attribute ->
-        fail_needing state span
-          ("the declaration of the function " ^ quote name)
-          (attribute_unknown state attribute Unknown_function))
-      derived.inner_effect;
-    if specified.thread_local then
-      fail state span "a function declared _Thread_local (C11 6.7.1p4)";
-    no_alignment "a function";
-    (* An overload redeclares nothing, so it has no visible declaration
-       to take a linkage from. *)
-    let declared =
-      if specified.attributed.overloadable then
-        { declared with Tree.earlier = None }
-      else declared
-    in
-    let linkage =
-      file_scope_linkage state span name declared ~is_function:true storage
-    in
-    Function
-      {
-        function_type = declared_type;
-        linkage;
-        inline = specified.inline;
-        noreturn = specified.noreturn || specified.attributed.gnu_noreturn;
-        (* GCC and Clang ignore it on a declaration without inline. *)
-        gnu_inline = specified.inline && specified.attributed.gnu_inline;
-        overload = specified.attributed.overloadable;
-      }
-  in
-  let declared_object storage =
-    function_specifiers ();
-    let linkage =
-      file_scope_linkage state span name declared ~is_function:false
-        storage
-    in
-    let storage =
-      if specified.thread_local then Thread_storage else Static_storage
-    in
-    Object { object_type = declared_type; linkage; storage }
-  in
-  match specified.storage with
-  | Some Typedef ->
-      function_specifiers ();
-      no_alignment "a typedef";
-      Typedef declared_type
-  | Some (Auto | Register | Thread_local) ->
-      fail state span "auto or register at file scope (C11 6.9p2)"
-  | (None | Some (Static | Extern)) as storage -> (
-      match Ctype.is_function declared_type with
-      | Answer true -> declared_function storage
-      | Answer false -> declared_object storage
-      | Depends_on unknown ->
-          fail_needing state span
-            ("whether " ^ quote name ^ " is a function or an object")
-            unknown)
+(* Declarations in blocks and what typing asks of the reader *)
 
-let declare_file_scope state span specified declared (derived : derived) =
-  match derived.name with
-  | Some name ->
-      let next =
-        file_scope_declared state span specified name declared derived
-      in
-      bind state span name declared next
-  | None -> invalid_arg "Declarations: a declarator without a name"
-
-(* The asm label names a symbol, which no type depends on, and typing
-   reads the initializer. *)
-let read_init_declarator state specified
+(* The asm label names a symbol, which no type depends on. Typing reads
+   the initialiser of a declaration in a block; one at file scope is read
+   by 0.9b-2. *)
+and read_init_declarator state scope specified
     (init_declarator : Tree.init_declarator) =
-  let {
-    Tree.declarator;
-    declared;
-    asm_label = _;
-    attributes;
-    initialiser = _;
-  } =
+  let { Tree.declarator; declared; asm_label = _; attributes; initialiser } =
     init_declarator.node
   in
   let specified = for_declarator specified attributes in
-  (* A function typedef records no effect. *)
-  let records_effects = specified.storage <> Some Typedef in
+  (* The effects of attributes are recorded where design 13.3 places
+     them: on a function declared at file scope, not on a typedef. *)
+  let records_effects =
+    scope = File_scope && specified.storage <> Some Typedef
+  in
   let derived =
     declare_type state ~records_effects ~parameter:false specified
       (Some declarator)
   in
-  declare_file_scope state init_declarator.span specified declared derived
+  let entity =
+    declare_in state scope init_declarator.span specified declared derived
+  in
+  (match (scope, initialiser) with
+  | Block_scope, Some initialiser ->
+      Expressions.initialiser (typing state) initialiser
+  | Block_scope, None | File_scope, _ -> ());
+  entity
+
+and read_block_declaration state (declaration : Tree.declaration) =
+  match declaration.node with
+  | Static_assert assertion -> static_assert state assertion
+  | Declaration { specifiers; declarators } ->
+      let specified = read_specifiers state specifiers in
+      List.iter
+        (fun declarator ->
+          ignore (read_init_declarator state Block_scope specified declarator))
+        declarators
+
+and typing state : Expressions.context =
+  {
+    typed = state.typed;
+    target = state.target;
+    text = state.text;
+    tags = state.tags;
+    fail = (fun span message -> fail state span message);
+    entity = referenced state;
+    overloaded = Hashtbl.mem state.overloaded;
+    type_name = read_type_name state;
+    declaration = read_block_declaration state;
+    constant = constant_value state;
+  }
+
+and constant_value state ~evaluated expression =
+  match constant_expression ~evaluated state expression with
+  | Constant value -> Some value
+  | Not_constant _ -> None
+
+(* External declarations (6.9) *)
 
 let read_declaration state (declaration : Tree.declaration) =
   match declaration.node with
@@ -1664,16 +1752,18 @@ let read_declaration state (declaration : Tree.declaration) =
       Static_assertion
   | Declaration { specifiers; declarators } ->
       let specified = read_specifiers state specifiers in
-      Declaration (List.map (read_init_declarator state specified) declarators)
+      Declaration
+        (List.map (read_init_declarator state File_scope specified) declarators)
 
-(* 6.9.1. The body is not read. *)
+(* 6.9.1. The body is typed where the definition stands, so that it sees
+   the unit as of that point. *)
 let read_function_definition state (definition : Tree.function_definition) =
   let {
     Tree.specifiers;
     declarator;
     declared;
     declarations;
-    body = _;
+    body;
     attributes;
   } =
     definition.node
@@ -1697,7 +1787,13 @@ let read_function_definition state (definition : Tree.function_definition) =
     fail state span
       "the declarator of a function definition does not end in a function \
        derivation (C11 6.9.1p2)";
-  Function_definition (declare_file_scope state span specified declared derived)
+  let entity = declare_in state File_scope span specified declared derived in
+  (match body with
+  | Parsed block ->
+      within state In_block (fun () ->
+          Expressions.function_body (typing state) ~name:entity.name block)
+  | Skipped _ -> ());
+  Function_definition entity
 
 let read_external state (external_declaration : Tree.external_declaration) =
   match external_declaration with
@@ -1737,16 +1833,18 @@ let read target text unit =
       entities = Hashtbl.create 1024;
       tag_types = Hashtbl.create 256;
       linked = Hashtbl.create 1024;
+      at_file_scope = Hashtbl.create 1024;
       beside = Hashtbl.create 64;
       overloaded = Hashtbl.create 64;
+      typed = Expressions.create ();
+      type_names = Hashtbl.create 256;
       place = At_file_scope;
       next_entity = 0;
-      expression_depth = 0;
     }
   in
   declare_builtin_typedefs state;
   match List.map (read_external state) unit with
   | items ->
-      let { tags; entities; tag_types; linked; _ } = state in
-      Ok { tags; items; entities; tag_types; linked }
+      let { tags; entities; tag_types; linked; typed; _ } = state in
+      Ok { tags; items; entities; tag_types; linked; typed }
   | exception Failed error -> Error error

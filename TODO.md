@@ -143,18 +143,19 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Parser.max_nesting`, and its tree is as deep as it is long. A pass
   that recurses over the tree can exhaust the stack on a long chain: the
   constant evaluator of `Declarations` counts its depth against
-  `max_expression_depth`, and expression typing (0.9b) and the test dump
-  must count too or walk chains in loops.
-- [Medium] Nothing checks the constraints of statements that the parser
-  accepts: the storage classes of a `for` declaration (6.8.5p3), `case`
-  and `default` outside a `switch` (6.8.1p2), `break` and `continue`
-  outside a loop (6.8.6.2p1, 6.8.6.3p1), duplicate and missing labels
-  (6.8.1p3, 6.8.6.1p1) and `return` with or without a value (6.8.6.4p1),
+  `max_expression_depth` and expression typing `Expressions.max_depth`,
+  and the test dump must count too or walk chains in loops.
+- [Medium] Typing checks the controlling expressions of statements, the
+  places of `case`, `default`, `break` and `continue`, and the values of
+  `case` labels; nothing checks the other constraints of statements that
+  the parser accepts: the storage classes of a `for` declaration
+  (6.8.5p3), duplicate and missing labels (6.8.1p3, 6.8.6.1p1) and
+  `return` with or without a value (6.8.6.4p1),
   and the GNU label rules: a label address (`&&a`) outside a function
   body, a duplicate or undefined `__label__` label, `&&a` as a use of
   `a`, and a jump into a statement expression from outside it. Check
-  them where bodies are typed (0.9b). `Declarations` checks those of
-  declarations.
+  them where bodies are typed (`Expressions`). `Declarations` checks
+  those of declarations.
 - [Medium] `test/support/file_scope_names.ml` finds what a unit declares
   at file scope from its external declarations alone, so
   `declaration_probe` and `test_declarations` miss file-scope names
@@ -181,7 +182,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   `__label__` declares a label with block scope that a label statement
   in that block defines. Resolve them per function body, and per block
   literal body, once it is parsed (a pure step of the parser), into the
-  tree, for the label checks of 0.9b.
+  tree, for the label checks.
 - [Medium] GNU forms that common code uses and the profile leaves out,
   each an error that names its first token: attributes before a
   statement that no named label precedes (`__attribute__((musttail))
@@ -202,7 +203,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   statement expression outside a function, a range designator in
   `__builtin_offsetof`, a repeated asm qualifier, a labels section of
   `asm` without `goto`, and qualifiers and operands on file-scope `asm`.
-  Check them with the other constraints (0.9b).
+  Check them with the other constraints of statements.
 - [Low] `__alignof__` is `_Alignof` in the tree, but GCC and Clang give
   the preferred alignment for it, which differs from `_Alignof` on i386
   (`double`, `long long`). No supported target has the difference;
@@ -227,6 +228,43 @@ is [type-c-language-design.md](type-c-language-design.md).
   enumerator, where typec's error does not name the construct. Read
   both forms through one funnel at each attribute slot that both
   backends accept, which removes the list of sites.
+
+## Expression typing
+
+- [Medium] The typed view records no constant value: whether an
+  expression is a null pointer constant is computed where the
+  conditional operator needs it (6.5.15p6), through the constant
+  evaluator of `Declarations`, and not kept. Add the values of integer
+  and address constants to `Expressions.typed` with the constant
+  expressions of 0.9b-2, and let the evaluator read them from there
+  rather than walk the expression again. The result type of each
+  operator is decided twice meanwhile, by `Expressions` and by
+  `Integer_constant.unary`, `binary` and `conditional`, which the
+  evaluator calls: the conversions are shared, the mapping from operator
+  to type is not.
+- [Medium] Where GCC and Clang type an expression differently, typing
+  follows one of them whatever `Target.compiler` is: the value of a
+  postfix `++` or `--` of a bit-field is no bit-field, as in Clang,
+  while GCC keeps the width, so `s.b++ + 0` of an unsigned bit-field
+  narrower than `int` is `unsigned int` here and `int` in GCC; a
+  bit-field wider than `int` and narrower than its type, such as
+  `unsigned long long w : 40`, promotes to its declared type as in
+  Clang, and to a type of its width in GCC (`Arithmetic.promote`); a
+  member found through an anonymous structure with a `const` type is
+  `const` as in GCC (`struct { const struct { int z; }; } t; t.z`),
+  which Clang lets `t.z = 1` assign. Choose by the backend or give an
+  unknown type; neither the probe nor the corpus has them yet.
+- [Medium] `Ctype.find_member` passes over an anonymous member of
+  unknown type, such as one whose specifier has an attribute outside the
+  table, so `t.z` of `struct T { struct { int z; }
+  __attribute__((ms_struct)); } t;` is reported as no member, which
+  Clang accepts. Let it answer `Depends_on` where a record has such a
+  member, and typing give the access that unknown type.
+- [Medium] An identifier is a spelling, so a universal character name
+  and the UTF-8 character it names are two names (`linked` is keyed by
+  spelling), and the length of `__func__` counts the spelling: Clang
+  gives a function spelled with `\U0001F600` a name of its UTF-8 bytes.
+  Normalise identifiers to UTF-8 where the reader lexes them.
 
 ## Declarations
 
@@ -255,18 +293,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   empty `no_attributes`); a set of effects would leave the table and the
   one consumer. The table checks no attribute's arguments
   (`noreturn(1)` is accepted).
-- [Medium] Unknown types (design 13.3, P21) for 0.7b and 0.9b to
-  replace by types where a point needs them: block pointers, `_Float16`,
-  `typeof` of an expression other than an identifier, and what an
-  attribute outside the table applies to. `typeof (x + 1) y;` at file
-  scope is an error, since whether `y` is a function depends on the
-  type, though both backends accept it. The tags that `typeof` of an
-  expression declares are not declared, as in `sizeof`, and a later use
-  of one is an error. An attribute outside the table on a structure or union
-  specifier makes the type of that specifier unknown, while a later
-  `struct s` names the record as declared: right for its identity,
-  members and completeness, the facts typec computes, but
-  `transparent_union` changes how 0.9b must convert arguments.
+- [Medium] Unknown types (design 13.3, P21) for 0.7b to replace by
+  types where a point needs them: block pointers, `_Float16`, the
+  builtins of the backend, and what an attribute outside the table
+  applies to. `typeof (__builtin_f) y;` at file scope is an error, since
+  whether `y` is a function depends on the type, though both backends
+  accept it. `_Generic` gives an unknown type until 0.9b-3 selects, and
+  a block literal one whose body is not typed. An attribute outside the
+  table on a structure or union specifier makes the type of that
+  specifier unknown, while a later `struct s` names the record as
+  declared: right for its identity, members and completeness, the facts
+  typec computes, but `transparent_union` changes how typing must
+  convert arguments.
 - [Medium] An anonymous structure or union member whose specifier has an
   attribute outside the table, such as `packed`, has an unknown type, so
   its members are not members of the containing type and a duplicate
@@ -332,12 +370,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   an array (x86-64), and it is compatible only with itself. The reader
   accepts `int f(va_list); int f(const va_list);`, which x86-64 refuses
   and leaves to the backend, and refuses `int g(va_list); int g(char
-  *);`, which i386 and arm64 Darwin accept. Typing `__builtin_va_arg`
-  and bodies (0.9b, 0.7b) must check that no expression needs more:
-  `&ap` of a parameter (`va_list *` on arm64, not on x86-64),
-  `char *p = ap;` and `va_copy` are the cases to try. If one does, the
-  representation must come from the backend (a target table is ruled
-  out by design 13.3).
+  *);`, which i386 and arm64 Darwin accept. In a body a `va_list`
+  parameter has an unknown type, since x86-64 adjusts it to `struct
+  __va_list_tag *` (Clang), so `&ap` and the uses of `ap` are not typed.
+  If a Type-C rule needs them, the representation must come from the
+  backend (a target table is ruled out by design 13.3).
 - [High] Initialisers are not read: an array of unknown size keeps its
   incomplete type where its initialiser completes it (6.7.9p22), and the
   tags and enumerators that an initialiser declares, inside `sizeof` or a
@@ -345,25 +382,17 @@ is [type-c-language-design.md](type-c-language-design.md).
   initialisers with compound literals (0.9b), which need the same
   rule.
 - [Medium] In an integer constant expression `sizeof` of an expression
-  is opaque, without a check of its operand, and `_Generic` is an error,
-  because only 0.9b types expressions. Take both from expression typing
-  there, so that `sizeof x` of a scalar `x` has its value and that of a
-  variable length array is no constant (6.5.3.4p2).
-- [High] Before 0.9b reads function bodies, decide how a body sees the
-  translation unit at its own point. `Declarations.entity` gives each
-  declaration as of itself, but `Ctype.tags` is one mutable table in its
-  state at the end of the file, so in `struct s; void f(void) {
-  sizeof (struct s); } struct s { int a; };` the structure would look
-  complete inside `f`. Either record completion per tag declaration or
-  type each body during `read`.
-- [High] A use of a name with a Clang overload (`overloadable`, design
-  13.3) in scope before the declaration it resolves to must be typed by
-  overload resolution, with Clang's rules, or left unknown: the parser
-  resolves it to the last declaration of the name, overload or not,
-  which need not be the function that Clang chooses. `typeof` of one is
-  unknown; expression typing (0.9b) must do the same for a call to one
-  and for its address, from the reader's private `overloaded` table,
-  which `Declarations` then exposes.
+  is opaque, though its operand is typed, and `_Generic` is an error.
+  Give `sizeof x` its value once initialisers complete array types
+  (0.9b-2), so that `sizeof a / sizeof a[0]` of `int a[] = {...}` stays
+  a constant, and that of a variable length array no constant
+  (6.5.3.4p2); select `_Generic` with 0.9b-3.
+- [Medium] A use of a name with a Clang overload (`overloadable`, design
+  13.3) in scope before the declaration it resolves to has an unknown
+  type, as the parser resolves it to the last declaration of the name,
+  overload or not, which need not be the function that Clang chooses;
+  so the type and arity of a call to one are the backend's. Overload
+  resolution with Clang's rules would type them.
 - [Medium] Two `overloadable` declarations of a name with the same type
   in one scope are one function in Clang; typec gives each an entity of
   its own and checks none of Clang's rules on overload sets: an
@@ -375,16 +404,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   not keep (`beside` holds only the entity before them), and a type
   comparison that counts `pass_object_size` and `enable_if`, which typec
   leaves unknown.
-  Do it with overload resolution in 0.9b if it needs the identity.
-- [High] Block-scope declarations with linkage (0.9b) must join
-  `Declarations.linked`, the table of the objects and functions with
-  linkage by name (6.2.2p4, 6.2.7p2): a block-scope `extern int x;`,
-  even where the file-scope `x` is hidden, denotes the same entity and
-  merges its composite type. Its linkage is that of the visible
-  declaration (6.2.2p4), which at file scope is the one it redeclares;
-  in a block the parser records no link to a visible declaration in an
-  enclosing scope, so 0.9b needs one (the resolution of the declared
-  name where its declarator starts).
+  Do it with overload resolution if that needs the identity.
+- [Medium] A block-scope declaration with linkage takes its linkage
+  from the last declaration of its name with linkage and the composite
+  type of the last at file scope (6.2.2p4, 6.2.7p4), as the parser
+  records no link to a visible declaration of an enclosing scope. Where
+  a declaration without linkage hides those, C gives the block's
+  `extern` external linkage and no composite with the hidden type:
+  `static int x; void f(void) { int x; { extern int x; } }` is undefined
+  there and accepted here, and `int a[3]; void f(void) { int a; {
+  extern int a[]; sizeof a; } }` gives `a` the size it lacks. The
+  resolution of the declared name where its declarator starts, recorded
+  by the parser, would settle both.
 - [Medium] An `entity` and an `item` carry no location or tree node, so
   no message can point at a previous declaration and a consumer lines
   `items` up with the tree by position. The id of each declaration is
@@ -392,10 +423,9 @@ is [type-c-language-design.md](type-c-language-design.md).
   Stage 1 first needs it.
 - [Medium] An undeclared identifier that the implementation reserves
   (two leading underscores, C11 7.1.3p1) is taken as a builtin of the
-  backend wherever the declaration reader evaluates it: not a constant,
-  and of unknown type in `typeof`. Replace the rule by the table of
-  builtin functions (0.7b) and the predefined identifiers (`__func__`,
-  `__FUNCTION__`, `__PRETTY_FUNCTION__`).
+  backend, of unknown type, wherever typing meets it but for `__func__`,
+  `__FUNCTION__` and `__PRETTY_FUNCTION__` in a function. Replace the
+  rule by the table of builtin functions (0.7b).
 - [Low] `specified.storage` holds a `Tree.storage_class`, which can say
   `_Thread_local` although `storage_class` never puts it there. Give it a
   type without that case.

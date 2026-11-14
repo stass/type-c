@@ -11,12 +11,12 @@
   (env_var TYPEC_TEST_CLANG)
   (env_var TYPEC_TEST_GCC)))
 
-; The model that target.t expects and the -m32 of types.t and
-; declarations.t are those of x86-64; arm64 hosts do not run them
+; The model that target.t expects and the -m32 of types.t,
+; declarations.t and expressions.t are those of x86-64; arm64 hosts do not run them
 ; (TODO.md, Test hosts).
 
 (cram
- (applies_to target types declarations)
+ (applies_to target types declarations expressions)
  (enabled_if
   (= %{architecture} amd64)))
 
@@ -60,3 +60,13 @@
 (cram
  (applies_to declarations)
  (deps declaration_probe.exe))
+
+; expressions.t compiles the output of expression_probe with each backend.
+
+(executable
+ (name expression_probe)
+ (libraries typec_cpp typec_syntax typec_sema))
+
+(cram
+ (applies_to expressions)
+ (deps expression_probe.exe))

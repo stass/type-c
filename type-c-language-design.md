@@ -1263,9 +1263,7 @@ otherwise the opaque type stays.
 
 **Unknown types.** *Provisional (P21).* A type that the front end does
 not compute is unknown, never guessed: Clang's block pointers,
-the optional floating types, `typeof` of an expression other than an
-identifier (whose type is that of the declaration it resolves to), and
-the type that an attribute applies to when the front end does not record the attribute's effect
+the optional floating types, and the type that an attribute applies to when the front end does not record the attribute's effect
 there: one without an entry in the table of effects that the front end
 knows, as `mode` and `vector_size` change a type in ways it does not
 model, or `noreturn`, `gnu_inline` and `overloadable` anywhere but in

@@ -70,7 +70,7 @@ let print_enum_integer (result : Declarations.t) name (t : Ctype.t) =
   | Unknown_type _ ->
       ()
 
-let print_declared result name (declared : Declarations.declared) =
+let print_declared result name (declared : Entity.declared) =
   match declared with
   | Object { object_type = t; _ } | Function { function_type = t; _ } ->
       assert_selects ("&" ^ name) (pointer_to t)

@@ -1,0 +1,40 @@
+(* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
+
+(** What an ordinary identifier denotes (C11 6.2.1, 6.2.2, 6.2.4): the
+    facts that the declaration reader records for each declaration and
+    that expression typing reads at each use. *)
+
+type linkage = External | Internal | No_linkage
+
+(** The storage duration of an object (6.2.4). *)
+type storage = Static_storage | Thread_storage | Automatic_storage
+
+type declared =
+  | Object of { object_type : Ctype.t; linkage : linkage; storage : storage }
+  | Function of {
+      function_type : Ctype.t;
+      linkage : linkage;
+      inline : bool;  (** [inline] in some declaration *)
+      noreturn : bool;  (** [_Noreturn] in some declaration *)
+      gnu_inline : bool;
+          (** The attribute [gnu_inline] in some [inline] declaration: the
+              GNU89 rule decides whether the inline definition is external,
+              which it is unless it says [extern inline], in place of
+              C11 6.7.4p7, which decides from every file-scope declaration
+              of the function. *)
+      overload : bool;
+          (** The attribute [overloadable] (Clang): one function of an
+              overload set of its name, an entity of its own that no other
+              declaration redeclares and that is not in
+              [Declarations.linked]. *)
+    }
+  | Typedef of Ctype.t
+  | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
+      (** The type is [int] when every value of the enumeration fits it,
+          else the enumerated type; while its list is read, the type is
+          that of its value, as in C23 6.7.2.2 and GCC and Clang. A value
+          that typec does not evaluate is an error (design P16). *)
+
+(** The declarations of one object or function share its [entity]. *)
+type t = { name : string; entity : int; declared : declared }
