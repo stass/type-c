@@ -12,8 +12,10 @@
     composite type (6.2.7p4). Each function body is typed where its
     definition stands, so that it sees the tags and declarations of the
     unit at that point, and the declarations of its blocks are read as
-    those at file scope are. Initialisers at file scope are not read
-    (0.9b-2), and no initialiser completes an array type (6.7.9p22) yet.
+    those at file scope are. An initialiser is read with its declarator
+    and completes the type of an array of unknown size (6.7.9p22), as a
+    later declaration with the length would; one of an object of static
+    or thread storage duration is constant (6.7.9p4).
 
     The reader keeps no scope: it follows the links that the parser
     records in the tree (design 13.3), from each use to the declaration it
@@ -50,10 +52,10 @@ val items : t -> item list
 
 val entity : t -> Tree.reference -> entity option
 (** What a declaration that the reader has read declares, as of that
-    declaration: a later one of the same entity may complete its type.
-    [None] for one in a place that the reader does not read, such as an
-    initialiser at file scope, and for a builtin typedef name that the
-    target lacks. *)
+    declaration and its initialiser: a later one of the same entity may
+    complete its type. [None] for one in a place that the reader does not
+    read, the body of a Clang block literal, and for a builtin typedef name
+    that the target lacks. *)
 
 val tag : t -> Tree.tag_id -> tag option
 (** The tag that a tag declaration declares, [None] as for {!entity}. *)
@@ -71,8 +73,11 @@ type error = Reader.error = { location : Location.t; message : string }
 val expression : t -> Tree.expression -> Expressions.typed option
 (** The type of an expression that the reader has typed, as
     {!Expressions.find} gives it: every expression of a parsed function
-    body and every one that a declaration holds, but those of
-    initialisers at file scope. *)
+    body and every one that a declaration holds, initialisers included. *)
+
+val constant : t -> Tree.expression -> Expressions.constant option
+(** The class of constant expression of an expression that the reader
+    has typed; see {!Expressions.constant}. *)
 
 val selection : t -> Tree.expression -> Tree.expression Ctype.answer option
 (** What a generic selection that the reader has typed selects; see

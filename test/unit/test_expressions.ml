@@ -183,8 +183,7 @@ let postfix () =
   rejects "x++ ++" "not an lvalue (C11 6.5.2.4p1)";
   rejects "s++" "6.5.2.4p1";
   types "(struct s){ 0 }" "struct s lvalue";
-  types "(int[]){ 1, 2 }"
-    "<a compound literal of an array of unknown length> lvalue";
+  types "(int[]){ 1, 2 }" "int[2] lvalue";
   types "(int[2]){ 1, x }" "int[2] lvalue"
 
 (* 6.5.3, 6.5.4. *)
@@ -480,6 +479,95 @@ let deep_bodies () =
   types (chain 1000) "int lvalue";
   rejects (chain (Expressions.max_depth + 1)) "too deeply"
 
+(* The class of constant expression (C11 6.6) that typing gives. *)
+let describe_constant (constant : Expressions.constant) =
+  let kind_name : Expressions.kind -> string = function
+    | Arithmetic_constant -> "arithmetic"
+    | Address_constant -> "address"
+    | Designator { static_storage; named } ->
+        (if static_storage then "static" else "automatic")
+        ^ if named then " named" else ""
+    | Backend_constant -> "backend"
+    | Not_constant -> "not constant"
+  in
+  match constant with
+  | Integer_expression { value; flaw } ->
+      let value =
+        match value.value with
+        | Known value -> Exact_integer.to_string value
+        | Opaque -> "opaque"
+      in
+      let flaw =
+        match flaw with
+        | None -> ""
+        | Some (Comma_operator _) -> " comma"
+        | Some (Invalid _) -> " invalid"
+      in
+      "integer " ^ value ^ flaw
+  | Not_integer { kind; _ } -> kind_name kind
+  | Unevaluable _ -> "unevaluable"
+
+let classes ?parameters body expected =
+  let source = in_function ?parameters body in
+  match read lp64 source with
+  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Ok (unit, result) -> (
+      match Option.bind (probed unit) (Declarations.constant result) with
+      | None -> fail_case source "the expression is not classed"
+      | Some constant ->
+          let actual = describe_constant constant in
+          if actual <> expected then
+            fail_case source (Printf.sprintf "%S, expected %S" actual expected))
+
+let constants () =
+  classes "1 + 2 * 3" "integer 7";
+  classes "(1, 2)" "integer 2 comma";
+  classes "0 ? (1, 2) : 3" "integer 3";
+  classes "1 / 0" "integer opaque invalid";
+  classes "0 && 1 / 0" "integer 0";
+  classes "(int)1.5" "integer opaque";
+  classes "sizeof x + sizeof (char)" "integer 5";
+  classes "sizeof a" "integer opaque";
+  classes "A + 1" "integer 1";
+  classes "1.0 + 2" "arithmetic";
+  classes "(double)1 < 2" "arithmetic";
+  classes "x" "static named";
+  classes "a[1]" "static named";
+  classes "s.m" "static named";
+  classes "\"ab\"[1]" "static";
+  classes "f" "static";
+  classes "*&x" "static";
+  classes "&x" "address";
+  classes "&a[1]" "address";
+  classes "a + 1" "address";
+  classes "&s.m" "address";
+  classes "(char *)&x - 1" "address";
+  classes "(void *)0" "address";
+  classes "(int *)16" "address";
+  classes "x + 1" "not constant";
+  classes "x = 1" "not constant";
+  classes "&ps->m" "not constant";
+  classes "&a[x]" "not constant";
+  classes "cx + 1" "backend";
+  classes "f(1)" "backend";
+  classes "0 && f(1)" "backend";
+  classes "1 ? 2 : x" "backend";
+  classes "(long)&x" "backend";
+  classes "(int){ 1 }" "automatic";
+  classes ~parameters:"int n" "n" "automatic named";
+  classes ~parameters:"int n" "&n" "not constant";
+  classes "_Generic(1, int: 2, default: x)" "integer 2";
+  classes "(struct s *)0 == 0" "backend";
+  classes "sizeof (struct s)" "integer opaque";
+  classes "(typeof(half))1" "unevaluable";
+  (* 6.6p3: an operand that is not evaluated may be anything. *)
+  classes "sizeof (x = 1)" "integer 4";
+  types "struct s y[] = { s, s, { 1 } }; y" "struct s[3] lvalue";
+  types "static const char n[] = \"abc\"; n" "const char[4] lvalue";
+  (* The null pointer check does not fail on an unknown type. *)
+  types "x ? (void *)(int)(typeof(half))0 : ip"
+    "<a null pointer constant of an opaque value>"
+
 let () =
   primaries ();
   postfix ();
@@ -492,4 +580,5 @@ let () =
   block_declarations ();
   block_linkage ();
   deep_bodies ();
+  constants ();
   if !failures > 0 then exit 1

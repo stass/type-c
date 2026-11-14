@@ -242,17 +242,45 @@ is [type-c-language-design.md](type-c-language-design.md).
   against the object it initialises (6.7.9). Record the target type of
   each such position when Stage 1 types constructor expressions, where
   typing reads the call, assignment, `return` and initialiser.
-- [Medium] The typed view records no constant value: whether an
-  expression is a null pointer constant is computed where the
-  conditional operator needs it (6.5.15p6), through the constant
-  evaluator of `Declarations`, and not kept. Add the values of integer
-  and address constants to `Expressions.typed` with the constant
-  expressions of 0.9b-2, and let the evaluator read them from there
-  rather than walk the expression again. The result type of each
-  operator is decided twice meanwhile, by `Expressions` and by
-  `Integer_constant.unary`, `binary` and `conditional`, which the
-  evaluator calls: the conversions are shared, the mapping from operator
-  to type is not.
+- [Medium] The result type of each operator on integer constants is
+  decided twice, by `Expressions` and by `Integer_constant.unary`,
+  `binary` and `conditional`, which the classing of constants calls: the
+  conversions are shared, the mapping from operator to type is not. Let
+  the constant operations take the result type from typing.
+- [Medium] The rule that the initialiser of an object of static or
+  thread storage duration is constant (6.7.9p4) reports only what both
+  GCC and Clang refuse (`Expressions.Not_constant`). Each takes other
+  forms (6.6p10) that the other refuses: GCC a call of some library
+  functions (`abs(-1)`), Clang a comma operator; both read a `const`
+  object. Calls, commas, casts of addresses to integers and the value of
+  a `const` object are left to the backend. If a Type-C rule or lowering
+  needs the value of a static initialiser, class those by
+  `Target.compiler`.
+- [Medium] `Declarations.initialised` completes an array's type by
+  recording the entity again in the tables that hold it (`record`,
+  `note_at_file_scope`); a table added later, or one read between the
+  declarator and the end of its initialiser, keeps the incomplete type.
+  One funnel that updates a declared object, or an entity whose type is
+  one binding cell, would make it hold by construction.
+- [Medium] `Ctype.Variable` stands for every array length that is not
+  an integer constant expression, which includes lengths that GCC and
+  Clang fold to a constant (`static const int N = 4; int a[N];`, a
+  `Backend_constant`). So the rule that a variable length array takes no
+  initialiser (6.7.9p3) is the backend's, and `int a[N];` at file scope
+  is an error here. A length that records whether the backend may fold
+  it would settle both.
+- [Low] Where the operands of an operation are an `Unevaluable` and a
+  `Not_integer` (`Expressions.broken_by`), the first decides: in a block,
+  `char b[(int)(_Float16)1 + n];` is an error and
+  `char b[n + (int)(_Float16)1];` a variable length array. Let
+  `Not_integer` win in either order.
+- [Low] GCC finds the type of `int a[] = {}` compatible with no `int[0]`
+  (`__builtin_types_compatible_p`), which Clang and typec do; its size is
+  0 in all three. initialisers.t asserts only the size.
+- [Low] Clang refuses a brace-elided initialiser for a member of an
+  empty structure (`struct { struct {} e; int b; } y[] = { 1, 2 };`),
+  where GCC skips the member with a warning; typec stops following the
+  positions there, and the length it gives such an array is opaque.
 - [High] Where GCC and Clang type an expression differently, typing
   follows one of them whatever `Target.compiler` is. GCC gives the value
   of a bit-field narrower than its type a type of its own width,
@@ -276,26 +304,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   unknown type, such as one whose specifier has an attribute outside the
   table, so `t.z` of `struct T { struct { int z; }
   __attribute__((ms_struct)); } t;` is reported as no member, which
-  Clang accepts. Let it answer `Depends_on` where a record has such a
-  member, and typing give the access that unknown type.
+  Clang accepts, and so is the designator `.z` of an initialiser of
+  `struct T` (`Ctype.member_path`). Let both answer `Depends_on` where a
+  record has such a member, typing give the access that unknown type and
+  `Initialiser` lose the position.
 - [Medium] An identifier is a spelling, so a universal character name
   and the UTF-8 character it names are two names (`linked` is keyed by
   spelling), and the length of `__func__` counts the spelling: Clang
   gives a function spelled with `\U0001F600` a name of its UTF-8 bytes.
   Normalise identifiers to UTF-8 where the reader lexes them.
 
-- [Medium] A null pointer constant whose operand is cast from a type
-  that depends on an unknown type, `x ? (void *)(int)_Generic(u, int: 0,
-  default: 0) : ip` or `(void *)(int)(typeof(u))0`, is an error, since
-  the evaluator fails at the first unknown type even where the caller
-  needs no value. Let the evaluation answer the dependence to its
-  caller, which fails where the value is required and gives an opaque
-  one in the null pointer check.
-- [Medium] The evaluator takes a floating constant as the operand of a
-  cast only through parentheses (`is_floating_constant`), so
-  `enum { V = (int)_Generic(0, int: 1.5) };`, which GCC and Clang
-  accept, is refused. Look through parentheses and a known selection in
-  one function that `null_pointer_constant` uses too.
 - [Low] `check_distinct` compares the associations of a generic
   selection in pairs: 20000 of them take 26 s, where GCC and Clang, as
   quadratic, take 4 s.
@@ -406,17 +424,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   __va_list_tag *` (Clang), so `&ap` and the uses of `ap` are not typed.
   If a Type-C rule needs them, the representation must come from the
   backend (a target table is ruled out by design 13.3).
-- [High] Initialisers are not read: an array of unknown size keeps its
-  incomplete type where its initialiser completes it (6.7.9p22), and the
-  tags and enumerators that an initialiser declares, inside `sizeof` or a
-  cast, are not declared, so a later use of one is an error. Read
-  initialisers with compound literals (0.9b), which need the same
-  rule.
-- [Medium] In an integer constant expression `sizeof` of an expression
-  is opaque, though its operand is typed. Give `sizeof x` its value once
-  initialisers complete array types (0.9b-2), so that
-  `sizeof a / sizeof a[0]` of `int a[] = {...}` stays a constant, and
-  that of a variable length array no constant (6.5.3.4p2).
 - [Medium] A use of a name with a Clang overload (`overloadable`, design
   13.3) in scope before the declaration it resolves to has an unknown
   type, as the parser resolves it to the last declaration of the name,
@@ -460,9 +467,8 @@ is [type-c-language-design.md](type-c-language-design.md).
   `_Thread_local` although `storage_class` never puts it there. Give it a
   type without that case.
 - [Low] `Declarations` refuses some code that both backends accept with
-  a warning: `sizeof (void)` and `sizeof` of a function type, unknown
-  escape sequences such as `'\q'`, `_Complex` alone and `_Complex int`
-  (the last two for the GNU profile, 0.7).
+  a warning: unknown escape sequences such as `'\q'`, `_Complex` alone
+  and `_Complex int` (the last two for the GNU profile, 0.7).
 - [Medium] GCC and Clang fold floating arithmetic in an array length, an
   enumerator value or a bit-field width (`(int)(1.5 * 2)`), and accept a
   signed overflow there with a warning (`INT_MAX + 1`). `Declarations`
@@ -479,7 +485,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   error, as it decides the integer type of the enumeration and the types
   and sizes that follow; a bit-field width from a size, which is an
   error; a `_Static_assert` on a size, which passes through unchecked;
-  `offsetof`, which GCC and Clang expand to `__builtin_offsetof` (0.7). The target model has no
+  `offsetof`, which GCC and Clang expand to `__builtin_offsetof` (0.7);
+  the length that an initialiser gives an array of unknown size where an
+  array designator is a size (`[sizeof (struct s)] = 1`) or braces are
+  elided into an array of opaque length, which is opaque, and the size of
+  an array that an initialiser completes (`sizeof a` of
+  `int a[] = { 1, 2 }`, `sizeof "abc"`), opaque as every array's is,
+  though its element type and length are known. The target model has no
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
@@ -580,13 +592,9 @@ types (design 13.3).
 ## Typing oracle
 
 - [High] Gate 4 of plan 0.10 does not hold: on c-testsuite, zlib,
-  Lua and SQLite with Apple clang, two classes of disagreement remain
+  Lua and SQLite with Apple clang, a class of disagreement remains
   outside the empty allow-list (README, "Typing oracle"). Re-run the
-  comparison on the corpus once each is closed.
-  * (0.9b-2) An array whose initialiser completes its type (6.7.9p22)
-    keeps the incomplete type, `int[]` where Clang has `int[4]`: 694
-    disagreements, in each use of the array. Reproducer:
-    `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/c-testsuite/clang/tests/single-exec/00092.tc.ref.i`, line 6.
+  comparison on the corpus once it is closed.
   * (0.10) A function of an old-style definition, `int f() {...}`: Clang
     spells its type `int ()`, which reads as a function type without
     parameter information, and `same_type` tells it from `typec`'s

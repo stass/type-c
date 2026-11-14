@@ -57,9 +57,18 @@ type member = {
 
 module Names = Map.Make (String)
 
-(* The members in order, and every member by name, those of anonymous
+(* A member found by name and its position: that of the member that holds
+   it in the record, then in each anonymous member down to it. *)
+type located = { member : member; path : int list }
+
+(* The members in order; those with a position, which are those that an
+   initialiser reaches; and every member by name, those of anonymous
    members included. *)
-type record_definition = { members : member list; by_name : member Names.t }
+type record_definition = {
+  members : member list;
+  positions : member array;
+  by_name : located Names.t;
+}
 
 type tags = {
   mutable next_id : int;
@@ -281,9 +290,21 @@ let record_definition tags tag = Hashtbl.find_opt tags.records tag.record_id
 let record_members tags tag =
   Option.map (fun definition -> definition.members) (record_definition tags tag)
 
-let find_member tags tag name =
+let located tags tag name =
   Option.bind (record_definition tags tag) (fun definition ->
       Names.find_opt name definition.by_name)
+
+let find_member tags tag name =
+  Option.map (fun found -> found.member) (located tags tag name)
+
+let member_path tags tag name =
+  Option.map (fun found -> found.path) (located tags tag name)
+
+let member_at tags tag position =
+  Option.bind (record_definition tags tag) (fun definition ->
+      if position < Array.length definition.positions then
+        Some definition.positions.(position)
+      else None)
 
 let rec is_complete tags t =
   match t.shape with
@@ -402,20 +423,21 @@ let as_arithmetic tags t =
 (* Raised at the first defect of a definition; caught in define_record. *)
 exception Invalid of error
 
-let add_name name member names =
+let add_name name found names =
   if Names.mem name names then raise (Invalid (Duplicate_member name));
-  Names.add name member names
+  Names.add name found names
 
 (* The members of an anonymous member are members of the containing type
    (6.7.2.1p13), const and volatile as the anonymous member is. Its
    _Atomic does not pass on, since a member of an atomic structure is not
    accessed on its own (6.5.2.3p5). *)
-let add_anonymous_members tags anonymous tag names =
+let add_anonymous_members tags ~index anonymous tag names =
   let { const; volatile; _ } = anonymous.member_type.qualifiers in
   let qualifiers = { no_qualifiers with const; volatile } in
-  let qualify_inner _ inner =
+  let qualify_inner _ { member = inner; path } =
     match qualify qualifiers inner.member_type with
-    | Ok member_type -> { inner with member_type }
+    | Ok member_type ->
+        { member = { inner with member_type }; path = index :: path }
     | Error error -> raise (Invalid error)
   in
   match record_definition tags tag with
@@ -423,12 +445,17 @@ let add_anonymous_members tags anonymous tag names =
       Names.fold add_name (Names.mapi qualify_inner definition.by_name) names
   | None -> raise (Invalid Incomplete_member)
 
-let add_member_names tags names member =
+let add_member_names tags names (index, member) =
   match (member.member_name, member.member_type.shape) with
-  | Some name, _ -> add_name name member names
+  | Some name, _ -> add_name name { member; path = [ index ] } names
   | None, Record tag when member.bit_field_width = None ->
-      add_anonymous_members tags member tag names
+      add_anonymous_members tags ~index member tag names
   | None, _ -> names
+
+(* 6.7.9p9: an unnamed member other than an anonymous one, which is an
+   unnamed bit-field, takes no initialiser. *)
+let has_position member =
+  Option.is_some member.member_name || member.bit_field_width = None
 
 let is_flexible_array member =
   match member.member_type.shape with
@@ -472,8 +499,12 @@ let definition_of target tags tag members =
   List.iteri
     (fun index member -> check_member target tags ~last:(index = last) member)
     members;
-  let by_name = List.fold_left (add_member_names tags) Names.empty members in
-  { members; by_name }
+  let positions = Array.of_list (List.filter has_position members) in
+  let indexed =
+    List.mapi (fun index member -> (index, member)) (Array.to_list positions)
+  in
+  let by_name = List.fold_left (add_member_names tags) Names.empty indexed in
+  { members; positions; by_name }
 
 let define_record target tags tag members =
   match definition_of target tags tag members with

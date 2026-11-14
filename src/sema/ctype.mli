@@ -232,6 +232,20 @@ val record_members : tags -> record_tag -> member list option
 val find_member : tags -> record_tag -> string -> member option
 (** The member of that name, looked up through anonymous members too. *)
 
+(** {2 Positions}
+
+    The members of a structure or union that an initialiser reaches have
+    positions, from 0 in order: all but unnamed bit-fields (6.7.9p9). *)
+
+val member_path : tags -> record_tag -> string -> int list option
+(** Where {!find_member} finds the member of that name: the position of
+    the member that holds it, then its position in each anonymous member
+    down to it. *)
+
+val member_at : tags -> record_tag -> int -> member option
+(** The member at a position of a complete structure or union; [None]
+    past the last. *)
+
 val enum_integer : tags -> enum_tag -> Integer.t answer option
 (** The integer type compatible with a complete enumerated type; [None]
     while it is incomplete. *)

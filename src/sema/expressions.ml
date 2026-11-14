@@ -8,6 +8,24 @@ type bit_field = Not_bit_field | Bit_field of int | Bit_field_value of int
 
 type typed = { expression_type : Ctype.t; lvalue : bool; bit_field : bit_field }
 
+type flaw =
+  | Comma_operator of Tree.span
+  | Invalid of { span : Tree.span; message : string }
+
+type designation = { static_storage : bool; named : bool }
+
+type kind =
+  | Arithmetic_constant
+  | Address_constant
+  | Designator of designation
+  | Backend_constant
+  | Not_constant
+
+type constant =
+  | Integer_expression of { value : Integer_constant.t; flaw : flaw option }
+  | Not_integer of { kind : kind; first : Tree.span }
+  | Unevaluable of { span : Tree.span; message : string }
+
 (* What encloses the statement being typed: the function, for __func__,
    and the loop or switch that break, continue and case need. *)
 type enclosing = {
@@ -23,6 +41,7 @@ type enclosing = {
    of the construct. *)
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
+  constants : (Tree.span, constant) Hashtbl.t;
   selections : (Tree.span, Tree.expression Ctype.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Ctype.answer) Hashtbl.t;
   mutable depth : int;
@@ -34,6 +53,7 @@ let outside_functions =
 
 let create () =
   { types = Hashtbl.create 4096;
+    constants = Hashtbl.create 4096;
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
     depth = 0;
@@ -41,6 +61,9 @@ let create () =
 
 let find view (expression : Tree.expression) =
   Hashtbl.find_opt view.types expression.span
+
+let constant view (expression : Tree.expression) =
+  Hashtbl.find_opt view.constants expression.span
 
 let selection view (expression : Tree.expression) =
   Hashtbl.find_opt view.selections expression.span
@@ -58,7 +81,6 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  constant : evaluated:bool -> Tree.expression -> Integer_constant.t option;
 }
 
 (* Far above the nesting of real code, it bounds the recursion on the
@@ -71,6 +93,11 @@ let max_quoted = 64
 let quote text =
   if String.length text <= max_quoted then "'" ^ text ^ "'"
   else "'" ^ String.sub text 0 max_quoted ^ "...'"
+
+let needing need (unknown : Ctype.unknown) =
+  Printf.sprintf
+    "%s depends on %s at %s:%d, which typec does not type yet (design 13.3)"
+    need unknown.construct unknown.location.file unknown.location.line
 
 (* [walk] one level deeper. *)
 let nested context span walk =
@@ -787,6 +814,470 @@ let types_compatible_answer context span first second =
         (unknown_at context span "the compatibility of an _Atomic type"
            Unknown_object)
 
+(* Constant expressions (6.6) *)
+
+(* An operand is typed, and so classed, before its operation. *)
+let operand_constant context (operand : Tree.expression) =
+  match Hashtbl.find_opt context.typed.constants operand.span with
+  | Some constant -> constant
+  | None -> invalid_arg "Expressions: an operand classed after its operation"
+
+let operand_typed context (operand : Tree.expression) =
+  match Hashtbl.find_opt context.typed.types operand.span with
+  | Some typed -> typed
+  | None -> invalid_arg "Expressions: an operand typed after its operation"
+
+let is_integer_expression context operand =
+  match operand_constant context operand with
+  | Integer_expression _ -> true
+  | Not_integer _ | Unevaluable _ -> false
+
+(* What a designator gives as a value (6.3.2.1): its address where it is
+   an array or a function, its value otherwise. *)
+let designated_value (typed : typed) { static_storage; named } =
+  let t = typed.expression_type in
+  match t.shape with
+  | Array _ | Function _ ->
+      if static_storage then Address_constant else Not_constant
+  | Unknown_type _ -> Backend_constant
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list ->
+      if named && not t.qualifiers.const then Not_constant
+      else Backend_constant
+
+(* The class of the value of an operand, which is never a designator; an
+   integer constant expression is an arithmetic one too (6.6p8). *)
+let operand_kind context operand =
+  match operand_constant context operand with
+  | Integer_expression _ -> Arithmetic_constant
+  | Unevaluable _ -> Backend_constant
+  | Not_integer { kind = Designator designation; _ } ->
+      designated_value (operand_typed context operand) designation
+  | Not_integer { kind; _ } -> kind
+
+(* Whether an operand is evaluated where its operation is (6.6p3): what a
+   constant expression does not allow is allowed in one that is not, and
+   may be in one that an opaque value decides. *)
+type role = Evaluated | Not_evaluated | Maybe_evaluated
+
+let demoted role kind =
+  match (role, kind) with
+  | (Not_evaluated | Maybe_evaluated), Not_constant -> Backend_constant
+  | (Evaluated | Not_evaluated | Maybe_evaluated), kind -> kind
+
+(* The class of an operation on operands of these classes: what both GCC
+   and Clang refuse where one is, an arithmetic constant where all are
+   (6.6p8), else what the backend decides. *)
+let combined kinds =
+  if List.mem Not_constant kinds then Not_constant
+  else if List.for_all (fun kind -> kind = Arithmetic_constant) kinds then
+    Arithmetic_constant
+  else Backend_constant
+
+let refused_or_backend kinds =
+  if List.mem Not_constant kinds then Not_constant else Backend_constant
+
+(* How an operand takes part in an integer constant expression: its value
+   and the flaw that counts where it is evaluated, or the constant of the
+   operation where the operand is none. *)
+type part = Part of Integer_constant.t * flaw option | Breaks of constant
+
+let part context role operand =
+  match operand_constant context operand with
+  | Integer_expression { value; flaw } ->
+      Part (value, if role = Evaluated then flaw else None)
+  | (Not_integer _ | Unevaluable _) as broken -> Breaks broken
+
+(* The constant of an operation of class [kind] whose operand [broken] is
+   no integer constant expression. *)
+let broken_by broken kind =
+  match broken with
+  | Not_integer { first; _ } -> Not_integer { kind; first }
+  | Integer_expression _ | Unevaluable _ -> broken
+
+let first_flaw first second =
+  match first with Some _ -> first | None -> second
+
+let invalid span (failure : Integer_constant.error option) =
+  Option.map
+    (fun error ->
+      Invalid { span; message = Integer_constant.error_message error })
+    failure
+
+let integer value = Integer_expression { value; flaw = None }
+
+(* The size of a type that the target model gives (6.5.3.4p2, p4); the
+   front end knows no other (design P16). The size of an unknown object
+   type is the backend's too, as a constant: an unknown type is a variable
+   length array only in a prototype, through [typeof] or an attribute,
+   where the backend checks it. *)
+type size = Bytes of int | Backend_size | Variable_size | No_size
+
+let size_of context (t : Ctype.t) =
+  let target = context.target in
+  let of_integer integer =
+    Bytes (Target.integer_width target integer / target.char_bit)
+  in
+  let of_floating : Arithmetic.floating -> int = function
+    | Float -> target.sizeof_float
+    | Double -> target.sizeof_double
+    | Long_double -> target.sizeof_long_double
+  in
+  if t.qualifiers.atomic then Backend_size
+  else
+    match t.shape with
+    (* GNU C, which GCC and Clang follow. *)
+    | Void | Function _ | Unknown_type { kind = Unknown_function; _ } ->
+        Bytes 1
+    | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
+        Backend_size
+    | Arithmetic (Integer Bool) -> Backend_size
+    | Arithmetic (Integer integer) -> of_integer integer
+    | Arithmetic (Real floating) -> Bytes (of_floating floating)
+    (* 6.2.5p13: the real and imaginary parts of a complex type. *)
+    | Arithmetic (Complex floating) -> Bytes (2 * of_floating floating)
+    | Enum tag -> (
+        match Ctype.enum_integer context.tags tag with
+        | Some (Answer integer) -> of_integer integer
+        | Some (Depends_on _) -> Backend_size
+        | None -> No_size)
+    | Pointer _ -> Bytes target.sizeof_pointer
+    | Va_list -> Backend_size
+    | Record _ | Array _ -> (
+        match
+          (Ctype.is_complete context.tags t, Ctype.is_variably_modified t)
+        with
+        | Answer false, _ -> No_size
+        | _, Answer true -> Variable_size
+        | (Answer true | Depends_on _), (Answer false | Depends_on _) ->
+            Backend_size)
+
+(* 6.5.3.4p2: an integer constant but for a variable length array. *)
+let size_constant context span t =
+  let size_type = context.target.size_type in
+  match size_of context t with
+  | Bytes bytes ->
+      integer
+        (Integer_constant.known context.target size_type
+           (Exact_integer.of_int bytes))
+  | Backend_size -> integer (Integer_constant.opaque size_type)
+  | Variable_size -> Not_integer { kind = Backend_constant; first = span }
+  | No_size ->
+      Unevaluable
+        {
+          span;
+          message =
+            "sizeof is applied to an incomplete type (C11 6.5.3.4p1)";
+        }
+
+let identifier_constant context span name (resolution : Tree.resolution)
+    (typed : typed) =
+  let itself kind = Not_integer { kind; first = span } in
+  match resolution with
+  (* [__func__] and its kin are static arrays, a builtin the backend's. *)
+  | Undeclared ->
+      if typed.lvalue then
+        itself (Designator { static_storage = true; named = false })
+      else itself Backend_constant
+  | Resolved reference -> (
+      match (context.entity span name reference).declared with
+      | Function _ when context.overloaded reference -> itself Backend_constant
+      | Function _ ->
+          itself (Designator { static_storage = true; named = false })
+      | Object { storage; _ } ->
+          let static_storage = storage = Static_storage in
+          itself (Designator { static_storage; named = true })
+      | Enumerator { value; _ } -> integer value
+      | Typedef _ -> invalid_arg "Expressions: a typedef name as an operand")
+
+(* 6.5.2.1p2: [e1[e2]] is [*(e1 + e2)]. An element of an array that a
+   designator designates is part of that object. *)
+let subscript_kind context operand index =
+  let operand_type = (operand_typed context operand).expression_type in
+  let pointer, offset =
+    match (Ctype.lvalue_conversion operand_type).shape with
+    | Pointer _ -> (operand, index)
+    | _ -> (index, operand)
+  in
+  let pointer_type = (operand_typed context pointer).expression_type in
+  let constant_offset = is_integer_expression context offset in
+  match operand_constant context pointer with
+  | Not_integer { kind = Designator designation; _ }
+    when constant_offset && Ctype.is_array pointer_type = Answer true ->
+      Designator designation
+  | _ when constant_offset && operand_kind context pointer = Address_constant
+    ->
+      Designator { static_storage = true; named = false }
+  | _ ->
+      refused_or_backend
+        [ operand_kind context pointer; operand_kind context offset ]
+
+(* What [*] or [->] designates through the value of [operand]. *)
+let through_pointer context operand =
+  match operand_kind context operand with
+  | Address_constant -> Designator { static_storage = true; named = false }
+  | Not_constant -> Not_constant
+  | Arithmetic_constant | Designator _ | Backend_constant -> Backend_constant
+
+let member_kind context operand =
+  match operand_constant context operand with
+  | Not_integer { kind = Designator _ as designator; _ } -> designator
+  | Integer_expression _ | Not_integer _ | Unevaluable _ ->
+      operand_kind context operand
+
+(* 6.6p9: the address of an object of static storage duration or of a
+   function is an address constant. *)
+let address_kind context operand =
+  match operand_constant context operand with
+  | Not_integer { kind = Designator { static_storage = true; _ }; _ } ->
+      Address_constant
+  | Not_integer
+      { kind = Designator { static_storage = false; _ } | Not_constant; _ }
+    ->
+      Not_constant
+  | Integer_expression _ | Unevaluable _ | Not_integer _ -> Backend_constant
+
+let unary_constant context span op operand =
+  match part context Evaluated operand with
+  | Part (value, flaw) ->
+      let value, failure = Integer_constant.unary context.target op value in
+      let flaw = first_flaw flaw (invalid span failure) in
+      Integer_expression { value; flaw }
+  | Breaks broken ->
+      broken_by broken (combined [ operand_kind context operand ])
+
+(* 6.6p7, p8: an address constant plus or minus an integer constant
+   expression, or an operation on arithmetic constants. *)
+let binary_kind context (op : Tree.binary_operator) left right =
+  match (op, operand_kind context left, operand_kind context right) with
+  | _, Not_constant, _ | _, _, Not_constant -> Not_constant
+  | (Add | Subtract), Address_constant, _
+    when is_integer_expression context right ->
+      Address_constant
+  | Add, _, Address_constant when is_integer_expression context left ->
+      Address_constant
+  | _, Arithmetic_constant, Arithmetic_constant -> Arithmetic_constant
+  | _, _, _ -> Backend_constant
+
+let binary_constant context span op left right =
+  match (part context Evaluated left, part context Evaluated right) with
+  | Part (left_value, left_flaw), Part (right_value, right_flaw) ->
+      let value, failure =
+        Integer_constant.binary context.target op left_value right_value
+      in
+      let operand_flaw = first_flaw left_flaw right_flaw in
+      Integer_expression
+        { value; flaw = first_flaw operand_flaw (invalid span failure) }
+  | Breaks broken, _ | Part _, Breaks broken ->
+      broken_by broken (binary_kind context op left right)
+
+(* 6.5.13p4, 6.5.14p4: the right operand is evaluated where the left one
+   does not decide the value, which is true for [||] ([decisive]) and
+   false for [&&]. Neither fails. *)
+let logical_constant context ~decisive op left right =
+  let kind right_role =
+    combined
+      [ operand_kind context left;
+        demoted right_role (operand_kind context right) ]
+  in
+  match part context Evaluated left with
+  | Breaks broken -> broken_by broken (kind Maybe_evaluated)
+  | Part (left_value, left_flaw) -> (
+      let right_role =
+        match Integer_constant.truth left_value with
+        | Some truth when truth = decisive -> Not_evaluated
+        | Some _ -> Evaluated
+        | None -> Maybe_evaluated
+      in
+      match part context right_role right with
+      | Part (right_value, right_flaw) ->
+          let value, _ =
+            Integer_constant.binary context.target op left_value right_value
+          in
+          Integer_expression { value; flaw = first_flaw left_flaw right_flaw }
+      | Breaks broken -> broken_by broken (kind right_role))
+
+(* 6.5.15p4: the operand that the condition chooses is evaluated. *)
+let conditional_constant context condition second third =
+  let kind (second_role, third_role) =
+    combined
+      [ operand_kind context condition;
+        demoted second_role (operand_kind context second);
+        demoted third_role (operand_kind context third) ]
+  in
+  match part context Evaluated condition with
+  | Breaks broken -> broken_by broken (kind (Maybe_evaluated, Maybe_evaluated))
+  | Part (condition_value, condition_flaw) -> (
+      let roles =
+        match Integer_constant.truth condition_value with
+        | Some true -> (Evaluated, Not_evaluated)
+        | Some false -> (Not_evaluated, Evaluated)
+        | None -> (Maybe_evaluated, Maybe_evaluated)
+      in
+      let second_role, third_role = roles in
+      match
+        (part context second_role second, part context third_role third)
+      with
+      | Part (if_true, true_flaw), Part (if_false, false_flaw) ->
+          let value =
+            Integer_constant.conditional context.target condition_value
+              if_true if_false
+          in
+          let branch_flaw = first_flaw true_flaw false_flaw in
+          Integer_expression
+            { value; flaw = first_flaw condition_flaw branch_flaw }
+      | Breaks broken, _ | Part _, Breaks broken ->
+          broken_by broken (kind roles))
+
+(* 6.6p3: a comma operator only where it is not evaluated. *)
+let comma_constant context span left right =
+  match (part context Not_evaluated left, part context Not_evaluated right) with
+  | Part _, Part (value, _) ->
+      Integer_expression { value; flaw = Some (Comma_operator span) }
+  | Breaks _, _ | Part _, Breaks _ ->
+      let kinds = [ operand_kind context left; operand_kind context right ] in
+      Not_integer { kind = refused_or_backend kinds; first = span }
+
+(* The expression whose value [expression] is, through parentheses and
+   the generic selections that typing has made (6.5.1p5, 6.5.1.1p4). *)
+let rec value_source context (expression : Tree.expression) =
+  match expression.node with
+  | Parenthesized inner -> value_source context inner
+  | Generic _ -> (
+      match Hashtbl.find_opt context.typed.selections expression.span with
+      | Some (Answer chosen) -> value_source context chosen
+      | Some (Depends_on unknown) -> Ctype.Depends_on unknown
+      | None -> invalid_arg "Expressions: an untyped _Generic")
+  | _ -> Answer expression
+
+let is_floating_constant context expression =
+  match value_source context expression with
+  | Answer { node = Constant (Floating _); _ } -> true
+  | Answer _ | Depends_on _ -> false
+
+(* 6.6p6, p8, p9: a cast to an integer type of an integer constant
+   expression, or of a floating constant, whose value the backend
+   computes; a cast between arithmetic types; a cast to a pointer type of
+   an integer constant expression or an address constant. *)
+let cast_constant context span (cast_type : Ctype.t) operand =
+  let itself kind = Not_integer { kind; first = span } in
+  let operand_kind = operand_kind context operand in
+  match Ctype.as_arithmetic context.tags cast_type with
+  | Answer (Some (Integer integer_type))
+    when is_floating_constant context operand ->
+      integer (Integer_constant.opaque integer_type)
+  | Answer (Some (Integer integer_type)) -> (
+      match part context Evaluated operand with
+      | Part (value, flaw) ->
+          let target = context.target in
+          let value = Integer_constant.convert target integer_type value in
+          Integer_expression { value; flaw }
+      | Breaks broken -> broken_by broken (combined [ operand_kind ]))
+  | Answer (Some (Real _ | Complex _)) -> itself (combined [ operand_kind ])
+  | Answer None when Ctype.is_pointer cast_type = Answer true ->
+      let integer = is_integer_expression context operand in
+      if integer || operand_kind = Address_constant then
+        itself Address_constant
+      else itself (refused_or_backend [ operand_kind ])
+  | Answer None -> itself (refused_or_backend [ operand_kind ])
+  | Depends_on unknown ->
+      Unevaluable { span; message = needing "the value of a cast" unknown }
+
+(* The class of an expression that has been typed, from those of its
+   operands. *)
+let classify context (whole : Tree.expression) typed =
+  let span = whole.span and target = context.target in
+  let itself kind = Not_integer { kind; first = span } in
+  let unevaluable error =
+    Unevaluable { span; message = Integer_constant.error_message error }
+  in
+  match whole.node with
+  | Identifier { name; resolution } ->
+      identifier_constant context span name resolution typed
+  | Constant (Integer { base; digits; suffix }) -> (
+      match Integer_constant.of_integer_constant target base digits suffix with
+      | Ok value -> integer value
+      | Error error -> unevaluable error)
+  | Constant (Floating _) -> itself Arithmetic_constant
+  | Constant Not_a_constant ->
+      invalid_arg "Expressions: a constant that is not one"
+  | Character encoding -> (
+      match
+        Integer_constant.of_character_constant target encoding
+          (spelling context span)
+      with
+      | Ok value -> integer value
+      | Error error -> unevaluable error)
+  | String _ -> itself (Designator { static_storage = true; named = false })
+  | Parenthesized inner -> operand_constant context inner
+  (* 6.5.1.1p4: the class and value of the result expression. *)
+  | Generic _ -> (
+      match Hashtbl.find_opt context.typed.selections span with
+      | Some (Answer chosen) -> operand_constant context chosen
+      | Some (Depends_on unknown) ->
+          let message = needing "the value of _Generic" unknown in
+          Unevaluable { span; message }
+      | None -> invalid_arg "Expressions: an untyped _Generic")
+  | Types_compatible _ -> (
+      let int = Integer.Int in
+      match Hashtbl.find_opt context.typed.compatibilities span with
+      | Some (Answer compatible) ->
+          integer
+            (Integer_constant.known target int
+               (Exact_integer.of_int (Bool.to_int compatible)))
+      | Some (Depends_on _) -> integer (Integer_constant.opaque int)
+      | None -> invalid_arg "Expressions: an untyped builtin")
+  (* 6.5.2.5p5: of static storage duration outside the body of a
+     function. *)
+  | Compound_literal _ ->
+      let static_storage = context.typed.enclosing.function_name = None in
+      itself (Designator { static_storage; named = false })
+  | Subscript { operand; index } ->
+      itself (subscript_kind context operand index)
+  | Member { operand; _ } -> itself (member_kind context operand)
+  | Pointer_member { operand; _ } | Unary (Indirection, operand) ->
+      itself (through_pointer context operand)
+  | Unary (Address, operand) -> itself (address_kind context operand)
+  | Unary
+      (((Unary_plus | Unary_minus | Bitwise_not | Logical_not) as op), operand)
+    ->
+      unary_constant context span op operand
+  | Unary ((Real_part | Imaginary_part), operand) ->
+      itself (combined [ operand_kind context operand ])
+  | Post_increment _ | Post_decrement _ | Assignment _
+  | Unary ((Pre_increment | Pre_decrement), _) ->
+      itself Not_constant
+  | Sizeof_expression operand ->
+      let operand_type = (operand_typed context operand).expression_type in
+      size_constant context span operand_type
+  | Sizeof_type type_name ->
+      size_constant context span (context.type_name type_name)
+  (* [offsetof] expands to [__builtin_offsetof], an integer constant
+     (C11 7.19p3). *)
+  | Alignof _ | Alignof_expression _ | Offsetof _ ->
+      integer (Integer_constant.opaque target.size_type)
+  | Cast { type_name; operand } ->
+      cast_constant context span (context.type_name type_name) operand
+  | Binary (Logical_and, left, right) ->
+      logical_constant context ~decisive:false Logical_and left right
+  | Binary (Logical_or, left, right) ->
+      logical_constant context ~decisive:true Logical_or left right
+  | Binary (op, left, right) -> binary_constant context span op left right
+  | Conditional { condition; if_true; if_false } ->
+      let second = Option.value if_true ~default:condition in
+      conditional_constant context condition second if_false
+  | Comma (left, right) -> comma_constant context span left right
+  | Label_address _ -> itself Address_constant
+  | Call _ | Statement_expression _ | Va_arg _ | Block_literal _ ->
+      itself Backend_constant
+
+(* 6.7.9p4, 6.5.2.5p3: an initialiser that no backend takes as
+   constant. *)
+let require_constant context (expression : Tree.expression) =
+  if operand_kind context expression = Not_constant then
+    context.fail expression.span
+      "an initialiser of an object with static or thread storage duration \
+       is not a constant expression (C11 6.7.9p4)"
+
 (* Statements (6.8) and the expressions that hold them *)
 
 let rec expression context (expression : Tree.expression) =
@@ -798,6 +1289,8 @@ let rec expression context (expression : Tree.expression) =
             expression_node context expression)
       in
       Hashtbl.replace context.typed.types expression.span typed;
+      Hashtbl.replace context.typed.constants expression.span
+        (classify context expression typed);
       typed
 
 and expression_node context (whole : Tree.expression) =
@@ -812,7 +1305,7 @@ and expression_node context (whole : Tree.expression) =
   | Generic { controlling; associations } ->
       generic context span controlling associations
   | Compound_literal { type_name; values } ->
-      compound_literal context span type_name values
+      compound_literal context type_name values
   | Subscript { operand; index } ->
       let array = typed operand in
       subscript context span array (typed index)
@@ -925,20 +1418,13 @@ and generic_association context (association : Tree.generic_association) =
   ignore (expression context result);
   { association_span = association.span; association_type; result }
 
-(* 6.5.2.5p4: an lvalue of the type name's type. An array of unknown
-   length takes it from the initialiser, which typec does not read yet
-   (0.9b-2). *)
-and compound_literal context span type_name values =
+(* 6.5.2.5p4: an lvalue of the type name's type, which the initialiser
+   completes where it is an array of unknown size; outside the body of a
+   function its initialisers are constant (p3). *)
+and compound_literal context type_name values =
   let t = context.type_name type_name in
-  initialiser_list context values;
-  match t.shape with
-  | Array { length = Unknown; _ } ->
-      lvalue
-        (unknown context span
-           "a compound literal of an array of unknown length" Unknown_object)
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Function _ | Unknown_type _ ->
-      lvalue t
+  let constant = context.typed.enclosing.function_name = None in
+  lvalue (initialiser context ~constant t (Tree.Braced values))
 
 (* 6.5.15p3 to p6. A GNU [a ?: b] has [a] as its second operand. *)
 and conditional context span condition if_true if_false =
@@ -1015,21 +1501,22 @@ and null_pointer_constant context (candidate : Tree.expression) =
       zero_constant context operand
   | _ -> zero_constant context candidate
 
-(* Evaluated as an operand that is not evaluated, an operation that would
-   fail gives an opaque value rather than an error: this is no constant
-   expression context. Whether an operand of unknown type is one is
-   unknown too. *)
+(* An operation that fails gives an opaque value rather than an error:
+   this is no constant expression context. Whether an operand of unknown
+   type is one is unknown too. *)
 and zero_constant context candidate =
-  match Ctype.is_integer (expression context candidate).expression_type with
-  | Answer false -> Not_null
-  | Depends_on _ -> Opaque_constant
-  | Answer true -> (
-      match context.constant ~evaluated:false candidate with
-      | Some { value = Known value; _ }
-        when Exact_integer.equal value Exact_integer.zero ->
-          Null
-      | Some { value = Opaque; _ } -> Opaque_constant
-      | Some { value = Known _; _ } | None -> Not_null)
+  let typed = expression context candidate in
+  match
+    (Ctype.is_integer typed.expression_type, operand_constant context candidate)
+  with
+  | Depends_on _, _ -> Opaque_constant
+  | _, Integer_expression { value = { value = Known value; _ }; flaw = None }
+    when Exact_integer.equal value Exact_integer.zero ->
+      Null
+  | _, (Integer_expression { value = { value = Opaque; _ }; _ } | Unevaluable _)
+    ->
+      Opaque_constant
+  | _, (Integer_expression _ | Not_integer _) -> Not_null
 
 (* 6.5.16p2, p3: the left operand is a modifiable lvalue, whose type after
    lvalue conversion the result has; a compound assignment takes what its
@@ -1060,17 +1547,39 @@ and designator context (designator : Tree.designator) =
       ignore (expression context high)
   | Member_designator _ -> ()
 
-and initialiser context (initialiser : Tree.initialiser) =
-  match initialiser with
-  | Expression_initialiser value -> ignore (expression context value)
-  | Braced list -> initialiser_list context list
+and integer_constant context candidate =
+  ignore (expression context candidate);
+  match operand_constant context candidate with
+  | Integer_expression { value; flaw = None } -> Ok value
+  | Integer_expression { flaw = Some (Comma_operator span); _ } -> Error span
+  | Integer_expression { flaw = Some (Invalid { span; message }); _ }
+  | Unevaluable { span; message } ->
+      context.fail span message
+  | Not_integer { first; _ } -> Error first
 
-and initialiser_list context (list : Tree.initialiser_list) =
-  List.iter
-    (fun (element : Tree.designated_initialiser) ->
-      List.iter (designator context) element.node.designators;
-      initialiser context element.node.initialiser)
-    list.node
+and initialiser context ~constant t initialiser =
+  (* Each callback types its expression first, which classes it too. *)
+  let value initialising = (expression context initialising).expression_type in
+  let initialises initialising =
+    ignore (value initialising);
+    if constant then require_constant context initialising
+  in
+  let source initialising =
+    ignore (value initialising);
+    value_source context initialising
+  in
+  let typing : Initialiser.typing =
+    {
+      target = context.target;
+      tags = context.tags;
+      fail = context.fail;
+      value;
+      initialises;
+      source;
+      index = integer_constant context;
+    }
+  in
+  Initialiser.initialise typing t initialiser
 
 and block_items context (block : Tree.block) =
   List.iter
@@ -1172,10 +1681,13 @@ and label_of context (label : Tree.label) =
 (* 6.8.4.2p3: an integer constant expression. *)
 and case_value context value =
   match operand context (expression context value) with
-  | Arithmetic_operand { arithmetic = Integer _; _ } ->
-      if context.constant ~evaluated:true value = None then
-        context.fail value.span
-          "a case label is not an integer constant expression (C11 6.8.4.2p3)"
+  | Arithmetic_operand { arithmetic = Integer _; _ } -> (
+      match integer_constant context value with
+      | Ok _ -> ()
+      | Error _ ->
+          context.fail value.span
+            "a case label is not an integer constant expression (C11 \
+             6.8.4.2p3)")
   | Unknown_operand _ -> ()
   | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
       context.fail value.span "a case label is not an integer (C11 6.8.4.2p3)"

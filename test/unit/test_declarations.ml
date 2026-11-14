@@ -305,11 +305,12 @@ let links () =
     "6.5.3.4p1";
   declares "enum e; enum e { A = 300 }; char c[sizeof (enum e)];" "c"
     "object char[4] external static";
-  (* A declaration that the reader does not read yet is an error to use. *)
-  rejects "int x = sizeof (enum { A = 1 }); int y[A];" "does not read";
-  rejects "int x = sizeof (enum { A = 1 }); int A;" "does not read";
+  (* What an initialiser at file scope declares is declared. *)
+  declares "int x = sizeof (enum { A = 1 }); int y[A];" "y"
+    "object int[1] external static";
+  rejects "int x = sizeof (enum { A = 1 }); int A;" "different kind";
   rejects "int n = sizeof (struct t { int a; }); struct t { int a; };"
-    "does not read"
+    "defined twice"
 
 (* [source] gives the object or function with linkage [name], in whatever
    scope it is declared, as [expected] describes, or none where [expected]
@@ -416,10 +417,12 @@ let constant_expressions () =
   opaque "sizeof(int[3])";
   opaque "sizeof(_Atomic int)";
   opaque "_Alignof(int)";
-  opaque "sizeof 1";
+  evaluates_int "sizeof 1 + sizeof ((char)1) + sizeof 1.0f" "9";
+  opaque "sizeof \"ab\"";
   opaque "__alignof__ 1";
   opaque "sizeof(struct q { int a; }) - sizeof(struct q)";
   opaque "(int)3.5";
+  opaque "(int)_Generic(0, int: (1.5))";
   evaluates_int "'a'" "97";
   evaluates_int "'\\377'" "-1";
   evaluates_int ~target:ilp32 "'\\377'" "255";
@@ -474,7 +477,11 @@ let constant_expressions () =
   rejects "enum { V = (1, 2) };" "6.7.2.2p2";
   rejects "int x; enum { V = x };" "6.7.2.2p2";
   rejects "enum { V = y };" "6.5.1p2";
-  rejects "enum { V = sizeof(void) };" "6.5.3.4p1";
+  (* GNU C: the size of void and of a function is 1. *)
+  evaluates_int "sizeof(void) + sizeof(int (void))" "2";
+  declares "void *p; char c[sizeof *p];" "c" "object char[1] external static";
+  declares "void f(void); char c[sizeof f];" "c"
+    "object char[1] external static";
   rejects "enum { V = sizeof(struct u) };" "6.5.3.4p1";
   rejects "enum { V = '\\400' };" "6.4.4.4p9";
   rejects "enum { V = '\\q' };" "6.4.4.4p1";
@@ -988,6 +995,137 @@ let builtin_typedefs () =
   declares ~target:ilp32 "__builtin_va_list ap;" "ap"
     "object __builtin_va_list external static"
 
+(* Initialisers (C11 6.7.9) and the lengths they give arrays of unknown
+   size (p22). *)
+let initialisers () =
+  let length source name expected =
+    declares source name ("object " ^ expected ^ " external static")
+  in
+  length "int a[] = { 1, 2, 3 };" "a" "int[3]";
+  length "int a[] = {};" "a" "int[0]";
+  length "char s[] = \"abc\";" "s" "char[4]";
+  length "char s[] = { \"abc\" };" "s" "char[4]";
+  length "char s[] = (\"ab\");" "s" "char[3]";
+  length "unsigned char s[] = u8\"ab\";" "s" "unsigned char[3]";
+  length "int w[] = L\"ab\";" "w" "int[3]";
+  length "char s[][4] = { \"ab\", \"cd\", \"e\" };" "s" "char[3][4]";
+  length "int a[] = { [5] = 1, 2, [1] = 3 };" "a" "int[7]";
+  length "int a[] = { [2 ... 4] = 1 };" "a" "int[5]";
+  length "int m[][2] = { 1, 2, 3 };" "m" "int[2][2]";
+  length "int m[][2] = { { 1 }, 2, 3, { 4 } };" "m" "int[3][2]";
+  length "struct p { int a, b; } p[] = { 1, 2, 3 };" "p" "struct p[2]";
+  length "struct p { int a, b; } p[] = { { 1 }, { .b = 2 }, 3 };" "p"
+    "struct p[3]";
+  length "union u { int i; char c[8]; } u[] = { 1, 2 };" "u" "union u[2]";
+  length "union u { int i; float f; } u[] = { { .f = 1 }, 2 };" "u"
+    "union u[2]";
+  length
+    "struct n { int a; union { int b; float c; }; int d; } n[] = { 1, 2, 3, \
+     4 };"
+    "n" "struct n[2]";
+  length "struct n { int a; struct { int b, c; }; } n[] = { [0].c = 1, 2 };"
+    "n" "struct n[2]";
+  length "struct q { int a[3]; int b; } q[] = { [0].a[1] = 5, 6, 7, 8 };"
+    "q" "struct q[2]";
+  length "struct t { char n[8]; int v; } t[] = { \"abc\", 1, \"def\", 2 };"
+    "t" "struct t[2]";
+  length "struct b { int : 3; int x; int : 0; int y; } b[] = { 1, 2, 3 };"
+    "b" "struct b[2]";
+  accepts "struct f { int n; int d[]; } f = { 1, 2, 3 }, g = { 1, { 2 } };";
+  length "int *p[] = { 0, \"x\" == 0 };" "p" "int *[2]";
+  length "extern int e[]; int e[] = { 1, 2 };" "e" "int[2]";
+  length "typedef int T[]; T a = { 1 }; T b = { 1, 2, 3 };" "b" "int[3]";
+  length "int a[] = (int[]){ 1, 2 };" "a" "int[2]";
+  declares "int a[] = { 1, 2 }; int n = sizeof a / sizeof a[0];" "n"
+    "object int external static";
+  (* Where the length depends on what typec does not compute, it is
+     opaque (design P16, P21). *)
+  length "struct s { int x; }; int a[] = { [sizeof (struct s)] = 1 };" "a"
+    "int[<constant>]";
+  length "int a[][sizeof (struct { int x; })] = { 1, 2, 3 };" "a"
+    "int[<constant>][<constant>]";
+  length "int a[][sizeof (struct { int x; })] = { { 1 }, { 2 } };" "a"
+    "int[2][<constant>]";
+  length "struct h { _Float16 h; int x; } h[] = { 1, 2 };" "h"
+    "struct h[<constant>]";
+  length "struct h { _Float16 h; int x; } h[] = { { 1, 2 }, { 3 } };" "h"
+    "struct h[2]";
+  (* What an initialiser must be (6.7.9p3, p5, p6, p7, p14, p16). *)
+  rejects "int a[] = { [sizeof a] = 1 };" "6.5.3.4p1";
+  rejects "int a[] = { .x = 1 };" "6.7.9p7";
+  rejects "struct s { int x; } v = { [0] = 1 };" "6.7.9p6";
+  rejects "struct s { int x; } v = { .y = 1 };" "6.7.9p7";
+  rejects "int a[2] = { [2] = 1 };" "6.7.9p6";
+  rejects "int a[] = { [-1] = 1 };" "negative";
+  rejects "int x; int a[] = { [x] = 1 };" "integer constant expression";
+  rejects "int a[] = { [3 ... 1] = 1 };" "empty";
+  rejects "int a[] = { [4611686018427387903] = 1 };" "too large";
+  rejects "char s[] = L\"ab\";" "6.7.9p14";
+  rejects "int w[] = \"ab\";" "6.7.9p14";
+  rejects "int a[] = 5;" "6.7.9p16";
+  rejects "int b[2]; int a[] = b;" "6.7.9p16";
+  rejects "struct u; struct u v = { 0 };" "6.7.9p3";
+  rejects "typedef int T = 1;" "6.7.9p3";
+  rejects "int x = { .a = 1 };" "scalar";
+  rejects "void f(void) { extern int x = 1; }" "6.7.9p5";
+  (* GCC and Clang fold the length of a variable length array in places,
+     and refuse the initialiser of one they do not fold. *)
+  accepts "void f(int n) { int a[n] = {}; }";
+  accepts "static const int N = 4; void f(void) { int a[N] = { 0 }; }";
+  (* A string literal that a generic selection chooses (6.5.1.1p4), and
+     one for an array of unknown type (design P21). *)
+  length "char s[] = _Generic(0, int: \"abc\");" "s" "char[4]";
+  length
+    "struct n { char name[4]; int v; } n[] = { _Generic(0, int: \"ab\"), 1, \
+     2 };"
+    "n" "struct n[2]";
+  accepts "typedef int q __attribute__((mode(QI))); q s[] = \"abc\";";
+  (* GCC takes a compound literal for a subarray, Clang refuses it. *)
+  length "struct c { int a[2]; int b; } c[] = { (int[2]){ 1, 2 }, 3, 4 };"
+    "c" "struct c[<constant>]";
+  accepts "int x = { 1, 2 }; int a[1] = { 1, 2 }; int y = { { 1 } };";
+  let deep =
+    "struct d0 { int x; };"
+    ^ String.concat ""
+        (List.init 300 (fun i ->
+             Printf.sprintf "struct d%d { struct d%d m; };" (i + 1) i))
+  in
+  rejects (deep ^ "struct d300 v = { 0 };") "levels";
+  accepts (deep ^ "void f(void) { struct d300 v; struct d300 w = v; }")
+
+(* 6.7.9p4: the initialiser of an object of static or thread storage
+   duration is constant; typec reports what GCC and Clang both refuse. *)
+let static_initialisers () =
+  let refused source = rejects source "6.7.9p4" in
+  refused "int g; int h = g;";
+  refused "int g; int h = g + 1;";
+  refused "int g; int h = (g = 1);";
+  refused "int g; int h = g++;";
+  refused "struct t { int v; } x; struct t y[] = { x };";
+  refused "_Thread_local int t; int *p = &t;";
+  refused "void f(void) { int x; static int *p = &x; }";
+  refused "void f(void) { int a[2]; static int *p = a; }";
+  refused "void f(void) { static int *p = (int[]){ 1 }; }";
+  refused "int g; int *p = (int[]){ g };";
+  refused "int g, *p; int *q = &p[g];";
+  accepts "int g; int *p = &g; int a[3]; int *q = &a[1]; int *r = a + 1;";
+  accepts "struct s { int m; } s; int *p = &s.m; int (*f)(void); int \
+           (*g)(void) = 0;";
+  accepts "int f(void); int (*p)(void) = f; int (*q)(void) = &f;";
+  accepts "int f(void); int x = f(); int y = 0 && f(); int z = (1, 2);";
+  accepts "const int c = 1; int d = c; double e = 1.0 / 3;";
+  accepts "void f(void) { const int c = 1; static int d = c; }";
+  accepts "char *s = \"abc\" + 1; int c = \"abc\"[1]; int *p = (int *)16;";
+  accepts "int *p = (int[]){ 1, 2 }; int n = (int){ 3 };";
+  accepts "int g; long n = sizeof g; int *p = 0 ? &g : 0;";
+  accepts "void f(void) { l: ; static void *p = &&l; int x = 1; int y = x; }";
+  accepts "struct s { int m; } s; struct s t = (struct s){ 1 };";
+  (* Excess initialisers are not checked: GCC and Clang drop them. *)
+  accepts
+    "int x; static int a[1] = { 1, x }; static int s = { 1, x }; union u { \
+     int i; int j; } u = { 1, x };";
+  accepts "void f(void) { static int a[] = (int[]){ 1, 2 }; }"
+
 let () =
   builtin_typedefs ();
   gnu_profile ();
@@ -1009,4 +1147,6 @@ let () =
   deep_expression ();
   huge_constants ();
   errors_are_located ();
+  initialisers ();
+  static_initialisers ();
   if !failures > 0 then exit 1

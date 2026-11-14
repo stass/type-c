@@ -22,7 +22,11 @@
     statement constraints on controlling expressions, the places of
     [case], [default], [break] and [continue], and [case] values.
     Assignment and argument conversions and the constraints of [return]
-    are the backend's. *)
+    are the backend's.
+
+    Typing also gives each expression its class of constant expression
+    (6.6), and the value of an integer one, which every rule that needs a
+    constant reads. Initialisers are typed through {!Initialiser}. *)
 
 open Typec_syntax
 
@@ -43,6 +47,61 @@ type typed = {
   lvalue : bool;
   bit_field : bit_field;
 }
+
+(** {1 Constant expressions (6.6)} *)
+
+(** Why an expression of integer constants is an integer constant
+    expression only where it is not evaluated (6.6p3, p4), as in the right
+    operand of a [&&] whose left operand is false. *)
+type flaw =
+  | Comma_operator of Tree.span
+  | Invalid of { span : Tree.span; message : string }
+      (** An operation that fails (6.6p4): an overflow, a division by
+          zero, a shift out of range. Its value is opaque. *)
+
+(** An lvalue or a function designator, as a constant expression reads
+    it. [static_storage]: it designates an object of static storage
+    duration or a function, whose address is an address constant
+    (6.6p9), as is its value where it is an array or a function;
+    otherwise neither is a constant. [named]: an object that an
+    identifier declares, or a member or element of one, whose value no
+    constant expression reads (6.6p9) unless it is [const], as GCC and
+    Clang read it. *)
+type designation = { static_storage : bool; named : bool }
+
+(** The class of an expression that is not an integer constant
+    expression. *)
+type kind =
+  | Arithmetic_constant  (** 6.6p8. *)
+  | Address_constant
+      (** 6.6p9, or one plus or minus an integer constant expression
+          (6.6p7); an integer constant expression cast to a pointer is
+          one, a null pointer among them. *)
+  | Designator of designation
+  | Backend_constant
+      (** A constant expression only as the backend decides (6.6p10):
+          what typec cannot tell that GCC and Clang both refuse, such as a
+          call, which each folds for some builtins, a comma operator, which
+          Clang takes, or an operand of a type that typec does not
+          compute. *)
+  | Not_constant
+      (** What GCC and Clang both refuse where it is evaluated: an
+          assignment, an increment or a decrement (6.6p3), the value of a
+          named object that is not [const], the address of an object of
+          automatic or thread storage duration (6.6p9). *)
+
+type constant =
+  | Integer_expression of { value : Integer_constant.t; flaw : flaw option }
+      (** An integer constant expression (6.6p6) and its value. *)
+  | Not_integer of { kind : kind; first : Tree.span }
+      (** [first] is the first operand or operator that 6.6p6 does not
+          allow. *)
+  | Unevaluable of { span : Tree.span; message : string }
+      (** An integer expression of constants that typec does not evaluate,
+          or that breaks a constraint: [sizeof] of an incomplete type, a
+          cast to a type that typec does not compute, a [_Generic] whose
+          selection depends on one. It is an error wherever it is part of
+          an integer constant expression, evaluated or not. *)
 
 (** The typed view of a translation unit, filled as the reader types its
     expressions. Each expression node is typed once and found by its
@@ -77,15 +136,16 @@ val types_compatible : t -> Tree.expression -> bool Ctype.answer option
     compare them. That of an [_Atomic] type, which GCC drops and Clang
     keeps, is unknown where it changes the answer. *)
 
+val constant : t -> Tree.expression -> constant option
+(** The class of constant expression of an expression that has been
+    typed. *)
+
 (** What the declaration reader gives typing. [fail] reports the first
     error at the start of a span and does not return; [entity] gives what
     a resolved use of a name denotes, and [overloaded] whether it names
     a Clang overload set (design 13.3); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
-    block, binding its identifiers and typing its initialisers; [constant]
-    gives the value of an integer constant expression (6.6p6), [None] for
-    an expression that is not one, evaluated as an operand that is not
-    evaluated (6.6p3) unless [evaluated] says it is. *)
+    block, binding its identifiers and typing its initialisers. *)
 type context = {
   typed : t;
   target : Target.t;
@@ -96,7 +156,6 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  constant : evaluated:bool -> Tree.expression -> Integer_constant.t option;
 }
 
 val max_depth : int
@@ -107,13 +166,26 @@ val expression : context -> Tree.expression -> typed
 (** Types an expression and every expression in it, or gives the type
     found for it before. *)
 
-val initialiser : context -> Tree.initialiser -> unit
-(** Types the expressions of an initialiser. The rules of initialisation
-    (6.7.9) are not checked, and an initialiser does not complete the
-    type it initialises. *)
+val integer_constant :
+  context -> Tree.expression -> (Integer_constant.t, Tree.span) result
+(** Types an expression where an integer constant expression is needed
+    (6.6p6), and gives its value, or the span of the first operand or
+    operator that keeps it from being one. One that typec cannot evaluate
+    or whose evaluation fails is an error. *)
+
+val initialiser :
+  context -> constant:bool -> Ctype.t -> Tree.initialiser -> Ctype.t
+(** Types the initialiser of an object of the type ({!Initialiser}) and
+    gives the type of the object, which it completes where it is an array
+    of unknown size. [constant] says that the object has static or thread
+    storage duration, whose initialiser is constant (6.7.9p4): an
+    expression that is [Not_constant] is an error. *)
 
 val function_body : context -> name:string -> Tree.block -> unit
 (** Types the body of the function [name]. *)
 
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)
+
+val needing : string -> Ctype.unknown -> string
+(** The message where [need] depends on an unknown type. *)

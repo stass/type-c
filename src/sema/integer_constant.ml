@@ -102,11 +102,11 @@ let with_values integer operation left right =
   | Known x, Known y -> operation x y
   | Opaque, _ | _, Opaque -> Ok (opaque integer)
 
-(* An operation in a subexpression that is not evaluated has no value,
-   and its undefined behaviour is no error (6.6p3, p11). *)
-let settle ~evaluated integer = function
-  | Error _ when not evaluated -> Ok (opaque integer)
-  | (Ok _ | Error _) as result -> result
+(* A failed operation has an opaque value: what it has where it is not
+   evaluated, and its undefined behaviour no error (6.6p3, p11). *)
+let settle integer = function
+  | Ok value -> (value, None)
+  | Error error -> (opaque integer, Some error)
 
 (* Unary operators *)
 
@@ -229,15 +229,15 @@ let conditional target condition if_true if_false =
   | Some false -> convert target integer if_false
   | None -> opaque integer
 
-let unary target ~evaluated operator operand =
+let unary target operator operand =
   let integer =
     match (operator : Tree.unary_operator) with
     | Logical_not -> Integer.Int
     | _ -> promoted_type target operand
   in
-  settle ~evaluated integer (unary_value target integer operator operand)
+  settle integer (unary_value target integer operator operand)
 
-let binary target ~evaluated operator left right =
+let binary target operator left right =
   let integer =
     match (operator : Tree.binary_operator) with
     | Shift_left | Shift_right -> promoted_type target left
@@ -248,7 +248,7 @@ let binary target ~evaluated operator left right =
     | Bitwise_xor | Bitwise_or ->
         common_type target left right
   in
-  settle ~evaluated integer (binary_value target integer operator left right)
+  settle integer (binary_value target integer operator left right)
 
 (* Integer constants (6.4.4.1) *)
 

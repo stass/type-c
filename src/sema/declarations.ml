@@ -30,6 +30,7 @@ let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name
 let expression result expression = Expressions.find result.typed expression
+let constant result expression = Expressions.constant result.typed expression
 let selection result expression = Expressions.selection result.typed expression
 
 let types_compatible result expression =
@@ -91,10 +92,6 @@ let checked state span = function
   | Ok t -> t
   | Error error -> fail state span (Ctype.error_message error)
 
-let constant_checked state span = function
-  | Ok constant -> constant
-  | Error error -> fail state span (Integer_constant.error_message error)
-
 let integer_type state span integer =
   checked state span (Ctype.integer state.target integer)
 
@@ -110,11 +107,8 @@ let unknown_type state span construct kind =
 
 (* The error where [need] depends on an unknown type: the first point that
    needs what typec does not know. *)
-let fail_needing state span need (unknown : Ctype.unknown) =
-  fail state span
-    (Printf.sprintf "%s depends on %s at %s:%d, which typec does not type \
-                     yet (design 13.3)"
-       need unknown.construct unknown.location.file unknown.location.line)
+let fail_needing state span need unknown =
+  fail state span (Expressions.needing need unknown)
 
 let fresh_entity state =
   let entity = state.next_entity in
@@ -130,8 +124,8 @@ let within state place read =
 (* Following the links of the tree *)
 
 (* A declaration that the parser resolved a use to, but that the reader
-   has not met, is in a place that the reader does not read yet: an
-   initialiser at file scope (0.9b-2). *)
+   has not met, is in a place that the reader does not read yet: the body
+   of a Clang block literal. *)
 let not_read state span name =
   fail state span
     (quote name
@@ -419,55 +413,6 @@ let wrong_kind_of_tag state (name : Tree.identifier) =
     (quote name.node
    ^ " is declared as a different kind of tag (C11 6.7.2.3p2)")
 
-(* Raised where an expression is not an integer constant expression;
-   caught in [constant_expression], which is not a failure. *)
-exception Not_integer_constant of Tree.span
-
-(* The size of a type that the target model gives (6.5.3.4p2, p4); the
-   front end knows no other (design P16). The size of an unknown object
-   type is the backend's too, as a constant: an unknown type is a
-   variable length array only in a prototype, through [typeof] or an
-   attribute, where the backend checks it. *)
-let size_in_bytes state span (t : Ctype.t) =
-  let target = state.target in
-  let of_integer integer =
-    Some (Target.integer_width target integer / target.char_bit)
-  in
-  let of_floating : Arithmetic.floating -> int = function
-    | Float -> target.sizeof_float
-    | Double -> target.sizeof_double
-    | Long_double -> target.sizeof_long_double
-  in
-  let incomplete () =
-    fail state span
-      "sizeof is applied to a function or an incomplete type (C11 6.5.3.4p1)"
-  in
-  if t.qualifiers.atomic then None
-  else
-    match t.shape with
-    | Void | Function _ | Unknown_type { kind = Unknown_function; _ } ->
-        incomplete ()
-    | Unknown_type { kind = Unknown_object | Object_or_function; _ } -> None
-    | Arithmetic (Integer Bool) -> None
-    | Arithmetic (Integer integer) -> of_integer integer
-    | Arithmetic (Real floating) -> Some (of_floating floating)
-    (* 6.2.5p13: the real and imaginary parts of a complex type. *)
-    | Arithmetic (Complex floating) -> Some (2 * of_floating floating)
-    | Enum tag -> (
-        match Ctype.enum_integer state.tags tag with
-        | Some (Answer integer) -> of_integer integer
-        | Some (Depends_on _) -> None
-        | None -> incomplete ())
-    | Pointer _ -> Some target.sizeof_pointer
-    | Va_list -> None
-    | Record _ | Array _ -> (
-        match
-          (Ctype.is_complete state.tags t, Ctype.is_variably_modified t)
-        with
-        | Answer false, _ -> incomplete ()
-        | _, Answer true -> raise (Not_integer_constant span)
-        | (Answer true | Depends_on _), (Answer false | Depends_on _) -> None)
-
 (* Constant expressions (6.6) *)
 
 (* The outcome of reading an expression as an integer constant
@@ -477,31 +422,8 @@ type evaluation =
   | Not_constant of Tree.span
       (** The operand or operator that 6.6p3 and p6 do not allow. *)
 
-let not_constant (expression : Tree.expression) =
-  raise (Not_integer_constant expression.span)
-
-let rec strip_parentheses (expression : Tree.expression) =
-  match expression.node with
-  | Parenthesized inner -> strip_parentheses inner
-  | _ -> expression
-
-let is_floating_constant expression =
-  match (strip_parentheses expression).node with
-  | Constant (Floating _) -> true
-  | _ -> false
-
 let spelling state (span : Tree.span) =
   Reader.spelling state.text state.text.tokens.(span.first)
-
-let identifier_value state (expression : Tree.expression) name
-    (resolution : Tree.resolution) =
-  match resolution with
-  | Resolved reference -> (
-      match (referenced state expression.span name reference).declared with
-      | Enumerator { value; _ } -> value
-      | Object _ | Function _ | Typedef _ -> not_constant expression)
-  (* Typing has refused a name that is no builtin. *)
-  | Undeclared -> not_constant expression
 
 (* Declarators *)
 
@@ -734,6 +656,15 @@ let declared_as state scope span specified name declared (derived : derived) =
             ("whether " ^ quote name ^ " is a function or an object")
             unknown)
 
+let has_linkage declared =
+  linkage_of declared <> No_linkage && not (is_overload declared)
+
+(* A block sees the last declaration at file scope of a name with
+   linkage. *)
+let note_at_file_scope state scope (entity : entity) =
+  if scope = File_scope && has_linkage entity.declared then
+    Hashtbl.replace state.at_file_scope entity.name entity
+
 (* Records what a declarator declares in [scope]. *)
 let declare_in state scope span specified declared (derived : derived) =
   match derived.name with
@@ -741,9 +672,7 @@ let declare_in state scope span specified declared (derived : derived) =
       let next =
         declared_as state scope span specified name declared derived
       in
-      let has_linkage =
-        linkage_of next <> No_linkage && not (is_overload next)
-      in
+      let has_linkage = has_linkage next in
       let entity =
         match (earlier_entity state span name declared, scope) with
         | Some prior, _ -> bind_to state span name declared (Some prior) next
@@ -758,8 +687,7 @@ let declare_in state scope span specified declared (derived : derived) =
             | Some other -> bind_unseen state span name declared other next
             | None -> bind_to state span name declared None next)
       in
-      if scope = File_scope && has_linkage then
-        Hashtbl.replace state.at_file_scope name entity;
+      note_at_file_scope state scope entity;
       entity)
   | None -> invalid_arg "Declarations: a declarator without a name"
 
@@ -1582,131 +1510,17 @@ and read_new_type_name state (type_name : Tree.type_name) =
 (* Constant expressions *)
 
 (* What the expression declares stays declared, as in C, though it is
-   not a constant. Typing checks its operands first, which the evaluator
-   then reads as typed, and bounds its depth, which bounds the
-   evaluator's recursion too. [evaluated] is as in [evaluate]. *)
-and constant_expression ?(evaluated = true) state expression =
-  ignore (Expressions.expression (typing state) expression);
-  match evaluate state ~evaluated expression with
-  | value -> Constant value
-  | exception Not_integer_constant span -> Not_constant span
-
-(* [evaluated] is false in an operand that is not evaluated (6.6p3), where
-   an operation that would fail has no value instead. *)
-and evaluate state ~evaluated (expression : Tree.expression) =
-  let target = state.target and span = expression.span in
-  let settled result = constant_checked state span result in
-  match expression.node with
-  | Identifier { name; resolution } ->
-      identifier_value state expression name resolution
-  | Constant (Integer { base; digits; suffix }) ->
-      settled (Integer_constant.of_integer_constant target base digits suffix)
-  | Constant (Floating _ | Not_a_constant) -> not_constant expression
-  | Character encoding ->
-      settled
-        (Integer_constant.of_character_constant target encoding
-           (spelling state span))
-  | Parenthesized inner -> evaluate state ~evaluated inner
-  | Unary
-      (((Unary_plus | Unary_minus | Bitwise_not | Logical_not) as op), operand)
-    ->
-      let operand = evaluate state ~evaluated operand in
-      settled (Integer_constant.unary target ~evaluated op operand)
-  | Binary (((Logical_and | Logical_or) as op), left, right) ->
-      let left = evaluate state ~evaluated left in
-      (* 6.5.13p4, 6.5.14p4: the right operand is evaluated after a left
-         one that does not decide the value. *)
-      let right_evaluated =
-        match (op, Integer_constant.truth left) with
-        | Logical_and, Some true | Logical_or, Some false -> evaluated
-        | _, (Some _ | None) -> false
-      in
-      let right = evaluate state ~evaluated:right_evaluated right in
-      settled (Integer_constant.binary target ~evaluated op left right)
-  | Binary (op, left, right) ->
-      let left = evaluate state ~evaluated left in
-      let right = evaluate state ~evaluated right in
-      settled (Integer_constant.binary target ~evaluated op left right)
-  | Conditional { condition; if_true; if_false } ->
-      let condition = evaluate state ~evaluated condition in
-      let truth = Integer_constant.truth condition in
-      let if_true =
-        match if_true with
-        | Some if_true ->
-            evaluate state ~evaluated:(evaluated && truth = Some true) if_true
-        | None -> condition
-      in
-      let if_false =
-        evaluate state ~evaluated:(evaluated && truth = Some false) if_false
-      in
-      Integer_constant.conditional target condition if_true if_false
-  | Cast { type_name; operand } ->
-      cast state ~evaluated expression type_name operand
-  | Sizeof_type type_name -> (
-      let size_type = target.size_type in
-      match size_in_bytes state span (read_type_name state type_name) with
-      | Some bytes ->
-          Integer_constant.known target size_type (Exact_integer.of_int bytes)
-      | None -> Integer_constant.opaque size_type)
-  | Alignof type_name ->
-      ignore (read_type_name state type_name);
-      Integer_constant.opaque target.size_type
-  (* [offsetof] expands to it and is an integer constant (C11 7.19p3). *)
-  | Offsetof { type_name; _ } ->
-      ignore (read_type_name state type_name);
-      Integer_constant.opaque target.size_type
-  (* The operand is typed, but its size waits for the initialisers that
-     complete arrays (0.9b-2). *)
-  | Sizeof_expression _ | Alignof_expression _ ->
-      Integer_constant.opaque target.size_type
-  | Comma (left, right) when not evaluated ->
-      ignore (evaluate state ~evaluated left);
-      evaluate state ~evaluated right
-  (* 6.5.1.1p4: the value of the result expression. *)
-  | Generic _ -> (
-      match Expressions.selection state.typed expression with
-      | Some (Answer chosen) -> evaluate state ~evaluated chosen
-      | Some (Depends_on unknown) ->
-          fail_needing state span "the value of _Generic" unknown
-      | None -> invalid_arg "Declarations.evaluate: an untyped _Generic")
-  | Types_compatible _ -> (
-      let int = Integer.Int in
-      match Expressions.types_compatible state.typed expression with
-      | Some (Answer compatible) ->
-          Integer_constant.known target int
-            (Exact_integer.of_int (Bool.to_int compatible))
-      | Some (Depends_on _) -> Integer_constant.opaque int
-      | None -> invalid_arg "Declarations.evaluate: an untyped builtin")
-  | Comma _ | String _ | Compound_literal _ | Subscript _ | Call _ | Member _
-  | Pointer_member _ | Post_increment _ | Post_decrement _
-  | Unary
-      ( ( Address | Indirection | Pre_increment | Pre_decrement | Real_part
-        | Imaginary_part ),
-        _ )
-  | Assignment _ | Statement_expression _ | Label_address _ | Va_arg _
-  | Block_literal _ ->
-      not_constant expression
-
-(* 6.6p6: a cast to an integer type, of an integer constant expression or
-   of a floating constant, whose value the backend computes. *)
-and cast state ~evaluated expression type_name operand =
-  let cast_type = read_type_name state type_name in
-  match Ctype.as_arithmetic state.tags cast_type with
-  | Answer (Some (Integer integer)) when is_floating_constant operand ->
-      Integer_constant.opaque integer
-  | Answer (Some (Integer integer)) ->
-      let value = evaluate state ~evaluated operand in
-      Integer_constant.convert state.target integer value
-  | Answer (Some (Real _ | Complex _) | None) -> not_constant expression
-  | Depends_on unknown ->
-      fail_needing state expression.span "the value of a cast" unknown
-
+   not a constant. *)
+and constant_expression state expression =
+  match Expressions.integer_constant (typing state) expression with
+  | Ok value -> Constant value
+  | Error span -> Not_constant span
 
 (* Declarations in blocks and what typing asks of the reader *)
 
-(* The asm label names a symbol, which no type depends on. Typing reads
-   the initialiser of a declaration in a block; one at file scope is read
-   by 0.9b-2. *)
+(* The asm label names a symbol, which no type depends on. The
+   initialiser is read after the declarator, whose identifier it sees
+   (6.2.1p7). *)
 and read_init_declarator state scope specified
     (init_declarator : Tree.init_declarator) =
   let { Tree.declarator; declared; asm_label = _; attributes; initialiser } =
@@ -1725,11 +1539,41 @@ and read_init_declarator state scope specified
   let entity =
     declare_in state scope init_declarator.span specified declared derived
   in
-  (match (scope, initialiser) with
-  | Block_scope, Some initialiser ->
-      Expressions.initialiser (typing state) initialiser
-  | Block_scope, None | File_scope, _ -> ());
-  entity
+  match initialiser with
+  | None -> entity
+  | Some initialiser ->
+      initialised state scope init_declarator.span declared entity initialiser
+
+(* 6.7.9: an initialised object, of static or thread storage duration
+   with a constant initialiser (p4). The initialiser completes the type of
+   an array of unknown size (p22), as a later declaration with the length
+   would. *)
+and initialised state scope span declared (entity : entity) initialiser =
+  match entity.declared with
+  | Object { object_type; linkage; storage } -> (
+      if scope = Block_scope && linkage <> No_linkage then
+        fail state span
+          "a declaration in a block of an identifier with linkage has an \
+           initialiser (C11 6.7.9p5)";
+      let constant = storage <> Automatic_storage in
+      let completed =
+        Expressions.initialiser (typing state) ~constant object_type
+          initialiser
+      in
+      match object_type.shape with
+      | Array { length = Unknown; _ } ->
+          let completed_object =
+            Object { object_type = completed; linkage; storage }
+          in
+          let entity =
+            record state entity.name declared
+              { entity with declared = completed_object }
+          in
+          note_at_file_scope state scope entity;
+          entity
+      | _ -> entity)
+  | Function _ | Typedef _ | Enumerator _ ->
+      fail state span "an initialiser for what is not an object (C11 6.7.9p3)"
 
 and read_block_declaration state (declaration : Tree.declaration) =
   match declaration.node with
@@ -1752,13 +1596,7 @@ and typing state : Expressions.context =
     overloaded = Hashtbl.mem state.overloaded;
     type_name = read_type_name state;
     declaration = read_block_declaration state;
-    constant = constant_value state;
   }
-
-and constant_value state ~evaluated expression =
-  match constant_expression ~evaluated state expression with
-  | Constant value -> Some value
-  | Not_constant _ -> None
 
 (* External declarations (6.9) *)
 

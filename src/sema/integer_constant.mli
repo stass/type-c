@@ -85,23 +85,20 @@ val of_character_constant :
     evaluate them. *)
 
 val unary :
-  Target.t ->
-  evaluated:bool ->
-  Typec_syntax.Tree.unary_operator ->
-  t ->
-  (t, error) result
+  Target.t -> Typec_syntax.Tree.unary_operator -> t -> t * error option
 (** [+], [-], [~] and [!] (6.5.3.3); the other unary operators are not
-    allowed in a constant expression and raise [Invalid_argument]. An
-    operation that is not [evaluated], being in an operand that is not
-    evaluated (6.6p3), gives an opaque value where it would fail. *)
+    allowed in a constant expression and raise [Invalid_argument]. The
+    result is the value and, where the operation fails, why: a failed
+    operation has an opaque value of its type, which is its value in an
+    operand that is not evaluated (6.6p3), where the failure is no
+    error. *)
 
 val binary :
   Target.t ->
-  evaluated:bool ->
   Typec_syntax.Tree.binary_operator ->
   t ->
   t ->
-  (t, error) result
+  t * error option
 (** The binary operators of 6.5.5 to 6.5.14, as {!unary}. A false left
     operand of [&&] or a true one of [||] decides the value whatever the
     right one is. *)
