@@ -25,3 +25,13 @@
 (cram
  (applies_to types)
  (deps type_probe.exe))
+
+; parse.t runs the parser on the output of both backends.
+
+(executable
+ (name parse_check)
+ (libraries typec_cpp typec_syntax typec_test_support))
+
+(cram
+ (applies_to parse)
+ (deps parse_check.exe))

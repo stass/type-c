@@ -76,8 +76,8 @@ feature is built here.
 | 0.2 | Reader for preprocessed text: tokens, literals, line markers, pragmas, and the file each token belongs to. |
 | 0.3 | Span emitter and the round trip: read, emit, compile with `-x cpp-output`. First object-identity test. |
 | 0.4 | Target model from the backend's predefined macros. |
-| 0.5 | Tree and parser for declarations: specifiers, declarators, typedef scopes, struct, union, enum, initialisers. |
-| 0.6 | Parser for statements and expressions; all of C11, including `_Generic`, compound literals, designators and old-style definitions. |
+| 0.5 | Tree and parser for declarations and expressions: specifiers, declarators, typedef scopes, struct, union, enum, initialisers and designators, all C11 expressions including `_Generic` and compound literals; function bodies brace-matched. |
+| 0.6 | Parser for statements and function bodies, including old-style definitions, with block-scope typedef names. |
 | 0.7 | GNU profile: attributes, alternate keywords, assembler, `typeof`, statement expressions, the builtin table; bodies in system headers skipped. |
 | 0.8 | Types: representation, compatibility, composite types, promotions, usual arithmetic conversions. |
 | 0.9 | Expression typing, constant evaluation, `_Generic` selection. |

@@ -1,0 +1,36 @@
+(* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
+
+(** Parsing the tokens of preprocessed text into a {!Tree.translation_unit}
+    (design 13.3): recursive descent over the complete token array, with
+    the scope of typedef names fed back into the grammar.
+
+    The grammar is C11's declarations and expressions (C11 6.5, 6.7, 6.9).
+    The body of a function definition is matched brace for brace and kept
+    as a span. A construct outside C11, such as [__attribute__], is an
+    error that names the token where it starts.
+
+    Pragma tokens ([#pragma] lines, including those that [_Pragma] writes
+    in the middle of an expression, and [#pragma typec] lines) are not
+    part of the grammar: the parser passes over them, and the node around
+    them holds them in its span, so emission keeps them in place.
+
+    Parsing takes time linear in the number of tokens, up to a logarithmic
+    factor for typedef names, and its recursion is bounded by
+    {!max_nesting}. *)
+
+open Typec_cpp
+
+(** Why the tokens are not a C11 translation unit: the presumed location
+    of the token where parsing stopped, and a message that names what the
+    grammar expected there and the token it found. *)
+type error = Reader.error = { location : Location.t; message : string }
+
+val max_nesting : int
+(** The most brackets ([(], [[], [{]) and conditional operators that the
+    parser accepts open at once; one more is an error. *)
+
+val parse : Reader.t -> (Tree.translation_unit, error) result
+
+val error_message : error -> string
+(** ["file:line: message"], as {!Reader.error_message}. *)

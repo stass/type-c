@@ -1,0 +1,7 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+(library
+ (name typec_syntax)
+ (libraries typec_cpp)
+ (private_modules keyword))
