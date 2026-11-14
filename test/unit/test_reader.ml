@@ -164,6 +164,9 @@ let place_cases =
       "# 1 \"t.c\"\na\n# 10 \"other.c\"\nb\n# 1 \"h.h\" 1\nc\n\
        # 11 \"other.c\" 2\nd"
       "a t.c t.c:1 | b t.c other.c:10 | c h.h h.h:1 | d t.c other.c:11";
+    case "a marker and #line may hold any blanks"
+      "#\011 1 \"t.c\"\na\n#line\t\t7 \"r.c\"\nb"
+      "a t.c t.c:1 | b t.c r.c:7";
     case "#line and a marker without a file name renumber"
       "# 1 \"t.c\"\n#line 7 \"r.c\"\na\n#line 20\nb\n# 30\nc\n# 40 \nd"
       "a t.c r.c:7 | b t.c r.c:20 | c t.c r.c:30 | d t.c r.c:40";

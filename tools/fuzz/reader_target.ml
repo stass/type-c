@@ -1,0 +1,41 @@
+(* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
+
+(* The reader as a fuzz target: any text is read, a rejection must come
+   with a printable message, and an accepted text must keep the promises
+   of Reader.t: its tokens and gaps spell it, the gaps are layout only,
+   and the emitter copies it unchanged. *)
+
+open Typec_cpp
+open Typec_test_support
+
+let violated property = failwith ("property violated: " ^ property)
+
+let is_printable_ascii byte = ' ' <= byte && byte <= '~'
+
+let check_rejection error =
+  if not (String.for_all is_printable_ascii (Reader.error_message error))
+  then violated "an error message is printable ASCII"
+
+(* Number.classify takes any spelling, so every pp-number is a valid
+   input to it; its result is not checked, only that it returns. *)
+let classify_numbers (result : Reader.t) =
+  Array.iter
+    (fun (token : Token.t) ->
+      if token.kind = Token.Number then
+        ignore (Number.classify (Reader.spelling result token)))
+    result.tokens
+
+let check_accepted (result : Reader.t) =
+  if not (Spans.spell_text result) then
+    violated "the tokens and gaps spell the text";
+  if not (Spans.gaps_are_layout result) then
+    violated "the gaps hold only white space and line markers";
+  if Typec_emit.Emitter.emit result [] <> result.text then
+    violated "a unit without edits is emitted as it was read";
+  classify_numbers result
+
+let check text =
+  match Reader.read ~name:"fuzz.i" text with
+  | Ok result -> check_accepted result
+  | Error error -> check_rejection error

@@ -46,15 +46,30 @@ let is_space = function
   | ' ' | '\t' | '\r' | '\011' | '\012' | '\n' -> true
   | _ -> false
 
-(* A line marker or #line, which must be a whole line of a gap and start
-   with '#'. *)
+(* [text] from its first byte that is not a space. String.trim would keep
+   the vertical tab, which the reader takes as a blank. *)
+let drop_leading_space text =
+  let length = String.length text in
+  let start = ref 0 in
+  while !start < length && is_space text.[!start] do
+    incr start
+  done;
+  String.sub text !start (length - !start)
+
+let is_digit byte = '0' <= byte && byte <= '9'
+
+(* A line marker or #line, which must be a whole line of a gap: '#', any
+   blanks, and then a digit or "line" and a blank. *)
 let is_marker_line line =
   String.starts_with ~prefix:"#" line
   &&
-  let directive = String.trim (String.sub line 1 (String.length line - 1)) in
-  directive <> ""
-  && (String.starts_with ~prefix:"line " directive
-     || ('0' <= directive.[0] && directive.[0] <= '9'))
+  let directive =
+    drop_leading_space (String.sub line 1 (String.length line - 1))
+  in
+  (directive <> "" && is_digit directive.[0])
+  || String.length directive > 4
+     && String.starts_with ~prefix:"line" directive
+     && is_space directive.[4]
 
 (* A gap holds only white space and whole lines that are line markers:
    none of the text was dropped from the tokens. *)

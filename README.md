@@ -113,3 +113,78 @@ inputs, `-o` and dependency options do not belong there.
 
 Exit status: 0 with the model on stdout; 1 when the backend fails or
 prints macros the model cannot be read from; 2 and 127 as above.
+
+## Fuzzing
+
+`tools/fuzz/` holds the fuzz harness: `fuzz.exe TARGET [FILE]` runs one
+input, from FILE or standard input, through a target, and fails on any
+exception, broken property or memory beyond a bound linear in the input.
+The `reader` target checks that every text is read or refused with a
+printable message, and that an accepted text is spelled by its tokens
+and gaps, has only layout in the gaps and is emitted unchanged. The
+normal build compiles the harness, and `dune test` runs it on the seeds
+in `tools/fuzz/seeds/`.
+
+AFL++ drives it, with coverage from an OCaml compiler configured for AFL
+instrumentation. That compiler lives in its own opam root, so the normal
+build keeps the system OCaml. AFL++ on macOS hands its coverage map over
+only as a POSIX shared memory descriptor, which the OCaml runtime does
+not read, so the compiler needs a patch to `runtime/afl.c` there. The
+patch is kept outside this repository, at
+`/Volumes/Optaine/typec-fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch`.
+Setting up, once:
+
+```sh
+brew install afl++
+export OPAMROOT=/Volumes/Optaine/opam
+opam init --bare --disable-sandboxing -n -y
+opam switch create afl -y \
+  --packages=ocaml-variants.5.5.2+options,ocaml-option-afl
+opam install --switch afl -y dune
+src=/Volumes/Optaine/typec-fuzz/ocaml-afl-src/ocaml-5.5.2
+opam source --switch afl ocaml-compiler.5.5.2 --dir "$src"
+patch -d "$src" -p1 \
+  < /Volumes/Optaine/typec-fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch
+opam pin add --switch afl -y --kind=path ocaml-compiler.5.5.2 "$src"
+```
+
+A campaign keeps its build, seeds and findings in `TYPEC_FUZZ_DIR`
+(default `/Volumes/Optaine/typec-fuzz`), never in this repository:
+
+```sh
+tools/fuzz/fuzz.sh build             # the instrumented harness
+tools/fuzz/fuzz.sh seeds             # more seeds: cc -E of C headers
+CC=gcc-16 tools/fuzz/fuzz.sh seeds   # and those of another compiler
+tools/fuzz/fuzz.sh run reader 30     # 30 minutes; resumes a run
+tools/fuzz/fuzz.sh triage reader     # minimise crashes and hangs
+```
+
+The limits of one execution, whose values are in `fuzz.ml` and
+`fuzz.sh`:
+
+* Input: at most `max_input_bytes`, 16 KiB; a longer one is skipped.
+  The densest input of that size, all `;`, takes about 20 ms in the
+  instrumented harness.
+* Time: `timeout_ms`, 100 ms (`-t`). AFL++ runs an input that exceeds
+  it again with twice that (`AFL_HANG_TMOUT`) and saves it as a hang
+  only if it exceeds that too, so that a busy host does not make one.
+  The limit is about five times the worst linear run, while a step
+  quadratic in the 16K bytes or tokens of that input would cost
+  thousands of times more. A step quadratic in something sparser, such
+  as line markers, can stay inside it.
+* Memory: the harness fails when the major heap peaks above
+  `heap_words_fixed` plus `heap_words_per_input_byte` per input byte,
+  about twice what the densest input needs. AFL++'s own limit (`-m`) is
+  off: it sets `RLIMIT_AS`, which macOS refuses to set, and on Linux
+  that limit counts the address space OCaml 5 reserves, not what a
+  stage uses.
+
+The harness reports a crash with the exit code in `AFL_CRASH_EXITCODE`,
+which `fuzz.sh` sets, because the crash reporter of macOS can hold a
+signalled process for seconds and AFL++ would record a hang.
+
+A target is a module with `check : string -> unit` that returns for
+every input its stage accepts or refuses and raises otherwise. Adding
+one is that module, its libraries in `tools/fuzz/dune`, an entry in the
+`targets` table of `fuzz.ml` and seeds in `tools/fuzz/seeds/TARGET/`,
+which `dune test` runs through it.

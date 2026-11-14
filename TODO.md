@@ -192,6 +192,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   text that is not `cc -E` output. When a third stage reports located
   errors, give the type a module of its own.
 
+## Fuzzing
+
+- [High] Decide where the OCaml AFL shm patch lives and offer it
+  upstream. AFL++ on macOS hands the coverage map over only as a POSIX
+  shared memory descriptor (`__AFL_SHM_FD`), and the runtime of OCaml
+  (`runtime/afl.c`, 5.5.2 and trunk) attaches only a SysV segment, so
+  the fuzz build needs a patched compiler (README, "Fuzzing"). The patch
+  modifies LGPL sources and is kept outside this repository.
+
 ## Design questions without a gate yet
 
 - [High] Write the formal model for checked-mode lifetimes before any

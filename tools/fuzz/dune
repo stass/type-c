@@ -1,0 +1,12 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; The fuzz harness. fuzz.sh builds it with an AFL-instrumented compiler;
+; the normal build compiles it too, and seeds.t runs it on the seeds.
+
+(executable
+ (name fuzz)
+ (libraries unix typec_cpp typec_emit typec_test_support))
+
+(cram
+ (deps fuzz.exe (source_tree seeds)))
