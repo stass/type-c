@@ -1,97 +1,12 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* An AST node nests two levels deeper than its parent, in its "inner"
-   array, so this admits expressions some 5000 deep, far beyond what
-   Clang parses by default, and keeps the recursion of the JSON reader
-   and of the walk below in a few megabytes of stack. *)
-let max_depth = 10_000
-
-(* A declaration is held as a tree while it is walked. Clang's take a
-   few times their bytes, and the largest function of lua, luaV_execute,
-   takes a quarter of this; the densest JSON, of empty arrays, takes
-   some 25 times its bytes, under a gigabyte. *)
-let max_declaration_bytes = 32 * 1024 * 1024
-
 exception Malformed of string
 
 let fail format =
   Printf.ksprintf (fun message -> raise (Malformed message)) format
 
 type summary = { expressions : int; without_range : int }
-
-(* Bounded input. The scanner sees every byte the JSON reader is given,
-   ahead of it, and tracks only what the bounds need: the nesting depth
-   outside strings and the bytes since the reader started its current
-   value. The JSON reader is given at most one buffer of bytes it has
-   not read, so a value can exceed its bound by that much. *)
-
-type scanner = {
-  channel : in_channel;
-  mutable depth : int;
-  mutable in_string : bool;
-  mutable escaped : bool;  (** the previous byte began an escape *)
-  mutable value_bytes : int;
-  mutable complete : bool;  (** the top-level value has been closed *)
-}
-
-let start_value scanner = scanner.value_bytes <- 0
-
-let scan_string_byte scanner c =
-  if scanner.escaped then scanner.escaped <- false
-  else if c = '\\' then scanner.escaped <- true
-  else if c = '"' then scanner.in_string <- false
-
-let open_value scanner =
-  scanner.depth <- scanner.depth + 1;
-  if scanner.depth > max_depth then
-    fail "the AST nests deeper than %d levels" max_depth
-
-let close_value scanner =
-  scanner.depth <- scanner.depth - 1;
-  if scanner.depth = 0 then scanner.complete <- true
-
-(* Yojson also reads comments, which Clang never writes and which would
-   hide quotes and brackets from the scanner; its other extensions hold
-   neither. *)
-let scan_structural_byte scanner c =
-  if scanner.complete then fail "data after the AST";
-  match c with
-  | '"' -> scanner.in_string <- true
-  | '{' | '[' -> open_value scanner
-  | '}' | ']' -> close_value scanner
-  | '/' -> fail "a comment in the AST"
-  | _ -> ()
-
-let count_value_byte scanner =
-  scanner.value_bytes <- scanner.value_bytes + 1;
-  if scanner.value_bytes > max_declaration_bytes then
-    fail "a value of the AST takes more than %d bytes" max_declaration_bytes
-
-(* Blanks between tokens are not counted: the reader keeps nothing of
-   them. *)
-let scan_byte scanner c =
-  let blank = (not scanner.in_string) && String.contains " \t\r\n" c in
-  if not blank then begin
-    if scanner.in_string then scan_string_byte scanner c
-    else scan_structural_byte scanner c;
-    count_value_byte scanner
-  end
-
-let refill scanner buffer length =
-  let count = input scanner.channel buffer 0 length in
-  for i = 0 to count - 1 do
-    scan_byte scanner (Bytes.get buffer i)
-  done;
-  count
-
-(* Reads what the JSON reader left, so that every byte is checked and
-   Clang can write all its output and exit. *)
-let drain scanner =
-  let buffer = Bytes.create 65536 in
-  while refill scanner buffer (Bytes.length buffer) > 0 do
-    ()
-  done
 
 (* The walk. A location is an object with an offset, written in full only
    for the first location in a buffer: Clang leaves out the buffer's name
@@ -237,11 +152,10 @@ and visit_expression_field reader expression = function
   | _, value -> visit reader value
 
 (* The translation unit is one object; its declarations, in its "inner"
-   array, and its other fields are read and walked one at a time, each
-   within the bound of a declaration. *)
-let read_translation_unit scanner reader state lexbuf =
+   array, and its other fields are read and walked one at a time, so
+   that only one declaration is held as a tree at once. *)
+let read_translation_unit reader state lexbuf =
   let visit_value () state lexbuf =
-    start_value scanner;
     visit reader (Yojson.Safe.read_json state lexbuf)
   in
   let visit_field () key state lexbuf =
@@ -251,25 +165,12 @@ let read_translation_unit scanner reader state lexbuf =
   Yojson.Safe.read_fields visit_field () state lexbuf
 
 let read ~input ~input_size channel emit =
-  let scanner =
-    {
-      channel;
-      depth = 0;
-      in_string = false;
-      escaped = false;
-      value_bytes = 0;
-      complete = false;
-    }
-  in
   let reader =
     { input; input_size; emit; buffer = ""; expressions = 0;
       without_range = 0 }
   in
-  let lexbuf = Lexing.from_function (refill scanner) in
-  match
-    read_translation_unit scanner reader (Yojson.init_lexer ()) lexbuf;
-    drain scanner
-  with
+  let lexbuf = Lexing.from_channel channel in
+  match read_translation_unit reader (Yojson.init_lexer ()) lexbuf with
   | () ->
       Ok
         {
@@ -280,3 +181,4 @@ let read ~input ~input_size channel emit =
   | exception Yojson.Json_error message ->
       (* Yojson puts the position on a line of its own. *)
       Error (String.concat " " (String.split_on_char '\n' message))
+  | exception Stack_overflow -> Error "the AST nests too deep to read"

@@ -95,10 +95,9 @@ are left out here, and leaves no output.
   0
   [1]
 
-Clang's output is untrusted. A stand-in for Clang prints the JSON in
-ast.json, which the oracle refuses when it nests too deep, holds a
-value too large, a location outside the input or in a macro expansion,
-or a comment, or goes on after the AST.
+A stand-in for Clang prints the JSON in ast.json, which the oracle
+refuses when it holds a range outside the input, a location in another
+file or in a macro expansion, or is not JSON.
 
   $ cat > fake-clang <<'EOF'
   > #!/bin/sh
@@ -112,19 +111,11 @@ or a comment, or goes on after the AST.
   >   printf '%s' "$1" > ast.json
   >   fake
   > }
-  $ { printf '{"id": "'; head -c 34000000 /dev/zero | tr '\0' a;
-  >   printf '"}'; } > ast.json
-  $ fake
-  oracle: unit.i: a value of the AST takes more than 33554432 bytes
-  [1]
   $ refuse '{"inner": [{"range": {"begin": {"offset": 0, "file": "unit.i",
   >   "tokLen": 1}, "end": {"offset": 9999, "tokLen": 1}},
   >   "kind": "IntegerLiteral", "type": {"qualType": "int"},
   >   "valueCategory": "prvalue"}]}'
   oracle: unit.i: a range 0-10000 outside the input
-  [1]
-  $ refuse '{"inner": [ /* " */ [[]] /* " */ ]}'
-  oracle: unit.i: a comment in the AST
   [1]
 
 A refusal early in a long output still names its reason, not the
@@ -137,18 +128,11 @@ broken pipe Clang would die of.
   $ fake
   oracle: unit.i: a location in "other.i", not in the input
   [1]
-  $ deep=$(awk 'BEGIN { for (i = 0; i < 10000; i++) printf "[" }')
-  $ refuse "{\"inner\": $deep"
-  oracle: unit.i: the AST nests deeper than 10000 levels
-  [1]
   $ refuse '{"inner": [{"loc": {"offset": 0, "file": "other.i", "tokLen": 1}}]}'
   oracle: unit.i: a location in "other.i", not in the input
   [1]
   $ refuse '{"inner": [{"loc": {"spellingLoc": {}, "expansionLoc": {}}}]}'
   oracle: unit.i: a location in a macro expansion
-  [1]
-  $ refuse '{"inner": []} {}'
-  oracle: unit.i: data after the AST
   [1]
   $ refuse '{"inner": ['
   oracle: unit.i: Line 1, bytes 10-11: Unexpected end of input

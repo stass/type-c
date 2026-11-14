@@ -23,4 +23,14 @@ val to_line : t -> string
     [FIRST LIMIT KIND CAST CATEGORY TYPE DESUGARED] separated by tabs,
     an absent optional field spelled [-]. In the string fields, a
     backslash and every control byte is written as [\xHH], so a field
-    holds no tab or newline. *)
+    holds no tab or newline, and a field that is [-] alone as [\x2d]. *)
+
+val needs_escape : char -> bool
+(** Whether {!to_line} escapes a byte: a backslash or a control byte. *)
+
+val escaped : string -> string
+(** A field as {!to_line} writes it. *)
+
+val of_line : string -> (t, string) result
+(** The record of a line that {!to_line} writes, or why the line is not
+    one. Lines come from a file, so nothing about them is trusted. *)

@@ -1,18 +1,42 @@
 ; SPDX-License-Identifier: BSD-2-Clause
 ; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-; The Clang half of the typing oracle (README, "Typing oracle"). It needs
-; yojson, which only the tools opam switch has, so it is built only in
-; the context that oracle.workspace makes of that switch; the default
-; context of a plain dune build skips it and oracle.t.
+; The typing oracle (README, "Typing oracle"). Its Clang half, oracle.exe,
+; needs yojson, which only the tools opam switch has, so it is built only
+; in the context that oracle.workspace makes of that switch; the default
+; context of a plain dune build skips it and the cram tests, which run
+; it. The typec half and the comparison need only typec's libraries and
+; are built in every context.
+
+(library
+ (name oracle_record)
+ (wrapped false)
+ (modules record))
 
 (executable
  (name oracle)
+ (modules oracle clang_ast)
  (enabled_if
   (= %{context_name} oracle))
- (libraries unix yojson))
+ (libraries unix yojson oracle_record))
+
+(executables
+ (names typec_dump compare)
+ (modules
+  typec_dump
+  compare
+  typec_unit
+  tree_expressions
+  spellings
+  normalisation
+  allow_list)
+ (libraries unix typec_cpp typec_syntax typec_sema typec_driver oracle_record))
 
 (cram
  (enabled_if
   (= %{context_name} oracle))
- (deps oracle.exe (env_var TYPEC_TEST_CLANG)))
+ (deps
+  oracle.exe
+  typec_dump.exe
+  compare.exe
+  (env_var TYPEC_TEST_CLANG)))

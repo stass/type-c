@@ -555,18 +555,70 @@ types (design 13.3).
 
 ## Typing oracle
 
-- [High] The comparison half of plan 0.10, after 0.9b: check the type
-  and value category `typec` gives each expression against the records
-  of `tools/oracle` for its source range (README, "Typing oracle"), and
-  keep the reviewed allow-list of gate 4. Clang's spellings keep typedef
-  names at every level, and its JSON gives no canonical type: the
-  desugared spelling removes only the outermost typedef, so `A3 *`
-  stays as written. Decide how to resolve them. Recommended: parse
-  Clang's spelling as a type name with `typec`'s parser in the scope of
-  the expression, which `typec` holds while typing it, then apply the
-  normalisations of the README's table. The alternative, rebuilding
-  each spelling from the typedef declarations of the dump, needs a
-  parser of C type names in the oracle.
+- [High] Gate 4 of plan 0.10 does not hold: on c-testsuite, zlib,
+  Lua and SQLite with Apple clang, two classes of disagreement remain
+  outside the empty allow-list (README, "Typing oracle"). Re-run the
+  comparison on the corpus once each is closed.
+  * (0.9b-2) An array whose initialiser completes its type (6.7.9p22)
+    keeps the incomplete type, `int[]` where Clang has `int[4]`: 694
+    disagreements, in each use of the array. Reproducer:
+    `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/c-testsuite/clang/tests/single-exec/00092.tc.ref.i`, line 6.
+  * (0.10) A function of an old-style definition, `int f() {...}`: Clang
+    spells its type `int ()`, which reads as a function type without
+    parameter information, and `same_type` tells it from `typec`'s
+    `Old_style []`: 20 disagreements. Clang's spelling cannot carry the
+    parameters of the definition, so it is the comparison's to accept.
+    Decide between an allow-list entry and reading `()` against
+    `typec`'s type with its parameter types dropped. Reproducer:
+    `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/c-testsuite/clang/tests/single-exec/00030.tc.ref.i`.
+- [Medium] (0.10) The comparison leaves 2748 records of the corpus
+  unresolved for naming an anonymous structure, union or member by its
+  location (`union (unnamed union at src/lstate.h:181:3)`), which no
+  type name names. Resolving them needs the tag that `typec` declares at
+  the presumed location of each tag keyword, which `Declarations` does
+  not give. Reproducer: `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/lua/clang/src/lvm.tc.ref.i`.
+- [Medium] (0.10) The comparison reads Clang's spellings at file scope,
+  so a tag or typedef name of a block is unresolved: 153 records of
+  SQLite, such as `struct Sublist *` and `void_function`. Worse, a name
+  that a block declares again reads as the file-scope one, so a scoping
+  bug of `typec` that gives the file-scope type there agrees. Reading
+  spellings in the scope of their expression needs the parser to give
+  its scope at a point of the unit; short of that, a spelling with a
+  name that some block or prototype declares could be unresolved.
+  Reproducer: a SQLite amalgamation preprocessed by Clang,
+  `/Volumes/Optaine/typec-oracle-0.10b/corpus/sqlite3.tc.ref.i`, lines
+  68820 and 192761 of `sqlite3.tc`; the corpus cache has SQLite
+  preprocessed only by GCC.
+- [Medium] (0.10) `Tree_expressions` lists every place of the tree that
+  holds an expression, which a new place in the tree must join, or its
+  expressions show as Clang-only. `Declarations` gives each typed
+  expression by its node but not all of them; an accessor over the
+  typed view (`Expressions.t`) would make the walk unnecessary. Until
+  then, the walk reads some records of the tree by field (`type_name`,
+  `parameter`, `function_definition`) where destructuring them with
+  every field named would make the compiler report a new one.
+- [Low] (0.10) A record's value category is a string checked against
+  the three Clang gives, and the `Retyped` rule compares it as one; a
+  variant would make a misspelt category impossible to write.
+- [Medium] (0.10) Each spelling that `typec` refuses costs a read of
+  the whole unit again: the spellings refused in SQLite make its
+  comparison take 27 seconds, most of them in re-reads. Marking a
+  spelling unresolved before the read when it has an identifier that no
+  file-scope declaration declares would leave one read in most units.
+- [Low] (0.10) An allow-list entry that matches no disagreement is not
+  reported, so a stale or broad pattern goes unnoticed; the comparison
+  could count the disagreements each entry allows.
+- [Medium] (0.10) Nothing runs the comparison over the corpus: a run of
+  the four programs takes a script around `oracle.exe` and
+  `compare.exe`. The corpus runner (0.11) could run both on each unit
+  it preprocesses with Clang and keep the counts in its run record.
+- [Medium] (0.7b) Types that `typec` does not compute, which the
+  comparison counts as unknown on the corpus: calls of builtin
+  functions (`__builtin_expect`, `__builtin_object_size`: 2327 records
+  with the expressions around them), the atomic builtins (39), `va_list`
+  parameters (31) and functions with the attribute `no_sanitize_thread`
+  (12). Reproducers:
+  `/Volumes/Optaine/type-c-corpus-cache/build/darwin-x86_64/lua/clang/src/lvm.tc.ref.i` and `lapi.tc.ref.i`.
 - [Low] The order of the oracle's records is what shows which of the
   nodes that share a range is outermost, and it holds only because
   Clang writes a node's range before its children. A field with each

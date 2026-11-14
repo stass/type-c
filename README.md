@@ -311,12 +311,16 @@ the runner cannot write a file of its own. `dune test` runs
 
 ## Typing oracle
 
-`tools/oracle/` holds the Clang half of the typing oracle of plan
-package 0.10, which records the type Clang gives each expression so
-that the comparison half can check `typec`'s against it.
+`tools/oracle/` holds the typing oracle of plan package 0.10, which
+checks the type and the value category `typec` gives each expression of
+a preprocessed file against Clang's: `oracle.exe` records Clang's,
+`compare.exe` compares `typec`'s with them, and `typec_dump.exe` prints
+`typec`'s.
 
 ```sh
 oracle.exe CC INPUT.i OUTPUT [OPTION...]
+compare.exe [--show N] CC INPUT.i RECORDS ALLOW-LIST [OPTION...]
+typec_dump.exe CC INPUT.i [OPTION...]
 ```
 
 runs `CC -Xclang -ast-dump=json -fsyntax-only -w OPTION... -x cpp-output
@@ -330,9 +334,9 @@ of the members an initialiser list leaves out). OUTPUT is written in
 full or not at all; the exit status is 1 when Clang fails or its output
 is refused.
 
-The oracle reads JSON with yojson, which `typec` does not depend on, so
-it is built in an opam switch of its own, in the opam root of the fuzz
-harness. Setting up, once:
+`oracle.exe` reads JSON with yojson, which `typec` does not depend on,
+so it is built in an opam switch of its own, in the opam root of the
+fuzz harness. Setting up, once:
 
 ```sh
 export OPAMROOT=/Volumes/Optaine/opam
@@ -341,8 +345,8 @@ opam switch create tools --no-switch -y ocaml-base-compiler.5.5.2
 opam install --switch tools -y dune.3.24.2 yojson.3.0.0
 ```
 
-Building it and running its test, with the build outside this
-repository, then running it on a unit of the corpus:
+Building the oracle and running its tests, with the build outside this
+repository, then comparing a unit of the corpus:
 
 ```sh
 export OPAMROOT=/Volumes/Optaine/opam
@@ -351,16 +355,20 @@ dune build --root . --workspace tools/oracle/oracle.workspace \
   --build-dir "$build" @tools/oracle/runtest
 "$build/oracle/tools/oracle/oracle.exe" /usr/bin/clang lvm.tc.ref.i \
   /Volumes/Optaine/typec-oracle/lvm.records -std=gnu11
+"$build/oracle/tools/oracle/compare.exe" /usr/bin/clang lvm.tc.ref.i \
+  /Volumes/Optaine/typec-oracle/lvm.records tools/oracle/allow-list \
+  -std=gnu11
 ```
 
 `tools/oracle/oracle.workspace` makes a dune context named `oracle` of
-the switch, and `tools/oracle/dune` enables the oracle and its test only
-in that context, so a plain `dune build` or `dune test`, in the default
-context, skips them. A condition on the library itself
-(`%{lib-available:yojson}`) needs dune language 3.15, and an executable
-marked `(optional)` is still built by the default alias. `oracle.t`
-runs the Clang that `TYPEC_TEST_CLANG` names, `/usr/bin/clang` when it
-is unset.
+the switch, and `tools/oracle/dune` enables `oracle.exe` and the tests
+only in that context, so a plain `dune build` or `dune test`, in the
+default context, skips them; `compare.exe` and `typec_dump.exe` need only
+`typec`'s libraries and are built in both. A condition on the library
+itself (`%{lib-available:yojson}`) needs dune language 3.15, and an
+executable marked `(optional)` is still built by the default alias.
+`oracle.t` and `compare.t` run the Clang that `TYPEC_TEST_CLANG` names,
+`/usr/bin/clang` when it is unset.
 
 Each record is a line of tab-separated fields:
 
@@ -386,37 +394,102 @@ FIRST  LIMIT  KIND  CAST  CATEGORY  TYPE  DESUGARED
   type with its outermost sugar removed (`desugaredQualType`), when
   that is spelled differently.
 * An absent field is `-`. A backslash or control byte in a field, such
-  as a tab in a file name, is written `\xHH`.
+  as a tab in a file name, is written `\xHH`, and so is a field that is
+  `-` alone.
 
 The records come in the order of the dump, each node before the nodes
 inside it, since Clang writes a node's range before its children. An
 implicit conversion has the source range of its operand, so for the
 nodes that share a range the first record has the type after the
-conversions and the last the type of the expression as written; the
-comparison chooses which to check.
+conversions and the last the type of the expression as written, which
+the comparison checks.
 
-Clang's output is untrusted: it is read one top-level declaration at a
-time, and refused when it nests deeper than `Clang_ast.max_depth`, a
-declaration takes more than `Clang_ast.max_declaration_bytes`, or it
-holds a comment, which yojson would read and Clang never writes. A
-declaration within the bound takes under a gigabyte as a tree; Clang's
-are far smaller, and the oracle reads all of SQLite in about 55
-megabytes.
+The oracle is a test tool that reads the pinned corpus through our own
+Clang, so neither Clang's output nor the records are a trust boundary
+and their size is not bounded. Clang's output is read one top-level
+declaration at a time, which reads all of SQLite in about 55 megabytes;
+a dump that yojson cannot read, such as one nested deep enough to
+overflow the stack, fails that unit with status 1.
 
-Clang spells types as `Type_name.of_ctype` does, apart from these
-cases, which the comparison has to normalise:
+### Comparison
 
-| Clang | `typec` |
-| --- | --- |
-| typedef names, anywhere in the type: `A3 *`, `size`; `DESUGARED` removes only the outermost (`size` gives `unsigned long`, `A3 *` none) | no typedef names |
-| `typeof (n) *`, like a typedef name | the type of `n` |
-| `struct (unnamed struct at FILE:LINE:COL)`, desugared `struct (unnamed at FILE:LINE:COL)`, or `union O::(unnamed at FILE:LINE:COL)` for a member of `struct O`, at the presumed location of the tag's keyword | `struct <anonymous>` |
-| an anonymous tag declared in a typedef, by the typedef's name even when desugared: `point` | `struct <anonymous>` |
-| `_Atomic(int)` | `_Atomic int` |
-| `int[n]`, the length as written | `int[*]` |
-| `__builtin_va_list`, desugared `struct __va_list_tag[1]` on x86-64; a `va_list` parameter `struct __va_list_tag *` | `__builtin_va_list` |
-| `bool` under `-std=c23`, `_Bool` before | `_Bool` |
-| `__attribute__((__vector_size__(4 * sizeof(int)))) int` | an unknown type, `<...>` |
+`compare.exe` takes the target model and the dialect from CC and the
+options as `typec` would for the compilation, reads INPUT.i as `typec`
+does, and joins its expressions with the records by their byte ranges:
+an expression's range runs from the first byte of its first token to
+the last of its last. Of the records that share a range, the last is
+checked, the type of the expression as written, which is `typec`'s
+type before the conversions of its context. The value categories are
+compared first: they agree when both are lvalues or neither is,
+`prvalue` and `xvalue` being values.
+
+Types are compared by meaning, not by spelling. Clang's spellings name
+typedefs and tags, so `typec` reads each one as a type name: it appends
+to INPUT.i a function with a typedef of `__typeof__ (SPELLING)` for each
+spelling of a record it has an expression for, each on a line of its
+own, reads the whole as one unit, and takes the type of each typedef. A
+spelling that typec refuses there drops out, with its message as the
+reason, and the rest are read again. The types of the expressions
+themselves come from INPUT.i read alone. The typedef names and tags a
+spelling sees are those of file scope at the end of the unit: a
+spelling with a tag that no file-scope declaration declares, or with a
+typedef name of a block, is unresolved, and one whose name a block
+declares again reads as the file-scope one, so its record disagrees, or
+agrees where `typec` wrongly gives the file-scope type. Reading a
+spelling in the scope of its expression would settle those too, but
+needs the parser's scope at a point of the unit, which it does not
+keep. The types then agree when `Ctype.same_type` says they are the
+same; when it depends on a type that `typec` does not compute, the
+comparison counts it as unknown.
+
+Clang spells types as `Type_name.of_ctype` does, apart from these cases;
+`tools/oracle/normalisation.ml` holds the rules that the comparison
+applies to them:
+
+| Clang | `typec` | comparison |
+| --- | --- | --- |
+| typedef names, anywhere in the type: `A3 *`, `size`; `DESUGARED` removes only the outermost (`size` gives `unsigned long`, `A3 *` none) | no typedef names | read as a type name |
+| `typeof (n) *`, like a typedef name | the type of `n` | read as a type name |
+| `struct (unnamed struct at FILE:LINE:COL)`, desugared `struct (unnamed at FILE:LINE:COL)`, or `union O::(unnamed at FILE:LINE:COL)` for a member of `struct O`, at the presumed location of the tag's keyword; `struct O::(anonymous at FILE:LINE:COL)` for an anonymous member | `struct <anonymous>` | unresolved: no type name names it |
+| an anonymous tag declared in a typedef, by the typedef's name even when desugared: `point` | `struct <anonymous>` | read as a type name |
+| `_Atomic(int)` | `_Atomic int` | read as a type name |
+| `int[n]`, the length as written | `int[*]` | the length becomes a parameter of the appended function |
+| `__builtin_va_list`, desugared `struct __va_list_tag[1]` on x86-64; a `va_list` parameter `struct __va_list_tag *` | `__builtin_va_list` | the parameter's type becomes `__builtin_va_list` |
+| a function type with `__attribute__((noreturn))` after it | no attribute | the attribute is dropped |
+| `<builtin fn type>`, the type of a builtin function | the builtin | unresolved |
+| a string literal that initialises an array: a `prvalue` of the array's type | an lvalue of the literal's type | unresolved, the category too |
+| a spelling over several lines, such as `typeof (({...}))` of a statement expression, or with a backslash, a brace, a semicolon or unbalanced brackets | any type | unresolved: it is not one type name on one line |
+| `bool` under `-std=c23`, `_Bool` before | `_Bool` | none: `typec` takes C11 and C17 |
+| `__attribute__((__vector_size__(4 * sizeof(int)))) int` | an unknown type, `<...>` | unknown |
 
 Apart from spelling, Clang gives a function designator the category
-`prvalue`.
+`prvalue`, as `typec` does.
+
+Each expression ends up in one of seven counts: those that agree; those
+that disagree, outside the allow-list; those that disagree and the
+allow-list accepts; those with a type `typec` does not compute; those
+whose record is unresolved, once the categories agree; those that only
+Clang records, such as the initialisers at file scope, which `typec`
+does not type (TODO.md), a braced initialiser list, which is not an
+expression in `typec`'s tree, and the bodies that a system header
+defines, which `typec` keeps as spans; and
+those that only `typec` types, such as the length of a constant array,
+which Clang folds into the type. The comparison prints the counts, the
+reasons of the unresolved records, and the first N (20 unless `--show`
+says) of each count but the agreements, each with its presumed location
+and byte range; what comes from INPUT.i or RECORDS is printed escaped as
+in a record. It exits with 1 when a disagreement is outside the
+allow-list, which gate 4 of the plan requires of the corpus, or `typec`
+refuses INPUT.i or fails on it, and with 2 when there is nothing to compare: a wrong
+command line, options that CC gives no target model for, or a file that
+cannot be read.
+
+`tools/oracle/allow-list` holds the reviewed disagreements. Each line is
+a pattern and a reason separated by a tab, a blank line, or a comment
+that starts with `#`. A pattern matches a disagreement as the comparison
+prints it, the whole line from its location on; `*` matches any run of
+bytes and every other byte itself.
+
+`typec_dump.exe` prints a line for each expression `typec` types, in
+the order of their ranges: `FIRST`, `LIMIT`, `lvalue` or `rvalue`, and
+the type as `Type_name.of_ctype` spells it, separated by tabs.
