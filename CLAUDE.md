@@ -1,8 +1,9 @@
 # Type-C working agreement
 
 Type-C is a programming language in the design stage. The current design is
-[type-c-language-design-v0.2.md](type-c-language-design-v0.2.md); read the
-sections relevant to a task before proposing changes to the language.
+[type-c-language-design.md](type-c-language-design.md) and the order of work
+is in [type-c-implementation-plan.md](type-c-implementation-plan.md); read
+the sections relevant to a task before proposing changes to the language.
 
 ## Collaboration
 
