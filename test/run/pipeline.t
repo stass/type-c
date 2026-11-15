@@ -176,7 +176,14 @@ that the reader refuses ends it with 80, the status of a refused program
 (src/driver/exit_status.ml), and the temporary directory is removed on
 every path: a backend that fails to preprocess or to compile, text that
 the reader refuses, and a backend ended by a signal. fails-compile fails
-the compile step with a status of its own, which typec passes on.
+the compile step with a status of its own, which typec passes on. A
+backend that cannot be started, because it is missing, not executable or
+a directory, ends typec with 81, while one that runs and exits with 127,
+the status a shell gives a command it cannot start, ends it with 127.
+says-why fails the link step after a message on stderr, which typec was
+started without and the backend writes to /dev/null instead. Clang
+aborts when it cannot write a warning to its stderr, so warns.c also
+shows that the backend can write there.
 
   $ printf '#error stop\n' > bad-cpp.tc
   $ typec --cc=$clang -c bad-cpp.tc 2>/dev/null
@@ -200,6 +207,25 @@ the compile step with a status of its own, which typec passes on.
   $ typec --cc=./no-such-cc -c x.tc
   typec: cannot run the C compiler "./no-such-cc": No such file or directory
   [81]
+  $ printf '#!/bin/sh\n' > not-executable
+  $ typec --cc=./not-executable -c x.tc
+  typec: cannot run the C compiler "./not-executable": Permission denied
+  [81]
+  $ mkdir a-directory
+  $ typec --cc=./a-directory -c x.tc
+  typec: cannot run the C compiler "./a-directory": Permission denied
+  [81]
+  $ sed 's/exit 42/exit 127/' fails-compile > exits-127 && chmod +x exits-127
+  $ typec --cc=./exits-127 -c x.tc
+  [127]
+  $ printf '#!/bin/sh\ncase " $* " in *" -o linked "*)\n' > says-why
+  $ printf '  echo cannot link >&2; exit 42 ;;\nesac\n' >> says-why
+  $ printf 'exec "%s" "$@"\n' "$clang" >> says-why
+  $ chmod +x says-why
+  $ typec --cc=./says-why x.tc -o linked >&- 2>&-
+  [42]
+  $ printf 'int f(void) { int unused; return 0; }\n' > warns.c
+  $ typec --cc=$clang -Wall -c warns.c 2>&-
   $ ls -A tmp
 
 The front end parses the text it reads and reads its declarations for

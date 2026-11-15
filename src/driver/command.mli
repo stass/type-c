@@ -26,4 +26,8 @@ val run : env_cc:string option -> string list -> 'a
     [Refused] when the reader or the front end refuses the preprocessed
     text; [Environment] when the command line is wrong, the backend
     cannot be started or gives no model, or a file cannot be read or
-    written; [Internal] when an exception escapes, which is a bug. *)
+    written; [Internal] when an exception escapes, which is a bug.
+
+    A standard descriptor that [typec] is started without is [/dev/null]
+    for [typec] and for the backend, as
+    {!Process.hold_standard_descriptors} says. *)

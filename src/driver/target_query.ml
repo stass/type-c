@@ -38,8 +38,9 @@ let read_bounded fd =
    the write end, as its stdout. *)
 let start program arguments =
   let output, input = Unix.pipe ~cloexec:true () in
-  let argv = Array.of_list (program :: arguments) in
-  match Unix.create_process program argv Unix.stdin input Unix.stderr with
+  match
+    Process.start ~stdin:Unix.stdin ~stdout:input (program :: arguments)
+  with
   | pid ->
       Unix.close input;
       (pid, output)

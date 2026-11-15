@@ -194,11 +194,19 @@ let run_command_line ~env_cc arguments =
       with Unix.Unix_error (error, _, _) ->
         fail Exit_status.Environment (cannot_run invocation.program error))
 
+let hold_standard_descriptors () =
+  try Process.hold_standard_descriptors ()
+  with Unix.Unix_error (error, _, _) ->
+    fail Exit_status.Environment
+      ("cannot open /dev/null: " ^ Unix.error_message error)
+
 (* Every failure of typec's own is handled where it happens, so an
    exception that reaches this handler is a bug. The backtrace, recorded
    under OCAMLRUNPARAM=b, comes first so that the message ends stderr. *)
 let run ~env_cc arguments =
-  try run_command_line ~env_cc arguments
+  try
+    hold_standard_descriptors ();
+    run_command_line ~env_cc arguments
   with exn ->
     (try prerr_string (Printexc.get_backtrace ()) with Sys_error _ -> ());
     fail Exit_status.Internal

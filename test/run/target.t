@@ -109,6 +109,14 @@ arguments, which GNU yes would refuse as options.
   $ typec --cc=./no-such-cc --print-target
   typec: cannot run the C compiler "./no-such-cc": No such file or directory
   [81]
+  $ printf '#!/bin/sh\n' > not-executable
+  $ typec --cc=./not-executable --print-target
+  typec: cannot run the C compiler "./not-executable": Permission denied
+  [81]
+  $ mkdir a-directory
+  $ typec --cc=./a-directory --print-target
+  typec: cannot run the C compiler "./a-directory": Permission denied
+  [81]
   $ typec --cc=echo --print-target
   typec: unexpected line "-dM -E -x c /dev/null" among the predefined macros
   [81]
