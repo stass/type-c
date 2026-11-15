@@ -2023,18 +2023,26 @@ let type_c_error_cases =
       "double e_B; void f(void) { type e = | A(typeof(e_B) v) | B; }"
       "error: in.tc:1: the enumerator `e_B` is not available to Type-C \
        text, as a type declaration claims it (design 10.1 rule 6) [TC0004]";
-    case "a type declaration named as C reserves for any use"
+    case "a type declaration named with two underscores"
       "type __tc = | x;"
-      "error: in.tc:1: `__tc` cannot name a type declaration, as C \
-       reserves it for any use (design 10.1 rule 6) [TC0004]";
+      "error: in.tc:1: `__tc` cannot name a type declaration, as it \
+       contains `__` (design 3.1 rules 6 and 7) [TC0029]";
+    case "a type declaration at file scope named with an underscore"
+      "type _t = int;"
+      "error: in.tc:1: `_t` cannot name a type declaration at file scope, \
+       as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]";
+    case "a constructor named with an underscore" "type e = | _a;"
+      "error: in.tc:1: `_a` cannot name a constructor, as it begins with \
+       `_` (design 3.2 rule 2) [TC0025]";
     case "a field named as C reserves for any use, through a universal \
           character name"
       "type e = | A(int _\\u0041);"
       "read error: in.tc:1: character U+0041 cannot be written as a universal \
        character name";
-    case "a derived tag that typec would generate" "type _ = | tc_x;"
-      "error: in.tc:1: the type declaration of `_` claims the tag `__tag`, \
-       which C reserves for any use (design 10.1 rule 6) [TC0004]";
+    case "a type name whose derived tag would begin with two underscores"
+      "type _ = | tc_x;"
+      "error: in.tc:1: `_` cannot name a type declaration, as it ends with \
+       `_` (design 3.1 rules 6 and 7) [TC0029]";
     case "a constructor with empty parentheses" "type e = | A();"
       "error: in.tc:1: expected a field, found `)`";
     case "a field without a name" "type e = | A(int);"

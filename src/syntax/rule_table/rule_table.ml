@@ -36,8 +36,7 @@ let rules =
       meaning =
         "A tag or enumerator that a type declaration claims for the C \
          it lowers to (also design 10.2), declared otherwise in its \
-         scope, named in Type-C text or reserved for any use in C; and \
-         a type declaration of any form whose name C reserves so." };
+         scope or named in Type-C text." };
     { name = "Duplicate_constructor"; code = 5;
       clause = Some "design 3.2 rule 2";
       meaning =
@@ -128,8 +127,8 @@ let rules =
       clause = Some "design 3.2 rule 2";
       meaning =
         "A constructor named for a word of Type-C text (design 2.3) or \
-         a universe name, or a constructor or field whose name C \
-         reserves for any use." };
+         a universe name, or whose name contains [__] or begins with \
+         [_]; and a field whose name C reserves for any use." };
     { name = "Disputed_jump"; code = 26; clause = Some "design 4.4";
       meaning =
         "A [break] or [continue] in Type-C text in a statement \
@@ -145,6 +144,12 @@ let rules =
       meaning =
         "A [break] in Type-C text that leaves a match other than in \
          tail position of its arm." };
+    { name = "Type_name_spelling"; code = 29;
+      clause = Some "design 3.1 rules 6 and 7";
+      meaning =
+        "A type declaration of any form whose name contains [__], ends \
+         with [_] or begins with [_] and an uppercase letter; or, at \
+         file scope, begins with [_]." };
   ]
 
 (* Stable codes are "TC" and four digits: fixed width for tools that read

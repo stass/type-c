@@ -607,41 +607,49 @@ let declare_tag state (name : identifier) =
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
   Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
 
+let begins_with_underscore_and_uppercase spelling =
+  String.length spelling >= 2
+  && spelling.[0] = '_'
+  && 'A' <= spelling.[1]
+  && spelling.[1] <= 'Z'
+
 (* C reserves for any use an identifier that begins with two underscores
    or with one and an uppercase letter (C11 7.1.3p1). *)
 let is_reserved_for_any_use spelling =
-  if String.length spelling < 2 || spelling.[0] <> '_' then false
-  else
-    match spelling.[1] with
-    | '_' | 'A' .. 'Z' -> true
-    | _ -> false
+  String.starts_with ~prefix:"__" spelling
+  || begins_with_underscore_and_uppercase spelling
 
-(* No type declaration has a name that C reserves for any use (design
-   10.1 rule 6), whatever its form, so the rule does not depend on
-   whether the form claims the name as a tag. *)
-let refuse_reserved_name state (name : identifier) =
-  if is_reserved_for_any_use name.node then
+let has_double_underscore spelling =
+  let last = String.length spelling - 1 in
+  let rec from index =
+    if index >= last then false
+    else if spelling.[index] = '_' && spelling.[index + 1] = '_' then true
+    else from (index + 1)
+  in
+  from 0
+
+(* The names that a type declaration derives begin as its name does and
+   join it with one [_] to a suffix that holds no [__] and does not begin
+   with [_], as [refuse_reserved_constructor] checks of a constructor
+   (design 3.1 rules 6 and 7). So this spelling keeps every derived name
+   from being reserved in C or holding the [__] of an instance name,
+   whatever the form of the declaration. [reason] completes the
+   sentence after the name. *)
+let refuse_misspelled_type_name state (name : identifier) =
+  let refuse reason =
     fail_at_token state (token_of name)
-      (Rule.message Claimed_name
-         (Printf.sprintf
-            "%s cannot name a type declaration, as C reserves it for any use"
-            (quoted name.node)))
-
-(* No name that a type declaration claims for the C it lowers to is
-   reserved for any use (design 10.1 rule 6), so no derived name spells
-   a keyword of the backend or a name that typec generates (design 2.3).
-   A variant's enumerators are checked too, though each is reserved only
-   where a tag claimed before it is. [kind] says what [claimed] is: a
-   tag or an enumerator. *)
-let refuse_reserved_claim state ~at ~(declaration : identifier) ~kind
-    claimed =
-  if is_reserved_for_any_use claimed then
-    fail_at_token state at
-      (Rule.message Claimed_name
-         (Printf.sprintf
-            "the type declaration of %s claims the %s %s, which C \
-             reserves for any use"
-            (quoted declaration.node) kind (quoted claimed)))
+      (Rule.message Type_name_spelling
+         (Printf.sprintf "%s cannot name a type declaration%s"
+            (quoted name.node) reason))
+  in
+  let spelling = name.node in
+  if has_double_underscore spelling then refuse ", as it contains `__`"
+  else if String.ends_with ~suffix:"_" spelling then
+    refuse ", as it ends with `_`"
+  else if begins_with_underscore_and_uppercase spelling then
+    refuse ", as it begins with `_` and an uppercase letter"
+  else if Scope.is_file state.scope && String.starts_with ~prefix:"_" spelling
+  then refuse " at file scope, as it begins with `_`"
 
 (* The end of a refused claim's message: what holds the name already. *)
 let already_taken_by ~declared_here =
@@ -652,8 +660,6 @@ let already_taken_by ~declared_here =
    claims in the current scope (design 10.1 rule 6, 10.2): no other
    declaration of the tag may be in that scope, and it hides no claim. *)
 let claim_tag state (name : identifier) ~tag id =
-  refuse_reserved_claim state ~at:(token_of name) ~declaration:name
-    ~kind:"tag" tag;
   let declared_here = Scope.find_tag_in_innermost state.scope tag <> None in
   if declared_here || claims_tag state tag then
     fail_at_token state (token_of name)
@@ -676,8 +682,6 @@ let claim_own_tag state (name : identifier) =
    claims a tag. *)
 let claim_enumerator state ~(variant : identifier) ~at constructor =
   let enumerator = enumerator_name ~variant:variant.node constructor in
-  refuse_reserved_claim state ~at ~declaration:variant ~kind:"enumerator"
-    enumerator;
   let declared_here = Scope.find_in_innermost state.scope enumerator <> None in
   if declared_here || claims_enumerator state enumerator then
     fail_at_token state at
@@ -1531,9 +1535,9 @@ let constructor_names state =
   loop 0 []
 
 (* Unqualified, a constructor named for a word of Type-C or a universe
-   name would read as that word or name; and its name may not be one C
-   reserves for any use, as it names a union member where it has fields
-   (design 3.2 rule 2). *)
+   name would read as that word or name; and its name joins the variant's
+   with one [_] in the enumerator it derives, so that the enumerator holds
+   no [__] (design 3.2 rule 2). *)
 let refuse_reserved_constructor state ~at constructor =
   let refuse why =
     fail_at_token state at
@@ -1545,8 +1549,9 @@ let refuse_reserved_constructor state ~at constructor =
   | Some _, _ -> refuse "it is a word of Type-C"
   | None, Some _ -> refuse "it is a universe name"
   | None, None ->
-      if is_reserved_for_any_use constructor then
-        refuse "C reserves it for any use"
+      if String.starts_with ~prefix:"_" constructor then
+        refuse "it begins with `_`"
+      else if has_double_underscore constructor then refuse "it contains `__`"
 
 (* A field names a member of its constructor's structure, so its name
    may not be one C reserves for any use (design 3.2 rule 2). *)
@@ -2578,7 +2583,7 @@ and type_declaration state : int -> type_declaration =
   let type_keyword = state.grammar.(start).index in
   advance state;
   let name = identifier state "the name of a type declaration" in
-  refuse_reserved_name state name;
+  refuse_misspelled_type_name state name;
   if peek state = Punctuator_token P.Left_paren then
     fail_not_implemented state ~section:"3.5" ~package:"2.1"
       "type parameters are not implemented yet";

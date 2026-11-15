@@ -22,6 +22,9 @@ val file : ('ordinary, 'tag) t
 val enter : ('ordinary, 'tag) t -> ('ordinary, 'tag) t
 (** A block or function prototype scope inside the innermost one. *)
 
+val is_file : ('ordinary, 'tag) t -> bool
+(** Whether the innermost scope is file scope. *)
+
 val reenter :
   ('ordinary, 'tag) t -> inner:('ordinary, 'tag) t -> ('ordinary, 'tag) t
 (** [reenter outer ~inner] is the innermost scope of [inner] inside

@@ -233,35 +233,55 @@ Derived names, field types and constructor names are checked.
   >     'void f(void) { type _Thread = | local; }' 'type _ = | attribute__;' \
   >     'type __x = int;' 'type _Y = distinct int;' \
   >     'type __s = struct t { int a; };' 'type __v;' \
-  >     'type __g(A) = struct { A a; };'; do
+  >     'type __g(A) = struct { A a; };' 'type a__b = int;' 'type a_ = int;' \
+  >     'type vector_ = | i;' 'void f(void) { type _X = int; }' \
+  >     'type _x = int;' 'type _v;' 'type _x_lower = | A | B;' \
+  >     'type _A_ = int;' 'void f(void) { { type _A = int; } }'; do
   >   printf '%s\n' "$decl" > reserved.tc
   >   ./golden.exe reserved.tc
   > done
-  reserved.tc:1: `_Static` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: `__x` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: `_Thread` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: the type declaration of `_` claims the tag `__tag`, which C reserves for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: `__x` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: `_Y` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: `__s` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: `__v` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
-  reserved.tc:1: `__g` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
+  reserved.tc:1: `_Static` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `__x` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_Thread` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `__x` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_Y` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `__s` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `__v` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `__g` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `a__b` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `a_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `vector_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_X` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_x` cannot name a type declaration at file scope, as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_v` cannot name a type declaration at file scope, as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_x_lower` cannot name a type declaration at file scope, as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_A_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: `_A` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
   [1]
   $ for decl in 'type e = | _BitInt(int x);' 'type e = | __A;' \
+  >     'type e = | A__B;' 'type e = | _a;' 'type f = | _a(int y);' \
+  >     'void f(void) { type e = | _a; }' \
   >     'type e = | A(int __x);' 'type e = | A(int _Y);' \
   >     'type e = | A(int a, int *_P);' 'type e = | A(int (*__f)(int));'; do
   >   printf '%s\n' "$decl" > member.tc
   >   ./golden.exe member.tc
   > done
-  member.tc:1: `_BitInt` cannot name a constructor, as C reserves it for any use (design 3.2 rule 2) [TC0025]
-  member.tc:1: `__A` cannot name a constructor, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  member.tc:1: `_BitInt` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
+  member.tc:1: `__A` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
+  member.tc:1: `A__B` cannot name a constructor, as it contains `__` (design 3.2 rule 2) [TC0025]
+  member.tc:1: `_a` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
+  member.tc:1: `_a` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
+  member.tc:1: `_a` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
   member.tc:1: `__x` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
   member.tc:1: `_Y` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
   member.tc:1: `_P` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
   member.tc:1: `__f` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
   [1]
-  $ printf '%s\n' 'type _x_lower = | A | B;' 'type _ = struct { int a; };' \
-  >   'type _y = int;' 'type f = | _a(int _y);' > usable.tc
+  $ printf '%s\n' 'type f = | A(int _y) | B_;' \
+  >   'void g(void) { type _x_lower = | A | B; type _y = int; type _1 = f; }' \
+  >   'void h(void) { { type _x = | a; } }' \
+  >   > usable.tc
   $ ./golden.exe usable.tc > usable.c
   $ printf 'type e = | A(e inner);\n' > recursive.tc
   $ ./golden.exe recursive.tc

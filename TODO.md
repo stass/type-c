@@ -980,17 +980,21 @@ types (design 13.3).
   is Clang's error, not typec's. Type the body, which the item above on
   design 3.2 rule 6 also wants.
 - [Medium] The instance names of design 10.3 claim nothing yet: when
-  they are built, claim them through the claim functions of the parser,
-  the one funnel that refuses a derived name reserved in C or claimed
-  twice. The spelling rules that keep every other derived name from
-  being an instance name or a name C reserves at file scope (design 3.1
-  rules 6 and 7, 3.2 rule 2, 7.1 rule 1) are not checked either:
-  `type vector_ = | i;` is accepted and derives `vector__i`.
-- [Low] A reserved type-declaration name is refused under TC0004,
-  which cites design 10.1 rule 6 on claimed names, though the rule is
-  design 3.1 rule 6 and an alias or a distinct type claims nothing. Give
-  it its own code that cites 3.1 rule 6, beside `Own_name` and
-  `One_definition`, once no change in flight adds codes.
+  generic types and functions are built (Stage 2), claim each instance
+  name through the claim functions of the parser, the one funnel that
+  refuses a derived name claimed twice, and check a generic function's
+  name as a file-scope type name (design 7.1 rule 1).
+- [Medium] That no derived name is reserved in C or holds `__` rests on
+  two spelling checks (`refuse_misspelled_type_name`,
+  `refuse_reserved_constructor`) and on `Tree.enum_tag_name` and
+  `Tree.enumerator_name` taking checked names, which only the parser's
+  order guarantees: the constructors are checked as `constructor_names`
+  reads them ahead, and the tree gets them from a second read. Make it
+  hold by construction: abstract type-name and constructor-name types
+  whose only constructors run the checks, taken by the derivation
+  functions and carried in the tree.
+- [Medium] A type declaration inside a Clang block literal is not
+  lowered: `^{ type x = | a; }` reaches the backend as written.
 - [Medium] Whether a variant completes `type N;` is read from
   `declared.earlier` by Lowering, Declarations and the tree dump, which
   holds only while no other type declaration has an `earlier`; and

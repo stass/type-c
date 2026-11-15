@@ -33,6 +33,10 @@ let innermost = function
 let enter scopes =
   { declared = empty_frame; visible = (innermost scopes).visible } :: scopes
 
+let is_file = function
+  | [ _ ] -> true
+  | _ -> false
+
 (* [inner]'s declarations, hiding those of [outer] of the same name. *)
 let hiding outer inner =
   Names.union (fun _ declaration _hidden -> Some declaration) inner outer
