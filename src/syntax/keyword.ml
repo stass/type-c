@@ -1,11 +1,12 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* The keywords of C11 6.4.1, of the GNU profile (design 13.3) and the two
-   that Type-C reserves (design 2.3): [try] and [defer], which are
-   keywords only in Type-C text, and [_Defer], which is [defer] in all
-   text. [type], [match] and the other positional words are not here: the
-   parser recognises them in their positions. *)
+(* The keywords of C11 6.4.1, of the GNU profile (design 13.3) and
+   [_Defer], the [defer] of Type-C, which is a keyword in all text (design
+   2.3). [try] and [defer] are not here: a declaration of the same
+   identifier hides them, so the parser recognises them where no
+   declaration is in scope. Nor are [type], [match] and the other
+   positional words: the parser recognises them in their positions. *)
 
 type t =
   | Auto
@@ -69,17 +70,14 @@ type t =
   | Builtin_choose_expr
   | Real
   | Imag
-  | Try
   | Defer
 
 (* Where a spelling is a keyword. GCC and Clang reserve the GNU keywords
    spelled without underscores only in the GNU dialects, since in ISO C
    they are the user's identifiers; a spelling with underscores is
    reserved to the implementation (C11 7.1.3), so it is a keyword in
-   every dialect, and [__int128] where the backend has the type. Type-C
-   reserves [try] and [defer] in its own text only, so that C text keeps
-   them as identifiers (design 2.3). *)
-type reserved_in = Every_dialect | Gnu_dialect | With_int128 | Type_c_text
+   every dialect, and [__int128] where the backend has the type. *)
+type reserved_in = Every_dialect | Gnu_dialect | With_int128
 
 (* The one mapping from spellings to keywords but for the optional
    floating types, which Optional_float spells and the keyword set
@@ -169,8 +167,6 @@ let spellings =
     ("__real__", Real, Every_dialect);
     ("__imag", Imag, Every_dialect);
     ("__imag__", Imag, Every_dialect);
-    ("try", Try, Type_c_text);
-    ("defer", Defer, Type_c_text);
     ("_Defer", Defer, Every_dialect);
   ]
 
@@ -182,22 +178,20 @@ let table =
             (spelling, (keyword, reserved_in)))
           spellings))
 
-let is_reserved (keywords : Keyword_set.t) ~type_c_text reserved_in =
+let is_reserved (keywords : Keyword_set.t) reserved_in =
   match (reserved_in, keywords.dialect) with
   | Every_dialect, _ | Gnu_dialect, Gnu -> true
   | Gnu_dialect, Iso -> false
   | With_int128, _ -> keywords.int128
-  | Type_c_text, _ -> type_c_text
 
 let optional_float_of_spelling (keywords : Keyword_set.t) spelling =
   List.find_opt
     (fun optional -> Optional_float.spelling optional = spelling)
     keywords.optional_floats
 
-(* The keyword that an identifier token spells in [keywords], if any, in
-   Type-C text or in C text as [type_c_text] says. *)
-let of_spelling (keywords : Keyword_set.t) ~type_c_text spelling =
-  let reserved = is_reserved keywords ~type_c_text in
+(* The keyword that an identifier token spells in [keywords], if any. *)
+let of_spelling (keywords : Keyword_set.t) spelling =
+  let reserved = is_reserved keywords in
   match Hashtbl.find_opt table spelling with
   | Some (keyword, reserved_in) when reserved reserved_in -> Some keyword
   | Some _ -> None

@@ -1477,18 +1477,18 @@ let type_declaration_cases =
        type) (declaration (type) y))) | (type z claims)";
     case "a label named type" "void f(void) { type: ; }"
       "(define (void) (function f (void)) (block (label type ;)))";
-    case "an obsolete designator may be a reserved word"
+    case "an obsolete designator may be try or defer"
       "struct s { int a; } v = { defer: 1, try: 2 };"
 
       "(declaration ((struct s (member (int) a))) (init v ({} (designate \
        .defer 1) (designate .try 2))))";
-    case "a member after . and -> may be a reserved word"
+    case "a member after . and -> may be try or defer"
       "struct s { int a; } *p; void f(void) { p->try; (*p).defer; \
-       struct s v = { .defer = 1, ._Defer = 2 }; }"
+       struct s v = { .defer = 1, .try = 2 }; }"
       "(declaration ((struct s (member (int) a))) (pointer p)) | (define \
        (void) (function f (void)) (block (expr (-> p try)) (expr (. (paren (* \
        p)) defer)) (declaration ((struct s)) (init v ({} (designate .defer 1) \
-       (designate ._Defer 2))))))";
+       (designate .try 2))))))";
     case "private and distinct name types where no definition begins"
       "typedef int private; typedef int distinct; type a = private *; \
        type b = distinct; type c = distinct *;"
@@ -1514,14 +1514,14 @@ let type_declaration_cases =
       "int result = 1; void f(void) { int str; str = result; }"
       "(declaration (int) (init result 1)) | (define (void) (function f \
        (void)) (block (declaration (int) str) (expr (= str result))))";
+    case "a declaration hides try and defer"
+      "int try(int); void f(int defer) { try(defer); }"
+      "(declaration (int) (function try (int))) | (define (void) (function f \
+       (int defer)) (block (expr (call try defer))))";
   ]
 
 let type_c_error_cases =
   [
-    case "try is a keyword in Type-C text" "int try;"
-      "error: in.tc:1: expected a declarator, found `try`";
-    case "defer is a keyword in Type-C text" "int defer;"
-      "error: in.tc:1: expected a declarator, found `defer`";
     case "a try expression is not implemented"
       "int f(void) { return try f(); }"
       "error: in.tc:1: `try` is not implemented yet (design 5.1; work package \
@@ -1720,13 +1720,17 @@ let type_c_error_cases =
        type declaration claims it (design 10.1 rule 6) [TC0004]";
   ]
 
-(* C text, which keeps the words that Type-C reserves as identifiers. *)
+(* C text, where try and defer are identifiers, declared or not. *)
 let c_text_word_cases =
   [
     case "try and defer are identifiers in C text"
       "int try, defer; int f(void) { return try + defer; }"
       "(declaration (int) try defer) | (define (int) (function f (void)) \
        (block (return (+ try defer))))";
+    case "try and defer need no declaration in C text"
+      "void f(void) { try(); defer(); }"
+      "(define (void) (function f (void)) (block (expr (call try)) (expr \
+       (call defer))))";
     case "_Defer is a keyword in C text as well" "int _Defer;"
       "error: in.i:1: expected a declarator, found `_Defer`";
     case "a generated name in C text" "int __tc_x;"

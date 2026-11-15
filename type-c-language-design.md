@@ -76,7 +76,7 @@ it. Otherwise add the smallest extension that does the job.
 
 Text is *Type-C text* when the file it comes from has the suffix `.tc` or
 `.tci`, and *C text* otherwise. The grammar is the same for both but for
-the two reserved words of 2.3; the other differences are that Type-C
+the words `try` and `defer` of 2.3; the other differences are that Type-C
 text cannot name the C that a type declaration derives (10.1) and cannot
 treat a variant as the structure it lowers to (3.2 rule 6). A `.tc` file
 may include `.h` and `.tci` files in any mix.
@@ -88,13 +88,13 @@ translation unit, so that a shared header can adapt.
 
 Every C11 translation unit in the supported dialect (2.4) is a Type-C
 translation unit with the same meaning, provided its Type-C text does not use
-`try` or `defer` as identifiers, nor a universe name (2.3) as a parameter of
-an old-style definition, which C11 6.9.1p6 makes an error because the name
-is a typedef name there. This holds because each new construct begins
+a universe name (2.3) as a parameter of an old-style definition, which C11
+6.9.1p6 makes an error because the name is a typedef name there. This holds because each new construct begins
 with a token sequence that C rejects:
 
 | Construct | Begins with | Why C rejects it |
 | --- | --- | --- |
+| `try` expression, `defer` statement | `try` or `defer` where no declaration of an ordinary identifier of that spelling is in scope (2.3) | An identifier that no declaration makes visible is not a primary expression (6.5.1p2), and C11 has no implicit function declaration. |
 | Type declaration | `type` *identifier*, starting a declaration | Two identifiers start a C declaration only when the first names a type; 2.3 excludes that case. |
 | `match` statement | `match (` ... `) {`, starting a statement | A call cannot be followed by `{`. |
 | Generic function | `generic (` ... `)`, starting a file-scope declaration | C11 has no implicit `int`, so this starts a C declaration only when `generic` names a type; 2.3 excludes that case. |
@@ -110,12 +110,24 @@ before any Type-C construct is used in it.
 
 *Provisional (P1).*
 
-**Reserved words.** `try` and `defer` are keywords in Type-C text. They
-prefix an expression and a statement, where an identifier could also appear,
-so position cannot tell them apart from a call or a declaration. In C text
-they are ordinary identifiers. `_Defer`, the spelling of ISO/DIS TS 25755,
-is accepted as `defer` in all text. After `.` and `->`, and in a designator,
-any word is a member name, so `p->type` and `s.defer` always work.
+**Hidden words.** In Type-C text, `try` is the operator of 5.1 and
+`defer` the statement of section 6 wherever no declaration of an ordinary
+identifier of the same spelling is in scope. Any declaration of it, a
+function, object, parameter, typedef or enumerator, in Type-C text or in
+C text such as an included header, hides the word from that point under
+C's ordinary scope rules, as it hides a universe name: inside that scope
+`try` and `defer` are the identifier, and the Type-C construct is
+unavailable. The words prefix an expression and a statement, where an
+identifier could also appear, so position cannot tell them apart from a
+call or a declaration; scope can, because C uses an ordinary identifier
+only where a declaration of it is visible. A superset must accept C that
+names something `try` or `defer`, as zlib's `test/infcover.c` names a
+function and QBE's `rega.c` a parameter, so the words are not reserved.
+A tag, a member or a label has a name space of its own, where neither
+construct can stand, so it may be named `try` or `defer` anywhere:
+`s.defer`, `struct try`, `goto try;`. In C text both are ordinary
+identifiers. `_Defer`, the spelling of ISO/DIS TS 25755, is a keyword in
+all text that always means `defer`.
 
 **Positional words.** `type`, `match`, `generic`, `unsafe`, `private` and
 `distinct` are ordinary identifiers that Type-C recognises only in the
@@ -1585,7 +1597,7 @@ a crash.
 
 | Property | Covers | Depends on |
 | --- | --- | --- |
-| Plain C keeps its meaning and ABI | Every translation unit in the supported dialect whose Type-C text does not use `try` or `defer` as identifiers | Emission by token span (13.4) |
+| Plain C keeps its meaning and ABI | Every translation unit in the supported dialect, but for the one exception of 2.2 | Emission by token span (13.4) |
 | A variant value has a valid tag and the payload of that tag | Values made by constructors, the zero value, and copies of either | No code writing the bytes of the object behind its type (C code, casts, unions, `memcpy`); no read of an uninitialised automatic object |
 | A `match` handles every constructor | Every `match` | Nothing; an invalid tag traps |
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
@@ -1608,7 +1620,7 @@ numbers refer to the implementation plan.
 
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
-| P1 | `type`, `match` and the other new words are positional; only `try` and `defer` are reserved (2.3) | Stage 1 pilot: identifiers renamed and header macros broken by the port | As specified |
+| P1 | `type`, `match` and the other new words are positional; `try` and `defer` are hidden by a declaration (2.3) | Stage 1 pilot: identifiers renamed and header macros broken by the port | As specified |
 | P2 | An unqualified constructor wins over an ordinary identifier under a variant target type (3.3) | Stage 1 pilot: any resolution that surprised its author | As specified |
 | P3 | The tag is a C enumeration (10.1) | Stage 1: size of pilot data against hand-written C; debugger use | Enumeration |
 | P4 | The `default` warning is off; there is no single-pattern test (4.2, 12) | Stage 1 pilot: share of matches with one `case` and a `default` | No new syntax; warning stays off |

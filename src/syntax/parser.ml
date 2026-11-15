@@ -105,8 +105,7 @@ let lexeme_of keywords reader (token : Token.t) =
   match token.kind with
   | Token.Identifier -> (
       let spelling = Reader.spelling reader token in
-      let type_c_text = File.is_type_c_text token.owner in
-      match Keyword.of_spelling keywords ~type_c_text spelling with
+      match Keyword.of_spelling keywords spelling with
       | Some keyword -> Some (Keyword_token keyword)
       | None -> Some (Identifier_token spelling))
   | Token.Number -> Some Number_token
@@ -380,6 +379,23 @@ let refuse_universe_name state name =
         (quoted name ^ " is a universe name that typec does not implement yet")
   | None -> ()
 
+(* At [defer] or [_Defer], which the cursor has not passed. *)
+let fail_defer state =
+  fail_not_implemented state ~section:"6" ~package:"2.5"
+    (quoted (next_spelling state) ^ " is not implemented yet")
+
+(* In Type-C text, [try] and [defer] where no declaration of the same
+   identifier hides them, as one hides a universe name (design 2.3), are
+   the operator and the statement of Type-C. *)
+let refuse_type_c_word state name =
+  if is_type_c_text_at state state.grammar.(state.position).index then
+    match name with
+    | "try" ->
+        fail_not_implemented state ~section:"5.1" ~package:"2.4"
+          "`try` is not implemented yet"
+    | "defer" -> fail_defer state
+    | _ -> ()
+
 (* A variant declares its enumerators for C clients (design 10.1 rule
    6), so Type-C text cannot name them. *)
 let refuse_derived_enumerator state name =
@@ -400,6 +416,7 @@ let resolve state name =
       Resolved declaration
   | Some { declaration; _ } -> Resolved declaration
   | None ->
+      refuse_type_c_word state name;
       refuse_universe_name state name;
       Undeclared
 
@@ -580,8 +597,7 @@ let keyword_specifier_word state offset keyword =
   | Break | Case | Continue | Default | Do | Else | For | Goto | If | Return
   | Sizeof | Switch | While | Alignof | Generic | Imaginary | Static_assert
   | Asm | Extension | Label | Builtin_va_arg | Builtin_offsetof
-  | Builtin_types_compatible_p | Builtin_choose_expr | Real | Imag | Try
-  | Defer ->
+  | Builtin_types_compatible_p | Builtin_choose_expr | Real | Imag | Defer ->
       None
 
 (* A type name followed by [.] begins a postfix expression in Type-C
@@ -746,20 +762,6 @@ let identifier state expected =
   | Keyword_token _ | Punctuator_token _ | Number_token | Character_token _
   | String_token _ | End_of_input ->
       fail_expected state expected
-
-(* After [.] and [->], in a designator and in [offsetof], a word that
-   Type-C reserves is a member name as well (design 2.3), so that Type-C
-   text can reach a member that C text names [defer]. *)
-let member_name state expected =
-  match peek state with
-  | Keyword_token (Keyword.Try | Keyword.Defer) ->
-      let start = state.position in
-      let name = next_spelling state in
-      advance state;
-      finish state start name
-  | Keyword_token _ | Identifier_token _ | Punctuator_token _ | Number_token
-  | Character_token _ | String_token _ | End_of_input ->
-      identifier state expected
 
 let optional_identifier state =
   match peek state with
@@ -1788,11 +1790,10 @@ and designated_initialiser state =
 
 (* GNU's obsolete [member:], which means [.member =] (GCC manual,
    "Designated Initializers"). The member's name may also be a typedef
-   name, as members have a name space of their own, or a word that Type-C
-   reserves ([member_name]). *)
+   name, as members have a name space of their own. *)
 and begins_obsolete_designator state =
   match peek state with
-  | Identifier_token _ | Keyword_token (Keyword.Try | Keyword.Defer) ->
+  | Identifier_token _ ->
       peek_at state 1 = Punctuator_token P.Colon
   | Keyword_token _ | Punctuator_token _ | Number_token | Character_token _
   | String_token _ | End_of_input ->
@@ -1800,7 +1801,7 @@ and begins_obsolete_designator state =
 
 and obsolete_designator state =
   let start = state.position in
-  let member = member_name state "a member name" in
+  let member = identifier state "a member name" in
   expect state P.Colon "`:` after a member name";
   finish state start (Member_designator member)
 
@@ -1817,7 +1818,7 @@ and designators state =
 and designator state =
   let start = state.position in
   if accept state P.Dot then
-    let member = member_name state "a member name after `.`" in
+    let member = identifier state "a member name after `.`" in
     finish state start (Member_designator member)
   else begin
     expect state P.Left_bracket "`[` or `.`";
@@ -1996,11 +1997,11 @@ and postfix_operators state start operand =
       continue_with (Call { callee = operand; arguments })
   | Punctuator_token P.Dot ->
       advance state;
-      let member = member_name state "a member name after `.`" in
+      let member = identifier state "a member name after `.`" in
       continue_with (Member { operand; member })
   | Punctuator_token P.Arrow ->
       advance state;
-      let member = member_name state "a member name after `->`" in
+      let member = identifier state "a member name after `->`" in
       continue_with (Pointer_member { operand; member })
   | Punctuator_token P.Plus_plus ->
       advance state;
@@ -2103,12 +2104,7 @@ and primary_expression state =
   | Punctuator_token P.Caret ->
       advance state;
       block_literal state start
-  | Keyword_token Keyword.Try ->
-      fail_not_implemented state ~section:"5.1" ~package:"2.4"
-        "`try` is not implemented yet"
-  | Keyword_token Keyword.Defer ->
-      fail_not_implemented state ~section:"6" ~package:"2.5"
-        (quoted (next_spelling state) ^ " is not implemented yet")
+  | Keyword_token Keyword.Defer -> fail_defer state
   | _ -> fail_expected state "an expression"
 
 (* After the [__builtin_va_arg]. *)
@@ -2125,7 +2121,7 @@ and offsetof state start =
   expect state P.Left_paren "`(` after `__builtin_offsetof`";
   let type_name = type_name state in
   expect state P.Comma "`,` after the type name of `__builtin_offsetof`";
-  let member = member_name state "a member name" in
+  let member = identifier state "a member name" in
   let designators = designators state in
   expect state P.Right_paren "`)` after the member of `__builtin_offsetof`";
   finish state start (Offsetof { type_name; member; designators })

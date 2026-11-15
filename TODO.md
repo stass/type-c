@@ -145,6 +145,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Parser
 
+- [Low] Where a declaration hides `try` or `defer` (design 2.3), Type-C
+  text that writes the construct gets a plain syntax error at the token
+  after the word (`expected ; after return, found f`), which does not
+  say that a declaration hides the word or where it is. A hidden
+  universe name gets no such note either. Add a note naming the
+  declaration if the pilot shows the error confusing. Until work
+  packages 2.4 and 2.5, a bare unhidden word in operand position
+  (`x + defer`, `sizeof try`) says the construct is not implemented
+  rather than that it is a syntax error.
 - [Low] A type name as the controlling operand of `_Generic` (C2y,
   `_Generic(const int, const int: 1, int: 2)`), which GCC 16 and Clang
   accept in gnu11, is a syntax error. Read it, with its type unconverted,
@@ -879,6 +888,15 @@ types (design 13.3).
   __SIZEOF_FLOAT128__) instead.
 
 ## Design questions without a gate yet
+
+- [Medium] A variant may name a constructor `try` or `defer` (design
+  3.2), and `T.try` and `case try:` reach it, but an unqualified `try`
+  under a variant target type (3.3) is read as the operator of 2.3, as
+  no ordinary declaration hides it; a universe name as a constructor
+  (`| str`) has the same conflict. Once 2.4 parses `try (x)`, `T t =
+  try(1);` is ambiguous. Decide which wins: refuse such a constructor
+  name with a rule code, or state in 3.3 that the word wins and the
+  qualified form is required.
 
 - [Medium] When package 3.4 makes universe names typedef names to the
   parser, it implements design 2.3's exception to C11 6.7.6.3p11 (a
