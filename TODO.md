@@ -758,19 +758,13 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   through a callback, nor a distinct type as a variant field.
 - [Low] `tools/oracle/oracle.t` has its own default of
   `TYPEC_TEST_CLANG` instead of sourcing `test/run/backends.sh`.
-- [High] The arm64 hosts do not run reliably on the x86-64 colima VM:
-  its qemu-user (v7.0.0, `/usr/bin/qemu-aarch64` in the VM) kills about
-  1 in 100 GCC compilations with a segmentation fault of `cc1`,
-  whatever the load. `debian-arm64` therefore does not build (opam
-  compiles OCaml 5.4.1 with GCC; the build fails with `gcc: internal
-  compiler error: Segmentation fault`), and `headers.t` fails on
-  `alpine-arm64` in a different place each run (`present` and `unit`
-  lose a header when `gcc` crashes). Reproducer: in
-  `typec-host-alpine-arm64`, run `gcc -std=gnu11 -fsyntax-only -x c -`
-  on `#include <H>` for each header of `headers.t` a few hundred
-  times. Needs a newer qemu-user in the VM (not installed:
-  `tonistiigi/binfmt --install arm64` keeps the VM's handler) or a
-  native arm64 machine.
+- [Medium] The arm64 hosts run under qemu-user 10.2.3 (registered with
+  `tonistiigi/binfmt --install arm64` after uninstalling the VM's 7.0.0
+  handler; a `colima restart` may bring 7.0.0 back, which kills about 1
+  in 100 GCC compilations). Both hosts build and run the suite; their
+  remaining failures are the items of this section. A native arm64
+  machine would settle the provisional causes and remove the emulator
+  from the results.
 - [Medium] `Target.architecture` is the first of a list of predefined
   macros that the backend defines, while Clang decides where it has
   `__builtin_setjmp` by the TargetInfo of the triple; the two agree on
