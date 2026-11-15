@@ -359,6 +359,16 @@ let gnu () =
   types "({ ; })" "void";
   types "({ a; })" "int *";
   types "({ x; int y; })" "void";
+  types "({ l: x + 1; })" "int";
+  types "({ l: m: a; })" "int *";
+  types "({ l: x; }) + 1" "int";
+  accepts "if (({ l: x; })) ;";
+  types "({ l: x; ; })" "void";
+  types "({ x; l: ; })" "void";
+  types "({ l: { x; } })" "void";
+  (* Clang gives void past a case label, which only a jump into the
+     statement expression reaches, and both backends refuse that. *)
+  rejects "switch (x) case 0: ({ case 1: x; }) + 1" "6.5.6p2";
   types "l: ; &&l" "void *";
   types "__builtin_types_compatible_p(int, long)" "int";
   types "__builtin_offsetof(struct s, m)" "unsigned long";

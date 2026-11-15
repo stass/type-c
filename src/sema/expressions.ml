@@ -2586,15 +2586,27 @@ and assignment context span (op : Tree.assignment_operator) left right =
     lvalue = false;
     bit_field = value_of left.bit_field }
 
-(* GNU: the value of the last expression statement of the block, or
-   void, which is no bit-field in Clang. *)
+(* GNU: the value of the last statement of the block, or void. *)
 and statement_expression context (block : Tree.block) =
   block_items context block;
   match List.rev block.node.items with
-  | Block_statement { node = Expression_statement last; _ } :: _ ->
-      Ctype.lvalue_conversion (whole_value context last).expression_type
-  | (Block_statement _ | Block_declaration _ | Block_type_declaration _) :: _
-  | [] ->
+  | Block_statement last :: _ -> statement_value context last
+  | (Block_declaration _ | Block_type_declaration _) :: _ | [] -> Ctype.void
+
+(* The value of an expression statement past the named labels before
+   it, as Clang reads it; void for any other statement. The value is no
+   bit-field in Clang. *)
+and statement_value context (statement : Tree.statement) =
+  match statement.node with
+  | Expression_statement value ->
+      Ctype.lvalue_conversion (whole_value context value).expression_type
+  | Labeled { label = { node = Named_label _; _ }; statement = labeled } ->
+      statement_value context labeled
+  | Labeled
+      { label = { node = Case_label _ | Case_range _ | Default_label; _ }; _ }
+  | Compound _ | Null_statement | Attribute_statement _ | If _ | Switch _
+  | While _ | Do _ | For _ | Goto _ | Computed_goto _ | Continue _ | Break _
+  | Return _ | Asm _ | Match _ ->
       Ctype.void
 
 (* 7.19p3: each step of the member path of [offsetof] reaches into the

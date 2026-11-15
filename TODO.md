@@ -226,11 +226,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   `__label__` declarations around it, for design 4.3 rule 3 and C's
   rules on duplicate and undefined labels (6.8.1p3, 6.8.6.1p1); it goes
   when the tree resolves labels, where those become failures to resolve.
-- [Medium] A statement expression whose last statement is a labelled
-  expression statement (`({ a: x + 1; })`) is typed `void`, where GCC
-  and Clang give it the type of the expression, so typec refuses
-  `if (({ a: x + 1; }))` and `({ a: x + 1; }) + 1`, which both accept.
-  `Expressions.statement_expression` should look through the label.
 - [Medium] GNU forms that common code uses and the profile leaves out,
   each an error that names its first token: attributes before a
   statement that no named label precedes (`__attribute__((musttail))

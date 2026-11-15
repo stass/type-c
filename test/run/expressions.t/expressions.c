@@ -120,6 +120,9 @@ void operators(int x, const int cx, char c, signed char sc, unsigned char uc,
 	__builtin_types_compatible_p(struct s, const struct s);
 	({ 1; }); ({ x; d; }); ({ a; }); ({ int y = 2; y + 1; }); ({ ; });
 	({ s; });
+	({ __label__ la; la: x + 1; }); ({ __label__ lb; lb: x; }) + 1;
+	({ __label__ lc, ld; lc: ld: (char)x; });
+	if (({ __label__ le; le: x; })) ;
 	__builtin_types_compatible_p(int, long);
 	__builtin_offsetof(struct s, m);
 	r + 1;
