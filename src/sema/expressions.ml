@@ -65,13 +65,15 @@ type matched_arm = {
   bindings : binding list;
 }
 
-type matching = {
+type 'arms matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
   variant : string;
   access : access;
-  arms : matched_arm list;
+  arms : 'arms;
 }
+
+type matching = matched_arm list matching_of
 
 type answer =
   | Selected of {
@@ -81,6 +83,104 @@ type answer =
     }
   | Compatible of bool
 type answered = { construct : Tree.span; answer : answer }
+
+let max_quoted = 64
+
+let quote text =
+  if String.length text <= max_quoted then "'" ^ text ^ "'"
+  else "'" ^ String.sub text 0 max_quoted ^ "...'"
+
+(* The sites that lowering replaces with the names that their variant
+   derives (design 3.3, 4.1 rule 1). Those names denote the variant only
+   within the scope of its declaration (10.1 rule 6), and [record] is the
+   one way to hand a site to lowering, so none lies outside the scope. *)
+module Sites : sig
+  type t
+  (* A match comes with the typing of its arms, which [record] runs only
+     once the match is in scope, so that the scope is the first thing
+     that a match is checked for. *)
+  type site =
+    | Construction of construction
+    | Matching of (unit -> matched_arm list) matching_of
+
+  val create : unit -> t
+
+  val record :
+    t ->
+    Ctype.tags ->
+    fail:(Tree.span -> string -> unit) ->
+    variant_type:Ctype.t ->
+    site ->
+    unit
+  (** Records [site], of a variant of [variant_type], or calls [fail]
+      where the site lies outside the scope of its declaration. *)
+
+  val construction : t -> Tree.span -> construction option
+  val brace : t -> construction -> unit
+  (** Lowers a recorded construction to its braced list alone (design
+      13.5). *)
+
+  val constructions : t -> construction list
+  val matchings : t -> matching list
+end = struct
+  type t = {
+    constructions : (Tree.span, construction) Hashtbl.t;
+    matchings : (Tree.span, matching) Hashtbl.t;
+  }
+
+  type site =
+    | Construction of construction
+    | Matching of (unit -> matched_arm list) matching_of
+
+  let create () =
+    { constructions = Hashtbl.create 64; matchings = Hashtbl.create 16 }
+
+  let within_scope tags variant_type (use : Tree.span) =
+    match Ctype.variant_scope tags variant_type with
+    | Some scope -> scope.first <= use.first && use.last <= scope.last
+    | None -> true
+
+  (* The diagnostic for a site that [what] names, which [rule] codes. *)
+  let outside_scope rule ~what ~variant =
+    Rule.message rule
+      (Printf.sprintf
+         "%s is outside the scope of the declaration of the variant %s, \
+          where the names that it lowers to do not denote the variant"
+         what (quote variant))
+
+  let record sites tags ~fail ~variant_type = function
+    | Construction construction ->
+        if within_scope tags variant_type construction.span then
+          Hashtbl.replace sites.constructions construction.span construction
+        else
+          fail construction.span
+            (outside_scope Variant_scope ~what:"the constructor expression"
+               ~variant:construction.variant)
+    | Matching matching ->
+        if within_scope tags variant_type matching.statement then
+          Hashtbl.replace sites.matchings matching.statement
+            { matching with arms = matching.arms () }
+        else
+          fail matching.scrutinee
+            (outside_scope Match_scrutinee ~what:"the match"
+               ~variant:matching.variant)
+
+  let construction sites span = Hashtbl.find_opt sites.constructions span
+
+  let brace sites construction =
+    Hashtbl.replace sites.constructions construction.span
+      { construction with braced = true }
+
+  let constructions sites =
+    Hashtbl.to_seq_values sites.constructions
+    |> List.of_seq
+    |> List.sort (fun a b -> compare a.span.first b.span.first)
+
+  let matchings sites =
+    Hashtbl.to_seq_values sites.matchings
+    |> List.of_seq
+    |> List.sort (fun a b -> compare a.statement.first b.statement.first)
+end
 
 (* The target type of an expression's position, which selects an
    unqualified constructor (design 3.3), or none. *)
@@ -99,8 +199,7 @@ type t = {
   selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
   answered : (Tree.span, answered) Hashtbl.t;
-  constructions : (Tree.span, construction) Hashtbl.t;
-  matchings : (Tree.span, matching) Hashtbl.t;
+  sites : Sites.t;
   mutable depth : int;
   mutable enclosing : enclosing;
 }
@@ -115,8 +214,7 @@ let create () =
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
-    constructions = Hashtbl.create 64;
-    matchings = Hashtbl.create 16;
+    sites = Sites.create ();
     depth = 0;
     enclosing = outside_functions }
 
@@ -129,15 +227,8 @@ let constant view (expression : Tree.expression) =
 let selection view (expression : Tree.expression) =
   Hashtbl.find_opt view.selections expression.span
 
-let constructions view =
-  Hashtbl.to_seq_values view.constructions
-  |> List.of_seq
-  |> List.sort (fun a b -> compare a.span.first b.span.first)
-
-let matchings view =
-  Hashtbl.to_seq_values view.matchings
-  |> List.of_seq
-  |> List.sort (fun a b -> compare a.statement.first b.statement.first)
+let constructions view = Sites.constructions view.sites
+let matchings view = Sites.matchings view.sites
 
 let answered view =
   Hashtbl.to_seq_values view.answered
@@ -157,7 +248,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  type_declaration : scope_end:int -> Tree.type_declaration -> unit;
+  type_declaration : Tree.type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
 }
 
@@ -165,12 +256,6 @@ type context = {
    chains that the parser reads in loops (operators, else-if), whose
    trees are as deep as they are long. *)
 let max_depth = 10_000
-
-let max_quoted = 64
-
-let quote text =
-  if String.length text <= max_quoted then "'" ^ text ^ "'"
-  else "'" ^ String.sub text 0 max_quoted ^ "...'"
 
 let needing need (unknown : Unknown.t) =
   let why =
@@ -333,24 +418,10 @@ let refuse_private_creation context (span : Tree.span) ~described
               described (quote declaring.name)))
   | Private _ | Public -> ()
 
-(* Design 3.3, 4.1 rule 1: a construction or a match at [use] lowers to
-   the names that its variant [t] derives, which denote the variant only
-   within the scope of its declaration (10.1 rule 6). [what] names the
-   construct in the diagnostic, which [at] locates and [rule] codes. *)
-let refuse_outside_scope context rule ~(use : Tree.span) ~at ~what
-    ~described (t : Ctype.t) =
-  let within (scope : Tree.span) =
-    scope.first <= use.first && use.last <= scope.last
-  in
-  match Ctype.variant_scope context.tags t with
-  | Some scope when not (within scope) ->
-      context.fail at
-        (Rule.message rule
-           (Printf.sprintf
-              "%s is outside the scope of the declaration of %s, where the \
-               names that it lowers to do not denote the variant"
-              what described))
-  | Some _ | None -> ()
+(* Hands [site], of a variant of [variant_type], to lowering. *)
+let record_site context ~variant_type site =
+  Sites.record context.typed.sites context.tags ~fail:context.fail
+    ~variant_type site
 
 (* The table of design 3.4: the operations that read a value of a
    distinct type in Type-C text. The other uses that it allows take the
@@ -1744,7 +1815,7 @@ let classify_node context (whole : Tree.expression) typed =
 (* The class of an expression that has been typed. A constructor makes a
    structure, constant where its arguments are. *)
 let classify context (whole : Tree.expression) typed =
-  match Hashtbl.find_opt context.typed.constructions whole.span with
+  match Sites.construction context.typed.sites whole.span with
   | Some { arguments; _ } ->
       let kinds = List.map (operand_kind context) arguments in
       Not_integer { kind = refused_or_backend kinds; first = whole.span }
@@ -2127,9 +2198,15 @@ and expression_node context position (whole : Tree.expression) =
    its arguments, one for each field, each converted to the type of its
    field as if by assignment. *)
 and construct context (whole : Tree.expression) named arguments =
+  record_site context ~variant_type:named.variant_type
+    (Construction
+       { span = whole.span;
+         variant = named.variant_name;
+         constructor = named.chosen.constructor_name;
+         callee = called_name whole;
+         arguments = Option.value arguments ~default:[];
+         braced = false });
   let described = "the variant " ^ quote named.variant_name in
-  refuse_outside_scope context Variant_scope ~use:whole.span ~at:whole.span
-    ~what:"the constructor expression" ~described named.variant_type;
   refuse_private_creation context whole.span named.variant_type ~described;
   let name = quote named.chosen.constructor_name in
   let fields = named.chosen.fields in
@@ -2152,13 +2229,6 @@ and construct context (whole : Tree.expression) named arguments =
               fields"
              name (List.length fields));
       List.iter2 (constructor_argument context named) fields arguments);
-  Hashtbl.replace context.typed.constructions whole.span
-    { span = whole.span;
-      variant = named.variant_name;
-      constructor = named.chosen.constructor_name;
-      callee = called_name whole;
-      arguments = Option.value arguments ~default:[];
-      braced = false };
   value named.variant_type
 
 (* [(T.C)(args)]: constructor_expression takes only [T.C(args)] as a
@@ -2513,16 +2583,14 @@ and integer_constant context candidate =
    takes no braced list in Clang, so it keeps the compound literal. *)
 and initialises_whole context t (initialising : Tree.expression) =
   let span = initialising.span in
-  match Hashtbl.find_opt context.typed.constructions span with
+  match Sites.construction context.typed.sites span with
   | Some construction ->
       let variant_type = (operand_typed context initialising).expression_type in
       if
         Ctype.compatible context.target context.tags
           (Ctype.without_top_qualifiers t) variant_type
         = Answer true
-      then
-        Hashtbl.replace context.typed.constructions span
-          { construction with braced = true }
+      then Sites.brace context.typed.sites construction
   | None -> ()
 
 and initialiser context ~constant t initialiser =
@@ -2559,14 +2627,13 @@ and initialiser context ~constant t initialiser =
   in
   Initialiser.initialise typing t initialiser
 
-and block_items context (block : Tree.block) =
-  items context ~scope_end:block.span.last block.node.items
+and block_items context (block : Tree.block) = items context block.node.items
 
-and items context ~scope_end =
+and items context =
   List.iter (function
     | Tree.Block_declaration declaration -> context.declaration declaration
     | Block_type_declaration declaration ->
-        context.type_declaration ~scope_end declaration
+        context.type_declaration declaration
     | Block_statement statement -> typed_statement context statement)
 
 and typed_statement context (statement : Tree.statement) =
@@ -2708,9 +2775,18 @@ and match_statement context (statement : Tree.statement) scrutinee arms =
   let typed = expression context scrutinee in
   let t = typed.expression_type in
   let variant, constructors = scrutinee_variant context scrutinee.span t in
-  refuse_outside_scope context Match_scrutinee ~use:statement.span
-    ~at:scrutinee.span
-    ~what:"the match" ~described:("the variant " ^ quote variant) t;
+  record_site context ~variant_type:t
+    (Matching
+       { statement = statement.span; scrutinee = scrutinee.span; variant;
+         access = access_of context scrutinee t;
+         arms =
+           (fun () ->
+             typed_arms context ~statement variant constructors arms) })
+
+(* The arms of a match of [variant]: their labels, the coverage of the
+   constructors and the items of each arm. *)
+and typed_arms context ~(statement : Tree.statement) variant constructors
+    arms =
   let labelled =
     List.map (labelled_constructors context variant constructors) arms
   in
@@ -2719,18 +2795,13 @@ and match_statement context (statement : Tree.statement) scrutinee arms =
       (List.concat labelled)
   in
   let enclosing = { context.typed.enclosing with case_labels = Match_arm } in
-  let arms =
-    List.map2
-      (fun (arm : Tree.arm) labels ->
-        let matched = matched_arm context arm labels defaulted in
-        within context enclosing (fun () -> arm_items context arm);
-        refuse_open_arm context arm;
-        matched)
-      arms labelled
-  in
-  Hashtbl.replace context.typed.matchings statement.span
-    { statement = statement.span; scrutinee = scrutinee.span; variant;
-      access = access_of context scrutinee t; arms }
+  List.map2
+    (fun (arm : Tree.arm) labels ->
+      let matched = matched_arm context arm labels defaulted in
+      within context enclosing (fun () -> arm_items context arm);
+      refuse_open_arm context arm;
+      matched)
+    arms labelled
 
 (* Design 4.4: a callee that designates a function declared [_Noreturn]
    or with the GNU [noreturn], or a builtin that is; an undeclared name
@@ -2947,8 +3018,7 @@ and non_modifiable t =
   | Ok qualified -> qualified
   | Error _ -> invalid_arg "Expressions.non_modifiable: no value type"
 
-and arm_items context (arm : Tree.arm) =
-  items context ~scope_end:arm.span.last arm.node.items
+and arm_items context (arm : Tree.arm) = items context arm.node.items
 
 (* Design 13.5: the lowered match reaches the scrutinee in place, through
    a pointer to it, unless it is volatile or atomic or may not be

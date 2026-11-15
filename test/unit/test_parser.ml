@@ -43,6 +43,61 @@ let resolutions ?(file = "in.i") text =
       | Ok unit ->
           Tree_dump.resolutions (Tree_dump.translation_unit reader unit))
 
+(* The scope end that the parser gives each type declaration of a text,
+   as [N:i:t] with [i] the index of that token and [t] its spelling, in
+   order, or the error.
+   It walks file scope, function bodies, blocks and match arms. *)
+let scope_ends ?(file = type_c_file) text =
+  let rec item reader = function
+    | Tree.Block_type_declaration declaration -> declared reader declaration
+    | Block_statement statement -> in_statement reader statement
+    | Block_declaration _ -> []
+  and in_statement reader (statement : Tree.statement) =
+    match statement.node with
+    | Compound block -> List.concat_map (item reader) block.node.items
+    | Match { arms; _ } ->
+        List.concat_map
+          (fun (arm : Tree.arm) -> List.concat_map (item reader) arm.node.items)
+          arms
+    | _ -> []
+  and declared reader (declaration : Tree.type_declaration) =
+    let { Tree.name; scope_end; _ } = declaration.node in
+    let token = reader.Reader.tokens.(scope_end) in
+    [ Printf.sprintf "%s:%d:%s" name.node scope_end
+        (Reader.spelling reader token) ]
+  in
+  let external_declaration reader = function
+    | Tree.Type_declaration declaration -> declared reader declaration
+    | Function_definition { node = { body = Parsed block; _ }; _ } ->
+        List.concat_map (item reader) block.node.items
+    | _ -> []
+  in
+  match Reader.read ~name:file text with
+  | Error error -> "read error: " ^ Reader.error_message error
+  | Ok reader -> (
+      match Parser.parse ~keywords:gnu_keywords reader with
+      | Error error -> "error: " ^ Parser.error_message error
+      | Ok unit ->
+          List.concat_map (external_declaration reader) unit
+          |> String.concat " ")
+
+(* A type declaration is in scope to the end of its block, its arm or
+   the text, whose last token may be a pragma token (design 10.1 rule
+   6). *)
+let scope_end_cases =
+  [
+    case "at file scope, to the last token" "type a = | A; int x;" "a:8:;";
+    case "at file scope, to a pragma token that ends the text"
+      "type a = | A;\n#pragma weak x\n" "a:6:#pragma weak x";
+    case "in a block, to its brace"
+      "void f(void) { type b = | B; { type c = | C; int y; } int z; }"
+      "b:26:} c:22:}";
+    case "in an arm, to its last token"
+      "type d = | D; void f(d v) { match (v) { case D: type e = | E; \
+       (void)0; } }"
+      "d:33:} e:31:;";
+  ]
+
 let declarator_cases =
   [
     case "a plain declaration" "int x;" "(declaration (int) x)";
@@ -1875,6 +1930,7 @@ let failures () =
     @ failed_with (resolutions ~file:type_c_file) type_c_resolution_cases
     @ failed_cases ~file:type_c_file ~spans:false match_cases
     @ failed_with (resolutions ~file:type_c_file) match_resolution_cases
+    @ failed_with scope_ends scope_end_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())
 

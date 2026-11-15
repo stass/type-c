@@ -69,7 +69,7 @@ let add_external names = function
     ->
       List.iter (add_specifier names) specifiers;
       add_declarator names declarator declared
-  | Type_declaration { node = { name; declared; definition }; _ } ->
+  | Type_declaration { node = { name; declared; definition; _ }; _ } ->
       Hashtbl.replace names.ordinary name.node (In_tree declared.id);
       add_derived_enumerators names name definition
   | External_declaration { node = Static_assert _; _ }

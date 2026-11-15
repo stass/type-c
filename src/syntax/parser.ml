@@ -134,11 +134,11 @@ let peek state = peek_at state 0
    ends at the last token read, so [finish] is the only way to make one
    and every node holds at least one token. *)
 
+(* The index in [Reader.t.tokens] of the last grammar token read. *)
+let last_read state = state.grammar.(state.position - 1).index
+
 let span_from state start =
-  {
-    first = state.grammar.(start).index;
-    last = state.grammar.(state.position - 1).index;
-  }
+  { first = state.grammar.(start).index; last = last_read state }
 
 let finish state start node = { span = span_from state start; node }
 
@@ -547,6 +547,20 @@ let run_in_scope state scope parse =
   (result, left)
 
 let in_scope state scope parse = fst (run_in_scope state scope parse)
+
+(* A block item or external declaration as read. A type declaration is
+   complete only where the scope that holds it closes, which gives it the
+   last token of the scope (design 10.1 rule 6). *)
+type 'item scoped = Complete of 'item | Until_scope_end of (int -> 'item)
+
+(* The items of a scope that closes at [scope_end], from [read], the
+   items in reverse order of reading. *)
+let close_scope ~scope_end read =
+  List.rev_map
+    (function
+      | Complete item -> item
+      | Until_scope_end complete -> complete scope_end)
+    read
 
 (* What a token begins among declaration specifiers: the one place that
    says which tokens are specifiers. *)
@@ -2296,8 +2310,9 @@ and declaration_of_start state = function
       expect state P.Semicolon "`;` after a declaration";
       finish state start (Declaration { specifiers; declarators })
 
-(* At the [type] that [begins_type_declaration] recognises. *)
-and type_declaration state =
+(* At the [type] that [begins_type_declaration] recognises. The
+   declaration is complete where its scope closes. *)
+and type_declaration state : int -> type_declaration =
   let start = state.position in
   let type_keyword = state.grammar.(start).index in
   advance state;
@@ -2314,7 +2329,8 @@ and type_declaration state =
       declared_definition
     end
   in
-  finish state start ({ name; declared; definition } : type_declaration_node)
+  let span = span_from state start in
+  fun scope_end -> { span; node = { name; declared; definition; scope_end } }
 
 and incomplete_variant state name =
   let declared = declare state ~kind:Incomplete_variant_type name in
@@ -2645,7 +2661,7 @@ and arm state =
       let labels = labels [] in
       let rec items read =
         if begins_arm_label state || peek state = Punctuator_token P.Right_brace
-        then List.rev read
+        then read
         else items (block_item state :: read)
       in
       match items [] with
@@ -2654,7 +2670,9 @@ and arm state =
             (Rule.message Arm_form
                ("an arm of `match` has no block item after its labels, found "
                 ^ found state))
-      | items -> finish state start { labels; items })
+      | read ->
+          let items = close_scope ~scope_end:(last_read state) read in
+          finish state start { labels; items })
 
 and arm_label state =
   let start = state.position in
@@ -2754,15 +2772,15 @@ and local_label_declarations state =
   in
   loop []
 
-(* After the [{], up to and including the [}]. *)
+(* After the [{], up to and including the [}], which closes the scope. *)
 and block_items state =
-  let rec loop items =
+  let rec loop read =
     match peek state with
     | Punctuator_token P.Right_brace ->
         advance state;
-        List.rev items
+        close_scope ~scope_end:(last_read state) read
     | End_of_input -> fail_expected state "`}` to end a compound statement"
-    | _ -> loop (block_item state :: items)
+    | _ -> loop (block_item state :: read)
   in
   loop []
 
@@ -2770,15 +2788,17 @@ and block_items state =
    attributes before a [;], which begin a declaration elsewhere. *)
 and block_item state =
   if begins_label state || begins_attribute_statement state then
-    Block_statement (statement state)
+    Complete (Block_statement (statement state))
   else if begins_type_declaration state then
-    Block_type_declaration (type_declaration state)
+    let declaration = type_declaration state in
+    Until_scope_end
+      (fun scope_end -> Block_type_declaration (declaration scope_end))
   (* Before a declaration: where [match] is a typedef name, the tokens of
      a match would otherwise begin a declaration (design 2.2). *)
-  else if begins_match state then Block_statement (statement state)
+  else if begins_match state then Complete (Block_statement (statement state))
   else if begins_declaration state then
-    Block_declaration (block_declaration state)
-  else Block_statement (statement state)
+    Complete (Block_declaration (block_declaration state))
+  else Complete (Block_statement (statement state))
 
 (* GCC's nested functions are outside the profile, as Clang has none; a
    [{] after the first declarator names them rather than the [;]. *)
@@ -2883,13 +2903,17 @@ let c_external_declaration state =
 
 let external_declaration state =
   if begins_type_declaration state then
-    Type_declaration (type_declaration state)
-  else c_external_declaration state
+    let declaration = type_declaration state in
+    Until_scope_end (fun scope_end -> Type_declaration (declaration scope_end))
+  else Complete (c_external_declaration state)
 
+(* File scope closes with the text, whose last token may be a pragma
+   token. *)
 let translation_unit state =
-  let rec loop declarations =
-    if peek state = End_of_input then List.rev declarations
-    else loop (external_declaration state :: declarations)
+  let rec loop read =
+    if peek state = End_of_input then
+      close_scope ~scope_end:(Array.length state.reader.tokens - 1) read
+    else loop (external_declaration state :: read)
   in
   loop []
 

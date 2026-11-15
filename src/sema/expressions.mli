@@ -168,14 +168,17 @@ type matched_arm = {
 
 (** A match statement (design 4) that lowering replaces (13.5): its
     span, that of its scrutinee, the name of its variant, how it reaches
-    the scrutinee, and its arms in order. *)
-type matching = {
+    the scrutinee, and its arms in order. Typing records a match before
+    it types the arms, with [arms] then still to be typed. *)
+type 'arms matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
   variant : string;
   access : access;
-  arms : matched_arm list;
+  arms : 'arms;
 }
+
+type matching = matched_arm list matching_of
 
 val matchings : t -> matching list
 (** The match statements typed, in source order. *)
@@ -234,8 +237,7 @@ val constant : t -> Tree.expression -> constant option
     a Clang overload set (design 13.3); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
     block, binding its identifiers and typing its initialisers, and
-    [type_declaration] a type declaration there, given the last token of
-    the block or arm that holds it. *)
+    [type_declaration] a type declaration there. *)
 type context = {
   typed : t;
   target : Target.t;
@@ -246,7 +248,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  type_declaration : scope_end:int -> Tree.type_declaration -> unit;
+  type_declaration : Tree.type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
 }

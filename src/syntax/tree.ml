@@ -563,6 +563,12 @@ and type_declaration_node = {
           that completes the [Incomplete_variant] of its name in its
           scope (rule 4), which is its [earlier] *)
   definition : type_definition;
+  scope_end : int;
+      (** the last token of the scope that holds the declaration, in
+          [Reader.t.tokens], which the parser gives it where it closes that
+          scope: of its block, its arm or the text, where the last may
+          be a pragma token. The names that a variant derives denote it
+          from the declaration to there (design 10.1 rule 6). *)
 }
 
 and type_definition =

@@ -609,7 +609,7 @@ and block_item reader = function
 (* A type declaration as [(type N definition)]; the tag that it claims
    is a [claims] part, whose entry is a declaration in the tag space. *)
 and type_declaration reader (d : type_declaration) =
-  let { name; declared; definition } = d.node in
+  let { name; declared; definition; _ } = d.node in
   let declared_name =
     noted (declaration_entry name.node declared) (identifier name)
   in

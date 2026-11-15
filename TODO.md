@@ -969,13 +969,6 @@ types (design 13.3).
   reinterpret storage as a private value (`*(symbol *)p`, a union member,
   `va_arg`, copying bytes), but section 11 does not name them. Say in
   11.2 which of them checked mode refuses or checks.
-- [Medium] The variant scope rule of design 3.3 and 4.1 rule 1 holds by
-  two checks, in `Expressions.construct` and `match_statement`; a later
-  lowering that names a variant's derived names must call it too. Fold
-  the check into the one place that records a lowering site. And the
-  scope end is derived in sema from block and arm spans, mirroring the
-  parser's scope rules; have the parser record it where it closes the
-  scope.
 - [Medium] In a `.tc` file, `e.A` is refused ("found the type name `e`")
   when a header declares `e`; likely the C-text owner rule near
   `src/syntax/parser.ml:590`. Decide whether that is intended and test
