@@ -42,7 +42,8 @@ dictionary=$built/fuzz.dict
 # that a busy host made late, where AFL++'s default second would drop
 # a step ten times too slow.
 timeout_ms=300
-memory_mb=0
+# No AFL++ memory limit, spelled none because afl-tmin 5.03c refuses -m 0.
+memory_limit=none
 export AFL_HANG_TMOUT=$((timeout_ms * 2))
 
 # The heap bound of fuzz.ml holds for the default GC settings.
@@ -56,6 +57,9 @@ export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
 # Instances run in the background, without the status screen; each logs to
 # a file of its own.
 export AFL_NO_UI=1
+# The scheduler places the instances on every system, because AFL++ 5.03c
+# on FreeBSD binds every one of them to the first core.
+export AFL_NO_AFFINITY=1
 
 usage() {
     echo "usage: fuzz.sh build | seeds | run TARGET MINUTES [SECONDARIES]" \
@@ -116,7 +120,7 @@ instance() {
         input=$work/in/$target
     fi
     exec afl-fuzz -i "$input" -o "$output" -x "$dictionary" \
-        -t "$timeout_ms" -m "$memory_mb" -V "$seconds" \
+        -t "$timeout_ms" -m "$memory_limit" -V "$seconds" \
         "$role" "$name" -- "$harness" "$target" @@ \
         > "$output.$name.log" 2>&1
 }
@@ -152,7 +156,7 @@ run() {
 minimise() {
     target=$1 case_file=$2 minimised=$3
     shift 3
-    afl-tmin "$@" -t "$timeout_ms" -m "$memory_mb" \
+    afl-tmin "$@" -t "$timeout_ms" -m "$memory_limit" \
         -i "$case_file" -o "$minimised" -- "$harness" "$target" @@ \
         > /dev/null
 }
