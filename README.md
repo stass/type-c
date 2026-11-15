@@ -207,21 +207,7 @@ counterpart, records which warnings GCC and Clang give on the C
 program, with `-Wall -Wextra` and with `-Wswitch-enum`,
 `-Wimplicit-fallthrough` and `-Wconversion`, and shows the code with
 which `typec` refuses the Type-C one (the codes are in
-`_build/default/docs/diagnostics.md`). In summary:
-
-| Error | GCC `-Wall -Wextra` | Clang `-Wall -Wextra` | Other flags | `typec` |
-| --- | --- | --- | --- | --- |
-| Kind added; `switch` on the enum, no `default` | `-Wswitch` | `-Wswitch` | | TC0018 |
-| Kind added; `switch` with a `default` | none | none | `-Wswitch-enum`, both | TC0018 |
-| Kind added; kind field of type `int` | none | none | none | TC0018 |
-| Payload read under the wrong tag | none | none | none | TC0004, for naming the tag |
-| Payload read with no tag test | none | none | none | TC0007 |
-| Missing `break` at the end of an arm | `-Wimplicit-fallthrough` | none | `-Wimplicit-fallthrough`, Clang | TC0021 |
-| One id typedef passed as another | none | none | none | TC0012 |
-| An id used as its representation | none | none | none | TC0012 |
-| Arithmetic on an id | none | none | none | TC0011 |
-| Value made outside its module | none | none | none | TC0013 |
-| Invalid tag from a cast or a union | none | none | none on the tag | run-time trap |
+`_build/default/docs/diagnostics.md`); the test is the table.
 
 C's warnings catch some forms of these errors: a `switch` on an
 enumeration without a `default` under `-Wall`, one with a `default`
