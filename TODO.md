@@ -975,13 +975,11 @@ types (design 13.3).
   `typedef int T; void f(void) { void (^b)(void) = ^{ (void)T; }; }`
   is Clang's error, not typec's. Type the body, which the item above on
   design 3.2 rule 6 also wants.
-- [Medium] A name that a variant derives (design 10.1 rule 6) may be a
-  keyword of the backend: `type _Static = | assert;` lowers to the
-  enumerator `_Static_assert`, which the backend refuses. The claim
-  functions of the parser are the one funnel for derived names (they
-  refuse `__tc_` there); give the parser's state the keyword set and
-  refuse a derived keyword there too, and the instance names of 10.3
-  (`type vector_ = | i;` derives `vector__i`) when 2.1 defines them.
+- [Medium] The instance names of design 10.3 claim nothing yet: when
+  they are built, claim them through the claim functions of the parser,
+  the one funnel that refuses a derived name reserved in C or claimed
+  twice, since a variant can derive one (`type vector_ = | i;` derives
+  `vector__i`).
 - [Medium] Whether a variant completes `type N;` is read from
   `declared.earlier` by Lowering, Declarations and the tree dump, which
   holds only while no other type declaration has an `earlier`; and

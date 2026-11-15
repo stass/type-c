@@ -1855,12 +1855,12 @@ let type_c_error_cases =
       "double e_B; void f(void) { type e = | A(typeof(e_B) v) | B; }"
       "error: in.tc:1: the enumerator `e_B` is not available to Type-C \
        text, as a type declaration claims it (design 10.1 rule 6) [TC0004]";
-    case "a derived name that typec would generate" "type __tc = | x;"
-      "error: in.tc:1: `__tc_tag` begins with `__tc_`, which is reserved \
-       for the names that typec generates (design 2.3) [TC0001]";
-    case "a derived enumerator that typec would generate" "type _ = | tc_x;"
-      "error: in.tc:1: `__tc_x` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+    case "a claimed tag that typec would generate" "type __tc = | x;"
+      "error: in.tc:1: the type declaration of `__tc` claims the tag \
+       `__tc`, which C reserves for any use (design 10.1 rule 6) [TC0004]";
+    case "a derived tag that typec would generate" "type _ = | tc_x;"
+      "error: in.tc:1: the type declaration of `_` claims the tag `__tag`, \
+       which C reserves for any use (design 10.1 rule 6) [TC0004]";
     case "a constructor with empty parentheses" "type e = | A();"
       "error: in.tc:1: expected a field, found `)`";
     case "a field without a name" "type e = | A(int);"

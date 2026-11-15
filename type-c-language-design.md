@@ -158,7 +158,8 @@ reading exists.
 compiler in a Type-C translation unit; one in its text, C text included, is
 an error, so that no declaration and no use can meet a name that lowering
 generates. The names that a type declaration derives for C (section 10)
-are reserved in the scope of that declaration.
+are reserved in the scope of that declaration; none is an identifier
+that C reserves for any use (10.1 rule 6), so none begins with `__tc_`.
 
 Rationale. The words Type-C wants (`type`, `match`, `result`, `str`,
 `option`) are among the most common identifiers in C. Reserving them would
@@ -1060,7 +1061,13 @@ struct expr {
    is a declaration of one in a nested block or prototype, in C text such
    as a header included there as well. So is a name that two variants
    derive alike (`a_b` with `C` and `a` with `b_C`), and a type
-   declaration in a block that claims a name an enclosing one claims. No
+   declaration in a block that claims a name an enclosing one claims. So
+   is a claimed name that C reserves for any use, one that begins with
+   `__` or with `_` and an uppercase letter (C11 7.1.3p1). A derived name
+   joins a name and a word with `_`, and every keyword of the dialects of
+   2.4 that has an inner `_` is reserved so; refusing these names keeps
+   every derived name from spelling a keyword with no list of keywords:
+   `type _Static = | assert;` would derive `_Static_assert`. No
    declaration hides a claimed name, so it denotes the variant wherever
    the variant is in scope, and a constructor lowers to it (13.5). The
    typedef name `expr` is not claimed: a block may declare `int expr;`,

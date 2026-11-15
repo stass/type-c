@@ -35,8 +35,8 @@ let rules =
     { name = "Claimed_name"; code = 4; clause = Some "design 10.1 rule 6";
       meaning =
         "A tag or enumerator that a type declaration claims for the C \
-         it lowers to, declared otherwise in its scope or named in \
-         Type-C text; also design 10.2." };
+         it lowers to, declared otherwise in its scope, named in Type-C \
+         text or reserved for any use in C; also design 10.2." };
     { name = "Duplicate_constructor"; code = 5;
       clause = Some "design 3.2 rule 2";
       meaning =

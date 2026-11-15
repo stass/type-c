@@ -229,6 +229,18 @@ Derived names, field types and constructor names are checked.
   $ ./golden.exe derived.tc
   derived.tc:2: the variant `e` claims the enumerator `e_A`, which this scope declares already (design 10.1 rule 6) [TC0004]
   [1]
+  $ for decl in 'type _Static = | assert;' 'type __x = struct { int a; };' \
+  >     'void f(void) { type _Thread = | local; }' 'type _ = | attribute__;'; do
+  >   printf '%s\n' "$decl" > reserved.tc
+  >   ./golden.exe reserved.tc
+  > done
+  reserved.tc:1: the type declaration of `_Static` claims the tag `_Static`, which C reserves for any use (design 10.1 rule 6) [TC0004]
+  reserved.tc:1: the type declaration of `__x` claims the tag `__x`, which C reserves for any use (design 10.1 rule 6) [TC0004]
+  reserved.tc:1: the type declaration of `_Thread` claims the tag `_Thread`, which C reserves for any use (design 10.1 rule 6) [TC0004]
+  reserved.tc:1: the type declaration of `_` claims the tag `__tag`, which C reserves for any use (design 10.1 rule 6) [TC0004]
+  [1]
+  $ printf 'type _x_lower = | A | B;\ntype _ = struct { int a; };\n' > usable.tc
+  $ ./golden.exe usable.tc > usable.c
   $ printf 'type e = | A(e inner);\n' > recursive.tc
   $ ./golden.exe recursive.tc
   recursive.tc:1: the field 'inner' of 'A' is not a complete object type, so it is not a value type (design 3.2 rule 4) [TC0006]

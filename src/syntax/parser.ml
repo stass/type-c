@@ -505,6 +505,31 @@ let declare_tag state (name : identifier) =
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
   Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
 
+(* C reserves for any use an identifier that begins with two underscores
+   or with one and an uppercase letter (C11 7.1.3p1). *)
+let is_reserved_for_any_use spelling =
+  if String.length spelling < 2 || spelling.[0] <> '_' then false
+  else
+    match spelling.[1] with
+    | '_' | 'A' .. 'Z' -> true
+    | _ -> false
+
+(* No name that a type declaration claims for the C it lowers to is
+   reserved for any use (design 10.1 rule 6), so no derived name spells
+   a keyword of the backend or a name that typec generates (design 2.3).
+   A variant's enumerators are checked too, though each is reserved only
+   where a tag claimed before it is. [kind] says what [claimed] is: a
+   tag or an enumerator. *)
+let refuse_reserved_claim state ~at ~(declaration : identifier) ~kind
+    claimed =
+  if is_reserved_for_any_use claimed then
+    fail_at_token state at
+      (Rule.message Claimed_name
+         (Printf.sprintf
+            "the type declaration of %s claims the %s %s, which C \
+             reserves for any use"
+            (quoted declaration.node) kind (quoted claimed)))
+
 (* The end of a refused claim's message: what holds the name already. *)
 let already_taken_by ~declared_here =
   if declared_here then "this scope declares already"
@@ -514,7 +539,8 @@ let already_taken_by ~declared_here =
    claims in the current scope (design 10.1 rule 6, 10.2): no other
    declaration of the tag may be in that scope, and it hides no claim. *)
 let claim_tag state (name : identifier) ~tag id =
-  refuse_generated_name state ~at:(token_of name) tag;
+  refuse_reserved_claim state ~at:(token_of name) ~declaration:name
+    ~kind:"tag" tag;
   let declared_here = Scope.find_tag_in_innermost state.scope tag <> None in
   if declared_here || claims_tag state tag then
     fail_at_token state (token_of name)
@@ -537,7 +563,8 @@ let claim_own_tag state (name : identifier) =
    claims a tag. *)
 let claim_enumerator state ~(variant : identifier) ~at constructor =
   let enumerator = enumerator_name ~variant:variant.node constructor in
-  refuse_generated_name state ~at enumerator;
+  refuse_reserved_claim state ~at ~declaration:variant ~kind:"enumerator"
+    enumerator;
   let declared_here = Scope.find_in_innermost state.scope enumerator <> None in
   if declared_here || claims_enumerator state enumerator then
     fail_at_token state at
