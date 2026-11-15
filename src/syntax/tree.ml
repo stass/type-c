@@ -551,6 +551,10 @@ and type_definition =
       (** [= type-name;] for a type name that is not a [Record_alias]:
           the name denotes the type, as [typedef] makes it, and the
           definition does not use the name (design 3.1 rule 2) *)
+  | Distinct of type_name
+      (** [= distinct type-name;]: a new type with the representation of
+          the type name (design 3.4); the definition does not use the
+          name (design 3.1 rule 2) *)
   | Record_alias of record_specifier spanned
       (** [= struct-or-union-specifier;] with a body, which its
           [members] always hold, and nothing else; it may use the name.

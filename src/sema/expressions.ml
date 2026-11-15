@@ -213,8 +213,8 @@ let unknown_value (unknown : Unknown.t) =
 let unknown_in_place_of (t : Ctype.t) (unknown : Unknown.t) =
   match t.shape with
   | Function _ -> Ctype.unknown { unknown with kind = Unknown_function }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Unknown_type _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Unknown_type _ ->
       Ctype.unknown unknown
 
 (* [t], Clang's type for [difference], or an unknown type where the
@@ -223,8 +223,8 @@ let unknown_in_place_of (t : Ctype.t) (unknown : Unknown.t) =
 let backend_type context location difference (t : Ctype.t) =
   match t.shape with
   | Unknown_type _ -> t
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Function _ -> (
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Function _ -> (
       match Backend_difference.answer context.target difference location t with
       | Answer t -> t
       | Depends_on unknown -> unknown_in_place_of t unknown)
@@ -253,6 +253,105 @@ let refuse_variant context (span : Tree.span) (t : Ctype.t) =
               (quote name)))
   | Some _ | None -> ()
 
+(* Distinct types (design 3.4, 10.2) *)
+
+(* C text sees a distinct type as the typedef of its representation that
+   it lowers to (design 10.2); only Type-C text sees the distinct type. *)
+let as_seen context (span : Tree.span) (typed : typed) =
+  if is_type_c_text context span then typed
+  else
+    { typed with
+      expression_type = Ctype.representation typed.expression_type }
+
+let distinct_name (distinct : Ctype.distinct) = quote distinct.distinct_name
+
+(* The table of design 3.4: the operations that read a value of a
+   distinct type in Type-C text. The other uses that it allows take the
+   value whole and never read it as an operand: =, initialisation,
+   arguments and return, sizeof, _Alignof, unary &, the comma and the
+   branches of ?:. Every other operation refuses it, a new one too. *)
+let reads_distinct : Tree.expression_node -> bool = function
+  | Binary ((Equal_to | Not_equal_to | Logical_and | Logical_or), _, _)
+  | Unary (Logical_not, _)
+  | Cast _ ->
+      true
+  | _ -> false
+
+let refuse_distinct context span (distinct : Ctype.distinct) =
+  context.fail span
+    (Rule.message Distinct_operation
+       (Printf.sprintf
+          "a value of the distinct type %s takes no such operation; a cast \
+           to its underlying type crosses to it"
+          (distinct_name distinct)))
+
+(* An operand of an operation at [span], as the operation sees it;
+   [reads] says whether the table lets the operation read a value of a
+   distinct type. *)
+let read_operand context span ~reads (typed : typed) =
+  let typed = as_seen context span typed in
+  match Ctype.as_distinct typed.expression_type with
+  | Some distinct when not reads -> refuse_distinct context span distinct
+  | Some _ | None -> typed
+
+(* Design 3.4: [==], [!=] and [?:] take two values of one distinct type,
+   [t], where they take one; [one_distinct] says whether they are. *)
+let one_distinct context (t : Ctype.t) other =
+  Ctype.compatible context.target context.tags t other = Answer true
+
+let refuse_mixed context span (t : Ctype.t) =
+  let name =
+    match Ctype.as_distinct t with
+    | Some distinct -> distinct_name distinct
+    | None -> invalid_arg "Expressions: a mixed operand that is not distinct"
+  in
+  context.fail span
+    (Rule.message Distinct_operation
+       ("the operands are not both of the distinct type " ^ name))
+
+(* Design 3.4: Type-C text converts no value implicitly to or from a
+   distinct type, nor a pointer to a type with one in it to a pointer to
+   another type but void. The backend sees a distinct type as its
+   representation (design 10.2), so it cannot refuse these conversions;
+   the others are its own. *)
+let refuse_distinct_conversion context span target (typed : typed) =
+  let target = Ctype.unqualified target in
+  let source = Ctype.lvalue_conversion typed.expression_type in
+  let differs a b =
+    Ctype.compatible context.target context.tags a b = Answer false
+  in
+  let crosses =
+    match (target.shape, source.shape) with
+    | Pointer t, Pointer s ->
+        let t = Ctype.unqualified t and s = Ctype.unqualified s in
+        Ctype.is_void t = Answer false
+        && Ctype.is_void s = Answer false
+        && (Ctype.mentions_distinct t || Ctype.mentions_distinct s)
+        && differs t s
+    | _ ->
+        (Ctype.as_distinct target <> None || Ctype.as_distinct source <> None)
+        && differs target source
+  in
+  if crosses && is_type_c_text context span then
+    context.fail span
+      (Rule.message Distinct_conversion
+         (Printf.sprintf
+            "a value of type %s does not convert to %s without a cast"
+            (quote (Type_name.of_ctype source))
+            (quote (Type_name.of_ctype target))))
+
+(* Design 13.5: where a distinct type is among the types that a
+   construct compares, the front end answers it, as the backend sees the
+   representation. Lowering does not yet replace the construct with the
+   answer, so it is refused rather than given the backend's answer. *)
+let refuse_unlowered_answer context span types =
+  if List.exists Ctype.mentions_distinct types then
+    context.fail span
+      (Rule.message
+         (Not_implemented { section = "13.5"; package = "1.4" })
+         "lowering the answer to a comparison of a distinct type with \
+          other types is not implemented yet")
+
 (* Operands (6.3.2.1, 6.3.1.1) *)
 
 (* The value of an operand, after lvalue conversion, by what the
@@ -265,6 +364,8 @@ type operand =
     }
   | Pointer_operand of { pointer : Ctype.t; referenced : Ctype.t }
   | Unknown_operand of Unknown.t
+  | Distinct_operand of Ctype.t
+      (** A scalar that takes only the operations of design 3.4. *)
   | Other_operand of Ctype.t
       (** void, a structure or union, [va_list], an incomplete enumeration *)
 
@@ -272,6 +373,7 @@ let value_operand context (t : Ctype.t) =
   match t.shape with
   | Pointer referenced -> Pointer_operand { pointer = t; referenced }
   | Unknown_type unknown -> Unknown_operand unknown
+  | Distinct _ -> Distinct_operand t
   | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _ | Function _
     -> (
       match Ctype.as_arithmetic context.tags t with
@@ -301,9 +403,11 @@ let bit_field_operand context field =
       | Depends_on unknown -> Unknown_operand unknown)
 
 let operand context (typed : typed) =
-  match typed.bit_field with
-  | Bit_field field | Bit_field_value field -> bit_field_operand context field
-  | Not_bit_field ->
+  match (Ctype.as_distinct typed.expression_type, typed.bit_field) with
+  | Some _, _ -> Distinct_operand (Ctype.unqualified typed.expression_type)
+  | None, (Bit_field field | Bit_field_value field) ->
+      bit_field_operand context field
+  | None, Not_bit_field ->
       value_operand context (Ctype.lvalue_conversion typed.expression_type)
 
 let is_integer : Arithmetic.t -> bool = function
@@ -328,8 +432,8 @@ let require_modifiable context span ~clause (typed : typed) =
   let t = typed.expression_type in
   match t.shape with
   | Unknown_type _ -> ()
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Function _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Function _ ->
       if not typed.lvalue then
         context.fail span ("the operand is not an lvalue (C11 " ^ clause ^ ")");
       if t.qualifiers.const || Ctype.is_array t = Answer true then
@@ -338,7 +442,9 @@ let require_modifiable context span ~clause (typed : typed) =
 
 let require_scalar context span ~clause typed =
   match operand context typed with
-  | Arithmetic_operand _ | Pointer_operand _ | Unknown_operand _ -> ()
+  | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+  | Unknown_operand _ ->
+      ()
   | Other_operand _ ->
       context.fail span
         ("the operand is not of scalar type (C11 " ^ clause ^ ")")
@@ -534,8 +640,8 @@ let function_designator context span ~old_style_definition (t : Ctype.t) =
       in
       backend_type context (location_of context span) difference
         (checked context span (Ctype.function_returning return clang))
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Unknown_type _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Unknown_type _ ->
       t
 
 let identifier context span name (resolution : Tree.resolution) =
@@ -563,7 +669,8 @@ let identifier context span name (resolution : Tree.resolution) =
    no other type. *)
 let bit_field_integer context (member : Ctype.member) : Integer.t Unknown.answer
     =
-  match Ctype.as_arithmetic context.tags member.member_type with
+  let declared = Ctype.representation member.member_type in
+  match Ctype.as_arithmetic context.tags declared with
   | Answer (Some (Integer integer)) -> Answer integer
   | Depends_on unknown -> Depends_on unknown
   | Answer (Some (Real _ | Complex _) | None) ->
@@ -599,8 +706,10 @@ let member_of context tag (qualifiers : Qualifiers.t)
       | Some width ->
           let integer = bit_field_integer context member in
           let narrow = Backend_difference.Narrow_bit_field { integer; width } in
+          (* A distinct type is no integer type to narrow (design 3.4). *)
           let value_type =
-            backend_type context location narrow expression_type
+            if Ctype.mentions_distinct expression_type then expression_type
+            else backend_type context location narrow expression_type
           in
           { expression_type = value_type;
             lvalue;
@@ -612,8 +721,8 @@ let direct_member context span (record : typed) name =
   | Record tag -> member_of context tag t.qualifiers name ~lvalue:record.lvalue
   | Unknown_type unknown ->
       { (value (unknown_value unknown)) with lvalue = record.lvalue }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _ | Function _
-    ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
+  | Function _ ->
       context.fail span
         "the operand of '.' is not a structure or union (C11 6.5.2.3p1)"
 
@@ -629,7 +738,8 @@ let pointer_member context span (pointer : typed) name =
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
       lvalue (unknown_value unknown)
-  | Pointer_operand _ | Arithmetic_operand _ | Other_operand _ ->
+  | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
+  | Other_operand _ ->
       context.fail span
         "the operand of '->' is not a pointer to a structure or union (C11 \
          6.5.2.3p2)"
@@ -646,7 +756,9 @@ let subscript context span array index =
       lvalue referenced
   | Unknown_operand unknown, _ | _, Unknown_operand unknown ->
       lvalue (unknown_value unknown)
-  | (Pointer_operand _ | Arithmetic_operand _ | Other_operand _), _ ->
+  | ( ( Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
+      | Other_operand _ ),
+      _ ) ->
       fail_operands context span "6.5.2.1p1"
 
 (* 6.5.2.2p2: as many arguments as a prototype has parameters, or more
@@ -672,7 +784,8 @@ let call_type context span (callee : typed) count =
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
       unknown_value unknown
-  | Pointer_operand _ | Arithmetic_operand _ | Other_operand _ ->
+  | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
+  | Other_operand _ ->
       context.fail span
         "the called expression is not a function or a pointer to one (C11 \
          6.5.2.2p1)"
@@ -685,7 +798,7 @@ let increment context span ~clause (typed : typed) =
   | Arithmetic_operand _ | Pointer_operand _ ->
       value (Ctype.lvalue_conversion typed.expression_type)
   | Unknown_operand unknown -> value (unknown_value unknown)
-  | Other_operand _ -> fail_operands context span clause
+  | Distinct_operand _ | Other_operand _ -> fail_operands context span clause
 
 (* 6.5.3.2p1, p3: of a function designator, or of an lvalue other than a
    bit-field. *)
@@ -705,7 +818,7 @@ let indirection context span typed =
         lvalue = Ctype.is_function referenced <> Answer true }
   | Unknown_operand unknown ->
       lvalue (Ctype.unknown { unknown with kind = Object_or_function })
-  | Arithmetic_operand _ | Other_operand _ ->
+  | Arithmetic_operand _ | Distinct_operand _ | Other_operand _ ->
       context.fail span
         "the operand of unary '*' is not a pointer (C11 6.5.3.2p2)"
 
@@ -722,7 +835,8 @@ let arithmetic_unary context span ~integer typed =
     when not (integer && is_real_floating arithmetic) ->
       value (promoted_type context span promoted)
   | Unknown_operand unknown -> value (unknown_value unknown)
-  | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
+  | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+  | Other_operand _ ->
       fail_operands context span "6.5.3.3p1"
 
 (* Clang takes either part of a bit-field as its value; GCC's real part
@@ -754,7 +868,7 @@ let other_part context span ~imaginary (typed : typed) =
   | Arithmetic_operand _ -> typed
   | Unknown_operand unknown ->
       { typed with expression_type = unknown_value unknown }
-  | Pointer_operand _ | Other_operand _ ->
+  | Pointer_operand _ | Distinct_operand _ | Other_operand _ ->
       context.fail span
         "the operand of __real__ or __imag__ is not arithmetic"
 
@@ -774,7 +888,9 @@ let arithmetic_binary context span ~integer ~clause left right =
       converted context span a.promoted b.promoted
   | Unknown_operand unknown, _ | _, Unknown_operand unknown ->
       unknown_value unknown
-  | (Arithmetic_operand _ | Pointer_operand _ | Other_operand _), _ ->
+  | ( ( Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+      | Other_operand _ ),
+      _ ) ->
       fail_operands context span clause
 
 (* 6.5.6p2, p8: GNU C takes a pointer to void or to a function too. *)
@@ -809,25 +925,39 @@ let shift context span left right =
       promoted_type context span promoted
   | Unknown_operand unknown, _ | _, Unknown_operand unknown ->
       unknown_value unknown
-  | (Arithmetic_operand _ | Pointer_operand _ | Other_operand _), _ ->
+  | ( ( Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+      | Other_operand _ ),
+      _ ) ->
       fail_operands context span "6.5.7p2"
 
 (* 6.5.8p2, p6 and 6.5.9p2, p3: an int. GNU C compares a pointer with an
    integer too; relations take real operands only. *)
-let comparison context span ~relational ~clause left right =
+let ordinary_comparison context span ~relational ~clause left right =
   let takes = function
     | Arithmetic_operand { arithmetic; _ } ->
         (not relational) || is_real arithmetic
     | Pointer_operand _ | Unknown_operand _ -> true
-    | Other_operand _ -> false
+    | Distinct_operand _ | Other_operand _ -> false
   in
   if not (takes left && takes right) then fail_operands context span clause;
   int_type context span
 
+(* Design 3.4: == and != take two values of one distinct type. *)
+let comparison context span ~relational ~clause left right =
+  match (left, right) with
+  | Distinct_operand a, Distinct_operand b
+    when (not relational) && one_distinct context a b ->
+      int_type context span
+  | Distinct_operand t, _ | _, Distinct_operand t when not relational ->
+      refuse_mixed context span t
+  | _ -> ordinary_comparison context span ~relational ~clause left right
+
 (* 6.5.13p2, p3 and 6.5.14p2, p3. *)
 let logical context span ~clause left right =
   let takes = function
-    | Arithmetic_operand _ | Pointer_operand _ | Unknown_operand _ -> true
+    | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+    | Unknown_operand _ ->
+        true
     | Other_operand _ -> false
   in
   if not (takes left && takes right) then fail_operands context span clause;
@@ -859,8 +989,8 @@ let binary_type context span (op : Tree.binary_operator) left right =
 let is_plain_void_pointer (t : Ctype.t) =
   match t.shape with
   | Pointer { shape = Void; qualifiers; _ } -> qualifiers = Qualifiers.none
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Function _ | Unknown_type _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Function _ | Unknown_type _ ->
       false
 
 (* 6.5.15p6: a pointer to void, qualified as both referenced types are;
@@ -1019,7 +1149,8 @@ let designated_value (typed : typed) { static_storage; named } =
   | Array _ | Function _ ->
       if static_storage then Address_constant else Not_constant
   | Unknown_type _ -> Backend_constant
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+    ->
       if named && not t.qualifiers.const then Not_constant
       else Backend_constant
 
@@ -1091,7 +1222,7 @@ let integer value = Integer_expression { value; flaw = None }
    where the backend checks it. *)
 type size = Bytes of int | Backend_size | Variable_size | No_size
 
-let size_of context (t : Ctype.t) =
+let rec size_of context (t : Ctype.t) =
   let target = context.target in
   let of_integer integer =
     Bytes (Target.integer_width target integer / target.char_bit)
@@ -1120,6 +1251,7 @@ let size_of context (t : Ctype.t) =
         | Some (Depends_on _) -> Backend_size
         | None -> No_size)
     | Pointer _ -> Bytes target.sizeof_pointer
+    | Distinct { representation; _ } -> size_of context representation
     | Va_list -> Backend_size
     | Record _ | Array _ -> (
         match
@@ -1345,7 +1477,8 @@ let is_floating_constant context expression =
    expression, or of a floating constant, whose value the backend
    computes; a cast between arithmetic types; a cast to a pointer type of
    an integer constant expression or an address constant. *)
-let cast_constant context span (cast_type : Ctype.t) operand =
+let representation_cast_constant context span (cast_type : Ctype.t) operand
+    =
   let itself kind = Not_integer { kind; first = span } in
   let operand_kind = operand_kind context operand in
   match Ctype.as_arithmetic context.tags cast_type with
@@ -1368,6 +1501,23 @@ let cast_constant context span (cast_type : Ctype.t) operand =
   | Answer None -> itself (refused_or_backend [ operand_kind ])
   | Depends_on unknown ->
       Unevaluable { span; message = needing "the value of a cast" unknown }
+
+(* Design 3.4: in Type-C text a cast to a distinct type is a constant
+   where the cast to its representation is, but no integer constant
+   expression, as a distinct type is no integer type. C text casts to the
+   representation (design 10.2). *)
+let cast_constant context span (cast_type : Ctype.t) operand =
+  match Ctype.as_distinct cast_type with
+  | Some { representation; _ } when not (is_type_c_text context span) ->
+      representation_cast_constant context span representation operand
+  | None -> representation_cast_constant context span cast_type operand
+  | Some { representation; _ } -> (
+      match representation_cast_constant context span representation operand
+      with
+      | Integer_expression _ ->
+          let kind = combined [ operand_kind context operand ] in
+          Not_integer { kind; first = span }
+      | constant -> constant)
 
 (* The constant of the selection at [span] of a [construct]. *)
 let selected_constant context span construct =
@@ -1514,7 +1664,7 @@ let pointee_of_first context span name first =
            Unknown_object)
   | Pointer_operand { referenced; _ } -> value (Ctype.unqualified referenced)
   | Unknown_operand unknown -> value (unknown_value unknown)
-  | Arithmetic_operand _ | Other_operand _ ->
+  | Arithmetic_operand _ | Distinct_operand _ | Other_operand _ ->
       fail_builtin_argument context span name "a pointer"
 
 let complex_of_first context span name first =
@@ -1522,7 +1672,8 @@ let complex_of_first context span name first =
   | Arithmetic_operand { arithmetic = Real floating; _ } ->
       value (arithmetic_type context span (Complex floating))
   | Unknown_operand unknown -> value (unknown_value unknown)
-  | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
+  | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+  | Other_operand _ ->
       fail_builtin_argument context span name "of a real floating type"
 
 (* The operand that the condition of __builtin_choose_expr chooses,
@@ -1680,6 +1831,10 @@ and positioned context position (expression : Tree.expression) =
                 construct context expression named arguments
             | None -> expression_node context position expression)
       in
+      (match position with
+      | Targeted target ->
+          refuse_distinct_conversion context expression.span target typed
+      | Untargeted -> ());
       Hashtbl.replace context.typed.types expression.span (position, typed);
       Hashtbl.replace context.typed.constants expression.span
         (classify context expression typed);
@@ -1699,7 +1854,7 @@ and expression_node context position (whole : Tree.expression) =
   let typed operand =
     let operand_typed = expression context operand in
     refuse_variant context span operand_typed.expression_type;
-    operand_typed
+    read_operand context span ~reads:(reads_distinct whole.node) operand_typed
   in
   match whole.node with
   | Identifier { name; resolution } -> identifier context span name resolution
@@ -1719,7 +1874,7 @@ and expression_node context position (whole : Tree.expression) =
       refuse_parenthesized_constructor context callee;
       let callee_typed = typed callee in
       let positions = argument_positions context callee_typed arguments in
-      let arguments = List.map2 (positioned context) positions arguments in
+      let arguments = List.map2 (argument context) positions arguments in
       call context span callee callee_typed arguments
   | Member { operand; member } ->
       direct_member context span (typed operand) member
@@ -1779,6 +1934,7 @@ and expression_node context position (whole : Tree.expression) =
   | Types_compatible (first, second) ->
       let first = context.type_name first in
       let second = context.type_name second in
+      refuse_unlowered_answer context span [ first; second ];
       Hashtbl.replace context.typed.compatibilities span
         (types_compatible_answer context span first second);
       value (int_type context span)
@@ -1883,8 +2039,8 @@ and argument_positions context (callee : typed) arguments =
             { shape = Function { parameters = Prototype { types; _ }; _ }; _ };
           _ } ->
         types
-    | Pointer_operand _ | Arithmetic_operand _ | Other_operand _
-    | Unknown_operand _ ->
+    | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
+    | Other_operand _ | Unknown_operand _ ->
         []
   in
   let rec positions parameters arguments =
@@ -1895,6 +2051,15 @@ and argument_positions context (callee : typed) arguments =
     | _ :: _, [] -> []
   in
   positions parameters arguments
+
+(* Design 3.4: a value of a distinct type passes only to a parameter of
+   its type, not through [...] or to a function without a prototype,
+   where the default argument promotions would convert it. *)
+and argument context position argument =
+  let typed = positioned context position argument in
+  match position with
+  | Targeted _ -> typed
+  | Untargeted -> read_operand context argument.span ~reads:false typed
 
 (* GNU [__real__] and [__imag__] and the operators of 6.5.3. *)
 and unary context span (op : Tree.unary_operator) typed =
@@ -1952,8 +2117,14 @@ and generic context span controlling associations =
   check_distinct context associations;
   let default = default_association context associations in
   let controlling_type =
-    Ctype.lvalue_conversion controlling_typed.expression_type
+    Ctype.lvalue_conversion
+      (as_seen context span controlling_typed).expression_type
   in
+  let types =
+    controlling_type
+    :: List.filter_map (fun a -> a.association_type) associations
+  in
+  refuse_unlowered_answer context span types;
   select context span controlling_type associations default
 
 (* Both operands are typed. *)
@@ -1992,8 +2163,11 @@ and conditional context span position condition if_true if_false =
     | None -> { branch = condition; branch_typed = condition_typed }
   in
   let third = { branch = if_false; branch_typed = branch_typed if_false } in
-  let second_operand = operand context second.branch_typed in
-  match (second_operand, operand context third.branch_typed) with
+  let branch_operand branch =
+    operand context (as_seen context span branch.branch_typed)
+  in
+  match (branch_operand second, branch_operand third) with
+  | Distinct_operand a, Distinct_operand b when one_distinct context a b -> a
   | Arithmetic_operand a, Arithmetic_operand b ->
       converted context span a.promoted b.promoted
   | Pointer_operand a, Pointer_operand b ->
@@ -2007,6 +2181,7 @@ and conditional context span position condition if_true if_false =
       pointer
   | Unknown_operand unknown, _ | _, Unknown_operand unknown ->
       unknown_value unknown
+  | Distinct_operand t, _ | _, Distinct_operand t -> refuse_mixed context span t
   | Other_operand a, Other_operand b -> other_conditional context span a b
   | Other_operand a, (Arithmetic_operand _ | Pointer_operand _)
     when Ctype.is_void a = Answer true ->
@@ -2239,9 +2414,12 @@ and for_clause context (clause : Tree.for_clause) =
 
 (* 6.8.4.2p1. *)
 and switch_controlling context controlling =
-  match operand context (expression context controlling) with
+  let typed = expression context controlling in
+  let read = read_operand context controlling.span ~reads:false typed in
+  match operand context read with
   | Arithmetic_operand { arithmetic = Integer _; _ } | Unknown_operand _ -> ()
-  | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
+  | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+  | Other_operand _ ->
       context.fail controlling.span
         "the controlling expression of a switch is not an integer (C11 \
          6.8.4.2p1)"
@@ -2275,7 +2453,8 @@ and case_value context value =
             "a case label is not an integer constant expression (C11 \
              6.8.4.2p3)")
   | Unknown_operand _ -> ()
-  | Arithmetic_operand _ | Pointer_operand _ | Other_operand _ ->
+  | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+  | Other_operand _ ->
       context.fail value.span "a case label is not an integer (C11 6.8.4.2p3)"
 
 let function_body context ~name ~return_type block =

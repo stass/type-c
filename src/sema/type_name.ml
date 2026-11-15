@@ -44,7 +44,7 @@ let pointer_declarator qualifiers declarator =
 let parenthesized_under_pointer t =
   match t.shape with
   | Array _ | Function _ -> true
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Unknown_type _ ->
       false
 
@@ -71,6 +71,8 @@ let rec declaration t declarator =
   | Record tag ->
       let name = tag_name (record_keyword tag.kind) tag.record_name in
       specified t.qualifiers name declarator
+  | Distinct distinct ->
+      specified t.qualifiers distinct.distinct_name declarator
   | Va_list ->
       specified t.qualifiers Typec_syntax.Builtin_typedef.va_list_name
         declarator

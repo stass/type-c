@@ -66,8 +66,8 @@ let print_enum_integer (result : Declarations.t) name (t : Ctype.t) =
                 name (Integer.name integer) name (Integer.name integer)
           | Depends_on _ -> ())
         (Ctype.enum_integer (Declarations.tags result) tag)
-  | Void | Arithmetic _ | Pointer _ | Record _ | Va_list | Array _ | Function _
-  | Unknown_type _ ->
+  | Void | Arithmetic _ | Pointer _ | Record _ | Distinct _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
       ()
 
 let print_declared result name (declared : Entity.declared) =

@@ -28,10 +28,17 @@ and shape =
   | Enum of enum_tag
   | Pointer of t
   | Record of record_tag
+  | Distinct of distinct
   | Va_list
   | Array of { element : t; length : length }
   | Function of { return : t; parameters : parameters }
   | Unknown_type of Unknown.t
+
+and distinct = {
+  distinct_id : int;
+  distinct_name : string;
+  representation : t;
+}
 
 type member = {
   member_name : string option;
@@ -85,6 +92,7 @@ type error =
   | Invalid_bit_field
   | Incompatible
   | Int128_unavailable
+  | Invalid_representation
 
 let max_size = 4096
 
@@ -100,7 +108,8 @@ let total_size types = List.fold_left (fun size t -> size + t.size) 0 types
 
 let shape_size = function
   | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _ -> 1
-  | Pointer referenced -> referenced.size + 1
+  | Pointer referenced | Distinct { representation = referenced; _ } ->
+      referenced.size + 1
   | Array { element; _ } -> element.size + 1
   | Function { return; parameters } ->
       total_size (return :: parameter_types parameters) + 1
@@ -114,14 +123,15 @@ let as_variant t =
   match t.shape with
   | Record { variant = true; record_name; _ } -> record_name
   | Record { variant = false; _ }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _ | Function _
-  | Unknown_type _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
       None
 
 let rec top_qualifiers t =
   match t.shape with
   | Array { element; _ } -> top_qualifiers element
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+  | Va_list | Function _
   | Unknown_type _ ->
       t.qualifiers
 
@@ -130,7 +140,8 @@ let rec without_top_qualifiers t =
   | Array array ->
       let element = without_top_qualifiers array.element in
       { t with shape = Array { array with element } }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+  | Va_list | Function _
   | Unknown_type _ ->
       let atomic = t.qualifiers.atomic in
       { t with qualifiers = { Qualifiers.none with atomic } }
@@ -140,7 +151,8 @@ let is_function t =
   | Function _ | Unknown_type { kind = Unknown_function; _ } -> Answer true
   | Unknown_type ({ kind = Object_or_function; _ } as unknown) ->
       Depends_on unknown
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+  | Va_list | Array _
   | Unknown_type { kind = Unknown_object; _ } ->
       Answer false
 
@@ -150,7 +162,8 @@ let is_array t =
   | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
     ->
       Depends_on unknown
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Function _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+  | Va_list | Function _
   | Unknown_type { kind = Unknown_function; _ } ->
       Answer false
 
@@ -192,7 +205,7 @@ let decay t =
   | Array { element; _ } -> of_shape (Pointer element)
   | Function _ | Unknown_type { kind = Unknown_function; _ } ->
       of_shape (Pointer t)
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
       t
 
@@ -202,7 +215,7 @@ let lvalue_conversion t =
   match t.shape with
   | Array _ | Function _ | Unknown_type { kind = Unknown_function; _ } ->
       decay t
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
       unqualified t
 
@@ -223,7 +236,7 @@ let function_returning return parameters =
   | Array _ -> Error Function_returning_array
   | Function _ | Unknown_type { kind = Unknown_function; _ } ->
       Error Function_returning_function
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
       if has_void_parameter parameters then Error Void_parameter
       else
@@ -232,9 +245,10 @@ let function_returning return parameters =
 
 (* 6.7.3p2: restrict needs a pointer to an object type. A va_list may be
    one, which the backend checks. *)
-let restrict_allowed t =
+let rec restrict_allowed t =
   match t.shape with
   | Pointer referenced -> not (surely_function referenced)
+  | Distinct { representation; _ } -> restrict_allowed representation
   | Va_list -> true
   | Void | Arithmetic _ | Enum _ | Record _ | Array _ | Function _
   | Unknown_type _ ->
@@ -254,7 +268,8 @@ let rec qualify qualifiers t =
         Result.map
           (fun element -> of_shape (Array { element; length }))
           (qualify qualifiers element)
-    | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list ->
+    | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+    | Va_list ->
         if qualifiers.restrict && not (restrict_allowed t) then
           Error Restrict_without_object_pointer
         else
@@ -289,6 +304,43 @@ let declare_variant tags name =
 
 let declare_enum tags enum_name = { enum_id = fresh_id tags; enum_name }
 
+(* Design 3.4: an unqualified arithmetic or pointer type. An unknown type
+   may be one; the casts that depend on what it is answer as unknown. *)
+let declare_distinct tags distinct_name representation =
+  let representable =
+    match representation.shape with
+    | Arithmetic _ | Enum _ | Pointer _ | Unknown_type _ -> true
+    | Void | Record _ | Distinct _ | Va_list | Array _ | Function _ -> false
+  in
+  if representable && representation.qualifiers = Qualifiers.none then
+    let distinct =
+      { distinct_id = fresh_id tags; distinct_name; representation }
+    in
+    let t = of_shape (Distinct distinct) in
+    if t.size > max_size then Error Too_large else Ok t
+  else Error Invalid_representation
+
+let as_distinct t =
+  match t.shape with
+  | Distinct distinct -> Some distinct
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
+      None
+
+let rec mentions_distinct t =
+  match t.shape with
+  | Distinct _ -> true
+  | Pointer referenced | Array { element = referenced; _ } ->
+      mentions_distinct referenced
+  | Function { return; parameters } ->
+      List.exists mentions_distinct (return :: parameter_types parameters)
+  | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _ -> false
+
+let representation t =
+  match as_distinct t with
+  | Some distinct -> { distinct.representation with qualifiers = t.qualifiers }
+  | None -> t
+
 let enum_integer tags tag = Hashtbl.find_opt tags.enums tag.enum_id
 
 let record_definition tags tag = Hashtbl.find_opt tags.records tag.record_id
@@ -310,7 +362,7 @@ let rec is_complete tags t =
   match t.shape with
   | Void | Function _ | Unknown_type { kind = Unknown_function; _ } ->
       Answer false
-  | Arithmetic _ | Pointer _ | Va_list -> Answer true
+  | Arithmetic _ | Pointer _ | Distinct _ | Va_list -> Answer true
   | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
     ->
       Depends_on unknown
@@ -333,7 +385,9 @@ let array_of tags element length =
 let rec is_variably_modified t =
   match t.shape with
   | Array { length = Variable; _ } -> Answer true
-  | Array { element = referenced; _ } | Pointer referenced ->
+  | Array { element = referenced; _ }
+  | Pointer referenced
+  | Distinct { representation = referenced; _ } ->
       is_variably_modified referenced
   | Function { return; _ } -> is_variably_modified return
   | Unknown_type unknown -> Depends_on unknown
@@ -356,7 +410,8 @@ let classify known t =
   | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
     ->
       Depends_on unknown
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+  | Va_list | Array _
   | Function _ ->
       Answer (known t.shape)
 
@@ -366,7 +421,7 @@ let is_integer =
   classify (function
     | Arithmetic (Integer _) | Enum _ -> true
     | Arithmetic (Real _ | Complex _)
-    | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+    | Void | Pointer _ | Record _ | Distinct _ | Va_list | Array _ | Function _
     | Unknown_type _ ->
         false)
 
@@ -374,34 +429,34 @@ let is_real =
   classify (function
     | Arithmetic (Integer _ | Real _) | Enum _ -> true
     | Arithmetic (Complex _)
-    | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+    | Void | Pointer _ | Record _ | Distinct _ | Va_list | Array _ | Function _
     | Unknown_type _ ->
         false)
 
 let is_arithmetic =
   classify (function
     | Arithmetic _ | Enum _ -> true
-    | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+    | Void | Pointer _ | Record _ | Distinct _ | Va_list | Array _ | Function _
     | Unknown_type _ ->
         false)
 
 let is_pointer =
   classify (function
     | Pointer _ -> true
-    | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _
+    | Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list | Array _
     | Function _ | Unknown_type _ ->
         false)
 
 let is_record =
   classify (function
     | Record _ -> true
-    | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _
-    | Function _ | Unknown_type _ ->
+    | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+    | Array _ | Function _ | Unknown_type _ ->
         false)
 
 let is_scalar =
   classify (function
-    | Arithmetic _ | Enum _ | Pointer _ -> true
+    | Arithmetic _ | Enum _ | Pointer _ | Distinct _ -> true
     | Void | Record _ | Va_list | Array _ | Function _ | Unknown_type _ ->
         false)
 
@@ -421,7 +476,7 @@ let as_arithmetic tags t =
   | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
     ->
       Depends_on unknown
-  | Void | Pointer _ | Record _ | Va_list | Array _ | Function _
+  | Void | Pointer _ | Record _ | Distinct _ | Va_list | Array _ | Function _
   | Unknown_type { kind = Unknown_function; _ } ->
       Answer None
 
@@ -473,16 +528,17 @@ let is_flexible_array member =
   match member.member_type.shape with
   | Array { length = Unknown; _ } -> true
   | Array { length = Constant _ | Opaque | Variable; _ }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Function _ | Unknown_type _ ->
       false
 
 (* 6.7.2.1p4: an integer type and a width from 0 to that of the type, 0
-   only for an unnamed bit-field. The backend checks a width against a
-   type that typec does not know. *)
+   only for an unnamed bit-field; design 3.4: a distinct type where its
+   representation is one. The backend checks a width against a type that
+   typec does not know. *)
 let check_bit_field target tags member width =
   let fits =
-    match as_arithmetic tags member.member_type with
+    match as_arithmetic tags (representation member.member_type) with
     | Answer (Some (Integer integer)) ->
         width <= Target.integer_width target integer
     | Answer (Some (Real _ | Complex _) | None) -> false
@@ -536,8 +592,8 @@ let constructors tags t =
   | Record ({ variant = true; _ } as tag) ->
       Hashtbl.find_opt tags.constructors tag.record_id
   | Record { variant = false; _ }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _ | Function _
-  | Unknown_type _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
       None
 
 (* Compatible and composite types *)
@@ -637,6 +693,10 @@ and merge_known comparison a b =
   | Record x, Record y ->
       require (x.record_id = y.record_id);
       a
+  (* Design 3.4: a distinct type is compatible only with itself. *)
+  | Distinct x, Distinct y ->
+      require (x.distinct_id = y.distinct_id);
+      a
   | Va_list, Va_list -> a
   | Pointer x, Pointer y -> make a.qualifiers (Pointer (merge x y))
   | Array x, Array y ->
@@ -647,8 +707,8 @@ and merge_known comparison a b =
       let return = merge x.return y.return in
       let parameters = merge_parameters comparison x.parameters y.parameters in
       of_shape (Function { return; parameters })
-  | ( ( Void | Arithmetic _ | Enum _ | Record _ | Va_list | Pointer _
-      | Array _ | Function _ | Unknown_type _ ),
+  | ( ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+      | Pointer _ | Array _ | Function _ | Unknown_type _ ),
       _ ) ->
       raise Not_compatible
 
@@ -761,7 +821,9 @@ and same_shape dependence a b =
   | Function x, Function y ->
       same x.return y.return
       && same_parameters dependence x.parameters y.parameters
-  | (Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _), _ ->
+  | ( ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+      | Unknown_type _ ),
+      _ ) ->
       a.shape = b.shape
   | (Pointer _ | Array _ | Function _), _ -> false
 
@@ -789,6 +851,9 @@ let error_message = function
        that type or zero with a name"
   | Incompatible -> "types are not compatible"
   | Int128_unavailable -> "__int128 is not available on this target"
+  | Invalid_representation ->
+      "a distinct type is not over an unqualified arithmetic or pointer \
+       type"
   | Qualified_function -> "function type has qualifiers"
   | Atomic_array -> "_Atomic qualifies an array type"
   | Restrict_without_object_pointer ->

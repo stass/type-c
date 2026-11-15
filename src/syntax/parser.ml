@@ -1271,21 +1271,24 @@ let claim_enumerators state ~variant =
   in
   List.iter claim (constructor_names state)
 
-(* The definitions that a later work package implements: [private]
-   before [|] or [distinct]; and [distinct] before a type name. [private]
-   and [distinct] are words only there (design 2.3), so elsewhere after
-   the [=] they may name a type. *)
+let word_at state offset word = peek_at state offset = Identifier_token word
+
+(* The definition that a later work package implements: [private] before
+   [|] or [distinct]. [private] and [distinct] are words only there and
+   before a type name (design 2.3), so elsewhere after the [=] they may
+   name a type. *)
 let refuse_unimplemented_definition state =
-  let word_at offset word = peek_at state offset = Identifier_token word in
   if
-    word_at 0 "private"
-    && (peek_at state 1 = Punctuator_token P.Pipe || word_at 1 "distinct")
+    word_at state 0 "private"
+    && (peek_at state 1 = Punctuator_token P.Pipe
+       || word_at state 1 "distinct")
   then
     fail_not_implemented state ~section:"9.2" ~package:"1.7"
-      "`private` is not implemented yet";
-  if word_at 0 "distinct" && starts_type_name state 1 then
-    fail_not_implemented state ~section:"3.4" ~package:"1.4"
-      "distinct types are not implemented yet"
+      "`private` is not implemented yet"
+
+(* [distinct] is the word only before a token that begins a type name. *)
+let begins_distinct state =
+  word_at state 0 "distinct" && starts_type_name state 1
 
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
@@ -2296,6 +2299,12 @@ and type_definition state name ~type_keyword =
         record_specifier state kind ~alone:false ~claimed_by:(Some name)
       in
       (declared, Record_alias (finish state start specifier))
+  | _ when begins_distinct state ->
+      advance state;
+      let declared = declare state ~kind:Defining_type name in
+      let type_name = type_name state in
+      end_definition state name declared;
+      (declared, Distinct type_name)
   | _ ->
       let declared = declare state ~kind:Defining_type name in
       let type_name = type_name state in

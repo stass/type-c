@@ -274,10 +274,6 @@ structure that a variant lowers to (design 10.6).
 The constructs of later work packages are refused with the package that
 implements them.
 
-  $ printf 'type d = distinct int;\n' > distinct.tc
-  $ ./golden.exe distinct.tc
-  distinct.tc:1: distinct types are not implemented yet (design 3.4; work package 1.4)
-  [1]
   $ printf 'type box(T) = struct { T value; };\n' > generic.tc
   $ ./golden.exe generic.tc
   generic.tc:1: type parameters are not implemented yet (design 3.5; work package 2.1)
@@ -289,4 +285,32 @@ implements them.
   $ printf 'int f(void) { return result; }\n' > universe.tc
   $ ./golden.exe universe.tc
   universe.tc:1: `result` is a universe name that typec does not implement yet (design 3.6; work package 2.3)
+  [1]
+
+A distinct type lowers to the typedef of its representation (design
+10.2); its casts are kept. Type-C text refuses the operations and the
+implicit conversions that design 3.4 leaves out, each at its operation.
+
+  $ printf 'type d = distinct int *;\nd x = (d)0;\n' > distinct.tc
+  $ ./golden.exe distinct.tc | grep -v '^#' | grep .
+  typedef
+   int *
+  d
+  ;
+  d x = (d)0;
+  $ printf 'type d = distinct int;\nint f(d a) { return a + 1; }\n' > add.tc
+  $ ./golden.exe add.tc
+  add.tc:2: a value of the distinct type 'd' takes no such operation; a cast to its underlying type crosses to it (design 3.4)
+  [1]
+  $ printf 'type d = distinct int;\nd f(int a) { return a; }\n' > convert.tc
+  $ ./golden.exe convert.tc
+  convert.tc:2: a value of type 'int' does not convert to 'd' without a cast (design 3.4)
+  [1]
+  $ printf 'type d = distinct int;\nint f(d a, int b) { return a == b; }\n' > mixed.tc
+  $ ./golden.exe mixed.tc
+  mixed.tc:2: the operands are not both of the distinct type 'd' (design 3.4)
+  [1]
+  $ printf 'struct s;\ntype d = distinct struct s;\n' > over.tc
+  $ ./golden.exe over.tc
+  over.tc:2: the distinct type 'd' is not over an unqualified arithmetic or pointer type (design 3.4)
   [1]

@@ -35,6 +35,15 @@ type t =
   | Constructor_expression
       (** A constructor expression that names no constructor, or whose
           arguments do not match its fields (design 3.3). *)
+  | Distinct_representation
+      (** A distinct type over a type that is no unqualified arithmetic or
+          pointer type (design 3.4). *)
+  | Distinct_operation
+      (** An operation on a value of a distinct type in Type-C text that
+          the table of design 3.4 does not allow. *)
+  | Distinct_conversion
+      (** An implicit conversion to or from a distinct type in Type-C text
+          (design 3.4). *)
   | Not_implemented of { section : string; package : string }
       (** A construct of design [section] that work [package] implements. *)
 
@@ -48,6 +57,8 @@ let clause = function
   | Variant_operation -> "design 3.2 rule 6"
   | Zero_value -> "design 3.2 rule 7"
   | Constructor_expression -> "design 3.3"
+  | Distinct_representation | Distinct_operation | Distinct_conversion ->
+      "design 3.4"
   | Not_implemented { section; package } ->
       Printf.sprintf "design %s; work package %s" section package
 

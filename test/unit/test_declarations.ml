@@ -1369,6 +1369,72 @@ let zero_values () =
     (variant ^ "\n# 1 \"v.h\" 1\ne x = { .tag = e_B, .u.B = { 1 } };\n\
                 # 3 \"in.tc\" 2\n")
 
+(* Design 3.4: the table of operations on a distinct type, in Type-C
+   text; C text sees the representation (design 10.2). *)
+let distinct_types () =
+  let file = "in.tc" in
+  let types =
+    "type id = distinct unsigned int; type other = distinct unsigned int; \
+     type ref = distinct int *; struct bits { id f : 3; int g; }; "
+  in
+  let in_function body =
+    types ^ "id f(id a, id b, other o, ref r, unsigned u, int c) { " ^ body
+    ^ " }"
+  in
+  let refused body =
+    rejects ~file (in_function body)
+      "a value of the distinct type 'id' takes no such operation; a cast to \
+       its underlying type crosses to it (design 3.4)"
+  in
+  let mixed body =
+    rejects ~file (in_function body)
+      "the operands are not both of the distinct type 'id' (design 3.4)"
+  in
+  let converts body =
+    rejects ~file (in_function body) "without a cast (design 3.4)"
+  in
+  accepts ~file
+    (in_function
+       "id x = a; x = b; id *p = &x; void *v = p; (void)v; \
+        (void)sizeof a; (void)_Alignof(id); f(x, a, o, r, u, c); (a, b); \
+        if (a && !b || r) return c ? a : *p; while (a) break; \
+        unsigned n = (unsigned)a + 1; x = (id)n; x = (id)o; \
+        struct bits s = {0}; s.f = a; id z = {0}; (void)z; \
+        return a == b ? (id)(a != b) : s.f;");
+  accepts ~file (types ^ "static id k = (id)3; static id *q = &k;");
+  List.iter refused
+    [ "return a + b;"; "return -a;"; "a++; return a;"; "a += 1; return a;";
+      "return (id)(a < b);"; "switch (a) { default: ; } return a;";
+      "int t[2]; return (id)t[a];"; "struct bits s = {0}; return s.f + 1;" ];
+  mixed "return (id)(a == u);";
+  mixed "return (id)(a == 0);";
+  mixed "(void)(c ? a : u); return a;";
+  List.iter converts
+    [ "id x = 1; return x;"; "unsigned n = a; return (id)n;";
+      "a = u; return a;"; "return u;"; "f(u, a, o, r, u, c); return a;";
+      "id x = o; return x;"; "unsigned *n = &a; return (id)*n;";
+      "_Bool t = a; return (id)t;" ];
+  rejects ~file
+    (in_function "return a; } int g(id a) { return __builtin_printf(\"\", a);")
+    "takes no such operation";
+  rejects ~file (in_function "return (id)*r;") "'ref' takes no such operation";
+  rejects ~file "type d = distinct struct s *[2];"
+    "is not over an unqualified arithmetic or pointer type (design 3.4)";
+  rejects ~file "type d = distinct const int;"
+    "is not over an unqualified arithmetic or pointer type (design 3.4)";
+  rejects ~file
+    (types ^ "int g(id a) { return _Generic(a, unsigned: 1, id: 2); }")
+    "work package 1.4";
+  (* C text in a Type-C file sees the representation. *)
+  accepts ~file
+    (types
+   ^ "\n# 1 \"m.h\" 1\n\
+      static unsigned plus(id a) { return a + 1 + (a < 2); }\n\
+      enum { three = (id)3 }; static int t[(id)2];\n\
+      # 3 \"in.tc\" 2\n");
+  rejects ~file "enum e; type d = distinct enum e;"
+    "is not over an unqualified arithmetic or pointer type (design 3.4)"
+
 let variant_operations () =
   let file = "in.tc" in
   let variant = "type e = | A | B(int i); " in
@@ -1414,6 +1480,7 @@ let () =
   type_declarations ();
   variants ();
   variant_operations ();
+  distinct_types ();
   constructors ();
   zero_values ();
   builtin_typedefs ();

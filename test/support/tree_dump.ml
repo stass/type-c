@@ -602,6 +602,7 @@ and type_declaration reader (d : type_declaration) =
     match definition with
     | Incomplete_variant -> [ claim ]
     | Alias t -> [ type_name reader t ]
+    | Distinct t -> [ leaf "distinct"; type_name reader t ]
     | Record_alias { span; node = specifier } ->
         let claimed = if specifier.tag = None then [ claim ] else [] in
         [ specifier_dump reader (node span) ~claimed specifier ]

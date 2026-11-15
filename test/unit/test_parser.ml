@@ -1663,8 +1663,7 @@ let type_c_error_cases =
     case "constructors without a bar between them" "type e = | A B;"
       "error: in.tc:1: expected `;` after a type declaration, found `B`";
     case "a distinct type" "type d = distinct unsigned int;"
-      "error: in.tc:1: distinct types are not implemented yet (design 3.4; \
-       work package 1.4)";
+      "(type d distinct (type unsigned int))";
     case "a private variant" "type v = private | A;"
       "error: in.tc:1: `private` is not implemented yet (design 9.2; work \
        package 1.7)";

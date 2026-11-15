@@ -81,6 +81,10 @@ and shape =
   | Enum of enum_tag
   | Pointer of t  (** The referenced type. *)
   | Record of record_tag
+  | Distinct of distinct
+      (** A distinct type (design 3.4): a scalar type compatible only with
+          itself, of which only Type-C text knows; C text sees its
+          representation (design 10.2), through {!representation}. *)
   | Va_list
       (** {e Provisional (design P20).} The type of [__builtin_va_list]
           ({!Typec_syntax.Builtin_typedef.Va_list}), whose representation
@@ -99,6 +103,16 @@ and shape =
       (** A type that typec does not compute. Its qualifiers are those
           written on it; any within it, as [typeof] of a [const] object
           has, are part of what is unknown, so no relation compares them. *)
+
+(** Created once for each declaration of a distinct type, as a
+    {!record_tag} is, and only by {!declare_distinct}. *)
+and distinct = private {
+  distinct_id : int;
+  distinct_name : string;
+  representation : t;
+      (** The unqualified arithmetic or pointer type that it has the size,
+          alignment and representation of. *)
+}
 
 (** A member of a structure or union (6.7.2.1). An unnamed member of
     structure or union type that is not a bit-field is taken as an
@@ -141,6 +155,9 @@ type error =
   | Invalid_bit_field  (** 6.7.2.1p4. *)
   | Incompatible  (** No composite type: 6.2.7p1. *)
   | Int128_unavailable  (** [__int128] on a target without it. *)
+  | Invalid_representation
+      (** The type of a distinct type is no unqualified arithmetic or
+          pointer type (design 3.4). *)
 
 val error_message : error -> string
 
@@ -197,6 +214,9 @@ val declare_variant : tags -> string -> record_tag
 type constructor = { constructor_name : string; fields : member list }
 
 val declare_enum : tags -> string option -> enum_tag
+
+val declare_distinct : tags -> string -> t -> (t, error) result
+(** A new distinct type of this name over its representation. *)
 
 val define_record :
   Target.t -> tags -> record_tag -> member list -> (unit, error) result
@@ -280,6 +300,18 @@ val is_variably_modified : t -> bool Unknown.answer
 val as_variant : t -> string option
 (** The name of the variant whose structure [t] is, qualified or not, or
     [None] where [t] is no variant. *)
+
+val as_distinct : t -> distinct option
+(** The distinct type that [t] is, qualified or not. *)
+
+val mentions_distinct : t -> bool
+(** Whether a distinct type is part of [t]: [t] itself, or a type that it
+    points to, is an array of, returns or takes. Members of a structure or
+    union are not part of it. *)
+
+val representation : t -> t
+(** The type that C text sees for [t] (design 10.2): the representation of
+    a distinct type with its qualifiers, any other type unchanged. *)
 
 val as_arithmetic : tags -> t -> Arithmetic.t option Unknown.answer
 (** The arithmetic type of an operand, without its qualifiers. An

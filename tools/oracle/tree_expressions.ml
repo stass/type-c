@@ -227,7 +227,7 @@ and block visit (b : block) =
 and type_declaration visit (d : type_declaration) =
   match d.node.definition with
   | Incomplete_variant -> ()
-  | Alias name -> type_name visit name
+  | Alias name | Distinct name -> type_name visit name
   | Record_alias specifier ->
       type_specifier visit (Struct_or_union specifier.node)
   | Variant constructors ->

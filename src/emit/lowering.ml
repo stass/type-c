@@ -194,6 +194,11 @@ let type_declaration (tokens : Token.t array)
         (record_declarations Struct ~tag:name.node name.node)
         (head @ [ declaration.span.last ])
   | Alias type_name -> alias tokens ~location ~head name.node type_name
+  (* Design 10.2: the typedef of its representation. *)
+  | Distinct type_name ->
+      let distinct_word = grammar_token_before tokens type_name.span.first in
+      let equals = grammar_token_before tokens distinct_word in
+      alias tokens ~location ~head:(head @ [ equals ]) name.node type_name
   | Record_alias record -> record_alias tokens ~location ~head name.node record
   | Variant constructors ->
       variant tokens ~location ~head declaration constructors

@@ -41,7 +41,7 @@ let rec contents_problem tags (t : Ctype.t) =
       let members = Ctype.record_members tags record in
       first_problem (member_problem tags) (Option.value members ~default:[])
   | Unknown_type unknown -> Unknown.Depends_on unknown
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ ->
       Unknown.Answer None
 

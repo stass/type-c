@@ -122,3 +122,37 @@ members; its assertions compare the layout with the structure that
   count
   ;
   count n;
+
+A distinct type is the typedef of its representation (design 10.2): the
+same size and alignment on each backend, and a C header reads its value
+as the representation, while Type-C text compares and crosses it only
+as design 3.4 allows.
+
+  $ cat > reader.h <<'EOF'
+  > #include <stdint.h>
+  > _Static_assert(sizeof (reg_id) == sizeof (uint32_t), "size");
+  > _Static_assert(_Alignof (reg_id) == _Alignof (uint32_t), "align");
+  > static uint32_t next(reg_id r) { return r + 1; }
+  > EOF
+  $ cat > distinct.tc <<'EOF'
+  > #include <stdio.h>
+  > #include <stdint.h>
+  > type reg_id = distinct uint32_t;
+  > type block_id = distinct uint32_t;
+  > #include "reader.h"
+  > struct slot { reg_id r : 8; block_id b; };
+  > static reg_id first = (reg_id)7;
+  > int main(void) {
+  >   struct slot s = {0};
+  >   s.r = first;
+  >   s.b = (block_id)(uint32_t)s.r;
+  >   reg_id r = (reg_id)next(s.r);
+  >   printf("%u %u %d %d\n", (unsigned)r, (unsigned)s.b, r == first,
+  >          !s.r);
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Werror -o clang-distinct distinct.tc && ./clang-distinct
+  8 7 0 0
+  $ typec --cc=$gcc -Wall -Werror -o gcc-distinct distinct.tc && ./gcc-distinct
+  8 7 0 0

@@ -598,8 +598,8 @@ let is_old_style_definition (t : Ctype.t) =
   match t.shape with
   | Function { parameters = Old_style (_ :: _); _ } -> true
   | Function { parameters = Prototype _ | Unspecified | Old_style []; _ }
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Unknown_type _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Unknown_type _ ->
       false
 
 let function_declared state scope span specified name declared
@@ -917,7 +917,7 @@ and fixed_type state span specifiers : Integer.t Unknown.answer =
   | Arithmetic (Integer integer) -> Answer integer
   | Unknown_type unknown -> Depends_on unknown
   | Void | Arithmetic (Real _ | Complex _) | Enum _ | Pointer _ | Record _
-  | Va_list | Array _ | Function _ ->
+  | Distinct _ | Va_list | Array _ | Function _ ->
       fail state span
         "the fixed type of an enumeration is not an integer type (C23 6.7.2.2)"
 
@@ -1435,7 +1435,7 @@ and declare_parameter state span derived name declared =
 and parameter_object_type state span (t : Ctype.t) =
   match t.shape with
   | Va_list -> unknown_type state span "a va_list parameter" Unknown_object
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Array _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Array _
   | Function _ | Unknown_type _ ->
       t
 
@@ -1630,8 +1630,25 @@ and read_type_declaration state (declaration : Tree.type_declaration) =
       bind (Ctype.record record)
   | Variant constructors -> read_variant state declaration constructors bind
   | Alias type_name -> bind (read_type_name state type_name)
+  | Distinct type_name -> bind (distinct_type state name type_name)
   | Record_alias specifier ->
       read_record_alias state name declared specifier bind
+
+(* Design 3.4: a new type over an unqualified arithmetic or pointer
+   type. *)
+and distinct_type state (name : Tree.identifier) type_name =
+  let representation = read_type_name state type_name in
+  let complete = Ctype.is_complete state.tags representation <> Answer false in
+  match Ctype.declare_distinct state.tags name.node representation with
+  | Ok t when complete -> t
+  | Ok _ | Error Invalid_representation ->
+      fail state type_name.span
+        (Rule.message Distinct_representation
+           (Printf.sprintf
+              "the distinct type '%s' is not over an unqualified arithmetic \
+               or pointer type"
+              name.node))
+  | Error error -> fail state type_name.span (Ctype.error_message error)
 
 (* A variant is the structure that it lowers to (design 10.1): that of
    the incomplete variant it completes, or a new one under the tag that
@@ -1814,8 +1831,8 @@ let read_declaration state (declaration : Tree.declaration) =
 let return_type (function_type : Ctype.t) =
   match function_type.shape with
   | Function { return; _ } -> Some return
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
-  | Unknown_type _ ->
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Unknown_type _ ->
       None
 
 (* 6.9.1. The body is typed where the definition stands, so that it sees

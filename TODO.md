@@ -243,6 +243,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   alternative, refusing type declarations inside expressions, also
   refuses `type t = typeof(({ type u = ...; ... }))`. Owner decision, as
   it adds a rule to 3.3.
+- [High] Design 13.5: lower a `_Generic` or `__builtin_types_compatible_p`
+  that compares a distinct type with its answer, which typec already
+  computes (`Expressions.selection`, `types_compatible`). Until then
+  `Expressions.refuse_unlowered_answer` refuses one in either text, as
+  the backend would answer for the representation. The replacement must
+  not overlap the edits that lowering makes inside the associations it
+  drops (constructor expressions).
 - [Medium] `Expressions.positioned` refuses a second typing of a node
   in another position at run time, and some callers type a node twice in
   the same position on purpose (`selected`, `statement_expression`,
@@ -784,12 +791,36 @@ types (design 13.3).
   and 2.2's old-style case (an error), each with a test; until then
   `Universe` leaves every universe name an ordinary identifier to the
   grammar.
-- [Low] After the `=` of a type declaration, `private` and `distinct`
-  may also be typedef names (design 2.3 recognises them only there).
-  The parser takes `distinct` as the word only before a token that
-  begins a type name, and `private` only before `|` or `distinct`, so
-  `type a = distinct;` and `type b = private *;` are aliases. Confirm in
-  the design (3.4, 9.2) when 1.4 and 1.7 implement them.
+- [Low] After the `=` of a type declaration, `private` may also be a
+  typedef name. The parser takes `private` as the word only before `|`
+  or `distinct`, so `type b = private *;` is an alias. Confirm in the
+  design (9.2) when 1.7 implements it; 2.3 says it for `distinct`.
+- [Medium] Distinct types, owner decisions taken by default (design
+  3.4): a qualified representation (`distinct const int`) is refused;
+  an argument of a distinct type to a function without a prototype is
+  refused as `...` is, since both promote it; Type-C or C text is
+  decided by the first token of the operation, and for an implicit
+  conversion by that of the converted expression.
+- [Medium] Distinct types: an implicit conversion is checked against
+  the target type of its position (design 3.3), which for an
+  initialiser with elided braces is the enclosing aggregate, so
+  `struct outer o = {5};` whose first scalar is a distinct type is not
+  refused. Check the scalar that the value reaches as well.
+- [Medium] Distinct types: the operation table (`Expressions.
+  reads_distinct`) holds by construction only for operands typed in
+  `expression_node`; other consumers each call `read_operand`, and some
+  do not: an array length or `offsetof` index, `goto *p`, and atomic
+  builtins take a distinct value, and `D *` mixes with `U *` in `==`,
+  `<`, `-` and `?:` without a cast. Invert the default: make the plain
+  typing entry refuse a distinct value and give the uses that design 3.4
+  allows an explicit whole-value entry.
+- [Low] Distinct types: `Distinct_operand` carries a `Ctype.t`, so
+  `refuse_mixed` has an unreachable case; carry the `Ctype.distinct`.
+  The bit-field narrowing that GCC applies is skipped for a distinct
+  member in C text too.
+- [Medium] Distinct types in C text: only the top level of a type reads
+  as the representation, so C text that converts `D *` to `U *`
+  without a cast is refused, which the C compiler accepts.
 - [Low] Type-C text cannot name a tag that a type declaration claims
   (design 10.1 rule 6); C text in the same unit can, and names the
   lowered structure. Say so in the design or refuse it there too.

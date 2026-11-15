@@ -111,7 +111,7 @@ let first_level typing ~zeroes span (t : Ctype.t) =
       match Ctype.member_at typing.tags tag 0 with
       | Some _ -> Some (Record_level { tag; position = 0 })
       | None -> None)
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Function _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Function _
   | Unknown_type _ ->
       None
 
@@ -246,7 +246,7 @@ let string_initialiser typing ~target element literal =
           "a string literal initialises an array of another character type \
            (C11 6.7.9p14, p15)";
       length
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Record _ | Va_list
   | Function _ | Unknown_type _ ->
       invalid_arg "Initialiser: a string literal that is not an array"
 
@@ -258,7 +258,8 @@ let completed typing (t : Ctype.t) length =
       match Ctype.array_of typing.tags element length with
       | Ok completed -> completed
       | Error _ -> invalid_arg "Initialiser: an array that its length breaks")
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Record _
+  | Va_list | Array _
   | Function _ | Unknown_type _ ->
       t
 
@@ -383,7 +384,8 @@ let rec holds_variant typing (t : Ctype.t) =
   | None, Array { element; _ } -> holds_variant typing element
   | None, Record tag -> members_hold_variant typing tag 0
   | ( None,
-      ( Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Function _
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+      | Function _
       | Unknown_type _ ) ) ->
       false
 
@@ -412,7 +414,8 @@ let rec first_variant typing (t : Ctype.t) =
       | Some first -> first_variant typing first.member_type
       | None -> None)
   | ( None,
-      ( Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Function _
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+      | Function _
       | Unknown_type _ ) ) ->
       None
 
@@ -424,10 +427,16 @@ let rec first_variant typing (t : Ctype.t) =
    constructor, so an expression that initialises an aggregate around
    the variant means there what it means with the variant as its target.
    The target stays the expression's as the walk elides braces. *)
+(* Design 3.4: [{0}] gives an object of a distinct type the zero value of
+   its representation, so its 0 converts to no type there; [zeroes] says
+   that the 0 is that of [{0}]. *)
+let scalar_target ~zeroes (t : Ctype.t) =
+  if zeroes && Option.is_some (Ctype.as_distinct t) then None else Some t
+
 let target_at typing (t : Ctype.t) =
   Option.value (first_variant typing t) ~default:t
 
-let reach_of typing ~target (t : Ctype.t) expression =
+let reach_of typing ~zeroes ~target (t : Ctype.t) expression =
   match t.shape with
   | Array { element; _ } -> (
       let form = form typing expression in
@@ -452,8 +461,8 @@ let reach_of typing ~target (t : Ctype.t) expression =
           Whole
       | Answer false -> Elided
       | Depends_on _ -> Unknown_reach)
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Function _ ->
-      ignore (typing.value (Some target) expression);
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Function _ ->
+      ignore (typing.value (scalar_target ~zeroes target) expression);
       typing.initialises expression;
       Whole
   | Va_list | Unknown_type _ ->
@@ -480,7 +489,7 @@ let rec place typing ~zeroes ~elided ~depth (level, outer)
         | Some target -> target
         | None -> target_at typing t
       in
-      match reach_of typing ~target t expression with
+      match reach_of typing ~zeroes ~target t expression with
       | Whole ->
           if Option.is_none elided then typing.initialises_whole t expression;
           Some (level, outer)
@@ -508,8 +517,9 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
       List.iter (untargeted_element typing) excess;
       completed typing t length
   | (Array _ | Record _), _ -> aggregate typing t list
-  | (Void | Arithmetic _ | Enum _ | Pointer _ | Function _), elements ->
-      scalar typing t elements;
+  | ( (Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Function _),
+      elements ) ->
+      scalar typing ~zeroes:(is_zero typing list) t elements;
       t
   | (Va_list | Unknown_type _), elements ->
       List.iter (untargeted_element typing) elements;
@@ -579,7 +589,7 @@ and place_element typing ~zeroes t walk
 
 (* 6.7.9p11: one initialiser, which GCC and Clang take in more braces, and
    after it excess ones, which they take with a warning. *)
-and scalar typing t elements =
+and scalar typing ~zeroes t elements =
   match elements with
   | [] -> ()
   | first :: excess ->
@@ -590,7 +600,7 @@ and scalar typing t elements =
       | [] -> ());
       (match first.node.initialiser with
       | Expression_initialiser expression ->
-          ignore (typing.value (Some t) expression);
+          ignore (typing.value (scalar_target ~zeroes t) expression);
           typing.initialises expression
       | Braced inner -> ignore (braced typing t inner));
       List.iter (untargeted_element typing) excess
@@ -617,7 +627,7 @@ let array_from typing t expression =
   match (typing.value (Some t) expression).shape with
   | Array { length; _ } -> completed typing t length
   | Unknown_type _ -> completed typing t Opaque
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Record _ | Va_list
   | Function _ ->
       typing.fail expression.span
         "an array is initialised by a compound literal that is not an \
@@ -645,7 +655,8 @@ let initialise typing (t : Ctype.t) (initialiser : Tree.initialiser) =
   | Expression_initialiser expression, Array { element; _ } ->
       array_initialiser typing t element expression
   | ( Expression_initialiser expression,
-      ( Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Record _
+      | Va_list
       | Function _ | Unknown_type _ ) ) ->
       ignore (typing.value (Some t) expression);
       typing.initialises expression;

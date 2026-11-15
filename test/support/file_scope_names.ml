@@ -52,7 +52,7 @@ let add_derived_enumerators names (variant : identifier) = function
             (enumerator_name ~variant:variant.node name.node)
             (In_tree (derived_enumerator name.span.first)))
         constructors
-  | Incomplete_variant | Alias _ | Record_alias _ -> ()
+  | Incomplete_variant | Alias _ | Distinct _ | Record_alias _ -> ()
 
 let add_external names = function
   | External_declaration
