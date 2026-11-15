@@ -1724,6 +1724,33 @@ let distinct_operands () =
        "id x = a; __atomic_store_n(&x, a, 5); \
         __asm__(\"\" : \"=r\"(x) : \"0\"(a)); \
         return __atomic_load_n(&x, 5);");
+  (* GCC has no __c11 builtins, so these take a Clang target. *)
+  rejects ~file ~target:lp64_clang
+    (in_function "_Atomic id x; return __c11_atomic_fetch_add(&x, a, 5);")
+    "a value of the distinct type 'id' takes no such operation";
+  rejects ~file ~target:lp64_clang
+    (in_function "_Atomic id x; __c11_atomic_store(&x, u, 5); return a;")
+    "a value of type 'unsigned int' does not convert to 'id' without a cast";
+  rejects ~file ~target:lp64_clang
+    (in_function
+       "_Atomic id x; (void)__c11_atomic_exchange(&x, u, 5); return a;")
+    "a value of type 'unsigned int' does not convert to 'id' without a cast";
+  rejects ~file ~target:lp64_clang
+    (in_function
+       "volatile _Atomic id x; u = __c11_atomic_load(&x, 5); return a;")
+    "a value of type 'id' does not convert to 'unsigned int' without";
+  rejects ~file ~target:lp64_clang
+    (in_function
+       "_Atomic id x; \
+        return (id)__c11_atomic_compare_exchange_weak(&x, &u, a, 5, 5);")
+    "a value of type 'unsigned int *' does not convert to 'id *' without";
+  accepts ~file ~target:lp64_clang
+    (in_function
+       "_Atomic id x; id e = a; __c11_atomic_init(&x, a); \
+        __c11_atomic_store(&x, a, 5); (void)__c11_atomic_exchange(&x, a, 5); \
+        (void)__c11_atomic_compare_exchange_strong(&x, &e, a, 5, 5); \
+        (void)__c11_atomic_compare_exchange_weak(&x, &e, a, 5, 5); \
+        return __c11_atomic_load(&x, 5);");
   accepts ~file
     (in_function
        "id x = a; id *p = &x; void *v = &u; (void)(p == v); \

@@ -2220,19 +2220,23 @@ and constructor_argument context named (field : Ctype.member) argument =
 and argument_positions context callee (callee_typed : typed) arguments =
   match (builtin_rule context callee, arguments) with
   | Some (_, Moves_object { operands; _ }), first :: rest ->
+      let span = first.span in
       let first = expression context first in
-      Untargeted :: moved_positions context operands first rest
+      Untargeted :: moved_positions context span operands first rest
   | _ -> prototype_positions context callee_typed arguments
 
 (* Design 3.4: a value moves into or out of the object that [first]
    points to as it is assigned, so a value of a distinct type moves only
-   to and from an object of its type. *)
-and moved_positions context operands (first : typed) arguments =
+   to and from an object of its type. The value has the unqualified type
+   of the object, which drops the _Atomic of Clang's __c11 builtins. *)
+and moved_positions context span operands (first : typed) arguments =
   match operand context first with
-  | Pointer_operand { pointer; referenced } ->
+  | Pointer_operand { referenced; _ } ->
+      let moved = Ctype.unqualified referenced in
       let position : Builtin_function.moved -> position = function
-        | Object_type -> Targeted (Ctype.unqualified referenced)
-        | Pointer_to_object -> Targeted pointer
+        | Object_type -> Targeted moved
+        | Pointer_to_object ->
+            Targeted (checked context span (Ctype.pointer_to moved))
       in
       zip_positions (List.map position operands) arguments
   | Arithmetic_operand _ | Distinct_operand _ | Other_operand _

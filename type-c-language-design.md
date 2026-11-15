@@ -421,13 +421,16 @@ The table's edges are these rules.
    they assign it as `=` does: `__atomic_load(_n)`, `__atomic_store(_n)`,
    `__atomic_exchange(_n)`, `__atomic_compare_exchange(_n)`,
    `__sync_lock_test_and_set`, `__sync_lock_release`,
-   `__sync_val_compare_and_swap` and `__sync_bool_compare_and_swap`. The
-   operands that stand for a value of the object then have type `D`, or
-   `D *` where they point to one, as the source of an assignment does;
-   the memory orders and `weak` stay integers.
-6. The arithmetic and bitwise `__atomic_*` and `__sync_*` builtins, such
-   as `__atomic_fetch_add` and `__sync_or_and_fetch`, refuse an object of
-   type `D`, because they do arithmetic on its representation.
+   `__sync_val_compare_and_swap` and `__sync_bool_compare_and_swap`.
+   Clang's `__c11_atomic_init`, `_load`, `_store`, `_exchange`,
+   `_compare_exchange_strong` and `_weak` do the same on an object of
+   type `_Atomic D`. The operands that stand for a value of the object
+   then have type `D`, or `D *` where they point to one, as the source of
+   an assignment does; the memory orders and `weak` stay integers.
+6. The arithmetic and bitwise `__atomic_*`, `__sync_*` and
+   `__c11_atomic_*` builtins, such as `__atomic_fetch_add`,
+   `__sync_or_and_fetch` and `__c11_atomic_fetch_add`, refuse an object
+   of type `D`, because they do arithmetic on its representation.
    `__atomic_test_and_set` and `__atomic_clear` take a `volatile void *`,
    which a `D *` converts to as it does for `memset`.
 

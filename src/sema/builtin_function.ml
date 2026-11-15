@@ -251,9 +251,8 @@ let bits =
    Clang's __c11 builtins take a pointer to an _Atomic type. *)
 let atomics =
   let pointee name = both name (Rule Pointee_of_first) in
-  let moves name operands result =
-    both name (Rule (Moves_object { operands; result }))
-  in
+  let moves_rule operands result = Rule (Moves_object { operands; result }) in
+  let moves name operands result = both name (moves_rule operands result) in
   let fence name = both name (prototype Void [ int ]) in
   let c11 name rule = clang ("__c11_atomic_" ^ name) rule in
   List.concat
@@ -296,13 +295,16 @@ let atomics =
       ];
       List.map
         (fun name -> c11 name (Rule Pointee_of_first))
-        [ "load"; "exchange"; "fetch_add"; "fetch_sub"; "fetch_and";
-          "fetch_or"; "fetch_xor" ];
+        [ "fetch_add"; "fetch_sub"; "fetch_and"; "fetch_or"; "fetch_xor" ];
       [
-        c11 "init" (type_generic Void);
-        c11 "store" (type_generic Void);
-        c11 "compare_exchange_strong" (type_generic bool);
-        c11 "compare_exchange_weak" (type_generic bool);
+        c11 "init" (moves_rule [ Object_type ] (Fixed Void));
+        c11 "store" (moves_rule [ Object_type ] (Fixed Void));
+        c11 "load" (moves_rule [] Moved_object);
+        c11 "exchange" (moves_rule [ Object_type ] Moved_object);
+        c11 "compare_exchange_strong"
+          (moves_rule [ Pointer_to_object; Object_type ] (Fixed bool));
+        c11 "compare_exchange_weak"
+          (moves_rule [ Pointer_to_object; Object_type ] (Fixed bool));
         c11 "is_lock_free" (prototype bool [ Size ]);
         c11 "thread_fence" (prototype Void [ int ]);
         c11 "signal_fence" (prototype Void [ int ]);

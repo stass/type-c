@@ -888,11 +888,9 @@ types (design 13.3).
   operation, for an implicit conversion by that of the converted
   expression, and for a value that no operator reads (an array length,
   a designator, `goto *`) by its own. Confirm and say so in 3.4.
-- [Low] Distinct types: Clang's `__c11_atomic_load`, `_store`, `_init`,
-  `_exchange` and `_compare_exchange_*` only move a value, as the
-  `__atomic` ones that design 3.4 rule 5 names do, but still refuse an
-  `_Atomic` object of a distinct type. Decide whether rule 5 names them;
-  the table would state them as `Moves_object`.
+- [Low] The builtin table lacks Clang's `__c11_atomic_fetch_max`,
+  `_fetch_min` and `_fetch_nand`, so typec refuses valid calls of them as
+  undeclared; list them as `Pointee_of_first`.
 - [Medium] Distinct types: C text sees the representation at every
   level, so a C-text operation on a Type-C value gives U where the
   object is D: with a header macro `M(p)` that is `*(p)` on `id *p`,
