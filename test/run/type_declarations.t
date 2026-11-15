@@ -157,6 +157,45 @@ as design 3.4 allows.
   $ typec --cc=$gcc -Wall -Werror -o gcc-distinct distinct.tc && ./gcc-distinct
   8 7 0 0
 
+The atomic builtins that only move a value load, store, exchange and
+compare-exchange a distinct object with values of its type, and an asm
+operand takes a distinct value, which the backend sees as its
+representation (design 3.4). The asm template is empty, so it runs on
+every architecture.
+
+  $ cat > atomic.tc <<'EOF'
+  > #include <stdio.h>
+  > type id = distinct unsigned;
+  > int main(void) {
+  >   id x = (id)1, r = (id)0, e = (id)2, d = (id)3;
+  >   __atomic_store_n(&x, d, __ATOMIC_SEQ_CST);
+  >   __atomic_store(&x, &e, __ATOMIC_SEQ_CST);
+  >   __atomic_load(&x, &r, __ATOMIC_SEQ_CST);
+  >   id n = __atomic_load_n(&x, __ATOMIC_SEQ_CST);
+  >   id old = __atomic_exchange_n(&x, d, __ATOMIC_SEQ_CST);
+  >   __atomic_exchange(&x, &e, &r, __ATOMIC_SEQ_CST);
+  >   _Bool swapped = __atomic_compare_exchange_n(&x, &e, d, 0,
+  >       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+  >   _Bool failed = __atomic_compare_exchange(&x, &e, &d, 0,
+  >       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+  >   d = (id)4;
+  >   id before = __sync_val_compare_and_swap(&x, d, e);
+  >   _Bool again = __sync_bool_compare_and_swap(&x, e, d);
+  >   id held = __sync_lock_test_and_set(&x, e);
+  >   __sync_lock_release(&x);
+  >   id out;
+  >   __asm__("" : "=r"(out) : "0"(held));
+  >   printf("%u %u %u %u %d %d %u %d %u %u\n", (unsigned)n, (unsigned)old,
+  >          (unsigned)r, (unsigned)e, swapped, failed, (unsigned)before,
+  >          again, (unsigned)out, (unsigned)x);
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Werror -o clang-atomic atomic.tc && ./clang-atomic
+  2 2 3 3 1 0 3 1 4 0
+  $ typec --cc=$gcc -Wall -Werror -o gcc-atomic atomic.tc && ./gcc-atomic
+  2 2 3 3 1 0 3 1 4 0
+
 Type-C text tells a distinct type from its representation in a generic
 selection and __builtin_types_compatible_p, and typec answers them
 (design 13.5): alone, Clang and GCC would take the int association for

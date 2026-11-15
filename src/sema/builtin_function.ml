@@ -17,10 +17,14 @@ type c_type =
 
 type prototype = { return : c_type; parameters : c_type list; variadic : bool }
 
+type moved = Object_type | Pointer_to_object
+type moved_result = Moved_object | Fixed of c_type
+
 type rule =
   | Type_generic of c_type
   | Pointee_of_first
   | Complex_of_first
+  | Moves_object of { operands : moved list; result : moved_result }
 
 type signature = Prototype of prototype | Rule of rule | Unknown
 
@@ -242,17 +246,37 @@ let bits =
 
 (* The _n forms and the fetch operations give the value that the pointer
    points to; the generic forms take pointers to their values instead.
+   Those that only move a value into or out of the object, which design
+   3.4 lets be of a distinct type, state their operands by its type.
    Clang's __c11 builtins take a pointer to an _Atomic type. *)
 let atomics =
   let pointee name = both name (Rule Pointee_of_first) in
-  let generic_void name = both name (type_generic Void) in
+  let moves name operands result =
+    both name (Rule (Moves_object { operands; result }))
+  in
   let fence name = both name (prototype Void [ int ]) in
   let c11 name rule = clang ("__c11_atomic_" ^ name) rule in
   List.concat
     [
-      List.map pointee
-        [ "__atomic_load_n"; "__atomic_exchange_n";
-          "__sync_val_compare_and_swap"; "__sync_lock_test_and_set" ];
+      [
+        moves "__atomic_load_n" [] Moved_object;
+        moves "__atomic_load" [ Pointer_to_object ] (Fixed Void);
+        moves "__atomic_store_n" [ Object_type ] (Fixed Void);
+        moves "__atomic_store" [ Pointer_to_object ] (Fixed Void);
+        moves "__atomic_exchange_n" [ Object_type ] Moved_object;
+        moves "__atomic_exchange"
+          [ Pointer_to_object; Pointer_to_object ] (Fixed Void);
+        moves "__atomic_compare_exchange_n"
+          [ Pointer_to_object; Object_type ] (Fixed bool);
+        moves "__atomic_compare_exchange"
+          [ Pointer_to_object; Pointer_to_object ] (Fixed bool);
+        moves "__sync_val_compare_and_swap"
+          [ Object_type; Object_type ] Moved_object;
+        moves "__sync_bool_compare_and_swap"
+          [ Object_type; Object_type ] (Fixed bool);
+        moves "__sync_lock_test_and_set" [ Object_type ] Moved_object;
+        moves "__sync_lock_release" [] (Fixed Void);
+      ];
       List.concat_map
         (fun operation ->
           List.map pointee
@@ -261,14 +285,8 @@ let atomics =
               "__sync_fetch_and_" ^ operation;
               "__sync_" ^ operation ^ "_and_fetch" ])
         [ "add"; "sub"; "and"; "or"; "xor"; "nand" ];
-      List.map generic_void
-        [ "__atomic_store_n"; "__atomic_load"; "__atomic_store";
-          "__atomic_exchange"; "__sync_lock_release" ];
       List.map fence [ "__atomic_thread_fence"; "__atomic_signal_fence" ];
       [
-        both "__atomic_compare_exchange" (type_generic bool);
-        both "__atomic_compare_exchange_n" (type_generic bool);
-        both "__sync_bool_compare_and_swap" (type_generic bool);
         both "__atomic_test_and_set"
           (prototype bool [ volatile_void_pointer; int ]);
         both "__atomic_clear" (prototype Void [ volatile_void_pointer; int ]);

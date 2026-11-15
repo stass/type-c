@@ -340,3 +340,46 @@ implicit conversions that design 3.4 leaves out, each at its operation.
   $ ./golden.exe over.tc
   over.tc:2: the distinct type 'd' is not over an unqualified arithmetic or pointer type (design 3.4) [TC0010]
   [1]
+
+An atomic builtin that only moves the value of a distinct object takes
+its other value operands of that distinct type; one that does arithmetic
+on the object refuses it (design 3.4).
+
+  $ cat > atomic.tc <<'EOF'
+  > type id = distinct unsigned;
+  > void f(id *p) { (void)__atomic_fetch_add(p, 1, 5); }
+  > EOF
+  $ ./golden.exe atomic.tc
+  atomic.tc:2: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
+  [1]
+  $ cat > exchange.tc <<'EOF'
+  > type id = distinct unsigned;
+  > type bid = distinct unsigned;
+  > _Bool f(id *p, id *e, bid d) {
+  >   return __atomic_compare_exchange_n(p, e, d, 0, 5, 5);
+  > }
+  > EOF
+  $ ./golden.exe exchange.tc
+  exchange.tc:4: a value of type 'bid' does not convert to 'id' without a cast (design 3.4) [TC0012]
+  [1]
+  $ cat > qualified.tc <<'EOF'
+  > type id = distinct unsigned;
+  > unsigned f(volatile id *p) { return __atomic_load_n(p, 5) * 2u; }
+  > EOF
+  $ ./golden.exe qualified.tc
+  qualified.tc:2: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
+  [1]
+  $ cat > load.tc <<'EOF'
+  > type id = distinct unsigned;
+  > void f(id *p, unsigned *r) { __atomic_load(p, r, 5); }
+  > EOF
+  $ ./golden.exe load.tc
+  load.tc:2: a value of type 'unsigned int *' does not convert to 'id *' without a cast (design 3.4) [TC0012]
+  [1]
+  $ cat > store.tc <<'EOF'
+  > type id = distinct unsigned;
+  > void f(id *p) { __atomic_store_n(p, 0, 5); }
+  > EOF
+  $ ./golden.exe store.tc
+  store.tc:2: a value of type 'int' does not convert to 'id' without a cast (design 3.4) [TC0012]
+  [1]

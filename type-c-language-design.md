@@ -380,6 +380,33 @@ apart.
 | Bit-field of type `D` | Allowed where one of type `U` is. |
 | Anything else | Error: arithmetic, `<` and the other relational operators, `++`, compound assignment, unary `*`, `->`, `[]`, a call, `switch`, passing through `...`, and every implicit conversion. |
 
+The table's edges are these rules.
+
+1. `U` is unqualified, so `distinct const int` is an error: a qualifier
+   belongs to an object, and `const D` states it where it applies.
+2. `{0}` also zeroes an object whose first member, reached through
+   elided braces, has type `D`, because `{0}` is the C idiom that zeroes
+   any object and zero is a value of every `U`.
+3. A value of type `D` passes to a function without a prototype no more
+   than through `...`, because the default argument promotions of both
+   would convert it to another type.
+4. An `asm` operand takes a value of type `D`, because `asm` is unchecked
+   and the backend sees `D` as `U` (section 10.2).
+5. The builtins that only move a value into or out of the object that
+   their first argument points to take an object of type `D`, because
+   they assign it as `=` does: `__atomic_load(_n)`, `__atomic_store(_n)`,
+   `__atomic_exchange(_n)`, `__atomic_compare_exchange(_n)`,
+   `__sync_lock_test_and_set`, `__sync_lock_release`,
+   `__sync_val_compare_and_swap` and `__sync_bool_compare_and_swap`. The
+   operands that stand for a value of the object then have type `D`, or
+   `D *` where they point to one, as the source of an assignment does;
+   the memory orders and `weak` stay integers.
+6. The arithmetic and bitwise `__atomic_*` and `__sync_*` builtins, such
+   as `__atomic_fetch_add` and `__sync_or_and_fetch`, refuse an object of
+   type `D`, because they do arithmetic on its representation.
+   `__atomic_test_and_set` and `__atomic_clear` take a `volatile void *`,
+   which a `D *` converts to as it does for `memset`.
+
 Rationale. The purpose is that ids and units do not mix by accident. The
 operation set is the smallest that lets a program store, compare and test
 an id; arithmetic goes through casts so that each crossing is visible.

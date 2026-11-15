@@ -582,7 +582,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   to a qualified type has an unknown type: Clang keeps a qualifier that
   a typedef gives the referenced type (`typedef const int cint; cint *p;
   __atomic_load_n(p, 0)` is `const int`) and drops one of the
-  declarator, and Ctype keeps no typedef to tell them apart.
+  declarator, and Ctype keeps no typedef to tell them apart. A distinct
+  referenced type gives itself unqualified instead, as design 3.4 needs,
+  so `__typeof__` of the result may lose such a qualifier under Clang.
+- [Medium] Distinct types: an implicit conversion between a distinct
+  type and an unknown one is accepted, since `refuse_distinct_conversion`
+  refuses only where `Ctype.compatible` answers false: `u = d` where `u`
+  is declared through a `__typeof__` that typec leaves unknown, and so a
+  move-only atomic builtin (design 3.4 rule 5) on such an object. Refuse
+  it in Type-C text, as design 13.5 refuses an unknown that may hide a
+  distinct type.
 - [Medium] A `__builtin_choose_expr` whose condition depends on an
   unknown type through a cast or a selection, such as one whose own
   condition is `__builtin_constant_p(x)`, is an error rather than of
@@ -877,16 +886,16 @@ types (design 13.3).
   and 2.2's old-style case (an error), each with a test; until then
   `Universe` leaves every universe name an ordinary identifier to the
   grammar.
-- [Medium] Distinct types, owner decisions taken by default (design
-  3.4): a qualified representation (`distinct const int`) is refused;
-  an argument of a distinct type to a function without a prototype is
-  refused as `...` is, since both promote it; Type-C or C text is
-  decided by the first token of the operation, for an implicit
-  conversion by that of the converted expression, and for a value that
-  no operator reads (an array length, a designator, `goto *`) by its
-  own; a builtin that operates on the object its first argument points
-  to (`__atomic_*`, `__sync_*`) refuses one of a distinct type, loads
-  and stores too; an `asm` operand refuses a distinct value.
+- [Medium] Distinct types, owner decision taken by default (design
+  3.4): Type-C or C text is decided by the first token of the
+  operation, for an implicit conversion by that of the converted
+  expression, and for a value that no operator reads (an array length,
+  a designator, `goto *`) by its own. Confirm and say so in 3.4.
+- [Low] Distinct types: Clang's `__c11_atomic_load`, `_store`, `_init`,
+  `_exchange` and `_compare_exchange_*` only move a value, as the
+  `__atomic` ones that design 3.4 rule 5 names do, but still refuse an
+  `_Atomic` object of a distinct type. Decide whether rule 5 names them;
+  the table would state them as `Moves_object`.
 - [Medium] Distinct types: C text sees the representation at every
   level, so a C-text operation on a Type-C value gives U where the
   object is D: with a header macro `M(p)` that is `*(p)` on `id *p`,

@@ -1776,20 +1776,21 @@ let fail_builtin_argument context span name requirement =
     (Printf.sprintf "the first argument of %s is not %s (design 13.3)"
        (quote name) requirement)
 
-(* Clang keeps a qualifier of the referenced type that a typedef gives
-   it and drops one written in the pointer's declarator; Ctype does not
-   tell them apart, so a qualified referenced type gives an unknown
-   result. _Atomic, which Clang's __c11 builtins drop, does not count.
-   Such a builtin reads the object that [first] points to as its operand,
-   so in Type-C text the object is not of a distinct type (design 3.4). *)
-let pointee_of_first context span name first =
+(* The type of the object that [first] points to, as the result of
+   [name]. A distinct type gives itself whatever its qualifiers: the
+   rules of design 3.4 need it, and only __typeof__ sees the qualifier.
+   Clang keeps a qualifier of any other referenced type that a typedef
+   gives it and drops one written in the pointer's declarator; Ctype does
+   not tell them apart, so such a qualified type gives an unknown result.
+   _Atomic, which Clang's __c11 builtins drop, does not count. *)
+let object_of_first context span name first =
   let qualified (qualifiers : Qualifiers.t) =
     qualifiers.const || qualifiers.volatile || qualifiers.restrict
   in
   match operand context first with
-  | Pointer_operand { referenced = { shape = Distinct distinct; _ }; _ }
-    when is_type_c_text context span ->
-      refuse_distinct context span distinct
+  | Pointer_operand { referenced = { shape = Distinct _; _ } as referenced; _ }
+    ->
+      value (Ctype.unqualified referenced)
   | Pointer_operand { referenced; _ } when qualified referenced.qualifiers ->
       value
         (unknown context span ("the result of " ^ quote name)
@@ -1798,6 +1799,18 @@ let pointee_of_first context span name first =
   | Unknown_operand unknown -> value (unknown_value unknown)
   | Arithmetic_operand _ | Distinct_operand _ | Other_operand _ ->
       fail_builtin_argument context span name "a pointer"
+
+(* A builtin of [Pointee_of_first] reads the object that [first] points
+   to as its operand, so in Type-C text the object is not of a distinct
+   type (design 3.4). *)
+let pointee_of_first context span name first =
+  match operand context first with
+  | Pointer_operand { referenced = { shape = Distinct distinct; _ }; _ }
+    when is_type_c_text context span ->
+      refuse_distinct context span distinct
+  | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
+  | Other_operand _ | Unknown_operand _ ->
+      object_of_first context span name first
 
 let complex_of_first context span name first =
   match operand context first with
@@ -1845,7 +1858,14 @@ let rule_call context span name (rule : Builtin_function.rule) arguments =
         (checked context span (Builtin_function.c_type context.target result))
   | Pointee_of_first, first :: _ -> pointee_of_first context span name first
   | Complex_of_first, first :: _ -> complex_of_first context span name first
-  | (Pointee_of_first | Complex_of_first), [] ->
+  | Moves_object { result = Moved_object; _ }, first :: _ ->
+      object_of_first context span name first
+  | Moves_object { result = Fixed result; _ }, _ ->
+      value
+        (checked context span (Builtin_function.c_type context.target result))
+  | ( (Pointee_of_first | Complex_of_first
+      | Moves_object { result = Moved_object; _ }),
+      [] ) ->
       context.fail span
         (quote name ^ " takes at least one argument (design 13.3)")
 
@@ -1942,6 +1962,14 @@ let constructor_expression context position (whole : Tree.expression) =
       Some (qualified_constructor context variant constructor, Some arguments)
   | _ -> None
 
+(* The first of [arguments] take [positions], those past them none. *)
+let rec zip_positions positions arguments =
+  match (positions, arguments) with
+  | position :: positions, _ :: arguments ->
+      position :: zip_positions positions arguments
+  | [], arguments -> List.map (fun _ -> Untargeted) arguments
+  | _ :: _, [] -> []
+
 (* Statements (6.8) and the expressions that hold them *)
 
 (* The value of an expression that an operation reads (design 3.4): the
@@ -2016,7 +2044,9 @@ and expression_node context position (whole : Tree.expression) =
   | Call { callee; arguments } ->
       refuse_parenthesized_constructor context callee;
       let callee_typed = typed callee in
-      let positions = argument_positions context callee_typed arguments in
+      let positions =
+        argument_positions context callee callee_typed arguments
+      in
       let arguments = List.map2 (argument context) positions arguments in
       call context span callee callee_typed arguments
   | Member { operand; member } ->
@@ -2182,10 +2212,37 @@ and constructor_argument context named (field : Ctype.member) argument =
                 (quote (Option.value field.member_name ~default:""))
                 (quote named.chosen.constructor_name)))
 
+(* The arguments of a call of a builtin that moves a value of the object
+   that its first argument points to have the target types that the
+   builtin states by that object; those of any other call have them by
+   its prototype. The first argument is typed here, in the one position
+   that [argument] gives it too. *)
+and argument_positions context callee (callee_typed : typed) arguments =
+  match (builtin_rule context callee, arguments) with
+  | Some (_, Moves_object { operands; _ }), first :: rest ->
+      let first = expression context first in
+      Untargeted :: moved_positions context operands first rest
+  | _ -> prototype_positions context callee_typed arguments
+
+(* Design 3.4: a value moves into or out of the object that [first]
+   points to as it is assigned, so a value of a distinct type moves only
+   to and from an object of its type. *)
+and moved_positions context operands (first : typed) arguments =
+  match operand context first with
+  | Pointer_operand { pointer; referenced } ->
+      let position : Builtin_function.moved -> position = function
+        | Object_type -> Targeted (Ctype.unqualified referenced)
+        | Pointer_to_object -> Targeted pointer
+      in
+      zip_positions (List.map position operands) arguments
+  | Arithmetic_operand _ | Distinct_operand _ | Other_operand _
+  | Unknown_operand _ ->
+      List.map (fun _ -> Untargeted) arguments
+
 (* 6.5.2.2p7: the arguments of a call through a prototype are converted
    to the types of its parameters, which are their target types (design
    3.3); those past them, and those of other calls, have none. *)
-and argument_positions context (callee : typed) arguments =
+and prototype_positions context (callee : typed) arguments =
   let parameters =
     match operand context callee with
     | Pointer_operand
@@ -2197,14 +2254,7 @@ and argument_positions context (callee : typed) arguments =
     | Other_operand _ | Unknown_operand _ ->
         []
   in
-  let rec positions parameters arguments =
-    match (parameters, arguments) with
-    | parameter :: parameters, _ :: arguments ->
-        Targeted parameter :: positions parameters arguments
-    | [], arguments -> List.map (fun _ -> Untargeted) arguments
-    | _ :: _, [] -> []
-  in
-  positions parameters arguments
+  zip_positions (List.map (fun t -> Targeted t) parameters) arguments
 
 (* Design 3.4: a value of a distinct type passes only to a parameter of
    its type, not through [...] or to a function without a prototype,
@@ -2574,12 +2624,14 @@ and statement_node context (statement : Tree.statement) =
       Option.iter
         (fun value -> ignore (positioned context position value))
         value
+  (* Design 3.4: an asm operand takes a value whole, a distinct one too,
+     since asm is unchecked and the backend sees the representation. *)
   | Asm { operands; qualifiers = _; template = _ } ->
       Option.iter
         (fun (operands : Tree.asm_operands) ->
           List.iter
             (fun (operand : Tree.asm_operand) ->
-              ignore (expression context operand.node.value))
+              ignore (whole_value context operand.node.value))
             (operands.outputs @ operands.inputs))
         operands
 

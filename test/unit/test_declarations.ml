@@ -1709,7 +1709,8 @@ let distinct_operands () =
       "(void)__builtin_offsetof(struct w, v[a]); return a;";
       "int t[4] = { [a] = 1 }; (void)t; return a;";
       "id x = a; (void)__atomic_fetch_add(&x, 1, 5); return a;";
-      "id x = a; return __atomic_load_n(&x, 5);" ];
+      "id x = a; return __sync_add_and_fetch(&x, a);";
+      "id x = a; __atomic_store_n(&x, a, a); return a;" ];
   rejects ~file (types ^ "static int t[(id)2];")
     "a value of the distinct type 'id' takes no such operation";
   rejects ~file (in_function "goto *r;") "'ref' takes no such operation";
@@ -1718,6 +1719,11 @@ let distinct_operands () =
       "id x = a; unsigned *q = &u; return (id)(&x < q);";
       "id x = a; unsigned *q = &u; return (id)(&x - q);";
       "id x = a; unsigned *q = &u; (void)(c ? &x : q); return a;" ];
+  accepts ~file
+    (in_function
+       "id x = a; __atomic_store_n(&x, a, 5); \
+        __asm__(\"\" : \"=r\"(x) : \"0\"(a)); \
+        return __atomic_load_n(&x, 5);");
   accepts ~file
     (in_function
        "id x = a; id *p = &x; void *v = &u; (void)(p == v); \

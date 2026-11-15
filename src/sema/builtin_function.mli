@@ -34,6 +34,16 @@ type c_type =
 
 type prototype = { return : c_type; parameters : c_type list; variadic : bool }
 
+(** The type of an operand of a builtin that moves a value into or out
+    of the object that its first argument points to, by the unqualified
+    type of that object. *)
+type moved = Object_type | Pointer_to_object
+
+(** The type of the result of such a builtin. *)
+type moved_result =
+  | Moved_object  (** The object's type. *)
+  | Fixed of c_type  (** A type of its own. *)
+
 (** How a builtin whose arguments take more than one type is typed: its
     call has the type that the rule gives from the arguments, and the
     name alone has an unknown function type. *)
@@ -43,10 +53,18 @@ type rule =
           classification and overflow builtins have. *)
   | Pointee_of_first
       (** The unqualified type that the first argument points to, as the
-          [__sync] and [__atomic] builtins give. *)
+          [__sync] and [__atomic] builtins that do arithmetic on that
+          object give; they read it, so it is of no distinct type in
+          Type-C text (design 3.4). *)
   | Complex_of_first
       (** The complex type of the real floating type of the first
           argument, as [__builtin_complex] gives. *)
+  | Moves_object of { operands : moved list; result : moved_result }
+      (** A builtin that only moves a value into or out of the object
+          that the first argument points to, so the object may be of a
+          distinct type (design 3.4): the arguments after the first have
+          the types of [operands], those past them have none. Those that
+          do arithmetic on the object are [Pointee_of_first]. *)
 
 type signature =
   | Prototype of prototype
