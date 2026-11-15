@@ -30,14 +30,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   make the target query write one for `/dev/null` and the compile step
   one for the temporary emitted file. Run the steps in the temporary
   directory, or document it.
-- [Medium] A command that compiles a `.tc` input and links loses the
-  side outputs of the compile step, which are written next to the
-  temporary object and removed with it: with `-g` on macOS the debug
-  information (Clang runs `dsymutil` for a one-step build, the final
-  command links objects and does not), and the `.dwo` files of
-  `-gsplit-dwarf` and GCC's `-fstack-usage` and `-fcallgraph-info`
-  files. Run `dsymutil` when the backend would, or keep the objects
-  beside the output.
+- [Medium] A command that links a `.tc` input with another input
+  (`typec -g a.tc b.c -o a`, or with `b.o`) compiles each `.tc` input
+  to a temporary object first and loses the side outputs of that step
+  with the object: with `-g` on macOS the `.dSYM` bundle (the backend
+  runs `dsymutil` only for a link that compiles a source), the `.dwo`
+  files of `-gsplit-dwarf` and the `-fstack-usage` and
+  `-fcallgraph-info` files. A link of `.tc` inputs alone compiles the
+  emitted C in its final command and keeps them. Doing that always
+  would give the other inputs the `-std=gnu11` (when the command line
+  has no `-std=`) and `-Wno-gnu-line-marker` that the emitted C needs.
+  Decide whether that is acceptable, and then delete the object path,
+  or keep the path for those command lines.
 - [Medium] Several `-arch` options make the `-E` step fail ("cannot use
   'cpp-output' output with multiple -arch options"), where cc builds a
   universal object. Refuse them with a `.tc` input with a clear message,
@@ -48,6 +52,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   line that a step does not use; GCC ignores it, but adds a note that
   names it to any diagnostic of that step. Pass it to Clang only once
   the driver knows the backend's family.
+- [Low] With Clang the debug information names the compilation unit
+  after the emitted file, an absolute path in the random temporary
+  directory (GCC names it after the `.tc` input), so a Clang build with
+  `-g` is not reproducible and names a file that no longer exists. Name
+  it after the input, for example with `-fdebug-prefix-map` or by the
+  line markers that Clang reads.
 - [Low] The pipeline stops at the first `.tc` input that fails, where cc
   compiles every input and reports every error.
 - [Low] GCC names the dependency file of a link without `-o` `a-x.d`;

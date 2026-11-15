@@ -11,8 +11,12 @@ val create : unit -> string
     file had, so no other user can have planted it or a link in its
     place. It raises [Sys_error] when the directory cannot be made. *)
 
+val make_subdirectory : string -> unit
+(** [make_subdirectory path] makes the directory [path], in one that
+    {!create} made, with the same mode. It raises [Sys_error] when the
+    directory cannot be made. *)
+
 val remove : string -> unit
-(** [remove dir] removes the files in [dir] and then [dir]; the pipeline
-    makes no subdirectories there. A symbolic link is removed, not
-    followed. A failure is reported on stderr and leaves the rest in
-    place. *)
+(** [remove dir] removes [dir] and everything in it. A symbolic link is
+    removed, not followed. A failure is reported on stderr and leaves the
+    rest in place. *)

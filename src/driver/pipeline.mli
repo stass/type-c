@@ -9,20 +9,25 @@
     preprocessing; [typec] reads and emits the result; the backend
     compiles the emitted C with [-x cpp-output] to what the command line
     asks for, an object ([-c]), assembly ([-S]) or nothing
-    ([-fsyntax-only]), named as cc names it. When the command line links,
-    each translation makes an object in the temporary directory and the
-    final command is the command line with each [.tc] input replaced by
-    its object. Without linking, the final command is the command line
+    ([-fsyntax-only]), named as cc names it. When the command line links
+    and has no other input, the final command compiles the emitted C and
+    links in one step: it is the command line with each [.tc] input
+    replaced by its emitted C, a file named as a C source like it, so
+    that the backend leaves the side outputs of a one-step build of C
+    sources, named as there. When it links with other inputs, each
+    translation makes an object in the temporary directory and the final
+    command is the command line with each [.tc] input replaced by its
+    object. Without linking, the final command is the command line
     without its [.tc] inputs, when other inputs remain. Every other input
     and option reaches the backend as given, so a [.c] input is compiled
     as cc compiles it.
 
-    Both steps of a translation get [-std=gnu11] unless the command line
-    selects C11 or C17 (design 2.4). A dependency file ([-MD], [-MMD])
-    comes from the [-E] step, named as cc names it: after [-MF], else
-    after [-o] with [.d] for its suffix, else after the input; its target
-    is the [-MT] or [-MQ] values, else the [-o] value, else the input's
-    object. *)
+    The commands that read the text of a translation get [-std=gnu11]
+    unless the command line selects C11 or C17 (design 2.4). A
+    dependency file ([-MD], [-MMD]) comes from the [-E] step, named as cc
+    names it: after [-MF], else after [-o] with [.d] for its suffix, else
+    after the input; its target is the [-MT] or [-MQ] values, else the
+    [-o] value, else the input's object. *)
 
 (** Where the emitted C goes. *)
 type destination = File of string | Standard_output
@@ -31,6 +36,9 @@ type destination = File of string | Standard_output
     whose first element is the backend. *)
 type translation = {
   source : string;  (** the input, as given *)
+  directory : string;
+      (** the directory, in the temporary one, of the files of the
+          translation, which the caller makes *)
   preprocess : string list;
       (** writes the preprocessed text on stdout, which goes to
           [preprocessed] *)
@@ -44,7 +52,9 @@ type translation = {
           with: that of [-std=], unless [-fasm] or [-fno-asm] says
           otherwise *)
   emitted : destination;
-  compile : string list option;  (** [None] with [--emit-c] *)
+  compile : string list option;
+      (** [None] with [--emit-c] and when the final command compiles the
+          emitted C *)
 }
 
 type t = { translations : translation list; final : string list option }

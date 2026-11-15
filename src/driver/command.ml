@@ -120,9 +120,16 @@ let write_emitted (destination : Pipeline.destination) text =
   with Sys_error message ->
     stop Exit_status.Environment ("cannot write the C: " ^ message)
 
+let make_directory path =
+  try Temp_dir.make_subdirectory path
+  with Sys_error message ->
+    stop Exit_status.Environment
+      ("cannot create a temporary directory: " ^ message)
+
 (* Each translation queries its own target model, which is simpler than
    sharing one between translations whose options are the same. *)
 let translate ~program ~null (translation : Pipeline.translation) =
+  make_directory translation.directory;
   preprocess ~null translation;
   let text = read_preprocessed translation in
   let target = query_target ~program translation in

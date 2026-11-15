@@ -307,11 +307,19 @@ preprocessing and to code generation, those of step 3 the latter only;
 `src/driver/cc_option.ml` is the one table that tells them apart and
 says which options take a separate value. The output is named as cc
 names it: after `-o`, else after the input in the current directory.
-When the command line links, each `.tc` input becomes an object in the
-temporary directory and the backend links the command line with those
-objects in place of the `.tc` inputs; without linking, the other inputs
-are compiled by one more backend command without the `.tc` inputs. A
-`.c` input is thus compiled exactly as without `typec`.
+When the command line links and has no input but `.tc` ones, step 3
+is the final command: the backend compiles and links the command line
+with each `.tc` input replaced by `-x cpp-output EMITTED`, where EMITTED
+is named as the input with the suffix `.c`, in a directory of its own.
+The backend thus leaves what it leaves for a one-step build of C
+sources, named as there: on macOS the `.dSYM` bundle of `-g`, and the
+files of `-gsplit-dwarf`, `-fstack-usage` and `-fcallgraph-info`. When
+the command line links with other inputs, each `.tc` input becomes an
+object in the temporary directory and the backend links the command line
+with those objects in place of the `.tc` inputs, and the side outputs of
+step 3 are lost with the objects; without linking, the other inputs are
+compiled by one more backend command without the `.tc` inputs. A `.c`
+input is thus compiled exactly as without `typec`.
 
 With `-MD` or `-MMD` the dependency file comes from step 1, named as cc
 names it: after `-MF`, else after `-o` with the suffix `.d`, else after

@@ -5,6 +5,7 @@ type destination = File of string | Standard_output
 
 type translation = {
   source : string;
+  directory : string;
   preprocess : string list;
   preprocessed : string;
   target_options : string list;
@@ -153,8 +154,9 @@ let compiling_role : Cc_option.role -> bool = function
   | Refused _ | Typec _ ->
       false
 
-(* What a final command that only links keeps: the options that matter
-   to preprocessing would make Clang warn that they are unused. *)
+(* What a final command whose only inputs were .tc ones keeps: the
+   options that matter to preprocessing would make Clang warn that they
+   are unused. *)
 let linking_role : Cc_option.role -> bool = function
   | Preprocess | Dependency _ -> false
   | Link | Common | Dialect | Keywords _ | Output | Language | Stop _
@@ -181,6 +183,16 @@ let dependency_options ~output arguments source =
 let object_file temp_dir index =
   Filename.concat temp_dir (string_of_int index ^ ".o")
 
+let translation_directory temp_dir index =
+  Filename.concat temp_dir (string_of_int index)
+
+(* The emitted C of [source] has the name of a C source like it, in a
+   directory of its own, so that a backend command that compiles it names
+   the side outputs (-fstack-usage, -gsplit-dwarf) as it names those of
+   that source, and GCC runs dsymutil for it as for a C source. *)
+let emitted_file directory source =
+  Filename.concat directory (output_beside source ".c")
+
 (* Where the compile step of [source] writes, and the option that stops
    it there. *)
 let compile_outputs ~goal ~output ~linked_object source =
@@ -202,6 +214,9 @@ type shape = {
   temp_dir : string;
   goal : goal;
   output : string option;
+  final_compiles : bool;
+      (** the final command compiles the emitted C, instead of a compile
+          step of each translation *)
   standard : string list;  (** what the backend adds for design 2.4 *)
   dialect : Typec_syntax.Keyword_set.dialect;
 }
@@ -213,38 +228,49 @@ let emit_c_destination output =
   | Some output when output <> "-" -> File output
   | Some _ | None -> Standard_output
 
+(* What a backend command that reads the text of a translation gets in
+   front of the [options] of the command line. *)
+let with_standard shape options =
+  shape.standard @ (quiet_unused_options :: options)
+
 (* The target model is read with these options so that it describes the
    target that the compile step compiles for (design 13.3). *)
 let compile_options shape arguments =
-  shape.standard
-  @ (quiet_unused_options :: options_where compiling_role arguments)
+  with_standard shape (options_where compiling_role arguments)
 
 (* Clang 20 calls the line markers of preprocessed input, which no user
    wrote, a GNU extension under -pedantic; the option follows the user's
    options so that their -Wgnu does not turn that back on (design 2.4). *)
 let quiet_line_markers = "-Wno-gnu-line-marker"
 
+let as_preprocessed file = [ "-x"; "cpp-output"; file ]
+
+(* A backend command that compiles emitted C: [words] are its options
+   and inputs. *)
+let emitted_c_command shape words =
+  (shape.program :: words) @ [ quiet_line_markers ]
+
 let compile_command shape arguments ~linked_object source emitted_file =
-  (shape.program :: compile_options shape arguments)
-  @ compile_outputs ~goal:shape.goal ~output:shape.output ~linked_object
-      source
-  @ [ quiet_line_markers; "-x"; "cpp-output"; emitted_file ]
+  emitted_c_command shape
+    (compile_options shape arguments
+    @ compile_outputs ~goal:shape.goal ~output:shape.output ~linked_object
+        source
+    @ as_preprocessed emitted_file)
 
 (* [linked_object] is the object that the step makes when the command
    line links. *)
 let translation shape arguments ~linked_object index source =
-  let temp_file suffix =
-    Filename.concat shape.temp_dir (string_of_int index ^ suffix)
-  in
+  let directory = translation_directory shape.temp_dir index in
   let preprocess =
-    (shape.program :: "-E" :: type_c_macro :: shape.standard)
-    @ (quiet_unused_options :: options_where preprocessing_role arguments)
+    (shape.program :: "-E" :: type_c_macro
+     :: with_standard shape (options_where preprocessing_role arguments))
     @ dependency_options ~output:shape.output arguments source
     @ [ "-x"; "c"; source ]
   in
-  let emitted_file = temp_file ".emitted.i" in
+  let emitted_file = emitted_file directory source in
   let emitted, compile =
     if shape.emit_c then (emit_c_destination shape.output, None)
+    else if shape.final_compiles then (File emitted_file, None)
     else
       ( File emitted_file,
         Some
@@ -253,30 +279,42 @@ let translation shape arguments ~linked_object index source =
   in
   {
     source;
+    directory;
     preprocess;
-    preprocessed = temp_file ".preprocessed.i";
+    preprocessed = Filename.concat directory "preprocessed.i";
     target_options = compile_options shape arguments;
     dialect = shape.dialect;
     emitted;
     compile;
   }
 
-(* The command line with each .tc input replaced by its object, in
-   order: [objects] has one for each. *)
-let with_objects objects arguments =
-  let replace objects = function
+(* The command line with each .tc input replaced by the words of its
+   replacement, in order: [replacements] has one for each. *)
+let with_replaced_inputs replacements arguments =
+  let replace replacements = function
     | Command_line.Input { type_c = true; _ } ->
-        (List.tl objects, [ List.hd objects ])
-    | argument -> (objects, Command_line.words [ argument ])
+        (List.tl replacements, List.hd replacements)
+    | argument -> (replacements, Command_line.words [ argument ])
   in
-  List.concat (snd (List.fold_left_map replace objects arguments))
+  List.concat (snd (List.fold_left_map replace replacements arguments))
 
 let without_type_c_inputs arguments =
   List.filter
     (function Command_line.Input { type_c; _ } -> not type_c | _ -> true)
     arguments
 
-let final_command shape ~objects arguments =
+(* The final command compiles the emitted C and links as a one-step build
+   of C sources does, so that the backend leaves what that build leaves:
+   the side outputs of the compilation, named as there, and on macOS the
+   debug information that it runs dsymutil for, from objects that it
+   removes after. The -std= and -Wno-gnu-line-marker that the emitted C
+   needs would apply to another input too, so a command line with
+   another input compiles each .tc input to an object first. *)
+let final_compiles ~emit_c ~goal arguments =
+  (not emit_c) && goal = Linked
+  && input_count (without_type_c_inputs arguments) = 0
+
+let final_command shape ~objects ~emitted_files arguments =
   let others = without_type_c_inputs arguments in
   let other_inputs = input_count others > 0 in
   let link_options = function
@@ -289,7 +327,14 @@ let final_command shape ~objects arguments =
   if shape.emit_c then None
   else
     match shape.goal with
-    | Linked -> Some (shape.program :: with_objects objects linked)
+    | Linked when shape.final_compiles ->
+        let compiled =
+          with_replaced_inputs (List.map as_preprocessed emitted_files) linked
+        in
+        Some (emitted_c_command shape (with_standard shape compiled))
+    | Linked ->
+        let objects = List.map (fun file -> [ file ]) objects in
+        Some (shape.program :: with_replaced_inputs objects linked)
     | Stopped _ when other_inputs ->
         Some (shape.program :: Command_line.words others)
     | Stopped _ -> None
@@ -305,7 +350,16 @@ let plan ~program ~emit_c ~temp_dir arguments =
       if has_role Dialect arguments then [] else [ "-std=" ^ default_standard ]
     in
     let shape =
-      { program; emit_c; temp_dir; goal; output; standard; dialect }
+      {
+        program;
+        emit_c;
+        temp_dir;
+        goal;
+        output;
+        final_compiles = final_compiles ~emit_c ~goal arguments;
+        standard;
+        dialect;
+      }
     in
     (* The number of a .tc input, from 1, names its files. *)
     let sources =
@@ -321,7 +375,21 @@ let plan ~program ~emit_c ~temp_dir arguments =
           translation shape arguments ~linked_object index source)
         sources objects
     in
-    Ok { translations; final = final_command shape ~objects arguments }
+    (* Only --emit-c writes to stdout, and it has no final command, so
+       the list has a file for each .tc input when the final reads it. *)
+    let emitted_files =
+      List.filter_map
+        (fun translation ->
+          match translation.emitted with
+          | File file -> Some file
+          | Standard_output -> None)
+        translations
+    in
+    Ok
+      {
+        translations;
+        final = final_command shape ~objects ~emitted_files arguments;
+      }
   with Failed error -> Error error
 
 let error_message = function

@@ -91,11 +91,14 @@ Each step gets options that it does not use, such as -F, which only
 preprocessing and linking use, or a linker flag that typec does not
 know: -dead_strip on macOS, where the linker calls -s obsolete, and -s
 elsewhere. Clang must not warn about them, or -Werror would fail the
-build.
+build. A command that links .tc inputs alone compiles and links them in
+its final command, without the options that only preprocessing uses.
 
   $ link_flag=-s
   $ if [ "$(uname -s)" = Darwin ]; then link_flag=-dead_strip; fi
   $ typec --cc=$clang -Werror -Fout $link_flag x.tc twice.c -o prog
+  $ typec --cc=$clang -Werror -Fout $link_flag -Iinc -DX lib.tc -o prog
+  $ typec --cc=$clang -Werror -fmacro-prefix-map=/a=/b lib.tc -o prog
   $ typec --cc=$clang -Werror -Fout -c x.tc -o out/x.o
   $ ls -A tmp
 

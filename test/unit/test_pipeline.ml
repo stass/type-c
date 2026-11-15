@@ -132,11 +132,12 @@ let () =
     = Some
         [
           "cc"; "-std=gnu11"; quiet; "-O2"; "-c"; "-o"; "out/x.o";
-          quiet_markers; "-x"; "cpp-output"; "/T/1.emitted.i";
+          "-x"; "cpp-output"; "/T/1/x.c"; quiet_markers;
         ]);
   check "-c -o: files"
-    (translation.preprocessed = "/T/1.preprocessed.i"
-    && translation.emitted = File "/T/1.emitted.i");
+    (translation.directory = "/T/1"
+    && translation.preprocessed = "/T/1/preprocessed.i"
+    && translation.emitted = File "/T/1/x.c");
   check "-c -o: target options are the compile step's"
     (translation.target_options = [ "-std=gnu11"; quiet; "-O2" ]);
   check "-c -o: no final command" (plan.final = None)
@@ -147,22 +148,22 @@ let () =
     (compile [ "-c"; "dir/x.tc" ]
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; quiet_markers; "-x";
-          "cpp-output"; "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
+          "/T/1/x.c"; quiet_markers;
         ]);
   check "-S"
     (compile [ "-S"; "-c"; "x.tc"; "-std=c17" ]
     = Some
         [
-          "cc"; quiet; "-std=c17"; "-S"; "-o"; "x.s"; quiet_markers; "-x";
-          "cpp-output"; "/T/1.emitted.i";
+          "cc"; quiet; "-std=c17"; "-S"; "-o"; "x.s"; "-x"; "cpp-output";
+          "/T/1/x.c"; quiet_markers;
         ]);
   check "-fsyntax-only"
     (compile [ "-fsyntax-only"; "x.tc"; "-o"; "x" ]
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-fsyntax-only"; quiet_markers; "-x";
-          "cpp-output"; "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-fsyntax-only"; "-x"; "cpp-output";
+          "/T/1/x.c"; quiet_markers;
         ])
 
 let () =
@@ -174,12 +175,24 @@ let () =
     ((only_translation plan).compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "/T/1.o"; quiet_markers; "-x";
-          "cpp-output"; "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
+          "/T/1/x.c"; quiet_markers;
         ]);
   let plan = planned [ "-Iinc"; "-MD"; "a.tc"; "b.tc"; "-lm" ] in
-  check "link .tc inputs only"
-    (plan.final = Some [ "cc"; "/T/1.o"; "/T/2.o"; "-lm" ]);
+  check "link .tc inputs only: the final command compiles"
+    (plan.final
+    = Some
+        [
+          "cc"; "-std=gnu11"; quiet; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
+          "cpp-output"; "/T/2/b.c"; "-lm"; quiet_markers;
+        ]);
+  check "link .tc inputs only: no compile step"
+    (List.for_all
+       (fun (t : Pipeline.translation) -> t.compile = None)
+       plan.translations);
+  check "link .tc inputs only: a directory each"
+    (List.map (fun (t : Pipeline.translation) -> t.directory) plan.translations
+    = [ "/T/1"; "/T/2" ]);
   check "two translations"
     (List.map (fun (t : Pipeline.translation) -> t.source) plan.translations
     = [ "a.tc"; "b.tc" ]);
