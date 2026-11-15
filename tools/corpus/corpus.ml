@@ -85,7 +85,8 @@ let parse_options arguments =
 
 (* The facts a run record states about where it ran. *)
 type host = {
-  system : string;  (** uname -s, which selects the cflags@ lines *)
+  system : string;  (** uname -s and uname -m, which select the @ lines *)
+  machine : string;
   label : string;  (** the directory of its run records *)
 }
 
@@ -97,7 +98,8 @@ let ask ~cwd command =
 let probe_host () =
   let system = ask ~cwd:"/" [ "uname"; "-s" ] in
   let machine = ask ~cwd:"/" [ "uname"; "-m" ] in
-  { system; label = String.lowercase_ascii system ^ "-" ^ machine }
+  let label = String.lowercase_ascii system ^ "-" ^ machine in
+  { system; machine; label }
 
 let revision dir =
   ask ~cwd:dir [ "git"; "describe"; "--always"; "--dirty"; "--abbrev=12" ]
@@ -283,19 +285,27 @@ let compile_or_fail context unit =
 
 (* [Substitute_passed] is a script that is not the program's own suite
    (the recipe says what it checks): it never counts as the tests
-   passing. *)
-type tests =
+   passing. [Skipped] is a line limited to another host, which is neither
+   a pass nor a failure; [Not_run] is a failure. *)
+type outcome =
   | Passed
   | Substitute_passed of string
   | Tests_failed of string
   | Not_run of string
+  | Skipped of string  (** the host the line is limited to *)
+
+(* The outcome of one test line of the recipe. *)
+type test_run = {
+  test : Recipe.test;
+  outcome : outcome;
+  results : Test_lines.t;  (** what the script reported, if anything *)
+}
 
 type build = {
   units : (string * unit_result) list;
   linked : string list;
   not_linked : string list;
-  tests : tests;
-  results : Test_lines.t;  (** what the script reported, if anything *)
+  test_runs : test_run list;  (** in the order of the recipe *)
 }
 
 let is_compiled = function
@@ -333,44 +343,56 @@ let script_command context ~recipe_dir script =
     Filename.concat recipe_dir script;
   ]
 
-(* The script's stdout, kept beside the log; a run removes the last one's. *)
-let tests_file context = context.root ^ ".tests"
+(* The stdout of each test script, kept beside the log; a run removes
+   the last one's. A file is named for the line's position and its
+   script, as two lines may name one script. *)
+let tests_dir context = context.root ^ ".tests"
 
-(* The script runs on the programs that linked, and its stdout, which
-   the log gets too, is kept next to the log for the results it prints. *)
-let run_tests context ~recipe_dir (recipe : Recipe.t) ~linked =
-  if linked = [] then (Not_run "no program linked", Test_lines.none)
-  else
-    let test = recipe.test in
-    let command = script_command context ~recipe_dir test.script in
-    let path = tests_file context in
-    let run fd =
-      run_to context ~stdout:fd ~stderr:context.log ~step:"the tests" command
-      |> ignore
-    in
-    let failure =
-      match with_output_file path run with
-      | () -> None
-      | exception Step_failed message -> Some message
-    in
-    let output = read_file path in
-    write_to_log context output;
-    let results = Test_lines.read output in
-    let tests =
-      match (failure, results, test.suite) with
-      | Some message, _, _ -> Tests_failed message
-      | None, Error message, _ -> Tests_failed (test.script ^ ": " ^ message)
-      | None, Ok { failed = _ :: _; _ }, _ ->
-          Tests_failed "the script exited with 0 but reported a failed test"
-      | None, Ok _, Own -> Passed
-      | None, Ok _, Substitute description -> Substitute_passed description
-    in
-    (tests, Result.value results ~default:Test_lines.none)
+(* A script runs on the programs that linked, and its stdout, which the
+   log gets too, is kept next to the log for the results it prints. *)
+let run_script context ~recipe_dir ~position (test : Recipe.test) =
+  let command = script_command context ~recipe_dir test.script in
+  make_directories (tests_dir context);
+  let name = Printf.sprintf "%d.%s" position test.script in
+  let path = Filename.concat (tests_dir context) name in
+  let run fd =
+    run_to context ~stdout:fd ~stderr:context.log ~step:"the tests" command
+    |> ignore
+  in
+  let failure =
+    match with_output_file path run with
+    | () -> None
+    | exception Step_failed message -> Some message
+  in
+  let output = read_file path in
+  write_to_log context output;
+  let results = Test_lines.read output in
+  let tests =
+    match (failure, results, test.suite) with
+    | Some message, _, _ -> Tests_failed message
+    | None, Error message, _ -> Tests_failed message
+    | None, Ok { failed = _ :: _; _ }, _ ->
+        Tests_failed "the script exited with 0 but reported a failed test"
+    | None, Ok _, Own -> Passed
+    | None, Ok _, Substitute description -> Substitute_passed description
+  in
+  (tests, Result.value results ~default:Test_lines.none)
+
+(* A line runs its script only when it applies here and a program
+   linked; the [position] counts the test lines from 1. *)
+let run_test context ~recipe_dir ~linked index (test : Recipe.test) =
+  let outcome, results =
+    match test.place with
+    | Not_here host -> (Skipped host, Test_lines.none)
+    | Here when linked = [] -> (Not_run "no program linked", Test_lines.none)
+    | Here -> run_script context ~recipe_dir ~position:(index + 1) test
+  in
+  { test; outcome; results }
 
 (* The build tree is made afresh: the trees of the recipe, copied from
    the cache, then its prepare script. *)
 let set_up context ~cache ~recipe_dir (recipe : Recipe.t) =
-  let remove = [ "rm"; "-rf"; "--"; context.root; tests_file context ] in
+  let remove = [ "rm"; "-rf"; "--"; context.root; tests_dir context ] in
   ignore (run ~cwd:"/" context ~step:"removing the old tree" remove);
   let copy (tree : Recipe.tree) =
     let source = List.fold_left Filename.concat cache [ "src"; tree.archive ] in
@@ -400,8 +422,10 @@ let build context ~cache ~recipe_dir recipe =
   in
   let names = List.map (fun (p : Recipe.program) -> p.name) in
   let linked = names linked and not_linked = names not_linked in
-  let tests, results = run_tests context ~recipe_dir recipe ~linked in
-  { units; linked; not_linked; tests; results }
+  let test_runs =
+    List.mapi (run_test context ~recipe_dir ~linked) recipe.tests
+  in
+  { units; linked; not_linked; test_runs }
 
 let with_log path f =
   let flags =
@@ -436,8 +460,8 @@ let all_built build =
   let compiled (_, result) = is_compiled result in
   build.not_linked = [] && List.for_all compiled build.units
 
-let tests_text build =
-  match build.tests with
+let tests_text build (run : test_run) =
+  match run.outcome with
   | Passed when not (all_built build) ->
       "partial: passed on what linked only, gate 1 not met"
   | Substitute_passed description when not (all_built build) ->
@@ -448,6 +472,7 @@ let tests_text build =
       "substitute passed, not the program's own suite: " ^ description
   | Tests_failed message -> "FAILED: " ^ message
   | Not_run reason -> "not run: " ^ reason
+  | Skipped host -> "skipped on this host: only on " ^ host
 
 let results_lines (results : Test_lines.t) =
   let failed = List.length results.failed in
@@ -462,15 +487,24 @@ let results_lines (results : Test_lines.t) =
 
 (* What a record says about the exit gate of plan 0.11: gate 1 (the
    program's own tests pass) and gate 2 (identical objects). *)
-type verdict = Gates_met | Substitute_tests | Gates_failed
+type verdict = Gates_met | No_own_suite | Gates_failed
 
+let is_failure = function
+  | Tests_failed _ | Not_run _ -> true
+  | Passed | Substitute_passed _ | Skipped _ -> false
+
+(* Gate 1 needs no test line that failed and an own suite that ran whole:
+   at least one own line, and every one passed, none skipped here. *)
 let build_verdict build =
   let identical = List.for_all is_identical build.units in
-  let met = identical && all_built build in
-  match build.tests with
-  | Passed when met -> Gates_met
-  | Substitute_passed _ when met -> Substitute_tests
-  | _ -> Gates_failed
+  let failed (run : test_run) = is_failure run.outcome in
+  let own run = run.test.suite = Own in
+  let own_runs = List.filter own build.test_runs in
+  let passed (run : test_run) = run.outcome = Passed in
+  if not (identical && all_built build) then Gates_failed
+  else if List.exists failed build.test_runs then Gates_failed
+  else if own_runs <> [] && List.for_all passed own_runs then Gates_met
+  else No_own_suite
 
 let record_verdict record =
   match record.outcome with
@@ -479,16 +513,20 @@ let record_verdict record =
 
 let verdict_text = function
   | Gates_met -> "gates met"
-  | Substitute_tests -> "gate 1 not met: only a substitute test passed"
+  | No_own_suite -> "gate 1 not met: no whole own suite ran on this host"
   | Gates_failed -> "gates not met"
 
 (* Exit status 0 only when every record meets the gates; a failure (1)
-   outranks a run whose only shortfall is a substitute test (3), so that
-   a script reading the status never takes either for a pass. *)
+   outranks a run whose only shortfall is that no own suite ran (3), so
+   that a script reading the status never takes either for a pass. *)
 let exit_status verdicts =
   if List.mem Gates_failed verdicts then 1
-  else if List.mem Substitute_tests verdicts then 3
+  else if List.mem No_own_suite verdicts then 3
   else 0
+
+let test_run_lines build run =
+  Printf.sprintf "tests        %s: %s" run.test.script (tests_text build run)
+  :: results_lines run.results
 
 let build_lines build =
   let add total (_, result) = add_times total (unit_times result) in
@@ -510,9 +548,8 @@ let build_lines build =
     Printf.sprintf "backend-fail %d" (count is_backend_failed build.units);
     Printf.sprintf "linked       %d of %d" (List.length build.linked)
       (List.length build.linked + List.length build.not_linked);
-    Printf.sprintf "tests        %s" (tests_text build);
   ]
-  @ results_lines build.results
+  @ List.concat_map (test_run_lines build) build.test_runs
   @ [
     "cpu seconds, summed over the units:";
     Printf.sprintf "  preprocessing (cc -E)            %8.2f" total.preprocess;
@@ -554,7 +591,9 @@ let run_program options host ~cc program =
   in
   let recipe_file = Filename.concat recipe_dir "recipe" in
   let recipe =
-    match Recipe.read ~system:host.system recipe_file with
+    match
+      Recipe.read ~system:host.system ~machine:host.machine recipe_file
+    with
     | Ok recipe -> recipe
     | Error message -> fatal "%s" message
   in

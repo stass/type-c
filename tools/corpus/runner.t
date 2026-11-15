@@ -57,7 +57,7 @@ the revisions and the timings are left out.
   typec-bug    0
   backend-fail 0
   linked       1 of 1
-  tests        passed
+  tests        test.sh: passed
   results      none reported
   cpu seconds, summed over the units:
 
@@ -115,7 +115,7 @@ A test script that fails is recorded as failed, with the exit status 1.
   typec-bug    0
   backend-fail 0
   linked       1 of 1
-  tests        FAILED: the tests exited with 5
+  tests        fail.sh: FAILED: the tests exited with 5
   results      none reported
   cpu seconds, summed over the units:
   hello.clang: gates not met
@@ -135,13 +135,13 @@ that passed, and the exit status is 3, neither a pass nor a failure.
   typec-bug    0
   backend-fail 0
   linked       1 of 1
-  tests        substitute passed, not the program's own suite: a greeting smoke test
+  tests        test.sh: substitute passed, not the program's own suite: a greeting smoke test
   results      none reported
   cpu seconds, summed over the units:
-  hello.clang: gate 1 not met: only a substitute test passed
+  hello.clang: gate 1 not met: no whole own suite ran on this host
   [3]
   $ grep '^tests' corpus/runs/*/hello.clang.txt
-  tests        substitute passed, not the program's own suite: a greeting smoke test
+  tests        test.sh: substitute passed, not the program's own suite: a greeting smoke test
 
 A substitute that fails is failed like any other test.
 
@@ -149,7 +149,7 @@ A substitute that fails is failed like any other test.
   >   corpus/programs/hello/recipe.good > corpus/programs/hello/recipe
   $ run hello > out; echo "exit $?"; grep -E '^(tests|hello)' out
   exit 1
-  tests        FAILED: the tests exited with 5
+  tests        fail.sh: FAILED: the tests exited with 5
   hello.clang: gates not met
 
 The exit status 1 outranks 3 when the run holds both.
@@ -161,12 +161,93 @@ The exit status 1 outranks 3 when the run holds both.
   $ cp corpus/programs/hello/test.sh corpus/programs/smoke/test.sh
   $ run hello smoke > out; echo "exit $?"; grep -E '^hello|^smoke|^tests' out
   exit 1
-  tests        FAILED: the tests exited with 5
+  tests        fail.sh: FAILED: the tests exited with 5
   hello.clang: gates not met
-  tests        substitute passed, not the program's own suite: smoke
-  smoke.clang: gate 1 not met: only a substitute test passed
+  tests        test.sh: substitute passed, not the program's own suite: smoke
+  smoke.clang: gate 1 not met: no whole own suite ran on this host
   $ cp corpus/programs/hello/recipe.good corpus/programs/hello/recipe
   $ rm -r corpus/programs/smoke corpus/programs/hello/recipe.*
+
+A test line limited to a host runs only there. The host is a system, as
+uname -s prints it, or a system and a machine, as uname -m prints it. On
+any other host the record shows the line skipped, never passed, and
+fail.sh does not run. A line without a host runs everywhere, so the
+substitute beside the skipped own suite still runs, and the exit status
+is 3.
+
+  $ cp corpus/programs/hello/recipe recipe.good
+  $ grep -v '^test ' recipe.good > recipe.no-tests
+  $ { cat recipe.no-tests
+  >   echo "test@NoSuchSystem own fail.sh"
+  >   echo "test@$(uname -s)/NoSuchMachine own fail.sh"
+  >   echo "test substitute test.sh smoke"
+  > } > corpus/programs/hello/recipe
+  $ run hello > out; echo "exit $?"
+  exit 3
+  $ grep -E '^(tests|results|hello)' out | sed "s|$(uname -s)/|SYSTEM/|"
+  tests        fail.sh: skipped on this host: only on NoSuchSystem
+  results      none reported
+  tests        fail.sh: skipped on this host: only on SYSTEM/NoSuchMachine
+  results      none reported
+  tests        test.sh: substitute passed, not the program's own suite: smoke
+  results      none reported
+  hello.clang: gate 1 not met: no whole own suite ran on this host
+  $ grep -c 'skipped on this host' corpus/runs/*/hello.clang.txt
+  2
+
+A recipe whose every test line names another host has no own suite on
+this host either.
+
+  $ { cat recipe.no-tests; echo "test@NoSuchSystem own fail.sh"; } \
+  >   > corpus/programs/hello/recipe
+  $ run hello > out; echo "exit $?"; grep -E '^(tests|hello)' out
+  exit 3
+  tests        fail.sh: skipped on this host: only on NoSuchSystem
+  hello.clang: gate 1 not met: no whole own suite ran on this host
+
+On a host the line names, by its system alone or with its machine, the
+line runs as an unlimited one does, and so does the substitute beside
+it: the gates are met when every line that ran passed.
+
+  $ { cat recipe.no-tests
+  >   echo "test@$(uname -s)/$(uname -m) own test.sh"
+  >   echo "test@$(uname -s) substitute test.sh smoke"
+  > } > corpus/programs/hello/recipe
+  $ run hello > out; echo "exit $?"; grep -E '^(tests|hello)' out
+  exit 0
+  tests        test.sh: passed
+  tests        test.sh: substitute passed, not the program's own suite: smoke
+  $ { cat recipe.no-tests
+  >   echo "test@$(uname -s) own test.sh"
+  >   echo "test substitute fail.sh smoke"
+  > } > corpus/programs/hello/recipe
+  $ run hello > out; echo "exit $?"; grep -E '^(tests|hello)' out
+  exit 1
+  tests        test.sh: passed
+  tests        fail.sh: FAILED: the tests exited with 5
+  hello.clang: gates not met
+
+Each script's stdout is kept under the line's position, since two lines
+may name one script.
+
+  $ ls cache/build/*/hello/clang.tests
+  1.test.sh
+  2.fail.sh
+
+An own suite split over lines meets gate 1 only where every own line
+runs: one that passed beside one limited to another host does not.
+
+  $ { cat recipe.no-tests
+  >   echo "test own test.sh"
+  >   echo "test@NoSuchSystem own fail.sh"
+  > } > corpus/programs/hello/recipe
+  $ run hello > out; echo "exit $?"; grep -E '^(tests|hello)' out
+  exit 3
+  tests        test.sh: passed
+  tests        fail.sh: skipped on this host: only on NoSuchSystem
+  hello.clang: gate 1 not met: no whole own suite ran on this host
+  $ mv recipe.good corpus/programs/hello/recipe
+  $ rm recipe.no-tests
 
 A unit typec refuses keeps the programs that use it from linking. With
 no program linked the tests do not run, and the runner exits with 1.
@@ -181,7 +262,7 @@ no program linked the tests do not run, and the runner exits with 1.
   typec-bug    0
   backend-fail 0
   linked       0 of 1
-  tests        not run: no program linked
+  tests        test.sh: not run: no program linked
   results      none reported
   cpu seconds, summed over the units:
   refused      greet.c: greet.tc:3: unexpected character '@'
@@ -226,7 +307,7 @@ failed to build is recorded as a partial pass, which does not meet gate
   typec-bug    0
   backend-fail 1
   linked       1 of 3
-  tests        partial: passed on what linked only, gate 1 not met
+  tests        test.sh: partial: passed on what linked only, gate 1 not met
   results      1 passed, 0 failed, 1 failed with the backend too
   test-host    a host test with spaces
   cpu seconds, summed over the units:
@@ -271,13 +352,13 @@ after reporting a failed test, is recorded as failed.
 
   $ echo 'echo "TEST maybe ok"' > corpus/programs/multi/test.sh
   $ run multi | grep '^tests'
-  tests        FAILED: test.sh: not a test result: "TEST maybe ok"
+  tests        test.sh: FAILED: not a test result: "TEST maybe ok"
   $ echo 'echo "TEST pass "' > corpus/programs/multi/test.sh
   $ run multi | grep '^tests'
-  tests        FAILED: test.sh: not a test result: "TEST pass "
+  tests        test.sh: FAILED: not a test result: "TEST pass "
   $ echo 'echo "TEST fail one"' > corpus/programs/multi/test.sh
   $ run multi | grep '^tests'
-  tests        FAILED: the script exited with 0 but reported a failed test
+  tests        test.sh: FAILED: the script exited with 0 but reported a failed test
   $ rm -r corpus/programs/multi
 
 A recipe that cannot be read ends the run with 2 before anything is
@@ -323,6 +404,22 @@ refused.
   >   > corpus/programs/hello/recipe
   $ fails hello
   corpus: corpus/programs/hello/recipe:3: wrong number of words after test own
+  [2]
+A host is SYSTEM or SYSTEM/MACHINE, and only cflags, libs and test
+lines can name one.
+
+  $ printf 'tree hello-1\nprogram a a.c\ntest@Linux/ own t.sh\n' \
+  >   > corpus/programs/hello/recipe
+  $ fails hello
+  corpus: corpus/programs/hello/recipe:3: "Linux/" is not a host, SYSTEM or SYSTEM/MACHINE
+  [2]
+  $ printf 'tree hello-1\ncflags@a/b/c -DX\n' > corpus/programs/hello/recipe
+  $ fails hello
+  corpus: corpus/programs/hello/recipe:2: "a/b/c" is not a host, SYSTEM or SYSTEM/MACHINE
+  [2]
+  $ printf 'tree@Linux hello-1\n' > corpus/programs/hello/recipe
+  $ fails hello
+  corpus: corpus/programs/hello/recipe:1: only cflags, libs and test can be limited to a host
   [2]
   $ printf 'tree missing-1\nprogram a a.c\ntest own t.sh\n' \
   >   > corpus/programs/hello/recipe

@@ -803,11 +803,6 @@ types (design 13.3).
 - [Medium] SQLite's recipe declares a substitute test (a smoke test of
   ours), so gate 1 is not met for it: the amalgamation has no test
   suite. Its own suite needs the full source tree and Tcl.
-- [Medium] chibicc's recipe declares a substitute test (its tests
-  compiled to assembly) on every host. Its own suite runs only on Linux
-  x86-64, which has not run yet; the recipe format limits only `cflags`
-  and `libs` to a system, so a `test own` for Linux x86-64 needs the
-  format to limit `test` to a system and to name a machine.
 - [Medium] 23 units of GCC's `c-torture/execute` define nested
   functions (`nestfunc-*.c`, `20000822-1.c` and others), which are
   outside the GNU profile (design 13.3) and which Clang refuses as a

@@ -401,13 +401,17 @@ with 2. The runner reads the statuses from the checkout it is built
 from, so the `typec` binary must be built from the same revision.
 
 The runner then links each program of the recipe from the `typec`
-objects, and runs the recipe's test script in the build tree on the
-programs that linked, even when others did not. The script's environment
+objects, and runs the recipe's test scripts in the build tree on the
+programs that linked, even when others did not. A script's environment
 has `CC` and `TYPEC_CC` naming the backend and `TYPEC` naming the
-`typec` under test. The recipe says whether the script is the program's
-own test suite (`test own SCRIPT`) or a substitute for it (`test
-substitute SCRIPT DESCRIPTION`, a smoke test or tests that are only
-compiled); it has no default. A script may print one line per test,
+`typec` under test. Each test line says whether its script is the
+program's own test suite (`test own SCRIPT`) or a substitute for it
+(`test substitute SCRIPT DESCRIPTION`, a smoke test or tests that are
+only compiled); it has no default. A test line may name the host it
+applies to, as `test@SYSTEM` or `test@SYSTEM/MACHINE` (by `uname -s` and
+`uname -m`, such as `test@Linux/x86_64` for a suite that needs Linux on
+x86-64); it is skipped on any other host, while a line without a host
+runs everywhere. A script may print one line per test,
 `TEST pass NAME`, `TEST fail NAME` or `TEST fail-with-backend NAME` (a
 test that fails with the backend's own objects too, so that it says
 something about the host), which the record counts.
@@ -418,28 +422,35 @@ It writes a record of each program and backend to
 the checkout beside it at run time, the revision of the corpus, the
 counts of identical, different, refused, typec-bug and backend-failed
 units, which failed and why, whether the programs linked, and the
-tests. The tests line says `passed` for an own suite that passed with
-everything built; `partial: ...` when the script passed but a unit
+tests. Each test line of the recipe gets a tests line in the record,
+which names its script and says `passed` for an own suite that passed
+with everything built; `partial: ...` when the script passed but a unit
 failed or a program did not link, which does not meet gate 1;
 `substitute passed, not the program's own suite: DESCRIPTION` for a
-substitute, which does not meet gate 1 either; and `FAILED` or `not
-run` otherwise. The results line counts the `TEST` lines (passed,
-failed, failed with the backend too) and lists the failures. The record ends with the CPU time of preprocessing,
-of `typec --emit-c` and of the backend's `-fsyntax-only` on `U.ref.i`,
-summed over the units, whose first two differ by the time of `typec`'s
-front end. The stderr of every command and the stdout of the test script
-go to `CACHE/build/HOST/PROGRAM/BACKEND.log`, and its stdout is kept in
-`BACKEND.tests` beside it.
+substitute, which does not meet gate 1 either; `skipped on this host:
+only on HOST` for a line limited to other hosts, which is neither a pass
+nor a failure; and `FAILED` or `not run` otherwise. Its results line
+counts the `TEST` lines (passed, failed, failed with the backend too)
+and lists the failures. The record ends with the CPU time of
+preprocessing, of `typec --emit-c` and of the backend's `-fsyntax-only`
+on `U.ref.i`, summed over the units, whose first two differ by the time
+of `typec`'s front end. The stderr of every command and the stdout of
+the test scripts go to `CACHE/build/HOST/PROGRAM/BACKEND.log`, and the
+stdout of each script is kept beside it in `BACKEND.tests/N.SCRIPT`, for
+the Nth test line.
 
 Exit status: 0 when every unit gave identical objects, every program
-linked and every program's own tests passed; 1 when a unit differs or
-failed, a program did not link, a test failed or did not run, or a build
-could not be set up; 3 when nothing failed but a program's tests are a
-substitute, so that a status of 0 never comes from a run that did not
-meet gate 1 (the runner also prints a line for each record that does not
-meet the gates); 2 when the command line or a recipe is wrong, an
-archive has not been fetched, or the runner cannot read or write a file
-of its own. A `TEST` line the runner cannot count, or a script that
+linked, every test line that applies to the host passed and each
+program's own suite ran whole (it has an own line and none is limited to
+other hosts); 1 when a unit differs or failed, a program did not link,
+a test line that applies to the host failed or could not run, or a build
+could not be set up; 3 when nothing failed but a program's own suite did
+not run whole on this host (its tests are a substitute, or an own line
+is limited to other hosts), so that a status of 0 never comes from a run
+that did not meet gate 1 (the runner also prints a line for each record
+that does not meet the gates); 2 when the command line or a recipe is
+wrong, an archive has not been fetched, or the runner cannot read or
+write a file of its own. A `TEST` line the runner cannot count, or a script that
 exits with 0 after reporting a failed test, is a failed test. `dune test`
 runs `tools/corpus/runner.t`, which checks the runner on a fixture program.
 

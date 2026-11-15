@@ -7,7 +7,8 @@
 # and dune from opam, since Debian 13's OCaml 5.3 lacks the Char.Ascii of
 # 5.4 that tools/fuzz uses. The base image is pinned by the digest of its
 # multi-platform index; the compilers, the C library's and the kernel's
-# headers by package version, the same on both platforms; the key of
+# headers, and file, which the own suite of the corpus's chibicc runs, by
+# package version, the same on both platforms; the key of
 # apt.llvm.org by fingerprint; OCaml and dune by a commit of
 # opam-repository. Their own dependencies follow Debian 13, and Clang's
 # apt.llvm.org. A pinned version that leaves the archive fails the build
@@ -19,6 +20,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc=4:14.2.0-1 gcc-14=14.2.0-19 \
       libc6-dev=2.41-12+deb13u4 linux-libc-dev=6.12.117-1 \
+      file=1:5.46-5 \
       opam=2.3.0-1+deb13u2 \
       ca-certificates curl gpg git make patch unzip bzip2 \
  && rm -rf /var/lib/apt/lists/*

@@ -4,7 +4,8 @@
 type tree = { archive : string; dir : string }
 type program = { name : string; units : string list }
 type suite = Own | Substitute of string
-type test = { script : string; suite : suite }
+type place = Here | Not_here of string
+type test = { script : string; suite : suite; place : place }
 
 type t = {
   trees : tree list;
@@ -13,7 +14,7 @@ type t = {
   prepare : string option;
   library : string list;
   programs : program list;
-  test : test;
+  tests : test list;
 }
 
 let units recipe =
@@ -62,7 +63,7 @@ let words line =
   |> String.split_on_char ' '
   |> List.filter (fun word -> word <> "")
 
-(* The keyword, and the system it is limited to, if any. *)
+(* The keyword, and the host it is limited to, if any. *)
 let split_keyword keyword =
   match String.index_opt keyword '@' with
   | None -> (keyword, None)
@@ -74,28 +75,52 @@ let only_once what previous value =
   if previous <> None then invalid "a second %s line" what;
   Some value
 
-let with_test recipe script suite =
-  let script = plain_name script in
-  if recipe.test.script <> "" then invalid "a second test line";
-  { recipe with test = { script; suite } }
+(* A HOST is SYSTEM or SYSTEM/MACHINE, matched against uname -s and -m. *)
+let names_host ~system ~machine host =
+  match String.split_on_char '/' host with
+  | [ s ] when s <> "" -> s = system
+  | [ s; m ] when s <> "" && m <> "" -> s = system && m = machine
+  | _ -> invalid "%S is not a host, SYSTEM or SYSTEM/MACHINE" host
+
+let place_of ~system ~machine = function
+  | None -> Here
+  | Some host when names_host ~system ~machine host -> Here
+  | Some host -> Not_here host
+
+let test_line place = function
+  | [ "own"; script ] -> { script = plain_name script; suite = Own; place }
+  | "substitute" :: script :: (_ :: _ as description) ->
+      let suite = Substitute (String.concat " " description) in
+      { script = plain_name script; suite; place }
+  | (("own" | "substitute") as kind) :: _ ->
+      invalid "wrong number of words after test %s" kind
+  | _ ->
+      invalid
+        "a test line is \"test own SCRIPT\" or \"test substitute SCRIPT \
+         DESCRIPTION...\""
 
 (* Lists accumulate in reverse and are put in order by [finish]. *)
-let add_line ~system recipe line =
+let add_line ~system ~machine recipe line =
   match words line with
   | [] -> recipe
   | first :: _ when first.[0] = '#' -> recipe
   | keyword :: rest -> (
       let keyword, only_on = split_keyword keyword in
-      let applies = match only_on with None -> true | Some s -> s = system in
+      let place = place_of ~system ~machine only_on in
       match (keyword, rest) with
-      | ("cflags" | "libs"), _ when not applies -> recipe
       | "cflags", options ->
+          (* Checked on every host, so a recipe is valid on all or none. *)
           let options = List.map compiler_option options in
-          { recipe with cflags = List.rev_append options recipe.cflags }
+          if place <> Here then recipe
+          else { recipe with cflags = List.rev_append options recipe.cflags }
+      | "libs", _ when place <> Here -> recipe
       | "libs", options ->
           { recipe with libs = List.rev_append options recipe.libs }
+      | "test", suite_words ->
+          let test = test_line place suite_words in
+          { recipe with tests = test :: recipe.tests }
       | _, _ when only_on <> None ->
-          invalid "only cflags and libs can be limited to a system"
+          invalid "only cflags, libs and test can be limited to a host"
       | "tree", [ archive ] ->
           let tree = { archive = plain_name archive; dir = "." } in
           { recipe with trees = tree :: recipe.trees }
@@ -106,16 +131,6 @@ let add_line ~system recipe line =
       | "prepare", [ script ] ->
           let script = plain_name script in
           { recipe with prepare = only_once "prepare" recipe.prepare script }
-      | "test", [ "own"; script ] -> with_test recipe script Own
-      | "test", "substitute" :: script :: (_ :: _ as description) ->
-          let suite = Substitute (String.concat " " description) in
-          with_test recipe script suite
-      | "test", ("own" | "substitute") :: _ ->
-          invalid "wrong number of words after test %s" (List.hd rest)
-      | "test", _ ->
-          invalid
-            "a test line is \"test own SCRIPT\" or \"test substitute \
-             SCRIPT DESCRIPTION...\""
       | "library", units ->
           let units = List.map unit_path units in
           { recipe with library = List.rev_append units recipe.library }
@@ -138,15 +153,13 @@ let empty =
     prepare = None;
     library = [];
     programs = [];
-    (* No test line yet: [finish] requires one, and the placeholder suite
-       is the one that does not count toward gate 1. *)
-    test = { script = ""; suite = Substitute "no test line" };
+    tests = [];
   }
 
 let finish recipe =
   if recipe.trees = [] then invalid "no tree line";
   if recipe.programs = [] then invalid "no program line";
-  if recipe.test.script = "" then invalid "no test line";
+  if recipe.tests = [] then invalid "no test line";
   {
     recipe with
     trees = List.rev recipe.trees;
@@ -154,20 +167,21 @@ let finish recipe =
     libs = List.rev recipe.libs;
     library = List.rev recipe.library;
     programs = List.rev recipe.programs;
+    tests = List.rev recipe.tests;
   }
 
 let read_lines path =
   In_channel.with_open_text path In_channel.input_all
   |> String.split_on_char '\n'
 
-let read ~system path =
+let read ~system ~machine path =
   match read_lines path with
   | exception Sys_error message -> Error message
   | lines -> (
       let line_number = ref 0 in
       let add recipe line =
         incr line_number;
-        add_line ~system recipe line
+        add_line ~system ~machine recipe line
       in
       match List.fold_left add empty lines with
       | exception Invalid message ->
