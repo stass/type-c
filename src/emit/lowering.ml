@@ -261,8 +261,9 @@ let construction (tokens : Token.t array)
    [switch] on its tag. Each arm is a block after the [case] of every
    constructor it takes; the block declares the bindings and ends in a
    trap, and the [default] of the switch, which only an invalid tag
-   reaches, traps (design 4.3, 4.5). The scrutinee and the block items
-   keep their tokens. *)
+   reaches, traps (design 4.3, 4.5). A single-pattern test holds its
+   operand in the same way. The scrutinee and the block items keep their
+   tokens. *)
 
 (* The trap of design 10.5 on a GNU-compatible compiler. *)
 let trap = "__builtin_trap();"
@@ -270,21 +271,19 @@ let trap = "__builtin_trap();"
 let scrutinee_pointer = "__tc_match"
 let scrutinee_copy = "__tc_copy"
 
-(* What replaces [match (] and [) {]: the declaration of the pointer
-   around the scrutinee, and the switch. *)
-let match_head (matching : Typec_sema.Expressions.matching) =
+(* What replaces the tokens before and after the scrutinee of a match or
+   the operand of a test: the opening of the block, and the declaration
+   of the pointer around the scrutinee. *)
+let scrutinee_holder (matching : _ Typec_sema.Expressions.matching_of) =
   let record = "struct " ^ matching.variant in
-  let switch =
-    Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member
-  in
   match matching.access with
   | Through_pointer ->
       ( Printf.sprintf "{ const %s *const %s = &(" record scrutinee_pointer,
-        "); " ^ switch )
+        "); " )
   | Through_copy ->
       ( Printf.sprintf "{ const %s %s = (" record scrutinee_copy,
-        Printf.sprintf "), *const %s = &%s; %s" scrutinee_pointer
-          scrutinee_copy switch )
+        Printf.sprintf "), *const %s = &%s; " scrutinee_pointer
+          scrutinee_copy )
 
 (* The type of a binding is spelt [__typeof__] its field (design 2.4),
    because no name of the field's type that C11 can spell is sure to be
@@ -296,40 +295,136 @@ let binding_declaration (binding : Typec_sema.Expressions.binding) =
   in
   Printf.sprintf " const __typeof__(%s) %s = %s;" field binding.name field
 
+let binding_declarations bindings =
+  String.concat "" (List.map binding_declaration bindings)
+
+let case_label ~variant constructor =
+  Printf.sprintf "case %s:" (Tree.enumerator_name ~variant constructor)
+
+(* The [default] that only a tag that is no constructor's reaches. *)
+let invalid_tag = Printf.sprintf "default: %s" trap
+
 (* The labels of an arm become the [case] of each constructor it takes
    and open its block; a trap closes the block after its last item. *)
 let matched_arm tokens ~variant (arm : Typec_sema.Expressions.matched_arm) =
-  let case constructor =
-    Printf.sprintf "case %s:" (Tree.enumerator_name ~variant constructor)
-  in
   let opening =
-    String.concat " " (List.map case arm.cases)
+    String.concat " " (List.map (case_label ~variant) arm.cases)
     ^ " {"
-    ^ String.concat "" (List.map binding_declaration arm.bindings)
+    ^ binding_declarations arm.bindings
   in
   replace tokens ~location:tokens.(arm.labels.first).location opening
     (grammar_tokens tokens arm.labels.first arm.labels.last)
   @ [ insert tokens ~before:(arm.arm.last + 1) (" " ^ trap ^ " }") ]
 
-let matching (tokens : Token.t array)
-    (matching : Typec_sema.Expressions.matching) =
-  let { Typec_sema.Expressions.statement; scrutinee; variant; arms; _ } =
+let match_statement (tokens : Token.t array) matching arms =
+  let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
     matching
   in
   let match_token = statement.first in
   let open_paren = grammar_token_after tokens match_token in
   let close_paren = grammar_token_after tokens scrutinee.last in
   let open_brace = grammar_token_after tokens close_paren in
-  let head, switch = match_head matching in
-  replace tokens ~location:tokens.(match_token).location head
+  let opening, held = scrutinee_holder matching in
+  let switch =
+    Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member
+  in
+  replace tokens ~location:tokens.(match_token).location opening
     [ match_token; open_paren ]
-  @ replace tokens ~location:tokens.(close_paren).location switch
+  @ replace tokens ~location:tokens.(close_paren).location (held ^ switch)
       [ close_paren; open_brace ]
   @ List.concat_map (matched_arm tokens ~variant) arms
   @ replace tokens
       ~location:tokens.(statement.last).location
-      (Printf.sprintf "default: %s } }" trap)
+      (Printf.sprintf "%s } }" invalid_tag)
       [ statement.last ]
+
+(* Design 13.5: a single-pattern test becomes the block of a match that
+   reads the tag once into [__tc_tag] and has an [if] on it. Its true
+   branch is the statement in a block that declares the bindings first;
+   its false branch traps on a tag that is no constructor's (4.5), with
+   a [switch] whose cases are those of a match, and then runs the [else]
+   statement of an [if]. A [while] test is the body of an endless loop
+   whose false branch ends in [break], so that the operand is evaluated
+   in that loop (4.4). *)
+
+let tag_local = "__tc_tag"
+
+let tag_declaration =
+  Printf.sprintf "const __typeof__(%s->%s) %s = %s->%s; " scrutinee_pointer
+    Tree.tag_member tag_local scrutinee_pointer Tree.tag_member
+
+let tag_check ~variant constructors =
+  Printf.sprintf "switch (%s) { %s break; %s } " tag_local
+    (String.concat " " (List.map (case_label ~variant) constructors))
+    invalid_tag
+
+(* The span of the statement [controlled], the edits that declare the
+   bindings in its block, and the text that closes a block made around
+   it, if one is. *)
+let controlled_block tokens (test : Typec_sema.Expressions.test) =
+  let declarations = binding_declarations test.bindings in
+  match test.controlled with
+  | Compound_controlled { span; bindings_before = _ } when test.bindings = []
+    ->
+      (span, [], None)
+  | Compound_controlled { span; bindings_before } ->
+      (span, [ insert tokens ~before:bindings_before declarations ], None)
+  | Wrapped_controlled span ->
+      ( span,
+        [ insert tokens ~before:span.first ("{" ^ declarations ^ " ") ],
+        Some " }" )
+
+(* The false branch of a test of [form] after the statement that ends at
+   [controlled_last], whose block [unwrap] closes if lowering made it:
+   the [check] of the tag, then the [else] statement of an [if], or the
+   end of the loop of a [while]. *)
+let false_branch tokens form ~controlled_last ~unwrap ~check =
+  let close = Option.value unwrap ~default:"" in
+  let after_controlled text =
+    insert tokens ~before:(controlled_last + 1) (close ^ text)
+  in
+  match (form : Typec_sema.Expressions.test_form) with
+  | If_test { otherwise = None } ->
+      [ after_controlled (" else { " ^ check ^ "} }") ]
+  | If_test { otherwise = Some otherwise } ->
+      let else_token = grammar_token_before tokens otherwise.first in
+      Option.to_list (Option.map (fun _ -> after_controlled "") unwrap)
+      @ replace tokens ~location:tokens.(else_token).location
+          ("else { " ^ check)
+          [ else_token ]
+      @ [ insert tokens ~before:(otherwise.last + 1) " } }" ]
+  | While_test -> [ after_controlled (" else { " ^ check ^ "break; } }") ]
+
+let single_pattern_test (tokens : Token.t array) matching
+    (test : Typec_sema.Expressions.test) =
+  let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
+    matching
+  in
+  let equals = grammar_token_before tokens scrutinee.first in
+  let close_paren = grammar_token_after tokens scrutinee.last in
+  let opening, held = scrutinee_holder matching in
+  let loop = match test.form with If_test _ -> "" | While_test -> "for (;;) " in
+  let selected =
+    Printf.sprintf "if (%s == %s) " tag_local
+      (Tree.enumerator_name ~variant test.constructor)
+  in
+  let controlled, declarations, unwrap = controlled_block tokens test in
+  let check = tag_check ~variant test.constructors in
+  replace tokens ~location:tokens.(statement.first).location
+    (loop ^ opening)
+    (grammar_tokens tokens statement.first equals)
+  @ replace tokens ~location:tokens.(close_paren).location
+      (held ^ tag_declaration ^ selected)
+      [ close_paren ]
+  @ declarations
+  @ false_branch tokens test.form ~controlled_last:controlled.last ~unwrap
+      ~check
+
+let matching (tokens : Token.t array)
+    (matching : Typec_sema.Expressions.matching) =
+  match matching.selects with
+  | Arms arms -> match_statement tokens matching arms
+  | Test test -> single_pattern_test tokens matching test
 
 (* Design 13.5: a construct that typec answers, where the backend would
    answer for the representation of a distinct type, is steered to or
@@ -422,9 +517,13 @@ let dropped_edits tokens range =
    its definition, and a constructor's arguments other constructors, so
    the edits of all are sorted; an insertion before a token comes before
    an edit that replaces it. Two insertions before one token keep their
-   order in [lowered], so the steering of a generic selection nests only
-   because no other lowering inserts before the first token of its
-   controlling expression or the comma after it. The edits inside a
+   order in [lowered]. Two statements that end at one token nest, and
+   the inner one, which begins later, closes first, so the matchings go
+   in reverse source order. That holds for the insertions that open
+   blocks too only because a matching inserts nothing before its own
+   first token, which it replaces. The steering of a generic selection
+   nests only because no other lowering inserts before the first token
+   of its controlling expression or the comma after it. The edits inside a
    dropped range go, and the range's own edits replace them. *)
 let edits (text : Reader.t) declarations constructions matchings answered =
   let tokens = text.tokens in
@@ -435,7 +534,7 @@ let edits (text : Reader.t) declarations constructions matchings answered =
   let lowered =
     List.concat_map (type_declaration tokens) declarations
     @ List.concat_map (construction tokens) constructions
-    @ List.concat_map (matching tokens) matchings
+    @ List.concat_map (matching tokens) (List.rev matchings)
     @ List.concat_map (steered_controlling tokens) answered
   in
   List.concat_map (dropped_edits tokens) ranges @ List.filter kept lowered

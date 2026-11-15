@@ -1886,6 +1886,83 @@ let variant_operations () =
       int tag_at(e *p) { return (int)p->tag + (int)(e){0}.tag; }\n\
       # 3 \"in.tc\" 2\nint g(e v) { return tag_of(v); }")
 
+(* Design 4.6: a single-pattern test is the selection step of a match
+   as the condition of an [if] or [while]; its statement is no arm. *)
+let single_pattern_test () =
+  let file = "in.tc" in
+  let variant = "type e = | A | B(int i) | C(long l, e *next); " in
+  let in_function body =
+    variant ^ "long f(e v, const e *p, int n) { " ^ body ^ " out: return 0; }"
+  in
+  let accepted body = accepts ~file (in_function body) in
+  let refused body text = rejects ~file (in_function body) text in
+  accepted "if (case B(i) = v) return i;";
+  accepted "if (case A = *p) n = 1; else n = 2;";
+  accepted
+    "while (case C(l, next) = *p) { n += (int)l; p = next; } return n;";
+  (* The statement may complete, and break and continue are C's. *)
+  accepted "while (n--) if (case A = v) break; else continue;";
+  accepted "while (case B(i) = v) { if (i) break; continue; }";
+  accepted "match (v) { case B(i): if (case B(j) = v) return i + j; break; \
+            default: break; }";
+  (* A binding is not visible in the operand, the else branch or after;
+     a nested block hides one. *)
+  accepted
+    "e x = v; if (case B(x) = x) return x; match (x) { default: break; }";
+  refused "if (case B(j) = v) return j; else return j;"
+    "'j' is not declared";
+  refused "if (case B(j) = v) return j; return j;" "'j' is not declared";
+  accepted "if (case B(i) = v) { { long i = 2; n = (int)i; } return i; }";
+  refused "if (case B(i) = v) { long i = 2; return i; }" "'i'";
+  refused "if (case B(i) = v) i = 2;" "not a modifiable lvalue";
+  refused "while (case B(i) = v) { i++; }" "modifiable lvalue";
+  (* 4.1 rules 1 and 3 hold for the operand and the pattern. *)
+  refused "if (case A = p) return 1;"
+    "the operand of a single-pattern test is not of a variant type; a \
+     pointer is not dereferenced implicitly (design 4.1 rule 1) [TC0014]";
+  refused "if (case A = n && n) return 1;" "[TC0014]";
+  refused "if (case A = v && n) return 1;" "(design 3.2 rule 6) [TC0007]";
+  refused "while (case D = v) break;"
+    "'D' names no constructor of the variant 'e' (design 4.1 rule 3) \
+     [TC0016]";
+  refused "if (case B = v) return 1;"
+    "the pattern 'B' has 0 sub-pattern(s), and the constructor has 1 \
+     field(s) (design 4.1 rule 3) [TC0016]";
+  refused "if (case B(i, j) = v) return 1;" "[TC0016]";
+  (* 4.3 rule 3 holds for the statement, whether or not it binds. *)
+  let into =
+    "a jump into the statement of a single-pattern test from outside it \
+     (design 4.3 rule 3) [TC0022]"
+  in
+  refused "goto in; if (case A = v) { in: return 1; }" into;
+  refused "if (case A = v) n = 1; else goto in; if (case B(i) = v) in: \
+           return i;" into;
+  refused "while (case A = v) { in: break; } goto in;" into;
+  refused "void *q = &&in; (void)q; if (case A = v) in: return 1;"
+    "the address of a label inside the statement of a single-pattern \
+     test";
+  accepted "if (case A = v) { in: if (n--) goto in; } else goto out;";
+  accepted "if (case A = v) n = 1; else { in: if (n--) goto in; }";
+  refused "switch (n) { case 1: if (case A = v) { case 2: ; } }"
+    "a case or default label inside the statement of a single-pattern \
+     test, which only a successful test enters (design 4.3 rule 3) \
+     [TC0020]";
+  (* Reachability: the test is no constant, and its statement's labels
+     enter only from inside it. *)
+  accepts ~file
+    (variant
+   ^ "int g(e v) { match (v) { case A: while (case B(i) = v) return i; \
+      return 0; default: if (case A = v) return 1; else return 2; } }");
+  rejects ~file
+    (variant
+   ^ "int g(e v) { match (v) { case A: return 1; default: if (case A = v) \
+      return 1; } }")
+    "[TC0021]";
+  accepts ~file
+    (variant
+   ^ "int g(e v) { match (v) { case A: return 1; default: return 2; \
+      if (case A = v) { in: return 3; } } }")
+
 let () =
   type_declarations ();
   variants ();
@@ -1896,6 +1973,7 @@ let () =
   matching ();
   arm_termination ();
   arm_jumps ();
+  single_pattern_test ();
   zero_values ();
   builtin_typedefs ();
   arm_vector_typedefs ();

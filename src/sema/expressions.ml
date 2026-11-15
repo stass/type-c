@@ -33,9 +33,10 @@ type constant =
   | Unevaluable of { span : Tree.span; message : string }
 
 (* What a case or default label in the statement being typed belongs
-   to: no switch, the innermost switch, or a match arm, where it belongs
-   to no switch of its own (design 4.3 rule 3). *)
-type label_owner = No_switch | Switch_body | Match_arm
+   to: no switch, the innermost switch, or a match arm or the statement
+   of a single-pattern test, where it belongs to no switch of its own
+   (design 4.3 rule 3, 4.6 rule 6). *)
+type label_owner = No_switch | Switch_body | Match_arm | Test_statement
 
 (* What encloses the statement being typed: the function, for __func__
    and return, and the switch or match that case labels need. *)
@@ -64,15 +65,31 @@ type matched_arm = {
   bindings : binding list;
 }
 
-type 'arms matching_of = {
+type controlled =
+  | Compound_controlled of { span : Tree.span; bindings_before : int }
+  | Wrapped_controlled of Tree.span
+
+type test_form = If_test of { otherwise : Tree.span option } | While_test
+
+type test = {
+  form : test_form;
+  constructor : string;
+  constructors : string list;
+  bindings : binding list;
+  controlled : controlled;
+}
+
+type selection = Arms of matched_arm list | Test of test
+
+type 'selects matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
   variant : string;
   access : access;
-  arms : 'arms;
+  selects : 'selects;
 }
 
-type matching = matched_arm list matching_of
+type matching = selection matching_of
 
 type answer =
   | Selected of {
@@ -95,12 +112,14 @@ let quote text =
    one way to hand a site to lowering, so none lies outside the scope. *)
 module Sites : sig
   type t
-  (* A match comes with the typing of its arms, which [record] runs only
-     once the match is in scope, so that the scope is the first thing
-     that a match is checked for. *)
+  (* A match comes with the typing of its arms, and a test with the
+     typing of its pattern and statement, which [record] runs only once
+     the matching is in scope, so that the scope is the first thing that
+     it is checked for. *)
   type site =
     | Construction of construction
     | Matching of (unit -> matched_arm list) matching_of
+    | Testing of (unit -> test) matching_of
 
   val create : unit -> t
 
@@ -130,6 +149,7 @@ end = struct
   type site =
     | Construction of construction
     | Matching of (unit -> matched_arm list) matching_of
+    | Testing of (unit -> test) matching_of
 
   let create () =
     { constructions = Hashtbl.create 64; matchings = Hashtbl.create 16 }
@@ -147,6 +167,17 @@ end = struct
           where the names that it lowers to do not denote the variant"
          what (quote variant))
 
+  (* A matching that [what] names, with what it selects typed by
+     [selects] once it is known to be in scope. *)
+  let record_matching sites tags ~fail ~variant_type ~what matching selects
+      =
+    if within_scope tags variant_type matching.statement then
+      Hashtbl.replace sites.matchings matching.statement
+        { matching with selects = selects () }
+    else
+      fail matching.scrutinee
+        (outside_scope Match_scrutinee ~what ~variant:matching.variant)
+
   let record sites tags ~fail ~variant_type = function
     | Construction construction ->
         if within_scope tags variant_type construction.span then
@@ -156,13 +187,12 @@ end = struct
             (outside_scope Variant_scope ~what:"the constructor expression"
                ~variant:construction.variant)
     | Matching matching ->
-        if within_scope tags variant_type matching.statement then
-          Hashtbl.replace sites.matchings matching.statement
-            { matching with arms = matching.arms () }
-        else
-          fail matching.scrutinee
-            (outside_scope Match_scrutinee ~what:"the match"
-               ~variant:matching.variant)
+        record_matching sites tags ~fail ~variant_type ~what:"the match"
+          matching (fun () -> Arms (matching.selects ()))
+    | Testing testing ->
+        record_matching sites tags ~fail ~variant_type
+          ~what:"the single-pattern test" testing (fun () ->
+            Test (testing.selects ()))
 
   let construction sites span = Hashtbl.find_opt sites.constructions span
 
@@ -2696,9 +2726,17 @@ and statement_node context (statement : Tree.statement) =
   | Computed_goto value -> ignore (expression context value)
   | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _ ->
       ()
-  | If { condition; then_branch; else_branch } ->
+  | If { condition = Controlling condition; then_branch; else_branch } ->
       scalar ~clause:"6.8.4.1p1" condition;
       typed_statement context then_branch;
+      Option.iter (typed_statement context) else_branch
+  | If { condition = Pattern_test { pattern; operand }; then_branch;
+         else_branch } ->
+      let otherwise =
+        Option.map (fun (branch : Tree.statement) -> branch.span) else_branch
+      in
+      single_pattern_test context statement ~pattern ~operand then_branch
+        (If_test { otherwise });
       Option.iter (typed_statement context) else_branch
   | Switch { controlling; body } ->
       switch_controlling context controlling;
@@ -2706,9 +2744,12 @@ and statement_node context (statement : Tree.statement) =
           typed_statement context body)
   | Match { scrutinee; arms } ->
       match_statement context statement scrutinee arms
-  | While { condition; body } ->
+  | While { condition = Controlling condition; body } ->
       scalar ~clause:"6.8.5p2" condition;
       typed_statement context body
+  | While { condition = Pattern_test { pattern; operand }; body } ->
+      single_pattern_test context statement ~pattern ~operand body
+        While_test
   | Do { body; condition } ->
       typed_statement context body;
       scalar ~clause:"6.8.5p2" condition
@@ -2762,6 +2803,11 @@ and label_of context (label : Tree.label) =
           (Rule.message Enclosing_switch_label
              "a case or default label inside a match arm, which is not one \
               of its own and belongs to no switch inside it")
+    | Test_statement ->
+        context.fail label.span
+          (Rule.message Enclosing_switch_label
+             "a case or default label inside the statement of a \
+              single-pattern test, which only a successful test enters")
     | No_switch ->
         context.fail label.span
           "a case or default label outside a switch (C11 6.8.1p2)"
@@ -2805,14 +2851,67 @@ and uncovered (constructors : Ctype.constructor list) named =
 and match_statement context (statement : Tree.statement) scrutinee arms =
   let typed = expression context scrutinee in
   let t = typed.expression_type in
-  let variant, constructors = scrutinee_variant context scrutinee.span t in
+  let variant, constructors =
+    scrutinee_variant context ~what:"the scrutinee of a match" scrutinee.span
+      t
+  in
   record_site context ~variant_type:t
     (Matching
        { statement = statement.span; scrutinee = scrutinee.span; variant;
          access = access_of context scrutinee t;
-         arms =
+         selects =
            (fun () ->
              typed_arms context ~statement variant constructors arms) })
+
+(* Design 4.6: the operand obeys 4.1 rule 1 and the pattern 4.1 rule 3,
+   as a scrutinee and a label of a match do. The [else] statement is the
+   caller's. *)
+and single_pattern_test context (statement : Tree.statement)
+    ~(pattern : Tree.pattern Tree.spanned) ~(operand : Tree.expression)
+    (controlled : Tree.statement) form =
+  let t = (expression context operand).expression_type in
+  let variant, constructors =
+    scrutinee_variant context ~what:"the operand of a single-pattern test"
+      operand.span t
+  in
+  record_site context ~variant_type:t
+    (Testing
+       { statement = statement.span; scrutinee = operand.span; variant;
+         access = access_of context operand t;
+         selects =
+           (fun () ->
+             tested context variant constructors pattern controlled form) })
+
+(* The bindings of a test, then its statement, which is in their scope
+   and in which no case or default label of a switch around it may stand
+   (4.6 rules 4 and 6). *)
+and tested context variant constructors (pattern : Tree.pattern Tree.spanned)
+    (controlled : Tree.statement) form =
+  let constructor =
+    pattern_constructor context variant constructors pattern.span pattern.node
+  in
+  let bindings = pattern_bindings context pattern.node constructor in
+  let enclosing =
+    { context.typed.enclosing with case_labels = Test_statement }
+  in
+  within context enclosing (fun () -> typed_statement context controlled);
+  { form; constructor = constructor.constructor_name;
+    constructors = List.map constructor_name constructors; bindings;
+    controlled = controlled_of controlled }
+
+(* Where lowering declares the bindings of a test (13.5): after the brace
+   of a compound statement and its GNU local labels, which come first in
+   a block. *)
+and controlled_of (controlled : Tree.statement) =
+  match controlled.node with
+  | Compound block ->
+      let bindings_before =
+        match List.rev block.node.local_labels with
+        | last :: _ -> last.span.last + 1
+        | [] -> block.span.first + 1
+      in
+      Compound_controlled { span = controlled.span; bindings_before }
+  | _ -> Wrapped_controlled controlled.span
 
 (* The arms of a match of [variant]: their labels, the coverage of the
    constructors and the items of each arm. *)
@@ -2877,26 +2976,28 @@ and refuse_open_arm context arm =
   | None -> ()
 
 (* 4.1 rule 1, 4.2 rule 4: a variant, whose qualifiers are ignored, and
-   complete here, so that its constructors are known. *)
-and scrutinee_variant context span t =
+   complete here, so that its constructors are known. [what] names the
+   expression: a scrutinee, or the operand of a test (4.6 rule 2). *)
+and scrutinee_variant context ~what span t =
   match (Ctype.as_variant t, Ctype.constructors context.tags t) with
   | Some variant, Some constructors -> (variant, constructors)
   | Some variant, None ->
       context.fail span
         (Rule.message Match_scrutinee
            (Printf.sprintf
-              "the scrutinee of a match is of the incomplete variant %s, \
-               whose constructors are unknown here"
-              (quote variant)))
+              "%s is of the incomplete variant %s, whose constructors are \
+               unknown here"
+              what (quote variant)))
   | None, _ ->
       context.fail span
         (Rule.message Match_scrutinee
-           "the scrutinee of a match is not of a variant type; a pointer \
-            is not dereferenced implicitly")
+           (what
+          ^ " is not of a variant type; a pointer is not dereferenced \
+             implicitly"))
 
 (* The constructor that [pattern] names, with one sub-pattern per field
    (4.1 rule 3). *)
-and pattern_constructor context variant constructors (label : Tree.arm_label)
+and pattern_constructor context variant constructors (label : Tree.span)
     (pattern : Tree.pattern) =
   let name = pattern.constructor.node in
   let given = List.length (Option.value pattern.sub_patterns ~default:[]) in
@@ -2907,12 +3008,12 @@ and pattern_constructor context variant constructors (label : Tree.arm_label)
       constructors
   with
   | None ->
-      context.fail label.span
+      context.fail label
         (Rule.message Pattern
            (Printf.sprintf "%s names no constructor of the variant %s"
               (quote name) (quote variant)))
   | Some constructor when List.length constructor.fields <> given ->
-      context.fail label.span
+      context.fail label
         (Rule.message Pattern
            (Printf.sprintf
               "the pattern %s has %d sub-pattern(s), and the constructor \
@@ -2929,7 +3030,8 @@ and labelled_constructors context variant constructors (arm : Tree.arm) =
       | Default_arm_label -> (label, None)
       | Pattern_label pattern ->
           let constructor =
-            pattern_constructor context variant constructors label pattern
+            pattern_constructor context variant constructors label.span
+              pattern
           in
           (label, Some constructor))
     arm.node.labels

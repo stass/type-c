@@ -34,8 +34,8 @@ type flow = {
      continue in it leaves for, as the parser resolved each. *)
   breaks : Targets.t;
   continues : Targets.t;
-  (* It carries or contains a named label outside every match arm in it,
-     by which a goto from around it may enter it. *)
+  (* It carries or contains a named label outside every guarded
+     statement in it, by which a goto from around it may enter it. *)
   has_named_label : bool;
   (* It carries or contains a case or default label of the switch around
      it, by which that switch may enter it. *)
@@ -90,15 +90,21 @@ type jump = { target : label; site : Tree.span; kind : jump_kind }
 
 module Names = Map.Make (String)
 
-(* One walk of a body. [arm] is the innermost match arm around the walk
-   and [local_labels] the block of each GNU local label in scope;
-   [arms_of_labels] gives the innermost arm around each label, [None]
-   outside every arm, and [jumps] holds the jumps in source order. *)
+(* A statement that a jump enters only from inside it (design 4.3 rule
+   3): a match arm, or the statement of a single-pattern test, which
+   only a successful test enters (4.6 rule 6). *)
+type guarded = Arm of Tree.span | Tested of Tree.span
+
+(* One walk of a body. [guard] is the innermost guarded statement around
+   the walk and [local_labels] the block of each GNU local label in
+   scope; [guards_of_labels] gives the innermost guarded statement around
+   each label, [None] outside every one, and [jumps] holds the jumps in
+   source order. *)
 type walk = {
   facts : facts;
-  arm : Tree.span option;
+  guard : guarded option;
   local_labels : Tree.span Names.t;
-  arms_of_labels : (label, Tree.span option) Hashtbl.t;
+  guards_of_labels : (label, guarded option) Hashtbl.t;
   jumps : jump Queue.t;
 }
 
@@ -181,10 +187,13 @@ and statement_flow walk (statement : Tree.statement) =
   | If { condition; then_branch; else_branch } ->
       if_flow walk condition then_branch else_branch
   | Switch { controlling; body } -> switch_flow walk target controlling body
-  | While { condition; body } ->
+  | While { condition = Controlling condition; body } ->
       let body = statement_flow walk body in
       let ends = not (walk.facts.non_zero condition) in
       loop target (expression walk condition) body ~completes:ends
+  | While { condition = Pattern_test { operand; _ }; body } ->
+      loop target (expression walk operand) (tested walk body)
+        ~completes:true
   | Do { body; condition } ->
       let body = statement_flow walk body in
       let repeats = walk.facts.non_zero condition in
@@ -207,7 +216,7 @@ and statement_flow walk (statement : Tree.statement) =
 and labelled_flow walk (label : Tree.label) labelled =
   match label.node with
   | Named_label { name; _ } ->
-      Hashtbl.replace walk.arms_of_labels (resolve walk name) walk.arm;
+      Hashtbl.replace walk.guards_of_labels (resolve walk name) walk.guard;
       { (statement_flow walk labelled) with has_named_label = true }
   | Case_label _ | Case_range _ ->
       { (statement_flow walk labelled) with has_case_label = true }
@@ -216,13 +225,17 @@ and labelled_flow walk (label : Tree.label) labelled =
         default = true }
 
 and if_flow walk condition then_branch else_branch =
-  let taken = statement_flow walk then_branch in
+  let taken =
+    match condition with
+    | Tree.Controlling _ -> statement_flow walk then_branch
+    | Pattern_test _ -> tested walk then_branch
+  in
   let other =
     match else_branch with
     | Some branch -> statement_flow walk branch
     | None -> completes
   in
-  let condition = expression walk condition in
+  let condition = expression walk (Tree.condition_value condition) in
   { (both (both condition taken) other) with
     completes = taken.completes || other.completes }
 
@@ -286,7 +299,18 @@ and match_flow walk target scrutinee arms =
     continues = Targets.union outside.continues arms.continues }
 
 and arm walk (arm : Tree.arm) =
-  sequence { walk with arm = Some arm.span } arm.node.items
+  sequence { walk with guard = Some (Arm arm.span) } arm.node.items
+
+(* Design 4.6 rules 5 and 6: the statement of a single-pattern test may
+   complete and leave what is around it, as C's does, but a jump enters
+   it only from inside it, as an arm, so its labels are not those of the
+   statements around it. *)
+and tested walk (statement : Tree.statement) =
+  let flow =
+    statement_flow { walk with guard = Some (Tested statement.span) } statement
+  in
+  { flow with has_named_label = false; has_case_label = false;
+    default = false }
 
 (* An [asm goto] may jump to each of its labels or complete. *)
 and asm_flow walk (assembler : Tree.assembler) =
@@ -347,21 +371,36 @@ and association (association : Tree.generic_association) =
 let encloses (outer : Tree.span) (inner : Tree.span) =
   outer.first <= inner.first && inner.last <= outer.last
 
-(* Design 4.3 rule 3. A computed goto may jump to any label whose address
-   is taken, so a label inside an arm cannot have its address taken. *)
-let check_jump arms_of_labels jump =
-  match (Hashtbl.find_opt arms_of_labels jump.target, jump.kind) with
-  | Some (Some _), Address ->
+let guarded_span = function Arm span | Tested span -> span
+
+(* What a diagnostic calls a guarded statement, and the same statement
+   named again. *)
+let guarded_names = function
+  | Arm _ -> ("a match arm", "the arm")
+  | Tested _ -> ("the statement of a single-pattern test", "the statement")
+
+(* Design 4.3 rule 3, 4.6 rule 6. A computed goto may jump to any label
+   whose address is taken, so a label inside a guarded statement cannot
+   have its address taken. *)
+let check_jump guards_of_labels jump =
+  match (Hashtbl.find_opt guards_of_labels jump.target, jump.kind) with
+  | Some (Some guard), Address ->
+      let inside, again = guarded_names guard in
       refuse jump.site Arm_entry
-        "the address of a label inside a match arm, which a computed goto \
-         could jump to from outside the arm"
-  | Some (Some arm), Goto when not (encloses arm jump.site) ->
-      refuse jump.site Arm_entry "a jump into a match arm from outside it"
+        (Printf.sprintf
+           "the address of a label inside %s, which a computed goto could \
+            jump to from outside %s"
+           inside again)
+  | Some (Some guard), Goto when not (encloses (guarded_span guard) jump.site)
+    ->
+      refuse jump.site Arm_entry
+        (Printf.sprintf "a jump into %s from outside it"
+           (fst (guarded_names guard)))
   | (Some _ | None), (Goto | Address) -> ()
 
 let start facts =
-  { facts; arm = None; local_labels = Names.empty;
-    arms_of_labels = Hashtbl.create 16; jumps = Queue.create () }
+  { facts; guard = None; local_labels = Names.empty;
+    guards_of_labels = Hashtbl.create 16; jumps = Queue.create () }
 
 (* Design 4.3 rule 1. *)
 let arm_refusal facts (matched : Tree.arm) =
@@ -375,6 +414,6 @@ let arm_refusal facts (matched : Tree.arm) =
 let jump_refusal facts body =
   let walk = start facts in
   ignore (block walk body);
-  match Queue.iter (check_jump walk.arms_of_labels) walk.jumps with
+  match Queue.iter (check_jump walk.guards_of_labels) walk.jumps with
   | () -> None
   | exception Refused refusal -> Some refusal

@@ -80,7 +80,8 @@ let rules =
       meaning =
         "A match whose scrutinee is no complete variant, or one outside \
          the scope of the declaration of the variant; also design 4.2 \
-         rule 4." };
+         rule 4. The same for a single-pattern test and its operand \
+         (design 4.6 rule 2)." };
     { name = "Arm_form"; code = 15; clause = Some "design 4.1 rule 2";
       meaning =
         "A match body that is not a sequence of arms, each of labels \
@@ -88,7 +89,8 @@ let rules =
     { name = "Pattern"; code = 16; clause = Some "design 4.1 rule 3";
       meaning =
         "A pattern that names no constructor of the scrutinee's type, \
-         or whose sub-patterns do not match its fields." };
+         or whose sub-patterns do not match its fields; also the pattern \
+         of a single-pattern test (design 4.6 rule 2)." };
     { name = "Shared_arm"; code = 17; clause = Some "design 4.1 rule 6";
       meaning =
         "An arm of several labels one of which binds." };
@@ -103,14 +105,16 @@ let rules =
       clause = Some "design 4.3 rule 3";
       meaning =
         "A [case] or [default] label inside a match that is not one of \
-         its own." };
+         its own, or inside the statement of a single-pattern test \
+         (design 4.6 rule 6)." };
     { name = "Arm_end"; code = 21; clause = Some "design 4.3 rule 1";
       meaning =
         "A match arm whose end can be reached; also design 4.4."
     };
     { name = "Arm_entry"; code = 22; clause = Some "design 4.3 rule 3";
       meaning =
-        "A jump into a match arm from outside it, or the address of a \
+        "A jump into a match arm or the statement of a single-pattern \
+         test (design 4.6 rule 6) from outside it, or the address of a \
          label inside one." };
     { name = "Not_implemented"; code = 23; clause = None;
       meaning =

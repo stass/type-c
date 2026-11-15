@@ -137,10 +137,12 @@ let jump_targets ?(file = type_c_file) text =
     | Labeled { statement; _ } -> sub statement
     | Expression_statement expression -> value reader expression
     | If { condition; then_branch; else_branch } ->
-        value reader condition @ sub then_branch
+        value reader (Tree.condition_value condition)
+        @ sub then_branch
         @ List.concat_map sub (Option.to_list else_branch)
     | Switch { controlling; body } -> value reader controlling @ sub body
-    | While { condition; body } -> value reader condition @ sub body
+    | While { condition; body } ->
+        value reader (Tree.condition_value condition) @ sub body
     | Do { body; condition } -> sub body @ value reader condition
     | For { clause; condition; step; body } ->
         let clause =
@@ -203,6 +205,15 @@ let jump_target_cases =
       "while (n) {\nfor (({ break; 0; }); ;) ;\n\
        switch (({ continue; 0; })) { default: break; }\n}"
       "break->while:2 continue->while:2 break->switch:4";
+    jumps "a jump in the operand of an if test leaves what is around it"
+      "while (n) {\nif (case A = ({ if (n) break; v; })) continue;\n}"
+      "break->while:2 continue->while:2";
+    jumps "a jump in the operand of a while test leaves that while"
+      "for (;;) {\nwhile (case A = ({ if (n) break; v; })) continue;\n}"
+      "break->while:3 continue->while:3";
+    jumps "a break in the statement of a test in a match leaves the match"
+      "while (n)\nmatch (v) {\ndefault:\nif (case A = v) break;\nbreak;\n}"
+      "break->match:3 break->match:3";
     jumps "a break outside a loop, switch or match" "break;"
       "error: in.tc:2: break outside a loop, switch or match (C11 \
        6.8.6.3p1, design 4.3 rule 2) [TC0027]";
@@ -712,6 +723,12 @@ let resolution_cases =
     case "a condition's declarations are in scope in both branches"
       "void f(void) { if (sizeof (enum { A })) A; else A; A; }"
       "f#1 A#1 A->#1 A->#1 A->?";
+    case "a test's bindings are in scope in its statement only"
+      "int x; void f(void) { if (case B(x) = x) x; else x; x; }"
+      "x#1 f#1 x#2 x->#1 x->#2 x->#1 x->#1";
+    case "a test's bindings and its compound statement are one scope"
+      "void f(void) { while (case B(x) = v) { int x; { int x; } } }"
+      "f#1 x#1 v->? x#2<#1 x#3";
     case "a statement expression is a block"
       "int f(void) { return ({ int y = 1; y; }) + y; }"
       "f#1 y#1 y->#1 y->?";
@@ -2047,6 +2064,26 @@ let match_cases =
       "(declaration (int) (init match 1)) (expr (= match (call match 2))) \
        (expr (call match 3)) (expr (call f match))";
     statement_case "a label named match" "match: ;" "(label match ;)";
+    statement_case "a single-pattern test in an if"
+      "if (case B(a, _) = *e) x; else y;"
+      "(if (test (case B a _) (* e)) (expr x) (expr y))";
+    statement_case "a single-pattern test in a while"
+      "while (case A = f(v)) { break; }"
+      "(while (test (case A) (call f v)) (block break))";
+    error_in_function "a test is the whole condition: not negated"
+      "if (!(case A = v)) ;" "error: in.tc:1: expected an expression, found \
+                              `case`";
+    error_in_function "nor parenthesised" "if ((case A = v)) ;"
+      "error: in.tc:1: expected an expression, found `case`";
+    error_in_function "nor the condition of a for" "for (; case A = v;) ;"
+      "error: in.tc:1: expected an expression, found `case`";
+    error_in_function "nor that of a do" "do ; while (case A = v);"
+      "error: in.tc:1: expected an expression, found `case`";
+    error_in_function "a test binds with =" "if (case A == v) ;"
+      "error: in.tc:1: expected `=` after the pattern of a single-pattern \
+       test, found `==`";
+    statement_case "the operand of a test extends to the parenthesis"
+      "if (case A = v && c, w) ;" "(if (test (case A) (, (&& v c) w)) ; _)";
     case "match is a member and a typedef name where no match begins"
       "typedef int match; struct s { match match; }; match (m);"
       "(declaration (typedef int) match) | (declaration ((struct s (member \

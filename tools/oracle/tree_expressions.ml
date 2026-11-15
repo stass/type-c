@@ -193,12 +193,13 @@ and statement visit (s : statement) =
   | Return None ->
       ()
   | If { condition; then_branch; else_branch } ->
-      expression visit condition;
+      expression visit (condition_value condition);
       statement visit then_branch;
       option statement visit else_branch
-  | Switch { controlling = condition; body }
-  | While { condition; body }
-  | Do { body; condition } ->
+  | While { condition; body } ->
+      expression visit (condition_value condition);
+      statement visit body
+  | Switch { controlling = condition; body } | Do { body; condition } ->
       expression visit condition;
       statement visit body
   | For { clause; condition; step; body } ->

@@ -25,7 +25,8 @@ val edits :
   Emitter.edit list
 (** [edits text declarations constructions matchings answered] lowers
     [declarations], the constructor expressions [constructions], the
-    match statements [matchings] and the constructs [answered], parsed
+    match statements and single-pattern tests [matchings] and the
+    constructs [answered], parsed
     from [text], to edits in the order that
     {!Emitter.emit} takes. An answered [__builtin_types_compatible_p]
     becomes its answer. An answered generic selection keeps its tokens,

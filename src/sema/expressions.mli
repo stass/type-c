@@ -166,22 +166,52 @@ type matched_arm = {
   bindings : binding list;
 }
 
-(** A match statement (design 4) that lowering replaces (13.5): its
-    span, that of its scrutinee, the name of its variant, how it reaches
-    the scrutinee, and its arms in order. Typing records a match before
-    it types the arms, with [arms] then still to be typed. *)
-type 'arms matching_of = {
+(** The statement that a single-pattern test controls, which lowering
+    makes a block that declares the bindings first (design 13.5): a
+    compound statement, whose bindings go before the token
+    [bindings_before], after its brace and its GNU local labels; or
+    another statement, which lowering puts in a block of its own. *)
+type controlled =
+  | Compound_controlled of { span : Tree.span; bindings_before : int }
+  | Wrapped_controlled of Tree.span
+
+(** Whether a test is the condition of an [if], with the span of its
+    [else] statement if it has one, or of a [while]. *)
+type test_form = If_test of { otherwise : Tree.span option } | While_test
+
+(** A single-pattern test (design 4.6): its form, the constructor that it
+    asks for, every constructor of its variant in order, whose tags are
+    the valid ones (4.5), its bindings in order, and its statement. *)
+type test = {
+  form : test_form;
+  constructor : string;
+  constructors : string list;
+  bindings : binding list;
+  controlled : controlled;
+}
+
+(** What a matching selects with the tag of its scrutinee: the arms of a
+    match statement, or the one constructor of a single-pattern test. *)
+type selection = Arms of matched_arm list | Test of test
+
+(** A match statement (design 4) or a single-pattern test (4.6) that
+    lowering replaces (13.5): its span, that of its scrutinee, which is
+    the operand of a test, the name of its variant, how it reaches the
+    scrutinee, and what it selects. Typing records a matching before it
+    types what it selects, which is then still to be typed. *)
+type 'selects matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
   variant : string;
   access : access;
-  arms : 'arms;
+  selects : 'selects;
 }
 
-type matching = matched_arm list matching_of
+type matching = selection matching_of
 
 val matchings : t -> matching list
-(** The match statements typed, in source order. *)
+(** The match statements and single-pattern tests typed, in source
+    order. *)
 
 (** How lowering answers a construct that asks whether types are
     compatible where Type-C text compares a distinct type with them

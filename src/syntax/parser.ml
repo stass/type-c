@@ -1372,16 +1372,24 @@ type open_statement = {
    the [else] branch and the condition of a [do] are read in it. *)
 and open_kind =
   | Open_labeled of label
-  | Open_if of { condition : expression; statement_scope : scope }
-  | Open_else of { condition : expression; then_branch : statement }
+  | Open_if of { condition : condition; statement_scope : scope }
+  | Open_else of { condition : condition; then_branch : statement }
   | Open_switch of expression
-  | Open_while of expression
+  | Open_while of condition
   | Open_do of { statement_scope : scope }
   | Open_for of {
       clause : for_clause option;
       condition : expression option;
       step : expression option;
     }
+
+(* A pattern as read, before its bindings enter scope where its block
+   scope begins: its constructor and its sub-patterns, each an
+   identifier, which may be [_]. *)
+type pattern_words = {
+  constructor : identifier;
+  sub_patterns : identifier list option;
+}
 
 (* What the substatement of an open statement leaves: the statement
    closed, or, after the [else] of an [if], open again. *)
@@ -2584,8 +2592,38 @@ and controlling_expression state keyword =
     (Printf.sprintf "`)` after the controlling expression of `%s`" keyword);
   value
 
-(* The controlling expression of a [while] or [do] after [keyword], in
-   the disputed scope of the loop [disputed]. *)
+(* After [if] or [while]: the parenthesised condition, C's controlling
+   expression read in the jump scope [controlling_jumps], or, after
+   [case], a single-pattern test read in [test_jumps] (design 4.4, 4.6).
+   The result makes the condition in the scope of the substatement,
+   which the test's bindings begin, after its operand. *)
+and condition state keyword ~controlling_jumps ~test_jumps =
+  if peek_at state 1 = Keyword_token Keyword.Case then
+    with_jumps state test_jumps (fun () -> pattern_test state keyword)
+  else
+    let value =
+      with_jumps state controlling_jumps (fun () ->
+          controlling_expression state keyword)
+    in
+    fun () -> Controlling value
+
+(* [(] [case] pattern [=] operand [)] after [keyword]. *)
+and pattern_test state keyword =
+  expect state P.Left_paren (Printf.sprintf "`(` after `%s`" keyword);
+  let start = state.position in
+  advance state;
+  let words = pattern_words state in
+  let pattern_span = span_from state start in
+  expect state P.Equal "`=` after the pattern of a single-pattern test";
+  let operand = expression state in
+  expect state P.Right_paren
+    (Printf.sprintf "`)` after the operand of the test of `%s`" keyword);
+  fun () ->
+    let pattern = { span = pattern_span; node = bound_pattern state words } in
+    Pattern_test { pattern; operand }
+
+(* The controlling expression of a [do] after [keyword], in the
+   disputed scope of the loop [disputed]. *)
 and loop_condition state keyword disputed =
   with_jumps state disputed (fun () -> controlling_expression state keyword)
 
@@ -2665,12 +2703,15 @@ and open_statements state opened =
   let outer = state.scope in
   let outer_jumps = state.jumps in
   (* A selection or iteration statement is a block, which [read_head]
-     reads in, and so is its substatement, read in [body_jumps]. *)
+     reads in, and so is its substatement, read in [body_jumps]. What
+     [read_head] returns makes the open statement in the scope of the
+     substatement, where the bindings of a test begin (design 4.6). *)
   let open_block_statement ~body_jumps read_head =
     enter_scope state;
-    let kind = read_head () in
+    let open_kind = read_head () in
     state.jumps <- body_jumps;
     enter_scope state;
+    let kind = open_kind () in
     (open_statements [@tailcall]) state
       ({ start; outer = Some outer; outer_jumps; kind } :: opened)
   in
@@ -2687,30 +2728,54 @@ and open_statements state opened =
   | Keyword_token Keyword.If ->
       advance state;
       open_block_statement ~body_jumps:outer_jumps (fun () ->
-          let condition = controlling_expression state "if" in
-          Open_if { condition; statement_scope = state.scope })
+          let condition =
+            condition state "if" ~controlling_jumps:outer_jumps
+              ~test_jumps:outer_jumps
+          in
+          let statement_scope = state.scope in
+          fun () -> Open_if { condition = condition (); statement_scope })
   | Keyword_token Keyword.Switch ->
       advance state;
       open_block_statement
         ~body_jumps:
           (Switch_or_match { target = target (); around = outer_jumps })
-        (fun () -> Open_switch (controlling_expression state "switch"))
+        (fun () ->
+          let controlling = controlling_expression state "switch" in
+          fun () -> Open_switch controlling)
   | Keyword_token Keyword.While ->
       advance state;
       open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
-          Open_while (loop_condition state "while" (disputed ())))
+          let condition =
+            condition state "while" ~controlling_jumps:(disputed ())
+              ~test_jumps:(Loop (target ()))
+          in
+          fun () -> Open_while (condition ()))
   | Keyword_token Keyword.Do ->
       advance state;
       open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
-          Open_do { statement_scope = state.scope })
+          let statement_scope = state.scope in
+          fun () -> Open_do { statement_scope })
   | Keyword_token Keyword.For ->
       advance state;
       open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
           let clause, condition, step = for_clauses state (disputed ()) in
-          Open_for { clause; condition; step })
+          fun () -> Open_for { clause; condition; step })
+  | Punctuator_token P.Left_brace when binds_substatement opened ->
+      let body = compound_statement state in
+      (close_statements [@tailcall]) state opened
+        { span = body.span; node = Compound body }
   | _ ->
       let statement = simple_statement state in
       (close_statements [@tailcall]) state opened statement
+
+(* Whether the substatement about to be read is the statement of a
+   single-pattern test, whose bindings and compound statement are one
+   block scope (design 4.6 rule 4). *)
+and binds_substatement = function
+  | { kind = Open_if { condition = Pattern_test _; _ }; _ } :: _
+  | { kind = Open_while (Pattern_test _); _ } :: _ ->
+      true
+  | _ -> false
 
 (* [statement] has been read: it is the substatement of the innermost
    open statement. Closing a statement restores the scope around it. *)
@@ -2881,18 +2946,20 @@ and arm_label state =
     if accept_keyword state Keyword.Default then Default_arm_label
     else begin
       advance state;
-      Pattern_label (pattern state)
+      Pattern_label (bound_pattern state (pattern_words state))
     end
   in
   expect state P.Colon "`:` after the label of an arm";
   finish state start node
 
 (* After the [case]: a constructor and its sub-patterns. *)
-and pattern state =
+and pattern_words state =
   let constructor = identifier state "a constructor after `case`" in
   let sub_patterns =
     if accept state P.Left_paren then begin
-      let read = one_or_more state sub_pattern in
+      let read =
+        one_or_more state (fun state -> identifier state "a binding or `_`")
+      in
       expect state P.Right_paren "`)` after the sub-patterns of a pattern";
       Some read
     end
@@ -2900,10 +2967,15 @@ and pattern state =
   in
   { constructor; sub_patterns }
 
-and sub_pattern state =
-  let name = identifier state "a binding or `_`" in
-  if name.node = wildcard_word then Wildcard name.span
-  else Binding { name; declared = declare state ~kind:Not_a_type name }
+(* The pattern [words], whose bindings enter the current scope here: the
+   one place that declares a binding (design 4.1 rule 4). *)
+and bound_pattern state (words : pattern_words) : pattern =
+  let sub_pattern (name : identifier) =
+    if name.node = wildcard_word then Wildcard name.span
+    else Binding { name; declared = declare state ~kind:Not_a_type name }
+  in
+  { constructor = words.constructor;
+    sub_patterns = Option.map (List.map sub_pattern) words.sub_patterns }
 
 (* After the [asm]: its qualifiers, and its template and operands in
    parentheses. *)

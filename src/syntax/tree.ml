@@ -484,12 +484,12 @@ and statement_node =
       (** GNU [__attribute__((...));] or C23 [[[...]];], a null statement
           with attributes, such as [fallthrough] before a [case] label *)
   | If of {
-      condition : expression;
+      condition : condition;
       then_branch : statement;
       else_branch : statement option;
     }
   | Switch of { controlling : expression; body : statement }
-  | While of { condition : expression; body : statement }
+  | While of { condition : condition; body : statement }
   | Do of { body : statement; condition : expression }
   | For of {
       clause : for_clause option;  (** clause-1 of 6.8.5.3 *)
@@ -510,6 +510,15 @@ and statement_node =
   | Asm of assembler
   | Match of { scrutinee : expression; arms : arm list }
       (** design 4.1: [match (] scrutinee [) {] arms [}] *)
+
+(** The condition of an [if] or a [while]: C's controlling expression,
+    or a single-pattern test (design 4.6), whose statement is the [then]
+    branch or the body, in the block scope that its bindings begin. *)
+and condition =
+  | Controlling of expression
+  | Pattern_test of { pattern : pattern spanned; operand : expression }
+      (** [case] pattern [=] operand; the span of [pattern] runs from
+          the [case] *)
 
 (** C11 6.8.1. The span runs to the [:], and past the attributes of a
     named label. *)
@@ -689,6 +698,12 @@ let declared_name declarator =
 (** The identity that a break or continue leaving the loop, switch or
     match [statement] names. *)
 let jump_target_of statement = Statement_at statement.span.first
+
+(** The expression that a condition evaluates: the controlling
+    expression, or the operand of a test. *)
+let condition_value = function
+  | Controlling value -> value
+  | Pattern_test { operand; _ } -> operand
 
 (** The tag that the type declaration [id] claims, where it claims one
     (design 10.1 rule 6, 10.2): a declaration of the tag at the token of

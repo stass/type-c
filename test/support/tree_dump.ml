@@ -550,11 +550,13 @@ and statement reader (s : statement) =
   | Null_statement -> here ";" []
   | Attribute_statement attributes ->
       here "attribute-statement" (List.map (attribute reader) attributes)
-  | If { condition; then_branch; else_branch } ->
-      here "if" [ value condition; sub then_branch; optional sub else_branch ]
+  | If { condition = c; then_branch; else_branch } ->
+      here "if"
+        [ condition reader c; sub then_branch; optional sub else_branch ]
   | Switch { controlling; body } ->
       here "switch" [ value controlling; sub body ]
-  | While { condition; body } -> here "while" [ value condition; sub body ]
+  | While { condition = c; body } ->
+      here "while" [ condition reader c; sub body ]
   | Do { body; condition } -> here "do" [ sub body; value condition ]
   | For { clause; condition; step; body } ->
       here "for"
@@ -573,6 +575,15 @@ and statement reader (s : statement) =
   | Match { scrutinee; arms } ->
       here "match" (value scrutinee :: List.map (arm reader) arms)
 
+(* A single-pattern test as [(test pattern operand)]. *)
+and condition reader = function
+  | Controlling value -> expression reader value
+  | Pattern_test { pattern = p; operand } ->
+      node
+        { first = p.span.first; last = operand.span.last }
+        "test"
+        [ pattern p.span p.node; expression reader operand ]
+
 (* An arm as [(arm labels items)]; a pattern as [(case C sub-patterns)],
    where a binding is a declaration entry and [_] a leaf. *)
 and arm reader (a : arm) =
@@ -583,15 +594,17 @@ and arm reader (a : arm) =
 and arm_label (l : arm_label) =
   match l.node with
   | Default_arm_label -> node l.span "default" []
-  | Pattern_label { constructor; sub_patterns } ->
-      let sub = function
-        | Wildcard _ -> leaf "_"
-        | Binding { name; declared } ->
-            noted (declaration_entry name.node declared) (identifier name)
-      in
-      node l.span "case"
-        (identifier constructor
-        :: List.map sub (Option.value sub_patterns ~default:[]))
+  | Pattern_label p -> pattern l.span p
+
+and pattern span { constructor; sub_patterns } =
+  let sub = function
+    | Wildcard _ -> leaf "_"
+    | Binding { name; declared } ->
+        noted (declaration_entry name.node declared) (identifier name)
+  in
+  node span "case"
+    (identifier constructor
+    :: List.map sub (Option.value sub_patterns ~default:[]))
 
 and block reader (b : block) =
   node b.span "block"
