@@ -84,6 +84,11 @@ tools/hosts/run.sh debian-amd64
 tools/hosts/run.sh alpine-arm64 /Volumes/Optaine/alpine-arm64.log
 ```
 
+The arm64 hosts have known failures, explained in `TODO.md` under Test
+hosts: among them `test_small_stack` with `FAIL: the backtrace names
+the stage` on both, and `target.t`, `pipeline.t` and
+`tools/corpus/runner.t` with a missing C compiler on `debian-arm64`.
+
 ### FreeBSD test host
 
 The FreeBSD x86-64 host is a machine reached over ssh, not a container:

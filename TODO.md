@@ -778,13 +778,47 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   `__x86_64__`), but nothing makes them agree on another. The calls of
   `expressions.t` for AArch64 and ARMv7 cover two of the architectures;
   PowerPC, SystemZ and VE are untested.
-- [Medium] `test/unit/test_small_stack.ml` fails on `alpine-arm64`
-  with `FAIL: the backtrace names the stage`: the backtrace of a
-  `Stack_overflow` in `Small_stack.run` has at most
-  `frames_of_the_stage` frames there. Reproducer: `tools/hosts/run.sh
-  alpine-arm64` (or `dune test test/unit` in that image). Not known
-  whether OCaml 5.4 on arm64, or the emulation, shortens the
-  backtrace.
+- [Medium] `test/unit/test_small_stack.ml` fails on both arm64 hosts
+  with `FAIL: the backtrace names the stage`. In OCaml 5.4.1 native code
+  on arm64, when a stack reaches its limit the `Stack_overflow` carries
+  an empty backtrace: 0 frames on the main fiber and 2 after the
+  re-raise of `Small_stack.run`, where amd64, and bytecode on arm64,
+  give 1024. `caml_call_realloc_stack` in `runtime/arm64.S` pops the
+  argument pair that holds the caller's `x30` and raises with `x30`
+  pointing into the stack-check stub of `asmcomp/arm64/emit.mlp`, which
+  has no frame descriptor, so `caml_stash_backtrace` stops at once;
+  amd64 raises with the real return address. Report it to OCaml with
+  the fix `ldr x30, [sp, 8]` before the `add sp, sp, 16` (unbuilt,
+  untested). Provisional: the cause is read from the source and seen
+  under qemu-user only; the path makes no system call, so native arm64
+  should fail too, which one run there would settle. Reproducer: a
+  native program that sets `Gc.stack_limit` to 32K words, catches the
+  `Stack_overflow` of a non-tail recursion 64K deep and prints
+  `Printexc.raw_backtrace_length` (0 on arm64, 1024 on amd64).
+- [Medium] `typec` relies on `posix_spawn` reporting a failed exec as
+  an error, which POSIX does not promise: it allows the child's exit
+  status 127 instead. glibc under qemu-user (`debian-arm64`) reports it
+  that way, because glibc starts the child with
+  `clone(CLONE_VM|CLONE_VFORK)` and reads the error from the memory the
+  two share, and qemu-user runs that clone as a plain `fork`; musl
+  reports it through a pipe, so `alpine-arm64` passes. With a C
+  compiler that does not exist, `--print-target` then says `exited with
+  status 127 listing its predefined macros` (exit 81, as it should be),
+  but `-c` exits silently with the backend's 127 instead of
+  `Exit_status.Environment`'s 81, so callers read an environment
+  failure as a backend failure: `test/run/target.t`,
+  `test/run/pipeline.t` and `tools/corpus/runner.t` fail, the last
+  counting every unit `backend-fail`. Fix: one function of our own that
+  both `Process.run` and `Target_query.start` spawn through,
+  `Unix.fork` and `Unix.execvp` with a close-on-exec pipe that carries
+  a failed exec's error to the parent, as `Command.exec` gets it from
+  `execvp`. The child must catch every exception and leave by
+  `Unix._exit`, so that no `at_exit` handler or `Fun.protect` of the
+  parent (the temporary directory's removal) runs in it; the error
+  crosses the pipe by `Marshal`, since OCaml has no mapping from
+  `Unix.error` to errno; the parent's read retries on `EINTR`; and
+  `Unix.fork` requires that typec stay on one domain. The existing
+  tests cover it once run on `debian-arm64`.
 
 ## Corpus
 
