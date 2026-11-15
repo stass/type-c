@@ -439,8 +439,8 @@ reached only from the arm.
 
 A break or continue in a statement expression in the condition of a
 loop or the step of a for leaves the loop in Clang and the statement
-around the loop in GCC, so it is refused unless it leaves a loop, switch
-or match within the expression (design 4.4).
+around the loop in GCC, so in Type-C text it is refused unless it leaves
+a loop, switch or match within the expression (design 4.4).
 
   $ cat > control.tc <<'EOF'
   > type e = | A | B;
@@ -458,6 +458,86 @@ or match within the expression (design 4.4).
   $ ./golden.exe control.tc
   control.tc:5: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
   [1]
+
+C text keeps such a break, and the backend decides where it goes. A
+C header included in a match arm is C text inside the arm, whose end
+must be unreachable on either reading (design 4.4): here the break
+leaves the match in GCC, and the loop, and with it the arm, in Clang.
+
+  $ cat > clang_ends.tc <<'EOF'
+  > # 1 "clang_ends.tc"
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  > # 1 "step.h" 1
+  >     for (;; ({ break; })) n--;
+  > # 6 "clang_ends.tc" 2
+  >   case B:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe clang_ends.tc
+  clang_ends.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  [1]
+
+Here Clang leaves the inner loop for the return, and GCC the outer loop,
+and with it the arm.
+
+  $ cat > gcc_ends.tc <<'EOF'
+  > # 1 "gcc_ends.tc"
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     for (;;) {
+  > # 1 "step.h" 1
+  >       for (;; ({ break; })) n--;
+  > # 7 "gcc_ends.tc" 2
+  >       return n;
+  >     }
+  >   case B:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe gcc_ends.tc
+  gcc_ends.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  [1]
+
+An arm that ends unreachably on both readings stands, and so does such
+a break in a C file; the loop reaches the C unchanged.
+
+  $ cat > both_end.tc <<'EOF'
+  > # 1 "both_end.tc"
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  > # 1 "condition.h" 1
+  >     while (({ if (n) break; n; })) n--;
+  > # 6 "both_end.tc" 2
+  >     return n;
+  >   case B:
+  >     return 0;
+  >   }
+  >   return -1;
+  > }
+  > EOF
+  $ ./golden.exe both_end.tc | grep break
+      while (({ if (n) break; n; })) n--;
+  $ cat > plain_loop.c <<'EOF'
+  > int f(int n) {
+  >   for (;;)
+  >     while (({ if (n) break; n; })) n--;
+  > }
+  > EOF
+  $ ./golden.exe plain_loop.c
+  int f(int n) {
+    for (;;)
+      while (({ if (n) break; n; })) n--;
+  }
 
 A break leaves a loop, switch or match, and a statement expression
 outside them has none to leave (design 4.3 rule 2).

@@ -84,10 +84,10 @@ type jump_scope =
   | Function_body  (* also a block literal, a function of its own *)
   | Loop of jump_target
   | Switch_or_match of { target : jump_target; around : jump_scope }
-  | Disputed
-      (* The condition of a loop or the step of a for, outside every
+  | Disputed of { loop : jump_target; around : jump_scope }
+      (* The condition of a [loop] or its step if a for, outside every
          loop, switch and match within it, where Clang leaves the loop
-         and GCC the statement around it (design 4.4). *)
+         and GCC reads the scope [around] the loop (design 4.4). *)
 
 (* The cursor. [scope] is persistent, so leaving a scope restores the
    value saved on entering it, and so is [jumps]. *)
@@ -164,6 +164,11 @@ let finish state start node = { span = span_from state start; node }
    [finish] makes. *)
 let target_at state start = Statement_at (first_token state start)
 
+(* The condition or step of the loop that begins at [start], in the
+   scope [around]. *)
+let disputed_scope state start around =
+  Disputed { loop = target_at state start; around }
+
 (* Runs [parse] with [state.jumps] set to [jumps], then restores it. An
    error abandons the state, so it needs no restoring on one. *)
 let with_jumps state jumps parse =
@@ -209,28 +214,6 @@ let fail_disputed_jump state start keyword =
            Clang takes to leave the loop and GCC the statement around it"
           keyword))
 
-(* What the break at [start] leaves. *)
-let break_target state start =
-  match state.jumps with
-  | Loop target | Switch_or_match { target; _ } -> target
-  | Disputed -> fail_disputed_jump state start "break"
-  | Function_body ->
-      fail_jump state start
-        (Rule.message Break_outside
-           "break outside a loop, switch or match")
-
-(* What the continue at [start] leaves: the innermost loop, through any
-   switch or match inside it. *)
-let continue_target state start =
-  let rec loop_of = function
-    | Loop target -> target
-    | Switch_or_match { around; _ } -> loop_of around
-    | Disputed -> fail_disputed_jump state start "continue"
-    | Function_body ->
-        fail_jump state start "continue outside a loop (C11 6.8.6.2p1)"
-  in
-  loop_of state.jumps
-
 let quoted spelling =
   if String.length spelling <= max_quoted_spelling then "`" ^ spelling ^ "`"
   else "`" ^ String.sub spelling 0 max_quoted_spelling ^ "...`"
@@ -238,6 +221,56 @@ let quoted spelling =
 (* Whether the token [index] of [Reader.t.tokens] is Type-C text. *)
 let is_type_c_text_at state index =
   File.is_type_c_text state.reader.tokens.(index).owner
+
+(* The two readings of a disputed scope (design 4.4): Clang takes a jump
+   there to leave the loop, and GCC reads the scope around the loop. *)
+type reading = Clang_reading | Gcc_reading
+
+(* The statement that a break in [jumps] leaves on [reading], if any. *)
+let rec break_leaves reading = function
+  | Loop target | Switch_or_match { target; _ } -> Some target
+  | Disputed { loop; around } -> (
+      match reading with
+      | Clang_reading -> Some loop
+      | Gcc_reading -> break_leaves reading around)
+  | Function_body -> None
+
+(* The loop that a continue in [jumps] continues on [reading], if any:
+   the innermost loop, through any switch or match inside it. *)
+let rec continue_leaves reading = function
+  | Loop target -> Some target
+  | Switch_or_match { around; _ } -> continue_leaves reading around
+  | Disputed { loop; around } -> (
+      match reading with
+      | Clang_reading -> Some loop
+      | Gcc_reading -> continue_leaves reading around)
+  | Function_body -> None
+
+(* What the [keyword] at [start] leaves, by [leaves]. The two readings
+   differ only where the jump is in a disputed scope, which Type-C text
+   refuses and C text leaves to the backend; where Clang finds nothing,
+   GCC does not either, as no disputed scope is in the way. *)
+let jump_targets state start keyword leaves ~no_target =
+  match (leaves Clang_reading state.jumps, leaves Gcc_reading state.jumps) with
+  | None, _ -> fail_jump state start no_target
+  | Some clang, Some gcc when clang = gcc -> Only clang
+  | Some loop, gcc -> (
+      if is_type_c_text_at state (first_token state start) then
+        fail_disputed_jump state start keyword;
+      match gcc with
+      | None -> Only loop (* GCC refuses it *)
+      | Some around -> Either { loop; around })
+
+(* What the break at [start] leaves. *)
+let break_target state start =
+  jump_targets state start "break" break_leaves
+    ~no_target:
+      (Rule.message Break_outside "break outside a loop, switch or match")
+
+(* What the continue at [start] leaves. *)
+let continue_target state start =
+  jump_targets state start "continue" continue_leaves
+    ~no_target:"continue outside a loop (C11 6.8.6.2p1)"
 
 (* The names that typec generates begin with this (design 13.5). *)
 let generated_prefix = "__tc_"
@@ -2539,10 +2572,10 @@ and controlling_expression state keyword =
     (Printf.sprintf "`)` after the controlling expression of `%s`" keyword);
   value
 
-(* The controlling expression of a [while] or [do] after [keyword]. *)
-and loop_condition state keyword =
-  with_jumps state Disputed (fun () ->
-      controlling_expression state keyword)
+(* The controlling expression of a [while] or [do] after [keyword], in
+   the disputed scope of the loop [disputed]. *)
+and loop_condition state keyword disputed =
+  with_jumps state disputed (fun () -> controlling_expression state keyword)
 
 (* An optional expression and the token [closing] after it. *)
 and optional_expression state closing expected =
@@ -2552,8 +2585,9 @@ and optional_expression state closing expected =
     expect state closing expected;
     Some value
 
-(* After the [for]: the three clauses in their parentheses. *)
-and for_clauses state =
+(* After the [for]: the three clauses in their parentheses, the
+   condition and step in the disputed scope of the loop [disputed]. *)
+and for_clauses state disputed =
   expect state P.Left_paren "`(` after `for`";
   let clause =
     if accept state P.Semicolon then None
@@ -2566,12 +2600,12 @@ and for_clauses state =
     end
   in
   let condition =
-    with_jumps state Disputed (fun () ->
+    with_jumps state disputed (fun () ->
         optional_expression state P.Semicolon
           "`;` after the condition of `for`")
   in
   let step =
-    with_jumps state Disputed (fun () ->
+    with_jumps state disputed (fun () ->
         optional_expression state P.Right_paren
           "`)` after the clauses of `for`")
   in
@@ -2631,6 +2665,7 @@ and open_statements state opened =
   (* Called only in a branch where [peek] has matched a keyword at
      [start], which is then a token. *)
   let target () = target_at state start in
+  let disputed () = disputed_scope state start outer_jumps in
   match peek state with
   | _ when begins_label state ->
       let label = label state in
@@ -2651,7 +2686,7 @@ and open_statements state opened =
   | Keyword_token Keyword.While ->
       advance state;
       open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
-          Open_while (loop_condition state "while"))
+          Open_while (loop_condition state "while" (disputed ())))
   | Keyword_token Keyword.Do ->
       advance state;
       open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
@@ -2659,7 +2694,7 @@ and open_statements state opened =
   | Keyword_token Keyword.For ->
       advance state;
       open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
-          let clause, condition, step = for_clauses state in
+          let clause, condition, step = for_clauses state (disputed ()) in
           Open_for { clause; condition; step })
   | _ ->
       let statement = simple_statement state in
@@ -2702,7 +2737,10 @@ and close_one state opened statement =
       state.scope <- statement_scope;
       if not (accept_keyword state Keyword.While) then
         fail_expected state "`while` after the body of `do`";
-      let condition = loop_condition state "while" in
+      let condition =
+        loop_condition state "while"
+          (disputed_scope state opened.start opened.outer_jumps)
+      in
       expect state P.Semicolon "`;` after `do` ... `while`";
       Closed (Do { body = statement; condition })
   | Open_for { clause; condition; step } ->

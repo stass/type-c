@@ -151,6 +151,38 @@ The program compiles without a warning and runs on each backend.
   $ ./gcc-exits
   3 -1
 
+A break in the condition of a loop is C that typec passes on, in a C
+header, and each backend takes it to leave its own statement (design
+4.4): Clang the inner loop, which the outer one runs twice, GCC the
+outer loop. Clang warns of the difference unless told not to.
+
+  $ cat > steps.h <<'EOF'
+  > static int steps(int n) {
+  >   int count = 0;
+  >   for (int i = 0; i < 2; i++) {
+  >     while (({ if (!n) break; n; }))
+  >       n--;
+  >     count += 10;
+  >   }
+  >   return count;
+  > }
+  > EOF
+  $ cat > steps.tc <<'EOF'
+  > #include <stdio.h>
+  > #include "steps.h"
+  > int main(void) {
+  >   printf("%d\n", steps(3));
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Wextra -Werror -Wno-gcc-compat -o clang-steps \
+  >   steps.tc
+  $ ./clang-steps
+  20
+  $ typec --cc=$gcc -Wall -Wextra -Werror -o gcc-steps steps.tc
+  $ ./gcc-steps
+  0
+
 A goto to a label in a block, or a case label in a block that the
 switch around it jumps to, reaches the end of that block, so the arm
 ends in the break that the rules then ask for (4.4). Each program takes

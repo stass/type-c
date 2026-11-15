@@ -21,6 +21,12 @@ module Targets = Set.Make (struct
   let compare (Tree.Statement_at a) (Tree.Statement_at b) = Int.compare a b
 end)
 
+(* Every statement that a jump may leave, so that a statement completes
+   if it does on any backend's reading (design 4.4). *)
+let targets = function
+  | Tree.Only target -> Targets.singleton target
+  | Either { loop; around } -> Targets.of_list [ loop; around ]
+
 (* What a statement tells the statements around it (design 4.4). *)
 type flow = {
   completes : bool;
@@ -178,22 +184,21 @@ and statement_flow walk (statement : Tree.statement) =
   | While { condition; body } ->
       let body = statement_flow walk body in
       let ends = not (walk.facts.non_zero condition) in
-      loop target (expression walk condition) body
-        ~completes:(ends || breaks_to target body)
+      loop target (expression walk condition) body ~completes:ends
   | Do { body; condition } ->
       let body = statement_flow walk body in
       let repeats = walk.facts.non_zero condition in
       let again = body.completes || Targets.mem target body.continues in
       loop target (expression walk condition) body
-        ~completes:(breaks_to target body || ((not repeats) && again))
+        ~completes:((not repeats) && again)
   | For { clause; condition; step; body } ->
       for_flow walk target clause condition step body
   | Goto label ->
       record_jump walk Goto label;
       stops
   | Computed_goto target -> { (expression walk target) with completes = false }
-  | Continue { loop } -> { stops with continues = Targets.singleton loop }
-  | Break { leaves } -> { stops with breaks = Targets.singleton leaves }
+  | Continue { loop } -> { stops with continues = targets loop }
+  | Break { leaves } -> { stops with breaks = targets leaves }
   | Return value ->
       { (all (expression walk) (Option.to_list value)) with completes = false }
   | Asm assembler -> asm_flow walk assembler
@@ -237,18 +242,20 @@ and for_flow walk target clause condition step body =
   in
   let expressions = Option.to_list condition @ Option.to_list step in
   let outside = both clause (all (expression walk) expressions) in
-  loop target outside body ~completes:(ends || breaks_to target body)
+  loop target outside body ~completes:ends
 
 (* The loop [target], whose condition and other expressions give the flow
-   [outside]: the breaks and continues of [body] for [target] end at the
-   loop, and its labels are those of the statements around the loop. *)
+   [outside]. The loop completes where [completes] says it may end other
+   than by a break, or where a break leaves it. The breaks and continues
+   for [target] end at the loop, those of [body] and, in C text, those of
+   its condition or step (design 4.4). Its labels are those of the
+   statements around the loop. *)
 and loop target outside body ~completes =
-  let inside =
-    { body with
-      breaks = Targets.remove target body.breaks;
-      continues = Targets.remove target body.continues }
-  in
-  { (both outside inside) with completes }
+  let flow = both outside body in
+  { flow with
+    completes = completes || breaks_to target flow;
+    breaks = Targets.remove target flow.breaks;
+    continues = Targets.remove target flow.continues }
 
 (* The breaks of [body] for the switch [target] end at it, and its case
    and default labels are the switch's own (C11 6.8.4.2p4); its other

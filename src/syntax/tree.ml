@@ -16,7 +16,7 @@
     declaration of an ordinary identifier or a tag carries its
     {!declared}, and every use of one the declaration it resolves to.
     It is also the one implementation of what a break or continue leaves,
-    which each records as its {!jump_target}. Members, which belong to
+    which each records as its {!jump_targets}. Members, which belong to
     their structure, and labels, which belong to their function, are
     names only, and so are the identifiers in the arguments of an
     attribute, which the parser does not read. *)
@@ -45,6 +45,14 @@ type tag_id = Tag_at of int
     continue names as the statement it leaves: the first token of the
     statement, its keyword ({!jump_target_of}). *)
 type jump_target = Statement_at of int
+
+(** The statements that a break or continue may leave: [Only] one, or,
+    for a disputed one in C text, in the condition of a loop or the step
+    of a [for] (design 4.4), [Either] of two, as the backend chooses:
+    Clang the [loop], GCC the statement [around] it. *)
+type jump_targets =
+  | Only of jump_target
+  | Either of { loop : jump_target; around : jump_target }
 
 (** What a use of an ordinary identifier can refer to: a declaration in
     the tree, or a typedef name that GCC and Clang declare before the
@@ -491,12 +499,13 @@ and statement_node =
     }
   | Goto of identifier
   | Computed_goto of expression  (** GNU [goto *] expression [;] *)
-  | Continue of { loop : jump_target }
+  | Continue of { loop : jump_targets }
       (** the innermost loop around it (C11 6.8.6.2p1), which may be
-          outside a match around it (design 4.3 rule 2) *)
-  | Break of { leaves : jump_target }
-      (** the innermost loop, switch or match around it (C11 6.8.6.3p1,
-          design 4.3 rule 2) *)
+          outside a match around it (design 4.3 rule 2), or the two that
+          a disputed one may continue *)
+  | Break of { leaves : jump_targets }
+      (** the innermost loop, switch or match around it, or the two that
+          a disputed one may leave (C11 6.8.6.3p1, design 4.3 rule 2) *)
   | Return of expression option
   | Asm of assembler
   | Match of { scrutinee : expression; arms : arm list }

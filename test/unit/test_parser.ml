@@ -105,13 +105,19 @@ let scope_end_cases =
 
 (* What each break and continue of a text leaves, in source order, as
    [k->t:l] with [k] the jump's keyword and [t] and [l] the keyword and
-   line of the statement it leaves, or the error. It walks function
+   line of the statement it leaves, or [k->t:l|t:l] for the two that a
+   backend chooses between, or the error. It walks function
    bodies, statements and match arms, and a statement expression that is
    a whole condition, clause or expression statement. *)
 let jump_targets ?(file = type_c_file) text =
   let target reader (Tree.Statement_at token) =
     let token = reader.Reader.tokens.(token) in
     Printf.sprintf "%s:%d" (Reader.spelling reader token) token.location.line
+  in
+  let targets reader = function
+    | Tree.Only leaves -> target reader leaves
+    | Either { loop; around } ->
+        target reader loop ^ "|" ^ target reader around
   in
   let rec items reader = List.concat_map (item reader)
   and item reader = function
@@ -125,8 +131,8 @@ let jump_targets ?(file = type_c_file) text =
   and in_statement reader (statement : Tree.statement) =
     let sub = in_statement reader in
     match statement.node with
-    | Break { leaves } -> [ "break->" ^ target reader leaves ]
-    | Continue { loop } -> [ "continue->" ^ target reader loop ]
+    | Break { leaves } -> [ "break->" ^ targets reader leaves ]
+    | Continue { loop } -> [ "continue->" ^ targets reader loop ]
     | Compound block -> items reader block.node.items
     | Labeled { statement; _ } -> sub statement
     | Expression_statement expression -> value reader expression
@@ -234,6 +240,58 @@ let jump_target_cases =
       "error: in.tc:3: a continue in the condition of a loop or the step \
        of a for, which Clang takes to leave the loop and GCC the statement \
        around it (design 4.4) [TC0026]";
+    jumps "a break in a while condition in the function body"
+      "while (({ break; 1; })) ;"
+      "error: in.tc:2: a break in the condition of a loop or the step of a \
+       for, which Clang takes to leave the loop and GCC the statement \
+       around it (design 4.4) [TC0026]";
+    jumps "a continue in a for step in the function body"
+      "for (;; ({ continue; })) ;"
+      "error: in.tc:2: a continue in the condition of a loop or the step \
+       of a for, which Clang takes to leave the loop and GCC the statement \
+       around it (design 4.4) [TC0026]";
+    jumps "a break in a loop condition in a loop condition"
+      "while (({ do ; while (({ break; 1; })); 1; })) ;"
+      "error: in.tc:2: a break in the condition of a loop or the step of a \
+       for, which Clang takes to leave the loop and GCC the statement \
+       around it (design 4.4) [TC0026]";
+  ]
+
+(* In C text the backend decides where a break or continue in the
+   condition of a loop or the step of a for goes, and each records both
+   statements a backend may take, [loop|around]: Clang leaves the loop,
+   GCC the statement around it, and GCC refuses it where there is none
+   (design 4.4). *)
+let c_text_jump_target_cases =
+  let in_function body = "void f(int n) {\n" ^ body ^ "\n}" in
+  let jumps name body expected = case name (in_function body) expected in
+  [
+    jumps "a break in a while condition"
+      "for (;;) {\nwhile (({ if (n) break; 1; })) ;\n}"
+      "break->while:3|for:2";
+    jumps "a break in a do condition"
+      "for (;;) {\ndo ; while (({ break; 1; }));\n}"
+      "break->do:3|for:2";
+    jumps "a break in a for step in a switch"
+      "switch (n) {\ndefault:\nfor (;; ({ break; })) ;\n}"
+      "break->for:4|switch:2";
+    jumps "a continue in a for condition continues the loop around a switch"
+      "for (;;) {\nswitch (n) {\ndefault:\n\
+       for (; ({ continue; 1; }); ) ;\n}\n}"
+      "continue->for:5|for:2";
+    jumps "a break with no statement around the loop leaves the loop"
+      "while (({ break; 1; })) ;" "break->while:2";
+    jumps "a continue with no loop around the loop continues the loop"
+      "switch (n) {\ndefault:\nwhile (({ continue; 1; })) ;\n}"
+      "continue->while:4";
+    jumps "a loop in the condition of a loop takes GCC's statement outward"
+      "for (;;) {\nwhile (({ do ; while (({ break; 1; })); 1; })) ;\n}"
+      "break->do:3|for:2";
+    jumps "a loop in the condition of a loop with nothing around them"
+      "while (({ do ; while (({ break; 1; })); 1; })) ;" "break->do:2";
+    jumps "a continue in the same place continues the inner loop"
+      "while (({ do ; while (({ continue; 1; })); 1; })) ;"
+      "continue->do:2";
   ]
 
 let declarator_cases =
@@ -2077,6 +2135,7 @@ let failures () =
     @ failed_with (resolutions ~file:type_c_file) match_resolution_cases
     @ failed_with scope_ends scope_end_cases
     @ failed_with jump_targets jump_target_cases
+    @ failed_with (jump_targets ~file:"in.i") c_text_jump_target_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())
 

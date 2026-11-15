@@ -126,10 +126,10 @@ let rules =
          a universe name." };
     { name = "Disputed_jump"; code = 26; clause = Some "design 4.4";
       meaning =
-        "A [break] or [continue] in a statement expression in the \
-         condition of a loop or the step of a [for], outside every loop, \
-         [switch] and match within it, which GCC and Clang take to leave \
-         different statements." };
+        "A [break] or [continue] in Type-C text in a statement \
+         expression in the condition of a loop or the step of a [for], \
+         outside every loop, [switch] and match within it, which GCC and \
+         Clang take to leave different statements." };
     { name = "Break_outside"; code = 27;
       clause = Some "C11 6.8.6.3p1, design 4.3 rule 2";
       meaning =
