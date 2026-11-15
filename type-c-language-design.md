@@ -202,7 +202,15 @@ forms that GCC and Clang accept in every dialect, also under
 name for that type is sure to be visible, and `__builtin_trap` (10.5).
 The emitted file is preprocessed output, with line markers, and is
 compiled as such (`-x cpp-output`). So the output dialect is the input
-dialect and nothing newer.
+dialect and nothing newer. Its line markers are the toolchain's text, not
+the user's, and are no part of the dialect: they take the GNU form
+(13.4), which Clang 20 calls an extension under `-pedantic` even in
+preprocessed input (Clang 21 and 22 do not). The compile step therefore
+gets `-Wno-gnu-line-marker`, after the user's options so that `-Wgnu`
+does not turn it back on. GCC ignores the option, naming it in a note
+only when it reports another diagnostic. A line marker that the
+user writes is still diagnosed, when the backend preprocesses the source
+under the user's options.
 
 ## 3. Types
 
@@ -1552,6 +1560,19 @@ of the preprocessor are reproduced, so the backend's diagnostics and debug
 line tables refer to the original source, and lowered code carries the
 line of its construct.
 
+Every marker, copied or written by `typec`, takes the GNU form
+`# 12 "file" flags`. It is the only form that GCC reads in preprocessed
+input, where it refuses `#line`, and the only one with flags: flag 3
+marks a system header, which the backend exempts from warnings, so that
+the user's `-pedantic-errors` or `-Wextra` judges the user's code and
+not the platform's headers. A marker that `typec` writes inside a file
+that a marker with flag 3 opened carries flag 3 and no enter or return
+flag, which keeps the exemption; without it the exemption would end until
+the backend's next marker with flag 3. A header that only
+`#pragma GCC system_header` makes a system header, and a region that GCC
+marks as the expansion of a system macro, is not seen as one (2.4 owner
+rule), so an edit there ends the exemption until the next such marker.
+
 Two properties follow by construction:
 
 - A translation unit without Type-C constructs yields the preprocessor's
@@ -1597,7 +1618,10 @@ Identifiers the compiler invents begin with `__tc_`.
   their source names. A variant value appears as its lowered struct, with
   the tag printed by name. Generic instances appear under their instance
   names.
-- `--emit-c` shows what any construct became.
+- `--emit-c` shows what any construct became. Its output is the file
+  that the compile step reads, preprocessed output with GNU line markers
+  (13.4): compiling it by hand takes `-x cpp-output`, and under
+  `-pedantic` on Clang also `-Wno-gnu-line-marker` (2.4).
 
 ### 13.7 Implementation
 

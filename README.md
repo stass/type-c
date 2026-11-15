@@ -157,8 +157,11 @@ before it, goes through three steps:
    refuses stops `typec` with one message, `FILE:LINE: MESSAGE`. With no
    Type-C construct yet the emitted text is the preprocessed text, byte
    for byte;
-3. `BACKEND -std=gnu11 OPTIONS -c -o OUTPUT -x cpp-output EMITTED`, or
-   `-S`, or `-fsyntax-only`, as the command line asks.
+3. `BACKEND -std=gnu11 OPTIONS -c -o OUTPUT -Wno-gnu-line-marker
+   -x cpp-output EMITTED`, or `-S`, or `-fsyntax-only`, as the command
+   line asks. The option keeps Clang 20 from calling the line markers of
+   EMITTED, which no user wrote, a GNU extension under `-pedantic`
+   (design 2.4).
 
 `-std=gnu11` is left out when the command line gives `-std=` for C11 or
 C17 (`c11`, `c17`, `c18`, `gnu11`, `gnu17`, `gnu18`, `c1x`, `gnu1x`,

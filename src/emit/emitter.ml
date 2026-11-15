@@ -6,9 +6,12 @@ open Typec_cpp
 type edit = { first : int; count : int; location : Location.t; text : string }
 
 (* The newline in front starts the marker on a line of its own wherever
-   the edit stands in a line. *)
-let marker (location : Location.t) =
-  Printf.sprintf "\n# %d \"%s\"\n" location.line location.file
+   the edit stands in a line. In a system header the marker carries flag
+   3 and no enter or return flag, so the backend keeps exempting the
+   header from warnings (design 13.4). *)
+let marker (owner : File.t) (location : Location.t) =
+  let system_flag = if owner.system_header then " 3" else "" in
+  Printf.sprintf "\n# %d \"%s\"%s\n" location.line location.file system_flag
 
 (* The bytes of the text that an edit replaces, as (start, stop). *)
 let replaced_bytes (tokens : Token.t array) edit =
@@ -61,9 +64,11 @@ let emit (unit : Reader.t) edits =
   let apply copied edit =
     let start, stop = replaced_bytes unit.tokens edit in
     copy copied start;
-    Buffer.add_string buffer (marker edit.location);
+    (* The edit lies in one file (check_edits). *)
+    let owner = unit.tokens.(edit.first).owner in
+    Buffer.add_string buffer (marker owner edit.location);
     Buffer.add_string buffer edit.text;
-    Buffer.add_string buffer (marker (end_location unit.tokens edit));
+    Buffer.add_string buffer (marker owner (end_location unit.tokens edit));
     stop
   in
   let copied = List.fold_left apply 0 edits in

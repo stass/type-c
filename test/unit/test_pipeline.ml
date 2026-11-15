@@ -100,6 +100,9 @@ let temp_dir = "/T"
 (* What every step gets before the options of the command line. *)
 let quiet = "-Wno-unused-command-line-argument"
 
+(* What the compile step gets in front of its preprocessed input. *)
+let quiet_markers = "-Wno-gnu-line-marker"
+
 let plan ?(emit_c = false) words =
   Pipeline.plan ~program:"cc" ~emit_c ~temp_dir (Command_line.read words)
 
@@ -128,9 +131,8 @@ let () =
     (translation.compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-O2"; "-c"; "-o"; "out/x.o"; "-x";
-          "cpp-output";
-          "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-O2"; "-c"; "-o"; "out/x.o";
+          quiet_markers; "-x"; "cpp-output"; "/T/1.emitted.i";
         ]);
   check "-c -o: files"
     (translation.preprocessed = "/T/1.preprocessed.i"
@@ -145,22 +147,22 @@ let () =
     (compile [ "-c"; "dir/x.tc" ]
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
-          "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; quiet_markers; "-x";
+          "cpp-output"; "/T/1.emitted.i";
         ]);
   check "-S"
     (compile [ "-S"; "-c"; "x.tc"; "-std=c17" ]
     = Some
         [
-          "cc"; quiet; "-std=c17"; "-S"; "-o"; "x.s"; "-x"; "cpp-output";
-          "/T/1.emitted.i";
+          "cc"; quiet; "-std=c17"; "-S"; "-o"; "x.s"; quiet_markers; "-x";
+          "cpp-output"; "/T/1.emitted.i";
         ]);
   check "-fsyntax-only"
     (compile [ "-fsyntax-only"; "x.tc"; "-o"; "x" ]
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-fsyntax-only"; "-x"; "cpp-output";
-          "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-fsyntax-only"; quiet_markers; "-x";
+          "cpp-output"; "/T/1.emitted.i";
         ])
 
 let () =
@@ -172,8 +174,8 @@ let () =
     ((only_translation plan).compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
-          "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "/T/1.o"; quiet_markers; "-x";
+          "cpp-output"; "/T/1.emitted.i";
         ]);
   let plan = planned [ "-Iinc"; "-MD"; "a.tc"; "b.tc"; "-lm" ] in
   check "link .tc inputs only"

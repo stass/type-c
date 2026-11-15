@@ -56,6 +56,30 @@ let () =
        # 2 \"a.tc\"\n\
        int z;\n")
 
+(* y becomes w in the system header h.h, which stays one for the
+   backend's warnings. *)
+let () =
+  let in_header : Location.t = { file = "h.h"; line = 1 } in
+  let edit =
+    { Emitter.first = 6; count = 1; location = in_header; text = "w" }
+  in
+  let owner (token : Token.t) = (token.owner.name, token.owner.system_header) in
+  let owners text = Array.to_list (Array.map owner (read text).tokens) in
+  check "read back, an edit in a system header keeps the owners"
+    (owners (Emitter.emit unit [ edit ]) = owners source);
+  check "an edit in a system header"
+    (Emitter.emit unit [ edit ]
+    = "# 1 \"a.tc\"\n\
+       int x = 1;\n\
+       # 1 \"h.h\" 1 3\n\
+       int \n\
+       # 1 \"h.h\" 3\n\
+       w\n\
+       # 1 \"h.h\" 3\n\
+       ;\n\
+       # 2 \"a.tc\" 2\n\
+       int z;\n")
+
 (* What the backend sees of a token: its bytes, where it is and the file
    it belongs to. *)
 let seen (unit : Reader.t) (token : Token.t) =

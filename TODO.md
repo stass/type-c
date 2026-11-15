@@ -85,6 +85,16 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Reader of preprocessed text
 
+- [Medium] The emitter gives its markers flag 3 when the edited tokens'
+  owner is a system header (`src/emit/emitter.ml`, `marker`), but the
+  backend's exemption follows the last marker in effect: a header made
+  one by `#pragma GCC system_header` (reached by `-I`), or a GCC
+  `# N "f" 3 4` system-macro region, loses the exemption after an edit
+  until the next marker with flag 3 (design 13.4; reproduced on Apple
+  clang 21 with `int a[0];` after the edit). Record per token whether
+  the marker in effect carries flag 3 and derive the flag from it,
+  deciding whether lowered text inside a system-macro region is exempt.
+
 - [Medium] `Number.classify` finds no constant in a number with a
   floating suffix of the `_Float` types (`f16`, `f32`, `f64`, `f128`,
   `f32x`, `f64x`, `bf16`), GCC's `q`, `w` and `d`, or the decimal

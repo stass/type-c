@@ -219,11 +219,16 @@ let compile_options shape arguments =
   shape.standard
   @ (quiet_unused_options :: options_where compiling_role arguments)
 
+(* Clang 20 calls the line markers of preprocessed input, which no user
+   wrote, a GNU extension under -pedantic; the option follows the user's
+   options so that their -Wgnu does not turn that back on (design 2.4). *)
+let quiet_line_markers = "-Wno-gnu-line-marker"
+
 let compile_command shape arguments ~linked_object source emitted_file =
   (shape.program :: compile_options shape arguments)
   @ compile_outputs ~goal:shape.goal ~output:shape.output ~linked_object
       source
-  @ [ "-x"; "cpp-output"; emitted_file ]
+  @ [ quiet_line_markers; "-x"; "cpp-output"; emitted_file ]
 
 (* [linked_object] is the object that the step makes when the command
    line links. *)
