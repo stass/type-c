@@ -243,13 +243,25 @@ is [type-c-language-design.md](type-c-language-design.md).
   alternative, refusing type declarations inside expressions, also
   refuses `type t = typeof(({ type u = ...; ... }))`. Owner decision, as
   it adds a rule to 3.3.
-- [High] Design 13.5: lower a `_Generic` or `__builtin_types_compatible_p`
-  that compares a distinct type with its answer, which typec already
-  computes (`Expressions.selection`, `types_compatible`). Until then
-  `Expressions.refuse_unlowered_answer` refuses one in either text, as
-  the backend would answer for the representation. The replacement must
-  not overlap the edits that lowering makes inside the associations it
-  drops (constructor expressions).
+- [Medium] Design 13.5: a `_Generic` that typec answers keeps only the
+  selected expression, so the backend no longer sees the uses in its
+  controlling expression and other associations: `-Wunused-variable` and
+  `-Wunused-function` fire on a name used only there, which fails a
+  `-Werror` build. Keeping every association and making the backend
+  select typec's answer would keep them: the controlling expression as
+  `((void)(e), (char (*)[k])0)` and the type name of association `i` as
+  `char (*)[i]`. Owner to choose.
+- [Medium] Design 13.5: a structure, union or enumeration that a type
+  name or the controlling expression of an answered `_Generic` or
+  `__builtin_types_compatible_p` declares is dropped with it, though C
+  declares it in the enclosing scope (6.7.2.3). A later use then fails
+  in the backend, or silently means an outer declaration of the name
+  (`_Generic(x, d: 1, enum { K = 5 }: 2)` before a use of a global `K`).
+  Refuse an answered construct whose dropped tokens declare a tag or an
+  enumeration constant.
+- [Low] `Expressions.answered` copies the answers that `selections` and
+  `compatibilities` hold; recording only the spans answered would leave
+  one copy.
 - [Medium] `Expressions.positioned` refuses a second typing of a node
   in another position at run time, and some callers type a node twice in
   the same position on purpose (`selected`, `statement_expression`,

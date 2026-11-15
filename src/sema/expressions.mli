@@ -146,6 +146,18 @@ type construction = {
 val constructions : t -> construction list
 (** The constructor expressions typed, in source order. *)
 
+(** What lowering puts in place of a construct that asks whether types
+    are compatible where Type-C text compares a distinct type with them
+    (design 13.5), as the backend would answer for its representation:
+    the result expression that a generic selection selects, or the answer
+    of [__builtin_types_compatible_p]. *)
+type answer = Selected of Tree.expression | Compatible of bool
+
+type answered = { construct : Tree.span; answer : answer }
+
+val answered : t -> answered list
+(** The constructs typed that typec answers, in source order. *)
+
 val find : t -> Tree.expression -> typed option
 (** The type of an expression that has been typed: the type that a
     Type-C rule sees (design 13.3). A generic selection has that of the

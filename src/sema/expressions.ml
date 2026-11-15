@@ -50,6 +50,9 @@ type construction = {
   braced : bool;
 }
 
+type answer = Selected of Tree.expression | Compatible of bool
+type answered = { construct : Tree.span; answer : answer }
+
 (* The target type of an expression's position, which selects an
    unqualified constructor (design 3.3), or none. *)
 type position = Untargeted | Targeted of Ctype.t
@@ -58,13 +61,15 @@ type position = Untargeted | Targeted of Ctype.t
    reader's failure leaves a walk early, and it ends the read, so neither
    is restored on it. [selections] and [compatibilities] hold the answers
    to the constructs that ask whether types are compatible, by the span
-   of the construct. [types] keeps the position that each expression is
+   of the construct, and [answered] those that lowering replaces with
+   their answer. [types] keeps the position that each expression is
    typed in, its one position. *)
 type t = {
   types : (Tree.span, position * typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
   selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
+  answered : (Tree.span, answered) Hashtbl.t;
   constructions : (Tree.span, construction) Hashtbl.t;
   mutable depth : int;
   mutable enclosing : enclosing;
@@ -79,6 +84,7 @@ let create () =
     constants = Hashtbl.create 4096;
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
+    answered = Hashtbl.create 16;
     constructions = Hashtbl.create 64;
     depth = 0;
     enclosing = outside_functions }
@@ -96,6 +102,11 @@ let constructions view =
   Hashtbl.to_seq_values view.constructions
   |> List.of_seq
   |> List.sort (fun a b -> compare a.span.first b.span.first)
+
+let answered view =
+  Hashtbl.to_seq_values view.answered
+  |> List.of_seq
+  |> List.sort (fun a b -> compare a.construct.first b.construct.first)
 
 let types_compatible view (expression : Tree.expression) =
   Hashtbl.find_opt view.compatibilities expression.span
@@ -257,11 +268,12 @@ let refuse_variant context (span : Tree.span) (t : Ctype.t) =
 
 (* C text sees a distinct type as the typedef of its representation that
    it lowers to (design 10.2); only Type-C text sees the distinct type. *)
-let as_seen context (span : Tree.span) (typed : typed) =
-  if is_type_c_text context span then typed
-  else
-    { typed with
-      expression_type = Ctype.representation typed.expression_type }
+let type_as_seen context (span : Tree.span) (t : Ctype.t) =
+  if is_type_c_text context span then t else Ctype.representation t
+
+let as_seen context span (typed : typed) =
+  { typed with
+    expression_type = type_as_seen context span typed.expression_type }
 
 let distinct_name (distinct : Ctype.distinct) = quote distinct.distinct_name
 
@@ -352,17 +364,24 @@ let refuse_distinct_conversion context span target (typed : typed) =
             (quote (Type_name.of_ctype source))
             (quote (Type_name.of_ctype target))))
 
-(* Design 13.5: where a distinct type is among the types that a
-   construct compares, the front end answers it, as the backend sees the
-   representation. Lowering does not yet replace the construct with the
-   answer, so it is refused rather than given the backend's answer. *)
-let refuse_unlowered_answer context span types =
-  if List.exists Ctype.mentions_distinct types then
-    context.fail span
-      (Rule.message
-         (Not_implemented { section = "13.5"; package = "1.4" })
-         "lowering the answer to a comparison of a distinct type with \
-          other types is not implemented yet")
+(* Design 13.5: typec answers a construct whose [types], as its text sees
+   them, have a distinct type in them, which only Type-C text sees, and
+   refuses one in Type-C text whose answer it does not know where an
+   unknown type may hide one; [lowered] makes what replaces the construct
+   from its answer. *)
+let record_answer context span types ~lowered answer =
+  let compares_distinct = List.exists Ctype.mentions_distinct types in
+  match (answer : _ Unknown.answer) with
+  | Answer answer when compares_distinct ->
+      Hashtbl.replace context.typed.answered span
+        { construct = span; answer = lowered answer }
+  | Depends_on unknown
+    when is_type_c_text context span && Ctype.has_distinct context.tags ->
+      context.fail span
+        (needing "the answer to a comparison of types, which may have a \
+                  distinct type in them,"
+           unknown)
+  | Answer _ | Depends_on _ -> ()
 
 (* Operands (6.3.2.1, 6.3.1.1) *)
 
@@ -1982,11 +2001,13 @@ and expression_node context position (whole : Tree.expression) =
       value (size_type context span)
   | Choose _ -> selected context whole
   | Types_compatible (first, second) ->
-      let first = context.type_name first in
-      let second = context.type_name second in
-      refuse_unlowered_answer context span [ first; second ];
-      Hashtbl.replace context.typed.compatibilities span
-        (types_compatible_answer context span first second);
+      let first = type_as_seen context span (context.type_name first) in
+      let second = type_as_seen context span (context.type_name second) in
+      let answer = types_compatible_answer context span first second in
+      record_answer context span [ first; second ]
+        ~lowered:(fun compatible -> Compatible compatible)
+        answer;
+      Hashtbl.replace context.typed.compatibilities span answer;
       value (int_type context span)
   (* Clang's block, whose type typec does not model; its body is not
      typed. *)
@@ -2162,7 +2183,9 @@ and selection_of context (selecting : Tree.expression) =
    as C17 says and GCC and Clang do in every mode. *)
 and generic context span controlling associations =
   let controlling_typed = whole_value context controlling in
-  let associations = List.map (generic_association context) associations in
+  let associations =
+    List.map (generic_association context span) associations
+  in
   check_distinct context associations;
   let default = default_association context associations in
   let controlling_type =
@@ -2173,8 +2196,11 @@ and generic context span controlling associations =
     controlling_type
     :: List.filter_map (fun a -> a.association_type) associations
   in
-  refuse_unlowered_answer context span types;
-  select context span controlling_type associations default
+  let selection = select context span controlling_type associations default in
+  record_answer context span types
+    ~lowered:(fun result -> Selected result)
+    selection;
+  selection
 
 (* Both operands are typed. *)
 and choose context span condition first second =
@@ -2183,11 +2209,15 @@ and choose context span condition first second =
   ignore (whole_value context second);
   choice context span condition first second
 
-and generic_association context (association : Tree.generic_association) =
+(* The association of the selection at [span], with its type as the text
+   of the selection sees it. *)
+and generic_association context span
+    (association : Tree.generic_association) =
   let association_type, result =
     match association.node with
     | Association (type_name, result) ->
-        (Some (context.type_name type_name), result)
+        (Some (type_as_seen context span (context.type_name type_name)),
+         result)
     | Default_association result -> (None, result)
   in
   ignore (whole_value context result);

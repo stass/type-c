@@ -249,12 +249,75 @@ let construction (tokens : Token.t array)
           ~location:tokens.(span.last).location
           (" } " ^ closing) [ span.last ]
 
+(* Design 13.5: a construct that typec answers, where the backend would
+   answer for the representation of a distinct type, is replaced by the
+   answer. Each range of its tokens that goes is replaced by [text], with
+   the edits that lowering makes inside it. *)
+type dropped = { first : int; last : int; text : string }
+
+let integer_constant compatible = if compatible then "1" else "0"
+
+(* A generic selection becomes the expression it selects (C11 6.5.1.1p4),
+   in parentheses, which keep its type, value and lvalue or function
+   designator (6.5.1p5), unless it is a string literal: one in
+   parentheses initialises no array (6.7.9p14), and a string literal in
+   the place of the selection parses as the selection does, as both are
+   primary expressions. *)
+let parentheses (result : Tree.expression) =
+  match result.node with
+  | String _ -> ("", "")
+  | _ -> ("(", ")")
+
+let dropped_ranges (answered : Typec_sema.Expressions.answered) =
+  let { Typec_sema.Expressions.construct; answer } = answered in
+  match answer with
+  | Compatible compatible ->
+      [ { first = construct.first;
+          last = construct.last;
+          text = integer_constant compatible } ]
+  | Selected result ->
+      let opening, closing = parentheses result in
+      [ { first = construct.first; last = result.span.first - 1;
+          text = opening };
+        { first = result.span.last + 1; last = construct.last;
+          text = closing } ]
+
+(* A range inside another goes with it, so only the outermost are kept:
+   the edits of one inside would overlap those of the one around it. *)
+let outermost ranges =
+  let contains outer inner =
+    outer <> inner && outer.first <= inner.first && inner.last <= outer.last
+  in
+  List.filter
+    (fun range -> not (List.exists (fun outer -> contains outer range) ranges))
+    ranges
+
+(* Whether [edit] goes with [range]: by the tokens it replaces, or for an
+   insertion by the place it inserts at, between two tokens, so that one
+   at either edge of the range stays with the tokens kept beside it. *)
+let goes_with range (edit : Emitter.edit) =
+  if edit.count = 0 then range.first < edit.first && edit.first <= range.last
+  else range.first <= edit.first && edit.first + edit.count - 1 <= range.last
+
+let dropped_edits tokens range =
+  replace tokens ~location:tokens.(range.first).location range.text
+    (grammar_tokens tokens range.first range.last)
+
 (* A type declaration may hold another, in a statement expression of
    its definition, and a constructor's arguments other constructors, so
    the edits of all are sorted; an insertion before a token comes before
-   an edit that replaces it. *)
-let edits (text : Reader.t) declarations constructions =
-  List.concat_map (type_declaration text.tokens) declarations
-  @ List.concat_map (construction text.tokens) constructions
+   an edit that replaces it. The edits inside a dropped range go, and the
+   range's own edits replace them. *)
+let edits (text : Reader.t) declarations constructions answered =
+  let tokens = text.tokens in
+  let ranges = outermost (List.concat_map dropped_ranges answered) in
+  let kept edit =
+    not (List.exists (fun range -> goes_with range edit) ranges)
+  in
+  let lowered =
+    List.concat_map (type_declaration tokens) declarations
+    @ List.concat_map (construction tokens) constructions
+  in
+  List.concat_map (dropped_edits tokens) ranges @ List.filter kept lowered
   |> List.stable_sort (fun (a : Emitter.edit) (b : Emitter.edit) ->
          compare (a.first, a.count) (b.first, b.count))

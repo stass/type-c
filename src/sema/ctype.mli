@@ -301,6 +301,10 @@ val as_variant : t -> string option
 (** The name of the variant whose structure [t] is, qualified or not, or
     [None] where [t] is no variant. *)
 
+val has_distinct : tags -> bool
+(** Whether a distinct type has been declared, so that a type that typec
+    does not know may be one or have one inside it. *)
+
 val as_distinct : t -> distinct option
 (** The distinct type that [t] is, qualified or not. *)
 

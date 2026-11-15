@@ -1422,9 +1422,8 @@ let distinct_types () =
     "is not over an unqualified arithmetic or pointer type (design 3.4)";
   rejects ~file "type d = distinct const int;"
     "is not over an unqualified arithmetic or pointer type (design 3.4)";
-  rejects ~file
-    (types ^ "int g(id a) { return _Generic(a, unsigned: 1, id: 2); }")
-    "work package 1.4";
+  accepts ~file
+    (types ^ "int g(id a) { return _Generic(a, unsigned: 1, id: 2); }");
   (* C text in a Type-C file sees the representation. *)
   accepts ~file
     (types

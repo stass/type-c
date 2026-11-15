@@ -31,7 +31,8 @@ let emitted source =
       Emitter.emit text
         (Lowering.edits text
            (Declarations.type_declarations declarations)
-           (Declarations.constructions declarations))
+           (Declarations.constructions declarations)
+           (Declarations.answered declarations))
   | Error error -> failwith (Reader.error_message error)
 
 let is_marker line = String.starts_with ~prefix:"# " line

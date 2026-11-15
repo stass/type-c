@@ -36,6 +36,7 @@ let type_declarations result =
          compare a.span.first b.span.first)
 
 let constructions result = Expressions.constructions result.typed
+let answered result = Expressions.answered result.typed
 let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name

@@ -156,3 +156,34 @@ as design 3.4 allows.
   8 7 0 0
   $ typec --cc=$gcc -Wall -Werror -o gcc-distinct distinct.tc && ./gcc-distinct
   8 7 0 0
+
+Type-C text tells a distinct type from its representation in a generic
+selection and __builtin_types_compatible_p, and typec answers them
+(design 13.5): alone, Clang and GCC would take the int association for
+a value of reg_id and the reg_id one for an int, and refuse a selection
+that names both. A selected function designator, lvalue and string
+literal keep what they are.
+
+  $ cat > select.tc <<'EOF'
+  > #include <stdio.h>
+  > type reg_id = distinct int;
+  > static int twice(int n) { return 2 * n; }
+  > static int same(int n) { return n; }
+  > int main(void) {
+  >   reg_id r = (reg_id)1;
+  >   int n = 0, m = 0;
+  >   char s[] = _Generic(r, reg_id: "reg_id", default: "other");
+  >   _Generic(r, reg_id: n, int: m) = 5;
+  >   printf("%s %s %s %d %d %d %d %d\n", s,
+  >          _Generic(r, int: "int", default: "not int"),
+  >          _Generic(n, reg_id: "reg_id", default: "not reg_id"),
+  >          n, m, _Generic(r, reg_id: twice, default: same)(3),
+  >          __builtin_types_compatible_p(reg_id, int),
+  >          __builtin_types_compatible_p(const reg_id, reg_id));
+  >   return same((int)r) - 1;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Werror -o clang-select select.tc && ./clang-select
+  reg_id not int not reg_id 5 0 6 0 1
+  $ typec --cc=$gcc -Wall -Werror -o gcc-select select.tc && ./gcc-select
+  reg_id not int not reg_id 5 0 6 0 1

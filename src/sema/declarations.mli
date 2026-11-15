@@ -69,6 +69,10 @@ val constructions : t -> Expressions.construction list
 (** The constructor expressions that the reader has typed, in source
     order: those that lowering replaces (design 13.5). *)
 
+val answered : t -> Expressions.answered list
+(** The constructs that typec answers in lowering; see
+    {!Expressions.answered}. *)
+
 val linked : t -> string -> entity option
 (** The object or function with linkage (6.2.2) of that name: the one
     entity that its declarations with linkage denote in any scope, as of

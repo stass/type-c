@@ -70,6 +70,7 @@ type tags = {
   records : (int, record_definition) Hashtbl.t;
   enums : (int, Integer.t Unknown.answer) Hashtbl.t;
   constructors : (int, constructor list) Hashtbl.t;
+  mutable has_distinct : bool;
 }
 
 type error =
@@ -286,7 +287,8 @@ let create_tags () =
   { next_id = 0;
     records = Hashtbl.create 16;
     enums = Hashtbl.create 16;
-    constructors = Hashtbl.create 16 }
+    constructors = Hashtbl.create 16;
+    has_distinct = false }
 
 let fresh_id tags =
   let id = tags.next_id in
@@ -317,8 +319,11 @@ let declare_distinct tags distinct_name representation =
       { distinct_id = fresh_id tags; distinct_name; representation }
     in
     let t = of_shape (Distinct distinct) in
+    tags.has_distinct <- true;
     if t.size > max_size then Error Too_large else Ok t
   else Error Invalid_representation
+
+let has_distinct tags = tags.has_distinct
 
 let as_distinct t =
   match t.shape with
