@@ -1513,11 +1513,7 @@ let arm_termination () =
     (in_function
        (repeat 120 "match (v) { default: " ^ "return 1;" ^ repeat 120 " }"));
   accepted (repeat 4000 "if (n) return 1; else " ^ "return 0;");
-  refused (repeat 4000 "if (n) " ^ "return 0;");
-  (* Design 4.3 rule 2: continue continues the loop around a match. *)
-  rejects ~file
-    (variant ^ "void h(e v) { match (v) { default: continue; } }")
-    "continue outside a loop"
+  refused (repeat 4000 "if (n) " ^ "return 0;")
 
 (* Design 4.3 rule 3: a label inside an arm is the target only of a goto
    in the same arm. *)

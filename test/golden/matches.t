@@ -437,6 +437,40 @@ reached only from the arm.
   entry.tc:5: a jump into a match arm from outside it (design 4.3 rule 3) [TC0022]
   [1]
 
+A break or continue in a statement expression in the condition of a
+loop or the step of a for leaves the loop in Clang and the statement
+around the loop in GCC, so it is refused unless it leaves a loop, switch
+or match within the expression (design 4.4).
+
+  $ cat > control.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     while (({ if (n) break; n; }))
+  >       n--;
+  >     return n;
+  >   case B:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe control.tc
+  control.tc:5: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
+  [1]
+
+A break leaves a loop, switch or match, and a statement expression
+outside them has none to leave (design 4.3 rule 2).
+
+  $ cat > stray.tc <<'EOF'
+  > int f(int n) {
+  >   return ({ if (n) break; n; });
+  > }
+  > EOF
+  $ ./golden.exe stray.tc
+  stray.tc:2: break outside a loop, switch or match (C11 6.8.6.3p1, design 4.3 rule 2) [TC0027]
+  [1]
+
 The scrutinee is of a variant whose declaration is in scope at the
 match, which names its tag and enumerators (design 4.1 rule 1).
 

@@ -15,13 +15,19 @@ exception Refused of refusal
 let refuse span rule text =
   raise (Refused { span; message = Rule.message rule text })
 
+module Targets = Set.Make (struct
+  type t = Tree.jump_target
+
+  let compare (Tree.Statement_at a) (Tree.Statement_at b) = Int.compare a b
+end)
+
 (* What a statement tells the statements around it (design 4.4). *)
 type flow = {
   completes : bool;
-  (* A reachable break or continue in it leaves it, for the loop, switch
-     or match around it. *)
-  breaks : bool;
-  continues : bool;
+  (* The loops, switches and matches around it that a reachable break or
+     continue in it leaves for, as the parser resolved each. *)
+  breaks : Targets.t;
+  continues : Targets.t;
   (* It carries or contains a named label outside every match arm in it,
      by which a goto from around it may enter it. *)
   has_named_label : bool;
@@ -33,7 +39,7 @@ type flow = {
 }
 
 let completes =
-  { completes = true; breaks = false; continues = false;
+  { completes = true; breaks = Targets.empty; continues = Targets.empty;
     has_named_label = false; has_case_label = false; default = false }
 
 let stops = { completes with completes = false }
@@ -43,16 +49,23 @@ let stops = { completes with completes = false }
    combine flows this way do; a statement that may not sets its own
    [completes] on the result. *)
 let followed_by flow ~reachable next =
+  let jumps leaving =
+    if reachable then Targets.union (leaving flow) (leaving next)
+    else leaving flow
+  in
   {
     completes = true;
-    breaks = flow.breaks || (reachable && next.breaks);
-    continues = flow.continues || (reachable && next.continues);
+    breaks = jumps (fun flow -> flow.breaks);
+    continues = jumps (fun flow -> flow.continues);
     has_named_label = flow.has_named_label || next.has_named_label;
     has_case_label = flow.has_case_label || next.has_case_label;
     default = flow.default || next.default;
   }
 
 let both flow next = followed_by flow ~reachable:true next
+
+(* Whether a reachable break in [flow] leaves the statement [target]. *)
+let breaks_to target flow = Targets.mem target flow.breaks
 
 let all flow_of parts =
   List.fold_left (fun flow part -> both flow (flow_of part)) completes parts
@@ -151,6 +164,8 @@ and initialiser_list walk (values : Tree.initialiser_list) =
     values.node
 
 and statement_flow walk (statement : Tree.statement) =
+  (* What a break or continue names, if [statement] is one it leaves. *)
+  let target = Tree.jump_target_of statement in
   match statement.node with
   | Labeled { label; statement = labelled } ->
       labelled_flow walk label labelled
@@ -159,29 +174,30 @@ and statement_flow walk (statement : Tree.statement) =
   | Null_statement | Attribute_statement _ -> completes
   | If { condition; then_branch; else_branch } ->
       if_flow walk condition then_branch else_branch
-  | Switch { controlling; body } -> switch_flow walk controlling body
+  | Switch { controlling; body } -> switch_flow walk target controlling body
   | While { condition; body } ->
       let body = statement_flow walk body in
       let ends = not (walk.facts.non_zero condition) in
-      loop (expression walk condition) body ~completes:(ends || body.breaks)
+      loop target (expression walk condition) body
+        ~completes:(ends || breaks_to target body)
   | Do { body; condition } ->
       let body = statement_flow walk body in
       let repeats = walk.facts.non_zero condition in
-      let again = body.completes || body.continues in
-      loop (expression walk condition) body
-        ~completes:(body.breaks || ((not repeats) && again))
+      let again = body.completes || Targets.mem target body.continues in
+      loop target (expression walk condition) body
+        ~completes:(breaks_to target body || ((not repeats) && again))
   | For { clause; condition; step; body } ->
-      for_flow walk clause condition step body
+      for_flow walk target clause condition step body
   | Goto label ->
       record_jump walk Goto label;
       stops
   | Computed_goto target -> { (expression walk target) with completes = false }
-  | Continue -> { stops with continues = true }
-  | Break -> { stops with breaks = true }
+  | Continue { loop } -> { stops with continues = Targets.singleton loop }
+  | Break { leaves } -> { stops with breaks = Targets.singleton leaves }
   | Return value ->
       { (all (expression walk) (Option.to_list value)) with completes = false }
   | Asm assembler -> asm_flow walk assembler
-  | Match { scrutinee; arms } -> match_flow walk scrutinee arms
+  | Match { scrutinee; arms } -> match_flow walk target scrutinee arms
 
 and labelled_flow walk (label : Tree.label) labelled =
   match label.node with
@@ -205,7 +221,7 @@ and if_flow walk condition then_branch else_branch =
   { (both (both condition taken) other) with
     completes = taken.completes || other.completes }
 
-and for_flow walk clause condition step body =
+and for_flow walk target clause condition step body =
   let body = statement_flow walk body in
   let ends =
     match condition with
@@ -221,39 +237,46 @@ and for_flow walk clause condition step body =
   in
   let expressions = Option.to_list condition @ Option.to_list step in
   let outside = both clause (all (expression walk) expressions) in
-  loop outside body ~completes:(ends || body.breaks)
+  loop target outside body ~completes:(ends || breaks_to target body)
 
-(* A loop whose condition and other expressions, which typing reads
-   outside the loop, give the flow [outside]: the breaks and continues
-   of [body] are the loop's own, and its labels those of the statements
-   around the loop. *)
-and loop outside body ~completes =
-  let inside = { body with breaks = false; continues = false } in
+(* The loop [target], whose condition and other expressions give the flow
+   [outside]: the breaks and continues of [body] for [target] end at the
+   loop, and its labels are those of the statements around the loop. *)
+and loop target outside body ~completes =
+  let inside =
+    { body with
+      breaks = Targets.remove target body.breaks;
+      continues = Targets.remove target body.continues }
+  in
   { (both outside inside) with completes }
 
-(* The breaks and the case and default labels of [body] are the
-   switch's own (C11 6.8.4.2p4); its continues and named labels are
-   those of the statements around it. *)
-and switch_flow walk controlling body =
+(* The breaks of [body] for the switch [target] end at it, and its case
+   and default labels are the switch's own (C11 6.8.4.2p4); its other
+   jumps and its named labels are those of the statements around it. *)
+and switch_flow walk target controlling body =
   let outside = expression walk controlling in
   let body = statement_flow walk body in
   let inside =
-    { body with breaks = false; has_case_label = false; default = false }
+    { body with
+      breaks = Targets.remove target body.breaks;
+      has_case_label = false;
+      default = false }
   in
   { (both outside inside) with
-    completes = (not body.default) || body.breaks || body.completes }
+    completes =
+      (not body.default) || breaks_to target body || body.completes }
 
-(* Design 4.3 rule 2: a break in an arm leaves the match, which completes
-   only by one. By rule 3, which [jump_refusal] checks over each body
-   that holds a match, a label in an arm is entered only from the arm,
-   so of the arms only their continues reach the statements around the
-   match. *)
-and match_flow walk scrutinee arms =
+(* Design 4.3 rule 2: a break in an arm leaves the match [target], which
+   completes only by one. By rule 3, which [jump_refusal] checks over
+   each body that holds a match, a label in an arm is entered only from
+   the arm, so of the arms only their continues reach the statements
+   around the match. *)
+and match_flow walk target scrutinee arms =
   let outside = expression walk scrutinee in
   let arms = all (arm walk) arms in
   { outside with
-    completes = arms.breaks;
-    continues = outside.continues || arms.continues }
+    completes = breaks_to target arms;
+    continues = Targets.union outside.continues arms.continues }
 
 and arm walk (arm : Tree.arm) =
   sequence { walk with arm = Some arm.span } arm.node.items

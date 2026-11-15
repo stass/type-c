@@ -659,8 +659,6 @@ let statements () =
   rejects "switch (d) { }" "6.8.4.2p1";
   rejects "switch (x) { case x: ; }" "6.8.4.2p3";
   rejects "switch (x) { case 1.0: ; }" "6.8.4.2p3";
-  rejects "break" "6.8.6.3p1";
-  rejects "switch (x) { continue; }" "6.8.6.2p1";
   rejects "case 1: ;" "6.8.1p2";
   rejects "default: ;" "6.8.1p2";
   accepts "return";

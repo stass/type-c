@@ -138,8 +138,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   calling `Rule.message`: the failure functions of the parser and the
   declarations take a plain string. Some refusals cite the design and
   carry no code: the profile limits of design 13.3 (`expressions.ml`,
-  the GNU nested function in `parser.ml`) and "break outside a loop,
-  switch or match" (design 4.3 rule 2). Decide whether these are rules
+  the GNU nested function in `parser.ml`). Decide whether these are rules
   with codes (a `Profile` rule, like `Not_implemented`), then make the
   failure functions take a diagnostic of two cases, a rule of Type-C
   made only by `Rule.message` and a refusal of C text, so that each
@@ -658,22 +657,11 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Matching
 
-- [Low] A break or continue in a statement expression in the condition
-  or step of a loop counts, in typing and in reachability alike, for the
-  statements around the loop. Whether GCC and Clang bind it to the loop
-  itself is not checked; a disagreement makes the analysis call an arm
-  end unreachable that is not, which the arm-end trap stops. Check both
-  backends and make typing and `Reachability` follow them.
 - [Low] Reachability does not walk type names: a break, continue or
   goto in a statement expression in an array length or a `typeof` is not
   seen by the arms and loops around it, nor a label there by the jump
   rule. (A match there is checked, since typing asks rule 1 of each arm
   it reads.)
-- [Medium] Typing (`enclosing` in `src/sema/expressions.ml`) and
-  `Reachability` (`loop`, `switch_flow`, `match_flow`) each decide which
-  construct a break or continue leaves, two copies that must agree.
-  Resolve each break and continue to its target once, in the parser as
-  for labels, and have both read it.
 
 - [Medium] typec does not check that `&` takes no `register` object
   (C11 6.5.3.2p1): `register struct s r; (&r)->m` is a backend error.

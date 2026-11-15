@@ -15,9 +15,11 @@
     6.2.3, 6.7.2.3), and the tree records their outcome: every
     declaration of an ordinary identifier or a tag carries its
     {!declared}, and every use of one the declaration it resolves to.
-    Members, which belong to their structure, and labels, which belong
-    to their function, are names only, and so are the identifiers in the
-    arguments of an attribute, which the parser does not read. *)
+    It is also the one implementation of what a break or continue leaves,
+    which each records as its {!jump_target}. Members, which belong to
+    their structure, and labels, which belong to their function, are
+    names only, and so are the identifiers in the arguments of an
+    attribute, which the parser does not read. *)
 
 open Typec_cpp
 
@@ -38,6 +40,11 @@ type declaration_id = Ordinary_at of int
     (6.2.3), so that no table of one can be read with an id of the
     other. *)
 type tag_id = Tag_at of int
+
+(** The identity of a loop, switch or match statement, which a break or
+    continue names as the statement it leaves: the first token of the
+    statement, its keyword ({!jump_target_of}). *)
+type jump_target = Statement_at of int
 
 (** What a use of an ordinary identifier can refer to: a declaration in
     the tree, or a typedef name that GCC and Clang declare before the
@@ -484,8 +491,12 @@ and statement_node =
     }
   | Goto of identifier
   | Computed_goto of expression  (** GNU [goto *] expression [;] *)
-  | Continue
-  | Break
+  | Continue of { loop : jump_target }
+      (** the innermost loop around it (C11 6.8.6.2p1), which may be
+          outside a match around it (design 4.3 rule 2) *)
+  | Break of { leaves : jump_target }
+      (** the innermost loop, switch or match around it (C11 6.8.6.3p1,
+          design 4.3 rule 2) *)
   | Return of expression option
   | Asm of assembler
   | Match of { scrutinee : expression; arms : arm list }
@@ -665,6 +676,10 @@ let rec declared_identifier declarator =
 
 let declared_name declarator =
   Option.map (fun name -> name.node) (declared_identifier declarator)
+
+(** The identity that a break or continue leaving the loop, switch or
+    match [statement] names. *)
+let jump_target_of statement = Statement_at statement.span.first
 
 (** The tag that the type declaration [id] claims, where it claims one
     (design 10.1 rule 6, 10.2): a declaration of the tag at the token of

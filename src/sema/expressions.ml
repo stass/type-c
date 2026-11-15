@@ -34,15 +34,14 @@ type constant =
 
 (* What a case or default label in the statement being typed belongs
    to: no switch, the innermost switch, or a match arm, where it belongs
-   to no switch of its own (design 4.3 rule 3). A break leaves either. *)
+   to no switch of its own (design 4.3 rule 3). *)
 type label_owner = No_switch | Switch_body | Match_arm
 
-(* What encloses the statement being typed: the function, for __func__,
-   and the loop, switch or match that break, continue and case need. *)
+(* What encloses the statement being typed: the function, for __func__
+   and return, and the switch or match that case labels need. *)
 type enclosing = {
   function_name : string option;
   return_type : Ctype.t option;
-  in_loop : bool;
   case_labels : label_owner;
 }
 
@@ -205,8 +204,7 @@ type t = {
 }
 
 let outside_functions =
-  { function_name = None; return_type = None; in_loop = false;
-    case_labels = No_switch }
+  { function_name = None; return_type = None; case_labels = No_switch }
 
 let create () =
   { types = Hashtbl.create 4096;
@@ -2685,10 +2683,6 @@ and typed_statement context (statement : Tree.statement) =
 
 and statement_node context (statement : Tree.statement) =
   let enclosing = context.typed.enclosing in
-  let in_loop body =
-    within context { enclosing with in_loop = true } (fun () ->
-        typed_statement context body)
-  in
   let scalar ~clause condition =
     require_scalar context condition.Tree.span ~clause
       (whole_value context condition)
@@ -2700,7 +2694,8 @@ and statement_node context (statement : Tree.statement) =
   | Compound block -> block_items context block
   | Expression_statement value -> ignore (whole_value context value)
   | Computed_goto value -> ignore (expression context value)
-  | Null_statement | Attribute_statement _ | Goto _ -> ()
+  | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _ ->
+      ()
   | If { condition; then_branch; else_branch } ->
       scalar ~clause:"6.8.4.1p1" condition;
       typed_statement context then_branch;
@@ -2713,23 +2708,15 @@ and statement_node context (statement : Tree.statement) =
       match_statement context statement scrutinee arms
   | While { condition; body } ->
       scalar ~clause:"6.8.5p2" condition;
-      in_loop body
+      typed_statement context body
   | Do { body; condition } ->
-      in_loop body;
+      typed_statement context body;
       scalar ~clause:"6.8.5p2" condition
   | For { clause; condition; step; body } ->
       Option.iter (for_clause context) clause;
       Option.iter (scalar ~clause:"6.8.5p2") condition;
       Option.iter (fun step -> ignore (whole_value context step)) step;
-      in_loop body
-  | Continue ->
-      if not enclosing.in_loop then
-        context.fail statement.span "continue outside a loop (C11 6.8.6.2p1)"
-  | Break ->
-      if (not enclosing.in_loop) && enclosing.case_labels = No_switch then
-        context.fail statement.span
-          "break outside a loop, switch or match (C11 6.8.6.3p1, design 4.3 \
-           rule 2)"
+      typed_statement context body
   | Return value ->
       let position =
         match enclosing.return_type with

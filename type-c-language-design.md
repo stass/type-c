@@ -660,9 +660,19 @@ and for none that contains the `switch`. In `switch (n) { default: return
 A constant here is an integer constant expression that the front end can
 evaluate (13.3). A statement expression of the GNU profile is treated as
 the block it contains: a `break`, `continue`, `goto` or label inside it
-counts for the statements around it. An arm that the rules reject but
-that cannot in fact fall through is fixed by adding the `break` the rules
-ask for.
+counts for the statements around it. A `break` leaves the innermost
+loop, `switch` or `match` around it and a `continue` the innermost loop;
+the parser records which, so that the analysis reads one answer. One in
+a statement expression in the condition of a `while` or `do`, or in the
+condition or step of a `for`, that leaves no loop, `switch` or `match`
+within the expression is refused: Clang takes it to leave that loop, GCC
+the statement around the loop, and GCC refuses it where there is none
+(GCC 16, Apple Clang 21). In the first clause of a `for` and the
+controlling expression of a `switch` both take it to leave the statement
+around that one, and so does typec there and in the scrutinee of a
+`match`, which lowers to a declaration before its `switch` (13.5). An
+arm that the rules reject but that cannot in fact fall through is fixed
+by adding the `break` the rules ask for.
 
 ### 4.5 Invalid tags
 

@@ -103,6 +103,139 @@ let scope_end_cases =
       "d:33:} e:31:;";
   ]
 
+(* What each break and continue of a text leaves, in source order, as
+   [k->t:l] with [k] the jump's keyword and [t] and [l] the keyword and
+   line of the statement it leaves, or the error. It walks function
+   bodies, statements and match arms, and a statement expression that is
+   a whole condition, clause or expression statement. *)
+let jump_targets ?(file = type_c_file) text =
+  let target reader (Tree.Statement_at token) =
+    let token = reader.Reader.tokens.(token) in
+    Printf.sprintf "%s:%d" (Reader.spelling reader token) token.location.line
+  in
+  let rec items reader = List.concat_map (item reader)
+  and item reader = function
+    | Tree.Block_statement statement -> in_statement reader statement
+    | Block_declaration _ | Block_type_declaration _ -> []
+  and value reader (expression : Tree.expression) =
+    match expression.node with
+    | Statement_expression block -> items reader block.node.items
+    | _ -> []
+  and values reader = List.concat_map (value reader)
+  and in_statement reader (statement : Tree.statement) =
+    let sub = in_statement reader in
+    match statement.node with
+    | Break { leaves } -> [ "break->" ^ target reader leaves ]
+    | Continue { loop } -> [ "continue->" ^ target reader loop ]
+    | Compound block -> items reader block.node.items
+    | Labeled { statement; _ } -> sub statement
+    | Expression_statement expression -> value reader expression
+    | If { condition; then_branch; else_branch } ->
+        value reader condition @ sub then_branch
+        @ List.concat_map sub (Option.to_list else_branch)
+    | Switch { controlling; body } -> value reader controlling @ sub body
+    | While { condition; body } -> value reader condition @ sub body
+    | Do { body; condition } -> sub body @ value reader condition
+    | For { clause; condition; step; body } ->
+        let clause =
+          match clause with
+          | Some (Clause_expression expression) -> [ expression ]
+          | Some (Clause_declaration _) | None -> []
+        in
+        values reader (clause @ Option.to_list condition @ Option.to_list step)
+        @ sub body
+    | Match { scrutinee; arms } ->
+        value reader scrutinee
+        @ List.concat_map
+            (fun (arm : Tree.arm) -> items reader arm.node.items)
+            arms
+    | _ -> []
+  in
+  let external_declaration reader = function
+    | Tree.Function_definition { node = { body = Parsed block; _ }; _ } ->
+        items reader block.node.items
+    | _ -> []
+  in
+  match Reader.read ~name:file text with
+  | Error error -> "read error: " ^ Reader.error_message error
+  | Ok reader -> (
+      match Parser.parse ~keywords:gnu_keywords reader with
+      | Error error -> "error: " ^ Parser.error_message error
+      | Ok unit ->
+          List.concat_map (external_declaration reader) unit
+          |> String.concat " ")
+
+(* A break leaves the innermost loop, switch or match around it, and a
+   continue the innermost loop (C11 6.8.6.2p1, 6.8.6.3p1, design 4.3 rule
+   2); in the condition or step of a loop GCC and Clang disagree, so
+   neither leaves anything there that is outside the expression (design
+   4.4). *)
+let jump_target_cases =
+  let in_function body =
+    "type e = | A | B; void f(e v, int n) {\n" ^ body ^ "\n}"
+  in
+  let jumps name body expected = case name (in_function body) expected in
+  [
+    jumps "a loop in a match arm in a switch"
+      "switch (n) {\ncase 1:\nmatch (v) {\ncase A:\n\
+       for (;;) { break; continue; }\nbreak;\ndefault:\nbreak;\n}\n\
+       break;\n}"
+      "break->for:6 continue->for:6 break->match:4 break->match:4 \
+       break->switch:2";
+    jumps "a continue in a switch in a loop"
+      "while (n) {\nswitch (n) {\ncase 1:\ncontinue;\ndefault:\nbreak;\n\
+       }\n}"
+      "continue->while:2 break->switch:3";
+    jumps "a continue in a match arm continues the loop around the match"
+      "do {\nmatch (v) {\ndefault:\ncontinue;\n}\n} while (n);"
+      "continue->do:2";
+    jumps "a loop in a statement expression in a loop condition"
+      "while (({ for (;;) break; 1; }))\n{ break; }"
+      "break->for:2 break->while:2";
+    jumps "the first clause of a for and a switch's controlling expression \
+           are outside the statement"
+      "while (n) {\nfor (({ break; 0; }); ;) ;\n\
+       switch (({ continue; 0; })) { default: break; }\n}"
+      "break->while:2 continue->while:2 break->switch:4";
+    jumps "a break outside a loop, switch or match" "break;"
+      "error: in.tc:2: break outside a loop, switch or match (C11 \
+       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
+    jumps "a continue in a switch outside a loop"
+      "switch (n) { default: continue; }"
+      "error: in.tc:2: continue outside a loop (C11 6.8.6.2p1)";
+    jumps "a continue in a match outside a loop"
+      "match (v) { default: continue; }"
+      "error: in.tc:2: continue outside a loop (C11 6.8.6.2p1)";
+    jumps "a block literal body is a function of its own"
+      "while (n) {\n(void)^{ break; };\n}"
+      "error: in.tc:3: break outside a loop, switch or match (C11 \
+       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
+    jumps "so are a block literal's parameters"
+      "while (n) {\n(void)^(int a[({ break; 1; })]) { };\n}"
+      "error: in.tc:3: break outside a loop, switch or match (C11 \
+       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
+    jumps "a break in a while condition"
+      "for (;;) {\nwhile (({ if (n) break; 1; })) ;\n}"
+      "error: in.tc:3: a break in the condition of a loop or the step of a \
+       for, which Clang takes to leave the loop and GCC the statement \
+       around it (design 4.4) [TC0026]";
+    jumps "a break in a do condition"
+      "for (;;) {\ndo ; while (({ break; 1; }));\n}"
+      "error: in.tc:3: a break in the condition of a loop or the step of a \
+       for, which Clang takes to leave the loop and GCC the statement \
+       around it (design 4.4) [TC0026]";
+    jumps "a continue in a for condition"
+      "for (;;) {\nfor (; ({ continue; 1; }); ) ;\n}"
+      "error: in.tc:3: a continue in the condition of a loop or the step \
+       of a for, which Clang takes to leave the loop and GCC the statement \
+       around it (design 4.4) [TC0026]";
+    jumps "a continue in a for step, in a switch within it"
+      "for (;;) {\nfor (;; ({ switch (n) { default: continue; } })) ;\n}"
+      "error: in.tc:3: a continue in the condition of a loop or the step \
+       of a for, which Clang takes to leave the loop and GCC the statement \
+       around it (design 4.4) [TC0026]";
+  ]
+
 let declarator_cases =
   [
     case "a plain declaration" "int x;" "(declaration (int) x)";
@@ -1251,6 +1384,12 @@ let error_cases =
     case "an unterminated body" "int f(void) {\n{\n"
       "error: in.i:2: expected `}` to end a compound statement, found end \
        of input";
+    case "the end of input after a loop head" "void f(void) { while (1)"
+      "error: in.i:1: expected an expression, found end of input";
+    case "the end of input after a label" "void f(void) { L:"
+      "error: in.i:1: expected an expression, found end of input";
+    case "the end of input after else" "void f(void) { if (1) ; else"
+      "error: in.i:1: expected an expression, found end of input";
     case "a body after a non-function" "int x { }"
       "error: in.i:1: expected `;` after a declaration, found `{`";
     case "a body after a pointer to a function" "int (*f)(void) { }"
@@ -1937,6 +2076,7 @@ let failures () =
     @ failed_cases ~file:type_c_file ~spans:false match_cases
     @ failed_with (resolutions ~file:type_c_file) match_resolution_cases
     @ failed_with scope_ends scope_end_cases
+    @ failed_with jump_targets jump_target_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())
 

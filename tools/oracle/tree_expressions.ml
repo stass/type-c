@@ -189,7 +189,7 @@ and statement visit (s : statement) =
   | Compound body -> block visit body
   | Expression_statement value | Computed_goto value | Return (Some value) ->
       expression visit value
-  | Null_statement | Attribute_statement _ | Goto _ | Continue | Break
+  | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _
   | Return None ->
       ()
   | If { condition; then_branch; else_branch } ->

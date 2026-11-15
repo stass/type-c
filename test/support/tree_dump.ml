@@ -566,8 +566,8 @@ and statement reader (s : statement) =
         ]
   | Goto target -> here "goto" [ identifier target ]
   | Computed_goto target -> here "goto*" [ value target ]
-  | Continue -> here "continue" []
-  | Break -> here "break" []
+  | Continue _ -> here "continue" []
+  | Break _ -> here "break" []
   | Return e -> here "return" (Option.to_list (Option.map value e))
   | Asm a -> here "asm" (assembler reader a)
   | Match { scrutinee; arms } ->

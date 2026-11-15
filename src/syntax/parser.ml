@@ -76,8 +76,21 @@ type tag_entry = { tag : tag_id; claimed : bool }
    looked up in {!Universe}. *)
 type scope = (ordinary, tag_entry) Scope.t
 
+(* The innermost statement around the cursor that a break or continue
+   may leave. A break leaves a loop, switch or match, and a continue the
+   innermost loop, which may be around a switch or match (C11 6.8.6.2p1,
+   6.8.6.3p1, design 4.3 rule 2). *)
+type jump_scope =
+  | Function_body  (* also a block literal, a function of its own *)
+  | Loop of jump_target
+  | Switch_or_match of { target : jump_target; around : jump_scope }
+  | Disputed
+      (* The condition of a loop or the step of a for, outside every
+         loop, switch and match within it, where Clang leaves the loop
+         and GCC the statement around it (design 4.4). *)
+
 (* The cursor. [scope] is persistent, so leaving a scope restores the
-   value saved on entering it. *)
+   value saved on entering it, and so is [jumps]. *)
 type state = {
   reader : Reader.t;
   grammar : grammar_token array;
@@ -85,6 +98,7 @@ type state = {
   mutable open_brackets : opening list;
       (** read and not yet closed, innermost first *)
   mutable scope : scope;
+  mutable jumps : jump_scope;
 }
 
 (* The function derivation applied to the name that a declarator
@@ -137,10 +151,27 @@ let peek state = peek_at state 0
 (* The index in [Reader.t.tokens] of the last grammar token read. *)
 let last_read state = state.grammar.(state.position - 1).index
 
+(* The index in [Reader.t.tokens] of the grammar token at [start]. *)
+let first_token state start = state.grammar.(start).index
+
 let span_from state start =
-  { first = state.grammar.(start).index; last = last_read state }
+  { first = first_token state start; last = last_read state }
 
 let finish state start node = { span = span_from state start; node }
+
+(* The target of the loop, switch or match statement that begins at
+   [start], as {!Tree.jump_target_of} reads it from the statement that
+   [finish] makes. *)
+let target_at state start = Statement_at (first_token state start)
+
+(* Runs [parse] with [state.jumps] set to [jumps], then restores it. An
+   error abandons the state, so it needs no restoring on one. *)
+let with_jumps state jumps parse =
+  let saved = state.jumps in
+  state.jumps <- jumps;
+  let result = parse () in
+  state.jumps <- saved;
+  result
 
 (* Errors. *)
 
@@ -165,6 +196,40 @@ let fail state message =
    has passed. *)
 let fail_at_token state index message =
   raise (Failed { location = state.reader.tokens.(index).location; message })
+
+(* The refusal of the break or continue at [start]. *)
+let fail_jump state start message =
+  fail_at_token state (first_token state start) message
+
+let fail_disputed_jump state start keyword =
+  fail_jump state start
+    (Rule.message Disputed_jump
+       (Printf.sprintf
+          "a %s in the condition of a loop or the step of a for, which \
+           Clang takes to leave the loop and GCC the statement around it"
+          keyword))
+
+(* What the break at [start] leaves. *)
+let break_target state start =
+  match state.jumps with
+  | Loop target | Switch_or_match { target; _ } -> target
+  | Disputed -> fail_disputed_jump state start "break"
+  | Function_body ->
+      fail_jump state start
+        (Rule.message Break_outside
+           "break outside a loop, switch or match")
+
+(* What the continue at [start] leaves: the innermost loop, through any
+   switch or match inside it. *)
+let continue_target state start =
+  let rec loop_of = function
+    | Loop target -> target
+    | Switch_or_match { around; _ } -> loop_of around
+    | Disputed -> fail_disputed_jump state start "continue"
+    | Function_body ->
+        fail_jump state start "continue outside a loop (C11 6.8.6.2p1)"
+  in
+  loop_of state.jumps
 
 let quoted spelling =
   if String.length spelling <= max_quoted_spelling then "`" ^ spelling ^ "`"
@@ -1222,8 +1287,15 @@ type declaration_start =
    and [do], which more tokens may follow. [outer] is the scope around
    the statement, which closing it restores: a selection or iteration
    statement is a block, and so is each of its substatements (6.8.4p3,
-   6.8.5p5). A label opens no scope, so its [outer] is None. *)
-type open_statement = { start : int; outer : scope option; kind : open_kind }
+   6.8.5p5). A label opens no scope, so its [outer] is None.
+   [outer_jumps] is the jump scope around the statement, which closing
+   it restores too. *)
+type open_statement = {
+  start : int;
+  outer : scope option;
+  outer_jumps : jump_scope;
+  kind : open_kind;
+}
 
 (* [statement_scope] is the scope of the whole statement after its head;
    the [else] branch and the condition of a [do] are read in it. *)
@@ -2212,6 +2284,11 @@ and choose state start =
 (* After the [^]: the body, after the parameters if it has them. The
    body continues their scope, as a function's does (6.2.1p4). *)
 and block_literal state start =
+  (* The literal is a function of its own, which no break or continue in
+     its parameters or body leaves. *)
+  with_jumps state Function_body (fun () -> literal_after_caret state start)
+
+and literal_after_caret state start =
   match peek state with
   | Punctuator_token P.Left_brace ->
       let body = block state in
@@ -2435,6 +2512,11 @@ and controlling_expression state keyword =
     (Printf.sprintf "`)` after the controlling expression of `%s`" keyword);
   value
 
+(* The controlling expression of a [while] or [do] after [keyword]. *)
+and loop_condition state keyword =
+  with_jumps state Disputed (fun () ->
+      controlling_expression state keyword)
+
 (* An optional expression and the token [closing] after it. *)
 and optional_expression state closing expected =
   if accept state closing then None
@@ -2457,10 +2539,14 @@ and for_clauses state =
     end
   in
   let condition =
-    optional_expression state P.Semicolon "`;` after the condition of `for`"
+    with_jumps state Disputed (fun () ->
+        optional_expression state P.Semicolon
+          "`;` after the condition of `for`")
   in
   let step =
-    optional_expression state P.Right_paren "`)` after the clauses of `for`"
+    with_jumps state Disputed (fun () ->
+        optional_expression state P.Right_paren
+          "`)` after the clauses of `for`")
   in
   (clause, condition, step)
 
@@ -2504,40 +2590,48 @@ and statement state = open_statements state []
 and open_statements state opened =
   let start = state.position in
   let outer = state.scope in
+  let outer_jumps = state.jumps in
   (* A selection or iteration statement is a block, which [read_head]
-     reads in, and so is its substatement. *)
-  let open_block_statement read_head =
+     reads in, and so is its substatement, read in [body_jumps]. *)
+  let open_block_statement ~body_jumps read_head =
     enter_scope state;
     let kind = read_head () in
+    state.jumps <- body_jumps;
     enter_scope state;
     (open_statements [@tailcall]) state
-      ({ start; outer = Some outer; kind } :: opened)
+      ({ start; outer = Some outer; outer_jumps; kind } :: opened)
   in
+  (* Called only in a branch where [peek] has matched a keyword at
+     [start], which is then a token. *)
+  let target () = target_at state start in
   match peek state with
   | _ when begins_label state ->
       let label = label state in
       (open_statements [@tailcall]) state
-        ({ start; outer = None; kind = Open_labeled label } :: opened)
+        ({ start; outer = None; outer_jumps; kind = Open_labeled label }
+        :: opened)
   | Keyword_token Keyword.If ->
       advance state;
-      open_block_statement (fun () ->
+      open_block_statement ~body_jumps:outer_jumps (fun () ->
           let condition = controlling_expression state "if" in
           Open_if { condition; statement_scope = state.scope })
   | Keyword_token Keyword.Switch ->
       advance state;
-      open_block_statement (fun () ->
-          Open_switch (controlling_expression state "switch"))
+      open_block_statement
+        ~body_jumps:
+          (Switch_or_match { target = target (); around = outer_jumps })
+        (fun () -> Open_switch (controlling_expression state "switch"))
   | Keyword_token Keyword.While ->
       advance state;
-      open_block_statement (fun () ->
-          Open_while (controlling_expression state "while"))
+      open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
+          Open_while (loop_condition state "while"))
   | Keyword_token Keyword.Do ->
       advance state;
-      open_block_statement (fun () ->
+      open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
           Open_do { statement_scope = state.scope })
   | Keyword_token Keyword.For ->
       advance state;
-      open_block_statement (fun () ->
+      open_block_statement ~body_jumps:(Loop (target ())) (fun () ->
           let clause, condition, step = for_clauses state in
           Open_for { clause; condition; step })
   | _ ->
@@ -2556,6 +2650,7 @@ and close_statements state opened statement =
             ({ innermost with kind } :: outside)
       | Closed node ->
           Option.iter (fun outer -> state.scope <- outer) innermost.outer;
+          state.jumps <- innermost.outer_jumps;
           (close_statements [@tailcall]) state outside
             (finish state innermost.start node))
 
@@ -2580,7 +2675,7 @@ and close_one state opened statement =
       state.scope <- statement_scope;
       if not (accept_keyword state Keyword.While) then
         fail_expected state "`while` after the body of `do`";
-      let condition = controlling_expression state "while" in
+      let condition = loop_condition state "while" in
       expect state P.Semicolon "`;` after `do` ... `while`";
       Closed (Do { body = statement; condition })
   | Open_for { clause; condition; step } ->
@@ -2621,12 +2716,14 @@ and simple_statement state =
         finish state start (Goto target)
   | Keyword_token Keyword.Continue ->
       advance state;
+      let loop = continue_target state start in
       expect state P.Semicolon "`;` after `continue`";
-      finish state start Continue
+      finish state start (Continue { loop })
   | Keyword_token Keyword.Break ->
       advance state;
+      let leaves = break_target state start in
       expect state P.Semicolon "`;` after `break`";
-      finish state start Break
+      finish state start (Break { leaves })
   | Keyword_token Keyword.Return ->
       advance state;
       let value =
@@ -2664,7 +2761,11 @@ and match_statement state start =
                ("expected `case` or `default` to begin an arm of `match`, \
                  found " ^ found state))
       in
-      let arms = loop [] in
+      let arm_jumps =
+        Switch_or_match
+          { target = target_at state start; around = state.jumps }
+      in
+      let arms = with_jumps state arm_jumps (fun () -> loop []) in
       finish state start (Match { scrutinee; arms }))
 
 and begins_arm_label state =
@@ -2948,6 +3049,7 @@ let parse ~keywords reader =
       position = 0;
       open_brackets = [];
       scope = file_scope keywords;
+      jumps = Function_body;
     }
   in
   match

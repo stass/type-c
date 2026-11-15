@@ -124,6 +124,17 @@ let rules =
       meaning =
         "A constructor named for a word of Type-C text (design 2.3) or \
          a universe name." };
+    { name = "Disputed_jump"; code = 26; clause = Some "design 4.4";
+      meaning =
+        "A [break] or [continue] in a statement expression in the \
+         condition of a loop or the step of a [for], outside every loop, \
+         [switch] and match within it, which GCC and Clang take to leave \
+         different statements." };
+    { name = "Break_outside"; code = 27;
+      clause = Some "C11 6.8.6.3p1, design 4.3 rule 2";
+      meaning =
+        "A [break] outside every loop, [switch] and match; also C11 \
+         6.8.6.3p1." };
   ]
 
 (* Stable codes are "TC" and four digits: fixed width for tools that read
