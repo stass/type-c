@@ -1027,13 +1027,27 @@ types (design 13.3).
   (execvp's ENOEXEC fallback), where glibc's posix_spawnp refused it;
   `tools/oracle/oracle.ml` still starts clang with `Unix.create_process`,
   so on glibc under qemu a missing clang there reads as status 127.
-- [Medium] Each arm with bindings lowers to a block of its own, and
-  Clang at -O0 gives sibling blocks separate stack slots, so a match of
-  many binding arms has a large frame: in Pilot A's chibicc `add_type`
-  grew from 0x40 to 0x270 bytes at -O0 and a 20000-deep conditional
-  under sizeof overflows the stack. Reproducer: /Volumes/Optaine/
-  type-c-pilot-a-notes/repro/node-probes/match-frame.tc. Measure at -O2
-  and decide whether the lowering should share one binding block.
+- [Medium] Each arm with bindings lowers to a block of its own, and at
+  -O0 neither backend shares stack slots between sibling blocks: in Pilot
+  A's chibicc (built at -O0 -g by its Makefile) `gen_expr` has a 616-byte
+  frame against upstream's 248, and recursion overflows at about 6000
+  levels against 16000. Reading bindings in place gives 120 bytes; at -O2
+  bindings cost no frame space. Change the 13.5 lowering so arms do not
+  each hold their bindings' slots: one union of the arms' bindings at the
+  top of the match keeps copy semantics (reading in place does not, since
+  arms may update the payload). Analysis:
+  /Volumes/Optaine/type-c-pilot-a-notes/size-analysis.md.
+- [Medium] GCC 14 at -O2 copies a constructor passed by value
+  (`new_node(NodeKind k)`) through two 64-byte stack temporaries: 11.2 KB
+  of Pilot A's 20 KB code growth on GCC, none on Clang. Check GCC 16, add
+  a gate 4 twin that passes a constructor by value, and say in 13.5 or a
+  guide which constructor idiom generates good code on both backends.
+- [Low] The trapping `default` of a match adds about 1.3 KB of .rodata in
+  Pilot A on both backends (likely jump tables widened by the default's
+  target); GCC also splits each trap into a `.cold` partition with its
+  own unwind entry (about 2 KB of .eh_frame and code). Find the .rodata
+  mechanism before changing the lowering; see the item on the trapping
+  default in a hot loop.
 - [Medium] Porting hazard (Pilot A step 8): a `break` that left a loop
   from inside an `if` leaves only the arm once the `if` becomes a match
   arm (design 4.3 rule 2), and typec says nothing. In chibicc's
