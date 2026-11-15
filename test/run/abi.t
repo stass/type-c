@@ -236,7 +236,7 @@ backend checks them on both targets.
   $ printf '#include "abi.tci"\n#include "hand.h"\n#include "layout.h"\n' \
   >   > layout.tc
   $ for cc in "$clang" "$gcc"; do
-  >   for target in "" "$second_target"; do
+  >   for target in "" "$hosted_second_target"; do
   >     typec --cc="$cc" $target -Wall -Wextra -Werror -Iinclude \
   >       -fsyntax-only layout.tc || echo "failed: $cc $target"
   >   done
@@ -268,11 +268,25 @@ through constructors, and calls C directly, through function pointers
 in both directions and through the ellipsis. A distinct value does not
 cross the ellipsis (3.4); its cast to the representation does.
 
+Each side shows a long double by whether it is 1.0L / 3, which every
+value of the test is: its text from printf would depend on the format
+of long double and on the libc.
+
+  $ cat > include/third.h <<'EOF'
+  > /* The text of a long double: 1/3 if it equals 1.0L / 3. */
+  > static const char *third_text(long double ld) {
+  >   if (ld == 1.0L / 3)
+  >     return "1/3";
+  >   return "not-1/3";
+  > }
+  > EOF
+
   $ cat > side.tc <<'EOF'
   > #include <limits.h>
   > #include <stdarg.h>
   > #include <stdio.h>
   > #include "abi.tci"
+  > #include "third.h"
   > 
   > /* The C side, declared with the Type-C types whose lowering it sees. */
   > long twice(long n);
@@ -317,7 +331,7 @@ cross the ellipsis (3.4); its cast to the representation does.
   >     printf(" %ld %lld %llu", l, ll, ull);
   >     break;
   >   case Reals(f, d, ld):
-  >     printf(" %a %a %La", f, d, ld);
+  >     printf(" %a %a %s", f, d, third_text(ld));
   >     break;
   >   case Pointers(text, next, fn):
   >     printf(" %s %s %ld", text, scalar_name(next), fn(21));
@@ -456,7 +470,8 @@ cross the ellipsis (3.4); its cast to the representation does.
   >          ((long (*)(long))fn)(21));
   >   printf("%ld %lu %lld %llu\n", (long)l, (unsigned long)ul, (long long)ll,
   >          (unsigned long long)ull);
-  >   printf("%a %a %La %a%+ai\n", (float)f, (double)d, (long double)ld,
+  >   printf("%a %a %s %a%+ai\n", (float)f, (double)d,
+  >          third_text((long double)ld),
   >          __real__ (_Complex double)z, __imag__ (_Complex double)z);
   > }
   > 
@@ -502,6 +517,7 @@ calls; it prints values with switch on the tag.
   > #include <stdarg.h>
   > #include <stdio.h>
   > #include "hand.h"
+  > #include "third.h"
   > 
   > typedef struct c_scalar scalar;
   > typedef struct c_compound compound;
@@ -560,7 +576,8 @@ calls; it prints values with switch on the tag.
   >     printf(" %ld %lld %llu", v.u.Longs.l, v.u.Longs.ll, v.u.Longs.ull);
   >     break;
   >   case c_scalar_Reals:
-  >     printf(" %a %a %La", v.u.Reals.f, v.u.Reals.d, v.u.Reals.ld);
+  >     printf(" %a %a %s", v.u.Reals.f, v.u.Reals.d,
+  >            third_text(v.u.Reals.ld));
   >     break;
   >   case c_scalar_Pointers:
   >     printf(" %s %s %ld", v.u.Pointers.text,
@@ -676,7 +693,8 @@ calls; it prints values with switch on the tag.
   >   printf("%c %d %d %d %d %d %u %d %s %ld\n", c, sc, uc, s, us, i, u, b,
   >          text, fn(21));
   >   printf("%ld %lu %lld %llu\n", l, ul, ll, ull);
-  >   printf("%a %a %La %a%+ai\n", f, d, ld, __real__ z, __imag__ z);
+  >   printf("%a %a %s %a%+ai\n", f, d, third_text(ld), __real__ z,
+  >          __imag__ z);
   > }
   > 
   > /* The values of tc_send_distinct, as their representation. */
@@ -710,9 +728,9 @@ calls; it prints values with switch on the tag.
   >                  tc_scale(count, three_halves), tc_flip(on));
   >   tc_print_distinct(DISTINCT_VALUES);
   >   tc_send_distinct(c_print_distinct);
-  >   printf("returned %d %llu %a %La %a%+ai %s\n", tc_lowest(), tc_highest(),
-  >          tc_tenth(), tc_third(), __real__ tc_unit(), __imag__ tc_unit(),
-  >          tc_text());
+  >   printf("returned %d %llu %a %s %a%+ai %s\n", tc_lowest(), tc_highest(),
+  >          tc_tenth(), third_text(tc_third()), __real__ tc_unit(),
+  >          __imag__ tc_unit(), tc_text());
   >   tc_call_c();
   >   return 0;
   > }
@@ -729,8 +747,6 @@ variants go by value to each side and back, and across the ellipsis to
 both sides; the distinct values cross by direct calls and callbacks
 each way. The output is sorted so that every crossing of a value lands
 on the same line, and the count shows how many agreed.
-
-The text of a long double is that of the x87 format of x86-64.
 
   $ for tc_cc in "$clang" "$gcc"; do
   >   rm -f tc.o
@@ -750,33 +766,33 @@ The text of a long double is that of the x87 format of x86-64.
   2  Metres 0x1.4p+1 Count -7 Ratio 0x1p+0 0x1p+1 On 0x1.999999999999ap-4
   2  Metres 0x1.ep+1 Count -10 Off
   4 -9223372036854775808 18446744073709551615 -9223372036854775808 18446744073709551615
-  4 0x1.99999ap-4 0x1.999999999999ap-4 0xa.aaaaaaaaaaaaaabp-5 0x1.8p+0-0x1p+1i
+  4 0x1.99999ap-4 0x1.999999999999ap-4 1/3 0x1.8p+0-0x1p+1i
   4 A -128 255 -32768 65535 -2147483648 4294967295 1 text 42
   3 Bits 0x3f800000
   6 Chars A -128 255
   6 Empty
   3 Flags 1 5 -3
-  3 Inner z Reals 0x1.99999ap-4 0x1.999999999999ap-4 0xa.aaaaaaaaaaaaaabp-5
+  3 Inner z Reals 0x1.99999ap-4 0x1.999999999999ap-4 1/3
   6 Ints -2147483648 4294967295 1
   6 Longs -9223372036854775808 -9223372036854775808 18446744073709551615
   3 Name abcdef
   3 Point 0x1.8p+0 -0x1.2p+1
   6 Pointers text Chars 42
-  6 Reals 0x1.99999ap-4 0x1.999999999999ap-4 0xa.aaaaaaaaaaaaaabp-5
+  6 Reals 0x1.99999ap-4 0x1.999999999999ap-4 1/3
   6 Shorts -32768 65535
-  1 returned -128 18446744073709551615 0x1.99999ap-4 0xa.aaaaaaaaaaaaaabp-5 0x1.8p+0-0x1p+1i text
+  1 returned -128 18446744073709551615 0x1.99999ap-4 1/3 0x1.8p+0-0x1p+1i text
   $ for out in out-*; do
   >   cmp "out-${clang##*/}-${clang##*/}" "$out"
   > done
 
-The second target is only compiled: a host may link no program for it,
-as macOS has no i386 libraries.
+The second target, of the headers the host has, is only compiled: a
+host may link no program for it, as macOS has no i386 libraries.
 
   $ for cc in "$clang" "$gcc"; do
-  >   typec --cc="$cc" $second_target -Wall -Wextra -Werror -Iinclude \
-  >     -fsyntax-only side.tc &&
-  >   "$cc" $second_target -Wall -Wextra -Werror -Iinclude -fsyntax-only \
-  >     side.c
+  >   typec --cc="$cc" $hosted_second_target -Wall -Wextra -Werror \
+  >     -Iinclude -fsyntax-only side.tc &&
+  >   "$cc" $hosted_second_target -Wall -Wextra -Werror -Iinclude \
+  >     -fsyntax-only side.c
   > done
 
 Passing a distinct value itself through the ellipsis is refused, with

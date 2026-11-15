@@ -7,7 +7,9 @@ which assigning to the scrutinee in its arm leaves unchanged (4.1 rule
 7). A value whose tag is
 none of its constructors, which only code that writes the bytes of the
 object can make, here C code, traps in every match, also in one with a
-default (design 4.5, 10.5): the program stops on a signal.
+default (design 4.5, 10.5): the program stops on a signal. It flushes
+its output before the corruption, which would otherwise be lost or kept
+with the buffering of each libc.
 
   $ . ./backends.sh
 
@@ -76,6 +78,7 @@ default (design 4.5, 10.5): the program stops on a signal.
   >   long kept = reassigned(&r);
   >   printf("%ld %ld\n", kept, eval(&r));
   >   if (argc > 1) {
+  >     fflush(stdout);
   >     corrupt(&sum);
   >     printf("%d\n", argv[1][0] == 'd' ? cost(sum) : (int)eval(&sum));
   >   }
@@ -87,16 +90,24 @@ default (design 4.5, 10.5): the program stops on a signal.
   3 3 1 0 104
   9 0
   $ sh -c './clang-eval match; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
+  3 3 1 0 104
+  9 0
   trapped
   $ sh -c './clang-eval default; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
+  3 3 1 0 104
+  9 0
   trapped
   $ typec --cc=$gcc -Wall -Wextra -Werror -o gcc-eval eval.tc
   $ ./gcc-eval
   3 3 1 0 104
   9 0
   $ sh -c './gcc-eval match; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
+  3 3 1 0 104
+  9 0
   trapped
   $ sh -c './gcc-eval default; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
+  3 3 1 0 104
+  9 0
   trapped
 
 An arm ends where the rules of design 4.4 say its end is unreachable: in

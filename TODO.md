@@ -747,11 +747,6 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   `git ls-files` and `tar` without `pipefail`, so a failure of either
   that leaves a partial tree shows up as a failure of dune. Two runs on
   one `DIR` at once are not guarded.
-- [Medium] `test/run/abi.t` pins the `%La` text of `1.0L / 3` in the
-  x87 format of x86-64, so its expected output differs on the arm64
-  hosts, where long double is binary128. Print the long double values
-  in a form that does not depend on the format, or compare the two
-  sides with `cmp` alone there.
 - [Medium] In `test/run/abi.t` the C side declares the Type-C functions
   with the hand-written tags `struct c_scalar` and the like, while the
   lowering uses `struct scalar`: across translation units the types are
@@ -763,6 +758,12 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   differential program. Measure at the gate: `size` of the objects of
   each pair, and the run time of a loop-heavy pair over repeated runs
   with the spread reported, on each backend.
+- [Medium] `test/run/backends.sh` drops `-m32` from
+  `hosted_second_target` when the host lacks the C headers of i386,
+  and nothing reports it: a host that loses its 32-bit headers runs
+  `test/run/abi.t` on one target with every test passing. Let a host
+  declare the targets it must have, for example through a
+  `TYPEC_TEST_*` variable, and fail when one is missing.
 - [Low] `test/run/abi.t` does not carry `compound` from Type-C to C or
   through a callback, nor a distinct type as a variant field.
 - [Low] `tools/oracle/oracle.t` has its own default of
