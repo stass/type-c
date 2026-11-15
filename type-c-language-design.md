@@ -1828,6 +1828,17 @@ or to a named local recovers only part of the cost. This is a
 code-generation weakness of GCC, not a rule of the language, and both
 forms lower as the table says.
 
+At -O0 neither Clang nor GCC shares stack slots between sibling blocks,
+so each arm's bindings take frame space of their own: in Pilot A's
+chibicc at -O0 `gen_expr` has a 616-byte frame against upstream's 248.
+At -Og and above the backends share the slots and the bindings cost no
+frame space, so a debug build of deeply recursive code uses -Og. The
+lowering keeps a block per arm because sharing the slots in typec, one
+union of every arm's bindings, would rename each use of a binding, and
+typec does not read attribute arguments or `#pragma` lines, where a
+binding can be named; it would also hide the bindings from a debugger
+under their own names (4.1).
+
 Identifiers the compiler invents begin with `__tc_`.
 
 ### 13.6 Diagnostics and debugging

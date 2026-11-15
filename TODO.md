@@ -1035,16 +1035,10 @@ types (design 13.3).
   (execvp's ENOEXEC fallback), where glibc's posix_spawnp refused it;
   `tools/oracle/oracle.ml` still starts clang with `Unix.create_process`,
   so on glibc under qemu a missing clang there reads as status 127.
-- [Medium] Each arm with bindings lowers to a block of its own, and at
-  -O0 neither backend shares stack slots between sibling blocks: in Pilot
-  A's chibicc (built at -O0 -g by its Makefile) `gen_expr` has a 616-byte
-  frame against upstream's 248, and recursion overflows at about 6000
-  levels against 16000. Reading bindings in place gives 120 bytes; at -O2
-  bindings cost no frame space. Change the 13.5 lowering so arms do not
-  each hold their bindings' slots: one union of the arms' bindings at the
-  top of the match keeps copy semantics (reading in place does not, since
-  arms may update the payload). Analysis:
-  /Volumes/Optaine/type-c-pilot-a-notes/size-analysis.md.
+- [Low] Pilot A's Makefile builds chibicc at -O0 -g, where each arm's
+  bindings take their own frame slots (design 13.5, after the table);
+  build its debug configuration at -Og when package 1.12 rewrites it,
+  and record the frame of `gen_expr` and the recursion depth there.
 - [Low] Measure whether GCC 15 copies a constructor passed by value
   through a stack temporary, as GCC 13 and 14 do and GCC 16 does not
   (design 13.5, after the table): build `tools/measure/gate4/nodes.c` at
