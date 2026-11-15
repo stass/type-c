@@ -40,10 +40,10 @@ let is_zero typing (list : Tree.initialiser_list) =
       | Ok { value = Opaque; _ } | Error _ -> false)
   | _ -> false
 
-(* {e Pending the owner (default):} [{0}] zeroes any object, so its
-   initialiser may reach the tag of a variant member through elided
-   braces, as C programs that zero a structure rely on. This is the one
-   place that decides it. *)
+(* [{0}] zeroes any object, so its initialiser may reach the tag of a
+   variant member through elided braces, as C programs that zero a
+   structure rely on (design 3.2 rule 7). This is the one place that
+   decides it. *)
 let zeroes_variant_members typing list = is_zero typing list
 
 (* Type-C text reaches the tag and fields of a variant only through

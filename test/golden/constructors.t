@@ -79,6 +79,10 @@ Constructors are refused where they do not fit.
   $ ./golden.exe missing.tc
   missing.tc:2: the variant 'e' has no constructor 'C' (design 3.3) [TC0009]
   [1]
+  $ printf 'type e = | A | B(int i);\ne x = A();\n' > empty.tc
+  $ ./golden.exe empty.tc
+  empty.tc:2: the constructor 'A' has no fields, so it is written without parentheses (design 3.3) [TC0009]
+  [1]
   $ printf 'type e = | A;\nint n = A;\n' > untargeted.tc
   $ ./golden.exe untargeted.tc
   untargeted.tc:2: 'A' is not declared (C11 6.5.1p2)

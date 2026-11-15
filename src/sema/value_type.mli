@@ -8,6 +8,7 @@
     order. *)
 type problem =
   | Array
+  | Va_list  (** [__builtin_va_list], whatever the target makes it *)
   | Variably_modified
   | Atomic
   | Qualified

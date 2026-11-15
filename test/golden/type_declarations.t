@@ -213,6 +213,10 @@ Derived names, field types and constructor names are checked.
   $ ./golden.exe array.tc
   array.tc:1: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type (design 3.2 rule 4) [TC0006]
   [1]
+  $ printf 'type e = | A(__builtin_va_list ap);\n' > va_list.tc
+  $ ./golden.exe va_list.tc
+  va_list.tc:1: the field 'ap' of 'A' is a va_list, which is an array on some targets, so it is not a value type (design 3.2 rule 4) [TC0006]
+  [1]
 
 Type-C text takes a variant only whole (design 3.2 rule 6): no member
 access, no comparison and no cast to or from one.
@@ -233,6 +237,28 @@ access, no comparison and no cast to or from one.
   $ ./golden.exe cast_to.tc
   cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
   [1]
+
+Every operation that does not open the variant takes it: the branches
+of ?:, parentheses, the comma operator, an expression statement, a cast
+to void, a _Generic selection and {0} for a structure that starts with
+a variant.
+
+  $ cat > whole.tc <<'EOF'
+  > type e = | A | B(int x);
+  > e g(void);
+  > struct s { e v; int n; };
+  > e f(int c, e v, e w) {
+  >   e r = c ? v : w;
+  >   r = (v);
+  >   r = (g(), v);
+  >   v;
+  >   (void)v;
+  >   struct s z = {0};
+  >   (void)z;
+  >   return _Generic(v, e: r, default: w);
+  > }
+  > EOF
+  $ ./golden.exe whole.tc > whole.c || cat whole.c
 
 C text, here a header that the Type-C file includes, may use the
 structure that a variant lowers to (design 10.6).

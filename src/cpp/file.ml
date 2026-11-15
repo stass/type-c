@@ -50,9 +50,9 @@ let implements ~declaring file =
     [declaring] itself and, where [declaring] is an interface [M.tci],
     the text of the primary source file [M.tc].
 
-    {e Pending the owner (default):} the names compare without their
-    directories, as the backend names an interface by the path it found
-    it through, [-I] included, and the main file as the command line
-    does. Not a security boundary (9.2 rule 4): a line marker with the
-    enter flag in the source can name any file. *)
+    The names compare without their directories, as the backend names
+    an interface by the path it found it through, [-I] included, and the
+    main file as the command line does. Not a security boundary (9.2
+    rule 4): a line marker with the enter flag in the source can name
+    any file. *)
 let owns ~declaring file = file = declaring || implements ~declaring file

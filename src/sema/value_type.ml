@@ -3,6 +3,7 @@
 
 type problem =
   | Array
+  | Va_list
   | Variably_modified
   | Atomic
   | Qualified
@@ -12,6 +13,7 @@ type problem =
 
 let describe = function
   | Array -> "is an array, which a struct can wrap"
+  | Va_list -> "is a va_list, which is an array on some targets"
   | Variably_modified -> "is variably modified"
   | Atomic -> "is atomic"
   | Qualified -> "is qualified"
@@ -52,6 +54,13 @@ and member_problem tags (member : Ctype.member) =
   | _ when element.qualifiers.const -> Unknown.Answer (Some Const_member)
   | _ -> contents_problem tags element
 
+(* The representation of [va_list] is the target's (design P20); on
+   x86-64 it is an array, which assignment cannot copy. *)
+let is_va_list (t : Ctype.t) =
+  match t.shape with
+  | Va_list -> true
+  | _ -> false
+
 let is_qualified (t : Ctype.t) =
   t.qualifiers.const || t.qualifiers.volatile || t.qualifiers.restrict
 
@@ -64,6 +73,7 @@ let negate : bool Unknown.answer -> bool Unknown.answer = function
 let own_problems tags (t : Ctype.t) =
   [
     (Array, fun () -> Ctype.is_array t);
+    (Va_list, fun () -> Unknown.Answer (is_va_list t));
     (Variably_modified, fun () -> Ctype.is_variably_modified t);
     (Atomic, fun () -> Unknown.Answer t.qualifiers.atomic);
     (Qualified, fun () -> Unknown.Answer (is_qualified t));

@@ -235,25 +235,44 @@ type expr =
    from an alias.
 4. A constructor has zero or more named fields, written like parameters. A
    field type is a *value type*: a complete object type that is unqualified,
-   not atomic, not an array and not variably modified, and that contains no
-   const-qualified member and no flexible array member at any depth. A
-   value of such a type can be assigned and can be a member. A bit-field is
-   not a field. An array is wrapped in a struct, because constructor
-   arguments are expressions and C has no array values.
+   not atomic, not an array, not `va_list` and not variably modified, and
+   that contains no const-qualified member and no flexible array member at
+   any depth. A value of such a type can be assigned and can be a member. A
+   bit-field is not a field. An array is wrapped in a struct, because
+   constructor arguments are expressions and C has no array values.
+   `va_list` is refused because its representation is the target's (P20):
+   on x86-64 it is an array, which cannot be assigned, and a variant is a
+   value type. A structure that wraps a `va_list` is a value type, as one
+   that wraps an array is.
 5. Since a field type must be complete, a variant can contain itself only
    through a pointer. No separate check for infinite size is needed. A
    variant is itself a value type.
-6. The operations on a variant value are initialisation, assignment,
-   passing and returning, which copy the representation as for a struct and
-   do not copy pointed-to objects; `sizeof`, `_Alignof` and unary `&`; and
-   `match`. There is no member access, no `==` and no cast to or from a
-   variant. Tag and payload are reachable only through constructors and
-   `match`.
+6. **A variant is opened only by `match`.** Type-C text cannot open a
+   variant, that is, reach its tag or payload, as a value or by name:
+   constructors make them and `match` reads them, and no other operation
+   does either, except that `{0}` writes the zero value (rule 7). Every
+   operation that does not open the value takes it whole and is allowed.
+   Copying it, as initialisation, assignment, passing and returning do,
+   copies the representation as for a struct and does not copy pointed-to
+   objects. Among the whole-value uses are `sizeof`, `_Alignof` and unary
+   `&`; parentheses, the second and third operands of `?:`, both operands
+   of the comma operator and an expression statement; a cast to `void`,
+   which discards the value; and `_Generic`, whose controlling expression
+   is a type query, as the operand of `sizeof` is. Member access and an
+   `offsetof` designator open it and are refused; so are `==`, a cast to
+   a variant and a cast from one to any type but `void`, which C refuses
+   for a structure too, and any operator that C defines only for scalars.
+   These lists are examples: the definition is whether the operation
+   opens the value. C text may use the structure that a variant lowers to
+   (10.6).
 7. **Zero value.** All-zero storage of a variant type holds its first
    constructor with every field zero. Static objects without an initialiser,
    `calloc`, `memset` and the initialiser `{0}` therefore all yield a valid
-   value. `{0}` is the only braced initialiser a variant accepts. Put the
-   constructor that makes a sensible default first (`None`, `Empty`).
+   value. `{0}` is the only braced initialiser a variant accepts. It zeroes
+   any object, so it also zeroes a structure whose first member is a
+   variant: its `0` writes the variant's zero value through elided
+   braces, which no other initialiser may do. Put the constructor that
+   makes a sensible default first (`None`, `Empty`).
 8. An automatic variant object without an initialiser is indeterminate, as
    in C. Matching on it traps when the tag is out of range and otherwise
    reads whatever the fields hold.
@@ -277,6 +296,7 @@ of its field as if by assignment. The result is a value of the variant type
 and not an lvalue. The order in which arguments are evaluated is
 unspecified, as for a call. A constructor is not a function: it has no
 address.
+`C()`, with empty parentheses, is an error, since it reads as a call.
 
 A constructor is named in one of two ways.
 
@@ -863,16 +883,37 @@ symbol intern(str name);
 1. `private` restricts creating values to the *owner* of the type: for a
    variant, constructor expressions; for a distinct type, casts to it.
    Everything else stays open. Clients match on a private variant, read its
-   fields, and cast a private distinct value to its underlying type.
+   fields, and cast a private distinct value to its underlying type. The
+   check is syntactic: every cast to a private distinct type outside its
+   owner is refused, including those that create no value, such as
+   `sizeof((symbol)1)` and the identity cast `(symbol)s`.
 2. *Provisional (P6).* The owner is the text of the file that contains the
    declaration and, when that file is `M.tci`, the text of the primary
    source file `M.tc` of the translation unit.
+   - `M.tci` and `M.tc` compare by their last component, the path split
+     on `/` only, because the backend names an interface by the `-I` path it
+     found it through, not by where the module keeps it.
+   - The primary source file is the bottom of the include stack that the
+     line markers describe, so an `M.tc` that another file includes owns
+     nothing of `M.tci`.
+   - A variant declared `type N;` in one file and defined `private` in
+     another belongs to the file of the definition, which is where
+     `private` is written.
 3. Tokens that a macro produces belong to the file of the expansion (2.4),
    so a macro defined in `M.tci` does not carry the owner's rights into a
    client.
 4. `private` is an interface convention that the compiler enforces between
-   Type-C files. It is not a security boundary: the zero value is available
-   to every client, and C code or unchecked Type-C can write any bytes.
+   Type-C files. Only Type-C text is bound: C text, such as a header that
+   a Type-C file includes, may cast to a private distinct type. `private`
+   is a design aid, not a security boundary. The zero value is available
+   to every client, C code or unchecked Type-C can write any bytes, and a
+   line marker in the source can name the owner's file and so claim its
+   rights. Type-C text also makes a private value without a cast or a
+   constructor through any operation that reinterprets storage, such as a
+   pointer conversion (`*(symbol *)p`), a union member, `va_arg` or
+   copying bytes; these stay outside the rule, because refusing pointer
+   conversions would break `malloc` code. Bounding them belongs to checked
+   mode (section 11).
 
 ### 9.3 C clients
 

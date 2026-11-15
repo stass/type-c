@@ -1831,9 +1831,8 @@ let call context span callee (callee_typed : typed) arguments =
   | None ->
       value (call_type context span callee_typed (List.length arguments))
 
-(* {e Pending the owner (default):} a cast to [void] discards its operand,
-   so it takes a variant whole (design 3.2 rule 6). This is the one place
-   that decides it. *)
+(* A cast to [void] discards its operand, so it takes a variant whole
+   (design 3.2 rule 6). This is the one place that decides it. *)
 let discards cast_type = Ctype.is_void cast_type = Answer true
 
 (* Constructor expressions (design 3.3) *)

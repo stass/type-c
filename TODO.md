@@ -899,25 +899,6 @@ types (design 13.3).
   and 2.2's old-style case (an error), each with a test; until then
   `Universe` leaves every universe name an ordinary identifier to the
   grammar.
-- [Medium] `private`, owner decisions taken by default (design 9.2),
-  each in one place: `File.owns` compares `M.tci` and `M.tc` without
-  their directories, as the backend names an interface by the `-I` path
-  it found it through; the primary source file is the bottom of the
-  stack of files that the line markers describe (`File.main`), so an
-  `M.tc` that another file includes owns nothing of `M.tci`; only Type-C
-  text is bound (`Expressions.refuse_private_creation`), so C text may
-  cast to a private distinct type; a variant declared `type N;` in one
-  file and defined `private` in another belongs to the file of the
-  definition. The check is syntactic: `sizeof((symbol)1)`, `(void)` of
-  such a cast and the identity cast `(symbol)s` are refused too.
-  Confirm each and say so in 9.2 rules 1 and 2. The names compare after
-  `Filename.basename`, which splits on `/` only.
-- [Medium] Design 9.2 rule 4 excuses "C code or unchecked Type-C", but
-  Type-C text makes a private value without a cast or a constructor
-  through a pointer or a union: `symbol *q = (void *)&n; return *q;`,
-  `*(instruction *)p`, `union { unsigned u; symbol s; }`. Name these in
-  rule 4 as outside the rule (refusing pointer conversions would break
-  `malloc` code), or tie them to the checked mode of section 11.
 - [Medium] Distinct types, owner decisions taken by default (design
   3.4): a qualified representation (`distinct const int`) is refused;
   an argument of a distinct type to a function without a prototype is
@@ -950,12 +931,6 @@ types (design 13.3).
 - [Low] Type-C text cannot name a tag that a type declaration claims
   (design 10.1 rule 6); C text in the same unit can, and names the
   lowered structure. Say so in the design or refuse it there too.
-- [High] Owner decisions taken by default, each in one place: `{0}`
-  zeroes a structure whose first member is a variant, reaching its tag
-  through elided braces (`Initialiser.zeroes_variant_members`); `(void)v`
-  discards a variant (`Expressions.discards`); `_Generic` on a variant is
-  a type query, as `sizeof` is (its controlling expression is a whole
-  use). Confirm each and say so in design 3.2 rules 6 and 7.
 - [Medium] A selection that depends on what typec does not know hides a
   variant from design 3.2 rule 6: Type-C text may write
   `__builtin_choose_expr(__builtin_constant_p(n), v, v).tag` and the
@@ -995,10 +970,6 @@ types (design 13.3).
   `;` that lowering puts there, which the backend refuses, as it
   refuses the pragma in a parameter list. Insert the `;` after the
   field instead.
-- [Low] A `va_list` field is a value type to `Value_type`, which models
-  `va_list` as neither an array nor a structure (design P20), though on
-  x86-64 it is an array and cannot be assigned. Decide in design 3.2
-  rule 4 whether a field may have it.
 - [Low] A type declaration in a span that the parser does not read, the
   arguments of a GNU attribute or the body of a function that a system
   header defines, is emitted unlowered and fails in the backend. Refuse
