@@ -229,6 +229,23 @@ let quoted spelling =
 let is_type_c_text_at state index =
   File.is_type_c_text state.reader.tokens.(index).owner
 
+(* Clang's blocks are C text only (design 13.3): typing does not read the
+   body of a block literal, so a Type-C construct there would reach the
+   backend unlowered. The literal that begins at [start] and ends at the
+   last token read is refused at its first token of Type-C text, whether
+   Type-C text writes it or an include puts Type-C text inside it. *)
+let refuse_type_c_text_in_block state start =
+  let read =
+    Seq.init (state.position - start) (fun i -> first_token state (start + i))
+  in
+  match Seq.find (is_type_c_text_at state) read with
+  | Some index ->
+      fail_at_token state index
+        (Rule.message Block_literal_text
+           "a block literal is C text only, so Type-C text cannot write one \
+            or be included in one")
+  | None -> ()
+
 (* The two readings of a disputed scope (design 4.4): Clang takes a jump
    there to leave the loop, and GCC reads the scope around the loop. *)
 type reading = Clang_reading | Gcc_reading
@@ -2433,7 +2450,11 @@ and choose state start =
 and block_literal state start =
   (* The literal is a function of its own, which no break or continue in
      its parameters or body leaves. *)
-  with_jumps state Function_body (fun () -> literal_after_caret state start)
+  let literal =
+    with_jumps state Function_body (fun () -> literal_after_caret state start)
+  in
+  refuse_type_c_text_in_block state start;
+  literal
 
 and literal_after_caret state start =
   match peek state with

@@ -1942,6 +1942,20 @@ outside the profile, as Clang has none. Bodies of functions defined
 in system headers are not parsed: they are brace-matched and passed
 through.
 
+**Block literals.** *Provisional (P24).* A block literal is C text
+only: Type-C text that writes one, or that an include puts inside one,
+is an error. Typing does not read the body of a block literal, so a
+Type-C construct there, which typing finds for lowering, would reach
+the backend as written; typing the body needs Clang's rules for blocks,
+chiefly that a captured automatic variable is a `const` copy, without
+which typec would answer a `_Generic` or lower a match on a captured
+variant differently from Clang. Type-C code reaches an API that takes
+a block through C text, or through the function-pointer form that such
+APIs also have (`dispatch_async_f`). Type-C code on macOS settles it: a
+block-taking API with no function-pointer form that Type-C code needs
+would make typec type block bodies; the default is that blocks stay C
+text.
+
 **Typing.** The front end types every expression by C's rules: promotions,
 usual arithmetic conversions, lvalues, qualifiers, composite types and
 `_Generic`. Type-C rules need the type of any expression that can hold a
@@ -2242,6 +2256,7 @@ numbers refer to the implementation plan.
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
 | P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 3: how often rule 8 rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
+| P24 | A block literal is C text only (13.3) | Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
 
 ## 16. Non-goals
 

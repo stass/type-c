@@ -223,14 +223,6 @@ let jump_target_cases =
     jumps "a continue in a match outside a loop"
       "match (v) { default: continue; }"
       "error: in.tc:2: continue outside a loop (C11 6.8.6.2p1)";
-    jumps "a block literal body is a function of its own"
-      "while (n) {\n(void)^{ break; };\n}"
-      "error: in.tc:3: break outside a loop, switch or match (C11 \
-       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
-    jumps "so are a block literal's parameters"
-      "while (n) {\n(void)^(int a[({ break; 1; })]) { };\n}"
-      "error: in.tc:3: break outside a loop, switch or match (C11 \
-       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
     jumps "a break in a while condition"
       "for (;;) {\nwhile (({ if (n) break; 1; })) ;\n}"
       "error: in.tc:3: a break in the condition of a loop or the step of a \
@@ -277,6 +269,14 @@ let c_text_jump_target_cases =
   let in_function body = "void f(int n) {\n" ^ body ^ "\n}" in
   let jumps name body expected = case name (in_function body) expected in
   [
+    jumps "a block literal body is a function of its own"
+      "while (n) {\n(void)^{ break; };\n}"
+      "error: in.i:3: break outside a loop, switch or match (C11 \
+       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
+    jumps "so are a block literal's parameters"
+      "while (n) {\n(void)^(int a[({ break; 1; })]) { };\n}"
+      "error: in.i:3: break outside a loop, switch or match (C11 \
+       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
     jumps "a break in a while condition"
       "for (;;) {\nwhile (({ if (n) break; 1; })) ;\n}"
       "break->while:3|for:2";
@@ -1899,6 +1899,10 @@ let type_c_error_cases =
       "int f(void) { return try f(); }"
       "error: in.tc:1: `try` is not implemented yet (design 5.1; work package \
        2.4) [TC0023]";
+    case "a block literal in Type-C text"
+      "void f(void) {\n(void)\n^{ };\n}"
+      "error: in.tc:3: a block literal is C text only, so Type-C text cannot \
+       write one or be included in one (design 13.3) [TC0030]";
     case "a defer statement is not implemented"
       "void f(void) { defer f(); }"
       "error: in.tc:1: `defer` is not implemented yet (design 6; work package \

@@ -957,26 +957,23 @@ types (design 13.3).
 - [Medium] A selection that depends on what typec does not know hides a
   variant from design 3.2 rule 6: Type-C text may write
   `__builtin_choose_expr(__builtin_constant_p(n), v, v).tag` and the
-  same through `_Generic`, as the result has an unknown type; and the
-  body of a Clang block literal is not typed at all. Where every
-  candidate is a variant, refuse the operation in Type-C text. The
+  same through `_Generic`, as the result has an unknown type. Where
+  every candidate is a variant, refuse the operation in Type-C text. The
   check of rule 6 could also move to where `Expressions` opens a
   record's members, as `Initialiser` checks it, deciding the text by the
   member's token rather than the first token of the operation (a line
   marker inside an expression makes them differ).
-- [Low] Typing does not read the body of a Clang block literal, so in
-  Type-C text a typedef name or an undeclared name used as an operand
-  there reaches the backend as written:
-  `typedef int T; void f(void) { void (^b)(void) = ^{ (void)T; }; }`
-  is Clang's error, not typec's. Type the body, which the item above on
-  design 3.2 rule 6 also wants.
 - [Medium] The instance names of design 10.3 claim nothing yet: when
   generic types and functions are built (Stage 2), claim each instance
   name through the claim functions of the parser, the one funnel that
   refuses a derived name claimed twice, and check a generic function's
   name as a file-scope type name (design 7.1 rule 1).
-- [Medium] A type declaration inside a Clang block literal is not
-  lowered: `^{ type x = | a; }` reaches the backend as written.
+- [Medium] C text may write the Type-C constructs (design 2.1), and one
+  inside a Clang block literal, whose body typing does not read, reaches
+  the backend unlowered: a header that writes `^{ type x = | a; }` or a
+  match there. The refusal of P24 covers Type-C text only. Either make
+  the constructs Type-C text only (amend 2.1, which that refusal then
+  covers whole) or type block bodies with Clang's capture rules (P24).
 - [Medium] Whether a variant completes `type N;` is read from
   `declared.earlier` by Lowering, Declarations and the tree dump, which
   holds only while no other type declaration has an `earlier`; and

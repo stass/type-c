@@ -152,6 +152,11 @@ let rows =
         "A type declaration of any form whose name contains [__], ends \
          with [_] or begins with [_] and an uppercase letter; or, at \
          file scope, begins with [_]." };
+    Live { name = "Block_literal_text"; code = 30;
+      clause = Some "design 13.3";
+      meaning =
+        "A Clang block literal that Type-C text writes, or that holds \
+         Type-C text an include puts inside it." };
   ]
 
 let () =
