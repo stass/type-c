@@ -570,6 +570,28 @@ and statement reader (s : statement) =
   | Break -> here "break" []
   | Return e -> here "return" (Option.to_list (Option.map value e))
   | Asm a -> here "asm" (assembler reader a)
+  | Match { scrutinee; arms } ->
+      here "match" (value scrutinee :: List.map (arm reader) arms)
+
+(* An arm as [(arm labels items)]; a pattern as [(case C sub-patterns)],
+   where a binding is a declaration entry and [_] a leaf. *)
+and arm reader (a : arm) =
+  node a.span "arm"
+    (List.map arm_label a.node.labels
+    @ List.map (block_item reader) a.node.items)
+
+and arm_label (l : arm_label) =
+  match l.node with
+  | Default_arm_label -> node l.span "default" []
+  | Pattern_label { constructor; sub_patterns } ->
+      let sub = function
+        | Wildcard _ -> leaf "_"
+        | Binding { name; declared } ->
+            noted (declaration_entry name.node declared) (identifier name)
+      in
+      node l.span "case"
+        (identifier constructor
+        :: List.map sub (Option.value sub_patterns ~default:[]))
 
 and block reader (b : block) =
   node b.span "block"

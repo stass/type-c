@@ -20,11 +20,13 @@ val edits :
   Typec_cpp.Reader.t ->
   Typec_syntax.Tree.type_declaration list ->
   Typec_sema.Expressions.construction list ->
+  Typec_sema.Expressions.matching list ->
   Typec_sema.Expressions.answered list ->
   Emitter.edit list
-(** [edits text declarations constructions answered] lowers
-    [declarations], the constructor expressions [constructions] and the
-    constructs [answered], parsed from [text], to edits in the order that
+(** [edits text declarations constructions matchings answered] lowers
+    [declarations], the constructor expressions [constructions], the
+    match statements [matchings] and the constructs [answered], parsed
+    from [text], to edits in the order that
     {!Emitter.emit} takes. An answered construct drops its tokens but
     those of the expression it selects, and the edits of the tokens it
     drops are discarded. *)

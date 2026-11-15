@@ -1280,6 +1280,87 @@ let variants () =
 (* Type-C text takes a variant only whole (design 3.2 rule 6): it may
    initialise, assign, pass, return, size and address one; C text may use
    the structure it lowers to (10.6). *)
+(* Design 4: the scrutinee, patterns, bindings and exhaustiveness. *)
+let matching () =
+  let file = "in.tc" in
+  let variant = "type e = | A | B(int i, e *next) | C(long l); " in
+  let in_function body =
+    variant ^ "long f(e v, const e *p, int n) { " ^ body ^ " return 0; }"
+  in
+  let match_error body text = rejects ~file (in_function body) text in
+  accepts ~file
+    (in_function
+       "long r = 0; match (*p) { case A: break; case B(i, next): \
+        r = i + (next != 0); break; case C(l): r = l; break; } \
+        while (n--) match (v) { case B(_, _): continue; default: \
+        match (*p) { case C(x): r += x; break; case A: case B(_, _): \
+        break; } break; } \
+        match (v) { case A: case C(_): int fresh = 1; r = fresh; break; \
+        default: switch (n) { case 1: break; } break; } (void)r;");
+  (* A binding is a copy that is not modifiable, of its field's type. *)
+  match_error "match (v) { case C(l): l = 1; break; default: break; }"
+    "the operand is not a modifiable lvalue (C11 6.5.16p2)";
+  accepts ~file
+    (in_function
+       "match (v) { case B(i, next): { const int *q = &i; e *m = next; \
+        (void)q; (void)m; } break; default: break; }");
+  match_error "match (v) { case C(l): break; default: (void)l; break; }"
+    "'l' is not declared";
+  match_error "match (v) { case B(x, x): break; default: break; }"
+    "'x'";
+  match_error "match (n) { default: break; }"
+    "the scrutinee of a match is not of a variant type; a pointer is not \
+     dereferenced implicitly (design 4.1 rule 1)";
+  match_error "match (p) { default: break; }"
+    "the scrutinee of a match is not of a variant type";
+  rejects ~file
+    "type t; void g(t *q) { match (*q) { default: break; } }"
+    "the scrutinee of a match is of the incomplete variant 't', whose \
+     constructors are unknown here (design 4.1 rule 1)";
+  match_error "match (v) { case D: break; default: break; }"
+    "'D' names no constructor of the variant 'e' (design 4.1 rule 3)";
+  match_error "match (v) { case C: break; default: break; }"
+    "the pattern 'C' has 0 sub-pattern(s), and the constructor has 1 \
+     field(s) (design 4.1 rule 3)";
+  match_error "match (v) { case A(x): break; default: break; }"
+    "the pattern 'A' has 1 sub-pattern(s), and the constructor has 0 \
+     field(s)";
+  (* The match is a block: what its scrutinee declares ends with it. *)
+  match_error
+    "match (*(sizeof(enum K { KA }) ? p : p)) { default: break; } \
+     return KA;"
+    "'KA' is not declared";
+  match_error "match (v) { case A: break; case C(x): case B(_, _): break; }"
+    "the binding 'x' is in an arm of several labels, which none of them may \
+     bind (design 4.1 rule 6)";
+  match_error "match (v) { case A: break; default: case C(x): break; }"
+    "(design 4.1 rule 6)";
+  match_error "match (v) { case A: break; case B(_, _): break; }"
+    "the match does not cover the constructor 'C' of the variant 'e' \
+     (design 4.2 rule 1)";
+  match_error "match (v) { case B(_, _): break; }"
+    "the match does not cover the constructors 'A' and 'C' of the variant \
+     'e' (design 4.2 rule 1)";
+  match_error "match (v) { case A: break; case A: break; default: break; }"
+    "the constructor 'A' is covered twice (design 4.2 rule 1)";
+  match_error "match (v) { case A: case A: break; default: break; }"
+    "the constructor 'A' is covered twice";
+  match_error "match (v) { case A: break; default: break; default: break; }"
+    "a match has a second `default` (design 4.2 rule 2)";
+  match_error
+    "match (v) { case A: break; case B(_, _): break; case C(_): break; \
+     default: break; }"
+    "the `default` of a match covers no constructor (design 4.2 rule 2)";
+  match_error
+    "switch (n) { case 1: match (v) { default: { case 2: break; } } }"
+    "a case or default label inside a match arm, which is not one of its \
+     own and belongs to no switch inside it (design 4.3 rule 3)";
+  match_error "match (v) { default: if (n) { default: ; } break; }"
+    "(design 4.3 rule 3)";
+  (* A variant reaches no constructor through an enumeration. *)
+  rejects ~file "enum k { K }; void g(enum k x) { match (x) { default: ; } }"
+    "(design 4.1 rule 1)"
+
 (* Design 3.3: qualified constructors everywhere, unqualified ones where
    the target type of the position is the variant. *)
 let constructors () =
@@ -1540,6 +1621,7 @@ let () =
   distinct_types ();
   distinct_operands ();
   constructors ();
+  matching ();
   zero_values ();
   builtin_typedefs ();
   gnu_profile ();

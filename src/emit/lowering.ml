@@ -249,6 +249,81 @@ let construction (tokens : Token.t array)
           ~location:tokens.(span.last).location
           (" } " ^ closing) [ span.last ]
 
+(* Design 13.5, 10.5: a match becomes a block that reaches the scrutinee
+   through [__tc_match], a pointer to it or to a copy of it, and a
+   [switch] on its tag. Each arm is a block after the [case] of every
+   constructor it takes; the block declares the bindings and ends in a
+   trap, and the [default] of the switch, which only an invalid tag
+   reaches, traps (design 4.3, 4.5). The scrutinee and the block items
+   keep their tokens. *)
+
+(* The trap of design 10.5 on a GNU-compatible compiler. *)
+let trap = "__builtin_trap();"
+
+let scrutinee_pointer = "__tc_match"
+let scrutinee_copy = "__tc_copy"
+
+(* What replaces [match (] and [) {]: the declaration of the pointer
+   around the scrutinee, and the switch. *)
+let match_head (matching : Typec_sema.Expressions.matching) =
+  let record = "struct " ^ matching.variant in
+  let switch =
+    Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member
+  in
+  match matching.access with
+  | Through_pointer ->
+      ( Printf.sprintf "{ const %s *const %s = &(" record scrutinee_pointer,
+        "); " ^ switch )
+  | Through_copy ->
+      ( Printf.sprintf "{ const %s %s = (" record scrutinee_copy,
+        Printf.sprintf "), *const %s = &%s; %s" scrutinee_pointer
+          scrutinee_copy switch )
+
+(* Provisional: the type of a binding is spelt [__typeof__] its field,
+   because no name of the field's type that C11 can spell is sure to be
+   visible, and not hidden, at the match. *)
+let binding_declaration (binding : Typec_sema.Expressions.binding) =
+  let field =
+    Printf.sprintf "%s->%s.%s.%s" scrutinee_pointer Tree.union_member
+      binding.constructor binding.field
+  in
+  Printf.sprintf " const __typeof__(%s) %s = %s;" field binding.name field
+
+(* The labels of an arm become the [case] of each constructor it takes
+   and open its block; a trap closes the block after its last item. *)
+let matched_arm tokens ~variant (arm : Typec_sema.Expressions.matched_arm) =
+  let case constructor =
+    Printf.sprintf "case %s:" (Tree.enumerator_name ~variant constructor)
+  in
+  let opening =
+    String.concat " " (List.map case arm.cases)
+    ^ " {"
+    ^ String.concat "" (List.map binding_declaration arm.bindings)
+  in
+  replace tokens ~location:tokens.(arm.labels.first).location opening
+    (grammar_tokens tokens arm.labels.first arm.labels.last)
+  @ [ insert tokens ~before:(arm.arm.last + 1) (" " ^ trap ^ " }") ]
+
+let matching (tokens : Token.t array)
+    (matching : Typec_sema.Expressions.matching) =
+  let { Typec_sema.Expressions.statement; scrutinee; variant; arms; _ } =
+    matching
+  in
+  let match_token = statement.first in
+  let open_paren = grammar_token_after tokens match_token in
+  let close_paren = grammar_token_after tokens scrutinee.last in
+  let open_brace = grammar_token_after tokens close_paren in
+  let head, switch = match_head matching in
+  replace tokens ~location:tokens.(match_token).location head
+    [ match_token; open_paren ]
+  @ replace tokens ~location:tokens.(close_paren).location switch
+      [ close_paren; open_brace ]
+  @ List.concat_map (matched_arm tokens ~variant) arms
+  @ replace tokens
+      ~location:tokens.(statement.last).location
+      (Printf.sprintf "default: %s } }" trap)
+      [ statement.last ]
+
 (* Design 13.5: a construct that typec answers, where the backend would
    answer for the representation of a distinct type, is replaced by the
    answer. Each range of its tokens that goes is replaced by [text], with
@@ -308,7 +383,7 @@ let dropped_edits tokens range =
    the edits of all are sorted; an insertion before a token comes before
    an edit that replaces it. The edits inside a dropped range go, and the
    range's own edits replace them. *)
-let edits (text : Reader.t) declarations constructions answered =
+let edits (text : Reader.t) declarations constructions matchings answered =
   let tokens = text.tokens in
   let ranges = outermost (List.concat_map dropped_ranges answered) in
   let kept edit =
@@ -317,6 +392,7 @@ let edits (text : Reader.t) declarations constructions answered =
   let lowered =
     List.concat_map (type_declaration tokens) declarations
     @ List.concat_map (construction tokens) constructions
+    @ List.concat_map (matching tokens) matchings
   in
   List.concat_map (dropped_edits tokens) ranges @ List.filter kept lowered
   |> List.stable_sort (fun (a : Emitter.edit) (b : Emitter.edit) ->

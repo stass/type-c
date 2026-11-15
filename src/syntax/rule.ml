@@ -44,6 +44,27 @@ type t =
   | Distinct_conversion
       (** An implicit conversion to or from a distinct type in Type-C text
           (design 3.4). *)
+  | Match_scrutinee
+      (** A match whose scrutinee is no complete variant (design 4.1
+          rule 1, 4.2 rule 4). *)
+  | Arm_form
+      (** A match body that is not a sequence of arms, each of labels and
+          at least one block item (design 4.1 rule 2). *)
+  | Pattern
+      (** A pattern that names no constructor of the scrutinee's type, or
+          whose sub-patterns do not match its fields (design 4.1 rule 3). *)
+  | Shared_arm
+      (** An arm of several labels one of which binds (design 4.1
+          rule 6). *)
+  | Exhaustiveness
+      (** A constructor that a match covers twice or not at all (design
+          4.2 rule 1). *)
+  | Default_arm
+      (** A second [default] in a match, or one that covers no constructor
+          (design 4.2 rule 2). *)
+  | Enclosing_switch_label
+      (** A [case] or [default] label inside a match that is not one of
+          its own (design 4.3 rule 3). *)
   | Not_implemented of { section : string; package : string }
       (** A construct of design [section] that work [package] implements. *)
 
@@ -59,6 +80,13 @@ let clause = function
   | Constructor_expression -> "design 3.3"
   | Distinct_representation | Distinct_operation | Distinct_conversion ->
       "design 3.4"
+  | Match_scrutinee -> "design 4.1 rule 1"
+  | Arm_form -> "design 4.1 rule 2"
+  | Pattern -> "design 4.1 rule 3"
+  | Shared_arm -> "design 4.1 rule 6"
+  | Exhaustiveness -> "design 4.2 rule 1"
+  | Default_arm -> "design 4.2 rule 2"
+  | Enclosing_switch_label -> "design 4.3 rule 3"
   | Not_implemented { section; package } ->
       Printf.sprintf "design %s; work package %s" section package
 

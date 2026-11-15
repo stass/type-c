@@ -1756,6 +1756,61 @@ let type_c_resolution_cases =
       "t#1 f#1 t#2 t->#2 x#1 t->#1 y#1";
   ]
 
+(* Design 4.1: [match] begins a match only at the start of a statement,
+   before a parenthesised group and a [{]; elsewhere it is an
+   identifier, as in C (design 2.2, 2.3). *)
+let error_in_function name body expected =
+  case name ("void f(void) { " ^ body ^ " }") expected
+
+let match_cases =
+  [
+    statement_case "a match with patterns, bindings and a default"
+      "match (*e) { case A: x; break; case B(a, _): case C: default: \
+       int y; break; }"
+      "(match (* e) (arm (case A) (expr x) break) (arm (case B a _) (case \
+       C) default (declaration (int) y) break))";
+    statement_case "a match is a substatement"
+      "if (c) match (v) { default: break; }"
+      "(if c (match v (arm default break)) _)";
+    statement_case "match is an identifier where no match begins"
+      "int match = 1; match = match(2); match (3); f(match);"
+      "(declaration (int) (init match 1)) (expr (= match (call match 2))) \
+       (expr (call match 3)) (expr (call f match))";
+    statement_case "a label named match" "match: ;" "(label match ;)";
+    case "match is a member and a typedef name where no match begins"
+      "typedef int match; struct s { match match; }; match (m);"
+      "(declaration (typedef int) match) | (declaration ((struct s (member \
+       (match) match)))) | (declaration (match) (paren m))";
+    error_in_function "an arm needs a label first" "match (v) { x; }"
+      "error: in.tc:1: expected `case` or `default` to begin an arm of \
+       `match`, found `x` (design 4.1 rule 2)";
+    error_in_function "a match has at least one arm" "match (v) { }"
+      "error: in.tc:1: expected `case` or `default` to begin an arm of \
+       `match`, found `}` (design 4.1 rule 2)";
+    error_in_function "an arm needs a block item" "match (v) { case A: }"
+      "error: in.tc:1: an arm of `match` has no block item after its labels, \
+       found `}` (design 4.1 rule 2)";
+    error_in_function "a pattern has at least one sub-pattern in parentheses"
+      "match (v) { case A(): break; }"
+      "error: in.tc:1: expected a binding or `_`, found `)`";
+    error_in_function "a pattern names its constructor unqualified"
+      "match (v) { case e.A: break; }"
+      "error: in.tc:1: expected `:` after the label of an arm, found `.`";
+  ]
+
+(* A binding is in scope in its arm only (design 4.1 rules 4, 5). *)
+let match_resolution_cases =
+  [
+    case "a binding hides an outer name in its arm"
+      "int x; void f(void) { match (v) { case A(x): x; break; case B: x; \
+       break; } x; }"
+      "x#1 f#1 v->? x#2 x->#2 x->#1 x->#1";
+    case "a binding hides a typedef name in its arm"
+      "typedef int T; void f(void) { match (v) { case A(T): T * 2; break; } \
+       T y; }"
+      "T#1 f#1 v->? T#2 T->#2 T->#1 y#1";
+  ]
+
 let failures () =
   let failed_with outcome cases =
     List.filter_map
@@ -1806,6 +1861,8 @@ let failures () =
         (type_declaration_cases @ type_c_error_cases)
     @ failed_cases ~spans:false c_text_word_cases
     @ failed_with (resolutions ~file:type_c_file) type_c_resolution_cases
+    @ failed_cases ~file:type_c_file ~spans:false match_cases
+    @ failed_with (resolutions ~file:type_c_file) match_resolution_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())
 

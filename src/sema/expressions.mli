@@ -146,6 +146,40 @@ type construction = {
 val constructions : t -> construction list
 (** The constructor expressions typed, in source order. *)
 
+(** How a lowered match reaches its scrutinee (design 13.5): through a
+    pointer to it, or through a copy where the scrutinee is no lvalue,
+    is volatile or atomic, or may be an object declared [register]. *)
+type access = Through_pointer | Through_copy
+
+(** A binding of a match: its name, the constructor of its pattern and
+    the field that it copies (design 4.1 rule 4). *)
+type binding = { name : string; constructor : string; field : string }
+
+(** An arm of a match: its span; the span from its first label to its
+    last; the constructors it takes, in the order of its labels, where a
+    [default] stands for those no label names (design 4.2); and its
+    bindings in order. *)
+type matched_arm = {
+  arm : Tree.span;
+  labels : Tree.span;
+  cases : string list;
+  bindings : binding list;
+}
+
+(** A match statement (design 4) that lowering replaces (13.5): its
+    span, that of its scrutinee, the name of its variant, how it reaches
+    the scrutinee, and its arms in order. *)
+type matching = {
+  statement : Tree.span;
+  scrutinee : Tree.span;
+  variant : string;
+  access : access;
+  arms : matched_arm list;
+}
+
+val matchings : t -> matching list
+(** The match statements typed, in source order. *)
+
 (** What lowering puts in place of a construct that asks whether types
     are compatible where Type-C text compares a distinct type with them
     (design 13.5), as the backend would answer for its representation:
@@ -205,6 +239,8 @@ type context = {
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
   type_declaration : Tree.type_declaration -> unit;
+  binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
+      (** declares a binding of a match as an object of the type *)
 }
 
 val max_depth : int

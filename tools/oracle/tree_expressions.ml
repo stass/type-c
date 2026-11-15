@@ -207,6 +207,9 @@ and statement visit (s : statement) =
       option expression visit step;
       statement visit body
   | Asm code -> assembler visit code
+  | Match { scrutinee; arms } ->
+      expression visit scrutinee;
+      List.iter (fun (a : arm) -> block_items visit a.node.items) arms
 
 and label visit (l : label) =
   match l.node with
@@ -216,13 +219,15 @@ and label visit (l : label) =
       expression visit low;
       expression visit high
 
-and block visit (b : block) =
+and block visit (b : block) = block_items visit b.node.items
+
+and block_items visit items =
   List.iter
     (function
       | Block_declaration d -> declaration visit d
       | Block_type_declaration d -> type_declaration visit d
       | Block_statement s -> statement visit s)
-    b.node.items
+    items
 
 and type_declaration visit (d : type_declaration) =
   match d.node.definition with

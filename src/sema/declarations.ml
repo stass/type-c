@@ -36,6 +36,7 @@ let type_declarations result =
          compare a.span.first b.span.first)
 
 let constructions result = Expressions.constructions result.typed
+let matchings result = Expressions.matchings result.typed
 let answered result = Expressions.answered result.typed
 let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
@@ -1813,7 +1814,18 @@ and typing state : Expressions.context =
     declaration = read_block_declaration state;
     type_declaration =
       (fun declaration -> ignore (read_type_declaration state declaration));
+    binding = bind_binding state;
   }
+
+(* A binding of a match (design 4.1 rule 4): an object without linkage
+   in the block scope of its arm. *)
+and bind_binding state (name : Tree.identifier) declared object_type =
+  let next =
+    Entity.Object
+      { object_type; linkage = No_linkage; storage = Automatic_storage }
+  in
+  let earlier = earlier_entity state name.span name.node declared in
+  ignore (bind_to state name.span name.node declared earlier next)
 
 (* External declarations (6.9) *)
 

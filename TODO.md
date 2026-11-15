@@ -623,6 +623,46 @@ is [type-c-language-design.md](type-c-language-design.md).
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
 
+## Matching
+
+- [High] Owner decision: a binding of a match lowers to
+  `const __typeof__(__tc_match->u.C.f) x = __tc_match->u.C.f;`, which
+  GCC and Clang accept in every dialect but which is not ISO C11, against
+  design 2.4 ("Everything Type-C lowers to is ISO C11"). C11 cannot
+  declare the copy without a name for the field's type, and no such name
+  is sure to be visible at the match: a typedef name or tag used by the
+  field may be hidden there. The alternatives are to relax 2.4 for
+  `__typeof__` (C23 `typeof`), or to have each variant declare a
+  generated typedef per field (a change to 10.1). Recommended: relax 2.4;
+  the choice is one function, `binding_declaration` in
+  `src/emit/lowering.ml`.
+- [Medium] Design 13.5 reaches every lvalue scrutinee through a pointer
+  except a volatile, atomic or `register` one. typec keeps no fact that
+  an object is declared `register`, so it reaches only an lvalue reached
+  through a pointer (`*p`, `p->m`, and members of those) in place and
+  copies a named object. Record `register` in `Entity.Object` and widen
+  `access_of` in `src/sema/expressions.ml`, with a run test that a
+  `register` scrutinee compiles.
+- [Medium] `--trap-function=name` (design 10.5) is not implemented: a
+  trap is `__builtin_trap()` alone. Add the option to the driver and
+  pass the name to lowering, with a run test on both backends.
+- [Low] A variant declared in a statement expression that is the
+  scrutinee of a match lowers to C that names its tag and enumerators
+  outside their scope, a backend error; constructor expressions likely
+  have the same class. Refuse a match (and a constructor) whose variant
+  is not in scope where its lowering names it.
+- [Low] `case A: L: case B:` in a match is refused under design 4.3
+  rule 3; the rule it breaks is 4.1 rule 2 (a label of the match stands
+  directly in its body). Give the label under a named label its own
+  message.
+- [Low] Every match names its pointer `__tc_match`, which is safe only
+  because each reference sits inside the block that declares it. A name
+  unique per match (by the token index of `match`) would make that hold
+  by construction.
+- [Low] Where `match` is a typedef name, `match (f(void)) { ... }` in a
+  block, a GNU nested function, now reports an expression error rather
+  than the GNU profile's refusal of nested functions.
+
 ## Fuzzing
 
 - [Medium] Offer the OCaml AFL shm patch upstream

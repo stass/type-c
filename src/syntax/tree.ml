@@ -488,6 +488,8 @@ and statement_node =
   | Break
   | Return of expression option
   | Asm of assembler
+  | Match of { scrutinee : expression; arms : arm list }
+      (** design 4.1: [match (] scrutinee [) {] arms [}] *)
 
 (** C11 6.8.1. The span runs to the [:], and past the attributes of a
     named label. *)
@@ -500,6 +502,33 @@ and label_node =
   | Case_range of { low : expression; high : expression }
       (** GNU [case low ... high] *)
   | Default_label
+
+(** An arm of a match (design 4.1 rule 2): its labels and at least one
+    block item, in a block scope of its own (rule 5) that its bindings
+    begin. The span runs from the first label to the last item. *)
+and arm = arm_node spanned
+
+and arm_node = { labels : arm_label list; items : block_item list }
+
+(** A label of an arm: [case] pattern [:], or [default:]. The span runs to
+    the [:]. *)
+and arm_label = arm_label_node spanned
+
+and arm_label_node = Pattern_label of pattern | Default_arm_label
+
+(** A constructor of the scrutinee's type, unqualified, and its
+    sub-patterns in parentheses, [None] without them (design 4.1 rule 3,
+    Appendix A). *)
+and pattern = {
+  constructor : identifier;
+  sub_patterns : sub_pattern list option;
+}
+
+(** A sub-pattern: an identifier, which declares a binding where it
+    enters scope, or [_], which binds nothing. *)
+and sub_pattern =
+  | Binding of { name : identifier; declared : declared }
+  | Wildcard of span
 
 (** The braces of a compound statement and what is between them: the
     GNU local label declarations, which come before everything else, and

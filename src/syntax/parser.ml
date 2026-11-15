@@ -1222,6 +1222,25 @@ let begins_type_declaration state =
   && is_identifier (peek_at state 1)
   && not (is_typedef_name state type_word)
 
+(* A match statement (design 4.1) is recognised by position: [match] is
+   an identifier everywhere else (design 2.3). It begins where a
+   statement begins, with [match], a parenthesised group and [{]. In C
+   the tokens [match (] ... [)] at the start of a statement begin a call,
+   which no [{] can follow, or, where [match] is a typedef name, a
+   declaration that a [{] makes a function definition in a block, which
+   the GNU profile excludes; so no C statement begins this way (design
+   2.2). *)
+let match_word = "match"
+
+(* The sub-pattern that matches without binding (design 4.1 rule 3). *)
+let wildcard_word = "_"
+
+let begins_match state =
+  peek state = Identifier_token match_word
+  && peek_at state 1 = Punctuator_token P.Left_paren
+  && peek_at state (past_group state P.Left_paren 1)
+     = Punctuator_token P.Left_brace
+
 (* Whether the definition at the cursor, after the [=] of a type
    declaration, is a structure or union specifier with a body and
    nothing else: the one definition that may use the name it defines
@@ -2553,6 +2572,7 @@ and simple_statement state =
         optional_expression state P.Semicolon "`;` after `return`"
       in
       finish state start (Return value)
+  | Identifier_token _ when begins_match state -> match_statement state start
   | Keyword_token Keyword.Asm ->
       advance state;
       let assembler = assembler state in
@@ -2562,6 +2582,87 @@ and simple_statement state =
       let value = expression state in
       expect state P.Semicolon "`;` after an expression";
       finish state start (Expression_statement value)
+
+(* Design 4.1, Appendix A: at the [match] that [begins_match]
+   recognises. The whole statement is a block, as a [switch] is (C11
+   6.8.4p3) and as its lowering is, so what the scrutinee declares ends
+   with it. *)
+and match_statement state start =
+  in_scope state (inner_scope state) (fun () ->
+      advance state;
+      expect state P.Left_paren "`(` after `match`";
+      let scrutinee = expression state in
+      expect state P.Right_paren "`)` after the scrutinee of `match`";
+      expect state P.Left_brace "`{` after the scrutinee of `match`";
+      let rec loop arms =
+        if begins_arm_label state then loop (arm state :: arms)
+        else if arms <> [] && accept state P.Right_brace then List.rev arms
+        else
+          fail state
+            (Rule.message Arm_form
+               ("expected `case` or `default` to begin an arm of `match`, \
+                 found " ^ found state))
+      in
+      let arms = loop [] in
+      finish state start (Match { scrutinee; arms }))
+
+and begins_arm_label state =
+  match peek state with
+  | Keyword_token (Keyword.Case | Keyword.Default) -> true
+  | _ -> false
+
+(* An arm is a block of its own (design 4.1 rule 5): its bindings and
+   declarations end with it. *)
+and arm state =
+  let start = state.position in
+  in_scope state (inner_scope state) (fun () ->
+      let rec labels read =
+        if begins_arm_label state then labels (arm_label state :: read)
+        else List.rev read
+      in
+      let labels = labels [] in
+      let rec items read =
+        if begins_arm_label state || peek state = Punctuator_token P.Right_brace
+        then List.rev read
+        else items (block_item state :: read)
+      in
+      match items [] with
+      | [] ->
+          fail state
+            (Rule.message Arm_form
+               ("an arm of `match` has no block item after its labels, found "
+                ^ found state))
+      | items -> finish state start { labels; items })
+
+and arm_label state =
+  let start = state.position in
+  let node =
+    if accept_keyword state Keyword.Default then Default_arm_label
+    else begin
+      advance state;
+      Pattern_label (pattern state)
+    end
+  in
+  expect state P.Colon "`:` after the label of an arm";
+  finish state start node
+
+(* After the [case]: a constructor and its sub-patterns. *)
+and pattern state =
+  let constructor = identifier state "a constructor after `case`" in
+  let sub_patterns =
+    if accept state P.Left_paren then begin
+      let read = one_or_more state sub_pattern in
+      expect state P.Right_paren "`)` after the sub-patterns of a pattern";
+      Some read
+    end
+    else None
+  in
+  { constructor; sub_patterns }
+
+and sub_pattern state =
+  let name = identifier state "a binding or `_`" in
+  if name.node = wildcard_word then Wildcard name.span
+  else Binding { name; declared = declare state ~kind:Not_a_type name }
 
 (* After the [asm]: its qualifiers, and its template and operands in
    parentheses. *)
@@ -2650,6 +2751,9 @@ and block_item state =
     Block_statement (statement state)
   else if begins_type_declaration state then
     Block_type_declaration (type_declaration state)
+  (* Before a declaration: where [match] is a typedef name, the tokens of
+     a match would otherwise begin a declaration (design 2.2). *)
+  else if begins_match state then Block_statement (statement state)
   else if begins_declaration state then
     Block_declaration (block_declaration state)
   else Block_statement (statement state)

@@ -11,6 +11,8 @@ let lower dialect target text =
     Typec_sema.Declarations.type_declarations declarations
   in
   let constructions = Typec_sema.Declarations.constructions declarations in
+  let matchings = Typec_sema.Declarations.matchings declarations in
   let answered = Typec_sema.Declarations.answered declarations in
   Ok
-    (Typec_emit.Lowering.edits text type_declarations constructions answered)
+    (Typec_emit.Lowering.edits text type_declarations constructions matchings
+       answered)

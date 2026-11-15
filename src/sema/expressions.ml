@@ -32,13 +32,18 @@ type constant =
   | Not_integer of { kind : kind; first : Tree.span }
   | Unevaluable of { span : Tree.span; message : string }
 
+(* What a case or default label in the statement being typed belongs
+   to: no switch, the innermost switch, or a match arm, where it belongs
+   to no switch of its own (design 4.3 rule 3). A break leaves either. *)
+type label_owner = No_switch | Switch_body | Match_arm
+
 (* What encloses the statement being typed: the function, for __func__,
-   and the loop or switch that break, continue and case need. *)
+   and the loop, switch or match that break, continue and case need. *)
 type enclosing = {
   function_name : string option;
   return_type : Ctype.t option;
   in_loop : bool;
-  in_switch : bool;
+  case_labels : label_owner;
 }
 
 type construction = {
@@ -48,6 +53,24 @@ type construction = {
   callee : Tree.span option;
   arguments : Tree.expression list;
   braced : bool;
+}
+
+type access = Through_pointer | Through_copy
+type binding = { name : string; constructor : string; field : string }
+
+type matched_arm = {
+  arm : Tree.span;
+  labels : Tree.span;
+  cases : string list;
+  bindings : binding list;
+}
+
+type matching = {
+  statement : Tree.span;
+  scrutinee : Tree.span;
+  variant : string;
+  access : access;
+  arms : matched_arm list;
 }
 
 type answer = Selected of Tree.expression | Compatible of bool
@@ -71,13 +94,14 @@ type t = {
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
   answered : (Tree.span, answered) Hashtbl.t;
   constructions : (Tree.span, construction) Hashtbl.t;
+  matchings : (Tree.span, matching) Hashtbl.t;
   mutable depth : int;
   mutable enclosing : enclosing;
 }
 
 let outside_functions =
   { function_name = None; return_type = None; in_loop = false;
-    in_switch = false }
+    case_labels = No_switch }
 
 let create () =
   { types = Hashtbl.create 4096;
@@ -86,6 +110,7 @@ let create () =
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
     constructions = Hashtbl.create 64;
+    matchings = Hashtbl.create 16;
     depth = 0;
     enclosing = outside_functions }
 
@@ -102,6 +127,11 @@ let constructions view =
   Hashtbl.to_seq_values view.constructions
   |> List.of_seq
   |> List.sort (fun a b -> compare a.span.first b.span.first)
+
+let matchings view =
+  Hashtbl.to_seq_values view.matchings
+  |> List.of_seq
+  |> List.sort (fun a b -> compare a.statement.first b.statement.first)
 
 let answered view =
   Hashtbl.to_seq_values view.answered
@@ -122,6 +152,7 @@ type context = {
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
   type_declaration : Tree.type_declaration -> unit;
+  binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
 }
 
 (* Far above the nesting of real code, it bounds the recursion on the
@@ -2420,14 +2451,13 @@ and initialiser context ~constant t initialiser =
   in
   Initialiser.initialise typing t initialiser
 
-and block_items context (block : Tree.block) =
-  List.iter
-    (function
-      | Tree.Block_declaration declaration -> context.declaration declaration
-      | Block_type_declaration declaration ->
-          context.type_declaration declaration
-      | Block_statement statement -> typed_statement context statement)
-    block.node.items
+and block_items context (block : Tree.block) = items context block.node.items
+
+and items context =
+  List.iter (function
+    | Tree.Block_declaration declaration -> context.declaration declaration
+    | Block_type_declaration declaration -> context.type_declaration declaration
+    | Block_statement statement -> typed_statement context statement)
 
 and typed_statement context (statement : Tree.statement) =
   nested context statement.span (fun () -> statement_node context statement)
@@ -2456,8 +2486,10 @@ and statement_node context (statement : Tree.statement) =
       Option.iter (typed_statement context) else_branch
   | Switch { controlling; body } ->
       switch_controlling context controlling;
-      within context { enclosing with in_switch = true } (fun () ->
+      within context { enclosing with case_labels = Switch_body } (fun () ->
           typed_statement context body)
+  | Match { scrutinee; arms } ->
+      match_statement context statement scrutinee arms
   | While { condition; body } ->
       scalar ~clause:"6.8.5p2" condition;
       in_loop body
@@ -2473,9 +2505,10 @@ and statement_node context (statement : Tree.statement) =
       if not enclosing.in_loop then
         context.fail statement.span "continue outside a loop (C11 6.8.6.2p1)"
   | Break ->
-      if not (enclosing.in_loop || enclosing.in_switch) then
+      if (not enclosing.in_loop) && enclosing.case_labels = No_switch then
         context.fail statement.span
-          "break outside a loop or switch (C11 6.8.6.3p1)"
+          "break outside a loop, switch or match (C11 6.8.6.3p1, design 4.3 \
+           rule 2)"
   | Return value ->
       let position =
         match enclosing.return_type with
@@ -2512,9 +2545,16 @@ and switch_controlling context controlling =
 (* 6.8.1p2: case and default labels only in a switch. *)
 and label_of context (label : Tree.label) =
   let in_switch () =
-    if not context.typed.enclosing.in_switch then
-      context.fail label.span
-        "a case or default label outside a switch (C11 6.8.1p2)"
+    match context.typed.enclosing.case_labels with
+    | Switch_body -> ()
+    | Match_arm ->
+        context.fail label.span
+          (Rule.message Enclosing_switch_label
+             "a case or default label inside a match arm, which is not one \
+              of its own and belongs to no switch inside it")
+    | No_switch ->
+        context.fail label.span
+          "a case or default label outside a switch (C11 6.8.1p2)"
   in
   match label.node with
   | Named_label _ -> ()
@@ -2541,6 +2581,232 @@ and case_value context value =
   | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
   | Other_operand _ ->
       context.fail value.span "a case label is not an integer (C11 6.8.4.2p3)"
+
+(* Matching (design 4) *)
+
+(* The constructors that no label names, in declaration order: what a
+   [default] covers, or what a match without one misses (4.2 rule 1). *)
+and uncovered (constructors : Ctype.constructor list) named =
+  List.filter
+    (fun (constructor : Ctype.constructor) ->
+      not (List.mem constructor.constructor_name named))
+    constructors
+
+and match_statement context (statement : Tree.statement) scrutinee arms =
+  let typed = expression context scrutinee in
+  let t = typed.expression_type in
+  let variant, constructors = scrutinee_variant context scrutinee.span t in
+  let labelled =
+    List.map (labelled_constructors context variant constructors) arms
+  in
+  let defaulted =
+    coverage context ~statement:statement.span variant constructors
+      (List.concat labelled)
+  in
+  let enclosing = { context.typed.enclosing with case_labels = Match_arm } in
+  let arms =
+    List.map2
+      (fun (arm : Tree.arm) labels ->
+        let matched = matched_arm context arm labels defaulted in
+        within context enclosing (fun () -> arm_items context arm);
+        matched)
+      arms labelled
+  in
+  Hashtbl.replace context.typed.matchings statement.span
+    { statement = statement.span; scrutinee = scrutinee.span; variant;
+      access = access_of scrutinee t; arms }
+
+(* 4.1 rule 1, 4.2 rule 4: a variant, whose qualifiers are ignored, and
+   complete here, so that its constructors are known. *)
+and scrutinee_variant context span t =
+  match (Ctype.as_variant t, Ctype.constructors context.tags t) with
+  | Some variant, Some constructors -> (variant, constructors)
+  | Some variant, None ->
+      context.fail span
+        (Rule.message Match_scrutinee
+           (Printf.sprintf
+              "the scrutinee of a match is of the incomplete variant %s, \
+               whose constructors are unknown here"
+              (quote variant)))
+  | None, _ ->
+      context.fail span
+        (Rule.message Match_scrutinee
+           "the scrutinee of a match is not of a variant type; a pointer \
+            is not dereferenced implicitly")
+
+(* The constructor that [pattern] names, with one sub-pattern per field
+   (4.1 rule 3). *)
+and pattern_constructor context variant constructors (label : Tree.arm_label)
+    (pattern : Tree.pattern) =
+  let name = pattern.constructor.node in
+  let given = List.length (Option.value pattern.sub_patterns ~default:[]) in
+  match
+    List.find_opt
+      (fun (constructor : Ctype.constructor) ->
+        constructor.constructor_name = name)
+      constructors
+  with
+  | None ->
+      context.fail label.span
+        (Rule.message Pattern
+           (Printf.sprintf "%s names no constructor of the variant %s"
+              (quote name) (quote variant)))
+  | Some constructor when List.length constructor.fields <> given ->
+      context.fail label.span
+        (Rule.message Pattern
+           (Printf.sprintf
+              "the pattern %s has %d sub-pattern(s), and the constructor \
+               has %d field(s)"
+              (quote name) given (List.length constructor.fields)))
+  | Some constructor -> constructor
+
+(* Each label of [arm] with the constructor that its pattern names;
+   [None] for a [default]. *)
+and labelled_constructors context variant constructors (arm : Tree.arm) =
+  List.map
+    (fun (label : Tree.arm_label) ->
+      match label.node with
+      | Default_arm_label -> (label, None)
+      | Pattern_label pattern ->
+          let constructor =
+            pattern_constructor context variant constructors label pattern
+          in
+          (label, Some constructor))
+    arm.node.labels
+
+(* 4.2 rules 1 and 2 over the labels of a match, in order: each
+   constructor is covered once, by a label or by the one [default], which
+   covers at least one. The result is what the [default] covers. *)
+and coverage context ~statement variant constructors labelled =
+  let rec named seen defaults = function
+    | [] -> (seen, defaults)
+    | ((label : Tree.arm_label), None) :: rest ->
+        if defaults <> [] then
+          context.fail label.span
+            (Rule.message Default_arm "a match has a second `default`");
+        named seen (label :: defaults) rest
+    | (label, Some (constructor : Ctype.constructor)) :: rest ->
+        let name = constructor.constructor_name in
+        if List.mem name seen then
+          context.fail label.span
+            (Rule.message Exhaustiveness
+               (Printf.sprintf "the constructor %s is covered twice"
+                  (quote name)));
+        named (name :: seen) defaults rest
+  in
+  let seen, defaults = named [] [] labelled in
+  let missing = uncovered constructors seen in
+  match (defaults, missing) with
+  | [], [] -> []
+  | [], _ :: _ ->
+      context.fail statement
+        (Rule.message Exhaustiveness
+           (Printf.sprintf "the match does not cover %s of the variant %s"
+              (constructor_list (List.map constructor_name missing))
+              (quote variant)))
+  | (default : Tree.arm_label) :: _, [] ->
+      context.fail default.span
+        (Rule.message Default_arm
+           "the `default` of a match covers no constructor")
+  | _ :: _, _ :: _ -> missing
+
+and constructor_name (constructor : Ctype.constructor) =
+  constructor.constructor_name
+
+(* What a diagnostic calls the constructors [names]. *)
+and constructor_list names =
+  let quoted = List.map quote names in
+  match List.rev quoted with
+  | [ one ] -> "the constructor " ^ one
+  | last :: before ->
+      Printf.sprintf "the constructors %s and %s"
+        (String.concat ", " (List.rev before))
+        last
+  | [] -> invalid_arg "Expressions.constructor_list: no constructor"
+
+(* An arm and its bindings, which only an arm of one label may declare
+   (4.1 rule 6). A binding is a non-modifiable object of its field's
+   type in the arm's scope (rule 4). *)
+and matched_arm context (arm : Tree.arm) labelled defaulted =
+  let labels = arm.node.labels in
+  let first = List.hd labels and last = List.hd (List.rev labels) in
+  let bindings =
+    match labelled with
+    | [ ({ Tree.node = Pattern_label pattern; _ }, Some constructor) ] ->
+        pattern_bindings context pattern constructor
+    | _ ->
+        List.iter (refuse_shared_binding context) labels;
+        []
+  in
+  let cases =
+    List.concat_map
+      (function
+        | _, Some constructor -> [ constructor ] | _, None -> defaulted)
+      labelled
+  in
+  { arm = arm.span;
+    labels = { first = first.span.first; last = last.span.last };
+    cases = List.map constructor_name cases;
+    bindings }
+
+and refuse_shared_binding context (label : Tree.arm_label) =
+  match label.node with
+  | Pattern_label { sub_patterns = Some sub_patterns; _ } ->
+      List.iter
+        (function
+          | Tree.Binding { name; _ } ->
+              context.fail name.span
+                (Rule.message Shared_arm
+                   (Printf.sprintf
+                      "the binding %s is in an arm of several labels, which \
+                       none of them may bind"
+                      (quote name.node)))
+          | Wildcard _ -> ())
+        sub_patterns
+  | Pattern_label { sub_patterns = None; _ } | Default_arm_label -> ()
+
+and pattern_bindings context (pattern : Tree.pattern)
+    (constructor : Ctype.constructor) =
+  let name = constructor.constructor_name in
+  let sub_patterns = Option.value pattern.sub_patterns ~default:[] in
+  List.concat
+    (List.map2
+       (fun (sub_pattern : Tree.sub_pattern) (field : Ctype.member) ->
+         match (sub_pattern, field.member_name) with
+         | Wildcard _, _ -> []
+         | Binding { name = binding; declared }, Some field_name ->
+             context.binding binding declared
+               (non_modifiable field.member_type);
+             [ { name = binding.node; constructor = name; field = field_name } ]
+         | Binding _, None ->
+             invalid_arg "Expressions.pattern_bindings: an unnamed field")
+       sub_patterns constructor.fields)
+
+(* A field type is unqualified and no array (design 3.2 rule 4), so it
+   takes [const]. *)
+and non_modifiable t =
+  match Ctype.qualify { Qualifiers.none with const = true } t with
+  | Ok qualified -> qualified
+  | Error _ -> invalid_arg "Expressions.non_modifiable: no value type"
+
+and arm_items context (arm : Tree.arm) = items context arm.node.items
+
+(* Design 13.5: the lowered match reaches an lvalue through a pointer to
+   it, and copies anything else, a volatile or atomic object, and an
+   object that may be declared [register], whose address C forbids. An
+   lvalue reached through a pointer is never such an object; typec keeps
+   no [register] fact for others, so they are copied. *)
+and access_of (scrutinee : Tree.expression) (t : Ctype.t) =
+  if t.qualifiers.volatile || t.qualifiers.atomic then Through_copy
+  else if reached_through_pointer scrutinee then Through_pointer
+  else Through_copy
+
+and reached_through_pointer (e : Tree.expression) =
+  match e.node with
+  | Unary (Indirection, _) | Pointer_member _ -> true
+  | Parenthesized inner | Member { operand = inner; _ } ->
+      reached_through_pointer inner
+  | _ -> false
 
 let function_body context ~name ~return_type block =
   let enclosing =

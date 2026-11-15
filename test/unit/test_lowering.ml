@@ -32,6 +32,7 @@ let emitted source =
         (Lowering.edits text
            (Declarations.type_declarations declarations)
            (Declarations.constructions declarations)
+           (Declarations.matchings declarations)
            (Declarations.answered declarations))
   | Error error -> failwith (Reader.error_message error)
 
