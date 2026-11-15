@@ -16,6 +16,10 @@ RUN apk add --no-cache \
       musl-dev=1.2.6-r3 \
       ocaml5=5.4.1-r0 dune=3.22.2-r1
 
+# git, for the revisions that the corpus runner records, follows Alpine
+# 3.24 as in the Debian host.
+RUN apk add --no-cache git
+
 ENV TYPEC_TEST_CLANG=/usr/bin/clang TYPEC_TEST_GCC=/usr/bin/gcc
 
 RUN adduser -D typec

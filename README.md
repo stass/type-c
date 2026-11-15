@@ -89,6 +89,30 @@ hosts: among them `test_small_stack` with `FAIL: the backtrace names
 the stage` on both, and `target.t`, `pipeline.t` and
 `tools/corpus/runner.t` with a missing C compiler on `debian-arm64`.
 
+`tools/hosts/run.sh --corpus HOST LOG PROGRAM...` runs the corpus
+runner (see "Running the corpus") on the named programs in a container
+of a Linux host instead, with the host's Clang and GCC as the backends.
+The corpus repository and its cache are `TYPEC_CORPUS` and
+`TYPEC_CORPUS_CACHE`, by default the paths that section names, and
+`fetch.sh` must have filled the cache. Nothing is mounted, so the
+paths need not be shared with Docker: the script sends the container
+the typec working tree and the corpus repository, each as the files git
+tracks or does not ignore with a copy of its git directory, and the
+sources of the cache as a tar stream, and
+`tools/hosts/corpus-in-container.sh` builds `typec` and the runner
+there and runs it. The records name the revision of each tree as it is
+outside the container, `-dirty` included. The results come back as a
+tar stream too; the script takes only plain files where the runner
+writes them, for one host, and copies the records into
+`CORPUS/runs/linux-MACHINE/` and the logs into `CACHE/build/`. The
+runner's output goes to `LOG`; the script prints whether the runner
+passed, counting its status 3 (substitute tests only) as a pass.
+
+```sh
+tools/hosts/run.sh --corpus debian-amd64 /Volumes/Optaine/debian.log \
+  c-testsuite zlib lua sqlite chibicc qbe
+```
+
 ### FreeBSD test host
 
 The FreeBSD x86-64 host is a machine reached over ssh, not a container:

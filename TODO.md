@@ -800,10 +800,28 @@ types (design 13.3).
 - [High] Record the whole corpus on one revision of typec and of the
   corpus repository, on every gating host, and commit the records: the
   macOS records of c-testsuite, chibicc, lua and zlib are rewritten but
-  uncommitted, and the Linux records of chibicc and musl were made by
-  hand-run scripts in a container. `tools/hosts/run.sh` runs only the
-  suite: give it a corpus mode (Docker here mounts only paths under
-  /Users), so a Linux record needs no ad hoc script.
+  uncommitted, and the Linux records of musl and zlib name a corpus
+  revision that was `-dirty`. A Linux record comes from
+  `tools/hosts/run.sh --corpus` (README, "Linux test hosts").
+- [Medium] A FreeBSD corpus record names no typec revision: the runner
+  asks git in the directory of the `typec` binary, and `freebsd.sh`
+  builds it in DIR/build, outside DIR/src, which has no git directory.
+  The records also stay on the host, printed only in the log, and the
+  next run deletes them. Either share `run.sh`'s staging of each tree
+  with its git directory and its checked copy of the results, or let
+  the runner take the two revisions from its command line, computed on
+  the machine where the trees are: that removes the git directories
+  from the copies sent to a host, and git from the hosts, but makes the
+  record state what its caller says. The copied git directory (its
+  config, stash, reflogs and other worktrees) reaches the third-party
+  code of the corpus, with no network but with the records as a way
+  back into a repository that gets committed. The runner's command line and the
+  meaning of its status 3 are also written out in both scripts.
+- [Low] `debian-amd64` and `alpine-amd64` write their corpus records to
+  the same `runs/linux-x86_64/` and their logs to the same
+  `CACHE/build/linux-x86_64/`, since the runner names a host by
+  `uname -s` and `uname -m`, so a run of one replaces the other's.
+  The name needs the C library if both hosts are to gate.
 - [Medium] musl's recipe declares a substitute test (19 checks of
   ours), so gate 1 is not met for it: libc-test needs a system running
   musl. Its recipe links each directory relocatably (`ld -r`), which
