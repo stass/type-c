@@ -63,18 +63,20 @@ let read target source =
         (Declarations.read target text unit)
   | Error error -> failwith (Parser.error_message error)
 
-(* The last expression statement of the body of [t]. *)
+(* The last expression statement of the body of the last function
+   definition, which [in_function] puts last. *)
 let probed (unit : Tree.translation_unit) =
-  let in_body = function
-    | Tree.Function_definition
-        { node = { declarator; body = Parsed block; _ }; _ }
-      when Tree.declared_name declarator = Some "t" -> (
-        match List.rev block.node.items with
-        | Block_statement { node = Expression_statement e; _ } :: _ -> Some e
-        | _ -> None)
+  let body = function
+    | Tree.Function_definition { node = { body = Parsed block; _ }; _ } ->
+        Some block
     | _ -> None
   in
-  List.find_map in_body unit
+  let last_expression (block : Tree.block) =
+    match List.rev block.node.items with
+    | Block_statement { node = Expression_statement e; _ } :: _ -> Some e
+    | _ -> None
+  in
+  Option.bind (List.find_map body (List.rev unit)) last_expression
 
 let describe (typed : Expressions.typed) =
   String.concat ""
@@ -91,12 +93,13 @@ let fail_case source message =
   incr failures;
   Printf.eprintf "FAIL: %s\n  %s\n" source message
 
-let in_function ?(declarations = prelude) ?(parameters = "void") body =
-  declarations ^ "void t(" ^ parameters ^ ") { " ^ body ^ "; }"
+let in_function ?(declarations = prelude) ?(name = "t") ?(parameters = "void")
+    body =
+  declarations ^ "void " ^ name ^ "(" ^ parameters ^ ") { " ^ body ^ "; }"
 
 (* The last expression of [body] has the type [expected] describes. *)
-let types ?(target = lp64) ?declarations ?parameters body expected =
-  let source = in_function ?declarations ?parameters body in
+let types ?(target = lp64) ?declarations ?name ?parameters body expected =
+  let source = in_function ?declarations ?name ?parameters body in
   match read target source with
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
   | Ok (unit, result) -> (
@@ -166,6 +169,10 @@ let primaries () =
   types "a" "int[3] lvalue";
   types "__func__" "const char[2] lvalue";
   types "__FUNCTION__" "const char[2] lvalue";
+  (* The name is the UTF-8 bytes of the function's name, as in Clang and
+     GCC, however the source spells it. *)
+  types ~name:"x\\U0001F600" "__func__" "const char[6] lvalue";
+  types ~name:"caf\\u00e9" "__FUNCTION__" "const char[6] lvalue";
   types "__PRETTY_FUNCTION__" "const char[<constant>] lvalue";
   rejects "y" "'y' is not declared (C11 6.5.1p2)";
   types

@@ -80,8 +80,18 @@ let kind_cases =
     case "a NUL byte in a literal" "\"a\000b\"" "str \"a\000b\"";
     case "GNU and extended identifiers"
       "$x a$b _1 caf\\u00e9 x\\U0001F600 caf\xc3\xa9 \xe2\x82\xac"
-      "id $x | id a$b | id _1 | id caf\\u00e9 | id x\\U0001F600 \
+      "id $x | id a$b | id _1 | id caf\xc3\xa9 | id x\xf0\x9f\x98\x80 \
        | id caf\xc3\xa9 | id \xe2\x82\xac";
+    case "an identifier is read as UTF-8, whatever spells its characters"
+      "\\u00e9t\\u00E9 \\U000000e9t\xc3\xa9 \xc3\xa9t\xc3\xa9"
+      "id \xc3\xa9t\xc3\xa9 | id \xc3\xa9t\xc3\xa9 | id \xc3\xa9t\xc3\xa9";
+    case "the bounds of the characters of an identifier"
+      "\\u00a8 \\u00aa \\u00ff \\u167f \\u1681 \\u2054 \\uD7FF \\uFFFD \
+       \\U00010000 \\U000EFFFD a\\u0300 \\u0370"
+      "id \xc2\xa8 | id \xc2\xaa | id \xc3\xbf | id \xe1\x99\xbf \
+       | id \xe1\x9a\x81 | id \xe2\x81\x94 | id \xed\x9f\xbf \
+       | id \xef\xbf\xbd | id \xf0\x90\x80\x80 | id \xf3\xaf\xbf\xbd \
+       | id a\xcc\x80 | id \xcd\xb0";
     case "pragmas"
       "#pragma once\n#pragma typec checked\n#  pragma  typec\n\
        #pragma typecx\n#pragma\nx"
@@ -108,6 +118,36 @@ let kind_cases =
     case "UTF-8 surrogate" "\xed\xa0\x80" "error: in.i:1: invalid UTF-8";
     case "short universal character name" "a\\u12g"
       "error: in.i:1: incomplete universal character name";
+    case "a universal character name for a basic character" "_\\u0041"
+      "error: in.i:1: character U+0041 cannot be written as a universal \
+       character name";
+    case "a universal character name for a control character" "a\\u009F"
+      "error: in.i:1: character U+009F cannot be written as a universal \
+       character name";
+    case "a universal character name for a surrogate" "a\\uD800"
+      "error: in.i:1: universal character name \\uD800 names no character";
+    case "a universal character name beyond Unicode" "a\\U00110000"
+      "error: in.i:1: universal character name \\U00110000 names no \
+       character";
+    case "a universal character name for a dollar sign" "a\\u0024"
+      "error: in.i:1: character U+0024 cannot be part of an identifier";
+    case "a universal character name for an at sign" "a\\u0040"
+      "error: in.i:1: character U+0040 cannot be part of an identifier";
+    case "a character outside the identifier ranges" "a\\u00A1"
+      "error: in.i:1: character U+00A1 cannot be part of an identifier";
+    case "a UTF-8 character outside the identifier ranges" "a\xc2\xa1"
+      "error: in.i:1: character U+00A1 cannot be part of an identifier";
+    case "a private use character" "a\\uE000"
+      "error: in.i:1: character U+E000 cannot be part of an identifier";
+    case "a noncharacter of a plane" "a\\U0001FFFE"
+      "error: in.i:1: character U+1FFFE cannot be part of an identifier";
+    case "a combining character begins an identifier" "\\u0300a"
+      "error: in.i:1: character U+0300 cannot begin an identifier";
+    case "a UTF-8 combining character begins an identifier" "\xe2\x83\x90"
+      "error: in.i:1: character U+20D0 cannot begin an identifier";
+    case "a basic character in a number" "1\\u0041"
+      "error: in.i:1: character U+0041 cannot be written as a universal \
+       character name";
     case "unterminated string" "\"abc" "error: in.i:1: unterminated literal";
     case "string ends at the newline" "\n\"a\nb\""
       "error: in.i:2: unterminated literal";
@@ -132,6 +172,20 @@ let kind_cases =
        | number 1E-x | number 1P+ | number 1.e5.x | number 0x1 | punct + \
        | number 1";
     case "invalid UTF-8 in a number" "1\xff" "error: in.i:1: invalid UTF-8";
+  ]
+
+(* "spelling = written" for each token: the name of an identifier
+   against the bytes that the text keeps for emission. *)
+let show_written result token =
+  Reader.spelling result token ^ " = " ^ Reader.written result token
+
+let written_cases =
+  [
+    case "a name in UTF-8 keeps the bytes as written"
+      "caf\\u00e9 x\\U0001F600 caf\xc3\xa9 1\\u00e9 \"\\u00e9\""
+      "caf\xc3\xa9 = caf\\u00e9 | x\xf0\x9f\x98\x80 = x\\U0001F600 \
+       | caf\xc3\xa9 = caf\xc3\xa9 | 1\\u00e9 = 1\\u00e9 \
+       | \"\\u00e9\" = \"\\u00e9\"";
   ]
 
 let place_cases =
@@ -225,7 +279,15 @@ let place_cases =
     case "a message escapes control characters" "# 1 \"a\027[2Jb\"\n@"
       "error: a\\x1B[2Jb:1: unexpected character '@'";
     case "a message escapes other bytes" "# 1 \"a\xc2\x9bb\"\n@"
-      "error: a\\xC2\\x9Bb:1: unexpected character '@'";
+      "error: a\\u009Bb:1: unexpected character '@'";
+    case "a message escapes a character as a universal character name"
+      "# 1 \"\xc3\xa9\xf0\x9f\x98\x80\"\n@"
+      "error: \\u00E9\\U0001F600:1: unexpected character '@'";
+    case "a message escapes a byte that is not UTF-8" "# 1 \"\xc3a\"\n@"
+      "error: \\xC3a:1: unexpected character '@'";
+    case "a message escapes each byte of a truncated character"
+      "# 1 \"a\xe2\x82b\"\n@"
+      "error: a\\xE2\\x82b:1: unexpected character '@'";
     case "#line without a number" "#line\n"
       "error: in.i:1: missing line number";
     case "#line with a name for a number" "#line \"x\""
@@ -431,7 +493,9 @@ let () =
       cases
   in
   let failed =
-    failed_cases show_kind kind_cases @ failed_cases show_place place_cases
+    failed_cases show_kind kind_cases
+    @ failed_cases show_written written_cases
+    @ failed_cases show_place place_cases
   in
   List.iter
     (fun (case, actual) ->

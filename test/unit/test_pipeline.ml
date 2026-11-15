@@ -142,6 +142,20 @@ let () =
     (translation.target_options = [ "-std=gnu11"; quiet; "-O2" ]);
   check "-c -o: no final command" (plan.final = None)
 
+(* The compile step reads typec's output, which is UTF-8 whatever the
+   source's encoding. *)
+let () =
+  let charset = "-finput-charset=ISO-8859-1" in
+  let translation = only_translation (planned [ charset; "-c"; "x.tc" ]) in
+  check "-finput-charset: preprocess" (List.mem charset translation.preprocess);
+  check "-finput-charset: not compile"
+    (translation.compile
+    = Some
+        [
+          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; quiet_markers; "-x";
+          "cpp-output"; "/T/1.emitted.i";
+        ])
+
 let () =
   let compile words = (only_translation (planned words)).compile in
   check "-c without -o"

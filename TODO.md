@@ -419,15 +419,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   `struct T` (`Ctype.member_path`). Let both answer `Depends_on` where a
   record has such a member, typing give the access that unknown type and
   `Initialiser` lose the position.
-- [Medium] An identifier is a spelling, so a universal character name
-  and the UTF-8 character it names are two names (`linked` is keyed by
-  spelling), and the length of `__func__` counts the spelling: Clang
-  gives a function spelled with `\U0001F600` a name of its UTF-8 bytes.
-  Normalise identifiers to UTF-8 where the reader lexes them, and
-  refuse there a universal character name below U+00A0 other than `$`,
-  `@` and backtick (C11 6.4.3p2): `_\u0041` passes every check for a
-  name C reserves for any use (`type e = | A(int _\u0041);`) and is
-  Clang's error, not typec's.
 
 - [Low] `check_distinct` compares the associations of a generic
   selection in pairs: 20000 of them take 26 s, where GCC and Clang, as

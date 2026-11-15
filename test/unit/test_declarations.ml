@@ -360,6 +360,12 @@ let linkage () =
   rejects "extern int x; static int x;" "6.2.2p7";
   declares "int x; int x; extern int x;" "x" "object int external static";
   rejects "int x; long x;" "6.7p4";
+  (* A universal character name and the UTF-8 character it names spell
+     one identifier. *)
+  rejects "int caf\\u00e9; long caf\xc3\xa9;" "6.7p4";
+  rejects "int x\xf0\x9f\x98\x80; static int x\\U0001F600;" "6.2.2p7";
+  declares "int caf\\u00e9; extern int caf\xc3\xa9;" "caf\xc3\xa9"
+    "object int external static";
   rejects "int x; int x(void);" "6.7p3";
   rejects "enum { A }; int A;" "6.7p3";
   rejects "enum { A, A };" "6.7p3";

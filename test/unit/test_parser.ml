@@ -2027,6 +2027,11 @@ let type_c_error_cases =
       "type __tc = | x;"
       "error: in.tc:1: `__tc` cannot name a type declaration, as C \
        reserves it for any use (design 10.1 rule 6) [TC0004]";
+    case "a field named as C reserves for any use, through a universal \
+          character name"
+      "type e = | A(int _\\u0041);"
+      "read error: in.tc:1: character U+0041 cannot be written as a universal \
+       character name";
     case "a derived tag that typec would generate" "type _ = | tc_x;"
       "error: in.tc:1: the type declaration of `_` claims the tag `__tag`, \
        which C reserves for any use (design 10.1 rule 6) [TC0004]";

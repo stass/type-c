@@ -37,7 +37,7 @@ let spell_text (result : Reader.t) =
       add_gap gaps.(0);
       Array.iteri
         (fun index token ->
-          Buffer.add_string buffer (Reader.spelling result token);
+          Buffer.add_string buffer (Reader.written result token);
           add_gap gaps.(index + 1))
         result.tokens;
       Buffer.contents buffer = result.text

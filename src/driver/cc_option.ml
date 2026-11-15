@@ -130,6 +130,10 @@ let table =
         ];
       entries Preprocess Joined [ "-Wp," ];
       entries Preprocess Flag [ "-nostdinc"; "-undef"; "-H" ];
+      (* The source's encoding: only the step that reads the source
+         decodes it, and GCC writes UTF-8 for -E, which the compile step
+         reads by default whatever the locale. *)
+      entries Preprocess Joined [ "-finput-charset=" ];
       (* Linking. *)
       entries Link Joined_or_separate [ "-l"; "-L"; "-T" ];
       entries Link (Separate 1)

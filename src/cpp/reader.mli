@@ -9,6 +9,13 @@
     directive; after a blank it is a punctuator. Comments and other
     directives are errors, as is any byte that starts no token.
 
+    The name of an identifier is in UTF-8, whether its extended
+    characters are written as universal character names, as GCC writes
+    them, or in UTF-8, as Clang does, so each name has one spelling; the
+    text keeps the bytes as written. Each extended character must be one
+    that C11 Annex D allows in an identifier, and a universal character
+    name must name a character that C11 6.4.3p2 allows it to name.
+
     Every token belongs to a file (its owner, {!File.t}) and has a
     presumed location ({!Location.t}). The enter (1) and return (2) flags
     of the line markers keep a stack of the files being read, and the
@@ -29,10 +36,13 @@
     Reading takes time and memory linear in the size of the text and
     never recurses on it. *)
 
+(** The names of the identifiers whose bytes spell them otherwise. *)
+type names
+
 (** The text and its tokens in order. The bytes before, between and after
     the tokens are white space and line markers only, so the tokens with
     those gaps spell the text exactly. *)
-type t = private { text : string; tokens : Token.t array }
+type t = private { text : string; tokens : Token.t array; names : names }
 
 (** Why a text is not [cc -E] output: the message and the presumed
     location of the line where reading stopped. *)
@@ -43,8 +53,16 @@ val read : name:string -> string -> (t, error) result
     [name] is the presumed file name until a line marker changes it. *)
 
 val spelling : t -> Token.t -> string
-(** [spelling result token] is the bytes of [token] in [result.text]. *)
+(** [spelling result token] is what [token] means: the name of an
+    identifier, in UTF-8, and the bytes of any other token. *)
+
+val written : t -> Token.t -> string
+(** [written result token] is the bytes of [token] in [result.text], as
+    [cc -E] wrote them: the text that emission copies, in which the
+    bytes of an identifier may differ from its {!spelling}. *)
 
 val error_message : error -> string
 (** ["file:line: message"], the form of a C compiler's diagnostics, with
-    every byte that is not printable ASCII written as [\xNN]. *)
+    every character that is not printable ASCII escaped as C writes it:
+    a character of UTF-8 as a universal character name, and any other
+    byte as [\xNN]. *)

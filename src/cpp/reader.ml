@@ -1,7 +1,11 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type t = { text : string; tokens : Token.t array }
+(* The name of each identifier whose bytes spell it otherwise, by the
+   position of its first byte: one that universal character names
+   spell. *)
+type names = (int, string) Hashtbl.t
+type t = { text : string; tokens : Token.t array; names : names }
 type error = { location : Location.t; message : string }
 
 (* The largest line number a line marker or #line may give (C11 6.10.4);
@@ -29,6 +33,7 @@ type state = {
           nothing recurses over it. *)
   mutable owners : File.t Owners.t;  (** each owner made so far *)
   mutable tokens : Token.t list;  (** in reverse *)
+  names : names;
 }
 
 (* Raised at the first part of the text that is not cc -E output. *)
@@ -66,6 +71,13 @@ let skip_while state accepted =
 
 let is_digit = Char_class.is_digit
 let is_hex_digit = Char_class.is_hex_digit
+
+(* The value of a digit that [is_hex_digit] accepts. *)
+let hex_digit_value c =
+  match c with
+  | '0' .. '9' -> Char.code c - Char.code '0'
+  | 'a' .. 'f' -> Char.code c - Char.code 'a' + 10
+  | _ -> Char.code c - Char.code 'A' + 10
 
 (* White space other than the newline, which ends a directive. *)
 let is_blank = function
@@ -122,42 +134,118 @@ let add_token state kind start =
 
 (* Tokens. *)
 
-(* \u and four hexadecimal digits, or \U and eight. *)
+(* A character of an identifier or a preprocessing number: a letter,
+   digit, '_' or '$' written as itself, or an extended character, which
+   a universal character name or UTF-8 spells. GCC writes extended
+   characters as universal character names, and Clang in UTF-8. *)
+type identifier_char = Basic of char | Extended of Uchar.t
+
+(* How the next character is written, if it can be part of an
+   identifier. *)
+type identifier_char_form = As_itself | Universal_character_name | Utf_8
+
+let next_identifier_char_form state =
+  match (peek state 0, peek state 1) with
+  | Some c, _ when is_ascii_identifier_char c -> Some As_itself
+  | Some '\\', Some ('u' | 'U') -> Some Universal_character_name
+  | Some c, _ when c >= '\128' -> Some Utf_8
+  | _ -> None
+
+let describe_code_point c = Printf.sprintf "U+%04X" (Uchar.to_int c)
+
+(* C11 6.4.3p2: a universal character name names no character below
+   U+00A0 other than '$', '@' and '`', which C does not require in the
+   basic character set. *)
+let may_be_universal_character_name code =
+  match code with
+  | 0x24 | 0x40 | 0x60 -> true
+  | _ -> code >= 0xA0
+
+(* A value of [beyond_unicode] or more names no character, so the value
+   of a universal character name stops growing there, which keeps it
+   far from overflow. *)
+let beyond_unicode = 0x110000
+
+(* \u and four hexadecimal digits, or \U and eight, which must name a
+   Unicode scalar value: C11 6.4.3p2 refuses a surrogate, and ISO/IEC
+   10646 has no character beyond U+10FFFF. *)
 let scan_universal_character_name state =
+  let start = state.pos in
   let digits = if peek state 1 = Some 'u' then 4 else 8 in
   advance state 2;
+  let code = ref 0 in
   for _ = 1 to digits do
     match peek state 0 with
-    | Some c when is_hex_digit c -> advance state 1
+    | Some c when is_hex_digit c ->
+        code := min beyond_unicode ((!code * 16) + hex_digit_value c);
+        advance state 1
     | _ -> fail state "incomplete universal character name"
-  done
+  done;
+  let written = String.sub state.text start (state.pos - start) in
+  if not (Uchar.is_valid !code) then
+    fail state
+      (Printf.sprintf "universal character name %s names no character"
+         written);
+  if not (may_be_universal_character_name !code) then
+    fail state
+      (Printf.sprintf
+         "character %s cannot be written as a universal character name"
+         (describe_code_point (Uchar.of_int !code)));
+  Uchar.of_int !code
 
-(* Clang writes extended characters of identifiers in UTF-8. *)
 let scan_utf_8_character state =
   let decoded = String.get_utf_8_uchar state.text state.pos in
   if not (Uchar.utf_decode_is_valid decoded) then fail state "invalid UTF-8";
-  advance state (Uchar.utf_decode_length decoded)
+  advance state (Uchar.utf_decode_length decoded);
+  Uchar.utf_decode_uchar decoded
 
 (* Consumes a character that can be part of an identifier, if one is
-   next, and says whether it did. GCC writes extended characters as
-   universal character names. *)
+   next, and returns it. *)
 let scan_identifier_char state =
-  match (peek state 0, peek state 1) with
-  | Some c, _ when is_ascii_identifier_char c ->
+  match next_identifier_char_form state with
+  | Some As_itself ->
+      let c = state.text.[state.pos] in
       advance state 1;
-      true
-  | Some '\\', Some ('u' | 'U') ->
-      scan_universal_character_name state;
-      true
-  | Some c, _ when c >= '\128' ->
-      scan_utf_8_character state;
-      true
-  | _ -> false
+      Some (Basic c)
+  | Some Universal_character_name ->
+      Some (Extended (scan_universal_character_name state))
+  | Some Utf_8 -> Some (Extended (scan_utf_8_character state))
+  | None -> None
 
+let starts_identifier state = Option.is_some (next_identifier_char_form state)
+
+(* C11 6.4.2.1p3 and Annex D: the extended characters an identifier may
+   hold, and those it may not begin with. *)
+let check_extended_char state c ~initial =
+  if not (Annex_d.allowed c) then
+    fail state
+      (Printf.sprintf "character %s cannot be part of an identifier"
+         (describe_code_point c));
+  if initial && not (Annex_d.allowed_initially c) then
+    fail state
+      (Printf.sprintf "character %s cannot begin an identifier"
+         (describe_code_point c))
+
+(* The name of an identifier is in UTF-8 however its characters are
+   written, so that each name has one spelling in every later stage;
+   the reader records it where it differs from the identifier's bytes,
+   which emission copies unchanged. *)
 let scan_identifier state =
-  while scan_identifier_char state do
-    ()
+  let start = state.pos in
+  let name = Buffer.create 16 in
+  let continues = ref true in
+  while !continues do
+    let initial = state.pos = start in
+    match scan_identifier_char state with
+    | Some (Basic c) -> Buffer.add_char name c
+    | Some (Extended c) ->
+        check_extended_char state c ~initial;
+        Buffer.add_utf_8_uchar name c
+    | None -> continues := false
   done;
+  let name = Buffer.contents name in
+  if name <> String.sub state.text start (state.pos - start) then
+    Hashtbl.replace state.names start name;
   Token.Identifier
 
 (* A preprocessing number (C11 6.4.8): a digit, or '.' and a digit, then
@@ -169,7 +257,7 @@ let scan_number state =
     match (peek state 0, peek state 1) with
     | Some ('e' | 'E' | 'p' | 'P'), Some ('+' | '-') -> advance state 2
     | Some '.', _ -> advance state 1
-    | _ -> continues := scan_identifier_char state
+    | _ -> continues := Option.is_some (scan_identifier_char state)
   done;
   Token.Number
 
@@ -240,7 +328,7 @@ let scan_token state =
       kind
   | None ->
       if starts_number state then scan_number state
-      else if scan_identifier_char state then scan_identifier state
+      else if starts_identifier state then scan_identifier state
       else if looking_at state "/*" || looking_at state "//" then
         fail state "comment in preprocessed text"
       else scan_punctuator state
@@ -393,6 +481,7 @@ let read ~name text =
       include_stack = [];
       owners = Owners.empty;
       tokens = [];
+      names = Hashtbl.create 16;
     }
   in
   match
@@ -400,22 +489,52 @@ let read ~name text =
       read_next state
     done
   with
-  | () -> Ok { text; tokens = Array.of_list (List.rev state.tokens) }
+  | () ->
+      let tokens = Array.of_list (List.rev state.tokens) in
+      Ok { text; tokens; names = state.names }
   | exception Failed error -> Error error
 
-let spelling (result : t) (token : Token.t) =
+let written (result : t) (token : Token.t) =
   String.sub result.text token.start token.length
 
-(* Every byte that is not printable ASCII is escaped, so that the names
-   and spellings of the text cannot send control sequences to a
-   terminal. *)
+let spelling (result : t) (token : Token.t) =
+  match Hashtbl.find_opt result.names token.start with
+  | Some name -> name
+  | None -> written result token
+
+let escaped_byte c = Printf.sprintf "\\x%02X" (Char.code c)
+
+(* How a message shows a character: printable ASCII as itself, an
+   extended character as a universal character name and any other as
+   [\xNN], as C writes them. *)
+let shown_character c =
+  let code = Uchar.to_int c in
+  if code > 0xFFFF then Printf.sprintf "\\U%08X" code
+  else if code >= 0x80 then Printf.sprintf "\\u%04X" code
+  else if is_printable (Char.chr code) then String.make 1 (Char.chr code)
+  else escaped_byte (Char.chr code)
+
+(* [\xNN] for each of the [length] bytes of [text] from [start]. *)
+let escaped_bytes text start length =
+  String.concat ""
+    (List.init length (fun offset -> escaped_byte text.[start + offset]))
+
+(* Every character that is not printable ASCII is escaped, so that the
+   names and spellings of the text cannot send control sequences to a
+   terminal: Annex D lets an identifier hold invisible and bidirectional
+   characters, and no table here tells which characters print. *)
 let escape text =
   let buffer = Buffer.create (String.length text) in
-  String.iter
-    (fun c ->
-      if is_printable c then Buffer.add_char buffer c
-      else Buffer.add_string buffer (Printf.sprintf "\\x%02X" (Char.code c)))
-    text;
+  let index = ref 0 in
+  while !index < String.length text do
+    let decoded = String.get_utf_8_uchar text !index in
+    let length = Uchar.utf_decode_length decoded in
+    if Uchar.utf_decode_is_valid decoded then
+      Buffer.add_string buffer
+        (shown_character (Uchar.utf_decode_uchar decoded))
+    else Buffer.add_string buffer (escaped_bytes text !index length);
+    index := !index + length
+  done;
   Buffer.contents buffer
 
 let error_message error =
