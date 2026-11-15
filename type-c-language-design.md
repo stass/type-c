@@ -193,8 +193,15 @@ the GNU form and identifiers in the ISO form, as for the C compiler;
 keywords in both.
 
 Rationale. Headers select constructs by `__STDC_VERSION__`; pinning the
-dialect bounds what the front end must parse. Everything Type-C lowers to is
-ISO C11, so the output dialect is the input dialect and nothing newer.
+dialect bounds what the front end must parse. Everything Type-C lowers to
+compiles in the dialect the command line selects: ISO C11 plus only GNU
+forms that GCC and Clang accept in every dialect, also under
+`-pedantic-errors`. Two are used: `__typeof__`, which C23 standardises as
+`typeof` and which gives a match binding the type of its field where no
+name for that type is sure to be visible, and `__builtin_trap` (10.5).
+The emitted file is preprocessed output, with line markers, and is
+compiled as such (`-x cpp-output`). So the output dialect is the input
+dialect and nothing newer.
 
 ## 3. Types
 
@@ -1546,7 +1553,7 @@ Two properties follow by construction:
 
 ### 13.5 Lowering
 
-| Construct | C11 form |
+| Construct | Lowered form |
 | --- | --- |
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
 | Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. Inside an initialiser, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. |

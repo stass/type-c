@@ -286,7 +286,7 @@ let match_head (matching : Typec_sema.Expressions.matching) =
         Printf.sprintf "), *const %s = &%s; %s" scrutinee_pointer
           scrutinee_copy switch )
 
-(* Provisional: the type of a binding is spelt [__typeof__] its field,
+(* The type of a binding is spelt [__typeof__] its field (design 2.4),
    because no name of the field's type that C11 can spell is sure to be
    visible, and not hidden, at the match. *)
 let binding_declaration (binding : Typec_sema.Expressions.binding) =

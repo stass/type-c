@@ -663,23 +663,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   Resolve each break and continue to its target once, in the parser as
   for labels, and have both read it.
 
-- [High] Owner decision: a binding of a match lowers to
-  `const __typeof__(__tc_match->u.C.f) x = __tc_match->u.C.f;`, which
-  GCC and Clang accept in every dialect but which is not ISO C11, against
-  design 2.4 ("Everything Type-C lowers to is ISO C11"). C11 cannot
-  declare the copy without a name for the field's type, and no such name
-  is sure to be visible at the match: a typedef name or tag used by the
-  field may be hidden there. The alternatives are to relax 2.4 for
-  `__typeof__` (C23 `typeof`), or to have each variant declare a
-  generated typedef per field (a change to 10.1). A third, one copy of
-  the variant per arm with each use of a binding rewritten to its field
-  of the copy, fails: uses that typing never sees, in a Clang block
-  literal's body, an attribute's arguments or a pragma, keep the bare
-  name, a backend error or, where an outer object has the name, silently
-  that object. Recommended: per-field typedefs with reserved `__tc_`
-  names, which no user declaration can hide, so a binding stays a C
-  local under its source name; the field then takes the typedef, so a
-  field of a structure type without a tag keeps one type.
 - [Medium] typec does not check that `&` takes no `register` object
   (C11 6.5.3.2p1): `register struct s r; (&r)->m` is a backend error.
   Record in `typed` that an lvalue designates a register object, or a
@@ -1014,6 +997,11 @@ types (design 13.3).
   instances, and every execution processes the whole map. Extend
   tools/fuzz/patches to make `runtime/afl.c` use the new handshake and
   report its size.
+- [Low] Design 2.4 allows in lowered code only GNU forms that GCC and
+  Clang accept under `-pedantic-errors` in every dialect. A run test
+  that compiles the lowered output of the golden corpus with
+  `-std=c11 -pedantic-errors -x cpp-output` on both backends would keep
+  that true as the lowering grows.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
