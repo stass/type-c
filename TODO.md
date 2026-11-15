@@ -670,7 +670,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   fact and `lvalue` instead of walking the syntax in `addressable`.
 - [Medium] `--trap-function=name` (design 10.5) is not implemented: a
   trap is `__builtin_trap()` alone. Add the option to the driver and
-  pass the name to lowering, with a run test on both backends.
+  pass the name to lowering, with a run test on both backends. The name
+  is the program's, so a block may hide it where a trap is written,
+  against design 13.5 (every name lowering writes is claimed or
+  reserved): say in 10.5 how the call reaches it, for example through
+  one `__tc_` function defined at file scope.
 - [Low] `case A: L: case B:` in a match is refused under design 4.3
   rule 3; the rule it breaks is 4.1 rule 2 (a label of the match stands
   directly in its body). Give the label under a named label its own
@@ -970,14 +974,15 @@ types (design 13.3).
 - [Medium] The instance names of design 10.3 claim nothing yet: when
   they are built, claim them through the claim functions of the parser,
   the one funnel that refuses a derived name reserved in C or claimed
-  twice, since a variant can derive one (`type vector_ = | i;` derives
-  `vector__i`). Design 10.3 cites a rule of 3.5 that a generic's name
-  has no `__`, which 3.5 lacks; `a__b` and `a_` break "the first `__`
-  separates the generic". State the rule in 3.5 and check it then.
+  twice. The spelling rules that keep every other derived name from
+  being an instance name or a name C reserves at file scope (design 3.1
+  rules 6 and 7, 3.2 rule 2, 7.1 rule 1) are not checked either:
+  `type vector_ = | i;` is accepted and derives `vector__i`.
 - [Low] A reserved type-declaration name is refused under TC0004,
-  which cites design 10.1 rule 6 on claimed names, though an alias or a
-  distinct type claims nothing. Give it its own rule in 3.1, beside
-  `Own_name` and `One_definition`, once no change in flight adds codes.
+  which cites design 10.1 rule 6 on claimed names, though the rule is
+  design 3.1 rule 6 and an alias or a distinct type claims nothing. Give
+  it its own code that cites 3.1 rule 6, beside `Own_name` and
+  `One_definition`, once no change in flight adds codes.
 - [Medium] Whether a variant completes `type N;` is read from
   `declared.earlier` by Lowering, Declarations and the tree dump, which
   holds only while no other type declaration has an `earlier`; and
@@ -1056,9 +1061,6 @@ types (design 13.3).
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
-- [Medium] Specify the instance-name encoding for every type of the GNU
-  profile (`__int128`, the `_Float` types, vector types) and for block
-  pointers (design 10.3).
 - [Medium] Decide whether to offer an option that zeroes padding and the
   inactive part of a variant on construction, against disclosure of stale
   memory (design 10.1 rule 5).

@@ -142,23 +142,23 @@ declarations, and the Type-C construct is unavailable in that scope.
 
 **Universe names.** `option`, `result`, `slice`, `str`, `slice_from_array`,
 `slice_sub` and `slice_unchecked` are declared in a *universe scope* that
-encloses file scope. Any declaration of the same identifier shadows the
-universe name from that point, under C's ordinary scope rules, so
-`int result = f();` remains valid C; inside that scope `result(T, E)` is
-simply unavailable. Where C11 6.7.6.3p11 would read an identifier in a
-parameter declaration either as a typedef name or as the parameter it
-declares, a universe name is the parameter: `int f(int (str));` declares an
-`int` parameter named `str`, as in C, so a header shared with C means the
-same in both. A parameter whose type is a universe type and that has no
-name is written without parentheses, `size_t len(str);`, where no other
-reading exists.
+encloses file scope. Any declaration of the same identifier, except a
+generic that 3.6 refuses, shadows the universe name from that point, under
+C's ordinary scope rules, so `int result = f();` remains valid C; inside
+that scope `result(T, E)` is simply unavailable. Where C11 6.7.6.3p11
+would read an identifier in a parameter declaration either as a typedef
+name or as the parameter it declares, a universe name is the parameter:
+`int f(int (str));` declares an `int` parameter named `str`, as in C, so
+a header shared with C means the same in both. A parameter whose type is
+a universe type and that has no name is written without parentheses,
+`size_t len(str);`, where no other reading exists.
 
 **Generated names.** Identifiers that begin with `__tc_` are reserved for the
 compiler in a Type-C translation unit; one in its text, C text included, is
 an error, so that no declaration and no use can meet a name that lowering
 generates. The names that a type declaration derives for C (section 10)
 are reserved in the scope of that declaration; none is an identifier
-that C reserves for any use (10.1 rule 6), so none begins with `__tc_`.
+that C reserves for any use (3.1 rule 6), so none begins with `__tc_`.
 
 Rationale. The words Type-C wants (`type`, `match`, `result`, `str`,
 `option`) are among the most common identifiers in C. Reserving them would
@@ -242,10 +242,27 @@ emitted.
    type (3.4), or any C type name. The last form makes the name an alias,
    as `typedef` would; it exists to carry type parameters (3.5).
 4. `type N;` declares an incomplete variant. It is completed at most once,
-   in the same scope, by a variant definition with the same parameters. For
-   an incomplete struct, C's `struct N;` remains the spelling.
+   in the same scope, by a variant definition with the same number of type
+   parameters: `type list(T);` has one type parameter, and so has the
+   definition that completes it. For an incomplete struct, C's
+   `struct N;` remains the spelling.
 5. A name has one definition in a scope. Unlike `typedef`, a type
    declaration is not repeated; headers use include guards.
+6. In every scope, and whatever the form of the declaration, the name
+   contains no two consecutive underscores, does not end with an
+   underscore, and does not begin with an underscore and an uppercase
+   letter. The names that the declaration derives (section 10) begin as
+   its name does. Under this rule and the one for constructor names (3.2
+   rule 2), none of them is a name that C reserves for any use (C11
+   7.1.3p1), so none spells a keyword of the dialects of 2.4, where every
+   keyword with an inner `_` is so reserved; and none holds the `__` that
+   marks an instance name (10.3). `type _Static = | assert;` would derive
+   `_Static_assert`, and `type vector_ = | i;` would derive `vector__i`.
+7. Where it is declared at file scope, the name does not begin with an
+   underscore. C reserves such a name at file scope, as an ordinary
+   identifier and as a tag (C11 7.1.3p1), and the names derived from it
+   begin as it does: `_x` would give `_x_tag`, `_x_A` and the instance
+   `_x__i`.
 
 ### 3.2 Variants
 
@@ -265,13 +282,16 @@ type expr =
    named `try`, `defer` or a universe name (2.3), in any text: written
    unqualified (`T t = try(1);`) it could read as the constructor or as
    the word or universe name, and refusing it keeps one reading. A field
-   may have such a name, as a member may. No constructor or field has a
-   name that C reserves for any use (10.1 rule 6): each field, and each
-   constructor that has fields, names a member of the C that `typec`
-   builds for the variant (10.1 rule 3), and the rule does not depend on
-   whether a constructor has fields. A name inside C written in a field,
-   such as a member of a structure type or a parameter of a function
-   type, follows the rules of C, as in C text.
+   may have such a name, as a member may. A constructor name also contains
+   no two consecutive underscores and does not begin with an underscore,
+   so that `N_C`, the enumerator it derives (10.1), has no `__` (3.1
+   rule 6); a name that C reserves for any use begins with an underscore
+   and is refused with the rest. A field is not named by a name that C
+   reserves for any use (3.1 rule 6) either, since each field names a
+   member of the C that `typec` builds for the variant (10.1 rule 3). A
+   name inside C written in a field, such as a member of a structure type
+   or a parameter of a function type, follows the rules of C, as in C
+   text.
 3. The leading `|` is required. It is what tells a one-constructor variant
    from an alias.
 4. A constructor has zero or more named fields, written like parameters. A
@@ -482,35 +502,99 @@ id(stmt) s;                             /* e = s is an error */
 ```
 
 1. A type declaration with parameters declares a *generic type*. Its name
-   alone is not a type; a *type application* `G(A1, ..., An)` is. The name
-   does not contain two consecutive underscores (10.3).
+   alone is not a type; a *type application* `G(A1, ..., An)` is. The
+   instance names made from the name (10.3) rely on what 3.1 rules 6 and
+   7 require of it.
 2. A type argument is an object type, complete or not, that is neither an
-   array nor variably modified. It is declared at file scope, and a struct,
-   union or enum argument has a tag or a typedef name declared with it, so
-   that every argument has a name (10.3).
-3. Two applications denote the same type exactly when they apply the same
-   generic to pairwise identical arguments. Typedef names are transparent,
-   qualifiers are significant, and a distinct type is identical only to
-   itself.
+   array nor variably modified, and every type in it has a row in the
+   table of 10.3. Every struct, union, enum, variant and distinct type
+   in it, the argument itself or one under a pointer or in a function
+   type, is declared at file scope, and a struct, union or enum among
+   them has a tag or exactly one typedef name declared with it, so that
+   every type in an argument has one name (10.3).
+   `typedef struct { int x; } a, b;` gives its struct two names, so
+   neither `a` nor `b` is an argument. An argument holds no attribute,
+   whatever the attribute: none is written in it, and no typedef name
+   that it uses, at any depth, is declared with one. An instance name is
+   built after typedef expansion and encodes no attribute (10.3), so
+   `vector(int)` and `vector(wide)`, where `wide` is a typedef of `int`
+   with the GNU attribute `aligned(16)`, would have one name and two
+   layouts in one translation unit, as another attribute would give one
+   name two aliasing behaviours. An attribute inside the specifier of a
+   struct, union or enum belongs to that type, which has its one name,
+   and is not held by the argument.
+3. Two applications of one generic to pairwise identical arguments denote
+   the same type. Typedef names are transparent, qualifiers are
+   significant, and a distinct type is identical only to itself. An
+   application of a variant or distinct generic is a type of its own, as
+   a variant or distinct type is. An application of an alias generic (3.1
+   rule 3) is its definition with the arguments substituted, and is
+   transparent as a typedef name is: with `type ptr(T) = T *;`,
+   `ptr(int)` is `int *`. Where that definition is a struct or union
+   specifier with a body, as that of `vector` is, each application names
+   a structure or union of its own.
 4. A generic definition uses a type parameter only as a type: of a member,
    a field, a pointed-to object, an element, a parameter or a result, or as
    a type argument. It does not use one directly after `distinct`, in a
-   bit-field or in `_Alignas`; no constant expression in it depends on one;
-   and a struct, union or enum specifier in it has no tag. The definition
-   is checked once under these rules, so an application to value types
-   (3.2) cannot fail.
+   bit-field or in `_Alignas`, and no constant expression in it depends on
+   one. A struct or union specifier with a body in it has no tag, and
+   stands only where the definition of an instance holds it (10.3): as
+   the whole definition of an alias, in a field of a variant, where a
+   variant that is not generic may have one too, or inside either.
+   Elsewhere no definition of an instance holds it: the instance of a
+   distinct generic, or of an alias generic such as
+   `type p(T) = struct { T x; } *;`, is a typedef that stands before its
+   first use (10.3), where the types of the members need not be
+   complete. No enum specifier in it has a body, since every instance
+   would declare the enumerators again. The definition is checked once
+   under these rules, so an application to value types (3.2) cannot
+   fail.
 5. An application with an argument that is not a value type, such as an
    incomplete or qualified type, is checked when a complete type is first
    needed: the arguments are substituted and the result must be a valid
    definition. An error is reported at the application and cites the
-   definition.
+   definition. Where the instance is a typedef (10.3), an argument that
+   the definition needs complete is complete at the first use of the
+   application: with `type a2(T) = T[2];`, `a2(struct s) *` needs
+   `struct s` complete, as `struct s (*)[2]` does in C. An argument that
+   the definition uses only under a pointer need not be.
 6. *Provisional (P7).* `void` may be an argument. A variant field whose type
    becomes `void` does not exist: its constructor takes no argument for it
    and a pattern has no sub-pattern for it. This makes `result(void, E)` the
    type of a fallible function that produces no value.
-7. A generic may refer to itself through a pointer (`list(T) *tail`).
-   Instantiation that nests deeper than an implementation limit of at least
-   64 levels is an error.
+7. A generic may refer to itself through a pointer (`list(T) *tail`). An
+   instance is defined only where a complete type is needed (10.3), so an
+   application under a pointer defines none, not even `g(g(T)) *` inside
+   `g`. A definition that needs its own instance complete, as
+   `type s(T) = struct { s(T) inner; };` does, is an error of an
+   incomplete type (3.1 rule 2), not of this rule. The definition of an
+   instance, of a generic type or of a generic function (section 7),
+   *causes* every other instance that it needs: a type instance that it
+   holds by value or otherwise needs complete and, in the body of a
+   function instance, every function instance that the body calls or
+   names. Instantiation *nests* along a chain of instances in which each
+   causes the next, and a chain longer than an implementation limit of
+   at least 64 is an error. `generic(T) void f(T *p) { f(&p); }` reaches
+   it, since every instance calls one of a new type.
+8. *Provisional (P23).* The definition of a generic, type or function
+   (section 7), means the same wherever lowering writes it: in each
+   instance, where 10.3 places it. Every identifier and every tag that
+   the definition names denotes there the entity and the type that it
+   denotes at the definition. A declaration that would change either
+   there is refused: the error is reported at the application or call
+   that puts the instance there, and cites the declaration. Completing
+   a structure or union changes neither. In
+
+   ```c
+   type named(T) = struct { str name; T value; };
+   int str;
+   named(int) n;
+   ```
+
+   the instance `named__i` is defined after `int str;`, where `str`
+   would be the object and no longer the universe type (2.3), so the
+   application is an error. Rule 3 of 7.3 shows the rule on a function.
+   The names that lowering itself writes cannot be hidden (13.5).
 
 Rationale for parentheses. `<` is ambiguous with less-than in C expressions.
 Parentheses need no lookahead once `G` is known to be generic, and they
@@ -527,7 +611,14 @@ Both are declared in the universe scope (2.3) and are ordinary generic
 variants with the ordinary representation. The zero value of an `option` is
 `None`. The zero value of a `result` is `Err` of a zero error, so storage
 that was never assigned does not read as success. `try` (section 5) is the
-only construct that knows `result` by name.
+only construct that knows `result`, and it means this type whatever the
+scope declares under that name (5.1).
+
+No generic type and no generic function (section 7) has a universe name
+(2.3), whichever it is: `slice_sub` no more than `option`. The instances
+of one named as a generic type of the universe scope would take the names
+of that type's instances (10.3), and the rule covers every universe name
+so that it lists none. Any other declaration may take such a name (2.3).
 
 ## 4. Matching
 
@@ -641,12 +732,10 @@ an implicit `break`; it keeps C's explicit statements and requires them.
 2. A `break` in an arm that is not inside a nested loop, `switch` or `match`
    leaves the match. `continue` continues the enclosing loop; a match is not
    a loop.
-3. A label inside an arm may be the target only of a `goto` in the same arm.
-   Each label of a GNU `asm goto` is the target of a `goto` in this sense.
-   The GNU address of a label inside an arm, `&&L`, is refused anywhere,
-   also in the label's own arm, since a computed `goto *e` from outside the
-   arm could jump to it. A `case` or `default` label of an enclosing
-   `switch` cannot appear inside a `match`.
+3. A label inside an arm may be the target only of a jump to a label
+   (4.4) that is in the same arm. The GNU address of such a label, `&&L`,
+   is a jump to it from every point and is therefore refused anywhere,
+   also in the label's own arm.
 4. `switch` is unchanged.
 5. A `break` that leaves a match must end its arm, that is, be in *tail
    position* of the arm. A statement is in tail position if it is the last
@@ -700,7 +789,7 @@ A statement *can complete* as follows.
 | Labelled statement, `unsafe` block | As the statement inside. |
 
 An item contains every label that lies within it, except a named label
-inside a match arm within the item, which by 4.3(3) only a `goto` in that
+inside a match arm within the item, which by 4.3(3) only a jump in that
 arm reaches, a label in the body of a block literal, which is a function
 of its own, and a `case` or `default` label of a `switch` within the
 item. Such a label belongs to the innermost `switch` around it (C11
@@ -709,6 +798,16 @@ expression, so it counts for the items between it and the `switch` body
 and for none that contains the `switch`. In `switch (n) { default: return
 1; { case 2: ; } }` the block after the `return` is reachable and the
 `switch` can complete.
+
+The rules that say which labels control may jump to, 4.3(3) and rules 4,
+5 and 10 of section 6, read *jump to a label* and *target* by one
+definition. A `goto L` is a jump to a label, and its target is `L`. A
+GNU `asm goto` is one whose targets are all the labels it lists. A
+`switch` is one whose targets are the `case` and `default` labels that
+belong to it. The GNU address of a label, `&&L`, is a jump to `L` from
+every point of the function, because a computed `goto *e` at any point
+may be given that address. A computed `goto *e` is a jump to a label
+whose targets are the labels whose address the function takes.
 
 A constant here is an integer constant expression that the front end can
 evaluate (13.3). A statement expression of the GNU profile is treated as
@@ -872,17 +971,38 @@ result(uint32_t, parse_error) read_number(reader *r)
 ### 5.1 `try`
 
 1. The operand of `try` has type `result(T, E)`, and the enclosing function
-   returns `result(U, E)` with the identical `E`. Anything else is an error;
-   there is no implicit conversion between error types.
+   returns `result(U, E)` with the identical `E`. Both are the `result` of
+   the universe scope (3.6), also where a declaration hides that name.
+   Anything else is an error; there is no implicit conversion between
+   error types.
 2. `try` evaluates its operand once. If the value is `Err(x)`, the function
    returns `Err(x)` exactly as a `return` statement would, running the
    deferred statements that are active (section 6). If it is `Ok(v)`, the
    `try` expression has the value `v` and the type `T`; when `T` is `void`
    it is a void expression.
-3. *Provisional (P8).* A `try` expression is the whole initialiser of an
-   automatic object, the whole right operand of `=` in an expression
-   statement, or a whole expression statement. In the assignment form the
-   operand of `try` is evaluated before the left operand.
+3. *Provisional (P8).* A `try` expression stands in one of three positions
+   and nowhere else:
+   * a whole expression statement, `try e;`;
+   * the whole right operand of a simple assignment that is a whole
+     expression statement, `lvalue = try e;`. The operand of `try` is
+     evaluated before the left operand. The assignment is not compound
+     (`x += try f();`) and not chained (`a = b = try f();`);
+   * the whole initialiser of the one declarator of a declaration that
+     is a block item and declares an automatic object. A declaration
+     that holds a `try` has exactly one declarator, and the operand of
+     the `try` names nothing that the declaration declares, by its
+     declarator or in its specifiers. The operand is evaluated before
+     the declaration (13.5), whereas C puts a declarator in scope in
+     its own initialiser (C11 6.2.1p7): in
+     `int n = 0; { size_t n = try rd(&n); }` the source names the inner
+     `n` and the lowered code would name the outer one.
+
+   A declaration in the first clause of a `for` is not a block item. The
+   operand of `return`, the scrutinee of a `match` and the operand of a
+   single-pattern test (4.6) are not among the positions. No `try` stands
+   inside a statement expression, whatever its position there: it would
+   return from inside the expression around it, where C does not say
+   which of the other operands have been evaluated.
 4. `try` cannot appear in a deferred statement.
 
 Rationale for the positions. C leaves the evaluation order of operands and
@@ -890,7 +1010,9 @@ arguments unspecified and sequences `&&`, `||`, `?:` and `,`. Hoisting a
 `try` out of an arbitrary expression must respect both, and C11 has no
 expression that can hold statements. The three positions cover the common
 case of one fallible call per statement and lower to straight-line C.
-General placement is in section 12.
+A `for` clause, a scrutinee and the operand of a test could be lowered
+as well; they are left out to keep the positions few, and a declaration
+before the statement holds the `try`. General placement is in section 12.
 
 ### 5.2 Results are not dropped
 
@@ -939,23 +1061,68 @@ defer fclose(f);
 2. `S` runs at the exit and sees the values variables have then.
 3. The operand of `return` is evaluated, and converted to the return type,
    before any deferred statement runs.
-4. `S` cannot be left by `return`, `break`, `continue` or `goto` and cannot
-   contain `try`. A loop inside `S` may use its own `break` and `continue`.
-5. `goto` and `switch` cannot jump into `S`, nor from outside the scope of
-   a `defer` statement into it.
+4. `S` cannot be left by `return`, `break` or `continue`, no jump to a
+   label (4.4) in `S` has a target outside `S`, and `S` cannot contain
+   `try`. A loop inside `S` may use its own `break` and `continue`.
+5. No jump to a label from outside `S` has a target in `S`, and none from
+   outside the scope of a `defer` statement has a target in that scope.
+   Section 4.4 says what is a jump to a label and what its targets are.
 6. A loop body and a match arm are blocks: a `defer` in one runs at the end
    of each iteration or arm.
 7. `longjmp`, `exit`, `abort` and other functions that do not return leave
    without running deferred statements.
-8. *Provisional (P9).* Within the scope of a `defer` statement, a
-   declaration in a nested block cannot reuse a name that `S` uses.
+8. *Provisional (P9).* Every identifier and tag that `S` uses resolves, at each
+   point where `S` is copied (13.5), to the declaration it resolves to at
+   the `defer` statement. A declaration in the scope of the `defer`
+   statement that would make one resolve otherwise is an error, in
+   whichever block of the scope it stands, the `defer` statement's own
+   included, and whatever it declares, a tag or a binding of a `match`
+   arm as much as an object. In
 
-Rules 1 and 5 make the set of deferred statements that a jump leaves a
+   ```c
+   int x;
+   void f(void) { defer use(x); int x = 0; }
+   ```
+
+   the copy of `use(x);` at the end of the block would read the inner
+   `x`, so the declaration of that `x` is an error. Each copy is a block
+   of its own, `{ S }`, so what `S` declares is declared for that copy
+   alone. The names that lowering itself writes into a copy cannot be
+   hidden (13.5).
+9. *Provisional (P9).* `S` contains no identifier label and no definition
+   of an object with static or thread storage duration. `S` is copied to
+   every exit (13.5): each copy would define the label again and would
+   hold an object of its own. A label declared with `__label__` is local
+   to its copy and would not clash; it is refused all the same, so that
+   the rule has no exception. A declaration with `extern` defines no
+   object and is allowed.
+10. Within the scope of a `defer` statement there is no GNU computed
+    `goto *e` and no `asm goto`. Both are jumps to labels (4.4) that no
+    deferred statement can precede: the first chooses its target when
+    it runs, and the second jumps from inside the assembly.
+11. A `defer` statement is a block item, as a declaration is (Appendix A):
+    it stands directly in a compound statement or in a match arm, where
+    it may follow the labels of the arm (4.1). It is not the substatement
+    of an `if`, an `else`, a `switch`, a loop or a single-pattern test.
+    It is not the statement of a labelled statement, a `case` or
+    `default` of a `switch` included: write `case 1: { defer S; ... }`.
+    It is not a block item of the compound statement of a statement
+    expression.
+
+Rules 1, 5 and 10 make the set of deferred statements that a jump leaves a
 static fact, so `defer` needs no flags or run-time bookkeeping. Rule 8 is
-not in the TS; it lets the compiler repeat `S` at each exit exactly as
-written, with every name bound as in the original. `typec` always lowers
-`defer` itself (13.5); it does not depend on the C compiler implementing
-the TS.
+not in the TS; it and rule 9 let the compiler repeat `S` at each exit
+exactly as written, with every name bound as in the original and no label
+or object defined twice. `typec` always lowers `defer` itself (13.5); it
+does not depend on the C compiler implementing the TS.
+
+Rationale for rule 11. C makes the substatement of a selection or
+iteration statement a block of its own (C11 6.8.4p3, 6.8.5p5), so the
+scope of a `defer` statement there would be empty and `S` would run at
+once. A label is followed by a statement, which a declaration is not in
+C11 or in the accepted dialect (2.4, 13.3), and a `defer` statement
+stands where a declaration does. The last expression of a statement
+expression is its value and leaves `S` no place after it.
 
 ## 7. Generic functions
 
@@ -974,21 +1141,26 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
 
 1. `generic(T1, ..., Tn)` prefixes a function definition or declaration at
    file scope. Each `Ti` is a type name for the rest of that declaration.
+   The function's name meets what 3.1 rules 6 and 7 require of a type
+   name declared at file scope, since its instance names are built as
+   those of a generic type are (10.3).
 2. Inside, `Ti` is an opaque value type (3.2).
 3. The body is checked once, against the opaque types, when the definition
    is read. It may use a value of type `Ti` only in ways that are valid for
    every value type:
 
    - declare objects of the type, including with the initialiser `{0}` or `{}`;
-   - initialise, assign, pass and return;
+   - initialise, assign, pass to a parameter of a prototype, and return;
    - apply unary `&`, `sizeof` and `_Alignof`;
    - do everything C allows with a `Ti *`: dereference, arithmetic,
      subscripting, comparison, casts to and from other object pointers;
    - use `Ti` as a type argument and in derived types.
 
    Arithmetic, comparison, conversion and casts of a `Ti` value, member
-   access, calls, truth tests, passing through `...`, and `_Generic` on a
-   type that depends on `Ti` are errors.
+   access, calls, truth tests, and `_Generic` on a type that depends on
+   `Ti` are errors. So is passing a `Ti` value through `...` or to a
+   function without a prototype: the default argument promotions (C11
+   6.5.2.2p6) would convert the values of some types and not of others.
 4. An expression whose value depends on a type parameter, such as
    `sizeof(T)`, is not a constant expression. It cannot be an array bound, a
    `case` value or a static initialiser, and a type parameter cannot be the
@@ -1006,8 +1178,11 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    ```
 
 Because of rules 2 to 4, an instance of a checked generic function is
-valid C for every value type. Instantiation fails only by exceeding the
-nesting limit of 3.5.
+valid C for every value type. Instantiation fails only where a chain of
+instances exceeds the nesting limit (3.5 rule 7), where a declaration
+changes what the definition names (3.5 rule 8), where another
+declaration takes a name that an instance claims (10.3), or where 10.3
+or rule 2 of 7.3 refuses the instance's placement.
 
 Rationale for no constraints. Resolving `hash(K)` statically for an
 arbitrary `K` needs overloading, or named instances that the compiler
@@ -1046,16 +1221,37 @@ convert, is weighed with P11.
 ### 7.3 Instances
 
 1. *Provisional (P12).* Each instance used in a translation unit is compiled
-   in that translation unit as a function with internal linkage. A generic
-   function that is not used produces no code.
-2. The definition must therefore be visible wherever an instance is used:
-   generic functions are defined in headers. A generic function may be
-   declared `static` or `inline` but not `extern`.
-3. Consequences: the code of an instance is duplicated across translation
+   in that translation unit as a function with internal linkage, named
+   and placed as 10.3 says. A generic function that is not used produces
+   no code.
+2. The definition of a generic function precedes the first use of each
+   of its instances, since the instance is defined there (10.3): generic
+   functions are defined in headers. A declaration that is not a
+   definition lets generic functions call each other, provided both are
+   defined before an instance of either is used. A generic function may
+   be declared `static` or `inline` but not `extern`.
+3. Rule 8 of 3.5 binds the whole definition, its body included, from the
+   definition to each instance. In
+
+   ```c
+   int g();
+   generic(T) void f(T *p) { g(p); }
+   int g(long);
+   void h(int *p) { f(p); }
+   ```
+
+   the instance `f__i` is defined after the second declaration of `g`,
+   whose prototype the check of the body (7.1 rule 3) never saw, so the
+   call in `h` is an error that cites that declaration. A declaration
+   that completes the array type of an object the body uses, a
+   file-scope declaration of a tag that the body declares for itself,
+   and one that hides a universe name the definition uses (2.3) are
+   refused in the same way.
+4. Consequences: the code of an instance is duplicated across translation
    units, the address of an instance differs between them, and a static
    object in a generic function exists once per instance per translation
    unit.
-4. An ordinary function gives C code and other translation units a single
+5. An ordinary function gives C code and other translation units a single
    external entry point:
 
    ```c
@@ -1249,16 +1445,9 @@ struct expr {
    is a declaration of one in a nested block or prototype, in C text such
    as a header included there as well. So is a name that two variants
    derive alike (`a_b` with `C` and `a` with `b_C`), and a type
-   declaration in a block that claims a name an enclosing one claims. So
-   is a claimed name that C reserves for any use, one that begins with
-   `__` or with `_` and an uppercase letter (C11 7.1.3p1). A derived name
-   joins a name and a word with `_`, and every keyword of the dialects of
-   2.4 that has an inner `_` is reserved so; refusing these names keeps
-   every derived name from spelling a keyword with no list of keywords:
-   `type _Static = | assert;` would derive `_Static_assert`. Every type
-   declaration whose name C reserves so is refused too, whatever its
-   form, so that the rule does not depend on whether a form claims the
-   name as a tag: `type __x = int;` is refused as `type __x = | A;` is. No
+   declaration in a block that claims a name an enclosing one claims. No
+   claimed name is one that C reserves for any use or spells a keyword,
+   since each begins as the name of its declaration does (3.1 rule 6). No
    declaration hides a claimed name, so it denotes the variant wherever
    the variant is in scope, and a constructor lowers to it (13.5). The
    typedef name `expr` is not claimed: a block may declare `int expr;`,
@@ -1299,22 +1488,114 @@ same name in every translation unit:
 | `void`, `_Bool`, `char`, `signed char`, `unsigned char` | `v` `b` `c` `a` `h` |
 | `short`, `unsigned short`, `int`, `unsigned`, `long`, `unsigned long`, `long long`, `unsigned long long` | `s` `t` `i` `j` `l` `m` `x` `y` |
 | `float`, `double`, `long double` | `f` `d` `e` |
+| `_Complex` *T* | `C` *T* |
 | Pointer to *T* | `P` *T* |
-| `const`, `volatile`, `restrict` qualified *T* | `K` *T*, `V` *T*, `r` *T*; several are written in the order `r`, `V`, `K` |
-| `_Atomic` *T* | `A` *T* |
-| Struct, union or enum with tag *name* | `T` *length* *name* |
-| Variant, distinct type, or untagged type named by its typedef | *length* *name* |
-| Application `G(args)` | `I` *length* `G` *args* `E` |
-| Function type, under a pointer | `F` *return* *parameters* `E`. The parameters are `v` for an empty prototype and `N` for no prototype; `z` marks a trailing ellipsis; top-level qualifiers of parameters are dropped, as in C's type compatibility. |
+| Array of *T*, under a pointer | `Y` *T* *n* `E` for *n* elements and `Y` *T* `E` for an unknown size. A size that the front end does not compute (13.3, P16) is an error in an argument. |
+| `_Atomic`, `restrict`, `volatile`, `const` qualified *T* | `A` *T*, `r` *T*, `V` *T*, `K` *T*; several are written in the order `A`, `r`, `V`, `K`. `_Atomic(`*T*`)` is the atomic-qualified *T*. The qualifiers of an array type are those of its element (C11 6.7.3p9) and are encoded there. |
+| Struct, union or enum whose own specifier has the tag *name* | `T` *length* *name* |
+| Variant, distinct type, alias of an untagged struct or union, or untagged type named by its typedef | *length* *name* |
+| Application `G(args)` of a variant or distinct generic, or of an alias generic whose definition is a struct or union specifier with a body | `I` *length* `G` *args* `E` |
+| Function type, under a pointer | `F` *return* *parameters* `E`. The parameters are `v` for an empty prototype and `N` for no prototype; `z` marks a trailing ellipsis; a parameter of array or function type is encoded as the pointer type that C adjusts it to (C11 6.7.6.3p7 and p8); top-level qualifiers of parameters are dropped, as in C's type compatibility, and so are qualifiers of the return type (C17 6.7.6.3p5). |
 
 `vector(int)` is `vector__i`, `vector(expr *)` is `vector__P4expr`, and
 `result(uint32_t, parse_error)` is `result__j11parse_error` where
-`uint32_t` is `unsigned int`. A generic's name has no `__` (3.5), so the
-first `__` of an instance name always separates the generic from its
-arguments, and every encoding is self-delimiting. Arguments are encoded
-after typedef expansion, so names depend on the target, like every other
-ABI fact. The remaining types of the GNU profile are encoded in the same
-manner.
+`uint32_t` is `unsigned int`. Arguments are encoded after typedef
+expansion, so names depend on the target, like every other ABI fact; an
+argument holds no attribute for the expansion to lose (3.5 rule 2). An
+application of an alias generic is expanded as a typedef name is, down
+to the structure or union it names where its definition is a specifier
+with a body (3.5 rule 3), which takes the application row:
+`vector(ptr(int))` is `vector__Pi`, and `pair(vector(int), int)` is
+`pair__I6vectoriEi`. The table is complete: a type without a row is no
+type argument (3.5 rule 2). That leaves out the remaining types of the
+GNU profile, among them `__int128`, `unsigned __int128`, the `_Float`
+types, `__bf16` and vector types; no rule needs one as an argument.
+
+The declaration of a type chooses its row, however a use spells the
+type. A type that a Type-C declaration defines, a variant or an alias of
+an untagged struct or union, is encoded by its Type-C name, also where C
+text writes `struct expr` for it: the tag that 10.1 or 10.2 gives it is
+not a tag of its own specifier. So `type n = struct { int x; };` is
+encoded `1n`, as `typedef struct { int x; } n;` is, and the encoding
+depends on the type alone, not on how the type lowers.
+
+Every encoding is self-delimiting and none begins with `_`. The name of
+a generic, type or function, meets 3.1 rule 6 (7.1 rule 1), so the first
+`__` of an instance name ends the name of its generic, and by the same
+rule no name that a variant or an alias derives is an instance name. The
+names `I_tag` and `I_C` that a variant instance `I` derives are none
+either: they follow its last encoding with `_`.
+
+Every type application and every use of a generic function names an
+instance. An application of an alias generic is transparent as a type
+(3.5 rule 3) and is encoded as the type it stands for, but it lowers to
+the name of an instance like any other: C has no type specifier that
+stands for a type name such as `T[2]` or `T (*)(T)`, and a typedef name
+is one.
+
+An instance is emitted at file scope in two steps. A type instance is
+what 10.1 or 10.2 makes of the generic's definition with the arguments
+substituted, under the instance name; a function instance is a `static`
+function (7.3).
+
+1. Its declaration stands before the external declaration that holds its
+   first use. For a variant instance, or an instance of an alias that is
+   a struct, it is `struct I; typedef struct I I;`; for an alias that is
+   a union, `union I; typedef union I I;`. An instance of a distinct
+   generic, or of an alias generic whose definition is not a struct or
+   union specifier with a body, is the one `typedef` of 10.2 and stands
+   here whole, so what its type needs complete is complete at the first
+   use (3.5 rule 5). For a function instance it is the prototype.
+2. Its definition is the rest of 10.1 or 10.2, or the function with its
+   body. A type instance is defined before the external declaration that
+   holds the first point that needs the type complete; one that no point
+   needs complete is not defined. The arguments that the definition
+   holds by value are complete there, or the application is an error
+   (3.5 rule 5). A function instance is defined before the external
+   declaration that holds its first use, which the definition of its
+   generic precedes (7.3 rule 2). The type instances that a definition
+   needs complete are defined before it.
+
+What a definition names means in the instance what it means in the
+generic (3.5 rule 8).
+
+External declarations are counted in the lowered C. A variant, or an
+alias whose definition is a struct or union specifier with a body,
+lowers to several (10.1, 10.2), and the instances that its body uses are
+declared, and defined where the body holds one by value, directly after
+its own forward declaration: `type expr = | Call(vector(expr *) args);`
+defines `vector__P4expr` after `typedef struct expr expr;` and before
+`enum expr_tag`. An application or a call inside a generic's definition,
+such as `vector(tree(T) *)` inside `tree`, is first used where an
+instance of that generic is defined.
+
+An instance names an argument that has a tag in the lowered C, a variant
+or an alias of 10.2 included, by `struct`, `union` or `enum` and the
+tag, and not by a typedef name. One instance then has one definition
+wherever its first use falls, also before the typedef names of its
+arguments are declared. For every structure or union tag `T` that an
+instance names so, `struct T;` or `union T;` stands at file scope before
+the declaration of the instance. The tag then denotes the type of file
+scope also where the instance stands before that type's own
+declaration, and where a prototype would otherwise declare a tag of its
+own (C11 6.2.1p4). An enumeration has no such declaration in ISO C,
+which lowered code keeps to (2.4). An application whose argument holds
+an enumeration that is declared in the external declaration of the
+instance's first use is therefore an error.
+
+At the external declaration of its first use an instance claims, at file
+scope, every name it declares there: a type instance its typedef name
+and its tag and, where it is a variant, the enum tag and the enumerators
+of 10.1; a function instance its name. All go through the one check
+that claims a variant's names (10.1 rule 6): any other declaration of
+one of them in the file scope or in a scope nested in it, in C text as
+well, is an error, whichever comes first. A block that declares
+`int max__i;` where `max__i` is claimed is refused.
+
+Rationale. The typedef name of a variant is not claimed, because only
+the source names it. The names of an instance are written by the
+lowering wherever the instance is used, so they are among the names that
+no declaration may hide (13.5).
 
 A generic variant instance is laid out as in 10.1 under its instance name.
 A generic function instance is a function with internal linkage under its
@@ -1343,7 +1624,7 @@ sub-slice out of range, and the checks of checked mode.
 | --- | --- |
 | Variant | Tagged struct (10.1), by value |
 | Distinct type | Its underlying type |
-| Type application | Struct or typedef under the instance name |
+| Type application | Struct, union or typedef under the instance name |
 | `option`, `result`, `slice`, `str` | Instances of the universe generics |
 | Non-generic function | The same function |
 | Generic function | Nothing; wrap an instance (7.3) |
@@ -1831,11 +2112,11 @@ Two properties follow by construction:
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is the controlled statement with the binding declarations first in its block, or in a block made around a statement that is not a compound statement. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
-| Type application | The instance definition, once, at file scope before first use. |
-| Generic function instance | A `static` function: the body's tokens, with each type parameter replaced by a typedef of its argument. |
-| `try` | A temporary of the result type; a test of its tag; on `Err`, the active cleanups and a `return`; then the `Ok` field. |
-| `defer` | *Provisional (P9).* The deferred statement is repeated, as written, at every exit from its scope, in reverse order; `return e;` becomes a temporary, the cleanups, and `return` of the temporary. Rule 8 of section 6 guarantees that each copy binds its names as the original does. |
-| Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes. |
+| Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
+| Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter replaced by a typedef of its argument. Its prototype and its definition stand where 10.3 says. |
+| `try` | A temporary of the result type; a test of its tag; on `Err`, the active cleanups and a `return`; then the `Ok` field, read where the `try` stood. The temporary and the test stand before the statement or declaration that holds the `try` (5.1), in the block of that statement, or in a block made around it where it is not a block item, as the substatement of an `if`, a loop or a label is not. Where `T` is `void`, `Ok` has no field (3.5 rule 6) and nothing is read after the test. |
+| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order; `return e;` becomes a temporary, the cleanups, and `return` of the temporary. Where `e` is a void expression, as in `return f();` of a function that returns `void`, there is no temporary: it becomes `e;`, the cleanups and `return;`. Rules 8 and 9 of section 6 guarantee that each copy binds its names as the original does and defines no label or object twice. |
+| Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes, named as said below the table. |
 | Checked-mode checks | Inline tests that trap. |
 
 A constructor passed by value to a function that the backend inlines,
@@ -1860,7 +2141,21 @@ typec does not read attribute arguments or `#pragma` lines, where a
 binding can be named; it would also hide the bindings from a debugger
 under their own names (4.1).
 
-Identifiers the compiler invents begin with `__tc_`.
+Every name that lowering writes is claimed (10.1, 10.3) or reserved
+(2.3), so no declaration hides one: not in a block, not in a copy of a
+deferred statement and not in an instance. The tokens of the source that
+it writes at another point, a deferred statement or the definition of a
+generic, keep their meaning there by rule 8 of section 6 and rule 8 of
+3.5.
+
+The identifiers that the compiler invents begin with `__tc_`. The internal
+function of a slice index or of a universe function is named `__tc_`, then
+`slice_index` or the name of the universe function, then the `__` and the
+argument encoding of the slice instance it serves (10.3):
+`__tc_slice_sub__h` for a `slice(unsigned char)`. The prefix keeps it from
+every name in the text (2.3), no other invented name holds a `__` after
+the prefix, and the rest tells these functions apart as it tells instances
+apart.
 
 ### 13.6 Diagnostics and debugging
 
@@ -1906,7 +2201,7 @@ a crash.
 | A `match` handles every constructor | Every `match` | Nothing; an invalid tag traps |
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
-| A generic function is valid for every instance | Every generic function, within the nesting limit of 3.5 | Nothing |
+| A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), another declaration of a name that an instance claims (10.3) and a placement that 10.3 or 7.3 rule 2 refuses are compile errors | Nothing |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for` | Explicit casts to `void` |
 | A slice access stays in bounds | `s[i]`, `slice_sub` | The slice describes live storage of its length |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |
@@ -1927,7 +2222,7 @@ numbers refer to the implementation plan.
 | P4 | The `default` warning is off (4.2); the single-pattern test is the whole condition of an `if` or `while` and has one pattern (4.6) | Pilot A written with the single-pattern test: the share of matches that keep a `default`; the tag tests the form does not fit, which are negated, joined with `&&` or `\|\|`, or of several constructors | Warning stays off; the form as specified |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions (5.1) | Stage 2 pilot: rewrites the limit forced | As specified |
-| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rule 8 of section 6 (13.5) | Stage 2: code size on the pilot; how often rule 8 rejects code | Repetition |
+| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8 and 9 of section 6 (13.5) | Stage 2: code size on the pilot; how often rules 8 and 9 reject code | Repetition |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
 | P12 | Instances are per translation unit (7.3) | Stage 3: code size of the library and pilot | Per unit |
@@ -1941,6 +2236,7 @@ numbers refer to the implementation plan.
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
+| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 3: how often rule 8 rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
 
 ## 16. Non-goals
 
@@ -1984,7 +2280,7 @@ and `+` one or more. Words in quotes are recognised as described in 2.3.
 
 ```text
 external-declaration:  ... | type-declaration | generic-function
-block-item:            ... | type-declaration
+block-item:            ... | type-declaration | defer-statement
 
 type-declaration:      "type" identifier type-parameters? ";"
                      | "type" identifier type-parameters? "=" definition ";"
@@ -2006,8 +2302,7 @@ primary-expression:    ... | variant-type "." identifier
 variant-type:          typedef-name | generic-type-name type-arguments
 assignment-expression: ... | "try" assignment-expression
 
-statement:             ... | match-statement | defer-statement
-                           | unsafe-block
+statement:             ... | match-statement | unsafe-block
 selection-statement:   ... | "if" "(" pattern-test ")" statement
                            | "if" "(" pattern-test ")" statement
                              "else" statement
@@ -2023,6 +2318,9 @@ unsafe-block:          "unsafe" compound-statement
 ```
 
 A type declaration with type parameters is an external declaration only.
+A `defer` statement is a block item and not a statement, so it is not the
+substatement of another statement (section 6 rule 11). `try` is written
+only in the positions of 5.1.
 An unqualified constructor is an ordinary identifier or call in the
 grammar; 3.3 decides its meaning. Slice indexing uses C's subscript
 syntax.

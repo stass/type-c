@@ -228,7 +228,7 @@ are rewritten with the single-pattern test. The record gives:
 
 | | Package |
 | --- | --- |
-| 2.1 | Generic type declarations and applications: identity, lazy instantiation, limits. |
+| 2.1 | Generic type declarations and applications: identity, lazy instantiation, limits, and rule 8 of design 3.5 for type definitions. |
 | 2.2 | Instance names and emission order; property tests that the naming is injective. |
 | 2.3 | The universe types `option` and `result`; `void` arguments. |
 | 2.4 | `try`: typing, the three positions, lowering; the rule against dropped results. |
@@ -237,8 +237,10 @@ are rewritten with the single-pattern test. The record gives:
 
 Pilot B records the statements rewritten to fit the `try` positions (P8),
 the uses of `void` type arguments (P7), how often the naming rule of
-`defer` rejected code (P9), and whether instance names read well in a
-debugger (P10).
+`defer` rejected code (P9, rules 8 and 9 of section 6), whether
+instance names read well in a debugger (P10), and how often the rule
+that a generic's definition means the same in every instance rejected
+code (P23, decided at Stage 3).
 
 **Exit gate**
 
@@ -278,7 +280,7 @@ debugger (P10).
 3. Out-of-range slice accesses trap; the negative tests for slices pass.
 4. The measurements of 3.6 are written up.
 
-**Decided at the gate:** P11 to P14, and whether the measured cost of
+**Decided at the gate:** P11 to P14, P23, and whether the measured cost of
 function-pointer operations is evidence for constraints (design section
 12). **Release 0.3.**
 
