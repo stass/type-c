@@ -33,6 +33,10 @@ open Typec_syntax
       of the subobject where the walk meets it or, where that
       subobject's braces may be elided, of the first variant inside it;
       [None] for an excess one.
+    - [converts] checks the implicit conversion of an expression that
+      [value] has typed to the scalar type that it initialises, which is
+      not its target type where the walk has elided braces around the
+      scalar.
     - [initialises] checks an expression that [value] has typed and that
       initialises a subobject, as an excess one does not.
     - [source] gives the expression whose value an expression is,
@@ -56,6 +60,7 @@ type typing = {
   tags : Ctype.tags;
   fail : 'a. Tree.span -> string -> 'a;
   value : Ctype.t option -> Tree.expression -> Ctype.t;
+  converts : Ctype.t -> Tree.expression -> unit;
   initialises : Tree.expression -> unit;
   source : Tree.expression -> Tree.expression Unknown.answer;
   initialises_whole : Ctype.t -> Tree.expression -> unit;

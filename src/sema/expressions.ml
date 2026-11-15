@@ -309,28 +309,40 @@ let refuse_mixed context span (t : Ctype.t) =
     (Rule.message Distinct_operation
        ("the operands are not both of the distinct type " ^ name))
 
+let differs context a b =
+  Ctype.compatible context.target context.tags a b = Answer false
+
+(* Design 3.4: [D *] and [U *] are incompatible. GNU C only warns where
+   two pointers to incompatible types meet, and the backend, which sees
+   U for D, does not even warn, so typec decides: in Type-C text two
+   pointers whose referenced types [a] and [b] mention a distinct type
+   meet only where those are compatible or one is void. This is the one
+   rule for conversions and for the operations on two pointers. *)
+let pointers_differ context (a : Ctype.t) (b : Ctype.t) =
+  let a = Ctype.unqualified a and b = Ctype.unqualified b in
+  Ctype.is_void a = Answer false
+  && Ctype.is_void b = Answer false
+  && (Ctype.mentions_distinct a || Ctype.mentions_distinct b)
+  && differs context a b
+
 (* Design 3.4: Type-C text converts no value implicitly to or from a
-   distinct type, nor a pointer to a type with one in it to a pointer to
-   another type but void. The backend sees a distinct type as its
-   representation (design 10.2), so it cannot refuse these conversions;
-   the others are its own. *)
+   distinct type, nor a pointer to a type with one in it to another
+   pointer but by [pointers_differ]. The backend sees a distinct type as
+   its representation (design 10.2), so it cannot refuse these
+   conversions; the others are its own. A value converts only to a
+   scalar: towards a structure or an array it initialises a member
+   through elided braces, which the initialiser checks where it places
+   the value, or the backend refuses it. *)
 let refuse_distinct_conversion context span target (typed : typed) =
   let target = Ctype.unqualified target in
   let source = Ctype.lvalue_conversion typed.expression_type in
-  let differs a b =
-    Ctype.compatible context.target context.tags a b = Answer false
-  in
   let crosses =
     match (target.shape, source.shape) with
-    | Pointer t, Pointer s ->
-        let t = Ctype.unqualified t and s = Ctype.unqualified s in
-        Ctype.is_void t = Answer false
-        && Ctype.is_void s = Answer false
-        && (Ctype.mentions_distinct t || Ctype.mentions_distinct s)
-        && differs t s
+    | Pointer t, Pointer s -> pointers_differ context t s
+    | (Record _ | Array _), _ -> false
     | _ ->
         (Ctype.as_distinct target <> None || Ctype.as_distinct source <> None)
-        && differs target source
+        && differs context target source
   in
   if crosses && is_type_c_text context span then
     context.fail span
@@ -409,6 +421,22 @@ let operand context (typed : typed) =
       bit_field_operand context field
   | None, Not_bit_field ->
       value_operand context (Ctype.lvalue_conversion typed.expression_type)
+
+(* Refuses an operation at [span] in Type-C text on two pointers that
+   [pointers_differ] keeps apart. *)
+let refuse_mixed_pointers context span left right =
+  match (left, right) with
+  | Pointer_operand a, Pointer_operand b
+    when is_type_c_text context span
+         && pointers_differ context a.referenced b.referenced ->
+      context.fail span
+        (Rule.message Distinct_operation
+           (Printf.sprintf
+              "the pointers %s and %s are not compatible; a cast crosses \
+               between them"
+              (quote (Type_name.of_ctype a.pointer))
+              (quote (Type_name.of_ctype b.pointer))))
+  | _ -> ()
 
 let is_integer : Arithmetic.t -> bool = function
   | Integer _ -> true
@@ -965,6 +993,11 @@ let logical context span ~clause left right =
 
 let binary_type context span (op : Tree.binary_operator) left right =
   let left = operand context left and right = operand context right in
+  (* Every operator but a logical one, which takes each operand as a
+     truth value on its own, relates two pointers that it takes. *)
+  (match op with
+  | Logical_and | Logical_or -> ()
+  | _ -> refuse_mixed_pointers context span left right);
   let arithmetic ~integer clause =
     arithmetic_binary context span ~integer ~clause left right
   in
@@ -1652,12 +1685,17 @@ let fail_builtin_argument context span name requirement =
 (* Clang keeps a qualifier of the referenced type that a typedef gives
    it and drops one written in the pointer's declarator; Ctype does not
    tell them apart, so a qualified referenced type gives an unknown
-   result. _Atomic, which Clang's __c11 builtins drop, does not count. *)
+   result. _Atomic, which Clang's __c11 builtins drop, does not count.
+   Such a builtin reads the object that [first] points to as its operand,
+   so in Type-C text the object is not of a distinct type (design 3.4). *)
 let pointee_of_first context span name first =
   let qualified (qualifiers : Qualifiers.t) =
     qualifiers.const || qualifiers.volatile || qualifiers.restrict
   in
   match operand context first with
+  | Pointer_operand { referenced = { shape = Distinct distinct; _ }; _ }
+    when is_type_c_text context span ->
+      refuse_distinct context span distinct
   | Pointer_operand { referenced; _ } when qualified referenced.qualifiers ->
       value
         (unknown context span ("the result of " ^ quote name)
@@ -1813,7 +1851,18 @@ let constructor_expression context position (whole : Tree.expression) =
 
 (* Statements (6.8) and the expressions that hold them *)
 
+(* The value of an expression that an operation reads (design 3.4): the
+   plain typing entry, which refuses a value of a distinct type in Type-C
+   text and gives C text the representation. Only the uses that design
+   3.4 lets take such a value whole call [whole_value] instead. *)
 let rec expression context (expression : Tree.expression) =
+  let typed = whole_value context expression in
+  read_operand context expression.span ~reads:false typed
+
+(* An expression without a target type, which its use takes whole: it
+   discards, copies, sizes, addresses or tests it, or gives it to the
+   expression around it, which reads it in turn. *)
+and whole_value context (expression : Tree.expression) =
   positioned context Untargeted expression
 
 (* An expression is typed once, in its one position: a second position
@@ -1848,11 +1897,12 @@ and expression_node context position (whole : Tree.expression) =
   (* An operand that the operation takes as a whole, as design 3.2 rule 6
      lets it take a variant: copies, sizes, addresses, passes on or
      discards. *)
-  let as_whole = expression context in
+  let as_whole = whole_value context in
   (* Any other operand, which the operation reaches into, so it may not
-     be a variant. *)
+     be a variant; it reads a distinct value only where the table of
+     design 3.4 says so. *)
   let typed operand =
-    let operand_typed = expression context operand in
+    let operand_typed = whole_value context operand in
     refuse_variant context span operand_typed.expression_type;
     read_operand context span ~reads:(reads_distinct whole.node) operand_typed
   in
@@ -2056,10 +2106,9 @@ and argument_positions context (callee : typed) arguments =
    its type, not through [...] or to a function without a prototype,
    where the default argument promotions would convert it. *)
 and argument context position argument =
-  let typed = positioned context position argument in
   match position with
-  | Targeted _ -> typed
-  | Untargeted -> read_operand context argument.span ~reads:false typed
+  | Targeted _ -> positioned context position argument
+  | Untargeted -> expression context argument
 
 (* GNU [__real__] and [__imag__] and the operators of 6.5.3. *)
 and unary context span (op : Tree.unary_operator) typed =
@@ -2082,7 +2131,7 @@ and unary context span (op : Tree.unary_operator) typed =
    bit-field where it is one, as GCC and Clang do. *)
 and selected context (selecting : Tree.expression) =
   match selection_of context selecting with
-  | Unknown.Answer chosen -> expression context chosen
+  | Unknown.Answer chosen -> whole_value context chosen
   | Depends_on unknown ->
       value (Ctype.unknown { unknown with kind = Object_or_function })
 
@@ -2112,7 +2161,7 @@ and selection_of context (selecting : Tree.expression) =
    selects is that of the controlling expression after lvalue conversion,
    as C17 says and GCC and Clang do in every mode. *)
 and generic context span controlling associations =
-  let controlling_typed = expression context controlling in
+  let controlling_typed = whole_value context controlling in
   let associations = List.map (generic_association context) associations in
   check_distinct context associations;
   let default = default_association context associations in
@@ -2130,8 +2179,8 @@ and generic context span controlling associations =
 (* Both operands are typed. *)
 and choose context span condition first second =
   ignore (expression context condition);
-  ignore (expression context first);
-  ignore (expression context second);
+  ignore (whole_value context first);
+  ignore (whole_value context second);
   choice context span condition first second
 
 and generic_association context (association : Tree.generic_association) =
@@ -2141,7 +2190,7 @@ and generic_association context (association : Tree.generic_association) =
         (Some (context.type_name type_name), result)
     | Default_association result -> (None, result)
   in
-  ignore (expression context result);
+  ignore (whole_value context result);
   { association_span = association.span; association_type; result }
 
 (* 6.5.2.5p4: an lvalue of the type name's type, which the initialiser
@@ -2154,7 +2203,7 @@ and compound_literal context type_name values =
 
 (* 6.5.15p3 to p6. A GNU [a ?: b] has [a] as its second operand. *)
 and conditional context span position condition if_true if_false =
-  let condition_typed = expression context condition in
+  let condition_typed = whole_value context condition in
   require_scalar context condition.span ~clause:"6.5.15p2" condition_typed;
   let branch_typed = positioned context position in
   let second =
@@ -2166,7 +2215,10 @@ and conditional context span position condition if_true if_false =
   let branch_operand branch =
     operand context (as_seen context span branch.branch_typed)
   in
-  match (branch_operand second, branch_operand third) with
+  let second_operand = branch_operand second
+  and third_operand = branch_operand third in
+  refuse_mixed_pointers context span second_operand third_operand;
+  match (second_operand, third_operand) with
   | Distinct_operand a, Distinct_operand b when one_distinct context a b -> a
   | Arithmetic_operand a, Arithmetic_operand b ->
       converted context span a.promoted b.promoted
@@ -2263,7 +2315,7 @@ and statement_expression context (block : Tree.block) =
   block_items context block;
   match List.rev block.node.items with
   | Block_statement { node = Expression_statement last; _ } :: _ ->
-      Ctype.lvalue_conversion (expression context last).expression_type
+      Ctype.lvalue_conversion (whole_value context last).expression_type
   | (Block_statement _ | Block_declaration _ | Block_type_declaration _) :: _
   | [] ->
       Ctype.void
@@ -2315,6 +2367,10 @@ and initialiser context ~constant t initialiser =
     in
     (positioned context position initialising).expression_type
   in
+  let converts scalar initialising =
+    refuse_distinct_conversion context initialising.Tree.span scalar
+      (operand_typed context initialising)
+  in
   let initialises initialising =
     if constant then require_constant context initialising
   in
@@ -2324,6 +2380,7 @@ and initialiser context ~constant t initialiser =
       tags = context.tags;
       fail = context.fail;
       value;
+      converts;
       initialises;
       source = source_through (selection_of context);
       initialises_whole = initialises_whole context;
@@ -2353,15 +2410,15 @@ and statement_node context (statement : Tree.statement) =
   in
   let scalar ~clause condition =
     require_scalar context condition.Tree.span ~clause
-      (expression context condition)
+      (whole_value context condition)
   in
   match statement.node with
   | Labeled { label; statement = labeled } ->
       label_of context label;
       typed_statement context labeled
   | Compound block -> block_items context block
-  | Expression_statement value | Computed_goto value ->
-      ignore (expression context value)
+  | Expression_statement value -> ignore (whole_value context value)
+  | Computed_goto value -> ignore (expression context value)
   | Null_statement | Attribute_statement _ | Goto _ -> ()
   | If { condition; then_branch; else_branch } ->
       scalar ~clause:"6.8.4.1p1" condition;
@@ -2380,7 +2437,7 @@ and statement_node context (statement : Tree.statement) =
   | For { clause; condition; step; body } ->
       Option.iter (for_clause context) clause;
       Option.iter (scalar ~clause:"6.8.5p2") condition;
-      Option.iter (fun step -> ignore (expression context step)) step;
+      Option.iter (fun step -> ignore (whole_value context step)) step;
       in_loop body
   | Continue ->
       if not enclosing.in_loop then
@@ -2410,13 +2467,11 @@ and statement_node context (statement : Tree.statement) =
 and for_clause context (clause : Tree.for_clause) =
   match clause with
   | Clause_declaration declaration -> context.declaration declaration
-  | Clause_expression value -> ignore (expression context value)
+  | Clause_expression value -> ignore (whole_value context value)
 
 (* 6.8.4.2p1. *)
 and switch_controlling context controlling =
-  let typed = expression context controlling in
-  let read = read_operand context controlling.span ~reads:false typed in
-  match operand context read with
+  match operand context (expression context controlling) with
   | Arithmetic_operand { arithmetic = Integer _; _ } | Unknown_operand _ -> ()
   | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
   | Other_operand _ ->

@@ -199,9 +199,11 @@ val max_depth : int
 (** The deepest nesting of expressions and statements that is typed; a
     deeper one is an error. *)
 
-val expression : context -> Tree.expression -> typed
+val whole_value : context -> Tree.expression -> typed
 (** Types an expression and every expression in it, or gives the type
-    found for it before. *)
+    found for it before, for a use that takes its value whole, as GNU
+    [typeof] does: a value of a distinct type is not refused (design
+    3.4). *)
 
 val integer_constant :
   context -> Tree.expression -> (Integer_constant.t, Tree.span) result

@@ -811,7 +811,7 @@ and other_type state span (specifier : Tree.type_specifier) =
 
 (* GNU [typeof] of an expression is its type, unconverted. *)
 and typeof_expression state expression =
-  (Expressions.expression (typing state) expression).expression_type
+  (Expressions.whole_value (typing state) expression).expression_type
 
 (* 6.7.5p3: the value is the backend's to check, as layout is. *)
 and alignment state (alignment : Tree.alignment Tree.spanned) =

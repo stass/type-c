@@ -8,6 +8,7 @@ type typing = {
   tags : Ctype.tags;
   fail : 'a. Tree.span -> string -> 'a;
   value : Ctype.t option -> Tree.expression -> Ctype.t;
+  converts : Ctype.t -> Tree.expression -> unit;
   initialises : Tree.expression -> unit;
   source : Tree.expression -> Tree.expression Unknown.answer;
   initialises_whole : Ctype.t -> Tree.expression -> unit;
@@ -463,6 +464,12 @@ let reach_of typing ~zeroes ~target (t : Ctype.t) expression =
       | Depends_on _ -> Unknown_reach)
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Function _ ->
       ignore (typing.value (scalar_target ~zeroes target) expression);
+      (* Where braces around the scalar are elided, the target is the
+         aggregate around it, so the conversion to the scalar is
+         checked here. *)
+      Option.iter
+        (fun scalar -> typing.converts scalar expression)
+        (scalar_target ~zeroes t);
       typing.initialises expression;
       Whole
   | Va_list | Unknown_type _ ->

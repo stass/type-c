@@ -310,8 +310,11 @@ val mentions_distinct : t -> bool
     union are not part of it. *)
 
 val representation : t -> t
-(** The type that C text sees for [t] (design 10.2): the representation of
-    a distinct type with its qualifiers, any other type unchanged. *)
+(** The type that C text sees for [t] (design 10.2): [t] with every
+    distinct type that {!mentions_distinct} finds in it replaced by its
+    representation, which keeps the distinct type's qualifiers. Members of
+    a structure or union keep their types, which C text sees in turn as
+    it reads them. *)
 
 val as_arithmetic : tags -> t -> Arithmetic.t option Unknown.answer
 (** The arithmetic type of an operand, without its qualifiers. An

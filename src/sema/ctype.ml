@@ -336,10 +336,30 @@ let rec mentions_distinct t =
       List.exists mentions_distinct (return :: parameter_types parameters)
   | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _ -> false
 
-let representation t =
-  match as_distinct t with
-  | Some distinct -> { distinct.representation with qualifiers = t.qualifiers }
-  | None -> t
+(* One walk over [t], so the cost is linear in its size. *)
+let rec replace_distinct t =
+  match t.shape with
+  | Distinct distinct ->
+      make t.qualifiers (replace_distinct distinct.representation).shape
+  | Pointer referenced ->
+      make t.qualifiers (Pointer (replace_distinct referenced))
+  | Array { element; length } ->
+      make t.qualifiers (Array { element = replace_distinct element; length })
+  | Function { return; parameters } ->
+      make t.qualifiers
+        (Function
+           { return = replace_distinct return;
+             parameters = replace_in_parameters parameters })
+  | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _ -> t
+
+and replace_in_parameters = function
+  | Prototype { types; variadic } ->
+      Prototype { types = List.map replace_distinct types; variadic }
+  | Old_style types -> Old_style (List.map replace_distinct types)
+  | Unspecified -> Unspecified
+
+(* A type with no distinct type in it stays the same value. *)
+let representation t = if mentions_distinct t then replace_distinct t else t
 
 let enum_integer tags tag = Hashtbl.find_opt tags.enums tag.enum_id
 

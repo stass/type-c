@@ -1435,6 +1435,64 @@ let distinct_types () =
   rejects ~file "enum e; type d = distinct enum e;"
     "is not over an unqualified arithmetic or pointer type (design 3.4)"
 
+(* Design 3.4: every operand that typing reads refuses a distinct value
+   in Type-C text, whichever path types it; a pointer to a distinct type
+   meets no other pointer but one to void; a scalar that an initialiser
+   reaches through elided braces converts as any other. *)
+let distinct_operands () =
+  let file = "in.tc" in
+  let types =
+    "type id = distinct unsigned int; type ref = distinct int *; \
+     struct w { int v[4]; }; struct inner { id x; }; \
+     struct outer { struct inner i; int n; }; struct pair { id t[2]; }; "
+  in
+  let in_function body =
+    types ^ "id f(id a, ref r, unsigned u, int c) { " ^ body ^ " }"
+  in
+  let refused body =
+    rejects ~file (in_function body)
+      "a value of the distinct type 'id' takes no such operation"
+  in
+  let mixed body =
+    rejects ~file (in_function body)
+      "the pointers 'id *' and 'unsigned int *' are not compatible"
+  in
+  List.iter refused
+    [ "int t[a]; (void)t; return a;";
+      "(void)__builtin_offsetof(struct w, v[a]); return a;";
+      "int t[4] = { [a] = 1 }; (void)t; return a;";
+      "id x = a; (void)__atomic_fetch_add(&x, 1, 5); return a;";
+      "id x = a; return __atomic_load_n(&x, 5);" ];
+  rejects ~file (types ^ "static int t[(id)2];")
+    "a value of the distinct type 'id' takes no such operation";
+  rejects ~file (in_function "goto *r;") "'ref' takes no such operation";
+  List.iter mixed
+    [ "id x = a; unsigned *q = &u; return (id)(&x == q);";
+      "id x = a; unsigned *q = &u; return (id)(&x < q);";
+      "id x = a; unsigned *q = &u; return (id)(&x - q);";
+      "id x = a; unsigned *q = &u; (void)(c ? &x : q); return a;" ];
+  accepts ~file
+    (in_function
+       "id x = a; id *p = &x; void *v = &u; (void)(p == v); \
+        (void)(p == 0); (void)(p - p); (void)(c ? p : v); return *p;");
+  List.iter
+    (fun source -> rejects ~file (types ^ source) "without a cast (design 3.4)")
+    [ "struct outer o = {5};"; "struct pair y = {5};";
+      "struct outer o = { {5} };" ];
+  accepts ~file
+    (types
+   ^ "struct outer o = {0}; struct outer p = { (id)5, 1 }; \
+      struct pair y = { (id)1, (id)2 }; struct outer q = { { (id)5 } };");
+  (* C text sees the representation at every level of a type. *)
+  accepts ~file
+    (types
+   ^ "\n# 1 \"m.h\" 1\n\
+      static unsigned *g(id *p, unsigned *q, int c) {\n\
+      unsigned *s = p; (void)(p == q); (void)(p < q); (void)(p - q);\n\
+      (void)s; return c ? p : q; }\n\
+      static int h(id *p) { return _Generic(p, unsigned *: 1); }\n\
+      # 3 \"in.tc\" 2\n")
+
 let variant_operations () =
   let file = "in.tc" in
   let variant = "type e = | A | B(int i); " in
@@ -1481,6 +1539,7 @@ let () =
   variants ();
   variant_operations ();
   distinct_types ();
+  distinct_operands ();
   constructors ();
   zero_values ();
   builtin_typedefs ();

@@ -799,28 +799,31 @@ types (design 13.3).
   3.4): a qualified representation (`distinct const int`) is refused;
   an argument of a distinct type to a function without a prototype is
   refused as `...` is, since both promote it; Type-C or C text is
-  decided by the first token of the operation, and for an implicit
-  conversion by that of the converted expression.
-- [Medium] Distinct types: an implicit conversion is checked against
-  the target type of its position (design 3.3), which for an
-  initialiser with elided braces is the enclosing aggregate, so
-  `struct outer o = {5};` whose first scalar is a distinct type is not
-  refused. Check the scalar that the value reaches as well.
-- [Medium] Distinct types: the operation table (`Expressions.
-  reads_distinct`) holds by construction only for operands typed in
-  `expression_node`; other consumers each call `read_operand`, and some
-  do not: an array length or `offsetof` index, `goto *p`, and atomic
-  builtins take a distinct value, and `D *` mixes with `U *` in `==`,
-  `<`, `-` and `?:` without a cast. Invert the default: make the plain
-  typing entry refuse a distinct value and give the uses that design 3.4
-  allows an explicit whole-value entry.
+  decided by the first token of the operation, for an implicit
+  conversion by that of the converted expression, and for a value that
+  no operator reads (an array length, a designator, `goto *`) by its
+  own; a builtin that operates on the object its first argument points
+  to (`__atomic_*`, `__sync_*`) refuses one of a distinct type, loads
+  and stores too; an `asm` operand refuses a distinct value.
+- [Medium] Distinct types: C text sees the representation at every
+  level, so a C-text operation on a Type-C value gives U where the
+  object is D: with a header macro `M(p)` that is `*(p)` on `id *p`,
+  Type-C `v == M(p)` is refused and `M(p) == v` accepted (the text of
+  the operation's first token decides). Decide whether a C-text result
+  that designates a Type-C object keeps its distinct type.
+- [Medium] Distinct types: a `Targeted` position is both the target type
+  of design 3.3 and the type an implicit conversion goes to, which
+  differ where an initialiser elides braces; so the conversion check
+  skips structure and array targets and `Initialiser.reach_of` checks
+  the scalar again through `converts`. Give the initialiser's `value`
+  both types and let `positioned` check the scalar alone.
+- [Low] Distinct types in C text: GNU `typeof` of an expression keeps
+  the distinct type, so `__builtin_types_compatible_p(typeof(p),
+  unsigned *)` in C text still compares a distinct type.
 - [Low] Distinct types: `Distinct_operand` carries a `Ctype.t`, so
   `refuse_mixed` has an unreachable case; carry the `Ctype.distinct`.
   The bit-field narrowing that GCC applies is skipped for a distinct
   member in C text too.
-- [Medium] Distinct types in C text: only the top level of a type reads
-  as the representation, so C text that converts `D *` to `U *`
-  without a cast is refused, which the C compiler accepts.
 - [Low] Type-C text cannot name a tag that a type declaration claims
   (design 10.1 rule 6); C text in the same unit can, and names the
   lowered structure. Say so in the design or refuse it there too.
