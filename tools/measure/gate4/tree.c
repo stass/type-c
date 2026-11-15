@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
 
-/* The hand-written twin of tree.tc: a tag, a union and a switch. */
+/* The hand-written twin of tree.tc: a tag, a union and a switch, with
+   the guarantees of the Type-C match (a trap on an invalid tag and the
+   payload copied into locals when the case is entered), so that the
+   gate measures the lowering and not the guarantees. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,11 +21,21 @@ struct expr {
 static unsigned long eval(const struct expr *e) {
   switch (e->kind) {
   case NUMBER: return e->u.value;
-  case ADD: return eval(e->u.pair.left) + eval(e->u.pair.right);
-  case SUBTRACT: return eval(e->u.pair.left) - eval(e->u.pair.right);
-  case MULTIPLY: return eval(e->u.pair.left) * eval(e->u.pair.right);
+  case ADD: {
+    const struct expr *l = e->u.pair.left, *r = e->u.pair.right;
+    return eval(l) + eval(r);
   }
-  return 0;
+  case SUBTRACT: {
+    const struct expr *l = e->u.pair.left, *r = e->u.pair.right;
+    return eval(l) - eval(r);
+  }
+  case MULTIPLY: {
+    const struct expr *l = e->u.pair.left, *r = e->u.pair.right;
+    return eval(l) * eval(r);
+  }
+  default:
+    __builtin_trap();
+  }
 }
 
 static unsigned long next_random(unsigned long *state) {

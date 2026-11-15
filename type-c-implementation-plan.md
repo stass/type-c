@@ -169,7 +169,14 @@ lives in its own repository and records:
    file, and read from a C file that declares the layout of design 10.1 by
    hand.
 4. Differential tests against hand-written C give the same output, and
-   size and speed within measurement noise at `-O2`.
+   size and speed within measurement noise at `-O2`. The C twin carries
+   the guarantees of its Type-C program: its `switch` on a tag traps on
+   a tag that is none of the constructors, as every `match` does (design
+   4.5), so a `default` arm of the `match` becomes cases for the
+   remaining constructors before a trapping `default`; and the payload
+   fields a binding reads are copied into locals when the case is
+   entered (design 4.1). The gate then measures the cost
+   of the lowering, not of the guarantees.
 5. Pilot A builds, passes the original compiler's tests, and its record is
    written up.
 6. A C comparison catalogue shows what Stage 1 catches that C does not.

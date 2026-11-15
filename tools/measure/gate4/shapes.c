@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
 
-/* The hand-written twin of shapes.tc: a tag, a union and a switch. */
+/* The hand-written twin of shapes.tc: a tag, a union and a switch, with
+   the guarantees of the Type-C match (a trap on an invalid tag and the
+   payload copied into locals when the case is entered), so that the
+   gate measures the lowering and not the guarantees. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,19 +59,29 @@ int main(int argc, char **argv) {
     for (unsigned long i = 0; i < count; i++) {
       const struct shape *s = &shapes[i];
       switch (s->kind) {
-      case SQUARE:
-        total += (unsigned long)s->u.square.side * s->u.square.side;
+      case SQUARE: {
+        unsigned side = s->u.square.side;
+        total += (unsigned long)side * side;
         break;
-      case RECTANGLE:
-        total += (unsigned long)s->u.rectangle.width * s->u.rectangle.height;
+      }
+      case RECTANGLE: {
+        unsigned w = s->u.rectangle.width, h = s->u.rectangle.height;
+        total += (unsigned long)w * h;
         break;
-      case TRIANGLE:
-        total += (unsigned long)s->u.triangle.base * s->u.triangle.height / 2;
+      }
+      case TRIANGLE: {
+        unsigned b = s->u.triangle.base, h = s->u.triangle.height;
+        total += (unsigned long)b * h / 2;
         break;
-      case BOX:
-        total += (unsigned long)s->u.box.width * s->u.box.height *
-                 s->u.box.depth;
+      }
+      case BOX: {
+        unsigned w = s->u.box.width, h = s->u.box.height;
+        unsigned d = s->u.box.depth;
+        total += (unsigned long)w * h * d;
         break;
+      }
+      default:
+        __builtin_trap();
       }
     }
   }
