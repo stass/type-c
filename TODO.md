@@ -153,11 +153,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   failure functions take a diagnostic of two cases, a rule of Type-C
   made only by `Rule.message` and a refusal of C text, so that each
   site chooses visibly; state the boundary in design 13.6.
-- [Medium] Nothing stops a retired code from being reused: the table in
-  `src/syntax/rule_table/rule_table.ml` checks only that codes rise, so
-  deleting the last rule and adding one with its number passes. Keep
-  retired rows in the table, marked retired, left out of `Rule.t` and
-  listed as retired in the catalogue.
 - [Low] `#ident` and `#sccs`, which `cc -E` passes through, are refused
   as unsupported directives. Pass them through like a pragma if a corpus
   uses them.

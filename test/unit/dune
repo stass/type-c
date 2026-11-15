@@ -40,3 +40,8 @@
  (name test_parser)
  (modules test_parser)
  (libraries typec_cpp typec_syntax typec_test_support))
+
+(test
+ (name test_rule_codegen)
+ (modules test_rule_codegen)
+ (libraries rule_codegen))

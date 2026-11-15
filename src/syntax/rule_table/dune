@@ -2,7 +2,15 @@
 ; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 ; The one table of the rules that typec enforces; it generates the module
-; Rule of typec_syntax and the catalogue of diagnostics.
+; Rule of typec_syntax and the catalogue of diagnostics. The library
+; checks the table and makes both outputs from it, so that a test runs it
+; on tables of its own.
+
+(library
+ (name rule_codegen)
+ (modules rule_codegen))
 
 (executable
- (name rule_table))
+ (name rule_table)
+ (modules rule_table)
+ (libraries rule_codegen))
