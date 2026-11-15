@@ -332,23 +332,51 @@ let matching (tokens : Token.t array)
       [ statement.last ]
 
 (* Design 13.5: a construct that typec answers, where the backend would
-   answer for the representation of a distinct type, is replaced by the
-   answer. Each range of its tokens that goes is replaced by [text], with
-   the edits that lowering makes inside it. *)
+   answer for the representation of a distinct type, is steered to or
+   replaced by the answer. Each range of its tokens that lowering
+   replaces is replaced by [text], and the edits inside it go. *)
 type dropped = { first : int; last : int; text : string }
 
 let integer_constant compatible = if compatible then "1" else "0"
 
-(* A generic selection becomes the expression it selects (C11 6.5.1.1p4),
-   in parentheses, which keep its type, value and lvalue or function
-   designator (6.5.1p5), unless it is a string literal: one in
-   parentheses initialises no array (6.7.9p14), and a string literal in
-   the place of the selection parses as the selection does, as both are
-   primary expressions. *)
-let parentheses (result : Tree.expression) =
-  match result.node with
-  | String _ -> ("", "")
-  | _ -> ("(", ")")
+(* The type name that only association [index] of an answered generic
+   selection matches, counting from 1: pointers to arrays of different
+   constant lengths are incompatible (C11 6.7.6.2p6). *)
+let steering_type index = Printf.sprintf "char (*)[%d]" index
+
+(* A generic selection that typec answers keeps its controlling
+   expression and its associations, so the backend sees the names they
+   use and the tags they declare, but for those in a type name. Each
+   association is numbered by its position, the type name of association
+   [i] becomes [steering_type i], and the controlling expression, which
+   is not evaluated (C11 6.5.1.1p3), is kept beside a null pointer of
+   the selected association's steering type, so the backend selects
+   what typec did. [default] has no type name and stays: when typec
+   selects it, no type name has its number. *)
+let numbered associations =
+  List.mapi (fun index association -> (index + 1, association)) associations
+
+let result_of (association : Tree.generic_association) =
+  match association.node with
+  | Association (_, result) | Default_association result -> result
+
+let steered_type_names associations =
+  List.filter_map
+    (fun (number, (association : Tree.generic_association)) ->
+      match association.node with
+      | Association (type_name, _) ->
+          Some
+            { first = type_name.span.first;
+              last = type_name.span.last;
+              text = steering_type number }
+      | Default_association _ -> None)
+    (numbered associations)
+
+let selected_number associations (result : Tree.expression) =
+  let selects (_, association) =
+    (result_of association).span = result.span
+  in
+  fst (List.find selects (numbered associations))
 
 let dropped_ranges (answered : Typec_sema.Expressions.answered) =
   let { Typec_sema.Expressions.construct; answer } = answered in
@@ -357,12 +385,17 @@ let dropped_ranges (answered : Typec_sema.Expressions.answered) =
       [ { first = construct.first;
           last = construct.last;
           text = integer_constant compatible } ]
-  | Selected result ->
-      let opening, closing = parentheses result in
-      [ { first = construct.first; last = result.span.first - 1;
-          text = opening };
-        { first = result.span.last + 1; last = construct.last;
-          text = closing } ]
+  | Selected { associations; _ } -> steered_type_names associations
+
+let steered_controlling tokens (answered : Typec_sema.Expressions.answered) =
+  match answered.answer with
+  | Compatible _ -> []
+  | Selected { controlling; associations; result } ->
+      let selected = steering_type (selected_number associations result) in
+      [ insert tokens ~before:controlling.span.first "((void)(";
+        insert tokens
+          ~before:(grammar_token_after tokens controlling.span.last)
+          (Printf.sprintf "), (%s)0)" selected) ]
 
 (* A range inside another goes with it, so only the outermost are kept:
    the edits of one inside would overlap those of the one around it. *)
@@ -388,8 +421,11 @@ let dropped_edits tokens range =
 (* A type declaration may hold another, in a statement expression of
    its definition, and a constructor's arguments other constructors, so
    the edits of all are sorted; an insertion before a token comes before
-   an edit that replaces it. The edits inside a dropped range go, and the
-   range's own edits replace them. *)
+   an edit that replaces it. Two insertions before one token keep their
+   order in [lowered], so the steering of a generic selection nests only
+   because no other lowering inserts before the first token of its
+   controlling expression or the comma after it. The edits inside a
+   dropped range go, and the range's own edits replace them. *)
 let edits (text : Reader.t) declarations constructions matchings answered =
   let tokens = text.tokens in
   let ranges = outermost (List.concat_map dropped_ranges answered) in
@@ -400,6 +436,7 @@ let edits (text : Reader.t) declarations constructions matchings answered =
     List.concat_map (type_declaration tokens) declarations
     @ List.concat_map (construction tokens) constructions
     @ List.concat_map (matching tokens) matchings
+    @ List.concat_map (steered_controlling tokens) answered
   in
   List.concat_map (dropped_edits tokens) ranges @ List.filter kept lowered
   |> List.stable_sort (fun (a : Emitter.edit) (b : Emitter.edit) ->

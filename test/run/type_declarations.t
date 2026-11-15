@@ -187,3 +187,32 @@ literal keep what they are.
   reg_id not int not reg_id 5 0 6 0 1
   $ typec --cc=$gcc -Wall -Werror -o gcc-select select.tc && ./gcc-select
   reg_id not int not reg_id 5 0 6 0 1
+
+A selection that typec answers keeps its controlling expression and
+every association, and the backend selects typec's answer (design
+13.5), so it sees the names they use and the tags they declare: under
+-Wall -Werror a variable used only in the controlling expression and a
+function used only in an association not selected would fail the build
+as unused, and a later use of a tag would not find it.
+
+  $ cat > kept.tc <<'EOF'
+  > #include <stdio.h>
+  > type reg_id = distinct int;
+  > static int unselected(void) { return 1; }
+  > int main(void) {
+  >   reg_id r = (reg_id)2;
+  >   reg_id only_controlling = (reg_id)3;
+  >   int a = _Generic(only_controlling, reg_id: 7, int: unselected());
+  >   int b = _Generic((struct held { reg_id r; }){ r }.r,
+  >                    int: (struct skipped { int n; }){ 1 }.n,
+  >                    reg_id: 8);
+  >   struct held h = { r };
+  >   struct skipped d = { 4 };
+  >   printf("%d %d %d %d\n", a, b, (int)h.r, d.n);
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Werror -o clang-kept kept.tc && ./clang-kept
+  7 8 2 4
+  $ typec --cc=$gcc -Wall -Werror -o gcc-kept kept.tc && ./gcc-kept
+  7 8 2 4

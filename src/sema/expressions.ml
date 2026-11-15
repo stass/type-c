@@ -73,7 +73,13 @@ type matching = {
   arms : matched_arm list;
 }
 
-type answer = Selected of Tree.expression | Compatible of bool
+type answer =
+  | Selected of {
+      controlling : Tree.expression;
+      associations : Tree.generic_association list;
+      result : Tree.expression;
+    }
+  | Compatible of bool
 type answered = { construct : Tree.span; answer : answer }
 
 (* The target type of an expression's position, which selects an
@@ -2260,22 +2266,24 @@ and selection_of context (selecting : Tree.expression) =
    as C17 says and GCC and Clang do in every mode. *)
 and generic context span controlling associations =
   let controlling_typed = whole_value context controlling in
-  let associations =
+  let associations_typed =
     List.map (generic_association context span) associations
   in
-  check_distinct context associations;
-  let default = default_association context associations in
+  check_distinct context associations_typed;
+  let default = default_association context associations_typed in
   let controlling_type =
     Ctype.lvalue_conversion
       (as_seen context span controlling_typed).expression_type
   in
   let types =
     controlling_type
-    :: List.filter_map (fun a -> a.association_type) associations
+    :: List.filter_map (fun a -> a.association_type) associations_typed
   in
-  let selection = select context span controlling_type associations default in
+  let selection =
+    select context span controlling_type associations_typed default
+  in
   record_answer context span types
-    ~lowered:(fun result -> Selected result)
+    ~lowered:(fun result -> Selected { controlling; associations; result })
     selection;
   selection
 

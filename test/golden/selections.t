@@ -4,8 +4,10 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 The constructs that ask whether types are compatible (design 13.5). The
 backend sees a distinct type as the typedef of its representation, so
 where Type-C text compares a distinct type typec answers: a generic
-selection becomes its selected expression in parentheses, and
-__builtin_types_compatible_p the integer constant 1 or 0.
+selection keeps its tokens, and its controlling expression and the type
+name of each association are replaced so that the backend selects the
+association typec selects; __builtin_types_compatible_p becomes the
+integer constant 1 or 0.
 
   $ cat > select.tc <<'EOF'
   > type d = distinct int;
@@ -21,16 +23,24 @@ __builtin_types_compatible_p the integer constant 1 or 0.
   d
   ;
   d x;
-  int a = 
-  (
-   1
-  )
-  ;
-  int b = 
-  (
-   2
-  )
-  ;
+  int a = _Generic(
+  ((void)(
+  x
+  ), (char (*)[1])0)
+  , 
+  char (*)[1]
+  : 1, 
+  char (*)[2]
+  : 2);
+  int b = _Generic(
+  ((void)(
+  (int)x
+  ), (char (*)[2])0)
+  , 
+  char (*)[1]
+  : 1, 
+  char (*)[2]
+  : 2);
   int c = 
   0
   ;
@@ -38,9 +48,9 @@ __builtin_types_compatible_p the integer constant 1 or 0.
   1
   ;
 
-The kept expression keeps the edits that lowering makes in it, and the
-controlling expression and the associations dropped lose theirs: here a
-constructor in each, and selections nested in both.
+The controlling expression and the associations keep the edits that
+lowering makes in them, and a replaced type name loses its own: here a
+constructor in each association, and selections nested in both.
 
   $ cat > nested.tc <<'EOF'
   > type d = distinct int;
@@ -67,25 +77,59 @@ constructor in each, and selections nested in both.
   } u; };
   d x;
   e f(void) {
-    return 
-  (
-   
-  (
-   
+    return _Generic(
+  ((void)(
+  x
+  ), (char (*)[2])0)
+  , 
+  char (*)[1]
+  : 
   ((struct e){ .tag = e_B, .u.B = { 
-  (
-   4
-  )
+  1
    } })
-  )
-  )
-  ;
+  ,
+                    
+  char (*)[2]
+  : _Generic(
+  ((void)(
+  x
+  ), (char (*)[1])0)
+  , 
+  char (*)[1]
+  : 
+  ((struct e){ .tag = e_B, .u.B = { 
+  _Generic(
+  ((void)(
+  0
+  ), (char (*)[2])0)
+  , 
+  char (*)[1]
+  : 3, 
+  char (*)[2]
+  : 4)
+   } })
+  ,
+                                default: 
+  ((struct e){ .tag = e_A })
+  ));
   }
-  int g(void) { return 
-  (
-   4
-  )
-  ; }
+  int g(void) { return _Generic(
+  ((void)(
+  _Generic(
+  ((void)(
+  x
+  ), (char (*)[1])0)
+  , 
+  char (*)[1]
+  : 1, 
+  char (*)[2]
+  : 2)
+  ), (char (*)[2])0)
+  , 
+  char (*)[1]
+  : 3, 
+  char (*)[2]
+  : 4); }
 
 A selection that compares no distinct type is the backend's, and its
 tokens stay as they are.
@@ -98,14 +142,42 @@ tokens stay as they are.
   int n = _Generic(1, int: 2, default: 3);
   int m = __builtin_types_compatible_p(int, long);
 
-A string literal that a selection gives keeps no parentheses, so that it
-still initialises an array (C11 6.7.9p14).
+Where typec selects the default association, it stays, and the
+controlling expression steers to the index of its position, which no
+type name has.
 
-  $ printf 'type d = distinct int;\nd x;\nchar s[] = _Generic(x, d: "ab", default: "c");\n' > string.tc
-  $ ./golden.exe string.tc | grep -v '^# ' | grep . | tail -3
-  char s[] = 
-   "ab"
-  ;
+  $ cat > default.tc <<'EOF'
+  > type d = distinct int;
+  > d x;
+  > int y = _Generic(x, int: 1, default: 2);
+  > EOF
+  $ ./golden.exe default.tc | grep -v '^# ' | grep . | tail -7
+  int y = _Generic(
+  ((void)(
+  x
+  ), (char (*)[2])0)
+  , 
+  char (*)[1]
+  : 1, default: 2);
+
+A selection answered inside a type name that is replaced goes with it,
+with its own edits.
+
+  $ cat > inner.tc <<'EOF'
+  > type d = distinct int;
+  > d x;
+  > int z = _Generic(x, __typeof__(_Generic(x, d: 1.0, int: 2)): 1, d: 2);
+  > EOF
+  $ ./golden.exe inner.tc | grep -v '^# ' | grep . | tail -9
+  int z = _Generic(
+  ((void)(
+  x
+  ), (char (*)[2])0)
+  , 
+  char (*)[1]
+  : 1, 
+  char (*)[2]
+  : 2);
 
 C text compares the types as it sees them, the representation of a
 distinct type (design 10.2), as the backend does, so its selections stay

@@ -27,6 +27,9 @@ val edits :
     [declarations], the constructor expressions [constructions], the
     match statements [matchings] and the constructs [answered], parsed
     from [text], to edits in the order that
-    {!Emitter.emit} takes. An answered construct drops its tokens but
-    those of the expression it selects, and the edits of the tokens it
-    drops are discarded. *)
+    {!Emitter.emit} takes. An answered [__builtin_types_compatible_p]
+    becomes its answer. An answered generic selection keeps its tokens,
+    but the type names of its associations become types that steer the
+    backend to typec's answer, and its controlling expression is wrapped
+    to have the selected one; the edits of the tokens dropped are
+    discarded. *)

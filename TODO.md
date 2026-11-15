@@ -249,22 +249,19 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [Medium] Design 13.5: a `_Generic` that typec answers keeps only the
-  selected expression, so the backend no longer sees the uses in its
-  controlling expression and other associations: `-Wunused-variable` and
-  `-Wunused-function` fire on a name used only there, which fails a
-  `-Werror` build. Keeping every association and making the backend
-  select typec's answer would keep them: the controlling expression as
-  `((void)(e), (char (*)[k])0)` and the type name of association `i` as
-  `char (*)[i]`. Owner to choose.
-- [Medium] Design 13.5: a structure, union or enumeration that a type
-  name or the controlling expression of an answered `_Generic` or
-  `__builtin_types_compatible_p` declares is dropped with it, though C
-  declares it in the enclosing scope (6.7.2.3). A later use then fails
+- [Medium] Design 13.5: the type name of an association of an answered
+  `_Generic`, or an operand of an answered
+  `__builtin_types_compatible_p`, is dropped with what it declares and
+  uses. A structure, union or enumeration it declares is gone, though C
+  declares it in the enclosing scope (6.7.2.3): a later use then fails
   in the backend, or silently means an outer declaration of the name
-  (`_Generic(x, d: 1, enum { K = 5 }: 2)` before a use of a global `K`).
-  Refuse an answered construct whose dropped tokens declare a tag or an
-  enumeration constant.
+  (`_Generic(x, d: 1, enum { K = 5 }: 2)` before a use of a global
+  `K`). A name used only there, through `__typeof__`, fires
+  `-Wunused-variable` or `-Wunused-function`, which fails a `-Werror`
+  build. Refuse an answered construct whose dropped type names declare
+  a tag or an enumeration constant. Untried: a type name kept as
+  `__typeof__((void)(__typeof__(T) *)0, (char (*)[i])0)` might keep
+  both, at the cost of a stranger lowering.
 - [Low] `Expressions.answered` copies the answers that `selections` and
   `compatibilities` hold; recording only the spans answered would leave
   one copy.

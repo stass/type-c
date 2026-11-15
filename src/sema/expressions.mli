@@ -180,12 +180,19 @@ type matching = {
 val matchings : t -> matching list
 (** The match statements typed, in source order. *)
 
-(** What lowering puts in place of a construct that asks whether types
-    are compatible where Type-C text compares a distinct type with them
+(** How lowering answers a construct that asks whether types are
+    compatible where Type-C text compares a distinct type with them
     (design 13.5), as the backend would answer for its representation:
-    the result expression that a generic selection selects, or the answer
-    of [__builtin_types_compatible_p]. *)
-type answer = Selected of Tree.expression | Compatible of bool
+    for a generic selection, its controlling expression, its
+    associations and the result expression it selects; for
+    [__builtin_types_compatible_p], its answer. *)
+type answer =
+  | Selected of {
+      controlling : Tree.expression;
+      associations : Tree.generic_association list;
+      result : Tree.expression;
+    }
+  | Compatible of bool
 
 type answered = { construct : Tree.span; answer : answer }
 
