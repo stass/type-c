@@ -141,6 +141,10 @@ let rules =
       meaning =
         "A [break] outside every loop, [switch] and match; also C11 \
          6.8.6.3p1." };
+    { name = "Early_break"; code = 28; clause = Some "design 4.3 rule 5";
+      meaning =
+        "A [break] in Type-C text that leaves a match other than in \
+         tail position of its arm." };
   ]
 
 (* Stable codes are "TC" and four digits: fixed width for tools that read

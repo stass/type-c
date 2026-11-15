@@ -89,8 +89,15 @@ type jump_scope =
          loop, switch and match within it, where Clang leaves the loop
          and GCC reads the scope [around] the loop (design 4.4). *)
 
+(* The innermost match arm around the cursor: the match it belongs to,
+   and the breaks in Type-C text read in it so far that leave that
+   match, by the first token of each, latest first. Design 4.3 rule 5
+   judges them where the arm ends. *)
+type arm_breaks = { matched : jump_target; mutable leaving : int list }
+
 (* The cursor. [scope] is persistent, so leaving a scope restores the
-   value saved on entering it, and so is [jumps]. *)
+   value saved on entering it, and so is [jumps]; leaving an arm restores
+   [arm]. An error abandons the state, so it needs no restoring on one. *)
 type state = {
   reader : Reader.t;
   grammar : grammar_token array;
@@ -99,6 +106,7 @@ type state = {
       (** read and not yet closed, innermost first *)
   mutable scope : scope;
   mutable jumps : jump_scope;
+  mutable arm : arm_breaks option;
 }
 
 (* The function derivation applied to the name that a declarator
@@ -261,11 +269,72 @@ let jump_targets state start keyword leaves ~no_target =
       | None -> Only loop (* GCC refuses it *)
       | Some around -> Either { loop; around })
 
+(* Notes the break at [start], which leaves [leaves], for design 4.3
+   rule 5 if it is Type-C text that leaves the match of the arm around
+   it. A Type-C break is never disputed, so it leaves [Only] one. *)
+let note_arm_break state start leaves =
+  let token = first_token state start in
+  match state.arm with
+  | Some arm when leaves = Only arm.matched && is_type_c_text_at state token
+    ->
+      arm.leaving <- token :: arm.leaving
+  | Some _ | None -> ()
+
 (* What the break at [start] leaves. *)
 let break_target state start =
-  jump_targets state start "break" break_leaves
-    ~no_target:
-      (Rule.message Break_outside "break outside a loop, switch or match")
+  let leaves =
+    jump_targets state start "break" break_leaves
+      ~no_target:
+        (Rule.message Break_outside "break outside a loop, switch or match")
+  in
+  note_arm_break state start leaves;
+  leaves
+
+(* Tokens of [Reader.t.tokens], by index. *)
+module Token_set = Set.Make (Int)
+
+(* The breaks in tail position of the arm whose block items are [items]
+   (design 4.3 rule 5), by the first token of each. Tail position passes
+   inward only through the cases below, so a break in a statement
+   expression or in the control of a statement is never in it. The walk
+   keeps a list of statements to visit, not the stack, as the parser
+   reads a chain of [if] or labels without recursing; the result is a
+   set, as such a chain may hold as many tail breaks as it is long. *)
+let tail_breaks (items : block_item list) =
+  let last_statement items =
+    match List.rev items with
+    | Block_statement last :: _ -> [ last ]
+    | (Block_declaration _ | Block_type_declaration _) :: _ | [] -> []
+  in
+  let rec visit found = function
+    | [] -> found
+    | (statement : statement) :: rest -> (
+        match statement.node with
+        | Break _ -> visit (Token_set.add statement.span.first found) rest
+        | Labeled { statement = labelled; _ } -> visit found (labelled :: rest)
+        | Compound b -> visit found (last_statement b.node.items @ rest)
+        | If { then_branch; else_branch; condition = _ } ->
+            visit found ((then_branch :: Option.to_list else_branch) @ rest)
+        | Expression_statement _ | Null_statement | Attribute_statement _
+        | Switch _ | While _ | Do _ | For _ | Goto _ | Computed_goto _
+        | Continue _ | Return _ | Asm _ | Match _ ->
+            visit found rest)
+  in
+  visit Token_set.empty (last_statement items)
+
+(* Design 4.3 rule 5: refuses the first break of [breaks] that is not in
+   tail position of the arm whose block items are [items]. *)
+let refuse_early_breaks state breaks items =
+  let tail = tail_breaks items in
+  let early token = not (Token_set.mem token tail) in
+  match List.find_opt early (List.rev breaks.leaving) with
+  | None -> ()
+  | Some token ->
+      fail_at_token state token
+        (Rule.message Early_break
+           "a break that leaves the match before the end of its arm; put \
+            the `break` last in the arm, or leave the loop with `goto` or \
+            `return`, or use a single-pattern test (design 4.6)")
 
 (* What the continue at [start] leaves. *)
 let continue_target state start =
@@ -2908,8 +2977,9 @@ and match_statement state start =
       let scrutinee = expression state in
       expect state P.Right_paren "`)` after the scrutinee of `match`";
       expect state P.Left_brace "`{` after the scrutinee of `match`";
+      let matched = target_at state start in
       let rec loop arms =
-        if begins_arm_label state then loop (arm state :: arms)
+        if begins_arm_label state then loop (arm state ~matched :: arms)
         else if arms <> [] && accept state P.Right_brace then List.rev arms
         else
           fail state
@@ -2918,8 +2988,7 @@ and match_statement state start =
                  found " ^ found state))
       in
       let arm_jumps =
-        Switch_or_match
-          { target = target_at state start; around = state.jumps }
+        Switch_or_match { target = matched; around = state.jumps }
       in
       let arms = with_jumps state arm_jumps (fun () -> loop []) in
       finish state start (Match { scrutinee; arms }))
@@ -2929,10 +2998,20 @@ and begins_arm_label state =
   | Keyword_token (Keyword.Case | Keyword.Default) -> true
   | _ -> false
 
-(* An arm is a block of its own (design 4.1 rule 5): its bindings and
-   declarations end with it. *)
-and arm state =
+(* An arm of the match [matched] is a block of its own (design 4.1 rule
+   5): its bindings and declarations end with it. Its breaks that leave
+   the match end it (4.3 rule 5). *)
+and arm state ~matched =
   let start = state.position in
+  let around = state.arm in
+  let breaks = { matched; leaving = [] } in
+  state.arm <- Some breaks;
+  let (read : arm) = arm_body state start in
+  state.arm <- around;
+  refuse_early_breaks state breaks read.node.items;
+  read
+
+and arm_body state start =
   in_scope state (inner_scope state) (fun () ->
       let rec labels read =
         if begins_arm_label state then labels (arm_label state :: read)
@@ -3213,6 +3292,7 @@ let parse ~keywords reader =
       open_brackets = [];
       scope = file_scope keywords;
       jumps = Function_body;
+      arm = None;
     }
   in
   match

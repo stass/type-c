@@ -1449,7 +1449,7 @@ let arm_termination () =
   accepted "{ n++; { break; } }";
   accepted "L: return 1;";
   accepted "({ return 1; });";
-  accepted "(({ n++; break; }));";
+  accepted "(({ n++; continue; }));";
   accepted "match (v) { case A: return 1; default: die(); }";
   accepted "match (v) { case A: break; default: return 1; } return 2;";
   refused "n++;";

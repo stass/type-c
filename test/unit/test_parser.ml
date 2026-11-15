@@ -212,7 +212,7 @@ let jump_target_cases =
       "for (;;) {\nwhile (case A = ({ if (n) break; v; })) continue;\n}"
       "break->while:3 continue->while:3";
     jumps "a break in the statement of a test in a match leaves the match"
-      "while (n)\nmatch (v) {\ndefault:\nif (case A = v) break;\nbreak;\n}"
+      "while (n)\nmatch (v) {\ndefault:\nif (case A = v) break;\nelse break;\n}"
       "break->match:3 break->match:3";
     jumps "a break outside a loop, switch or match" "break;"
       "error: in.tc:2: break outside a loop, switch or match (C11 \
@@ -303,6 +303,89 @@ let c_text_jump_target_cases =
     jumps "a continue in the same place continues the inner loop"
       "while (({ do ; while (({ continue; 1; })); 1; })) ;"
       "continue->do:2";
+  ]
+
+(* A break in Type-C text that leaves a match ends its arm: it is in tail
+   position, by the last block item, the branches of an if and the
+   statement of a label (design 4.3 rule 5). A break that a loop or
+   switch in the arm takes is that statement's. *)
+let tail_break_cases =
+  let in_function body =
+    "type e = | A | B; void f(e v, int n) {\n" ^ body ^ "\n}"
+  in
+  let jumps name body expected = case name (in_function body) expected in
+  let refused line =
+    Printf.sprintf
+      "error: in.tc:%d: a break that leaves the match before the end of \
+       its arm; put the `break` last in the arm, or leave the loop with \
+       `goto` or `return`, or use a single-pattern test (design 4.6) \
+       (design 4.3 rule 5) [TC0028]"
+      line
+  in
+  [
+    jumps "a break in an if before the end of an arm in a loop"
+      "for (;;) {\nmatch (v) {\ncase A:\nif (n) break;\nn++;\nbreak;\n\
+       default:\nreturn;\n}\n}"
+      (refused 5);
+    jumps "a break in a statement expression in an arm"
+      "match (v) {\ndefault:\nn = ({ if (n) break; n; });\nbreak;\n}"
+      (refused 4);
+    jumps "a break in a statement expression that ends an arm"
+      "match (v) {\ndefault:\n({ break; });\n}"
+      (refused 4);
+    jumps "a break in the operand of a test in an arm"
+      "match (v) {\ndefault:\n\
+       if (case A = ({ if (n) break; v; })) return;\nbreak;\n}"
+      (refused 4);
+    jumps "a break in the condition of an if in tail position"
+      "match (v) {\ndefault:\nif (({ if (n) break; 1; })) return;\n\
+       else return;\n}"
+      (refused 4);
+    jumps "a break in the first clause of a for in an arm"
+      "match (v) {\ndefault:\nfor (({ break; 0; }); ;) ;\n}"
+      (refused 4);
+    jumps "a break that ends a block before the end of an arm"
+      "match (v) {\ndefault:\n{ n++; break; }\nn++;\nbreak;\n}"
+      (refused 4);
+    jumps "a break before a declaration that ends an arm"
+      "match (v) {\ndefault:\nbreak;\nint m;\n}"
+      (refused 4);
+    jumps "a break in the controlling expression of a switch in an arm"
+      "match (v) {\ndefault:\nswitch (({ if (n) break; n; })) {\n\
+       default: return;\n}\n}"
+      (refused 4);
+    jumps "a break in a type name in an arm"
+      "match (v) {\ndefault:\nn = sizeof(int[({ if (n) break; 1; })]);\n\
+       break;\n}"
+      (refused 4);
+    jumps "a break before a null statement that ends an arm"
+      "match (v) {\ndefault:\nbreak;\n;\n}"
+      (refused 4);
+    jumps "a break in a scrutinee in an arm leaves the outer match"
+      "match (v) {\ndefault:\nmatch (({ if (n) break; v; })) {\n\
+       default: return;\n}\n}"
+      (refused 4);
+    jumps "a break in each branch of an if that ends an arm"
+      "match (v) {\ncase A:\nif (n) { n++; break; } else { n--; break; }\n\
+       default:\nbreak;\n}"
+      "break->match:2 break->match:2 break->match:2";
+    jumps "a labelled break that ends an arm"
+      "match (v) {\ncase A:\nif (n) goto out;\nn++;\nout:\nbreak;\n\
+       default:\nbreak;\n}"
+      "break->match:2 break->match:2";
+    jumps "a break in a nested block that ends an arm"
+      "match (v) {\ndefault:\nn++;\n{ n++; { break; } }\n}"
+      "break->match:2";
+    jumps "breaks of a loop, a switch and a match within an arm"
+      "match (v) {\ncase A:\nwhile (n) { if (n) break; n--; }\n\
+       switch (n) { case 1: break; default: n++; }\n\
+       match (v) { default: break; }\nbreak;\ndefault:\nbreak;\n}"
+      "break->while:4 break->switch:5 break->match:6 break->match:2 \
+       break->match:2";
+    jumps "a break in the statement of a test in tail position"
+      "match (v) {\ndefault:\nn++;\nif (case B = v) { n++; break; }\n\
+       else return;\n}"
+      "break->match:2";
   ]
 
 let declarator_cases =
@@ -1683,15 +1766,25 @@ let failed_chain_cases () =
         "int x = __builtin_offsetof(struct s, a" ^ repeat length ".a" ^ ");" );
     ]
   in
-  List.filter_map
-    (fun (name, text) ->
-      match Reader.read ~name:"in.i" text with
-      | Error _ -> Some (name, "read error")
-      | Ok reader -> (
-          match Parser.parse ~keywords:gnu_keywords reader with
-          | Ok _ -> None
-          | Error error -> Some (name, error.message)))
-    texts
+  (* Each break of the chain is in tail position of the arm (design 4.3
+     rule 5), which the parser checks against every one. *)
+  let type_c_texts =
+    [
+      ( "else-if chains of breaks in an arm",
+        "type e = | A; void f(e v, int a) { match (v) { default: "
+        ^ repeat length "if (a) break; else " ^ "break; } }" );
+    ]
+  in
+  let failures file =
+    List.filter_map (fun (name, text) ->
+        match Reader.read ~name:file text with
+        | Error _ -> Some (name, "read error")
+        | Ok reader -> (
+            match Parser.parse ~keywords:gnu_keywords reader with
+            | Ok _ -> None
+            | Error error -> Some (name, error.message)))
+  in
+  failures "in.i" texts @ failures type_c_file type_c_texts
 
 (* Every case runs on the small stack that the fuzz harness runs the
    parser on, so that a chain the parser reads in a loop fails loudly if
@@ -2174,6 +2267,7 @@ let failures () =
     @ failed_with scope_ends scope_end_cases
     @ failed_with jump_targets jump_target_cases
     @ failed_with (jump_targets ~file:"in.i") c_text_jump_target_cases
+    @ failed_with jump_targets tail_break_cases
   in
   (failed, failed_nesting_cases () @ failed_chain_cases ())
 

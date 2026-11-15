@@ -551,6 +551,55 @@ outside them has none to leave (design 4.3 rule 2).
   stray.tc:2: break outside a loop, switch or match (C11 6.8.6.3p1, design 4.3 rule 2) [TC0027]
   [1]
 
+A break that leaves a match ends its arm (design 4.3 rule 5). Before
+this code became an arm the break left the loop; in the arm it would
+leave only the match, and the loop would go on.
+
+  $ cat > early.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e *v, int n) {
+  >   for (int i = 0; i < n; i++) {
+  >     match (v[i]) {
+  >     case A:
+  >       if (i > 2)
+  >         break;
+  >       n--;
+  >       break;
+  >     case B:
+  >       return i;
+  >     }
+  >   }
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe early.tc
+  early.tc:7: a break that leaves the match before the end of its arm; put the `break` last in the arm, or leave the loop with `goto` or `return`, or use a single-pattern test (design 4.6) (design 4.3 rule 5) [TC0028]
+  [1]
+
+A break that a C header brings into an arm is C text, which the rule
+does not bind: the arm is judged by rule 1 alone.
+
+  $ cat > header_break.tc <<'EOF'
+  > # 1 "header_break.tc"
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   for (;;) {
+  >     match (v) {
+  >     case A:
+  > # 1 "early.h" 1
+  >       if (n) break;
+  > # 7 "header_break.tc" 2
+  >       n--;
+  >       break;
+  >     case B:
+  >       return n;
+  >     }
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe header_break.tc | grep 'if (n)'
+        if (n) break;
+
 The scrutinee is of a variant whose declaration is in scope at the
 match, which names its tag and enumerators (design 4.1 rule 1).
 
