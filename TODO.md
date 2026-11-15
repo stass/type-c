@@ -19,9 +19,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
-- [Medium] A backend that resolves to `typec` itself, such as a `cc`
-  symlink to `typec` first on `PATH`, makes the driver exec itself forever
-  with no message. Detect it, or document how to install `typec` as `cc`.
 - [Low] `Target_query.query` starts and waits for the backend itself,
   so in a compilation it hands the backend `typec`'s stdin, not
   `/dev/null`, and does not pass on a caught signal as `Process.wait`

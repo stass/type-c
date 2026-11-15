@@ -186,10 +186,25 @@ let perform (invocation : Invocation.t) =
       compile_through_pipeline invocation
   | Invocation.Compile -> exec invocation
 
-let run_command_line ~env_cc arguments =
+(* Every process below a backend inherits the mark, so typec refuses to
+   run anywhere there: a backend that is typec itself, or runs it, would
+   otherwise start typec again forever. Refusing a nested typec that
+   would end is the price of not telling the two apart. *)
+let outer_cc_variable = "TYPEC_OUTER_CC"
+
+let refuse_as_backend outer_cc =
+  fail Exit_status.Environment
+    (Printf.sprintf
+       "the C compiler %S runs typec again (%S, marked by %s): name the \
+        real C compiler with --cc=PATH or TYPEC_CC"
+       outer_cc Sys.executable_name outer_cc_variable)
+
+let run_command_line ~env_cc ~outer_cc arguments =
+  Option.iter refuse_as_backend outer_cc;
   match Invocation.of_command_line ~env_cc arguments with
   | Error error -> fail Exit_status.Environment (Invocation.error_message error)
   | Ok invocation -> (
+      Unix.putenv outer_cc_variable invocation.program;
       try perform invocation
       with Unix.Unix_error (error, _, _) ->
         fail Exit_status.Environment (cannot_run invocation.program error))
@@ -203,10 +218,10 @@ let hold_standard_descriptors () =
 (* Every failure of typec's own is handled where it happens, so an
    exception that reaches this handler is a bug. The backtrace, recorded
    under OCAMLRUNPARAM=b, comes first so that the message ends stderr. *)
-let run ~env_cc arguments =
+let run ~env_cc ~outer_cc arguments =
   try
     hold_standard_descriptors ();
-    run_command_line ~env_cc arguments
+    run_command_line ~env_cc ~outer_cc arguments
   with exn ->
     (try prerr_string (Printexc.get_backtrace ()) with Sys_error _ -> ());
     fail Exit_status.Internal

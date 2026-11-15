@@ -61,3 +61,34 @@ message and 81, the status of typec's environment errors
   $ typec --cc= -c hello.c
   typec: --cc= needs the path of a C compiler
   [81]
+
+A C compiler that runs typec again, such as a cc first on PATH that is a
+symlink to typec or a script that runs it, would make typec start itself
+forever. typec marks the environment of every C compiler it runs, and a
+typec that finds the mark refuses with one message and 81, naming the C
+compiler and the path that typec was started as, which sed replaces. The
+cc here is a script that gives up on its fourth run, so that a typec that
+loops fails the test rather than hang it.
+
+  $ mkdir own
+  $ cat > own/cc <<'EOF'
+  > #!/bin/sh
+  > echo run >> runs
+  > test "$(wc -l < runs)" -le 3 || exit 99
+  > exec typec "$@"
+  > EOF
+  $ chmod +x own/cc
+  $ PATH="$PWD/own:$PATH" typec -c hello.c 2> message
+  [81]
+  $ sed 's/(".*",/(TYPEC,/' message
+  typec: the C compiler "cc" runs typec again (TYPEC, marked by TYPEC_OUTER_CC): name the real C compiler with --cc=PATH or TYPEC_CC
+
+The same holds when typec runs the C compiler as a step of compiling a
+.tc input: the step ends with 81, and so does typec.
+
+  $ rm runs
+  $ touch empty.tc
+  $ PATH="$PWD/own:$PATH" typec -c empty.tc 2> message
+  [81]
+  $ sed 's/(".*",/(TYPEC,/' message
+  typec: the C compiler "cc" runs typec again (TYPEC, marked by TYPEC_OUTER_CC): name the real C compiler with --cc=PATH or TYPEC_CC

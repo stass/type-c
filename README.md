@@ -151,6 +151,15 @@ without `=` included, in its original order. The backend is run with an
 argument vector, never through a shell, so `TYPEC_CC` names one program:
 it cannot carry extra arguments such as `ccache gcc`.
 
+A backend that runs `typec` again, such as a `cc` first on `PATH` that
+is `typec` itself, is refused: `typec` sets `TYPEC_OUTER_CC` to the
+backend's name in the environment of every backend it runs, and a
+`typec` that starts with it set exits with 81 after one message naming
+that backend. The whole process tree of the backend inherits the mark,
+so a `typec` that a wrapper backend runs on purpose is refused too. To
+install `typec` as `cc`, set `TYPEC_CC` to the path of the real C
+compiler.
+
 The backend is GCC or Clang, Apple's included, no older than the
 releases that `minimum_major_version` in
 [src/sema/target.ml](src/sema/target.ml) names. `typec` refuses an
@@ -158,8 +167,10 @@ older one with a message naming the oldest supported releases.
 
 Without a `.tc` input `typec` replaces itself with the backend. Exit
 status: the backend's own; a backend ended by a signal ends `typec`
-with the same signal. `typec` exits with 81 when `--cc=` has no path or
-the backend cannot be started, after one message on stderr.
+with the same signal. `typec` exits with 81 when `--cc=` has no path, the
+backend cannot be started or the backend runs `typec` again, after one
+message on stderr (with `--print-target`, a second says that the backend
+gave no target model).
 
 `typec`'s own failures have statuses of their own, which
 [src/driver/exit_status.ml](src/driver/exit_status.ml) defines and

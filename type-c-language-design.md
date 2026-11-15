@@ -1527,6 +1527,20 @@ language is defined here and not by the tool.
   (`-MD`) come from the preprocessing step and name the real output.
 - The *backend* is the C compiler named by `--cc=` or `TYPEC_CC`, by default
   `cc`. GCC and Clang are supported, from the releases that 13.3 names.
+- A backend that runs `typec` again, such as a `cc` first on `PATH` that
+  is `typec` itself, would make `typec` start itself forever. `typec` sets
+  `TYPEC_OUTER_CC` to the backend's name in the environment of every
+  backend it runs, so the backend's whole process tree inherits it, and a
+  `typec` that starts with it set refuses, as an error of its
+  environment, naming that backend. The mark, rather than a comparison of
+  the backend's file with `typec`'s, also catches a copy of `typec` and a
+  wrapper that runs it, and needs no second copy of the `PATH` search
+  that starting the backend does. Its costs: a nested `typec` that would
+  end, such as a wrapper that runs `typec --cc=/usr/bin/cc`, is refused
+  too, as is any `typec` that a long-lived process started by a backend
+  (a compile server) runs later; and a hop that clears the environment,
+  such as `env -i` or `sudo`, still loops. No use of a nested `typec` is
+  known, so neither cost is worth more mechanism.
 - *Provisional (P15).* The backend preprocesses: `typec` runs it with
   `-E -x c` and the user's options, parses the result, and compiles its own
   output with `-x cpp-output`. Macros are expanded once, by the compiler that
@@ -1546,7 +1560,8 @@ language is defined here and not by the tool.
   for an error of its environment (the command line, a backend it cannot
   start or that gives no target model, a file it cannot read or write)
   and 82 for an internal error, which is a bug in `typec`. *Provisional
-  (P22).* The values assume that no backend exits with them: GCC and
+  (P22).* The values assume that no backend exits with them, apart from
+  a `typec` that a backend runs again, which refuses with 81: GCC and
   Clang exit with small statuses, statuses of the sysexits range (64 to
   78) and 128 plus a signal number, a shell with 126 or 127 for a
   command it cannot run, and distcc from 100 up.
