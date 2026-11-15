@@ -51,8 +51,8 @@ let rules =
          design 3.2 rule 6 allows." };
     { name = "Zero_value"; code = 8; clause = Some "design 3.2 rule 7";
       meaning =
-        "A braced initialiser of a variant other than [{0}] in Type-C \
-         text." };
+        "A braced initialiser of a variant other than [{0}] and [{}] in \
+         Type-C text." };
     { name = "Constructor_expression"; code = 9; clause = Some "design 3.3";
       meaning =
         "A constructor expression that names no constructor, or whose \

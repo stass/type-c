@@ -21,11 +21,16 @@ let max_levels = 256
 
 (* Variants (design 3.2 rules 6 and 7) *)
 
-(* The braced list [{0}]: one integer constant 0, without a designator.
-   It is read from its digits, as typing the constant here would give it
-   a position before the walk reaches its subobject. *)
-let is_zero typing (list : Tree.initialiser_list) =
+(* The zero initialiser: the braced list [{0}], one integer constant 0
+   without a designator, or the empty list [{}] of GNU C and C23. The 0
+   is read from its digits, as typing the constant here would give it a
+   position before the walk reaches its subobject. It zeroes any object,
+   so its 0 may reach the tag of a variant member through elided braces,
+   as C programs that zero a structure rely on (design 3.2 rule 7). This
+   is the one place that decides it. *)
+let is_zero_initialiser typing (list : Tree.initialiser_list) =
   match list.node with
+  | [] -> true
   | [ { node =
           { designators = [];
             initialiser =
@@ -40,17 +45,12 @@ let is_zero typing (list : Tree.initialiser_list) =
       | Ok { value = Opaque; _ } | Error _ -> false)
   | _ -> false
 
-(* [{0}] zeroes any object, so its initialiser may reach the tag of a
-   variant member through elided braces, as C programs that zero a
-   structure rely on (design 3.2 rule 7). This is the one place that
-   decides it. *)
-let zeroes_variant_members typing list = is_zero typing list
-
 (* Type-C text reaches the tag and fields of a variant only through
    constructors and match (rule 6): an initialiser at [span] does not
-   open a variant's members, but where [zeroes] says it is the [{0}] that
-   zeroes them (rule 7). The two functions that open a structure's or
-   union's members, {!first_level} and {!designate}, ask it. *)
+   open a variant's members, but where [zeroes] says it is the zero
+   initialiser that zeroes them (rule 7). The two functions that open a
+   structure's or union's members, {!first_level} and {!designate}, ask
+   it. *)
 let refuse_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
   match Ctype.as_variant t with
   | Some name when typing.type_c_text span && not zeroes ->
@@ -58,7 +58,7 @@ let refuse_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
         (Rule.message Zero_value
            (Printf.sprintf
               "an initialiser reaches into the variant '%s'; the only braced \
-               initialiser of a variant is {0}"
+               initialisers of a variant are {0} and {}"
               name))
   | Some _ | None -> ()
 
@@ -424,8 +424,8 @@ let rec first_variant typing (t : Ctype.t) =
    walk meets at a subobject of type [t]: the first variant inside [t]
    where its braces may be elided, else [t]. A constructor initialises
    that variant whole, as no initialiser in Type-C text enters a variant
-   but {0} (3.2 rule 7); and a target that is no variant selects no
-   constructor, so an expression that initialises an aggregate around
+   but the zero initialiser (3.2 rule 7); and a target that is no
+   variant selects no constructor, so an expression that initialises an aggregate around
    the variant means there what it means with the variant as its target.
    The target stays the expression's as the walk elides braces. *)
 (* Design 3.4: [{0}] gives an object of a distinct type the zero value of
@@ -526,16 +526,16 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
   | (Array _ | Record _), _ -> aggregate typing t list
   | ( (Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Function _),
       elements ) ->
-      scalar typing ~zeroes:(is_zero typing list) t elements;
+      scalar typing ~zeroes:(is_zero_initialiser typing list) t elements;
       t
   | (Va_list | Unknown_type _), elements ->
       List.iter (untargeted_element typing) elements;
       t
 
 and aggregate typing t (list : Tree.initialiser_list) =
-  let zeroes = zeroes_variant_members typing list in
+  let zeroes = is_zero_initialiser typing list in
   let start =
-    match first_level typing ~zeroes:(is_zero typing list) list.span t with
+    match first_level typing ~zeroes list.span t with
     | Some level -> Position (level, [])
     | None -> Past_end
   in

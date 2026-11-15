@@ -1581,24 +1581,30 @@ let constructors () =
   rejects ~file (in_function "static e x; static e y = B(n, &x); return v;")
     "not a constant expression"
 
-(* Design 3.2 rule 7: [{0}] is the only braced initialiser of a variant. *)
+(* Design 3.2 rule 7: [{0}] and [{}] are the only braced initialisers of
+   a variant. *)
 let zero_values () =
   let file = "in.tc" in
   let variant = "type e = | A | B(int i); struct s { e v; int n; }; " in
   let refused source =
     rejects ~file (variant ^ source)
-      "the only braced initialiser of a variant is {0} (design 3.2 rule 7) \
-       [TC0008]"
+      "the only braced initialisers of a variant are {0} and {} (design \
+       3.2 rule 7) [TC0008]"
   in
   accepts ~file
     (variant
    ^ "e x = {0}; e y = { 0 }; e a[2] = {0}; struct s z = {0}; \
       struct s w = { {0}, 1 }; struct s u = { A, 1 }; \
       struct s t = { .v = B(1), .n = 2 }; e c = (e){0};");
+  accepts ~file
+    (variant
+   ^ "e x = {}; e a[2] = { {}, {0} }; struct s z = {}; \
+      struct s w = { {}, 1 }; struct s v = { .v = {} }; \
+      union u { e v; int n; } q = { {} }; e c = (e){};");
   refused "e x = {1};";
   refused "e x = { 0, 0 };";
   refused "e x = { .tag = 0 };";
-  refused "e x = {};";
+  refused "e x = { {} };";
   refused "struct s z = { 0, 1 };";
   refused "struct s z = { .v.tag = 1 };";
   refused "struct s z = { .v = { 1 } };";

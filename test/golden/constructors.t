@@ -95,8 +95,9 @@ A type name followed by `.` is a constructor in Type-C text only.
   c.h:1: expected an expression, found the type name `e`
   [1]
 
-`{0}` is the only braced initialiser of a variant (design 3.2 rule 7);
-it zeroes a structure whose first member is a variant too.
+`{0}` and `{}` are the only braced initialisers of a variant (design
+3.2 rule 7); `{0}` zeroes a structure whose first member is a variant
+too.
 
   $ printf 'type e = | A | B(int i);\nstruct s { e v; int n; } z = {0};\ne x = {0};\n' > zero.tc
   $ ./golden.exe zero.tc | grep -v '^# ' | grep .
@@ -109,13 +110,31 @@ it zeroes a structure whose first member is a variant too.
   } u; };
   struct s { e v; int n; } z = {0};
   e x = {0};
+
+The empty initialiser `{}` (GNU C, C23) is the zero value of a variant
+wherever `{0}` is: on a variant object, static or automatic, on a
+structure whose first member is a variant, and on an element of an
+array of variants.
+
+  $ cat > empty.tc <<'EOF'
+  > type e = | A | B(int i);
+  > struct s { e v; int n; } z = {};
+  > static e w = {};
+  > e a[2] = { {}, {0} };
+  > void f(void) { e v = {}; (void)v; }
+  > EOF
+  $ ./golden.exe empty.tc | grep ' = {'
+  struct s { e v; int n; } z = {};
+  static e w = {};
+  e a[2] = { {}, {0} };
+  void f(void) { e v = {}; (void)v; }
   $ printf 'type e = | A | B(int i);\ne x = { 1, 2 };\n' > braced.tc
   $ ./golden.exe braced.tc
-  braced.tc:2: an initialiser reaches into the variant 'e'; the only braced initialiser of a variant is {0} (design 3.2 rule 7) [TC0008]
+  braced.tc:2: an initialiser reaches into the variant 'e'; the only braced initialisers of a variant are {0} and {} (design 3.2 rule 7) [TC0008]
   [1]
   $ printf 'type e = | A | B(int i);\nstruct s { e v; int n; } z = { 0, 1 };\n' > elided.tc
   $ ./golden.exe elided.tc
-  elided.tc:2: an initialiser reaches into the variant 'e'; the only braced initialiser of a variant is {0} (design 3.2 rule 7) [TC0008]
+  elided.tc:2: an initialiser reaches into the variant 'e'; the only braced initialisers of a variant are {0} and {} (design 3.2 rule 7) [TC0008]
   [1]
 
 A constructor's lowering names the variant's structure tag and its

@@ -274,7 +274,7 @@ type expr =
 6. **A variant is opened only by `match`.** Type-C text cannot open a
    variant, that is, reach its tag or payload, as a value or by name:
    constructors make them and `match` reads them, and no other operation
-   does either, except that `{0}` writes the zero value (rule 7). Every
+   does either, except that `{0}` and `{}` write the zero value (rule 7). Every
    operation that does not open the value takes it whole and is allowed.
    Copying it, as initialisation, assignment, passing and returning do,
    copies the representation as for a struct and does not copy pointed-to
@@ -292,11 +292,13 @@ type expr =
 7. **Zero value.** All-zero storage of a variant type holds its first
    constructor with every field zero. Static objects without an initialiser,
    `calloc`, `memset` and the initialiser `{0}` therefore all yield a valid
-   value. `{0}` is the only braced initialiser a variant accepts. It zeroes
-   any object, so it also zeroes a structure whose first member is a
-   variant: its `0` writes the variant's zero value through elided
-   braces, which no other initialiser may do. Put the constructor that
-   makes a sensible default first (`None`, `Empty`).
+   value. `{0}` and the empty initialiser `{}` (GNU C, C23) are the only
+   braced initialisers a variant accepts, and `{}` is its zero value
+   wherever `{0}` is. `{0}` zeroes any object, so it also zeroes a
+   structure whose first member is a variant: its `0` writes the
+   variant's zero value through elided braces, which no other
+   initialiser may do. Put the constructor that makes a sensible default
+   first (`None`, `Empty`).
 8. An automatic variant object without an initialiser is indeterminate, as
    in C. Matching on it traps when the tag is out of range and otherwise
    reads whatever the fields hold.
@@ -350,11 +352,11 @@ Where a braced list elides braces (C11 6.7.9p20), which subobject an
 initialiser initialises depends on its type, so its target type cannot
 come from that subobject. It is the first variant that eliding the braces
 of the subobject at the list's position leads to, or that subobject where
-none does. No initialiser enters a variant except `{0}` (3.2 rule 7), so a
-constructor initialises that variant whole, and a target that is no
-variant selects no constructor: `struct w { struct s { e v; int n; } s; }
-y = { A, 1 };` builds `y.s.v` with the constructor `A` of `e`, whatever
-object `A` is visible.
+none does. No initialiser enters a variant except `{0}` or `{}` (3.2
+rule 7), so a constructor initialises that variant whole, and a target
+that is no variant selects no constructor:
+`struct w { struct s { e v; int n; } s; } y = { A, 1 };` builds `y.s.v`
+with the constructor `A` of `e`, whatever object `A` is visible.
 
 Everywhere else an unqualified name is looked up as C looks it up, and a
 constructor needs the qualified form. String literals use the same

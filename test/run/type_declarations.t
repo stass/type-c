@@ -113,6 +113,38 @@ members; its assertions compare the layout with the structure that
   $ typec --cc=$gcc -Wall -Werror -o gcc-variant variant.tc && ./gcc-variant
   5 0 0
 
+The empty initialiser `{}` gives a variant its zero value, the first
+constructor with every field zero, as `{0}` does (design 3.2 rule 7).
+
+  $ cat > empty.tc <<'EOF'
+  > #include <stdio.h>
+  > type shape = | Dot(int x, int y) | Circle(int r);
+  > struct holder { shape s; int n; };
+  > static shape kept = {};
+  > static int dot_sum(shape s) {
+  >   match (s) {
+  >   case Dot(x, y):
+  >     return x + y;
+  >   case Circle(_):
+  >     return -1;
+  >   }
+  > }
+  > int main(void) {
+  >   shape local = Circle(5);
+  >   local = (shape){};
+  >   shape fresh = {};
+  >   struct holder h = {};
+  >   shape row[2] = { {}, Circle(1) };
+  >   printf("%d %d %d %d %d %d\n", dot_sum(kept), dot_sum(local),
+  >          dot_sum(fresh), dot_sum(h.s), dot_sum(row[0]), h.n);
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Werror -o clang-empty empty.tc && ./clang-empty
+  0 0 0 0 0 0
+  $ typec --cc=$gcc -Wall -Werror -o gcc-empty empty.tc && ./gcc-empty
+  0 0 0 0 0 0
+
 --emit-c shows the typedef that an alias becomes, at its own line.
 
   $ printf 'type count = unsigned long;\ncount n;\n' > emit.tc
