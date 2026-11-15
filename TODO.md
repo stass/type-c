@@ -1033,11 +1033,10 @@ types (design 13.3).
   top of the match keeps copy semantics (reading in place does not, since
   arms may update the payload). Analysis:
   /Volumes/Optaine/type-c-pilot-a-notes/size-analysis.md.
-- [Medium] GCC 14 at -O2 copies a constructor passed by value
-  (`new_node(NodeKind k)`) through two 64-byte stack temporaries: 11.2 KB
-  of Pilot A's 20 KB code growth on GCC, none on Clang. Check GCC 16, add
-  a gate 4 twin that passes a constructor by value, and say in 13.5 or a
-  guide which constructor idiom generates good code on both backends.
+- [Low] Measure whether GCC 15 copies a constructor passed by value
+  through a stack temporary, as GCC 13 and 14 do and GCC 16 does not
+  (design 13.5, after the table): build `tools/measure/gate4/nodes.c` at
+  -O2 with GCC 14, 15 and 16 and compare the text sizes.
 - [Low] The trapping `default` of a match adds about 1.3 KB of .rodata in
   Pilot A on both backends (likely jump tables widened by the default's
   target); GCC also splits each trap into a `.cold` partition with its

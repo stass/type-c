@@ -1638,6 +1638,17 @@ Two properties follow by construction:
 | Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes. |
 | Checked-mode checks | Inline tests that trap. |
 
+A constructor passed by value to a function that the backend inlines,
+`add_node(arena, Call(f, a, b))`, costs nothing on Clang or GCC 16, but
+GCC 13 and 14 build the compound literal in a stack temporary and copy it
+again before the store. Code that must be small on those compilers stores
+the constructor into its destination instead,
+`next_node(arena)->op = Call(f, a, b);`, which they compile to nearly the
+code Clang and GCC 16 give either form; passing a pointer to the literal
+or to a named local recovers only part of the cost. This is a
+code-generation weakness of GCC, not a rule of the language, and both
+forms lower as the table says.
+
 Identifiers the compiler invents begin with `__tc_`.
 
 ### 13.6 Diagnostics and debugging

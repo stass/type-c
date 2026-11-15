@@ -53,6 +53,7 @@ arguments_of() {
   tree) echo "65536 400 1" ;;
   shapes) echo "10000 10000 1" ;;
   ids) echo "1048576 8000000 1" ;;
+  nodes) echo "100000 100 1" ;;
   *) fail "no arguments for $1" ;;
   esac
 }
@@ -185,7 +186,8 @@ EOF
 # part-way leaves no table that reads as complete.
 mkdir -p "$out/work"
 header > "$out/results.md.tmp"
-for program in tree shapes ids; do
+for source in "$sources"/*.tc; do
+  program=$(basename "$source" .tc)
   for backend in "$clang" "$gcc"; do
     name=$(basename "$backend")
     base=$out/work/$program-$name

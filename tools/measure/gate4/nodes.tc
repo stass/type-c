@@ -1,0 +1,109 @@
+/* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
+
+/* Constructors passed by value to a function that stores them in the
+   node it allocates, as a parser builds its tree; nodes.c is its
+   hand-written twin. Usage: nodes COUNT ROUNDS SEED. */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+struct node;
+
+/* Call is the largest constructor, 64 bytes with its tag on LP64. */
+type op =
+    | Constant(unsigned long value)
+    | Add(const struct node *left, const struct node *right)
+    | Select(const struct node *test, const struct node *then,
+             const struct node *otherwise)
+    | Call(unsigned long callee, const struct node *a, const struct node *b,
+           const struct node *c, const struct node *d, const struct node *e,
+           const struct node *f);
+
+struct node {
+  op op;
+  unsigned long value;
+};
+
+struct arena {
+  struct node *nodes;
+  unsigned long used;
+};
+
+static unsigned long next_random(unsigned long *state) {
+  *state = *state * 6364136223846793005UL + 1442695040888963407UL;
+  return *state >> 33;
+}
+
+static void add_node(struct arena *arena, op op) {
+  arena->nodes[arena->used++].op = op;
+}
+
+/* An operand is any node built before; the arena is never empty here. */
+static const struct node *pick(struct arena *arena, unsigned long *seed) {
+  return &arena->nodes[next_random(seed) % arena->used];
+}
+
+static void build_node(struct arena *arena, unsigned long *seed) {
+  unsigned long v = next_random(seed) % 1000;
+  const struct node *a = pick(arena, seed), *b = pick(arena, seed);
+  const struct node *c = pick(arena, seed), *d = pick(arena, seed);
+  const struct node *e = pick(arena, seed), *f = pick(arena, seed);
+  switch (next_random(seed) % 4) {
+  case 0: add_node(arena, Constant(v)); break;
+  case 1: add_node(arena, Add(a, b)); break;
+  case 2: add_node(arena, Select(a, b, c)); break;
+  default: add_node(arena, Call(v, a, b, c, d, e, f)); break;
+  }
+}
+
+/* Operands precede their node, so one pass in order sets every value. */
+static unsigned long evaluate(struct node *nodes, unsigned long count) {
+  unsigned long total = 0;
+  for (unsigned long i = 0; i < count; i++) {
+    unsigned long value;
+    match (nodes[i].op) {
+    case Constant(v):
+      value = v;
+      break;
+    case Add(l, r):
+      value = l->value + r->value;
+      break;
+    case Select(t, y, n):
+      value = t->value & 1 ? y->value : n->value;
+      break;
+    case Call(callee, a, b, c, d, e, f):
+      value = callee + a->value - b->value + c->value - d->value +
+              e->value - f->value;
+      break;
+    }
+    nodes[i].value = value;
+    total += value;
+  }
+  return total;
+}
+
+int main(int argc, char **argv) {
+  if (argc != 4)
+    return 2;
+  unsigned long count = strtoul(argv[1], NULL, 0);
+  unsigned long rounds = strtoul(argv[2], NULL, 0);
+  unsigned long seed = strtoul(argv[3], NULL, 0);
+  if (count == 0)
+    return 2;
+  struct arena arena = { malloc(count * sizeof *arena.nodes), 0 };
+  if (arena.nodes == NULL)
+    return 1;
+  unsigned long total = 0;
+  /* Each round rebuilds the tree, so construction stays in the loop. */
+  for (unsigned long round = 0; round < rounds; round++) {
+    arena.used = 0;
+    add_node(&arena, Constant(round));
+    while (arena.used < count)
+      build_node(&arena, &seed);
+    total += evaluate(arena.nodes, count);
+  }
+  printf("%lu\n", total);
+  free(arena.nodes);
+  return 0;
+}

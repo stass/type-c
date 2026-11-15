@@ -690,11 +690,13 @@ the type as `Type_name.of_ctype` spells it, separated by tabs.
 twin of the same name: `tree` walks a tree of a variant by `match`
 against a tag, a union and a `switch`; `shapes` runs a `match` with
 bindings in a hot loop; `ids` passes ids of a distinct type through
-calls against a `typedef`. `tools/measure/gate4.sh [OUT]` builds each
-pair at `-O2` with both backends, checks that the two print the same,
-and writes the bytes of machine code of each object and the run times to
-`OUT/results.md` (by default `/Volumes/Optaine/typec-gate4`), with the
-objects, the lowered C and the hyperfine exports under `OUT/work`. It
+calls against a `typedef`; `nodes` passes constructors by value to the
+function that stores them, as a parser builds its tree (design 13.5).
+`tools/measure/gate4.sh [OUT]` builds each pair at `-O2` with both
+backends, checks that the two print the same, and writes the bytes of
+machine code of each object and the run times to `OUT/results.md` (by
+default `/Volumes/Optaine/typec-gate4`), with the objects, the lowered C
+and the hyperfine exports under `OUT/work`. It
 runs on macOS and needs hyperfine and jq; `results.md` states how the
 verdicts are drawn.
 
