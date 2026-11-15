@@ -1497,6 +1497,12 @@ let type_declaration_cases =
        | (type c (type distinct pointer))";
     case "a variant without fields" "type e = | A | B;"
       "(type e claims claims A B)";
+    case "fields named for Type-C words and universe names"
+      "type e = | A(int try, int defer) | B(int str, int result);"
+      "(type e claims claims (A (field (int) try) (field (int) defer)) (B \
+       (field (int) str) (field (int) result)))";
+    case "constructors named for positional words" "type e = | type | match;"
+      "(type e claims claims type match)";
     case "a variant with fields that uses its name"
       "type expr = | Number(long value) | Add(expr *left, expr *right);"
       "(type expr claims claims (Number (field (long) value)) (Add (field \

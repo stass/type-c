@@ -125,9 +125,10 @@ names something `try` or `defer`, as zlib's `test/infcover.c` names a
 function and QBE's `rega.c` a parameter, so the words are not reserved.
 A tag, a member or a label has a name space of its own, where neither
 construct can stand, so it may be named `try` or `defer` anywhere:
-`s.defer`, `struct try`, `goto try;`. In C text both are ordinary
-identifiers. `_Defer`, the spelling of ISO/DIS TS 25755, is a keyword in
-all text that always means `defer`.
+`s.defer`, `struct try`, `goto try;`. A constructor may not, in any
+text (3.2 rule 2). In C text both are ordinary identifiers. `_Defer`, the
+spelling of ISO/DIS TS 25755, is a keyword in all text that always means
+`defer`.
 
 **Positional words.** `type`, `match`, `generic`, `unsafe`, `private` and
 `distinct` are ordinary identifiers that Type-C recognises only in the
@@ -249,7 +250,11 @@ type expr =
    allocates nothing.
 2. Constructor names live in the variant, not in the ordinary namespace: two
    variants in one scope may both have a constructor `Add`, and no global
-   `Add` exists. Names within one variant are unique.
+   `Add` exists. Names within one variant are unique. No constructor is
+   named `try`, `defer` or a universe name (2.3), in any text: written
+   unqualified (`T t = try(1);`) it could read as the constructor or as
+   the word or universe name, and refusing it keeps one reading. A field
+   may have such a name, as a member may.
 3. The leading `|` is required. It is what tells a one-constructor variant
    from an alias.
 4. A constructor has zero or more named fields, written like parameters. A

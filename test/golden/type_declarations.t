@@ -201,6 +201,26 @@ Derived names, field types and constructor names are checked.
   $ ./golden.exe constructors.tc
   constructors.tc:1: `A` names two constructors of one variant (design 3.2 rule 2) [TC0005]
   [1]
+  $ printf 'type e = | try;\n' > try.tc
+  $ ./golden.exe try.tc
+  try.tc:1: `try` cannot name a constructor, as it is a word of Type-C (design 3.2 rule 2) [TC0025]
+  [1]
+  $ printf 'type e = | A | defer;\n' > defer.tc
+  $ ./golden.exe defer.tc
+  defer.tc:1: `defer` cannot name a constructor, as it is a word of Type-C (design 3.2 rule 2) [TC0025]
+  [1]
+  $ printf 'type e = | str(int x);\n' > str.tc
+  $ ./golden.exe str.tc
+  str.tc:1: `str` cannot name a constructor, as it is a universe name (design 3.2 rule 2) [TC0025]
+  [1]
+  $ printf 'type e = | result;\n' > result.tc
+  $ ./golden.exe result.tc
+  result.tc:1: `result` cannot name a constructor, as it is a universe name (design 3.2 rule 2) [TC0025]
+  [1]
+  $ printf 'void f(void) {\n  type e;\n  type e = | slice;\n}\n' > block.tc
+  $ ./golden.exe block.tc
+  block.tc:3: `slice` cannot name a constructor, as it is a universe name (design 3.2 rule 2) [TC0025]
+  [1]
   $ printf 'int e_A;\ntype e = | A;\n' > derived.tc
   $ ./golden.exe derived.tc
   derived.tc:2: the variant `e` claims the enumerator `e_A`, which this scope declares already (design 10.1 rule 6) [TC0004]

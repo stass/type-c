@@ -384,17 +384,26 @@ let fail_defer state =
   fail_not_implemented state ~section:"6" ~package:"2.5"
     (quoted (next_spelling state) ^ " is not implemented yet")
 
+(* The identifiers that are words of Type-C text where no declaration
+   hides them (design 2.3). *)
+type type_c_word = Try | Defer
+
+let type_c_word = function
+  | "try" -> Some Try
+  | "defer" -> Some Defer
+  | _ -> None
+
 (* In Type-C text, [try] and [defer] where no declaration of the same
    identifier hides them, as one hides a universe name (design 2.3), are
    the operator and the statement of Type-C. *)
 let refuse_type_c_word state name =
   if is_type_c_text_at state state.grammar.(state.position).index then
-    match name with
-    | "try" ->
+    match type_c_word name with
+    | Some Try ->
         fail_not_implemented state ~section:"5.1" ~package:"2.4"
           "`try` is not implemented yet"
-    | "defer" -> fail_defer state
-    | _ -> ()
+    | Some Defer -> fail_defer state
+    | None -> ()
 
 (* A variant declares its enumerators for C clients (design 10.1 rule
    6), so Type-C text cannot name them. *)
@@ -1278,6 +1287,20 @@ let constructor_names state =
   in
   loop 0 []
 
+(* Unqualified, a constructor named for a word of Type-C or a universe
+   name would read as that word or name (design 3.2 rule 2). *)
+let refuse_reserved_constructor state ~at constructor =
+  let refuse what =
+    fail_at_token state at
+      (Rule.message Reserved_constructor
+         (Printf.sprintf "%s cannot name a constructor, as it is %s"
+            (quoted constructor) what))
+  in
+  match (type_c_word constructor, Universe.find constructor) with
+  | Some _, _ -> refuse "a word of Type-C"
+  | None, Some _ -> refuse "a universe name"
+  | None, None -> ()
+
 (* The enumerators of the variant [variant], claimed before any field is
    read: the C it lowers to declares them before the structure, so a
    field names them as C does (design 10.1 rule 6). Names within one
@@ -1285,6 +1308,7 @@ let constructor_names state =
 let claim_enumerators state ~variant =
   let seen = Hashtbl.create 8 in
   let claim (constructor, at) =
+    refuse_reserved_constructor state ~at constructor;
     if Hashtbl.mem seen constructor then
       fail_at_token state at
         (Rule.message Duplicate_constructor

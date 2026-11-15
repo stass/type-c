@@ -877,15 +877,6 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
-- [Medium] A variant may name a constructor `try` or `defer` (design
-  3.2), and `T.try` and `case try:` reach it, but an unqualified `try`
-  under a variant target type (3.3) is read as the operator of 2.3, as
-  no ordinary declaration hides it; a universe name as a constructor
-  (`| str`) has the same conflict. Once 2.4 parses `try (x)`, `T t =
-  try(1);` is ambiguous. Decide which wins: refuse such a constructor
-  name with a rule code, or state in 3.3 that the word wins and the
-  qualified form is required.
-
 - [Medium] When package 3.4 makes universe names typedef names to the
   parser, it implements design 2.3's exception to C11 6.7.6.3p11 (a
   universe name in a parenthesised parameter declarator is the parameter)

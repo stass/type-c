@@ -119,6 +119,11 @@ let rules =
       meaning =
         "A constructor expression outside the scope of the declaration \
          of its variant." };
+    { name = "Reserved_constructor"; code = 25;
+      clause = Some "design 3.2 rule 2";
+      meaning =
+        "A constructor named for a word of Type-C text (design 2.3) or \
+         a universe name." };
   ]
 
 (* Stable codes are "TC" and four digits: fixed width for tools that read
