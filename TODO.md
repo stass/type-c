@@ -991,6 +991,12 @@ types (design 13.3).
   that compiles the lowered output of the golden corpus with
   `-std=c11 -pedantic-errors -x cpp-output` on both backends would keep
   that true as the lowering grows.
+- [Low] With `-g`, the debug information of a typec object differs from
+  `cc -x c` on the same file: the backend compiles the preprocessed text,
+  so GCC's DWARF columns come from that text and Clang's line table lists
+  the line-marker files. Design 13.6 promises debuggers the original
+  lines; decide whether columns must match too, and test the -g output
+  against the source.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
