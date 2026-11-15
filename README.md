@@ -265,26 +265,39 @@ the harness, and `dune test` runs it on the seeds in
 
 AFL++ drives it, with coverage from an OCaml compiler configured for AFL
 instrumentation. That compiler lives in its own opam root, so the normal
-build keeps the system OCaml. AFL++ on macOS hands its coverage map over
-only as a POSIX shared memory descriptor, which the OCaml runtime does
-not read, so the compiler needs a patch to `runtime/afl.c` there:
-`tools/fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch`, under the license
-of the OCaml file it modifies (its header says so). Setting up, once,
-from the root of this repository:
+build keeps the system OCaml. On every host the compiler needs a patch
+to `runtime/afl.c`, `tools/fuzz/patches/ocaml-5.5.2-afl.patch`, under the
+license of the OCaml file it modifies (its header says so). The fork
+server of the stock runtime speaks only the old handshake, which reports
+no map size, so afl-fuzz gives every instance an 8 MiB map where the
+instrumentation writes 64 KiB; the patch speaks the handshake of AFL++
+4.20c and later, which reports it (an older afl-fuzz needs
+`AFL_OLD_FORKSERVER=1`). AFL++ on macOS also hands its coverage map
+over only as a POSIX shared memory descriptor, which the stock runtime
+does not read and the patch does. Setting up, once, from the root of
+this repository:
 
 ```sh
 brew install afl++
 export OPAMROOT=/Volumes/Optaine/opam
 opam init --bare --disable-sandboxing -n -y
-opam switch create afl -y \
-  --packages=ocaml-variants.5.5.2+options,ocaml-option-afl
+opam switch create afl -y --packages=\
+ocaml-variants.5.5.2+options,ocaml-option-afl,compiler-cloning.disabled
 opam install --switch afl -y dune
 src=/Volumes/Optaine/typec-fuzz/ocaml-afl-src/ocaml-5.5.2
 opam source --switch afl ocaml-compiler.5.5.2 --dir "$src"
 patch -d "$src" -p1 \
-  < tools/fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch
+  < tools/fuzz/patches/ocaml-5.5.2-afl.patch
 opam pin add --switch afl -y --kind=path ocaml-compiler.5.5.2 "$src"
 ```
+
+Without `compiler-cloning.disabled`, opam copies the compiler of another
+switch of the same version instead of building the patched source. To
+take a new version of the patch, remove the switch and `$src` and run
+the recipe again, then remove `$TYPEC_FUZZ_DIR/_build` so that the
+harness links the new runtime. The `afl-fuzz` log of a run says `new
+fork server model v1 is up` and `Target map size: 65536` when the
+patch is in.
 
 A campaign keeps its build, seeds and findings in `TYPEC_FUZZ_DIR`
 (default `/Volumes/Optaine/typec-fuzz`), never in this repository:

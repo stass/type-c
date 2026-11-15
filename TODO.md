@@ -686,13 +686,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Fuzzing
 
-- [Medium] Offer the OCaml AFL shm patch upstream
-  (`tools/fuzz/patches/ocaml-5.5.2-afl-posix-shm.patch`). AFL++ on macOS
-  hands the coverage map over only as a POSIX shared memory descriptor
+- [Medium] Offer the OCaml AFL patch upstream
+  (`tools/fuzz/patches/ocaml-5.5.2-afl.patch`). AFL++ on macOS hands the
+  coverage map over only as a POSIX shared memory descriptor
   (`__AFL_SHM_FD`), and the runtime of OCaml (`runtime/afl.c`, 5.5.2 and
-  trunk) attaches only a SysV segment, so the fuzz build needs a patched
-  compiler (README, "Fuzzing"). Once OCaml takes it, drop the patch and
-  pin the release that has it.
+  trunk) attaches only a SysV segment and speaks only the old fork-server
+  handshake, so the fuzz build needs a patched compiler (README,
+  "Fuzzing"). Raise there too that the map size is defined twice, as
+  `INITIAL_AFL_AREA_SIZE` in `afl.c` and `afl_map_size` in
+  `asmcomp/afl_instrument.ml`, and the runtime reports the former. Once
+  OCaml takes both changes, drop the patch and pin the release that has
+  them.
 
 ## Test hosts
 
@@ -973,13 +977,6 @@ types (design 13.3).
   when a header declares `e`; likely the C-text owner rule near
   `src/syntax/parser.ml:590`. Decide whether that is intended and test
   it either way.
-- [Medium] The AFL runtime of OCaml uses the old fork-server handshake,
-  which reports no map size, so AFL++ 5.03c gives every instance an
-  8 MiB map although the instrumentation writes below 65536: stock
-  FreeBSD SysV limits (`kern.ipc.shmall` 512 MiB) then hold only 56
-  instances, and every execution processes the whole map. Extend
-  tools/fuzz/patches to make `runtime/afl.c` use the new handshake and
-  report its size.
 - [Low] With `-g`, the debug information of a typec object differs from
   `cc -x c` on the same file: the backend compiles the preprocessed text,
   so GCC's DWARF columns come from that text and Clang's line table lists
