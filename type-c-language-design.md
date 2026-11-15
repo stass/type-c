@@ -402,7 +402,7 @@ apart.
 | `==`, `!=` | Both operands have type `D`. |
 | Truth value: `if`, loops, `!`, `&&`, `\|\|`, first operand of `?:` | Allowed; the value is compared with zero. |
 | Results of `?:` both of type `D`; `,`; `sizeof`; `_Alignof`; unary `&` | As in C. |
-| Initialiser `{0}` | The zero value of `U`. |
+| Initialiser `{0}` or `{}` | The zero value of `U`. |
 | Bit-field of type `D` | Allowed where one of type `U` is. |
 | Anything else | Error: arithmetic, `<` and the other relational operators, `++`, compound assignment, unary `*`, `->`, `[]`, a call, `switch`, passing through `...`, and every implicit conversion. |
 
@@ -410,9 +410,9 @@ The table's edges are these rules.
 
 1. `U` is unqualified, so `distinct const int` is an error: a qualifier
    belongs to an object, and `const D` states it where it applies.
-2. `{0}` also zeroes an object whose first member, reached through
-   elided braces, has type `D`, because `{0}` is the C idiom that zeroes
-   any object and zero is a value of every `U`.
+2. `{0}` and `{}` also zero an object whose first member, reached
+   through elided braces, has type `D`, because they are the C idioms
+   that zero any object and zero is a value of every `U`.
 3. A value of type `D` passes to a function without a prototype no more
    than through `...`, because the default argument promotions of both
    would convert it to another type.
@@ -784,7 +784,7 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    is read. It may use a value of type `Ti` only in ways that are valid for
    every value type:
 
-   - declare objects of the type, including with the initialiser `{0}`;
+   - declare objects of the type, including with the initialiser `{0}` or `{}`;
    - initialise, assign, pass and return;
    - apply unary `&`, `sizeof` and `_Alignof`;
    - do everything C allows with a `Ti *`: dereference, arithmetic,
