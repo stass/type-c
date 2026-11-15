@@ -970,7 +970,15 @@ types (design 13.3).
   they are built, claim them through the claim functions of the parser,
   the one funnel that refuses a derived name reserved in C or claimed
   twice, since a variant can derive one (`type vector_ = | i;` derives
-  `vector__i`).
+  `vector__i`). Design 10.3 cites a rule of 3.5 that a generic's name
+  has no `__`, which 3.5 lacks; `a__b` and `a_` break "the first `__`
+  separates the generic". State the rule in 3.5 and check it then.
+- [Medium] A constructor name or a field name that C reserves for any
+  use is emitted verbatim as a union or structure member (design 10.1
+  rule 3): `type e = | _BitInt(int x);` reaches the backend and is
+  Clang's error, not typec's, and `type e = | A(int __x);` declares
+  `__x`. Refuse them beside `refuse_reserved_constructor` (design 3.2
+  rule 2), as the declared name is refused.
 - [Medium] Whether a variant completes `type N;` is read from
   `declared.earlier` by Lowering, Declarations and the tree dump, which
   holds only while no other type declaration has an `earlier`; and

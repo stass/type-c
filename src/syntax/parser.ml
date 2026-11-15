@@ -547,6 +547,17 @@ let is_reserved_for_any_use spelling =
     | '_' | 'A' .. 'Z' -> true
     | _ -> false
 
+(* No type declaration has a name that C reserves for any use (design
+   10.1 rule 6), whatever its form, so the rule does not depend on
+   whether the form claims the name as a tag. *)
+let refuse_reserved_name state (name : identifier) =
+  if is_reserved_for_any_use name.node then
+    fail_at_token state (token_of name)
+      (Rule.message Claimed_name
+         (Printf.sprintf
+            "%s cannot name a type declaration, as C reserves it for any use"
+            (quoted name.node)))
+
 (* No name that a type declaration claims for the C it lowers to is
    reserved for any use (design 10.1 rule 6), so no derived name spells
    a keyword of the backend or a name that typec generates (design 2.3).
@@ -2477,6 +2488,7 @@ and type_declaration state : int -> type_declaration =
   let type_keyword = state.grammar.(start).index in
   advance state;
   let name = identifier state "the name of a type declaration" in
+  refuse_reserved_name state name;
   if peek state = Punctuator_token P.Left_paren then
     fail_not_implemented state ~section:"3.5" ~package:"2.1"
       "type parameters are not implemented yet";

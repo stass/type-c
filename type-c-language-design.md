@@ -1249,7 +1249,10 @@ struct expr {
    joins a name and a word with `_`, and every keyword of the dialects of
    2.4 that has an inner `_` is reserved so; refusing these names keeps
    every derived name from spelling a keyword with no list of keywords:
-   `type _Static = | assert;` would derive `_Static_assert`. No
+   `type _Static = | assert;` would derive `_Static_assert`. Every type
+   declaration whose name C reserves so is refused too, whatever its
+   form, so that the rule does not depend on whether a form claims the
+   name as a tag: `type __x = int;` is refused as `type __x = | A;` is. No
    declaration hides a claimed name, so it denotes the variant wherever
    the variant is in scope, and a constructor lowers to it (13.5). The
    typedef name `expr` is not claimed: a block may declare `int expr;`,

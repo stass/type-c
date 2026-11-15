@@ -1913,9 +1913,10 @@ let type_c_error_cases =
       "double e_B; void f(void) { type e = | A(typeof(e_B) v) | B; }"
       "error: in.tc:1: the enumerator `e_B` is not available to Type-C \
        text, as a type declaration claims it (design 10.1 rule 6) [TC0004]";
-    case "a claimed tag that typec would generate" "type __tc = | x;"
-      "error: in.tc:1: the type declaration of `__tc` claims the tag \
-       `__tc`, which C reserves for any use (design 10.1 rule 6) [TC0004]";
+    case "a type declaration named as C reserves for any use"
+      "type __tc = | x;"
+      "error: in.tc:1: `__tc` cannot name a type declaration, as C \
+       reserves it for any use (design 10.1 rule 6) [TC0004]";
     case "a derived tag that typec would generate" "type _ = | tc_x;"
       "error: in.tc:1: the type declaration of `_` claims the tag `__tag`, \
        which C reserves for any use (design 10.1 rule 6) [TC0004]";
