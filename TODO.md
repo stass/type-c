@@ -1076,6 +1076,10 @@ types (design 13.3).
   (`./type.tci`); and a binding of another arm used in an arm reads
   "'addr' is not declared (C11 6.5.1p2)" with no code, where a message
   naming the arm that binds it would point at the mistake.
+- [Medium] The Linux host images have no csmith, so the csmith recipe
+  fails to set up there (`prepare.sh: csmith is not installed`). Add a
+  pinned csmith to tools/hosts/debian.Dockerfile and alpine.Dockerfile,
+  or limit the recipe's lines to the hosts that have it.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
