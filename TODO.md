@@ -730,6 +730,24 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   `git ls-files` and `tar` without `pipefail`, so a failure of either
   that leaves a partial tree shows up as a failure of dune. Two runs on
   one `DIR` at once are not guarded.
+- [Medium] `test/run/abi.t` pins the `%La` text of `1.0L / 3` in the
+  x87 format of x86-64, so its expected output differs on the arm64
+  hosts, where long double is binary128. Print the long double values
+  in a form that does not depend on the format, or compare the two
+  sides with `cmp` alone there.
+- [Medium] In `test/run/abi.t` the C side declares the Type-C functions
+  with the hand-written tags `struct c_scalar` and the like, while the
+  lowering uses `struct scalar`: across translation units the types are
+  not compatible (C11 6.2.7), which works at the ABI but would trip
+  `-fsanitize=cfi-icall`. Let `hand.h` spell its names through one
+  prefix macro that `layout.tc` sets to `c_` and `side.c` leaves empty.
+- [Medium] Stage 1 exit gate 4 also asks for size and speed within
+  noise at `-O2`; `test/run/abi.t` checks only the output of its
+  differential program. Measure at the gate: `size` of the objects of
+  each pair, and the run time of a loop-heavy pair over repeated runs
+  with the spread reported, on each backend.
+- [Low] `test/run/abi.t` does not carry `compound` from Type-C to C or
+  through a callback, nor a distinct type as a variant field.
 - [Low] `tools/oracle/oracle.t` has its own default of
   `TYPEC_TEST_CLANG` instead of sourcing `test/run/backends.sh`.
 - [High] The arm64 hosts do not run reliably on the x86-64 colima VM:
