@@ -979,6 +979,10 @@ types (design 13.3).
   Clang's error, not typec's, and `type e = | A(int __x);` declares
   `__x`. Refuse them beside `refuse_reserved_constructor` (design 3.2
   rule 2), as the declared name is refused.
+- [Low] A reserved type-declaration name is refused under TC0004,
+  which cites design 10.1 rule 6 on claimed names, though an alias or a
+  distinct type claims nothing. Give it its own rule in 3.1, beside
+  `Own_name` and `One_definition`, once no change in flight adds codes.
 - [Medium] Whether a variant completes `type N;` is read from
   `declared.earlier` by Lowering, Declarations and the tree dump, which
   holds only while no other type declaration has an `earlier`; and
