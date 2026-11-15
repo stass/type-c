@@ -6,9 +6,10 @@
     every arm is unreachable (rule 1), and a label inside an arm is the
     target only of a goto in the same arm (rule 3). The analysis is
     syntactic: it reads the tree and the two facts of typing below, and
-    evaluates no condition other than a constant. A refusal needs a
-    match, so C code gains none. Label scopes are resolved here until
-    the tree resolves labels (TODO.md). *)
+    evaluates no condition other than a constant. Label scopes are
+    resolved here until the tree resolves labels (TODO.md), and with
+    them the rules of C on labels (C11 6.8.1p3, 6.8.6.1p1), the only
+    refusals that C code without a match can gain. *)
 
 open Typec_syntax
 
@@ -31,6 +32,8 @@ val arm_refusal : facts -> Tree.arm -> refusal option
 (** The breach of design 4.3 rule 1 by the arm, if its end can be
     reached. Typing asks it of every match it reads. *)
 
-val jump_refusal : facts -> Tree.block -> refusal option
-(** The first jump, in source order, in the body of a function that
-    breaches design 4.3 rule 3, if any. *)
+val label_refusal : facts -> Tree.block -> refusal option
+(** In the body of a function, the first label, in source order, defined
+    a second time in its scope (C11 6.8.1p3), or else the first jump that
+    names a label not defined in its scope (6.8.6.1p1) or breaches design
+    4.3 rule 3, if any. *)

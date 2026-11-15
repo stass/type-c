@@ -15,6 +15,9 @@ exception Refused of refusal
 let refuse span rule text =
   raise (Refused { span; message = Rule.message rule text })
 
+(* A breach of C, which states no rule of Type-C (design 13.6). *)
+let refuse_constraint span text = raise (Refused { span; message = text })
+
 module Targets = Set.Make (struct
   type t = Tree.jump_target
 
@@ -95,16 +98,20 @@ module Names = Map.Make (String)
    only a successful test enters (4.6 rule 6). *)
 type guarded = Arm of Tree.span | Tested of Tree.span
 
+(* A labelled statement: its label, and the innermost guarded statement
+   around it, [None] outside every one. *)
+type definition = { label : label; site : Tree.span; guard : guarded option }
+
 (* One walk of a body. [guard] is the innermost guarded statement around
    the walk and [local_labels] the block of each GNU local label in
-   scope; [guards_of_labels] gives the innermost guarded statement around
-   each label, [None] outside every one, and [jumps] holds the jumps in
-   source order. *)
+   scope; [definitions] and [jumps] hold the labelled statements and the
+   jumps in the order of the walk, which is not source order: a loop's
+   body is walked before its condition. *)
 type walk = {
   facts : facts;
   guard : guarded option;
   local_labels : Tree.span Names.t;
-  guards_of_labels : (label, guarded option) Hashtbl.t;
+  definitions : definition Queue.t;
   jumps : jump Queue.t;
 }
 
@@ -216,7 +223,9 @@ and statement_flow walk (statement : Tree.statement) =
 and labelled_flow walk (label : Tree.label) labelled =
   match label.node with
   | Named_label { name; _ } ->
-      Hashtbl.replace walk.guards_of_labels (resolve walk name) walk.guard;
+      Queue.add
+        { label = resolve walk name; site = label.span; guard = walk.guard }
+        walk.definitions;
       { (statement_flow walk labelled) with has_named_label = true }
   | Case_label _ | Case_range _ ->
       { (statement_flow walk labelled) with has_case_label = true }
@@ -287,7 +296,7 @@ and switch_flow walk target controlling body =
       (not body.default) || breaks_to target body || body.completes }
 
 (* Design 4.3 rule 2: a break in an arm leaves the match [target], which
-   completes only by one. By rule 3, which [jump_refusal] checks over
+   completes only by one. By rule 3, which [label_refusal] checks over
    each body that holds a match, a label in an arm is entered only from
    the arm, so of the arms only their continues reach the statements
    around the match. *)
@@ -379,11 +388,41 @@ let guarded_names = function
   | Arm _ -> ("a match arm", "the arm")
   | Tested _ -> ("the statement of a single-pattern test", "the statement")
 
-(* Design 4.3 rule 3, 4.6 rule 6. A computed goto may jump to any label
-   whose address is taken, so a label inside a guarded statement cannot
-   have its address taken. *)
+(* The queued items of a walk in source order, so that a refusal names
+   the first breach as GCC and Clang do. Spans are token indices. *)
+let in_source_order site queue =
+  List.stable_sort
+    (fun a b -> Int.compare (site a).Tree.first (site b).Tree.first)
+    (List.of_seq (Queue.to_seq queue))
+
+(* 6.8.1p3: a label is defined once in its scope. Defines each label,
+   refusing the second definition of one, and gives the guarded statement
+   around each. *)
+let define_labels definitions =
+  let guards = Hashtbl.create 16 in
+  let define { label; site; guard } =
+    if Hashtbl.mem guards label then
+      refuse_constraint site
+        "a second definition of a label in its scope (C11 6.8.1p3)";
+    Hashtbl.add guards label guard
+  in
+  let site (definition : definition) = definition.site in
+  List.iter define (in_source_order site definitions);
+  guards
+
+(* 6.8.6.1p1, design 4.3 rule 3, 4.6 rule 6. A computed goto may jump to
+   any label whose address is taken, so a label inside a guarded
+   statement cannot have its address taken. The walk reads no type name,
+   so a label it does not find may lie in a statement expression in one,
+   such as an array length: a goto to it jumps into the statement
+   expression from outside, which GCC refuses although Clang accepts it
+   in an array length, and the address of such a label, which both
+   backends take, is left to them. *)
 let check_jump guards_of_labels jump =
   match (Hashtbl.find_opt guards_of_labels jump.target, jump.kind) with
+  | None, Goto ->
+      refuse_constraint jump.site
+        "a goto to a label that is not defined in its scope (C11 6.8.6.1p1)"
   | Some (Some guard), Address ->
       let inside, again = guarded_names guard in
       refuse jump.site Arm_entry
@@ -396,11 +435,11 @@ let check_jump guards_of_labels jump =
       refuse jump.site Arm_entry
         (Printf.sprintf "a jump into %s from outside it"
            (fst (guarded_names guard)))
-  | (Some _ | None), (Goto | Address) -> ()
+  | Some _, (Goto | Address) | None, Address -> ()
 
 let start facts =
   { facts; guard = None; local_labels = Names.empty;
-    guards_of_labels = Hashtbl.create 16; jumps = Queue.create () }
+    definitions = Queue.create (); jumps = Queue.create () }
 
 (* Design 4.3 rule 1. *)
 let arm_refusal facts (matched : Tree.arm) =
@@ -411,9 +450,14 @@ let arm_refusal facts (matched : Tree.arm) =
           Rule.message Arm_end "the end of the match arm can be reached" }
   else None
 
-let jump_refusal facts body =
+let label_refusal facts body =
   let walk = start facts in
   ignore (block walk body);
-  match Queue.iter (check_jump walk.guards_of_labels) walk.jumps with
+  match
+    let guards = define_labels walk.definitions in
+    let site (jump : jump) = jump.site in
+    let jumps = in_source_order site walk.jumps in
+    List.iter (check_jump guards) jumps
+  with
   | () -> None
   | exception Refused refusal -> Some refusal

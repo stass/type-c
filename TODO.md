@@ -188,17 +188,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   constant evaluator of `Declarations` counts its depth against
   `max_expression_depth` and expression typing `Expressions.max_depth`,
   and the test dump must count too or walk chains in loops.
-- [Medium] Typing checks the controlling expressions of statements, the
-  places of `case`, `default`, `break` and `continue`, and the values of
-  `case` labels; nothing checks the other constraints of statements that
-  the parser accepts: the storage classes of a `for` declaration
-  (6.8.5p3), duplicate and missing labels (6.8.1p3, 6.8.6.1p1) and
-  `return` with or without a value (6.8.6.4p1),
-  and the GNU label rules: a label address (`&&a`) outside a function
-  body, a duplicate or undefined `__label__` label, `&&a` as a use of
-  `a`, and a jump into a statement expression from outside it. Check
-  them where bodies are typed (`Expressions`). `Declarations` checks
-  those of declarations.
+- [Medium] Nothing checks the GNU label rules that the backends
+  enforce: a label address (`&&a`) outside a function body, a
+  `__label__` declaration that names a label twice, `&&a` of a label
+  that is not defined, and a jump into a statement expression from
+  outside it. Check them where `Reachability` resolves labels; the
+  third needs its walk to read type names, as a statement expression
+  in an array length may define the label.
 - [Medium] `test/support/file_scope_names.ml` finds what a unit declares
   at file scope from its external declarations alone, so
   `declaration_probe` and `test_declarations` miss file-scope names
@@ -227,8 +223,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   literal body, once it is parsed (a pure step of the parser), into the
   tree, for the label checks. Until then `Reachability.resolve` in
   `src/sema/reachability.ml` resolves a label by its name and the
-  `__label__` declarations around it, for design 4.3 rule 3; it goes
-  when the tree resolves labels.
+  `__label__` declarations around it, for design 4.3 rule 3 and C's
+  rules on duplicate and undefined labels (6.8.1p3, 6.8.6.1p1); it goes
+  when the tree resolves labels, where those become failures to resolve.
+- [Medium] A statement expression whose last statement is a labelled
+  expression statement (`({ a: x + 1; })`) is typed `void`, where GCC
+  and Clang give it the type of the expression, so typec refuses
+  `if (({ a: x + 1; }))` and `({ a: x + 1; }) + 1`, which both accept.
+  `Expressions.statement_expression` should look through the label.
 - [Medium] GNU forms that common code uses and the profile leaves out,
   each an error that names its first token: attributes before a
   statement that no named label precedes (`__attribute__((musttail))

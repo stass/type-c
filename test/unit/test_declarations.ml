@@ -1562,7 +1562,13 @@ let arm_jumps () =
        "match (v) { case A: in: { void *q = &&in; (void)q; } return 1; \
         default: break; }")
     "the address of a label inside a match arm, which a computed goto \
-     could jump to from outside the arm (design 4.3 rule 3) [TC0022]"
+     could jump to from outside the arm (design 4.3 rule 3) [TC0022]";
+  (* The labels of the arms are those of the function, as in the C that
+     the match lowers to. *)
+  rejects ~file
+    (in_function
+       "match (v) { case A: in: break; default: in: break; }")
+    "a second definition of a label in its scope (C11 6.8.1p3)"
 
 (* Design 3.3: qualified constructors everywhere, unqualified ones where
    the target type of the position is the variant. *)

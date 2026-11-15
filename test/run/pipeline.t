@@ -191,7 +191,7 @@ shows that the backend can write there.
   $ printf '#error stop\n' > bad-cpp.tc
   $ typec --cc=$clang -c bad-cpp.tc 2>/dev/null
   [1]
-  $ printf 'void f(void) { goto nowhere; }\n' > bad-c.tc
+  $ printf 'void f(void) { __asm__("no_such_instruction"); }\n' > bad-c.tc
   $ typec --cc=$clang -c bad-c.tc 2>/dev/null
   [1]
   $ printf 'int @;\n' > bad-read.tc

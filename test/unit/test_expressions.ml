@@ -674,6 +674,40 @@ let statements () =
   rejects "int v = undeclared" "6.5.1p2";
   rejects "int v = { 1, { undeclared } }" "6.5.1p2"
 
+(* 6.8.1p3, 6.8.6.1p1: a label is defined once in its scope, the
+   function or the block of a GNU local label, and a goto or an asm goto
+   names one defined there. *)
+let labels () =
+  accepts "goto a; a: ; again: if (x) goto again";
+  accepts "__asm__ goto (\"\" : : : : a); a: ;";
+  accepts "{ __label__ a; a: ; } { __label__ a; a: goto a; } a: goto a";
+  accepts "({ if (x) goto out; 0; }); out: ;";
+  accepts "({ __asm__ goto (\"\" : : : : out); 0; }); out: ;";
+  rejects "a: ; a: ;" "6.8.1p3";
+  rejects "a: ; { a: ; }" "6.8.1p3";
+  rejects "({ a: 0; }); a: ;" "6.8.1p3";
+  rejects "__label__ a; a: ; a: ;" "6.8.1p3";
+  rejects "goto b" "6.8.6.1p1";
+  rejects "__asm__ goto (\"\" : : : : b)" "6.8.6.1p1";
+  rejects "{ __label__ b; goto b; } b: ;" "6.8.6.1p1";
+  (* Typing reads no type name for labels, so it cannot tell a label
+     inside an array length from no label: the address of one is the
+     backend's, which both accept. *)
+  accepts "int n = x; void *p = &&b; int a[({ b: n; })]; (void)p; (void)a"
+
+(* Constraints of statements that both backends accept in GNU C, so
+   typec leaves them to the backend: any storage class but _Thread_local
+   in a for declaration (6.8.5p3, which 6.7.1p3 refuses in a block anyway),
+   and a return whose value does not match the function's (6.8.6.4p1),
+   which both refuse by default but accept under -Wno-return-mismatch. *)
+let left_to_backend () =
+  accepts "for (static int i = 0; i < 1; ) ;";
+  accepts "for (extern int i; i < 1; ) ;";
+  accepts "for (typedef int T; ; ) break";
+  rejects "for (_Thread_local int i = 0; ; ) break" "6.7.1p3";
+  accepts "return x";
+  accepts_source "int f(void) { return; }"
+
 (* Declarations in blocks are read as those at file scope. *)
 let block_declarations () =
   types "int y = 2; struct t { int a; } v; y + v.a" "int";
@@ -847,6 +881,8 @@ let () =
   old_style_definitions ();
   enum_integer_composites ();
   statements ();
+  labels ();
+  left_to_backend ();
   block_declarations ();
   block_linkage ();
   deep_bodies ();

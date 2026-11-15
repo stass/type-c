@@ -2758,6 +2758,10 @@ and statement_node context (statement : Tree.statement) =
       Option.iter (scalar ~clause:"6.8.5p2") condition;
       Option.iter (fun step -> ignore (whole_value context step)) step;
       typed_statement context body
+  (* 6.8.6.4p1 is left to the backend: GCC and Clang refuse a return
+     that mismatches the function by default but accept it under
+     -Wno-return-mismatch, and GNU C returns a void expression from a
+     void function. *)
   | Return value ->
       let position =
         match enclosing.return_type with
@@ -2778,6 +2782,9 @@ and statement_node context (statement : Tree.statement) =
             (operands.outputs @ operands.inputs))
         operands
 
+(* The storage classes of 6.8.5p3 are left to the backend: in GNU C,
+   GCC and Clang accept all but _Thread_local, which 6.7.1p3 refuses in a
+   block. *)
 and for_clause context (clause : Tree.for_clause) =
   match clause with
   | Clause_declaration declaration -> context.declaration declaration
@@ -3195,6 +3202,6 @@ let function_body context ~name ~return_type block =
     { outside_functions with function_name = Some name; return_type }
   in
   within context enclosing (fun () -> block_items context block);
-  match Reachability.jump_refusal (reachability_facts context) block with
+  match Reachability.label_refusal (reachability_facts context) block with
   | Some { span; message } -> context.fail span message
   | None -> ()
