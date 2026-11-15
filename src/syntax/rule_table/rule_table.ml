@@ -128,7 +128,8 @@ let rules =
       clause = Some "design 3.2 rule 2";
       meaning =
         "A constructor named for a word of Type-C text (design 2.3) or \
-         a universe name." };
+         a universe name, or a constructor or field whose name C \
+         reserves for any use." };
     { name = "Disputed_jump"; code = 26; clause = Some "design 4.4";
       meaning =
         "A [break] or [continue] in Type-C text in a statement \

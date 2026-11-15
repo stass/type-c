@@ -247,8 +247,21 @@ Derived names, field types and constructor names are checked.
   reserved.tc:1: `__v` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
   reserved.tc:1: `__g` cannot name a type declaration, as C reserves it for any use (design 10.1 rule 6) [TC0004]
   [1]
+  $ for decl in 'type e = | _BitInt(int x);' 'type e = | __A;' \
+  >     'type e = | A(int __x);' 'type e = | A(int _Y);' \
+  >     'type e = | A(int a, int *_P);' 'type e = | A(int (*__f)(int));'; do
+  >   printf '%s\n' "$decl" > member.tc
+  >   ./golden.exe member.tc
+  > done
+  member.tc:1: `_BitInt` cannot name a constructor, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  member.tc:1: `__A` cannot name a constructor, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  member.tc:1: `__x` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  member.tc:1: `_Y` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  member.tc:1: `_P` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  member.tc:1: `__f` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  [1]
   $ printf '%s\n' 'type _x_lower = | A | B;' 'type _ = struct { int a; };' \
-  >   'type _y = int;' > usable.tc
+  >   'type _y = int;' 'type f = | _a(int _y);' > usable.tc
   $ ./golden.exe usable.tc > usable.c
   $ printf 'type e = | A(e inner);\n' > recursive.tc
   $ ./golden.exe recursive.tc

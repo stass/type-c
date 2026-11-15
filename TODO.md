@@ -416,7 +416,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   and the UTF-8 character it names are two names (`linked` is keyed by
   spelling), and the length of `__func__` counts the spelling: Clang
   gives a function spelled with `\U0001F600` a name of its UTF-8 bytes.
-  Normalise identifiers to UTF-8 where the reader lexes them.
+  Normalise identifiers to UTF-8 where the reader lexes them, and
+  refuse there a universal character name below U+00A0 other than `$`,
+  `@` and backtick (C11 6.4.3p2): `_\u0041` passes every check for a
+  name C reserves for any use (`type e = | A(int _\u0041);`) and is
+  Clang's error, not typec's.
 
 - [Low] `check_distinct` compares the associations of a generic
   selection in pairs: 20000 of them take 26 s, where GCC and Clang, as
@@ -973,12 +977,6 @@ types (design 13.3).
   `vector__i`). Design 10.3 cites a rule of 3.5 that a generic's name
   has no `__`, which 3.5 lacks; `a__b` and `a_` break "the first `__`
   separates the generic". State the rule in 3.5 and check it then.
-- [Medium] A constructor name or a field name that C reserves for any
-  use is emitted verbatim as a union or structure member (design 10.1
-  rule 3): `type e = | _BitInt(int x);` reaches the backend and is
-  Clang's error, not typec's, and `type e = | A(int __x);` declares
-  `__x`. Refuse them beside `refuse_reserved_constructor` (design 3.2
-  rule 2), as the declared name is refused.
 - [Low] A reserved type-declaration name is refused under TC0004,
   which cites design 10.1 rule 6 on claimed names, though an alias or a
   distinct type claims nothing. Give it its own rule in 3.1, beside

@@ -265,7 +265,13 @@ type expr =
    named `try`, `defer` or a universe name (2.3), in any text: written
    unqualified (`T t = try(1);`) it could read as the constructor or as
    the word or universe name, and refusing it keeps one reading. A field
-   may have such a name, as a member may.
+   may have such a name, as a member may. No constructor or field has a
+   name that C reserves for any use (10.1 rule 6): each field, and each
+   constructor that has fields, names a member of the C that `typec`
+   builds for the variant (10.1 rule 3), and the rule does not depend on
+   whether a constructor has fields. A name inside C written in a field,
+   such as a member of a structure type or a parameter of a function
+   type, follows the rules of C, as in C text.
 3. The leading `|` is required. It is what tells a one-constructor variant
    from an alias.
 4. A constructor has zero or more named fields, written like parameters. A

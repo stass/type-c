@@ -1462,18 +1462,31 @@ let constructor_names state =
   loop 0 []
 
 (* Unqualified, a constructor named for a word of Type-C or a universe
-   name would read as that word or name (design 3.2 rule 2). *)
+   name would read as that word or name; and its name may not be one C
+   reserves for any use, as it names a union member where it has fields
+   (design 3.2 rule 2). *)
 let refuse_reserved_constructor state ~at constructor =
-  let refuse what =
+  let refuse why =
     fail_at_token state at
       (Rule.message Reserved_constructor
-         (Printf.sprintf "%s cannot name a constructor, as it is %s"
-            (quoted constructor) what))
+         (Printf.sprintf "%s cannot name a constructor, as %s"
+            (quoted constructor) why))
   in
   match (type_c_word constructor, Universe.find constructor) with
-  | Some _, _ -> refuse "a word of Type-C"
-  | None, Some _ -> refuse "a universe name"
-  | None, None -> ()
+  | Some _, _ -> refuse "it is a word of Type-C"
+  | None, Some _ -> refuse "it is a universe name"
+  | None, None ->
+      if is_reserved_for_any_use constructor then
+        refuse "C reserves it for any use"
+
+(* A field names a member of its constructor's structure, so its name
+   may not be one C reserves for any use (design 3.2 rule 2). *)
+let refuse_reserved_field state (field : identifier) =
+  if is_reserved_for_any_use field.node then
+    fail_at_token state (token_of field)
+      (Rule.message Reserved_constructor
+         (Printf.sprintf "%s cannot name a field, as C reserves it for any use"
+            (quoted field.node)))
 
 (* The enumerators of the variant [variant], claimed before any field is
    read: the C it lowers to declares them before the structure, so a
@@ -2580,6 +2593,7 @@ and field state =
   let specifiers = specifiers state Specifier_qualifiers in
   if specifiers = [] then fail_expected state "a field";
   let declarator = member_name_declarator state in
+  refuse_reserved_field state (named_identifier state declarator);
   finish state start ({ specifiers; declarator } : field_node)
 
 (* Statements (C11 6.8). *)
