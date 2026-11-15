@@ -98,3 +98,44 @@ default (design 4.5, 10.5): the program stops on a signal.
   trapped
   $ sh -c './gcc-eval default; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
   trapped
+
+An arm ends where the rules of design 4.4 say its end is unreachable: in
+a goto within the arm or out of the match, in a loop that never ends
+but by a return, in a call to a function that does not return (4.3).
+The program compiles without a warning and runs on each backend.
+
+  $ cat > exits.tc <<'EOF'
+  > #include <stdio.h>
+  > #include <stdlib.h>
+  > type step = | Repeat(int times) | Stop | Fail;
+  > static _Noreturn void fail(void) { abort(); }
+  > static int run(step s) {
+  >   int count = 0;
+  >   match (s) {
+  >   case Repeat(times):
+  >   again:
+  >     count++;
+  >     if (count < times)
+  >       goto again;
+  >     goto done;
+  >   case Stop:
+  >     for (;;)
+  >       return -1;
+  >   case Fail:
+  >     fail();
+  >   }
+  > done:
+  >   return count;
+  > }
+  > int main(int argc, char **argv) {
+  >   (void)argv;
+  >   printf("%d %d\n", run(Repeat(3)), run(Stop));
+  >   return argc > 1 ? run(Fail) : 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Wextra -Werror -o clang-exits exits.tc
+  $ ./clang-exits
+  3 -1
+  $ typec --cc=$gcc -Wall -Wextra -Werror -o gcc-exits exits.tc
+  $ ./gcc-exits
+  3 -1

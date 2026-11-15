@@ -69,6 +69,11 @@ type t =
   | Enclosing_switch_label
       (** A [case] or [default] label inside a match that is not one of
           its own (design 4.3 rule 3). *)
+  | Arm_end
+      (** A match arm whose end can be reached (design 4.3 rule 1, 4.4). *)
+  | Arm_entry
+      (** A jump into a match arm from outside it, or the address of a
+          label inside one (design 4.3 rule 3). *)
   | Not_implemented of { section : string; package : string }
       (** A construct of design [section] that work [package] implements. *)
 
@@ -91,7 +96,8 @@ let clause = function
   | Shared_arm -> "design 4.1 rule 6"
   | Exhaustiveness -> "design 4.2 rule 1"
   | Default_arm -> "design 4.2 rule 2"
-  | Enclosing_switch_label -> "design 4.3 rule 3"
+  | Enclosing_switch_label | Arm_entry -> "design 4.3 rule 3"
+  | Arm_end -> "design 4.3 rule 1"
   | Not_implemented { section; package } ->
       Printf.sprintf "design %s; work package %s" section package
 

@@ -65,6 +65,10 @@ type lookup =
 
 val find : Target.t -> string -> lookup
 
+val noreturn : string -> bool
+(** Whether the builtin of the name does not return, as GCC and Clang
+    declare it. *)
+
 val c_type : Target.t -> c_type -> (Ctype.t, Ctype.error) result
 val function_type : Target.t -> prototype -> (Ctype.t, Ctype.error) result
 

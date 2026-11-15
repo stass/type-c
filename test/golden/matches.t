@@ -115,3 +115,41 @@ Each refusal is located at the construct it concerns.
   $ ./golden.exe scrutinee.tc
   scrutinee.tc:3: the scrutinee of a match is not of a variant type; a pointer is not dereferenced implicitly (design 4.1 rule 1)
   [1]
+
+The end of every arm, the last one too, must be unreachable by the rules
+of design 4.4 (4.3 rule 1), which evaluate no condition but a constant;
+the refusal names the arm. A label inside an arm is the target only of a
+goto in the same arm (4.3 rule 3).
+
+  $ cat > open.tc <<'EOF'
+  > type e = | A | B(int i);
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     return 1;
+  >   case B(i):
+  >     if (i > n)
+  >       return i;
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ ./golden.exe open.tc
+  open.tc:6: the end of the match arm can be reached (design 4.3 rule 1)
+  [1]
+
+  $ cat > entry.tc <<'EOF'
+  > type e = | A | B(int i);
+  > int f(e v) {
+  >   match (v) {
+  >   case A:
+  >     goto inside;
+  >   case B(i):
+  >   inside:
+  >     return i;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe entry.tc
+  entry.tc:5: a jump into a match arm from outside it (design 4.3 rule 3)
+  [1]

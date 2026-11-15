@@ -315,25 +315,34 @@ let control =
     both "__builtin_prefetch" (variadic Void [ const_void_pointer ]);
     both "__builtin_return_address" (prototype void_pointer [ unsigned ]);
     both "__builtin_frame_address" (prototype void_pointer [ unsigned ]);
-    both "__builtin_abort" (prototype Void []);
-    both "__builtin_trap" (prototype Void []);
-    both "__builtin_unreachable" (prototype Void []);
-    gcc "__builtin_exit" (prototype Void [ int ]);
     (* GCC takes a void *, Clang a void ** to the buffer. *)
     setjmp_family "__builtin_setjmp"
       ~gcc:(prototype int [ void_pointer ])
       ~clang:(prototype int [ Pointer void_pointer ]);
-    setjmp_family "__builtin_longjmp"
-      ~gcc:(prototype Void [ void_pointer; int ])
-      ~clang:(prototype Void [ Pointer void_pointer; int ]);
     gcc "__builtin_apply_args" (variadic void_pointer []);
     gcc "__builtin_apply" Unknown;
     gcc "__builtin_shuffle" Unknown;
   ]
 
+(* The builtins that GCC and Clang declare noreturn, whose call ends a
+   match arm (design 4.4). *)
+let not_returning =
+  [
+    both "__builtin_abort" (prototype Void []);
+    both "__builtin_trap" (prototype Void []);
+    both "__builtin_unreachable" (prototype Void []);
+    gcc "__builtin_exit" (prototype Void [ int ]);
+    setjmp_family "__builtin_longjmp"
+      ~gcc:(prototype Void [ void_pointer; int ])
+      ~clang:(prototype Void [ Pointer void_pointer; int ]);
+  ]
+
 let table =
   List.concat [ memory_and_strings; object_size_checking; floating; bits;
-                atomics; control ]
+                atomics; control; not_returning ]
+
+let noreturn name =
+  List.exists (fun entry -> entry.name = name) not_returning
 
 let offer (target : Target.t) entry =
   match target.backend.compiler with

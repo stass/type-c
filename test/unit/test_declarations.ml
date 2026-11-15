@@ -1361,6 +1361,165 @@ let matching () =
   rejects ~file "enum k { K }; void g(enum k x) { match (x) { default: ; } }"
     "(design 4.1 rule 1)"
 
+(* Design 4.3 rule 1 and 4.4: the end of every arm is unreachable, by the
+   syntactic rules of 4.4, which evaluate no condition but a constant. *)
+let arm_termination () =
+  let file = "in.tc" in
+  let variant =
+    "type e = | A | B(int i); void g(void); _Noreturn void die(void); \
+     __attribute__((noreturn)) void halt(void); \
+     void stop(int) __attribute__((noreturn)); enum { ON = 1 }; "
+  in
+  let in_function body =
+    variant ^ "long f(e v, int n) { while (n) { " ^ body
+    ^ " } out: return 0; }"
+  in
+  (* [ends arm] puts [arm] as the last arm of a match. *)
+  let ends arm =
+    in_function ("match (v) { case A: break; default: " ^ arm ^ " }")
+  in
+  let open_end =
+    "the end of the match arm can be reached (design 4.3 rule 1)"
+  in
+  let refused arm = rejects ~file (ends arm) open_end in
+  let accepted arm = accepts ~file (ends arm) in
+  accepted "break;";
+  accepted "return 1;";
+  accepted "continue;";
+  accepted "goto out;";
+  accepted "die();";
+  accepted "halt();";
+  accepted "(stop)(1);";
+  accepted "__builtin_trap();";
+  accepted "__builtin_unreachable();";
+  accepted "__builtin_abort();";
+  accepted "__builtin_exit(1);";
+  accepted "do { continue; } while (1);";
+  accepted "switch (n) { case 1: while (1) { default: return 1; } }";
+  accepted "if (n) return 1; else break;";
+  accepted "for (;;) ;";
+  accepted "for (;1;) { if (n) continue; }";
+  accepted "while (1) { switch (n) { case 1: break; } }";
+  accepted "while (ON) { match (v) { default: break; } }";
+  accepted "do { } while (2);";
+  accepted "do { return 1; } while (n);";
+  accepted "for (;;) { return 1; break; }";
+  accepted "switch (n) { default: return 1; }";
+  accepted "switch (n) { case 1: n++; default: return 1; }";
+  accepted "{ n++; { break; } }";
+  accepted "L: return 1;";
+  accepted "({ return 1; });";
+  accepted "(({ n++; break; }));";
+  accepted "match (v) { case A: return 1; default: die(); }";
+  accepted "match (v) { case A: break; default: return 1; } return 2;";
+  refused "n++;";
+  refused "g();";
+  refused "(void)die();";
+  refused "{ }";
+  refused "if (n) break;";
+  refused "if (1) break;";
+  refused "if (n) break; else n++;";
+  refused "while (n) return 1;";
+  refused "while (1, 1) ;";
+  refused "for (;;) { if (n) break; }";
+  refused "for (;;) { n += ({ if (n) break; 1; }); }";
+  refused "for (;;) { int x = ({ break; 0; }); (void)x; }";
+  refused "while (1) ({ break; });";
+  refused "do { break; } while (1);";
+  refused "do { continue; } while (n);";
+  refused "do { if (n) continue; return 1; } while (0);";
+  refused "do ; while (n);";
+  refused "switch (n) { case 1: return 1; }";
+  refused "switch (n) { default: break; }";
+  refused "switch (n) { default: return 1; case 2: ; }";
+  refused "return 1; L: n++;";
+  refused "({ n++; });";
+  refused "match (v) { default: break; }";
+  refused "asm goto (\"\" : : : : out);";
+  refused "switch (n) { case 1: switch (n) { default: return 1; } }";
+  (* Which function of an overload set a call names is unknown. *)
+  rejects ~file
+    (variant
+     ^ "__attribute__((overloadable)) void quit(double); \
+        __attribute__((overloadable, noreturn)) void quit(int); \
+        void h(e v) { match (v) { case A: quit(1); default: break; } }")
+    open_end;
+  (* A match in a type name is checked as any other. *)
+  rejects ~file
+    (variant
+     ^ "void h(e v) { int a[({ int k = 1; match (v) { case A: k = 2; \
+        default: break; } k; })]; (void)a; }")
+    open_end;
+  (* An arm before the last one, and the location of the refusal. *)
+  rejects ~file (in_function "match (v) { case A: n++; default: break; }")
+    open_end;
+  (match read ~file lp64
+           (variant ^ "void h(e v) {\n match (v) {\n case A:\n break;\n \
+                       default:\n v = A;\n }\n}") with
+   | Error { location; _ } when location.line = 5 -> ()
+   | Error { location; _ } ->
+       fail_case "arm location" (Printf.sprintf "line %d" location.line)
+   | Ok _ -> fail_case "arm location" "accepted");
+  (* C code gains no refusal: a switch section may fall into the next. *)
+  accepts ~file
+    "int c(int n) { switch (n) { case 1: n++; case 2: n--; } \
+     for (;;) { if (n) break; } return n; }";
+  (* The analysis recurses as deep as typing, which bounds the nesting:
+     the parser bounds brackets, typing a chain of statements. *)
+  let repeat depth text =
+    String.concat "" (List.init depth (fun _ -> text))
+  in
+  accepts ~file
+    (in_function
+       (repeat 120 "match (v) { default: " ^ "return 1;" ^ repeat 120 " }"));
+  accepted (repeat 4000 "if (n) return 1; else " ^ "return 0;");
+  refused (repeat 4000 "if (n) " ^ "return 0;");
+  (* Design 4.3 rule 2: continue continues the loop around a match. *)
+  rejects ~file
+    (variant ^ "void h(e v) { match (v) { default: continue; } }")
+    "continue outside a loop"
+
+(* Design 4.3 rule 3: a label inside an arm is the target only of a goto
+   in the same arm. *)
+let arm_jumps () =
+  let file = "in.tc" in
+  let variant = "type e = | A | B(int i); " in
+  let in_function body =
+    variant ^ "int f(e v, e w, int n) { " ^ body ^ " out: return 0; }"
+  in
+  let into = "a jump into a match arm from outside it (design 4.3 rule 3)" in
+  let refused body = rejects ~file (in_function body) into in
+  let accepted body = accepts ~file (in_function body) in
+  accepted
+    "match (v) { case A: again: if (n--) goto again; break; \
+     default: goto out; }";
+  accepted
+    "match (v) { case A: inner: match (w) { case A: goto inner; \
+     default: goto out; } default: break; }";
+  accepted "void *q = &&out; (void)q; match (v) { default: goto *q; }";
+  accepted
+    "{ __label__ in; match (v) { case A: in: if (n--) goto in; break; \
+     default: break; } } goto in; in: ;";
+  accepted "goto in; switch (n) { case 1: in: break; }";
+  refused "goto in; match (v) { case A: in: return 1; default: break; }";
+  refused "match (v) { case A: in: return 1; default: break; } goto in;";
+  refused "match (v) { case A: goto in; default: in: return 1; }";
+  refused
+    "match (v) { case A: match (w) { case A: in: return 1; \
+     default: break; } goto in; default: break; }";
+  refused
+    "match (v) { case A: n += ({ goto in; 0; }); break; \
+     default: in: break; }";
+  refused
+    "match (v) { case A: break; default: in: break; } \
+     asm goto (\"\" : : : : in);";
+  rejects ~file
+    (in_function
+       "match (v) { case A: in: { void *q = &&in; (void)q; } return 1; \
+        default: break; }")
+    "the address of a label inside a match arm, which a computed goto \
+     could jump to from outside the arm (design 4.3 rule 3)"
+
 (* Design 3.3: qualified constructors everywhere, unqualified ones where
    the target type of the position is the variant. *)
 let constructors () =
@@ -1622,6 +1781,8 @@ let () =
   distinct_operands ();
   constructors ();
   matching ();
+  arm_termination ();
+  arm_jumps ();
   zero_values ();
   builtin_typedefs ();
   gnu_profile ();

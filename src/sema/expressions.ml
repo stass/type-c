@@ -2635,12 +2635,55 @@ and match_statement context (statement : Tree.statement) scrutinee arms =
       (fun (arm : Tree.arm) labels ->
         let matched = matched_arm context arm labels defaulted in
         within context enclosing (fun () -> arm_items context arm);
+        refuse_open_arm context arm;
         matched)
       arms labelled
   in
   Hashtbl.replace context.typed.matchings statement.span
     { statement = statement.span; scrutinee = scrutinee.span; variant;
       access = access_of scrutinee t; arms }
+
+(* Design 4.4: a callee that designates a function declared [_Noreturn]
+   or with the GNU [noreturn], or a builtin that is; an undeclared name
+   that typing accepted is a builtin. Which function of an overload set
+   a call names is unknown, so it may return. *)
+and calls_noreturn context (callee : Tree.expression) =
+  match callee.node with
+  | Parenthesized inner -> calls_noreturn context inner
+  | Identifier { name; resolution = Undeclared } ->
+      Builtin_function.noreturn name
+  | Identifier { resolution = Resolved reference; _ }
+    when context.overloaded reference ->
+      false
+  | Identifier { name; resolution = Resolved reference } -> (
+      match (context.entity callee.span name reference).declared with
+      | Function { noreturn; _ } -> noreturn
+      | Object _ | Typedef _ | Enumerator _ -> false)
+  | _ -> false
+
+(* Design 4.4: a condition that is an integer constant expression the
+   front end evaluates (13.3), other than 0. *)
+and non_zero_constant context condition =
+  match constant context.typed condition with
+  | Some (Integer_expression { value; flaw = None }) ->
+      Integer_constant.truth value = Some true
+  | Some (Integer_expression { flaw = Some _; _ } | Not_integer _
+         | Unevaluable _)
+  | None ->
+      false
+
+and reachability_facts context =
+  { Reachability.noreturn = calls_noreturn context;
+    non_zero = non_zero_constant context }
+
+(* Design 4.3 rule 1, asked of each arm once typing has read it, so that
+   every match that typing reads, and lowering emits, is checked. An arm
+   is walked again for each arm around it, at most as many times as the
+   parser's bound on nested brackets. *)
+and refuse_open_arm context arm =
+  match Reachability.arm_refusal (reachability_facts context) arm with
+  | Some { span; message } -> context.fail span message
+  | None -> ()
 
 (* 4.1 rule 1, 4.2 rule 4: a variant, whose qualifiers are ignored, and
    complete here, so that its constructors are known. *)
@@ -2838,4 +2881,7 @@ let function_body context ~name ~return_type block =
   let enclosing =
     { outside_functions with function_name = Some name; return_type }
   in
-  within context enclosing (fun () -> block_items context block)
+  within context enclosing (fun () -> block_items context block);
+  match Reachability.jump_refusal (reachability_facts context) block with
+  | Some { span; message } -> context.fail span message
+  | None -> ()
