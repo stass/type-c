@@ -249,20 +249,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [High] A constructor whose target is a variant declared in a block can
-  be written outside that block, where `__typeof__` carries the type of
-  a statement expression (or a block literal) out of it. There the
-  names it lowers to denote something else or nothing: with
-  `int e_A = 7;` outside, `__typeof__(({ type e = | A; e v = A; v; })) y
-  = A;` lowers to `{ .tag = e_A }`, reads the local object and compiles
-  silently; a compound literal's `struct e` fails in the backend. Design
-  10.1 rule 6 makes the names denote the variant only within its scope.
-  Recommended: refuse a construction outside its variant's scope, which
-  is a token range, so the parser records where each type declaration's
-  scope ends and constructor_expression checks the use against it; the
-  alternative, refusing type declarations inside expressions, also
-  refuses `type t = typeof(({ type u = ...; ... }))`. Owner decision, as
-  it adds a rule to 3.3.
 - [Medium] Design 13.5: a `_Generic` that typec answers keeps only the
   selected expression, so the backend no longer sees the uses in its
   controlling expression and other associations: `-Wunused-variable` and
@@ -683,11 +669,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Medium] `--trap-function=name` (design 10.5) is not implemented: a
   trap is `__builtin_trap()` alone. Add the option to the driver and
   pass the name to lowering, with a run test on both backends.
-- [Low] A variant declared in a statement expression that is the
-  scrutinee of a match lowers to C that names its tag and enumerators
-  outside their scope, a backend error; constructor expressions likely
-  have the same class. Refuse a match (and a constructor) whose variant
-  is not in scope where its lowering names it.
 - [Low] `case A: L: case B:` in a match is refused under design 4.3
   rule 3; the rule it breaks is 4.1 rule 2 (a label of the match stands
   directly in its body). Give the label under a named label its own

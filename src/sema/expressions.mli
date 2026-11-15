@@ -227,7 +227,8 @@ val constant : t -> Tree.expression -> constant option
     a Clang overload set (design 13.3); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
     block, binding its identifiers and typing its initialisers, and
-    [type_declaration] a type declaration there. *)
+    [type_declaration] a type declaration there, given the last token of
+    the block or arm that holds it. *)
 type context = {
   typed : t;
   target : Target.t;
@@ -238,7 +239,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  type_declaration : Tree.type_declaration -> unit;
+  type_declaration : scope_end:int -> Tree.type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
 }

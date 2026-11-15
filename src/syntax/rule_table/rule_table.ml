@@ -77,8 +77,9 @@ let rules =
          type." };
     { name = "Match_scrutinee"; code = 14; clause = Some "design 4.1 rule 1";
       meaning =
-        "A match whose scrutinee is no complete variant; also design \
-         4.2 rule 4." };
+        "A match whose scrutinee is no complete variant, or one outside \
+         the scope of the declaration of the variant; also design 4.2 \
+         rule 4." };
     { name = "Arm_form"; code = 15; clause = Some "design 4.1 rule 2";
       meaning =
         "A match body that is not a sequence of arms, each of labels \
@@ -114,6 +115,10 @@ let rules =
       meaning =
         "A construct that a later work package of the plan implements; \
          the text names the section of the design and the package." };
+    { name = "Variant_scope"; code = 24; clause = Some "design 3.3";
+      meaning =
+        "A constructor expression outside the scope of the declaration \
+         of its variant." };
   ]
 
 (* Stable codes are "TC" and four digits: fixed width for tools that read

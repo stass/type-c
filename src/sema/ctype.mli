@@ -237,15 +237,25 @@ val define_variant :
   tags ->
   record_tag ->
   privacy ->
+  scope:Typec_syntax.Tree.span ->
   constructor list ->
   member list ->
   (unit, error) result
 (** Completes the structure of a variant, as {!define_record} does, and
-    gives the variant its privacy and constructors. *)
+    gives the variant its privacy, the tokens where its declaration is in
+    scope, and its constructors. *)
 
 val constructors : tags -> t -> constructor list option
 (** The constructors of a variant, qualified or not, in order; [None]
     where [t] is no variant or one that is incomplete here. *)
+
+val variant_scope : tags -> t -> Typec_syntax.Tree.span option
+(** The tokens from the declaration of a variant, qualified or not, to
+    the end of the scope that holds it, where the names that it derives
+    denote it (design 10.1 rule 6); [None] for any other type and for an
+    incomplete variant. A variant stays complete after its scope ends, so
+    the caller checks that a use lies within; at file scope the end is
+    the last token, which may be a pragma token. *)
 
 val privacy : tags -> t -> privacy
 (** The privacy of a variant that is complete here or of a distinct type,

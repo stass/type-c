@@ -1616,9 +1616,12 @@ and read_block_declaration state (declaration : Tree.declaration) =
 
 (* Type declarations (design 3.1). The parser has made each the only
    declaration of its name in its scope (rule 5), so it declares a new
-   entity: a typedef name of the type that it defines. *)
+   entity: a typedef name of the type that it defines. [scope_end] is the
+   last token of the scope that holds it: of its block, its arm or the
+   translation unit. *)
 
-and read_type_declaration state (declaration : Tree.type_declaration) =
+and read_type_declaration state ~scope_end
+    (declaration : Tree.type_declaration) =
   let { Tree.name; declared; definition } = declaration.node in
   Hashtbl.replace state.type_declarations declared.id declaration;
   let bind t =
@@ -1632,7 +1635,8 @@ and read_type_declaration state (declaration : Tree.type_declaration) =
       bind (Ctype.record record)
   | Variant { is_private; constructors } ->
       let privacy = privacy state declaration ~is_private in
-      read_variant state declaration privacy constructors bind
+      let scope = { declaration.span with last = scope_end } in
+      read_variant state declaration privacy ~scope constructors bind
   | Alias type_name -> bind (read_type_name state type_name)
   | Distinct { is_private; representation } ->
       let privacy = privacy state declaration ~is_private in
@@ -1680,7 +1684,7 @@ and variant_record state (name : Tree.identifier) (declared : Tree.declared) =
 (* The structure has a tag of the enumeration of the constructors and,
    where one has fields, a union of the struct of each one's fields
    (design 10.1 rule 3). *)
-and read_variant state (declaration : Tree.type_declaration) privacy
+and read_variant state (declaration : Tree.type_declaration) privacy ~scope
     constructors bind =
   let { Tree.name; declared; _ } = declaration.node in
   let record = variant_record state name declared in
@@ -1697,7 +1701,7 @@ and read_variant state (declaration : Tree.type_declaration) privacy
         [ tag; variant_member Tree.union_member (Ctype.record union) ]
   in
   checked state declaration.span
-    (Ctype.define_variant state.target state.tags record privacy
+    (Ctype.define_variant state.target state.tags record privacy ~scope
        (List.map fst read) members);
   entity
 
@@ -1826,7 +1830,8 @@ and typing state : Expressions.context =
     type_name = read_type_name state;
     declaration = read_block_declaration state;
     type_declaration =
-      (fun declaration -> ignore (read_type_declaration state declaration));
+      (fun ~scope_end declaration ->
+        ignore (read_type_declaration state ~scope_end declaration));
     binding = bind_binding state;
   }
 
@@ -1907,7 +1912,8 @@ let read_external state (external_declaration : Tree.external_declaration) =
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
   | Type_declaration declaration ->
-      Type_declaration (read_type_declaration state declaration)
+      let scope_end = Array.length state.text.tokens - 1 in
+      Type_declaration (read_type_declaration state ~scope_end declaration)
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
 let builtin_type target : Builtin_typedef.t -> (Ctype.t, Ctype.error) result =

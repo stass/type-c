@@ -151,7 +151,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  type_declaration : Tree.type_declaration -> unit;
+  type_declaration : scope_end:int -> Tree.type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
 }
 
@@ -326,6 +326,25 @@ let refuse_private_creation context (span : Tree.span) ~described
                its values"
               described (quote declaring.name)))
   | Private _ | Public -> ()
+
+(* Design 3.3, 4.1 rule 1: a construction or a match at [use] lowers to
+   the names that its variant [t] derives, which denote the variant only
+   within the scope of its declaration (10.1 rule 6). [what] names the
+   construct in the diagnostic, which [at] locates and [rule] codes. *)
+let refuse_outside_scope context rule ~(use : Tree.span) ~at ~what
+    ~described (t : Ctype.t) =
+  let within (scope : Tree.span) =
+    scope.first <= use.first && use.last <= scope.last
+  in
+  match Ctype.variant_scope context.tags t with
+  | Some scope when not (within scope) ->
+      context.fail at
+        (Rule.message rule
+           (Printf.sprintf
+              "%s is outside the scope of the declaration of %s, where the \
+               names that it lowers to do not denote the variant"
+              what described))
+  | Some _ | None -> ()
 
 (* The table of design 3.4: the operations that read a value of a
    distinct type in Type-C text. The other uses that it allows take the
@@ -2072,8 +2091,10 @@ and expression_node context position (whole : Tree.expression) =
    its arguments, one for each field, each converted to the type of its
    field as if by assignment. *)
 and construct context (whole : Tree.expression) named arguments =
-  refuse_private_creation context whole.span named.variant_type
-    ~described:("the variant " ^ quote named.variant_name);
+  let described = "the variant " ^ quote named.variant_name in
+  refuse_outside_scope context Variant_scope ~use:whole.span ~at:whole.span
+    ~what:"the constructor expression" ~described named.variant_type;
+  refuse_private_creation context whole.span named.variant_type ~described;
   let name = quote named.chosen.constructor_name in
   let fields = named.chosen.fields in
   let refuse text = context.fail whole.span (constructor_message text) in
@@ -2476,12 +2497,14 @@ and initialiser context ~constant t initialiser =
   in
   Initialiser.initialise typing t initialiser
 
-and block_items context (block : Tree.block) = items context block.node.items
+and block_items context (block : Tree.block) =
+  items context ~scope_end:block.span.last block.node.items
 
-and items context =
+and items context ~scope_end =
   List.iter (function
     | Tree.Block_declaration declaration -> context.declaration declaration
-    | Block_type_declaration declaration -> context.type_declaration declaration
+    | Block_type_declaration declaration ->
+        context.type_declaration ~scope_end declaration
     | Block_statement statement -> typed_statement context statement)
 
 and typed_statement context (statement : Tree.statement) =
@@ -2621,6 +2644,9 @@ and match_statement context (statement : Tree.statement) scrutinee arms =
   let typed = expression context scrutinee in
   let t = typed.expression_type in
   let variant, constructors = scrutinee_variant context scrutinee.span t in
+  refuse_outside_scope context Match_scrutinee ~use:statement.span
+    ~at:scrutinee.span
+    ~what:"the match" ~described:("the variant " ^ quote variant) t;
   let labelled =
     List.map (labelled_constructors context variant constructors) arms
   in
@@ -2857,7 +2883,8 @@ and non_modifiable t =
   | Ok qualified -> qualified
   | Error _ -> invalid_arg "Expressions.non_modifiable: no value type"
 
-and arm_items context (arm : Tree.arm) = items context arm.node.items
+and arm_items context (arm : Tree.arm) =
+  items context ~scope_end:arm.span.last arm.node.items
 
 (* Design 13.5: the lowered match reaches an lvalue through a pointer to
    it, and copies anything else, a volatile or atomic object, and an

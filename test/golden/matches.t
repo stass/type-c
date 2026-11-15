@@ -372,3 +372,34 @@ reached only from the arm.
   $ ./golden.exe entry.tc
   entry.tc:5: a jump into a match arm from outside it (design 4.3 rule 3) [TC0022]
   [1]
+
+The scrutinee is of a variant whose declaration is in scope at the
+match, which names its tag and enumerators (design 4.1 rule 1).
+
+  $ cat > carried.tc <<'EOF'
+  > void f(void) {
+  >   match (({ type e = | A; e v = A; v; })) {
+  >   case A:
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe carried.tc
+  carried.tc:2: the match is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 4.1 rule 1) [TC0014]
+  [1]
+
+Within the scope, in the block of the declaration or a statement
+expression in it, the match stands.
+
+  $ cat > scoped.tc <<'EOF'
+  > int f(void) {
+  >   type e = | A;
+  >   e v = A;
+  >   match (v) {
+  >   case A:
+  >     break;
+  >   }
+  >   return ({ match (v) { case A: break; } 1; });
+  > }
+  > EOF
+  $ ./golden.exe scoped.tc > /dev/null

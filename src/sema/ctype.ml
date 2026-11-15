@@ -71,6 +71,7 @@ type constructor = { constructor_name : string; fields : member list }
 (* What the definition of a variant adds to its structure. *)
 type variant_definition = {
   privacy : privacy;
+  scope : Typec_syntax.Tree.span;
   constructors : constructor list;
 }
 
@@ -618,11 +619,12 @@ let define_record target tags tag members =
       Ok ()
   | exception Invalid error -> Error error
 
-let define_variant target tags tag privacy constructors members =
+let define_variant target tags tag privacy ~scope constructors members =
   if not tag.variant then invalid_arg "Ctype: a variant of no variant tag";
   Result.map
     (fun () ->
-      Hashtbl.replace tags.variants tag.record_id { privacy; constructors })
+      Hashtbl.replace tags.variants tag.record_id
+        { privacy; scope; constructors })
     (define_record target tags tag members)
 
 let variant_definition tags t =
@@ -637,6 +639,11 @@ let variant_definition tags t =
 let constructors tags t =
   Option.map
     (fun (variant : variant_definition) -> variant.constructors)
+    (variant_definition tags t)
+
+let variant_scope tags t =
+  Option.map
+    (fun (variant : variant_definition) -> variant.scope)
     (variant_definition tags t)
 
 let privacy tags t =

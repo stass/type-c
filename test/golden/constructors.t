@@ -145,3 +145,74 @@ not claimed, and a block may hide it.
   $ ./golden.exe header.tc
   header.h:1: the enumerator `e_A` is declared again, as a type declaration claims it (design 10.1 rule 6) [TC0004]
   [1]
+
+A constructor expression stands within the scope of its variant's
+declaration, from the declaration to the end of its block or of the
+translation unit, where the names its lowering derives denote the
+variant (design 3.3). A statement expression carries the type of its
+block out of it; a construction there is refused, as the lowering
+would name an unrelated `e_A` or no structure at all.
+
+  $ cat > carried.tc <<'EOF'
+  > int e_A = 7;
+  > void f(void) {
+  >   __typeof__(({ type e = | A; e v = A; v; })) y = A;
+  > }
+  > EOF
+  $ ./golden.exe carried.tc
+  carried.tc:3: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 3.3) [TC0024]
+  [1]
+  $ cat > assigned.tc <<'EOF'
+  > void f(void) {
+  >   typedef __typeof__(({ type e = | A; e v = A; v; })) t;
+  >   t y;
+  >   y = A;
+  > }
+  > EOF
+  $ ./golden.exe assigned.tc
+  assigned.tc:4: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 3.3) [TC0024]
+  [1]
+  $ cat > qualified.tc <<'EOF'
+  > void f(void) {
+  >   typedef __typeof__(({ type e = | A; e v = A; v; })) t;
+  >   t y = t.A;
+  > }
+  > EOF
+  $ ./golden.exe qualified.tc
+  qualified.tc:3: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 3.3) [TC0024]
+  [1]
+
+Within the scope, a construction stands anywhere: in the block of the
+declaration, in a block nested in it or in a statement expression there
+whose type it carries, in the arm that declares the variant, after the
+definition that completes an incomplete variant, and after the
+declaration at file scope.
+
+  $ cat > scoped.tc <<'EOF'
+  > type f_e = | F;
+  > void f(void) {
+  >   __typeof__(({ type e = | A; e v = A; { e w = e.A; v = w; } v; })) y;
+  >   (void)y;
+  > }
+  > void l(void) {
+  >   type e = | A;
+  >   __typeof__(({ e v = A; v; })) y = A;
+  >   type g;
+  >   type g = | G;
+  >   g z = G;
+  >   (void)y;
+  >   (void)z;
+  > }
+  > f_e g(void) { { return F; } }
+  > static f_e h = f_e.F;
+  > void k(f_e x) {
+  >   match (x) {
+  >   case F:
+  >     type u = | X;
+  >     u w = X;
+  >     (void)w;
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe scoped.tc > /dev/null

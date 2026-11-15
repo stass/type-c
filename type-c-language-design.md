@@ -336,6 +336,15 @@ Everywhere else an unqualified name is looked up as C looks it up, and a
 constructor needs the qualified form. String literals use the same
 mechanism to become `str` (section 8).
 
+A constructor expression, qualified or not, stands within the scope of its
+variant's declaration: from the type declaration to the end of the block,
+match arm or translation unit that holds it. Outside that scope it is an
+error, even where the type reaches: `__typeof__` carries the type of a
+statement expression out of the block that declares it, and `int e_A = 7;
+__typeof__(({ type e = | A; e v = A; v; })) y = A;` is refused. The names
+that a constructor lowers to denote the variant only within its scope
+(10.1 rule 6).
+
 Rationale. Variants want short constructor names, and a C translation unit
 has one flat namespace of ordinary identifiers. Scoping constructors to
 their type keeps them out of it; target typing removes the qualification
@@ -478,7 +487,9 @@ expression form; a C local assigned in each arm does that job.
 ### 4.1 Form
 
 1. The scrutinee is an expression of variant type; qualifiers are ignored. A
-   pointer is not dereferenced implicitly: write `match (*e)`.
+   pointer is not dereferenced implicitly: write `match (*e)`. The match
+   stands within the scope of the variant's declaration, as a constructor
+   expression does (3.3), since it lowers to the same names.
 2. The body is a sequence of *arms*. An arm is one or more labels, `case`
    *pattern* `:` or `default:`, followed by at least one block item. A label
    of the match stands directly in its body, never inside a nested
