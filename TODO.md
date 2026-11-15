@@ -1065,6 +1065,11 @@ types (design 13.3).
   (Pilot A step 10 needed a maker function for it). Decide whether rule
   1 excepts a cast of the constant 0, or say in 9.2 that the zero value
   is reached only by an initialiser.
+- [Low] Two diagnostics from Pilot A's injections: TC0013 gives no
+  column and names the owner by the path the backend found it through
+  (`./type.tci`); and a binding of another arm used in an arm reads
+  "'addr' is not declared (C11 6.5.1p2)" with no code, where a message
+  naming the arm that binds it would point at the mistake.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
