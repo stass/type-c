@@ -1007,6 +1007,13 @@ types (design 13.3).
   when a header declares `e`; likely the C-text owner rule near
   `src/syntax/parser.ml:590`. Decide whether that is intended and test
   it either way.
+- [Medium] The AFL runtime of OCaml uses the old fork-server handshake,
+  which reports no map size, so AFL++ 5.03c gives every instance an
+  8 MiB map although the instrumentation writes below 65536: stock
+  FreeBSD SysV limits (`kern.ipc.shmall` 512 MiB) then hold only 56
+  instances, and every execution processes the whole map. Extend
+  tools/fuzz/patches to make `runtime/afl.c` use the new handshake and
+  report its size.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
