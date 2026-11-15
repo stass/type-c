@@ -1034,6 +1034,13 @@ types (design 13.3).
   under sizeof overflows the stack. Reproducer: /Volumes/Optaine/
   type-c-pilot-a-notes/repro/node-probes/match-frame.tc. Measure at -O2
   and decide whether the lowering should share one binding block.
+- [Medium] Porting hazard (Pilot A step 8): a `break` that left a loop
+  from inside an `if` leaves only the arm once the `if` becomes a match
+  arm (design 4.3 rule 2), and typec says nothing. In chibicc's
+  `write_gvar_data` a line-by-line port would silently change the output.
+  Decide whether a `break` in an arm that is not the arm's last statement
+  (or that sits inside a loop around the match) deserves a diagnostic, or
+  whether 4.3 should say how to leave the enclosing loop.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
