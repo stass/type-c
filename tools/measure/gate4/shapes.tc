@@ -1,0 +1,68 @@
+/* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
+
+/* A match with bindings in a hot loop; shapes.c is its hand-written twin.
+   Usage: shapes COUNT ROUNDS SEED. */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+type shape =
+    | Square(unsigned side)
+    | Rectangle(unsigned width, unsigned height)
+    | Triangle(unsigned base, unsigned height)
+    | Box(unsigned width, unsigned height, unsigned depth);
+
+static unsigned long next_random(unsigned long *state) {
+  *state = *state * 6364136223846793005UL + 1442695040888963407UL;
+  return *state >> 33;
+}
+
+static shape random_shape(unsigned long *seed) {
+  unsigned a = next_random(seed) % 1000, b = next_random(seed) % 1000;
+  switch (next_random(seed) % 4) {
+  case 0: return Square(a);
+  case 1: return Rectangle(a, b);
+  case 2: return Triangle(a, b);
+  default: return Box(a, b, a ^ b);
+  }
+}
+
+int main(int argc, char **argv) {
+  if (argc != 4)
+    return 2;
+  unsigned long count = strtoul(argv[1], NULL, 0);
+  unsigned long rounds = strtoul(argv[2], NULL, 0);
+  unsigned long seed = strtoul(argv[3], NULL, 0);
+  if (count == 0)
+    return 2;
+  shape *shapes = malloc(count * sizeof *shapes);
+  if (shapes == NULL)
+    return 1;
+  for (unsigned long i = 0; i < count; i++)
+    shapes[i] = random_shape(&seed);
+  unsigned long total = 0;
+  for (unsigned long round = 0; round < rounds; round++) {
+    /* Replacing one shape per round keeps the sum inside the loop. */
+    shapes[round % count] = Square(round % 1000);
+    for (unsigned long i = 0; i < count; i++) {
+      match (shapes[i]) {
+      case Square(s):
+        total += (unsigned long)s * s;
+        break;
+      case Rectangle(w, h):
+        total += (unsigned long)w * h;
+        break;
+      case Triangle(b, h):
+        total += (unsigned long)b * h / 2;
+        break;
+      case Box(w, h, d):
+        total += (unsigned long)w * h * d;
+        break;
+      }
+    }
+  }
+  printf("%lu\n", total);
+  free(shapes);
+  return 0;
+}

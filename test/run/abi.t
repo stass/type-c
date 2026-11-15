@@ -807,8 +807,8 @@ status 80.
 
 A small program in Type-C and its hand-written C equivalent, a tagged
 structure read by switch, give the same output at -O2 on each backend
-(plan, Stage 1 exit gate 4). The gate also compares their size and
-speed, which a run test does not measure.
+(plan, Stage 1 exit gate 4); tools/measure/gate4.sh measures the size
+and speed of such pairs, which a run test does not.
 
   $ cat > eval.tc <<'EOF'
   > #include <stdio.h>

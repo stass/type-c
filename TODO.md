@@ -721,11 +721,38 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   not compatible (C11 6.2.7), which works at the ABI but would trip
   `-fsanitize=cfi-icall`. Let `hand.h` spell its names through one
   prefix macro that `layout.tc` sets to `c_` and `side.c` leaves empty.
-- [Medium] Stage 1 exit gate 4 also asks for size and speed within
-  noise at `-O2`; `test/run/abi.t` checks only the output of its
-  differential program. Measure at the gate: `size` of the objects of
-  each pair, and the run time of a loop-heavy pair over repeated runs
-  with the spread reported, on each backend.
+- [High] Stage 1 exit gate 4 does not hold for size and speed as
+  stated. `tools/measure/gate4.sh` (results in
+  `/Volumes/Optaine/typec-gate4/results.md`) finds `ids` equal in code
+  size on both backends, and `tree` and `shapes` larger by 7 to 50
+  bytes. Rewriting the C twins one construct at a time until they match
+  the lowered C makes every size and time equal, so each difference is
+  one of these constructs (3 was seen with an earlier `shapes` twin that
+  built `Square` through a helper):
+  1. the trapping `default` of a `match` (gate 2): clang +2 and +12
+     bytes, gcc -1 and +7; GCC 16 runs `shapes` 19% slower with it (its
+     loop over the array keeps an index counter beside the pointer) and
+     `tree` 7% faster than with the twin's `return 0`;
+  2. one union member per constructor (design 10.1): GCC 16 +51 bytes
+     in `tree`, where `main` keeps three arms storing constructors of the
+     same layout separate (17 jumps against 14; not verified further);
+  3. a constructor spelled as a compound literal at its use: clang +32
+     bytes in `shapes` against a helper that returns an initialised
+     local, though both compile alike alone; a twin written with
+     compound literals is equal, so this costs nothing Type-C adds;
+  4. bindings copied when the arm is entered (design 2.4): clang +6
+     bytes in `tree`, where `r` is loaded before the call `eval(l)`.
+
+  Decide whether the twin carries the same guarantees as the Type-C
+  program (a trap on an invalid tag, bindings read at the match), which
+  turns 1 and 4 into equal code and leaves 2 and 3 as backend effects;
+  then whether the GCC cost of a trap in a hot loop is accepted or the
+  lowering of the default changes. Clang runs the Type-C `tree` and
+  `shapes` 6% faster than their twins; which construct does it is not
+  yet measured (the trapping default is the first suspect). The run was on a host at load 13 to
+  17, and the `ids` walk, bound by memory, has an interquartile range
+  of 80 to 170 ms on 300 ms: rerun on an idle host before the gate is
+  signed off.
 - [Medium] `test/run/backends.sh` drops `-m32` from
   `hosted_second_target` when the host lacks the C headers of i386,
   and nothing reports it: a host that loses its 32-bit headers runs

@@ -627,3 +627,22 @@ bytes and every other byte itself.
 `typec_dump.exe` prints a line for each expression `typec` types, in
 the order of their ranges: `FIRST`, `LIMIT`, `lvalue` or `rvalue`, and
 the type as `Type_name.of_ctype` spells it, separated by tabs.
+
+## Measuring against hand-written C
+
+`tools/measure/gate4/` holds Type-C programs, each with a hand-written C
+twin of the same name: `tree` walks a tree of a variant by `match`
+against a tag, a union and a `switch`; `shapes` runs a `match` with
+bindings in a hot loop; `ids` passes ids of a distinct type through
+calls against a `typedef`. `tools/measure/gate4.sh [OUT]` builds each
+pair at `-O2` with both backends, checks that the two print the same,
+and writes the bytes of machine code of each object and the run times to
+`OUT/results.md` (by default `/Volumes/Optaine/typec-gate4`), with the
+objects, the lowered C and the hyperfine exports under `OUT/work`. It
+runs on macOS and needs hyperfine and jq; `results.md` states how the
+verdicts are drawn.
+
+```sh
+brew install hyperfine jq
+tools/measure/gate4.sh
+```
