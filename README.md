@@ -97,12 +97,13 @@ The corpus repository and its cache are `TYPEC_CORPUS` and
 `fetch.sh` must have filled the cache. Nothing is mounted, so the
 paths need not be shared with Docker: the script sends the container
 the typec working tree and the corpus repository, each as the files git
-tracks or does not ignore with a copy of its git directory, and the
-sources of the cache as a tar stream, and
-`tools/hosts/corpus-in-container.sh` builds `typec` and the runner
-there and runs it. The records name the revision of each tree as it is
-outside the container, `-dirty` included. The results come back as a
-tar stream too; the script takes only plain files where the runner
+tracks or does not ignore, and the sources of the cache as a tar
+stream, and `tools/hosts/corpus-in-container.sh` builds `typec` and the
+runner there and runs it. No git directory goes in, as the corpus
+programs are third-party code: the script names the revision of each
+tree as it is outside the container, `-dirty` included, on the
+runner's command line, and the records carry it. The results come back
+as a tar stream too; the script takes only plain files where the runner
 writes them, for one host, and copies the records into
 `CORPUS/runs/linux-MACHINE/` and the logs into `CACHE/build/`. The
 runner's output goes to `LOG`; the script prints whether the runner
@@ -405,9 +406,20 @@ cache=/Volumes/Optaine/type-c-corpus-cache
 dune build
 _build/default/tools/corpus/corpus.exe --corpus "$corpus" --cache "$cache" \
   --typec _build/install/default/bin/typec \
+  --typec-revision "$(tools/corpus/revision.sh .)" \
+  --corpus-revision "$(tools/corpus/revision.sh "$corpus")" \
   --cc /usr/bin/clang --cc /usr/local/bin/gcc-16 \
   c-testsuite zlib lua sqlite chibicc qbe
 ```
+
+The runner asks git nothing: its caller names the revision of the
+`typec` checkout and of the corpus, as `tools/corpus/revision.sh`
+prints them (the commit, then `-dirty` when the tree differs from it,
+a file git does not track included), and the runner refuses any other
+form. On a test host the
+caller is `tools/hosts/run.sh` or `tools/hosts/freebsd.sh`, on the
+machine that holds the trees, so no git directory goes where the corpus
+programs run.
 
 For each program and backend the runner makes a fresh build tree in
 `CACHE/build/HOST/PROGRAM/BACKEND/` from the archives of the program's
@@ -450,14 +462,15 @@ something about the host), which the record counts.
 
 It writes a record of each program and backend to
 `CORPUS/runs/HOST/PROGRAM.BACKEND.txt` and prints it: the digest of the
-`typec` binary, which cannot report its own revision, and the revision of
-the checkout beside it at run time, the revision of the corpus, the
-counts of identical, different, refused, typec-bug and backend-failed
-units, which failed and why, whether the programs linked, and the
-tests. Each test line of the recipe gets a tests line in the record,
-which names its script and says `passed` for an own suite that passed
-with everything built; `partial: ...` when the script passed but a unit
-failed or a program did not link, which does not meet gate 1;
+`typec` binary, which cannot report its own revision, and the revision
+its caller names for the `typec` checkout at run time, the revision of
+the corpus, the counts of identical, different, refused, typec-bug and
+backend-failed units, which failed and why, whether the programs
+linked, and the tests. Each test line of the recipe gets a tests line
+in the record, which names its script and says `passed` for an own
+suite that passed with everything built; `partial: ...` when the
+script passed but a unit failed or a program did not link, which does
+not meet gate 1;
 `substitute passed, not the program's own suite: DESCRIPTION` for a
 substitute, which does not meet gate 1 either; `skipped on this host:
 only on HOST` for a line limited to other hosts, which is neither a pass

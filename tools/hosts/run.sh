@@ -30,10 +30,11 @@
 # into the container as a tar stream on its stdin, and the results come
 # out as one on its stdout (corpus-in-container.sh). The inputs are the
 # typec working tree and the corpus repository, each as the files git
-# tracks or does not ignore with a copy of its git directory, so that the
-# runner names the revision of each as the machine sees it, and the
-# sources of the cache. The FreeBSD host runs the corpus from its own
-# script instead (TYPEC_FREEBSD_CORPUS).
+# tracks or does not ignore, and the sources of the cache. No git
+# directory goes in, as the corpus programs are third-party code: the
+# revision of each tree as the machine sees it (tools/corpus/revision.sh)
+# goes to the runner on its command line. The FreeBSD host runs the
+# corpus from its own script instead (TYPEC_FREEBSD_CORPUS).
 
 set -eu
 
@@ -134,26 +135,20 @@ run_suite() {
 }
 
 # Puts the working tree SOURCE in INTO/NAME: the files git tracks or does
-# not ignore, without the contents of the repositories nested in it, and
-# a .git file naming a copy of its git directory. The git directory of a
-# worktree lies in the repository's common one, which is copied whole as
-# INTO/NAME.git, so that the path between them is kept.
+# not ignore, without the contents of the repositories nested in it or
+# its git directory.
 stage_tree() {
   source=$1 into=$2 name=$3
-  git_dir=$(git -C "$source" rev-parse --absolute-git-dir)
-  common_dir=$(git -C "$source" rev-parse --path-format=absolute \
-    --git-common-dir)
   mkdir "$into/$name"
   (cd "$source" && git ls-files -z --cached --others --exclude-standard) \
     | (cd "$source" && tar -cf - --no-recursion --null -T -) \
     | tar -xf - -C "$into/$name"
-  cp -R "$common_dir" "$into/$name.git"
-  echo "gitdir: ../$name.git${git_dir#"$common_dir"}" > "$into/$name/.git"
 }
 
-# Sends the inputs in STAGE/in to a container that runs the programs and
-# extracts its results in STAGE/out. Whether the run gave results is
-# for take_results to say.
+# Sends the inputs in STAGE/in to a container that runs
+# corpus-in-container.sh with the arguments after STAGE, and extracts its
+# results in STAGE/out. Whether the run gave results is for take_results
+# to say.
 run_container() {
   stage=$1
   shift
@@ -166,7 +161,7 @@ run_container() {
     tar -xf -
     exec sh typec/tools/hosts/corpus-in-container.sh "$@"'
   tar -cf - --no-xattrs --no-mac-metadata --no-acls \
-    -C "$stage/in" typec typec.git corpus corpus.git -C "$cache" src \
+    -C "$stage/in" typec corpus -C "$cache" src \
     | docker run --platform "$platform" --rm --interactive --init \
       --network none --cap-drop ALL --security-opt no-new-privileges \
       "$image" sh -c "$unpack" sh "$@" 2>> "$log" \
@@ -239,11 +234,13 @@ run_corpus() {
   stage=$(mktemp -d "${TMPDIR:-/tmp}/typec-corpus.XXXXXX")
   trap 'rm -rf "$stage"' EXIT
   mkdir "$stage/in" "$stage/out"
+  typec_revision=$("$repo/tools/corpus/revision.sh" "$repo")
+  corpus_revision=$("$repo/tools/corpus/revision.sh" "$corpus")
   stage_tree "$repo" "$stage/in" typec
   stage_tree "$corpus" "$stage/in" corpus
 
   echo "$host: running the corpus runner on: $*"
-  run_container "$stage" "$@"
+  run_container "$stage" "$typec_revision" "$corpus_revision" "$@"
   take_results "$stage"
   copy_results "$stage"
 

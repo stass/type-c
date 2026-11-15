@@ -24,7 +24,7 @@
 #                         /Volumes/Optaine/type-c-corpus.
 #
 # The host supplies its own GCC and Clang, which this script only checks
-# for, together with gmake, git and curl. OCaml and dune are built from
+# for, together with gmake and curl. OCaml and dune are built from
 # source tarballs, pinned by SHA-256, into DIR/toolchain once, and again
 # when a pin changes. Each run copies the files of the working tree that
 # git tracks or would track into DIR/src, read-only, builds in DIR/build,
@@ -32,7 +32,10 @@
 # the newest Clang and the GCC. Nothing runs as root, and the tools get
 # a HOME inside DIR. The corpus programs are third-party code that runs
 # with the account's own rights, so the account should be one that
-# holds nothing else. The output goes to LOG, by default
+# holds nothing else. The corpus repository goes to DIR/corpus as the
+# working tree does, without its git directory, and the runner gets the
+# revision of each tree as this machine sees it (tools/corpus/revision.sh)
+# on its command line. The output goes to LOG, by default
 # ${TMPDIR:-/tmp}/typec-host-freebsd.log, outside the repository.
 
 set -eu
@@ -121,8 +124,14 @@ fail() {
 # Runs the sh script on stdin on the host, as the account's login shell
 # is not sh, with the words of ARGS as its arguments. They go in a line
 # of the script, not on the ssh command line, which that shell would
-# parse; each is a plain word, so they need no quoting.
+# parse. Each must be plain words, which the host's sh takes as they
+# are; anything else fails the run here, before it reaches the host.
 run_script() {
+  for word in "$@"; do
+    case $word in
+      *[!A-Za-z0-9._/:@\ -]*) fail "not plain words: $word" ;;
+    esac
+  done
   { echo "set -- $*"; cat; } | remote sh -s
 }
 
@@ -137,7 +146,7 @@ if [ "$(uname -sm)" != "FreeBSD amd64" ]; then
   echo "not FreeBSD amd64" >&2
   exit 1
 fi
-for tool in gmake git curl; do
+for tool in gmake curl; do
   command -v "$tool" > /dev/null || { echo "no $tool" >&2; exit 1; }
 done
 for compiler in "$@"; do
@@ -236,7 +245,8 @@ corpus_script() {
   cat <<'SCRIPT'
 set -eu
 dir=$1 clang_oldest=$2 clang_newest=$3 gcc=$4
-shift 4
+typec_revision=$5 corpus_revision=$6
+shift 6
 cd "$dir"
 HOME=$PWD/home
 export HOME
@@ -244,20 +254,20 @@ mkdir -p "$HOME"
 TYPEC_CORPUS_CACHE=$PWD/corpus-cache corpus/fetch.sh
 build/default/tools/corpus/corpus.exe --corpus corpus \
   --cache "$PWD/corpus-cache" --typec build/install/default/bin/typec \
+  --typec-revision "$typec_revision" --corpus-revision "$corpus_revision" \
   --cc "$clang_oldest" --cc "$clang_newest" --cc "$gcc" "$@"
 SCRIPT
 }
 
-# Writes the files of the working tree that git tracks or does not
+# Writes the files of the working tree TREE that git tracks or does not
 # ignore, as a tar archive, without the contents of the repositories
-# nested in it. The .git of a worktree is a file naming a directory
-# outside it, so it stays behind.
-source_archive() {
-  cd "$repo"
+# nested in it or its git directory, which git does not list.
+tree_archive() (
+  cd "$1"
   git ls-files -z --cached --others --exclude-standard \
     | tar -cf - --no-recursion --no-xattrs --no-mac-metadata --no-acls \
       --null -T -
-}
+)
 
 : > "$log"
 say "checking the host and the toolchain; log in $log"
@@ -267,9 +277,11 @@ toolchain_script \
     >> "$log" 2>&1 || fail "the toolchain is not ready"
 
 say "copying the source"
+# The revision of the source as it is copied, which the corpus runs on.
+typec_revision=$("$repo/tools/corpus/revision.sh" "$repo")
 prepare_script | run_script "$dir" >> "$log" 2>&1 \
   || fail "the source directory is not ready"
-source_archive | remote tar -xf - -C "$dir/src" >> "$log" 2>&1 \
+tree_archive "$repo" | remote tar -xf - -C "$dir/src" >> "$log" 2>&1 \
   || fail "the source does not copy"
 
 say "running dune build and dune test"
@@ -280,15 +292,14 @@ say "the suite passes"
 
 if [ -n "$programs" ]; then
   say "running the corpus runner on: $programs"
-  # The archive holds the repository with its history, whose revision
-  # the runner records.
-  tar -cf - --no-xattrs --no-mac-metadata --no-acls -C "$corpus" . \
-    | remote tar -xf - -C "$dir/corpus" >> "$log" 2>&1 \
+  corpus_revision=$("$repo/tools/corpus/revision.sh" "$corpus")
+  tree_archive "$corpus" | remote tar -xf - -C "$dir/corpus" >> "$log" 2>&1 \
     || fail "the corpus does not copy"
   status=0
   corpus_script \
     | run_script "$dir" "$oldest_clang" "$newest_clang" "$gcc" \
-      "$programs" >> "$log" 2>&1 || status=$?
+      "$typec_revision" "$corpus_revision" "$programs" >> "$log" 2>&1 \
+    || status=$?
   # The runner's status 3 is a run in which nothing failed but some
   # tests are substitutes (README, "Running the corpus").
   case $status in

@@ -709,9 +709,10 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 - [Medium] The records of a corpus run on the FreeBSD host exist only in
   the log: `tools/hosts/freebsd.sh` deletes `DIR/corpus` on the next run
   and does not copy `runs/` back into the corpus repository.
-- [Low] `tools/hosts/freebsd.sh` copies the source with a pipeline of
-  `git ls-files` and `tar` without `pipefail`, so a failure of either
-  that leaves a partial tree shows up as a failure of dune. Two runs on
+- [Low] `tools/hosts/freebsd.sh` copies the source and the corpus with
+  a pipeline of `git ls-files` and `tar` without `pipefail`, so a
+  failure of either that leaves a partial tree shows up later, as a
+  failure of dune, `fetch.sh` or the runner. Two runs on
   one `DIR` at once are not guarded.
 - [Medium] In `test/run/abi.t` the C side declares the Type-C functions
   with the hand-written tags `struct c_scalar` and the like, while the
@@ -801,20 +802,10 @@ types (design 13.3).
   uncommitted, and the Linux records of musl and zlib name a corpus
   revision that was `-dirty`. A Linux record comes from
   `tools/hosts/run.sh --corpus` (README, "Linux test hosts").
-- [Medium] A FreeBSD corpus record names no typec revision: the runner
-  asks git in the directory of the `typec` binary, and `freebsd.sh`
-  builds it in DIR/build, outside DIR/src, which has no git directory.
-  The records also stay on the host, printed only in the log, and the
-  next run deletes them. Either share `run.sh`'s staging of each tree
-  with its git directory and its checked copy of the results, or let
-  the runner take the two revisions from its command line, computed on
-  the machine where the trees are: that removes the git directories
-  from the copies sent to a host, and git from the hosts, but makes the
-  record state what its caller says. The copied git directory (its
-  config, stash, reflogs and other worktrees) reaches the third-party
-  code of the corpus, with no network but with the records as a way
-  back into a repository that gets committed. The runner's command line and the
-  meaning of its status 3 are also written out in both scripts.
+- [Low] The runner's command line and the meaning of its status 3 are
+  written out in `tools/hosts/corpus-in-container.sh`,
+  `tools/hosts/freebsd.sh` and the README's example; `run.sh` and
+  `freebsd.sh` could share one script that runs it.
 - [Low] `debian-amd64` and `alpine-amd64` write their corpus records to
   the same `runs/linux-x86_64/` and their logs to the same
   `CACHE/build/linux-x86_64/`, since the runner names a host by
@@ -844,8 +835,8 @@ types (design 13.3).
   the system's: "ended by signal -10" for SIGSEGV. `Sys.signal_to_string`
   names it.
 - [Low] A run record names `typec` by the digest of its binary and
-  labels the revision of the checkout beside it as that at run time,
-  because `typec` cannot report the revision it was built from. A
+  labels the revision its caller names for the checkout as that at run
+  time, because `typec` cannot report the revision it was built from. A
   `typec --version` printing it would name the binary exactly; today
   `--version` goes to the backend like any unknown option.
 - [Medium] The corpus runner trusts a test script to test every program

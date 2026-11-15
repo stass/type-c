@@ -9,8 +9,9 @@
    into the corpus repository. *)
 
 let usage =
-  "usage: corpus.exe --corpus DIR --cache DIR --typec PATH --cc PATH \
-   [--cc PATH]... PROGRAM..."
+  "usage: corpus.exe --corpus DIR --cache DIR --typec PATH \
+   --typec-revision REV --corpus-revision REV --cc PATH [--cc PATH]... \
+   PROGRAM..."
 
 (* Every error that ends the whole run: a usage error, a recipe that
    cannot be read, an archive not fetched, an environment typec cannot
@@ -30,6 +31,8 @@ type options = {
   corpus : string;  (** the corpus repository *)
   cache : string;  (** the fetched sources and the build trees *)
   typec : string;
+  typec_revision : string;  (** the caller's, of the typec checkout *)
+  corpus_revision : string;  (** the caller's, of the corpus *)
   backends : string list;
   programs : string list;
 }
@@ -57,13 +60,35 @@ let checked_name what name =
 (* A backend's records and build trees are named after its file name. *)
 let backend_label cc = checked_name "backend" (Filename.basename cc)
 
+(* A revision goes into the run record as given, so it must be what
+   tools/corpus/revision.sh prints: the commit in hex digits, then -dirty
+   when the working tree differs from it. *)
+let checked_revision revision =
+  let dirty = "-dirty" in
+  let commit =
+    if String.ends_with ~suffix:dirty revision then
+      String.sub revision 0 (String.length revision - String.length dirty)
+    else revision
+  in
+  let hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false in
+  if commit = "" || not (String.for_all hex commit) then
+    fatal "revision %S is not hex digits and an optional -dirty" revision;
+  revision
+
 let parse_options arguments =
   let corpus = ref None and cache = ref None and typec = ref None in
+  let typec_revision = ref None and corpus_revision = ref None in
   let backends = ref [] and programs = ref [] in
   let rec loop = function
     | "--corpus" :: dir :: rest -> corpus := Some (absolute dir); loop rest
     | "--cache" :: dir :: rest -> cache := Some (absolute dir); loop rest
     | "--typec" :: path :: rest -> typec := Some (absolute path); loop rest
+    | "--typec-revision" :: revision :: rest ->
+        typec_revision := Some (checked_revision revision);
+        loop rest
+    | "--corpus-revision" :: revision :: rest ->
+        corpus_revision := Some (checked_revision revision);
+        loop rest
     | "--cc" :: path :: rest ->
         backends := backend_path path :: !backends;
         loop rest
@@ -73,15 +98,22 @@ let parse_options arguments =
     | [] -> ()
   in
   loop arguments;
-  match (!corpus, !cache, !typec, !backends, !programs) with
-  | Some corpus, Some cache, Some typec, _ :: _, _ :: _ ->
-      let backends = List.rev !backends in
-      let labels = List.map backend_label backends in
-      if List.length (List.sort_uniq compare labels) <> List.length labels
-      then fatal "two backends have the same name: %s" (String.concat " " labels);
-      List.iter (fun p -> ignore (checked_name "program" p)) !programs;
-      { corpus; cache; typec; backends; programs = List.rev !programs }
-  | _ -> fatal "%s" usage
+  let required = function Some value -> value | None -> fatal "%s" usage in
+  if !backends = [] || !programs = [] then fatal "%s" usage;
+  let backends = List.rev !backends in
+  let labels = List.map backend_label backends in
+  if List.length (List.sort_uniq compare labels) <> List.length labels then
+    fatal "two backends have the same name: %s" (String.concat " " labels);
+  List.iter (fun p -> ignore (checked_name "program" p)) !programs;
+  {
+    corpus = required !corpus;
+    cache = required !cache;
+    typec = required !typec;
+    typec_revision = required !typec_revision;
+    corpus_revision = required !corpus_revision;
+    backends;
+    programs = List.rev !programs;
+  }
 
 (* The facts a run record states about where it ran. *)
 type host = {
@@ -101,16 +133,13 @@ let probe_host () =
   let label = String.lowercase_ascii system ^ "-" ^ machine in
   { system; machine; label }
 
-let revision dir =
-  ask ~cwd:dir [ "git"; "describe"; "--always"; "--dirty"; "--abbrev=12" ]
-
 (* typec cannot report the revision it was built from, so the binary is
-   named by its digest. The checkout beside it is only where the binary
-   sits at run time: it may have moved on since the build. *)
-let typec_identity typec =
-  let digest = Digest.BLAKE256.to_hex (Digest.BLAKE256.file typec) in
+   named by its digest. The revision is the caller's word for the
+   checkout at run time: the binary may have been built before it. *)
+let typec_identity options =
+  let digest = Digest.BLAKE256.to_hex (Digest.BLAKE256.file options.typec) in
   Printf.sprintf "blake2b-256 %s (checkout at run time: %s)" digest
-    (revision (Filename.dirname typec))
+    options.typec_revision
 
 (* What one build needs to run its commands. *)
 type context = {
@@ -642,8 +671,8 @@ let main arguments =
   let provenance =
     {
       host_line = String.concat " " [ host.system; release; host.label ];
-      typec_line = typec_identity options.typec;
-      corpus_line = revision options.corpus;
+      typec_line = typec_identity options;
+      corpus_line = options.corpus_revision;
     }
   in
   let verdicts = ref [] in

@@ -5,7 +5,9 @@ The corpus runner builds a program of a fixture corpus with the Clang
 that test/run/backends.sh names, linked as clang: a library unit and a
 program unit, compiled through typec and through the reference recipe,
 then linked and tested. The lines that depend on the host, the backend,
-the revisions and the timings are left out.
+the timings are left out. The caller names the revisions of the typec
+checkout and of the corpus repository, which $revisions holds as the
+words of both options.
 
   $ . ../../test/run/backends.sh
   $ ln -s "$(command -v "$clang")" clang
@@ -34,16 +36,18 @@ the revisions and the timings are left out.
   $ cat > corpus/programs/hello/test.sh <<'EOF'
   > [ "$(bin/hello)" = 'greet.tc hello' ]
   > EOF
+  $ revisions='--typec-revision 0123456789ab'
+  $ revisions="$revisions --corpus-revision ba9876543210-dirty"
   $ run() {
   >   out=$(./corpus.exe --corpus corpus --cache cache \
-  >     --typec "$(command -v typec)" --cc ./clang "$@")
+  >     --typec "$(command -v typec)" $revisions --cc ./clang "$@")
   >   status=$?
   >   echo "$out" | grep -v -E '^(host|backend|typec|corpus|log) |^  |^$'
   >   return $status
   > }
   $ fails() {
   >   out=$(./corpus.exe --corpus corpus --cache cache \
-  >     --typec "$(command -v typec)" --cc ./clang "$@" 2>&1)
+  >     --typec "$(command -v typec)" $revisions --cc ./clang "$@" 2>&1)
   >   status=$?
   >   echo "$out" | sed "s|$PWD/||"
   >   return $status
@@ -68,12 +72,32 @@ its log go into the cache.
   hello.clang.txt
 
 The record names the typec binary by its digest. typec cannot report the
-revision it was built from, so the revision of the checkout beside it is
-labelled as that of the run.
+revision it was built from, so the revision the caller names for its
+checkout is labelled as that of the run. The corpus revision is written
+as given.
 
-  $ grep '^typec ' corpus/runs/*/hello.clang.txt |
-  >   sed -E 's/[0-9a-f]{64}/DIGEST/; s/time: .*\)/time: REVISION)/'
-  typec        blake2b-256 DIGEST (checkout at run time: REVISION)
+  $ grep -E '^(typec|corpus) ' corpus/runs/*/hello.clang.txt |
+  >   sed -E 's/[0-9a-f]{64}/DIGEST/'
+  typec        blake2b-256 DIGEST (checkout at run time: 0123456789ab)
+  corpus       ba9876543210-dirty
+
+A revision goes into the record verbatim, so the runner takes only hex
+digits and an optional -dirty, and both revisions are required.
+
+  $ fails --typec-revision 'v1.0' hello
+  corpus: revision "v1.0" is not hex digits and an optional -dirty
+  [2]
+  $ ./corpus.exe --corpus corpus --cache cache --typec "$(command -v typec)" \
+  >   --typec-revision "$(printf 'abc\nhost forged')" --cc ./clang hello
+  corpus: revision "abc\nhost forged" is not hex digits and an optional -dirty
+  [2]
+  $ fails --corpus-revision -dirty hello
+  corpus: revision "-dirty" is not hex digits and an optional -dirty
+  [2]
+  $ ./corpus.exe --corpus corpus --cache cache --typec "$(command -v typec)" \
+  >   --typec-revision 0123456789ab --cc ./clang hello
+  corpus: usage: corpus.exe --corpus DIR --cache DIR --typec PATH --typec-revision REV --corpus-revision REV --cc PATH [--cc PATH]... PROGRAM...
+  [2]
 
   $ ls cache/build/*/hello/
   clang
@@ -433,5 +457,5 @@ lines can name one.
   corpus: two backends have the same name: clang clang
   [2]
   $ ./corpus.exe --corpus corpus hello
-  corpus: usage: corpus.exe --corpus DIR --cache DIR --typec PATH --cc PATH [--cc PATH]... PROGRAM...
+  corpus: usage: corpus.exe --corpus DIR --cache DIR --typec PATH --typec-revision REV --corpus-revision REV --cc PATH [--cc PATH]... PROGRAM...
   [2]
