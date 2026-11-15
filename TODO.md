@@ -982,6 +982,10 @@ types (design 13.3).
   `--emit-c` shows a lowered alias over eight lines. An edit whose text
   and replaced tokens hold no newline could go without them.
 
+- [Medium] Design 9.2 rule 4 leaves to checked mode the operations that
+  reinterpret storage as a private value (`*(symbol *)p`, a union member,
+  `va_arg`, copying bytes), but section 11 does not name them. Say in
+  11.2 which of them checked mode refuses or checks.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.

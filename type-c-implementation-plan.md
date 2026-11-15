@@ -152,7 +152,11 @@ lives in its own repository and records:
 - matches with one `case` and a `default`, as a share of all matches (P4);
 - sites that update a payload in place (P5);
 - how a module of several files used `private` (P6);
-- friction that fits none of the above.
+- friction that fits none of the above;
+- the bugs the port would have caught: each bug-fix commit in the
+  original's history whose bug falls in a class of the C comparison
+  catalogue (exit gate 6), with the reasoning that puts it in that class
+  and whether the port refuses the bug when it is reintroduced.
 
 **Exit gate**
 
@@ -168,6 +172,30 @@ lives in its own repository and records:
    size and speed within measurement noise at `-O2`.
 5. Pilot A builds, passes the original compiler's tests, and its record is
    written up.
+6. A C comparison catalogue shows what Stage 1 catches that C does not.
+   Each entry pairs a C program with its Type-C counterpart and records,
+   for GCC and for Clang, whether `-Wall -Wextra` gives a diagnostic and
+   which other warning would (`-Wswitch-enum`; `-Wimplicit-fallthrough`
+   on Clang). The Type-C side gives the code of the rule that refuses it
+   (package 1.8). The entries:
+   - a constructor added without updating every `match` (4.2), beside a
+     C `switch` on the kind that has a `default` or an `int` kind field,
+     the forms `-Wswitch` misses; a `match` with a `default` hides the new
+     constructor too, and the entry says so;
+   - a payload reached outside `match`, under the wrong tag or with no
+     tag test (3.2 rule 6);
+   - a missing `break` at the end of an arm (4.3);
+   - a value of one distinct type used as another or as its
+     representation, and an operator 3.4 does not allow on it;
+   - a private value made outside its owner, between Type-C files and
+     apart from `{0}` (9.2);
+   - an invalid tag, from a cast or a union, which C reads as a stray
+     member and Type-C traps on at run time (4.5); this entry checks the
+     trap, not a diagnostic. An uninitialised tag is outside Stage 1
+     (checked mode, 11.2).
+
+   Each entry for a feature that Pilot A's port uses is also injected into
+   the port and refused there; the record names the features it uses.
 
 **Decided at the gate:** P1 to P6. The single-pattern test and binding by
 reference (design section 12) are accepted or rejected here on the
