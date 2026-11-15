@@ -152,8 +152,8 @@ let () =
     (translation.compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; quiet_markers; "-x";
-          "cpp-output"; "/T/1.emitted.i";
+          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
+          "/T/1/x.c"; quiet_markers;
         ])
 
 let () =

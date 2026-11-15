@@ -90,6 +90,11 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Reader of preprocessed text
 
+- [Medium] An identifier's name is right only where a stage asks
+  `Reader.spelling`; one that slices `Reader.t.text` by token offsets
+  gets the characters as written, universal character names included.
+  Carry the name in the token (`Token.Identifier of string`) so every
+  consumer sees it by construction, and keep the text for emission.
 - [Medium] The emitter gives its markers flag 3 when the edited tokens'
   owner is a system header (`src/emit/emitter.ml`, `marker`), but the
   backend's exemption follows the last marker in effect: a header made
