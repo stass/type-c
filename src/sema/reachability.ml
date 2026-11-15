@@ -15,19 +15,26 @@ exception Refused of refusal
 let refuse span rule text =
   raise (Refused { span; message = Rule.message rule text })
 
-(* What a statement tells the statements around it (design 4.4): whether
-   it can complete; whether a reachable break or continue in it leaves
-   it, for the loop, switch or match around it; and whether it holds a
-   default label of the switch around it, reachable or not. *)
+(* What a statement tells the statements around it (design 4.4). *)
 type flow = {
   completes : bool;
+  (* A reachable break or continue in it leaves it, for the loop, switch
+     or match around it. *)
   breaks : bool;
   continues : bool;
+  (* It carries or contains a named label outside every match arm in it,
+     by which a goto from around it may enter it. *)
+  has_named_label : bool;
+  (* It carries or contains a case or default label of the switch around
+     it, by which that switch may enter it. *)
+  has_case_label : bool;
+  (* It holds a default label of the switch around it, reachable or not. *)
   default : bool;
 }
 
 let completes =
-  { completes = true; breaks = false; continues = false; default = false }
+  { completes = true; breaks = false; continues = false;
+    has_named_label = false; has_case_label = false; default = false }
 
 let stops = { completes with completes = false }
 
@@ -40,6 +47,8 @@ let followed_by flow ~reachable next =
     completes = true;
     breaks = flow.breaks || (reachable && next.breaks);
     continues = flow.continues || (reachable && next.continues);
+    has_named_label = flow.has_named_label || next.has_named_label;
+    has_case_label = flow.has_case_label || next.has_case_label;
     default = flow.default || next.default;
   }
 
@@ -84,15 +93,8 @@ let record_jump walk kind (label : Tree.identifier) =
     { target = resolve walk label.node; site = label.span; kind }
     walk.jumps
 
-let carries_label = function
-  | Tree.Block_statement { node = Labeled _; _ } -> true
-  | Block_statement _ | Block_declaration _ | Block_type_declaration _ ->
-      false
-
-let is_default (label : Tree.label) =
-  match label.node with
-  | Default_label -> true
-  | Named_label _ | Case_label _ | Case_range _ -> false
+(* A jump may enter a statement at a label it carries or contains. *)
+let enterable flow = flow.has_named_label || flow.has_case_label
 
 let rec block walk (b : Tree.block) =
   let declare labels (name : Tree.identifier) =
@@ -107,12 +109,12 @@ let rec block walk (b : Tree.block) =
   sequence { walk with local_labels } b.node.items
 
 (* An item is reachable if it is first, if it follows a reachable item
-   that can complete, or if it carries a label; a sequence completes if
+   that can complete, or if a jump may enter it; a sequence completes if
    it is empty or its last item is reachable and completes. *)
 and sequence walk items =
   let step (reaching, flow) item =
-    let reachable = reaching || carries_label item in
     let next = block_item walk item in
+    let reachable = reaching || enterable next in
     (reachable && next.completes, followed_by flow ~reachable next)
   in
   let reaching, flow = List.fold_left step (true, completes) items in
@@ -182,12 +184,15 @@ and statement_flow walk (statement : Tree.statement) =
   | Match { scrutinee; arms } -> match_flow walk scrutinee arms
 
 and labelled_flow walk (label : Tree.label) labelled =
-  (match label.node with
+  match label.node with
   | Named_label { name; _ } ->
-      Hashtbl.replace walk.arms_of_labels (resolve walk name) walk.arm
-  | Case_label _ | Case_range _ | Default_label -> ());
-  let flow = statement_flow walk labelled in
-  { flow with default = flow.default || is_default label }
+      Hashtbl.replace walk.arms_of_labels (resolve walk name) walk.arm;
+      { (statement_flow walk labelled) with has_named_label = true }
+  | Case_label _ | Case_range _ ->
+      { (statement_flow walk labelled) with has_case_label = true }
+  | Default_label ->
+      { (statement_flow walk labelled) with has_case_label = true;
+        default = true }
 
 and if_flow walk condition then_branch else_branch =
   let taken = statement_flow walk then_branch in
@@ -219,28 +224,36 @@ and for_flow walk clause condition step body =
   loop outside body ~completes:(ends || body.breaks)
 
 (* A loop whose condition and other expressions, which typing reads
-   outside the loop, give the flow [outside]: the breaks and continues of [body]
-   are the loop's own, and its default labels those of a switch around
-   the loop. *)
+   outside the loop, give the flow [outside]: the breaks and continues
+   of [body] are the loop's own, and its labels those of the statements
+   around the loop. *)
 and loop outside body ~completes =
-  { outside with completes; default = outside.default || body.default }
+  let inside = { body with breaks = false; continues = false } in
+  { (both outside inside) with completes }
 
+(* The breaks and the case and default labels of [body] are the
+   switch's own (C11 6.8.4.2p4); its continues and named labels are
+   those of the statements around it. *)
 and switch_flow walk controlling body =
   let outside = expression walk controlling in
   let body = statement_flow walk body in
-  { outside with
-    completes = (not body.default) || body.breaks || body.completes;
-    continues = outside.continues || body.continues }
+  let inside =
+    { body with breaks = false; has_case_label = false; default = false }
+  in
+  { (both outside inside) with
+    completes = (not body.default) || body.breaks || body.completes }
 
 (* Design 4.3 rule 2: a break in an arm leaves the match, which completes
-   only by one. *)
+   only by one. By rule 3, which [jump_refusal] checks over each body
+   that holds a match, a label in an arm is entered only from the arm,
+   so of the arms only their continues reach the statements around the
+   match. *)
 and match_flow walk scrutinee arms =
   let outside = expression walk scrutinee in
   let arms = all (arm walk) arms in
   { outside with
     completes = arms.breaks;
-    continues = outside.continues || arms.continues;
-    default = outside.default || arms.default }
+    continues = outside.continues || arms.continues }
 
 and arm walk (arm : Tree.arm) =
   sequence { walk with arm = Some arm.span } arm.node.items

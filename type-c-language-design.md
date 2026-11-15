@@ -511,8 +511,11 @@ an implicit `break`; it keeps C's explicit statements and requires them.
    leaves the match. `continue` continues the enclosing loop; a match is not
    a loop.
 3. A label inside an arm may be the target only of a `goto` in the same arm.
-   A `case` or `default` label of an enclosing `switch` cannot appear inside
-   a `match`.
+   Each label of a GNU `asm goto` is the target of a `goto` in this sense.
+   The GNU address of a label inside an arm, `&&L`, is refused anywhere,
+   also in the label's own arm, since a computed `goto *e` from outside the
+   arm could jump to it. A `case` or `default` label of an enclosing
+   `switch` cannot appear inside a `match`.
 4. `switch` is unchanged.
 
 The lowered code also ends every arm in a trap (13.5). If the analysis of
@@ -529,10 +532,11 @@ A statement *can complete* as follows.
 
 | Statement | Can complete |
 | --- | --- |
-| `break`, `continue`, `return`, `goto` | No. |
-| Expression statement | Yes, unless it is a call to a function declared `_Noreturn` or with the GNU `noreturn` attribute. |
+| `break`, `continue`, `return`, `goto`, GNU computed `goto *e` | No. |
+| Expression statement | Yes, unless it is a call to a function declared `_Noreturn` or with the GNU `noreturn` attribute, or to a builtin that GCC or Clang declares noreturn: `__builtin_trap`, `__builtin_unreachable`, `__builtin_abort`, `__builtin_exit` (GCC only) or `__builtin_longjmp`. |
 | Declaration, `defer`, `try` in any form | Yes. |
-| Block, arm body | If it is empty, or its last item is reachable and can complete. An item is reachable if it is first, if the item before it is reachable and can complete, or if it carries a label, including a `case` or `default` label of a `switch`. |
+| `asm`, GNU `asm goto` included | Yes. |
+| Block, arm body | If it is empty, or its last item is reachable and can complete. An item is reachable if it is first, if the item before it is reachable and can complete, or if it carries or contains a label, by the rule below. |
 | `if (c) S` | Yes. |
 | `if (c) S1 else S2` | If `S1` or `S2` can. |
 | `while (c) S`, `for (..; c; ..) S` | Yes, if `c` is present and is not a non-zero constant, or if a reachable `break` leaves the loop. |
@@ -541,11 +545,23 @@ A statement *can complete* as follows.
 | `match` | If a reachable `break` leaves it. |
 | Labelled statement, `unsafe` block | As the statement inside. |
 
+An item contains every label that lies within it, except a named label
+inside a match arm within the item, which by 4.3(3) only a `goto` in that
+arm reaches, a label in the body of a block literal, which is a function
+of its own, and a `case` or `default` label of a `switch` within the
+item. Such a label belongs to the innermost `switch` around it (C11
+6.8.4.2p4) and is reached only through that `switch`'s controlling
+expression, so it counts for the items between it and the `switch` body
+and for none that contains the `switch`. In `switch (n) { default: return
+1; { case 2: ; } }` the block after the `return` is reachable and the
+`switch` can complete.
+
 A constant here is an integer constant expression that the front end can
 evaluate (13.3). A statement expression of the GNU profile is treated as
-the block it contains: a `break`, `continue` or `goto` inside it counts for
-the statements around it. An arm that the rules reject but that cannot in
-fact fall through is fixed by adding the `break` the rules ask for.
+the block it contains: a `break`, `continue`, `goto` or label inside it
+counts for the statements around it. An arm that the rules reject but
+that cannot in fact fall through is fixed by adding the `break` the rules
+ask for.
 
 ### 4.5 Invalid tags
 

@@ -645,26 +645,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Matching
 
-- [High] Owner decision: design 4.4 makes an item reachable if it
-  carries a label, but not if it only contains one, so in
-  `case A: if (n) goto L; return 0; { L: n++; }` the rules call the end
-  of the arm unreachable while the goto reaches it; the arm-end trap
-  stops the program there. A contained `case` label does the same
-  without a goto: in `case A: switch (n) { default: return 1; { case 2:
-  ; } }` the switch completes for `n == 2`. Recommended: "carries or
-  contains a label" (a label of a nested switch, match arm or block
-  literal excepted), computed bottom-up as a field of the flow in
-  `src/sema/reachability.ml` rather than by rescanning each item.
-- [Medium] Owner decision: design 4.3 rule 3 and 4.4 are silent on four
-  GNU forms, which `src/sema/reachability.ml` takes as follows. A
-  computed goto cannot complete, as `goto` cannot. `asm goto` can
-  complete, and each of its labels is the target of a goto. The address
-  of a label inside an arm (`&&L`) is refused anywhere, also in its own
-  arm, since a computed goto from outside may reach it. The builtins that
-  GCC and Clang declare noreturn (`__builtin_trap`,
-  `__builtin_unreachable`, `__builtin_abort`, `__builtin_exit`,
-  `__builtin_longjmp`) count as functions declared noreturn. Recommended:
-  state the four in 4.4 and 4.3 rule 3 as implemented.
 - [Low] A break or continue in a statement expression in the condition
   or step of a loop counts, in typing and in reachability alike, for the
   statements around the loop. Whether GCC and Clang bind it to the loop

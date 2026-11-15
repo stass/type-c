@@ -210,6 +210,153 @@ goto in the same arm (4.3 rule 3).
   open.tc:6: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
   [1]
 
+An item is reachable if it carries or contains a label (4.4), so the end
+of an arm is reached through a goto to a label in a block, or through a
+case label in a block that the switch around it jumps to.
+
+  $ cat > contained.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     if (n)
+  >       goto inside;
+  >     return 0;
+  >     {
+  >     inside:
+  >       n++;
+  >     }
+  >   case B:
+  >     return 1;
+  >   }
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe contained.tc
+  contained.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  [1]
+
+  $ cat > section.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     switch (n) {
+  >     default:
+  >       return 1;
+  >       {
+  >       case 2:
+  >         ;
+  >       }
+  >     }
+  >   case B:
+  >     return 1;
+  >   }
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe section.tc
+  section.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  [1]
+
+A label counts through a loop and a nested switch: a case label in a
+loop in the switch body, as in Duff's device, and a named label in a
+nested switch make the arm end reachable. A default label of a nested
+switch is not one of the switch around it, which without its own
+default can complete.
+
+  $ cat > duff.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     switch (n) {
+  >     default:
+  >       return 1;
+  >       while (n) {
+  >       case 2:
+  >         n--;
+  >       }
+  >     }
+  >   case B:
+  >     return 1;
+  >   }
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe duff.tc
+  duff.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  [1]
+
+  $ cat > nswnamed.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     if (n) goto L;
+  >     return 0;
+  >     switch (n) { case 1: return 2; L: ; }
+  >   case B:
+  >     return 1;
+  >   }
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe nswnamed.tc
+  nswnamed.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  [1]
+
+  $ cat > innerdefault.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e v, int n, int m) {
+  >   match (v) {
+  >   case A:
+  >     switch (n) {
+  >     case 1:
+  >       while (m) { switch (m) { default: m--; } }
+  >       return 1;
+  >     }
+  >   case B:
+  >     return 1;
+  >   }
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe innerdefault.tc
+  innerdefault.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  [1]
+
+A case label of a switch, or any label in a match arm, inside an item
+does not make the item reachable: the switch reaches its case labels
+only through its controlling expression, and a label in an arm is
+reached only from the arm.
+
+  $ cat > nested.tc <<'EOF'
+  > type e = | A | B;
+  > int f(e v, e w, int n) {
+  >   match (v) {
+  >   case A:
+  >     return 0;
+  >     switch (n) {
+  >     case 1:
+  >       break;
+  >     }
+  >   case B:
+  >     return 1;
+  >     match (w) {
+  >     case A:
+  >     inside:
+  >       break;
+  >     case B:
+  >       break;
+  >     }
+  >   }
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe nested.tc > /dev/null && echo accepted
+  accepted
+
   $ cat > entry.tc <<'EOF'
   > type e = | A | B(int i);
   > int f(e v) {

@@ -150,3 +150,57 @@ The program compiles without a warning and runs on each backend.
   $ typec --cc=$gcc -Wall -Wextra -Werror -o gcc-exits exits.tc
   $ ./gcc-exits
   3 -1
+
+A goto to a label in a block, or a case label in a block that the
+switch around it jumps to, reaches the end of that block, so the arm
+ends in the break that the rules then ask for (4.4). Each program takes
+that path and leaves the match by the break, not by the trap.
+
+  $ cat > contained.tc <<'EOF'
+  > #include <stdio.h>
+  > type e = | A | B;
+  > static int jumps(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     if (n)
+  >       goto inside;
+  >     return 0;
+  >     {
+  >     inside:
+  >       n++;
+  >     }
+  >     break;
+  >   case B:
+  >     return -1;
+  >   }
+  >   return n;
+  > }
+  > static int sections(e v, int n) {
+  >   match (v) {
+  >   case A:
+  >     switch (n) {
+  >     default:
+  >       return 1;
+  >       {
+  >       case 2:
+  >         ;
+  >       }
+  >     }
+  >     break;
+  >   case B:
+  >     return -1;
+  >   }
+  >   return n + 10;
+  > }
+  > int main(void) {
+  >   printf("%d %d %d %d\n", jumps(A, 0), jumps(A, 4), sections(A, 0),
+  >          sections(A, 2));
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -Wall -Wextra -Werror -o clang-contained contained.tc
+  $ ./clang-contained
+  0 5 1 12
+  $ typec --cc=$gcc -Wall -Wextra -Werror -o gcc-contained contained.tc
+  $ ./gcc-contained
+  0 5 1 12
