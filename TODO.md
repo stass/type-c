@@ -369,6 +369,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   composite of an enumerated type and its integer type. A typedef
   redefinition with typec's spelling (`typedef __typeof__(e) T1;
   typedef <spelling> T1;`) would check sameness (6.7p3).
+- [Medium] With GCC, a member found through a qualified anonymous member
+  has an unknown type, which hides a variant from design 3.2 rule 6:
+  `struct t { const struct { e v; }; };` lets Type-C text read `x.v.tag`
+  of a `struct t x`. The `Anonymous_member` difference should leave only
+  the qualifiers unknown, or the member funnel that `.`, `->` and the
+  member path of `offsetof` share should refuse a variant on the declared
+  member type; `offsetof` reads the declared type already, so the two
+  disagree until then.
 - [Medium] With GCC, the unknown types of `Backend_difference` cover more
   than the difference, so code that needs the type is refused where both
   compilers agree. A member found through a qualified anonymous member
@@ -963,11 +971,6 @@ types (design 13.3).
   `typedef int T; void f(void) { void (^b)(void) = ^{ (void)T; }; }`
   is Clang's error, not typec's. Type the body, which the item above on
   design 3.2 rule 6 also wants.
-- [Medium] `offsetof(struct s, v.tag)` in Type-C text reaches the tag of
-  the variant member `v`: `Expressions` refuses `offsetof` of a variant
-  but does not resolve the member path of `offsetof`, so it cannot see
-  one that passes through a variant. Resolve the path through
-  `Ctype.find_member` and refuse a variant on it.
 - [Medium] A name that a variant derives (design 10.1 rule 6) may be a
   keyword of the backend: `type _Static = | assert;` lowers to the
   enumerator `_Static_assert`, which the backend refuses. The claim

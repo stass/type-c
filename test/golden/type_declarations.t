@@ -262,6 +262,38 @@ access, no comparison and no cast to or from one.
   cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
   [1]
 
+The member path of offsetof, which expands to __builtin_offsetof, may
+end at a variant but not reach into one.
+
+  $ cat > offsetof.h <<'EOF'
+  > type e = | A | B(int x);
+  > struct t { e v; };
+  > struct s { e v; int n; struct t a[2]; e w[2];
+  >   const struct { struct t q; }; e *p; };
+  > EOF
+  $ for path in v.tag v.u.B.x a[0].v.tag w[1].tag q.v.tag p[1].tag; do
+  >   cat offsetof.h > offsetof.tc
+  >   printf 'unsigned long f(void) { return __builtin_offsetof(struct s, %s); }\n' "$path" >> offsetof.tc
+  >   ./golden.exe offsetof.tc
+  > done
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  [1]
+  $ cat offsetof.h > offsetof.tc
+  $ cat >> offsetof.tc <<'EOF'
+  > unsigned long f(void) {
+  >   return __builtin_offsetof(struct s, v) + __builtin_offsetof(struct s, n)
+  >     + __builtin_offsetof(struct s, a[1].v) + __builtin_offsetof(struct s, w[1]);
+  > }
+  > # 1 "e.h" 1
+  > static unsigned long g(void) { return __builtin_offsetof(struct s, a[1].v.u.B.x); }
+  > EOF
+  $ ./golden.exe offsetof.tc > offsetof.c || cat offsetof.c
+
 Every operation that does not open the variant takes it: the branches
 of ?:, parentheses, the comma operator, an expression statement, a cast
 to void, a _Generic selection and {0} for a structure that starts with

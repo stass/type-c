@@ -2181,9 +2181,13 @@ and expression_node context position (whole : Tree.expression) =
   | Va_arg { list; type_name } ->
       ignore (typed list);
       value (Ctype.unqualified (context.type_name type_name))
-  | Offsetof { type_name; member = _; designators } ->
-      refuse_variant context span (context.type_name type_name);
+  | Offsetof { type_name; member; designators } ->
       List.iter (designator context) designators;
+      let path =
+        Tree.Member_designator member
+        :: List.map (fun (step : Tree.designator) -> step.node) designators
+      in
+      offsetof_path context span (context.type_name type_name) path;
       value (size_type context span)
   | Choose _ -> selected context whole
   | Types_compatible (first, second) ->
@@ -2564,6 +2568,40 @@ and statement_expression context (block : Tree.block) =
   | (Block_statement _ | Block_declaration _ | Block_type_declaration _) :: _
   | [] ->
       Ctype.void
+
+(* 7.19p3: each step of the member path of [offsetof] reaches into the
+   type that the steps before it reach, which may not be a variant (design
+   3.2 rule 6); the path may end at one. *)
+and offsetof_path context span (reached : Ctype.t) path =
+  match path with
+  | [] -> ()
+  | step :: rest ->
+      refuse_variant context span reached;
+      Option.iter
+        (fun next -> offsetof_path context span next rest)
+        (offsetof_step context reached step)
+
+(* The type that [step] reaches from [reached]; [None] where the model
+   cannot follow it, and the backend checks the rest of the path. The
+   member is looked up as declared, since a qualifier that the backend
+   adds to it does not change whether it is a variant. A subscript of a
+   pointer, which offsetof does not take, is followed too, so that rule 6
+   holds whether the backend refuses it or not. *)
+and offsetof_step context (reached : Ctype.t) (step : Tree.designator_node) =
+  match (step, reached.shape) with
+  | Member_designator name, Record tag ->
+      Option.map
+        (fun (found : Ctype.found_member) -> found.member.member_type)
+        (Ctype.find_member context.tags tag name.node)
+  | (Index _ | Index_range _), Array { element; _ } -> Some element
+  | (Index _ | Index_range _), Pointer referenced -> Some referenced
+  | ( Member_designator _,
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+      | Array _ | Function _ | Unknown_type _ ) )
+  | ( (Index _ | Index_range _),
+      ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+      | Function _ | Unknown_type _ ) ) ->
+      None
 
 and designator context (designator : Tree.designator) =
   match designator.node with
