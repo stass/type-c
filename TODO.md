@@ -671,16 +671,21 @@ is [type-c-language-design.md](type-c-language-design.md).
   is sure to be visible at the match: a typedef name or tag used by the
   field may be hidden there. The alternatives are to relax 2.4 for
   `__typeof__` (C23 `typeof`), or to have each variant declare a
-  generated typedef per field (a change to 10.1). Recommended: relax 2.4;
-  the choice is one function, `binding_declaration` in
-  `src/emit/lowering.ml`.
-- [Medium] Design 13.5 reaches every lvalue scrutinee through a pointer
-  except a volatile, atomic or `register` one. typec keeps no fact that
-  an object is declared `register`, so it reaches only an lvalue reached
-  through a pointer (`*p`, `p->m`, and members of those) in place and
-  copies a named object. Record `register` in `Entity.Object` and widen
-  `access_of` in `src/sema/expressions.ml`, with a run test that a
-  `register` scrutinee compiles.
+  generated typedef per field (a change to 10.1). A third, one copy of
+  the variant per arm with each use of a binding rewritten to its field
+  of the copy, fails: uses that typing never sees, in a Clang block
+  literal's body, an attribute's arguments or a pragma, keep the bare
+  name, a backend error or, where an outer object has the name, silently
+  that object. Recommended: per-field typedefs with reserved `__tc_`
+  names, which no user declaration can hide, so a binding stays a C
+  local under its source name; the field then takes the typedef, so a
+  field of a structure type without a tag keeps one type.
+- [Medium] typec does not check that `&` takes no `register` object
+  (C11 6.5.3.2p1): `register struct s r; (&r)->m` is a backend error.
+  Record in `typed` that an lvalue designates a register object, or a
+  member or element of one, as `bit_field` is recorded; then `address`
+  refuses it, and `access_of` in `src/sema/expressions.ml` reads that
+  fact and `lvalue` instead of walking the syntax in `addressable`.
 - [Medium] `--trap-function=name` (design 10.5) is not implemented: a
   trap is `__builtin_trap()` alone. Add the option to the driver and
   pass the name to lowering, with a run test on both backends.

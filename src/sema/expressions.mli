@@ -147,8 +147,8 @@ val constructions : t -> construction list
 (** The constructor expressions typed, in source order. *)
 
 (** How a lowered match reaches its scrutinee (design 13.5): through a
-    pointer to it, or through a copy where the scrutinee is no lvalue,
-    is volatile or atomic, or may be an object declared [register]. *)
+    pointer to it, or through a copy where the scrutinee is volatile or
+    atomic or is no lvalue that typec knows [&] may take. *)
 type access = Through_pointer | Through_copy
 
 (** A binding of a match: its name, the constructor of its pattern and

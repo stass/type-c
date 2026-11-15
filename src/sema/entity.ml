@@ -11,7 +11,14 @@ type linkage = External | Internal | No_linkage
 type storage = Static_storage | Thread_storage | Automatic_storage
 
 type declared =
-  | Object of { object_type : Ctype.t; linkage : linkage; storage : storage }
+  | Object of {
+      object_type : Ctype.t;
+      linkage : linkage;
+      storage : storage;
+      register : bool;
+          (** declared [register], so that its address may not be taken
+              (C11 6.5.3.2p1) *)
+    }
   | Function of {
       function_type : Ctype.t;
       linkage : linkage;

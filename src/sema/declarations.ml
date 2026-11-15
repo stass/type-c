@@ -640,6 +640,7 @@ let function_declared state scope span specified name declared
 let object_declared state scope span specified name declared
     (derived : derived) storage =
   no_function_specifiers state span specified;
+  let register = storage = Some Tree.Register in
   let duration =
     if specified.thread_local then Thread_storage else Static_storage
   in
@@ -660,7 +661,7 @@ let object_declared state scope span specified name declared
     | Some (Typedef | Thread_local), Block_scope ->
         invalid_arg "Declarations: a storage class refused before"
   in
-  Object { object_type = derived.declared_type; linkage; storage }
+  Object { object_type = derived.declared_type; linkage; storage; register }
 
 (* What a declarator declares [name] as in [scope] (6.2.2, 6.2.4, 6.7.1,
    6.9p2). *)
@@ -1398,7 +1399,8 @@ and read_parameter state (parameter : Tree.parameter) =
       in
       Option.iter
         (fun name ->
-          ignore (declare_parameter state span derived name declared))
+          ignore
+            (declare_parameter state span specified derived name declared))
         derived.name;
       derived.declared_type
   | Abstract_parameter declarator ->
@@ -1418,14 +1420,16 @@ and parameter_specifiers state span specifiers =
   specified
 
 (* Records the parameter and returns its type. *)
-and declare_parameter state span derived name declared =
+and declare_parameter state span specified derived name declared =
   let object_type = adjusted_parameter state span derived in
+  let register = specified.storage = Some Tree.Register in
   let parameter =
     Object
       {
         object_type = parameter_object_type state span object_type;
         linkage = No_linkage;
         storage = Automatic_storage;
+        register;
       }
   in
   ignore (bind state span name declared parameter);
@@ -1486,12 +1490,14 @@ and read_old_style_declarator state types specified
   match (derived.name, declared.earlier) with
   | Some name, Some (In_tree listed) when Hashtbl.mem types listed ->
       let first = { declared with earlier = None } in
-      let object_type = declare_parameter state span derived name first in
+      let object_type =
+        declare_parameter state span specified derived name first
+      in
       Hashtbl.replace types listed (Some object_type)
   (* What it redeclares is a parameter or an enumerator of the list's
      scope, so [bind] refuses it (6.7p3). *)
   | Some name, Some _ ->
-      ignore (declare_parameter state span derived name declared)
+      ignore (declare_parameter state span specified derived name declared)
   | Some _, None | None, _ ->
       fail state span
         "a declaration before a function body declares a name that is not \
@@ -1579,7 +1585,7 @@ and read_init_declarator state scope specified
    would. *)
 and initialised state scope span declared (entity : entity) initialiser =
   match entity.declared with
-  | Object { object_type; linkage; storage } -> (
+  | Object ({ object_type; linkage; storage; _ } as declared_object) -> (
       if scope = Block_scope && linkage <> No_linkage then
         fail state span
           "a declaration in a block of an identifier with linkage has an \
@@ -1592,7 +1598,7 @@ and initialised state scope span declared (entity : entity) initialiser =
       match object_type.shape with
       | Array { length = Unknown; _ } ->
           let completed_object =
-            Object { object_type = completed; linkage; storage }
+            Object { declared_object with object_type = completed }
           in
           let entity =
             record state entity.name declared
@@ -1840,7 +1846,8 @@ and typing state : Expressions.context =
 and bind_binding state (name : Tree.identifier) declared object_type =
   let next =
     Entity.Object
-      { object_type; linkage = No_linkage; storage = Automatic_storage }
+      { object_type; linkage = No_linkage; storage = Automatic_storage;
+        register = false }
   in
   let earlier = earlier_entity state name.span name.node declared in
   ignore (bind_to state name.span name.node declared earlier next)

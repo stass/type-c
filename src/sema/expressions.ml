@@ -2726,7 +2726,7 @@ and match_statement context (statement : Tree.statement) scrutinee arms =
   in
   Hashtbl.replace context.typed.matchings statement.span
     { statement = statement.span; scrutinee = scrutinee.span; variant;
-      access = access_of scrutinee t; arms }
+      access = access_of context scrutinee t; arms }
 
 (* Design 4.4: a callee that designates a function declared [_Noreturn]
    or with the GNU [noreturn], or a builtin that is; an undeclared name
@@ -2946,22 +2946,42 @@ and non_modifiable t =
 and arm_items context (arm : Tree.arm) =
   items context ~scope_end:arm.span.last arm.node.items
 
-(* Design 13.5: the lowered match reaches an lvalue through a pointer to
-   it, and copies anything else, a volatile or atomic object, and an
-   object that may be declared [register], whose address C forbids. An
-   lvalue reached through a pointer is never such an object; typec keeps
-   no [register] fact for others, so they are copied. *)
-and access_of (scrutinee : Tree.expression) (t : Ctype.t) =
+(* Design 13.5: the lowered match reaches the scrutinee in place, through
+   a pointer to it, unless it is volatile or atomic or may not be
+   addressed. Any other scrutinee is copied, which only costs time. *)
+and access_of context (scrutinee : Tree.expression) (t : Ctype.t) =
   if t.qualifiers.volatile || t.qualifiers.atomic then Through_copy
-  else if reached_through_pointer scrutinee then Through_pointer
+  else if addressable context scrutinee then Through_pointer
   else Through_copy
 
-and reached_through_pointer (e : Tree.expression) =
+(* Whether [e] is an lvalue that C lets [&] take (C11 6.5.3.2p1): one that
+   a pointer reaches, a compound literal, a named object not declared
+   [register], or a member or element of one of those. Another lvalue is
+   taken as not, which is safe. No bit-field has a variant type
+   (6.7.2.1p5). *)
+and addressable context (e : Tree.expression) =
   match e.node with
-  | Unary (Indirection, _) | Pointer_member _ -> true
+  | Unary (Indirection, _) | Pointer_member _ | Compound_literal _ -> true
   | Parenthesized inner | Member { operand = inner; _ } ->
-      reached_through_pointer inner
+      addressable context inner
+  | Subscript { operand; index } ->
+      subscripted_addressable context operand
+      && subscripted_addressable context index
+  | Identifier { name; resolution = Resolved reference } -> (
+      match (context.entity e.span name reference).declared with
+      | Object { register; _ } -> not register
+      | Function _ | Typedef _ | Enumerator _ -> false)
   | _ -> false
+
+(* An operand of [e1[e2]] is a pointer, which reaches an object, or an
+   array, which converts to one only where C may take its address
+   (6.5.2.1p2, 6.3.2.1p3). *)
+and subscripted_addressable context (operand : Tree.expression) =
+  match find context.typed operand with
+  | Some { expression_type = { shape = Array _; _ }; _ } ->
+      addressable context operand
+  | Some _ -> true
+  | None -> false
 
 let function_body context ~name ~return_type block =
   let enclosing =

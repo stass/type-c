@@ -2,12 +2,12 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 A match (design 4) becomes a block that reaches its scrutinee through a
-pointer, to the lvalue that a pointer reaches or else to a copy, and a
-switch on its tag with a case for every constructor, the arm of a
-default taking those no label names. Each arm is a block that declares
-its bindings and ends in a trap, and the switch's default, which only an
-invalid tag reaches, traps (design 13.5, 10.5). The scrutinee and the
-block items keep their tokens and lines.
+pointer, to the lvalue that a pointer reaches or that a name designates,
+or else to a copy, and a switch on its tag with a case for every
+constructor, the arm of a default taking those no label names. Each arm
+is a block that declares its bindings and ends in a trap, and the
+switch's default, which only an invalid tag reaches, traps (design 13.5,
+10.5). The scrutinee and the block items keep their tokens and lines.
 
   $ cat > lower.tc <<'EOF'
   > type e = | A | B(int i, e *next) | C(long l);
@@ -39,9 +39,9 @@ block items keep their tokens and lines.
       break;
    __builtin_trap(); }
   default: __builtin_trap(); } }
-  { const struct e __tc_copy = (
+  { const struct e *const __tc_match = &(
   v
-  ), *const __tc_match = &__tc_copy; switch (__tc_match->tag) {
+  ); switch (__tc_match->tag) {
   case e_C: { const __typeof__(__tc_match->u.C.l) l = __tc_match->u.C.l;
   { const struct e *const __tc_match = &(
   *p
@@ -56,6 +56,70 @@ block items keep their tokens and lines.
    __builtin_trap(); }
   default: __builtin_trap(); } }
     return 0;
+  }
+
+A scrutinee declared register is copied, as C takes no address of it
+(C11 6.5.3.2p1), also an element of a register array; an element of
+another array is reached through a pointer.
+
+  $ cat > register.tc <<'EOF'
+  > type e = | A | B(int i);
+  > int f(register e r) {
+  >   match (r) {
+  >   case B(i): {
+  >     int i = 2;
+  >     return i;
+  >   }
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > int g(e a[2]) {
+  >   match (a[1]) { default: return 1; }
+  > }
+  > int h(void) {
+  >   register e a[2] = { A, A };
+  >   match (a[1]) { default: return 1; }
+  > }
+  > EOF
+  $ ./golden.exe register.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^int f/,$p'
+  int f(register e r) {
+  { const struct e __tc_copy = (
+  r
+  ), *const __tc_match = &__tc_copy; switch (__tc_match->tag) {
+  case e_B: { const __typeof__(__tc_match->u.B.i) i = __tc_match->u.B.i;
+   {
+      int i = 2;
+      return i;
+    }
+   __builtin_trap(); }
+  case e_A: {
+      return 0;
+   __builtin_trap(); }
+  default: __builtin_trap(); } }
+  }
+  int g(e a[2]) {
+  { const struct e *const __tc_match = &(
+  a[1]
+  ); switch (__tc_match->tag) {
+  case e_A: case e_B: {
+   return 1;
+   __builtin_trap(); }
+  default: __builtin_trap(); } }
+  }
+  int h(void) {
+    register e a[2] = {
+  { .tag = e_A }
+  ,
+  { .tag = e_A }
+   };
+  { const struct e __tc_copy = (
+  a[1]
+  ), *const __tc_match = &__tc_copy; switch (__tc_match->tag) {
+  case e_A: case e_B: {
+   return 1;
+   __builtin_trap(); }
+  default: __builtin_trap(); } }
   }
 
 Each refusal is located at the construct it concerns.

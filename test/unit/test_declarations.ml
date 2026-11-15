@@ -46,7 +46,7 @@ let value_name (constant : Integer_constant.t) =
 (* An identifier as words: its kind, type, linkage and the rest. *)
 let describe (declared : Entity.declared) =
   match declared with
-  | Object { object_type; linkage; storage } ->
+  | Object { object_type; linkage; storage; _ } ->
       let storage_name =
         match storage with
         | Static_storage -> "static"

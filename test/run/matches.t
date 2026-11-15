@@ -204,3 +204,73 @@ that path and leaves the match by the break, not by the trap.
   $ typec --cc=$gcc -Wall -Wextra -Werror -o gcc-contained contained.tc
   $ ./gcc-contained
   0 5 1 12
+
+A binding is a copy of its field, taken where the arm is entered
+(design 4.1 rules 4 and 7): an assignment to the scrutinee by its name
+inside the arm leaves the bindings unchanged, and a match of the
+scrutinee after it sees the new value. A declaration in a block inside
+the arm hides a binding there. The bindings of an outer arm are visible
+in an inner match, one of them as its scrutinee. A scrutinee declared
+register, a parameter or an object in a block, is copied (13.5). The
+program compiles with -std=c11 -pedantic-errors on each backend.
+
+  $ cat > copies.tc <<'EOF'
+  > #include <stdio.h>
+  > type shape = | Circle(int r) | Rect(int w, int h);
+  > type box = | Empty | Wrap(shape inner, int scale);
+  > static int area(shape s) {
+  >   match (s) {
+  >   case Rect(w, h):
+  >     s = Circle(1);
+  >     int hidden;
+  >     {
+  >       int w = 100;
+  >       hidden = w;
+  >     }
+  >     match (s) {
+  >     case Circle(r):
+  >       return w * h + r + hidden;
+  >     default:
+  >       return -1;
+  >     }
+  >   case Circle(r):
+  >     return 3 * r * r;
+  >   }
+  > }
+  > static int scaled(register box b) {
+  >   match (b) {
+  >   case Wrap(inner, scale):
+  >     match (inner) {
+  >     case Circle(r):
+  >       return scale * r;
+  >     case Rect(w, h):
+  >       return scale * w * h;
+  >     }
+  >   case Empty:
+  >     return 0;
+  >   }
+  > }
+  > int main(void) {
+  >   register shape r = Rect(2, 3);
+  >   int seen = 0;
+  >   match (r) {
+  >   case Rect(w, h):
+  >     r = Circle(w);
+  >     seen = w + h;
+  >     break;
+  >   default:
+  >     break;
+  >   }
+  >   printf("%d %d %d %d %d\n", area(Rect(2, 3)), area(Circle(2)), seen,
+  >          scaled(Wrap(Circle(4), 5)), scaled(Wrap(Rect(2, 3), 2)));
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -std=c11 -pedantic-errors -Wall -Wextra -Werror \
+  >   -o clang-copies copies.tc
+  $ ./clang-copies
+  107 12 5 20 12
+  $ typec --cc=$gcc -std=c11 -pedantic-errors -Wall -Wextra -Werror \
+  >   -o gcc-copies copies.tc
+  $ ./gcc-copies
+  107 12 5 20 12
