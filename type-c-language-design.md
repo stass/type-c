@@ -1459,6 +1459,15 @@ Identifiers the compiler invents begin with `__tc_`.
 - A diagnostic carries the file, the line, the source line and a stable
   code. Stable codes let tests and editors refer to a diagnostic without
   matching its text.
+- A stable code is `TC` and four digits. It names a rule of this design
+  that Type-C text breaks, or a construct that a later work package
+  implements, and ends the diagnostic in brackets after the clause that
+  states the rule, as GCC and Clang end a warning with its option:
+  `file:line: text (design 4.2 rule 1) [TC0018]`. Each rule's code is
+  written beside it in the one table of rules, which generates the
+  catalogue of diagnostics; a code is never renumbered or reused.
+- A refusal of C text carries no code: it states no rule of Type-C, and
+  the C standard or the backend's own diagnostic names what is wrong.
 - Debuggers step through the original lines. Bindings are C locals under
   their source names. A variant value appears as its lowered struct, with
   the tag printed by name. Generic instances appear under their instance

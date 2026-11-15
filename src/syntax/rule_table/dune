@@ -1,0 +1,8 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; The one table of the rules that typec enforces; it generates the module
+; Rule of typec_syntax and the catalogue of diagnostics.
+
+(executable
+ (name rule_table))

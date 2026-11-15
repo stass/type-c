@@ -786,7 +786,7 @@ status 80.
   >   > ellipsis.tc
   $ printf 'void f(reg_id r) { printf("%%u", r); }\n' >> ellipsis.tc
   $ typec --cc="$clang" -c ellipsis.tc -o ellipsis.o
-  typec: ellipsis.tc:3: a value of the distinct type 'reg_id' takes no such operation; a cast to its underlying type crosses to it (design 3.4)
+  typec: ellipsis.tc:3: a value of the distinct type 'reg_id' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
   [80]
 
 A small program in Type-C and its hand-written C equivalent, a tagged

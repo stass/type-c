@@ -122,6 +122,23 @@ is [type-c-language-design.md](type-c-language-design.md).
   text; route them through the escaping of `Reader.error_message`, and
   cut a quoted spelling, such as a number that is no constant, to a
   bounded length so that a huge token cannot make a huge message.
+- [Low] A diagnostic gives the file and the line but not the source line
+  that design 13.6 says it carries; print the line of text under it.
+- [Medium] Whether a refusal carries a stable code rests on its site
+  calling `Rule.message`: the failure functions of the parser and the
+  declarations take a plain string. Some refusals cite the design and
+  carry no code: the profile limits of design 13.3 (`expressions.ml`,
+  the GNU nested function in `parser.ml`) and "break outside a loop,
+  switch or match" (design 4.3 rule 2). Decide whether these are rules
+  with codes (a `Profile` rule, like `Not_implemented`), then make the
+  failure functions take a diagnostic of two cases, a rule of Type-C
+  made only by `Rule.message` and a refusal of C text, so that each
+  site chooses visibly; state the boundary in design 13.6.
+- [Medium] Nothing stops a retired code from being reused: the table in
+  `src/syntax/rule_table/rule_table.ml` checks only that codes rise, so
+  deleting the last rule and adding one with its number passes. Keep
+  retired rows in the table, marked retired, left out of `Rule.t` and
+  listed as retired in the catalogue.
 - [Low] `#ident` and `#sccs`, which `cc -E` passes through, are refused
   as unsupported directives. Pass them through like a pragma if a corpus
   uses them.

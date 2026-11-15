@@ -204,7 +204,9 @@ let refuse_generated_names state =
 
 (* A construct that a later work package implements, at the cursor. *)
 let fail_not_implemented state ~section ~package text =
-  fail state (Rule.message (Not_implemented { section; package }) text)
+  fail state
+    (Rule.message Not_implemented
+       (Printf.sprintf "%s (design %s; work package %s)" text section package))
 
 let found state =
   match peek state with

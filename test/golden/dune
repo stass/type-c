@@ -6,7 +6,19 @@
 
 (executable
  (name golden)
+ (modules golden)
  (libraries typec_cpp typec_emit typec_driver typec_test_support))
 
 (cram
  (deps golden.exe))
+
+; Every rule has a negative golden case: some cram test shows its code.
+
+(test
+ (name coverage)
+ (modules coverage)
+ (libraries typec_syntax)
+ (deps
+  (glob_files *.t))
+ (action
+  (run %{test} %{deps})))

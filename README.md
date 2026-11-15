@@ -46,8 +46,13 @@ the structural dump of its tree (`test/support/tree_dump.ml`) or its
 error. `test/golden` holds cram tests that show the C or the diagnostic
 that the front end gives for a source, with no backend
 (`test/golden/golden.ml`); `dune test test/golden` runs them and
-`dune promote` takes a changed output. `test/run` holds cram tests that
-run `typec` and the backends;
+`dune promote` takes a changed output. Every rule that typec enforces has
+a stable code in the one table `src/syntax/rule_table/rule_table.ml`,
+which generates the module `Rule` and the catalogue
+`_build/default/docs/diagnostics.md` (`dune build docs/diagnostics.md`);
+`test/golden/coverage.ml` fails while some rule's code appears in no
+golden output, so a new rule needs a golden case. `test/run` holds cram
+tests that run `typec` and the backends;
 `types.t` and `declarations.t` compile static assertions of what typec
 computes, so a backend that disagrees fails to compile them.
 

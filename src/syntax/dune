@@ -5,3 +5,10 @@
  (name typec_syntax)
  (libraries typec_cpp)
  (private_modules keyword scope))
+
+; Rule is a build output of the one table of rules.
+
+(rule
+ (with-stdout-to
+  rule.ml
+  (run %{exe:rule_table/rule_table.exe} ocaml)))

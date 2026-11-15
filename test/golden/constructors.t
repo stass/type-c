@@ -73,11 +73,11 @@ Constructors are refused where they do not fit.
 
   $ printf 'type e = | A | B(int i);\ne x = B;\n' > arguments.tc
   $ ./golden.exe arguments.tc
-  arguments.tc:2: the constructor 'B' takes arguments (design 3.3)
+  arguments.tc:2: the constructor 'B' takes arguments (design 3.3) [TC0009]
   [1]
   $ printf 'type e = | A | B(int i);\ne x = e.C;\n' > missing.tc
   $ ./golden.exe missing.tc
-  missing.tc:2: the variant 'e' has no constructor 'C' (design 3.3)
+  missing.tc:2: the variant 'e' has no constructor 'C' (design 3.3) [TC0009]
   [1]
   $ printf 'type e = | A;\nint n = A;\n' > untargeted.tc
   $ ./golden.exe untargeted.tc
@@ -107,11 +107,11 @@ it zeroes a structure whose first member is a variant too.
   e x = {0};
   $ printf 'type e = | A | B(int i);\ne x = { 1, 2 };\n' > braced.tc
   $ ./golden.exe braced.tc
-  braced.tc:2: an initialiser reaches into the variant 'e'; the only braced initialiser of a variant is {0} (design 3.2 rule 7)
+  braced.tc:2: an initialiser reaches into the variant 'e'; the only braced initialiser of a variant is {0} (design 3.2 rule 7) [TC0008]
   [1]
   $ printf 'type e = | A | B(int i);\nstruct s { e v; int n; } z = { 0, 1 };\n' > elided.tc
   $ ./golden.exe elided.tc
-  elided.tc:2: an initialiser reaches into the variant 'e'; the only braced initialiser of a variant is {0} (design 3.2 rule 7)
+  elided.tc:2: an initialiser reaches into the variant 'e'; the only braced initialiser of a variant is {0} (design 3.2 rule 7) [TC0008]
   [1]
 
 A constructor's lowering names the variant's structure tag and its
@@ -139,5 +139,5 @@ not claimed, and a block may hide it.
   > }
   > EOF
   $ ./golden.exe header.tc
-  header.h:1: the enumerator `e_A` is declared again, as a type declaration claims it (design 10.1 rule 6)
+  header.h:1: the enumerator `e_A` is declared again, as a type declaration claims it (design 10.1 rule 6) [TC0004]
   [1]

@@ -1253,7 +1253,7 @@ let variants () =
      through a pointer (rule 5). *)
   rejects ~file "type e = | A(e inner);"
     "the field 'inner' of 'A' is not a complete object type, so it is not \
-     a value type (design 3.2 rule 4)";
+     a value type (design 3.2 rule 4) [TC0006]";
   rejects ~file "type e; type e = | A(e inner);" "not a complete object";
   rejects ~file "type e = | A(struct { e x; } s);" "incomplete";
   rejects ~file "struct s; type e = | A(struct s v);" "not a complete object";
@@ -1310,18 +1310,18 @@ let matching () =
     "'x'";
   match_error "match (n) { default: break; }"
     "the scrutinee of a match is not of a variant type; a pointer is not \
-     dereferenced implicitly (design 4.1 rule 1)";
+     dereferenced implicitly (design 4.1 rule 1) [TC0014]";
   match_error "match (p) { default: break; }"
     "the scrutinee of a match is not of a variant type";
   rejects ~file
     "type t; void g(t *q) { match (*q) { default: break; } }"
     "the scrutinee of a match is of the incomplete variant 't', whose \
-     constructors are unknown here (design 4.1 rule 1)";
+     constructors are unknown here (design 4.1 rule 1) [TC0014]";
   match_error "match (v) { case D: break; default: break; }"
-    "'D' names no constructor of the variant 'e' (design 4.1 rule 3)";
+    "'D' names no constructor of the variant 'e' (design 4.1 rule 3) [TC0016]";
   match_error "match (v) { case C: break; default: break; }"
     "the pattern 'C' has 0 sub-pattern(s), and the constructor has 1 \
-     field(s) (design 4.1 rule 3)";
+     field(s) (design 4.1 rule 3) [TC0016]";
   match_error "match (v) { case A(x): break; default: break; }"
     "the pattern 'A' has 1 sub-pattern(s), and the constructor has 0 \
      field(s)";
@@ -1332,34 +1332,35 @@ let matching () =
     "'KA' is not declared";
   match_error "match (v) { case A: break; case C(x): case B(_, _): break; }"
     "the binding 'x' is in an arm of several labels, which none of them may \
-     bind (design 4.1 rule 6)";
+     bind (design 4.1 rule 6) [TC0017]";
   match_error "match (v) { case A: break; default: case C(x): break; }"
-    "(design 4.1 rule 6)";
+    "(design 4.1 rule 6) [TC0017]";
   match_error "match (v) { case A: break; case B(_, _): break; }"
     "the match does not cover the constructor 'C' of the variant 'e' \
-     (design 4.2 rule 1)";
+     (design 4.2 rule 1) [TC0018]";
   match_error "match (v) { case B(_, _): break; }"
     "the match does not cover the constructors 'A' and 'C' of the variant \
-     'e' (design 4.2 rule 1)";
+     'e' (design 4.2 rule 1) [TC0018]";
   match_error "match (v) { case A: break; case A: break; default: break; }"
-    "the constructor 'A' is covered twice (design 4.2 rule 1)";
+    "the constructor 'A' is covered twice (design 4.2 rule 1) [TC0018]";
   match_error "match (v) { case A: case A: break; default: break; }"
     "the constructor 'A' is covered twice";
   match_error "match (v) { case A: break; default: break; default: break; }"
-    "a match has a second `default` (design 4.2 rule 2)";
+    "a match has a second `default` (design 4.2 rule 2) [TC0019]";
   match_error
     "match (v) { case A: break; case B(_, _): break; case C(_): break; \
      default: break; }"
-    "the `default` of a match covers no constructor (design 4.2 rule 2)";
+    "the `default` of a match covers no constructor (design 4.2 rule 2) \
+     [TC0019]";
   match_error
     "switch (n) { case 1: match (v) { default: { case 2: break; } } }"
     "a case or default label inside a match arm, which is not one of its \
-     own and belongs to no switch inside it (design 4.3 rule 3)";
+     own and belongs to no switch inside it (design 4.3 rule 3) [TC0020]";
   match_error "match (v) { default: if (n) { default: ; } break; }"
-    "(design 4.3 rule 3)";
+    "(design 4.3 rule 3) [TC0020]";
   (* A variant reaches no constructor through an enumeration. *)
   rejects ~file "enum k { K }; void g(enum k x) { match (x) { default: ; } }"
-    "(design 4.1 rule 1)"
+    "(design 4.1 rule 1) [TC0014]"
 
 (* Design 4.3 rule 1 and 4.4: the end of every arm is unreachable, by the
    syntactic rules of 4.4, which evaluate no condition but a constant. *)
@@ -1379,7 +1380,7 @@ let arm_termination () =
     in_function ("match (v) { case A: break; default: " ^ arm ^ " }")
   in
   let open_end =
-    "the end of the match arm can be reached (design 4.3 rule 1)"
+    "the end of the match arm can be reached (design 4.3 rule 1) [TC0021]"
   in
   let refused arm = rejects ~file (ends arm) open_end in
   let accepted arm = accepts ~file (ends arm) in
@@ -1487,7 +1488,9 @@ let arm_jumps () =
   let in_function body =
     variant ^ "int f(e v, e w, int n) { " ^ body ^ " out: return 0; }"
   in
-  let into = "a jump into a match arm from outside it (design 4.3 rule 3)" in
+  let into =
+    "a jump into a match arm from outside it (design 4.3 rule 3) [TC0022]"
+  in
   let refused body = rejects ~file (in_function body) into in
   let accepted body = accepts ~file (in_function body) in
   accepted
@@ -1518,7 +1521,7 @@ let arm_jumps () =
        "match (v) { case A: in: { void *q = &&in; (void)q; } return 1; \
         default: break; }")
     "the address of a label inside a match arm, which a computed goto \
-     could jump to from outside the arm (design 4.3 rule 3)"
+     could jump to from outside the arm (design 4.3 rule 3) [TC0022]"
 
 (* Design 3.3: qualified constructors everywhere, unqualified ones where
    the target type of the position is the variant. *)
@@ -1529,7 +1532,7 @@ let constructors () =
     variant ^ "void take(e); e f(e v, int n) { " ^ body ^ " }"
   in
   let constructor_error body text =
-    rejects ~file (in_function body) (text ^ " (design 3.3)")
+    rejects ~file (in_function body) (text ^ " (design 3.3) [TC0009]")
   in
   accepts ~file
     (in_function
@@ -1584,7 +1587,8 @@ let zero_values () =
   let variant = "type e = | A | B(int i); struct s { e v; int n; }; " in
   let refused source =
     rejects ~file (variant ^ source)
-      "the only braced initialiser of a variant is {0} (design 3.2 rule 7)"
+      "the only braced initialiser of a variant is {0} (design 3.2 rule 7) \
+       [TC0008]"
   in
   accepts ~file
     (variant
@@ -1624,14 +1628,15 @@ let distinct_types () =
   let refused body =
     rejects ~file (in_function body)
       "a value of the distinct type 'id' takes no such operation; a cast to \
-       its underlying type crosses to it (design 3.4)"
+       its underlying type crosses to it (design 3.4) [TC0011]"
   in
   let mixed body =
     rejects ~file (in_function body)
-      "the operands are not both of the distinct type 'id' (design 3.4)"
+      "the operands are not both of the distinct type 'id' (design 3.4) \
+       [TC0011]"
   in
   let converts body =
-    rejects ~file (in_function body) "without a cast (design 3.4)"
+    rejects ~file (in_function body) "without a cast (design 3.4) [TC0012]"
   in
   accepts ~file
     (in_function
@@ -1659,9 +1664,11 @@ let distinct_types () =
     "takes no such operation";
   rejects ~file (in_function "return (id)*r;") "'ref' takes no such operation";
   rejects ~file "type d = distinct struct s *[2];"
-    "is not over an unqualified arithmetic or pointer type (design 3.4)";
+    "is not over an unqualified arithmetic or pointer type (design 3.4) \
+     [TC0010]";
   rejects ~file "type d = distinct const int;"
-    "is not over an unqualified arithmetic or pointer type (design 3.4)";
+    "is not over an unqualified arithmetic or pointer type (design 3.4) \
+     [TC0010]";
   accepts ~file
     (types ^ "int g(id a) { return _Generic(a, unsigned: 1, id: 2); }");
   (* C text in a Type-C file sees the representation. *)
@@ -1672,7 +1679,8 @@ let distinct_types () =
       enum { three = (id)3 }; static int t[(id)2];\n\
       # 3 \"in.tc\" 2\n");
   rejects ~file "enum e; type d = distinct enum e;"
-    "is not over an unqualified arithmetic or pointer type (design 3.4)"
+    "is not over an unqualified arithmetic or pointer type (design 3.4) \
+     [TC0010]"
 
 (* Design 3.4: every operand that typing reads refuses a distinct value
    in Type-C text, whichever path types it; a pointer to a distinct type
@@ -1715,7 +1723,8 @@ let distinct_operands () =
        "id x = a; id *p = &x; void *v = &u; (void)(p == v); \
         (void)(p == 0); (void)(p - p); (void)(c ? p : v); return *p;");
   List.iter
-    (fun source -> rejects ~file (types ^ source) "without a cast (design 3.4)")
+    (fun source ->
+      rejects ~file (types ^ source) "without a cast (design 3.4) [TC0012]")
     [ "struct outer o = {5};"; "struct pair y = {5};";
       "struct outer o = { {5} };" ];
   accepts ~file
@@ -1739,7 +1748,8 @@ let variant_operations () =
   let refused body =
     rejects ~file (in_function body)
       "the variant 'e' takes no such operation; Type-C text reaches its tag \
-       and fields only through constructors and match (design 3.2 rule 6)"
+       and fields only through constructors and match (design 3.2 rule 6) \
+       [TC0007]"
   in
   accepts ~file
     (in_function

@@ -1,0 +1,17 @@
+; SPDX-License-Identifier: BSD-2-Clause
+; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+
+; The catalogue of diagnostics is a build output of the one table of
+; rules. dune build makes it, and dune test does too, so that a test run
+; shows the catalogue still builds.
+
+(rule
+ (with-stdout-to
+  diagnostics.md
+  (run %{exe:../src/syntax/rule_table/rule_table.exe} catalogue)))
+
+(rule
+ (alias runtest)
+ (deps diagnostics.md)
+ (action
+  (progn)))

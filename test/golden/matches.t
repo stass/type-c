@@ -70,7 +70,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe missing.tc
-  missing.tc:3: the match does not cover the constructors 'A' and 'C' of the variant 'e' (design 4.2 rule 1)
+  missing.tc:3: the match does not cover the constructors 'A' and 'C' of the variant 'e' (design 4.2 rule 1) [TC0018]
   [1]
 
   $ cat > twice.tc <<'EOF'
@@ -86,7 +86,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe twice.tc
-  twice.tc:7: the constructor 'A' is covered twice (design 4.2 rule 1)
+  twice.tc:7: the constructor 'A' is covered twice (design 4.2 rule 1) [TC0018]
   [1]
 
   $ cat > shared.tc <<'EOF'
@@ -100,7 +100,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe shared.tc
-  shared.tc:5: the binding 'i' is in an arm of several labels, which none of them may bind (design 4.1 rule 6)
+  shared.tc:5: the binding 'i' is in an arm of several labels, which none of them may bind (design 4.1 rule 6) [TC0017]
   [1]
 
   $ cat > scrutinee.tc <<'EOF'
@@ -113,7 +113,79 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe scrutinee.tc
-  scrutinee.tc:3: the scrutinee of a match is not of a variant type; a pointer is not dereferenced implicitly (design 4.1 rule 1)
+  scrutinee.tc:3: the scrutinee of a match is not of a variant type; a pointer is not dereferenced implicitly (design 4.1 rule 1) [TC0014]
+  [1]
+
+A match body is a sequence of arms, each of labels and at least one
+block item (design 4.1 rule 2).
+
+  $ cat > form.tc <<'EOF'
+  > type e = | A;
+  > void f(e v) {
+  >   match (v) {
+  >     v = v;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe form.tc
+  form.tc:4: expected `case` or `default` to begin an arm of `match`, found `v` (design 4.1 rule 2) [TC0015]
+  [1]
+
+A pattern names a constructor of the scrutinee's type, with a
+sub-pattern for each of its fields (design 4.1 rule 3).
+
+  $ cat > pattern.tc <<'EOF'
+  > type e = | A | B(int i);
+  > void f(e v) {
+  >   match (v) {
+  >   case B(i, j):
+  >     break;
+  >   default:
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe pattern.tc
+  pattern.tc:4: the pattern 'B' has 2 sub-pattern(s), and the constructor has 1 field(s) (design 4.1 rule 3) [TC0016]
+  [1]
+
+A match has at most one `default`, and that one covers a constructor
+(design 4.2 rule 2).
+
+  $ cat > default.tc <<'EOF'
+  > type e = | A;
+  > void f(e v) {
+  >   match (v) {
+  >   case A:
+  >     break;
+  >   default:
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe default.tc
+  default.tc:6: the `default` of a match covers no constructor (design 4.2 rule 2) [TC0019]
+  [1]
+
+A `case` or `default` label inside a match arm belongs to the match or
+to a switch inside the arm (design 4.3 rule 3).
+
+  $ cat > label.tc <<'EOF'
+  > type e = | A;
+  > void f(e v, int n) {
+  >   switch (n) {
+  >   case 0:
+  >     match (v) {
+  >     case A: {
+  >     case 1:
+  >       break;
+  >     }
+  >     }
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe label.tc
+  label.tc:7: a case or default label inside a match arm, which is not one of its own and belongs to no switch inside it (design 4.3 rule 3) [TC0020]
   [1]
 
 The end of every arm, the last one too, must be unreachable by the rules
@@ -135,7 +207,7 @@ goto in the same arm (4.3 rule 3).
   > }
   > EOF
   $ ./golden.exe open.tc
-  open.tc:6: the end of the match arm can be reached (design 4.3 rule 1)
+  open.tc:6: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
   [1]
 
   $ cat > entry.tc <<'EOF'
@@ -151,5 +223,5 @@ goto in the same arm (4.3 rule 3).
   > }
   > EOF
   $ ./golden.exe entry.tc
-  entry.tc:5: a jump into a match arm from outside it (design 4.3 rule 3)
+  entry.tc:5: a jump into a match arm from outside it (design 4.3 rule 3) [TC0022]
   [1]

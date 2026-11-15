@@ -118,23 +118,23 @@ breaks it, naming the rule.
 
   $ printf 'type t = int;\ntype t = long;\n' > twice.tc
   $ ./golden.exe twice.tc
-  twice.tc:2: `t` is declared twice in one scope, and one of them is a type declaration (design 3.1 rule 5)
+  twice.tc:2: `t` is declared twice in one scope, and one of them is a type declaration (design 3.1 rule 5) [TC0003]
   [1]
   $ printf 'type t = t *;\n' > own.tc
   $ ./golden.exe own.tc
-  own.tc:1: `t` is used in its own definition, which is not a structure or union specifier (design 3.1 rule 2)
+  own.tc:1: `t` is used in its own definition, which is not a structure or union specifier (design 3.1 rule 2) [TC0002]
   [1]
   $ printf 'type pair = struct { int a; };\nstruct pair { int b; };\n' > tag.tc
   $ ./golden.exe tag.tc
-  tag.tc:2: the tag `pair` is declared again, as a type declaration claims it (design 10.1 rule 6)
+  tag.tc:2: the tag `pair` is declared again, as a type declaration claims it (design 10.1 rule 6) [TC0004]
   [1]
   $ printf 'type node;\nstruct node *p;\n' > named.tc
   $ ./golden.exe named.tc
-  named.tc:2: the tag `node` is not available to Type-C text, as a type declaration claims it (design 10.1 rule 6)
+  named.tc:2: the tag `node` is not available to Type-C text, as a type declaration claims it (design 10.1 rule 6) [TC0004]
   [1]
   $ printf 'int __tc_x;\n' > generated.tc
   $ ./golden.exe generated.tc
-  generated.tc:1: `__tc_x` begins with `__tc_`, which is reserved for the names that typec generates (design 2.3)
+  generated.tc:1: `__tc_x` begins with `__tc_`, which is reserved for the names that typec generates (design 2.3) [TC0001]
   [1]
 
 A variant (design 10.1) becomes the structure and typedef, the
@@ -199,19 +199,19 @@ Derived names, field types and constructor names are checked.
 
   $ printf 'type e = | A | A;\n' > constructors.tc
   $ ./golden.exe constructors.tc
-  constructors.tc:1: `A` names two constructors of one variant (design 3.2 rule 2)
+  constructors.tc:1: `A` names two constructors of one variant (design 3.2 rule 2) [TC0005]
   [1]
   $ printf 'int e_A;\ntype e = | A;\n' > derived.tc
   $ ./golden.exe derived.tc
-  derived.tc:2: the variant `e` claims the enumerator `e_A`, which this scope declares already (design 10.1 rule 6)
+  derived.tc:2: the variant `e` claims the enumerator `e_A`, which this scope declares already (design 10.1 rule 6) [TC0004]
   [1]
   $ printf 'type e = | A(e inner);\n' > recursive.tc
   $ ./golden.exe recursive.tc
-  recursive.tc:1: the field 'inner' of 'A' is not a complete object type, so it is not a value type (design 3.2 rule 4)
+  recursive.tc:1: the field 'inner' of 'A' is not a complete object type, so it is not a value type (design 3.2 rule 4) [TC0006]
   [1]
   $ printf 'type e = | A(int values[4]);\n' > array.tc
   $ ./golden.exe array.tc
-  array.tc:1: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type (design 3.2 rule 4)
+  array.tc:1: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type (design 3.2 rule 4) [TC0006]
   [1]
 
 Type-C text takes a variant only whole (design 3.2 rule 6): no member
@@ -219,19 +219,19 @@ access, no comparison and no cast to or from one.
 
   $ printf 'type e = | A;\nint f(e v) { return v.tag; }\n' > member.tc
   $ ./golden.exe member.tc
-  member.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  member.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
   [1]
   $ printf 'type e = | A;\nint f(e v, e w) { return v == w; }\n' > equal.tc
   $ ./golden.exe equal.tc
-  equal.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  equal.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
   [1]
   $ printf 'type e = | A;\nvoid f(e v) { (void)(long)v; }\n' > cast.tc
   $ ./golden.exe cast.tc
-  cast.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  cast.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
   [1]
   $ printf 'type e = | A;\ne f(void) { return (e)0; }\n' > cast_to.tc
   $ ./golden.exe cast_to.tc
-  cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6)
+  cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
   [1]
 
 C text, here a header that the Type-C file includes, may use the
@@ -276,15 +276,15 @@ implements them.
 
   $ printf 'type box(T) = struct { T value; };\n' > generic.tc
   $ ./golden.exe generic.tc
-  generic.tc:1: type parameters are not implemented yet (design 3.5; work package 2.1)
+  generic.tc:1: type parameters are not implemented yet (design 3.5; work package 2.1) [TC0023]
   [1]
   $ printf 'void f(void) { defer f(); }\n' > defer.tc
   $ ./golden.exe defer.tc
-  defer.tc:1: `defer` is not implemented yet (design 6; work package 2.5)
+  defer.tc:1: `defer` is not implemented yet (design 6; work package 2.5) [TC0023]
   [1]
   $ printf 'int f(void) { return result; }\n' > universe.tc
   $ ./golden.exe universe.tc
-  universe.tc:1: `result` is a universe name that typec does not implement yet (design 3.6; work package 2.3)
+  universe.tc:1: `result` is a universe name that typec does not implement yet (design 3.6; work package 2.3) [TC0023]
   [1]
 
 A distinct type lowers to the typedef of its representation (design
@@ -300,17 +300,17 @@ implicit conversions that design 3.4 leaves out, each at its operation.
   d x = (d)0;
   $ printf 'type d = distinct int;\nint f(d a) { return a + 1; }\n' > add.tc
   $ ./golden.exe add.tc
-  add.tc:2: a value of the distinct type 'd' takes no such operation; a cast to its underlying type crosses to it (design 3.4)
+  add.tc:2: a value of the distinct type 'd' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
   [1]
   $ printf 'type d = distinct int;\nd f(int a) { return a; }\n' > convert.tc
   $ ./golden.exe convert.tc
-  convert.tc:2: a value of type 'int' does not convert to 'd' without a cast (design 3.4)
+  convert.tc:2: a value of type 'int' does not convert to 'd' without a cast (design 3.4) [TC0012]
   [1]
   $ printf 'type d = distinct int;\nint f(d a, int b) { return a == b; }\n' > mixed.tc
   $ ./golden.exe mixed.tc
-  mixed.tc:2: the operands are not both of the distinct type 'd' (design 3.4)
+  mixed.tc:2: the operands are not both of the distinct type 'd' (design 3.4) [TC0011]
   [1]
   $ printf 'struct s;\ntype d = distinct struct s;\n' > over.tc
   $ ./golden.exe over.tc
-  over.tc:2: the distinct type 'd' is not over an unqualified arithmetic or pointer type (design 3.4)
+  over.tc:2: the distinct type 'd' is not over an unqualified arithmetic or pointer type (design 3.4) [TC0010]
   [1]
