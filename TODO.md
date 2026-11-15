@@ -988,6 +988,14 @@ types (design 13.3).
   is checked against design 2.4 only if pedantic.t gains it. Give the
   ISO flags from backends.sh to every run-test compile that needs no
   GNU form, so each new run test checks its lowering by default.
+- [Medium] Owner decision: design 3.2 rule 7 names only `{0}` as the
+  zero value of a variant, but the GNU profile's empty initialiser `{}`
+  is accepted on a structure whose first member is a variant and
+  refused (TC0008) on a variant object itself. Pilot A's port of chibicc
+  writes `Token head = {};` eight times. Recommended: `{}` is the zero
+  value wherever `{0}` is, stated in rule 7, with a golden case each
+  way. Reproducer: /Volumes/Optaine/type-c-pilot-a-notes/repro/
+  empty-brace-variant.tc.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
