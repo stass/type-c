@@ -151,7 +151,7 @@ lives in its own repository and records:
 - identifiers renamed and header macros broken (design 2.3);
 - constructor resolutions that surprised the author (design 3.3);
 - the size of the data against the original (design 10.1);
-- matches with one `case` and a `default`, as a share of all matches (P4);
+- matches with one `case` and a `default`, as a share of all matches;
 - sites that update a payload in place (design 4.1);
 - how a module of several files used `private` (design 9.2);
 - friction that fits none of the above;
@@ -210,13 +210,15 @@ lives in its own repository and records:
 the predicate and accessor functions that only ask for one constructor,
 are rewritten with the single-pattern test. The record gives:
 
-- matches that keep a `default`, as a share of all matches (P4);
+- matches that keep a `default`, as a share of all matches;
 - tag tests that the form does not fit, by shape (negated, joined with
   `&&` or `||`, of several constructors), and the predicate functions
-  that stay for them (P4);
+  that stay for them;
 - code size against package 1.10's port.
 
-**Decided at the gate:** P4, on the numbers of package 1.12.
+**Decided at the gate:** P4, on the numbers of package 1.12: the
+`default` warning stays off and the single-pattern test stays a
+condition, with a field list optional in a test (design 4.2, 4.6).
 **Release 0.1.**
 
 ## Stage 2: generic types, `result`, `try` and `defer`
@@ -378,7 +380,7 @@ Type-C is considered here, not earlier.
 | The tail of C extensions does not end | Stage 0 change-of-course condition | The three options listed there |
 | The front end types C differently from the backend | Typing-oracle disagreements; backend errors in lowered code | Fix; the backend still compiles every token, so a divergence is loud |
 | Diagnostics without columns or macro context are too weak | Pilot records | A preprocessor of its own (P15) |
-| The first release is awkward for real code | Package 1.12's numbers on tag tests the single-pattern test does not fit; Pilot A's numbers on in-place updates | A wider single-pattern test (design 4.6, P4); binding by reference (design section 12), which waits for a lifetime tier |
+| The first release is awkward for real code | Package 1.12's numbers on tag tests the single-pattern test does not fit; Pilot A's numbers on in-place updates | A wider single-pattern test (design 4.6); binding by reference (design section 12), which waits for a lifetime tier |
 | Duplicated instances bloat binaries | Stage 3 measurements | External instances (design section 12) |
 | The design moves under the implementation | Rework of merged packages | Gates settle provisional decisions before the next stage builds on them |
 | Too few OCaml contributors | Review latency | Keep the code plain: no advanced type-level features |

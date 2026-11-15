@@ -669,8 +669,10 @@ expression form; a C local assigned in each arm does that job.
    of the match stands directly in its body, never inside a nested
    statement.
 3. A pattern names a constructor of the scrutinee's type, unqualified, with
-   one sub-pattern per field. A sub-pattern is an identifier, which is a
-   *binding*, or `_`, which matches without binding.
+   one sub-pattern per field; a `case` label that omits the field list of
+   a constructor with fields is refused (only a single-pattern test may,
+   4.6(2)). A sub-pattern is an identifier, which is a *binding*, or `_`,
+   which matches without binding.
 4. A binding declares a non-modifiable object of the
    field's type in the scope of its arm, initialised with a copy of the
    field.
@@ -711,12 +713,11 @@ and wrote 57 arms that repeat the body of another for it.
    constructor named twice.
 2. There is at most one `default`, and it must cover at least one
    constructor.
-3. A `default` hides constructors added later. *Provisional (P4):* a warning
-   for `default` on a variant exists and is off by default. In Pilot A it
-   would flag 89 of 100 matches, 52 of them a match of one `case` and a
-   `default`, which a single-pattern test (4.6) replaces. What settles it
-   is the share of matches that keep a `default` in the pilot written
-   with that test.
+3. A `default` hides constructors added later, and nothing warns about
+   it. In Pilot A written with the single-pattern test (4.6), 49 of 60
+   matches keep a `default`, most of them matches of several cases whose
+   `default` means "every other constructor"; a warning would flag that
+   correct code far more often than a forgotten constructor.
 4. `match` accepts variants only. A C `enum` is not closed: its objects can
    hold values that are not enumerators.
 
@@ -888,7 +889,7 @@ of a `match`, written as the condition of an `if` or a `while`: the test
 match would trap (4.5). The statement it controls is C's `if` or `while`
 and not an arm.
 
-1. *Provisional (P4).* The forms are `if (case P = e) S`,
+1. The forms are `if (case P = e) S`,
    `if (case P = e) S else S2` and `while (case P = e) S`. The test is
    the whole condition and stands nowhere else: not in a `for` or a `do`,
    and not parenthesised, negated or joined with `&&` or `||`, since
@@ -900,7 +901,9 @@ and not an arm.
    reads `e && c` as the operand and is refused, because that is not a
    variant. The pattern `P` is that of a `case` label (4.1(3)): one
    constructor of the operand's type, unqualified, with one sub-pattern
-   per field.
+   per field. In a test, and only there, a constructor with fields may
+   also be written without its field list, `case Str = tok->kind`: the
+   test then binds nothing, as if each field were `_`.
 3. Each time the condition is evaluated, once for an `if` and before
    every iteration of a `while`, the operand is evaluated once and its
    tag is read once. On success the bound fields are copied and then `S`
@@ -946,12 +949,15 @@ statement of a C condition may complete and may leave a loop around it
 with `break`, and in the pilot a `break` ported into an arm left the
 match instead of the loop.
 
-What is provisional is how little the form allows. The pilot calls its
-predicates negated and inside `&&` and `||` as well as alone, and such a
-call keeps its predicate function, whose body becomes one test. The pilot
-written with the test settles whether those calls justify a test that is
-an expression, and whether its matches of one shared arm and a `default`
-justify a list of patterns. The default is the form as specified.
+The form stays a condition and not an expression. Pilot A written with
+the test (Step 12) has 74 tests, and 92 tag tests it does not fit: 30
+negated, 39 joined with `&&` or `||`, 17 in a `for` condition, 6 used as
+a value. None of them binds a field, so each stays a call of a predicate
+whose body is one test, while a test that is an expression would need
+binding scopes across `&&`, `||` and `!`. Without a field list a test
+that binds nothing does not repeat its constructor's arity at every
+site; in a `case` label the full pattern stays, so that a label always
+shows what an arm binds.
 
 ## 5. Errors: `option`, `result`, `try`
 
@@ -2219,7 +2225,6 @@ numbers refer to the implementation plan.
 
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
-| P4 | The `default` warning is off (4.2); the single-pattern test is the whole condition of an `if` or `while` and has one pattern (4.6) | Pilot A written with the single-pattern test: the share of matches that keep a `default`; the tag tests the form does not fit, which are negated, joined with `&&` or `\|\|`, or of several constructors | Warning stays off; the form as specified |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions (5.1) | Stage 2 pilot: rewrites the limit forced | As specified |
 | P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8 and 9 of section 6 (13.5) | Stage 2: code size on the pilot; how often rules 8 and 9 reject code | Repetition |
