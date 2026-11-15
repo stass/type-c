@@ -255,6 +255,7 @@ let atomics =
   let moves name operands result = both name (moves_rule operands result) in
   let fence name = both name (prototype Void [ int ]) in
   let c11 name rule = clang ("__c11_atomic_" ^ name) rule in
+  let clang_pointee name = clang name (Rule Pointee_of_first) in
   List.concat
     [
       [
@@ -284,6 +285,23 @@ let atomics =
               "__sync_fetch_and_" ^ operation;
               "__sync_" ^ operation ^ "_and_fetch" ])
         [ "add"; "sub"; "and"; "or"; "xor"; "nand" ];
+      List.concat_map
+        (fun operation ->
+          List.map clang_pointee
+            [ "__atomic_fetch_" ^ operation;
+              "__atomic_" ^ operation ^ "_fetch" ])
+        [ "max"; "min" ];
+      (* Clang's __sync max and min take int or unsigned int only, so
+         they have prototypes, not the rule of the type they point to. *)
+      List.map
+        (fun name ->
+          clang name (prototype int [ Pointer (Volatile int); int ]))
+        [ "__sync_fetch_and_max"; "__sync_fetch_and_min" ];
+      List.map
+        (fun name ->
+          clang name
+            (prototype unsigned [ Pointer (Volatile unsigned); unsigned ]))
+        [ "__sync_fetch_and_umax"; "__sync_fetch_and_umin" ];
       List.map fence [ "__atomic_thread_fence"; "__atomic_signal_fence" ];
       [
         both "__atomic_test_and_set"
@@ -294,8 +312,9 @@ let atomics =
         both "__sync_synchronize" (prototype Void []);
       ];
       List.map
-        (fun name -> c11 name (Rule Pointee_of_first))
-        [ "fetch_add"; "fetch_sub"; "fetch_and"; "fetch_or"; "fetch_xor" ];
+        (fun name -> clang_pointee ("__c11_atomic_" ^ name))
+        [ "fetch_add"; "fetch_sub"; "fetch_and"; "fetch_or"; "fetch_xor";
+          "fetch_nand"; "fetch_max"; "fetch_min" ];
       [
         c11 "init" (moves_rule [ Object_type ] (Fixed Void));
         c11 "store" (moves_rule [ Object_type ] (Fixed Void));

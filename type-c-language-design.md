@@ -427,10 +427,11 @@ The table's edges are these rules.
    type `_Atomic D`. The operands that stand for a value of the object
    then have type `D`, or `D *` where they point to one, as the source of
    an assignment does; the memory orders and `weak` stay integers.
-6. The arithmetic and bitwise `__atomic_*`, `__sync_*` and
-   `__c11_atomic_*` builtins, such as `__atomic_fetch_add`,
-   `__sync_or_and_fetch` and `__c11_atomic_fetch_add`, refuse an object
-   of type `D`, because they do arithmetic on its representation.
+6. The arithmetic, bitwise and ordering (max, min) `__atomic_*`,
+   `__sync_*` and `__c11_atomic_*` builtins, such as
+   `__atomic_fetch_add`, `__sync_or_and_fetch` and
+   `__c11_atomic_fetch_max`, refuse an object of type `D`, because they
+   compute on its representation.
    `__atomic_test_and_set` and `__atomic_clear` take a `volatile void *`,
    which a `D *` converts to as it does for `memset`.
 

@@ -91,14 +91,18 @@ void c23(int n, ...)
 
 #ifdef __clang__
 /* Clang's builtins of C11's atomic operations take a pointer to an atomic
-   type and give the type without _Atomic. */
-void c11(_Atomic int *ai, _Atomic(long) *al, int x)
+   type and give the type without _Atomic. Its __atomic max and min
+   operations give the type that the first argument points to. */
+void c11(_Atomic int *ai, _Atomic(long) *al, int x, long *lp)
 {
 	__c11_atomic_init(ai, 1); __c11_atomic_store(ai, 1, 0);
 	__c11_atomic_load(ai, 0); __c11_atomic_exchange(al, 1, 0);
 	__c11_atomic_fetch_add(ai, 1, 0); __c11_atomic_fetch_sub(al, 1, 0);
 	__c11_atomic_fetch_and(ai, 1, 0); __c11_atomic_fetch_or(ai, 1, 0);
-	__c11_atomic_fetch_xor(ai, 1, 0);
+	__c11_atomic_fetch_xor(ai, 1, 0); __c11_atomic_fetch_nand(al, 1, 0);
+	__c11_atomic_fetch_max(ai, 1, 0); __c11_atomic_fetch_min(al, 1, 0);
+	__atomic_fetch_max(lp, 1, 0); __atomic_max_fetch(&x, 1, 0);
+	__atomic_fetch_min(&x, 1, 0); __atomic_min_fetch(lp, 1, 0);
 	__c11_atomic_compare_exchange_strong(ai, &x, 1, 0, 0);
 	__c11_atomic_compare_exchange_weak(ai, &x, 1, 0, 0);
 	__builtin_os_log_format_buffer_size("x %d", x);

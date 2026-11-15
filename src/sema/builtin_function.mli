@@ -53,9 +53,10 @@ type rule =
           classification and overflow builtins have. *)
   | Pointee_of_first
       (** The unqualified type that the first argument points to, as the
-          [__sync] and [__atomic] builtins that do arithmetic on that
-          object give; they read it, so it is of no distinct type in
-          Type-C text (design 3.4). *)
+          [__sync], [__atomic] and [__c11_atomic] builtins that compute
+          on that object (arithmetic, bitwise, max and min) give; they
+          read it, so it is of no distinct type in Type-C text
+          (design 3.4). *)
   | Complex_of_first
       (** The complex type of the real floating type of the first
           argument, as [__builtin_complex] gives. *)

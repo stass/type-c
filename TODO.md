@@ -888,9 +888,10 @@ types (design 13.3).
   operation, for an implicit conversion by that of the converted
   expression, and for a value that no operator reads (an array length,
   a designator, `goto *`) by its own. Confirm and say so in 3.4.
-- [Low] The builtin table lacks Clang's `__c11_atomic_fetch_max`,
-  `_fetch_min` and `_fetch_nand`, so typec refuses valid calls of them as
-  undeclared; list them as `Pointee_of_first`.
+- [Low] The builtin table lacks `__atomic_always_lock_free` (GCC and
+  Clang; libstdc++ and some C code call it, and both fold it to a
+  constant) and Clang's `__scoped_atomic_*`, which LLVM's libc calls;
+  typec refuses valid calls of them as undeclared.
 - [Medium] Distinct types: C text sees the representation at every
   level, so a C-text operation on a Type-C value gives U where the
   object is D: with a header macro `M(p)` that is `*(p)` on `id *p`,

@@ -1726,7 +1726,7 @@ let distinct_operands () =
         return __atomic_load_n(&x, 5);");
   (* GCC has no __c11 builtins, so these take a Clang target. *)
   rejects ~file ~target:lp64_clang
-    (in_function "_Atomic id x; return __c11_atomic_fetch_add(&x, a, 5);")
+    (in_function "_Atomic id x; return __c11_atomic_fetch_add(&x, 1, 5);")
     "a value of the distinct type 'id' takes no such operation";
   rejects ~file ~target:lp64_clang
     (in_function "_Atomic id x; __c11_atomic_store(&x, u, 5); return a;")
@@ -1751,6 +1751,34 @@ let distinct_operands () =
         (void)__c11_atomic_compare_exchange_strong(&x, &e, a, 5, 5); \
         (void)__c11_atomic_compare_exchange_weak(&x, &e, a, 5, 5); \
         return __c11_atomic_load(&x, 5);");
+  (* Clang's max, min and nand fetch operations compute on the value;
+     the operand is an int, so that the object is what is refused. *)
+  List.iter
+    (fun call ->
+      rejects ~file ~target:lp64_clang
+        (in_function ("_Atomic id x; id y = a; (void)" ^ call ^ "; return a;"))
+        "a value of the distinct type 'id' takes no such operation")
+    [ "__c11_atomic_fetch_max(&x, 1, 5)"; "__c11_atomic_fetch_min(&x, 1, 5)";
+      "__c11_atomic_fetch_nand(&x, 1, 5)"; "__atomic_fetch_max(&y, 1, 5)";
+      "__atomic_fetch_min(&y, 1, 5)"; "__atomic_max_fetch(&y, 1, 5)";
+      "__atomic_min_fetch(&y, 1, 5)" ];
+  rejects ~file ~target:lp64_clang
+    (in_function "id y = a; (void)__sync_fetch_and_umax(&y, 1u); return a;")
+    "'id *' does not convert to 'volatile unsigned int *' without a cast";
+  accepts ~file ~target:lp64_clang
+    (in_function
+       "_Atomic int n = 0; int m = c; unsigned v = u; \
+        (void)__c11_atomic_fetch_max(&n, c, 5); \
+        (void)__c11_atomic_fetch_min(&n, c, 5); \
+        (void)__c11_atomic_fetch_nand(&n, c, 5); \
+        (void)__atomic_fetch_max(&m, c, 5); \
+        (void)__atomic_fetch_min(&m, c, 5); \
+        (void)__atomic_max_fetch(&m, c, 5); \
+        (void)__atomic_min_fetch(&m, c, 5); \
+        (void)__sync_fetch_and_max(&m, c); (void)__sync_fetch_and_min(&m, c); \
+        (void)__sync_fetch_and_umax(&v, u); \
+        (void)__sync_fetch_and_umin(&v, u); \
+        return a;");
   accepts ~file
     (in_function
        "id x = a; id *p = &x; void *v = &u; (void)(p == v); \
