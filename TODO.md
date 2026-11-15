@@ -1055,6 +1055,13 @@ types (design 13.3).
   Decide whether a `break` in an arm that is not the arm's last statement
   (or that sits inside a loop around the match) deserves a diagnostic, or
   whether 4.3 should say how to leave the enclosing loop.
+- [Low] Design 9.2 rule 4 opens the zero value of a private type to
+  every client, but Type-C text can spell a zero value of a private
+  distinct type only through `{0}` or `{}` in an initialiser: the
+  expression `(Bits)0` is a cast, which rule 1 refuses outside the owner
+  (Pilot A step 10 needed a maker function for it). Decide whether rule
+  1 excepts a cast of the constant 0, or say in 9.2 that the zero value
+  is reached only by an initialiser.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
