@@ -1851,7 +1851,7 @@ let variant_operations () =
   let refused body =
     rejects ~file (in_function body)
       "the variant 'e' takes no such operation; Type-C text reaches its tag \
-       and fields only through constructors and match (design 3.2 rule 6) \
+       and fields only through constructors and matching (design 3.2 rule 6) \
        [TC0007]"
   in
   accepts ~file

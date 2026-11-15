@@ -396,7 +396,7 @@ let fail_operands context span clause =
    ^ ")")
 
 (* Design 3.2 rule 6: Type-C text reaches the tag and fields of a
-   variant only through constructors and match, so an operation at [span]
+   variant only through constructors and matching, so an operation at [span]
    whose operand, or the type it converts to or reaches into, is the
    variant [t] is refused there. C text may use the structure that a
    variant lowers to (design 10.6). *)
@@ -410,7 +410,7 @@ let refuse_variant context (span : Tree.span) (t : Ctype.t) =
         (Rule.message Variant_operation
            (Printf.sprintf
               "the variant %s takes no such operation; Type-C text reaches \
-               its tag and fields only through constructors and match"
+               its tag and fields only through constructors and matching"
               (quote name)))
   | Some _ | None -> ()
 

@@ -281,19 +281,19 @@ access, no comparison and no cast to or from one.
 
   $ printf 'type e = | A;\nint f(e v) { return v.tag; }\n' > member.tc
   $ ./golden.exe member.tc
-  member.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  member.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
   [1]
   $ printf 'type e = | A;\nint f(e v, e w) { return v == w; }\n' > equal.tc
   $ ./golden.exe equal.tc
-  equal.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  equal.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
   [1]
   $ printf 'type e = | A;\nvoid f(e v) { (void)(long)v; }\n' > cast.tc
   $ ./golden.exe cast.tc
-  cast.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  cast.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
   [1]
   $ printf 'type e = | A;\ne f(void) { return (e)0; }\n' > cast_to.tc
   $ ./golden.exe cast_to.tc
-  cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
   [1]
 
 The member path of offsetof, which expands to __builtin_offsetof, may
@@ -310,12 +310,12 @@ end at a variant but not reach into one.
   >   printf 'unsigned long f(void) { return __builtin_offsetof(struct s, %s); }\n' "$path" >> offsetof.tc
   >   ./golden.exe offsetof.tc
   > done
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
   [1]
   $ cat offsetof.h > offsetof.tc
   $ cat >> offsetof.tc <<'EOF'

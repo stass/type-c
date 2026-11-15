@@ -46,7 +46,7 @@ let is_zero_initialiser typing (list : Tree.initialiser_list) =
   | _ -> false
 
 (* Type-C text reaches the tag and fields of a variant only through
-   constructors and match (rule 6): an initialiser at [span] does not
+   constructors and matching (rule 6): an initialiser at [span] does not
    open a variant's members, but where [zeroes] says it is the zero
    initialiser that zeroes them (rule 7). The two functions that open a
    structure's or union's members, {!first_level} and {!designate}, ask

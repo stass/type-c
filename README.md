@@ -11,10 +11,107 @@ work is [type-c-implementation-plan.md](type-c-implementation-plan.md).
 
 `typec` is its compiler. It takes the command line of the C compiler, so
 it can replace `cc` in a build. At this stage it compiles a `.tc` input
-through its pipeline, which reads it as C with the type declarations of
-design 3.1 (aliases and forward declarations) and lowers those to C,
-hands every other input and option to the backend C compiler unchanged,
-and can print the target model the backend reports (`--print-target`).
+through its pipeline, which reads it as C with the Type-C declarations
+and statements of Stage 1 (type declarations, variants, `match`, the
+single-pattern test, distinct types and `private`) and lowers those to
+C, hands every other input and option to the backend C compiler
+unchanged, and can print the target model the backend reports
+(`--print-target`).
+
+## What Type-C looks like
+
+Type-C is C with a few additions: a C11 file is a Type-C file with the
+same meaning, with narrow exceptions (design 2.2). The examples are in
+the style of Pilot A, a port of the chibicc C compiler to Type-C (plan,
+Stage 1); filled in, each compiles with `typec` today.
+
+**A tag and the fields it governs become a variant.** In C the kind and
+the fields that are valid for some kinds are separate, and a comment
+carries the rule:
+
+```c
+typedef enum { TK_IDENT, TK_PUNCT, TK_STR, TK_NUM, TK_EOF } TokenKind;
+
+struct Token {
+  TokenKind kind;
+  int64_t val;      /* if kind is TK_NUM */
+  Type *ty;         /* if kind is TK_NUM or TK_STR */
+  char *str;        /* if kind is TK_STR */
+  ...
+};
+```
+
+In Type-C each field lives in the constructor where it means something,
+and reading `val` of a string token cannot be written:
+
+```c
+type TokenKind =
+  | Ident
+  | Punct
+  | Str(Type *ty, char *str)
+  | Num(Type *ty, int64_t val)
+  | Eof;
+
+struct Token {
+  TokenKind kind;
+  ...
+};
+
+Token t = {Num(&ty_long, 42), ...};
+```
+
+**Tests of the kind become a `match`.** The bindings are copies of the
+fields and exist only in their arm. Leaving out a constructor is an
+error unless a `default` covers it, and an invalid tag traps instead of
+falling through:
+
+```c
+match (tok->kind) {
+case Num(_, val):
+  return val;
+case Str(_, str):
+  return str[0];
+case Ident:
+case Punct:
+case Eof:
+  return 0;
+}
+```
+
+**A question about one constructor is a condition.** The single-pattern
+test binds the fields when it succeeds:
+
+```c
+if (case Num(ty, val) = tok->kind)
+  printf("%lld of size %d\n", (long long)val, ty->size);
+
+while (case Cons(head, tail) = *list) {
+  sum += head;
+  list = tail;
+}
+```
+
+**Integers that mean different things become distinct types.** A
+distinct type has the representation and operators of its underlying
+type but does not mix with it, or with another distinct type, without a
+cast:
+
+```c
+type GpReg = distinct int;   /* a general-purpose register */
+type FpReg = distinct int;   /* an XMM register */
+
+void pop_gp(GpReg r);
+void f(FpReg x) { pop_gp(x); }
+/* typec: a value of type 'FpReg' does not convert to 'GpReg'
+   without a cast (design 3.4) [TC0012] */
+```
+
+Everything lowers to plain C: a variant is a structure of an
+enumeration and a union, a `match` is a `switch`, and a distinct type is
+a typedef, so C code calls Type-C code and the other way round with no
+glue. [What Stage 1 catches that C does not](#what-stage-1-catches-that-c-does-not)
+lists the errors these rules refuse and what C's warnings say about
+them.
 
 ## Building and testing
 

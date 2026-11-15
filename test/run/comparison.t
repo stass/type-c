@@ -194,7 +194,7 @@ operation on a variant (TC0007).
   typec: token.tc:4: the enumerator `token_Name` is not available to Type-C text, as a type declaration claims it (design 10.1 rule 6) [TC0004]
   [80]
   $ typec --cc=$clang -DNO_TAG_TEST -c token.tc -o tc.o
-  typec: token.tc:7: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and match (design 3.2 rule 6) [TC0007]
+  typec: token.tc:7: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
   [80]
 
 3. A missing break at the end of an arm (design 4.3). GCC's -Wextra
