@@ -308,6 +308,25 @@ let as_seen context span (typed : typed) =
 
 let distinct_name (distinct : Ctype.distinct) = quote distinct.distinct_name
 
+(* Design 9.2: Type-C text creates a value of a private type, through
+   a constructor expression or a cast at [span], only where it owns the
+   type; tokens of a macro expansion belong to the file of the expansion.
+   C text is bound by no Type-C rule (rule 4). [described] names the
+   type in the diagnostic. *)
+let refuse_private_creation context (span : Tree.span) ~described
+    (t : Ctype.t) =
+  let file = context.text.tokens.(span.first).owner in
+  match Ctype.privacy context.tags t with
+  | Private declaring
+    when File.is_type_c_text file && not (File.owns ~declaring file) ->
+      context.fail span
+        (Rule.message Private_creation
+           (Printf.sprintf
+              "%s is private to %s, so only the text of its owner creates \
+               its values"
+              described (quote declaring.name)))
+  | Private _ | Public -> ()
+
 (* The table of design 3.4: the operations that read a value of a
    distinct type in Type-C text. The other uses that it allows take the
    value whole and never read it as an operand: =, initialisation,
@@ -1999,6 +2018,11 @@ and expression_node context position (whole : Tree.expression) =
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
       refuse_variant context span cast_type;
+      Option.iter
+        (fun distinct ->
+          refuse_private_creation context span cast_type
+            ~described:("the distinct type " ^ distinct_name distinct))
+        (Ctype.as_distinct cast_type);
       ignore (if discards cast_type then as_whole operand else typed operand);
       value (Ctype.unqualified cast_type)
   | Binary (op, left, right) ->
@@ -2049,6 +2073,8 @@ and expression_node context position (whole : Tree.expression) =
    its arguments, one for each field, each converted to the type of its
    field as if by assignment. *)
 and construct context (whole : Tree.expression) named arguments =
+  refuse_private_creation context whole.span named.variant_type
+    ~described:("the variant " ^ quote named.variant_name);
   let name = quote named.chosen.constructor_name in
   let fields = named.chosen.fields in
   let refuse text = context.fail whole.span (constructor_message text) in

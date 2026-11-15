@@ -44,6 +44,10 @@ type t =
   | Distinct_conversion
       (** An implicit conversion to or from a distinct type in Type-C text
           (design 3.4). *)
+  | Private_creation
+      (** A constructor expression of a private variant, or a cast to a
+          private distinct type, in Type-C text that does not own the
+          type (design 9.2 rule 1). *)
   | Match_scrutinee
       (** A match whose scrutinee is no complete variant (design 4.1
           rule 1, 4.2 rule 4). *)
@@ -80,6 +84,7 @@ let clause = function
   | Constructor_expression -> "design 3.3"
   | Distinct_representation | Distinct_operation | Distinct_conversion ->
       "design 3.4"
+  | Private_creation -> "design 9.2 rule 1"
   | Match_scrutinee -> "design 4.1 rule 1"
   | Arm_form -> "design 4.1 rule 2"
   | Pattern -> "design 4.1 rule 3"

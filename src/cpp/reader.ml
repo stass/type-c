@@ -12,7 +12,7 @@ let max_line_number = 2147483647
 type motion = Stay | Enter | Return
 
 module Owners = Map.Make (struct
-  type t = string * bool
+  type t = string * bool * bool
 
   let compare = Stdlib.compare
 end)
@@ -89,12 +89,12 @@ let start_next_line state =
   state.presumed <- { state.presumed with line = state.presumed.line + 1 }
 
 (* The one value for an owner. *)
-let owner state name system_header =
-  let key = (name, system_header) in
+let owner state ~main name system_header =
+  let key = (name, system_header, main) in
   match Owners.find_opt key state.owners with
   | Some file -> file
   | None ->
-      let file = { File.name; system_header } in
+      let file = { File.name; system_header; main } in
       state.owners <- Owners.add key file state.owners;
       file
 
@@ -104,7 +104,7 @@ let current_owner state =
   match state.include_stack with
   | file :: _ -> file
   | [] ->
-      let main = owner state state.input_name false in
+      let main = owner state ~main:true state.input_name false in
       state.include_stack <- [ main ];
       main
 
@@ -315,8 +315,8 @@ let read_flags state =
    belong to the file of the expansion. *)
 let stack_after_marker state motion name system_header =
   match (motion, state.include_stack) with
-  | Enter, stack -> owner state name system_header :: stack
-  | Stay, [] -> [ owner state name system_header ]
+  | Enter, stack -> owner state ~main:false name system_header :: stack
+  | Stay, [] -> [ owner state ~main:true name system_header ]
   | Stay, stack -> stack
   | Return, _ :: (_ :: _ as includer) -> includer
   | Return, _ -> fail state "line marker returns from the main file"

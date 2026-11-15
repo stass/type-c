@@ -569,21 +569,23 @@ and type_definition =
   | Incomplete_variant
       (** [type N;], which claims the structure tag [N] that its
           lowering declares (design 10.1 rule 6) *)
-  | Variant of constructor list
-      (** [= | C ... ;]: the constructors in order, at least one, whose
-          names are unique (design 3.2 rule 2). The definition may use
-          the name. It claims the tag [N] where it completes no
-          incomplete variant, and the enumeration tag and enumerators of
-          the names {!enum_tag_name} and {!enumerator_name} give (design
-          10.1 rule 6). *)
+  | Variant of { is_private : bool; constructors : constructor list }
+      (** [= private? | C ... ;]: whether [private] restricts creating
+          values to the owner (design 9.2), and the constructors in order,
+          at least one, whose names are unique (design 3.2 rule 2). The
+          definition may use the name. It claims the tag [N] where it
+          completes no incomplete variant, and the enumeration tag and
+          enumerators of the names {!enum_tag_name} and {!enumerator_name}
+          give (design 10.1 rule 6). *)
   | Alias of type_name
       (** [= type-name;] for a type name that is not a [Record_alias]:
           the name denotes the type, as [typedef] makes it, and the
           definition does not use the name (design 3.1 rule 2) *)
-  | Distinct of type_name
-      (** [= distinct type-name;]: a new type with the representation of
-          the type name (design 3.4); the definition does not use the
-          name (design 3.1 rule 2) *)
+  | Distinct of { is_private : bool; representation : type_name }
+      (** [= private? distinct type-name;]: a new type with the
+          representation of the type name (design 3.4), whose values only
+          its owner creates where it is private (9.2); the definition
+          does not use the name (design 3.1 rule 2) *)
   | Record_alias of record_specifier spanned
       (** [= struct-or-union-specifier;] with a body, which its
           [members] always hold, and nothing else; it may use the name.

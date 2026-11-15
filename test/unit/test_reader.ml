@@ -379,6 +379,49 @@ let owners_are_shared () =
       a.owner == c.owner && c.owner == d.owner
   | _ -> false
 
+(* The main file is the one at the bottom of the stack: the first marker
+   or the first token opens it, and a marker that enters a file of the
+   same name opens another file. A marker without a flag, which [#line]
+   also writes, changes no owner. *)
+let main_cases =
+  [ ("a\n", [ ("in.i", true) ]);
+    ( "# 1 \"m.tc\"\na\n# 1 \"m.tc\" 1\nb\n# 2 \"m.tc\" 2\nc\n",
+      [ ("m.tc", true); ("m.tc", false); ("m.tc", true) ] );
+    ("# 1 \"m.tc\"\na\n# 7 \"n.tc\"\nb\n", [ ("m.tc", true); ("m.tc", true) ])
+  ]
+
+let failed_main_cases () =
+  List.filter
+    (fun (text, expected) ->
+      match Reader.read ~name:"in.i" text with
+      | Ok { tokens; _ } ->
+          Array.to_list tokens
+          |> List.map (fun (token : Token.t) ->
+                 (token.owner.name, token.owner.main))
+          <> expected
+      | Error _ -> true)
+    main_cases
+
+(* The owner rule (design 9.2 rule 2): a declaring file, the file of the
+   text, and whether that text owns the declarations. *)
+let file ?(main = false) name = { File.name; system_header = false; main }
+
+let owner_cases =
+  [ (file "ir.tci", file "ir.tci", true);
+    (file "include/ir.tci", file ~main:true "src/ir.tc", true);
+    (file "ir.tci", file "ir.tc", false);
+    (file "ir.tci", file ~main:true "client.tc", false);
+    (file "ir.tci", file ~main:true "ir.tci.tc", false);
+    (file "ir.tc", file ~main:true "ir.tc", false);
+    (file ~main:true "ir.tc", file ~main:true "ir.tc", true);
+    (file "ir.h", file ~main:true "ir.tc", false);
+    (file "ir.tci", file ~main:true "ir.c", false) ]
+
+let failed_owner_cases () =
+  List.filter
+    (fun (declaring, text, expected) -> File.owns ~declaring text <> expected)
+    owner_cases
+
 let () =
   let failed_cases show cases =
     List.filter_map
@@ -407,7 +450,17 @@ let () =
     failed_punctuators;
   let shared = owners_are_shared () in
   if not shared then prerr_endline "FAIL: owners are shared";
+  let failed_mains = failed_main_cases () in
+  List.iter
+    (fun (text, _) -> Printf.eprintf "FAIL: main file in %S\n" text)
+    failed_mains;
+  let failed_owners = failed_owner_cases () in
+  List.iter
+    (fun ((declaring : File.t), (text : File.t), _) ->
+      Printf.eprintf "FAIL: owner rule for %s in %s\n" declaring.name
+        text.name)
+    failed_owners;
   if
     failed <> [] || failed_constants <> [] || failed_punctuators <> []
-    || not shared
+    || (not shared) || failed_mains <> [] || failed_owners <> []
   then exit 1

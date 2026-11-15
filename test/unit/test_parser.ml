@@ -1665,11 +1665,13 @@ let type_c_error_cases =
     case "a distinct type" "type d = distinct unsigned int;"
       "(type d distinct (type unsigned int))";
     case "a private variant" "type v = private | A;"
-      "error: in.tc:1: `private` is not implemented yet (design 9.2; work \
-       package 1.7)";
+      "(type v private claims claims A)";
     case "a private distinct type" "type v = private distinct int;"
-      "error: in.tc:1: `private` is not implemented yet (design 9.2; work \
-       package 1.7)";
+      "(type v private distinct (type int))";
+    case "private before a distinct that begins no type name"
+      "typedef int private; type v = private distinct;"
+      "error: in.tc:1: expected `;` after a type declaration, found \
+       `distinct`";
     case "type parameters" "type box(T) = struct { T value; };"
       "error: in.tc:1: type parameters are not implemented yet (design 3.5; \
        work package 2.1)";

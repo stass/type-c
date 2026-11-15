@@ -232,10 +232,11 @@ and block_items visit items =
 and type_declaration visit (d : type_declaration) =
   match d.node.definition with
   | Incomplete_variant -> ()
-  | Alias name | Distinct name -> type_name visit name
+  | Alias name | Distinct { representation = name; _ } ->
+      type_name visit name
   | Record_alias specifier ->
       type_specifier visit (Struct_or_union specifier.node)
-  | Variant constructors ->
+  | Variant { constructors; _ } ->
       let field (f : field) =
         specifiers visit f.node.specifiers;
         declarator visit f.node.declarator

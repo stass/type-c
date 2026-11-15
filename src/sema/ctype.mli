@@ -32,6 +32,14 @@
     same tag. *)
 type record_kind = Struct | Union
 
+(** Who may create values of a variant or a distinct type (design 9.2
+    rule 1). *)
+type privacy =
+  | Public
+  | Private of Typec_cpp.File.t
+      (** The file whose text declares the type, whose owners
+          {!Typec_cpp.File.owns} names. *)
+
 type record_tag = private {
   record_id : int;
   kind : record_kind;
@@ -109,6 +117,7 @@ and shape =
 and distinct = private {
   distinct_id : int;
   distinct_name : string;
+  distinct_privacy : privacy;
   representation : t;
       (** The unqualified arithmetic or pointer type that it has the size,
           alignment and representation of. *)
@@ -215,8 +224,9 @@ type constructor = { constructor_name : string; fields : member list }
 
 val declare_enum : tags -> string option -> enum_tag
 
-val declare_distinct : tags -> string -> t -> (t, error) result
-(** A new distinct type of this name over its representation. *)
+val declare_distinct : tags -> string -> privacy -> t -> (t, error) result
+(** A new distinct type of this name and privacy over its
+    representation. *)
 
 val define_record :
   Target.t -> tags -> record_tag -> member list -> (unit, error) result
@@ -226,15 +236,20 @@ val define_variant :
   Target.t ->
   tags ->
   record_tag ->
+  privacy ->
   constructor list ->
   member list ->
   (unit, error) result
 (** Completes the structure of a variant, as {!define_record} does, and
-    gives the variant its constructors. *)
+    gives the variant its privacy and constructors. *)
 
 val constructors : tags -> t -> constructor list option
 (** The constructors of a variant, qualified or not, in order; [None]
     where [t] is no variant or one that is incomplete here. *)
+
+val privacy : tags -> t -> privacy
+(** The privacy of a variant that is complete here or of a distinct type,
+    qualified or not; [Public] for any other type. *)
 
 val define_enum :
   tags -> enum_tag -> Integer.t Unknown.answer -> (unit, error) result

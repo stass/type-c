@@ -624,11 +624,13 @@ and type_declaration reader (d : type_declaration) =
     match definition with
     | Incomplete_variant -> [ claim ]
     | Alias t -> [ type_name reader t ]
-    | Distinct t -> [ leaf "distinct"; type_name reader t ]
+    | Distinct { is_private; representation } ->
+        privacy ~is_private
+        @ [ leaf "distinct"; type_name reader representation ]
     | Record_alias { span; node = specifier } ->
         let claimed = if specifier.tag = None then [ claim ] else [] in
         [ specifier_dump reader (node span) ~claimed specifier ]
-    | Variant constructors ->
+    | Variant { is_private; constructors } ->
         let own = if declared.earlier = None then [ claim ] else [] in
         let (Tag_at token) = derived_enum_tag ~type_keyword:d.span.first in
         let enum_claim =
@@ -638,9 +640,13 @@ and type_declaration reader (d : type_declaration) =
                  earlier = None })
             (leaf "claims")
         in
-        own @ (enum_claim :: List.map (constructor reader name) constructors)
+        privacy ~is_private @ own
+        @ (enum_claim :: List.map (constructor reader name) constructors)
   in
   node d.span "type" (declared_name :: parts)
+
+(* The word [private] of a definition (design 9.2) as a [private] part. *)
+and privacy ~is_private = if is_private then [ leaf "private" ] else []
 
 (* A constructor as [(C fields)], noted with the enumerator it claims. *)
 and constructor reader variant (c : constructor) =

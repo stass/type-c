@@ -44,7 +44,7 @@ let add_declarator names declarator (declared : declared) =
 
 (* The enumerators that a variant declares for C (design 10.1 rule 6). *)
 let add_derived_enumerators names (variant : identifier) = function
-  | Variant constructors ->
+  | Variant { constructors; _ } ->
       List.iter
         (fun (constructor : constructor) ->
           let name = constructor.node.name in

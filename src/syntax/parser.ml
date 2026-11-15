@@ -1292,22 +1292,22 @@ let claim_enumerators state ~variant =
 
 let word_at state offset word = peek_at state offset = Identifier_token word
 
-(* The definition that a later work package implements: [private] before
-   [|] or [distinct]. [private] and [distinct] are words only there and
-   before a type name (design 2.3), so elsewhere after the [=] they may
-   name a type. *)
-let refuse_unimplemented_definition state =
-  if
-    word_at state 0 "private"
-    && (peek_at state 1 = Punctuator_token P.Pipe
-       || word_at state 1 "distinct")
-  then
-    fail_not_implemented state ~section:"9.2" ~package:"1.7"
-      "`private` is not implemented yet"
-
 (* [distinct] is the word only before a token that begins a type name. *)
-let begins_distinct state =
-  word_at state 0 "distinct" && starts_type_name state 1
+let begins_distinct_at state offset =
+  word_at state offset "distinct" && starts_type_name state (offset + 1)
+
+let begins_distinct state = begins_distinct_at state 0
+
+(* [private] is the word only before the [|] of a variant or before the
+   word [distinct] (design 2.3, 9.2); elsewhere after the [=] it may name
+   a type. Takes the word, if it is one. *)
+let accept_private state =
+  let is_private =
+    word_at state 0 "private"
+    && (peek_at state 1 = Punctuator_token P.Pipe || begins_distinct_at state 1)
+  in
+  if is_private then advance state;
+  is_private
 
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
@@ -2302,11 +2302,11 @@ and incomplete_variant state name =
 (* After the [=]: the declaration of [name], which is in scope from the
    end of its identifier, and the definition. *)
 and type_definition state name ~type_keyword =
-  refuse_unimplemented_definition state;
+  let is_private = accept_private state in
   if peek state = Punctuator_token P.Pipe then begin
     let declared = declare_variant state name ~type_keyword in
     claim_enumerators state ~variant:name;
-    (declared, Variant (constructors state))
+    (declared, Variant { is_private; constructors = constructors state })
   end
   else
     match specifier_word state 0 with
@@ -2321,9 +2321,9 @@ and type_definition state name ~type_keyword =
   | _ when begins_distinct state ->
       advance state;
       let declared = declare state ~kind:Defining_type name in
-      let type_name = type_name state in
+      let representation = type_name state in
       end_definition state name declared;
-      (declared, Distinct type_name)
+      (declared, Distinct { is_private; representation })
   | _ ->
       let declared = declare state ~kind:Defining_type name in
       let type_name = type_name state in

@@ -39,6 +39,17 @@ let replace (tokens : Token.t array) ~location text indexes :
 let insert (tokens : Token.t array) ~before text : Emitter.edit =
   { first = before; count = 0; location = tokens.(before).location; text }
 
+(* The grammar tokens from [first] to [last], without the pragmas
+   between them, which stay. *)
+let grammar_tokens (tokens : Token.t array) first last =
+  List.init (last - first + 1) (fun offset -> first + offset)
+  |> List.filter (fun index ->
+         match tokens.(index).kind with
+         | Token.Pragma | Token.Typec_pragma -> false
+         | Token.Identifier | Token.Number | Token.Character _
+         | Token.String _ | Token.Punctuator _ ->
+             true)
+
 (* The token before [index] that is not a pragma: the grammar gives
    pragmas no place, so before a definition it is the [=]. *)
 let rec grammar_token_before (tokens : Token.t array) index =
@@ -170,15 +181,16 @@ let constructor_edits tokens (constructor : Tree.constructor) =
       replace_at tokens ~first:bar "struct {" [ name.span.first; open_paren ]
       @ List.concat_map field_end fields
 
-(* [type N = ... ;]: the head replaces [type N =] and the tail the [;]. *)
+(* [type N = ... ;]: the head replaces [type N =], and [private] where
+   it follows, and the tail the [;]. *)
 let variant tokens ~location ~head (declaration : Tree.type_declaration)
     constructors =
   let { Tree.name; declared; _ } = declaration.node in
   let completes = declared.earlier <> None in
-  let equals = grammar_token_after tokens name.span.first in
+  let first_bar = (List.hd constructors : Tree.constructor).span.first in
   replace tokens ~location
     (variant_head ~completes name.node constructors)
-    (head @ [ equals ])
+    (head @ grammar_tokens tokens (name.span.first + 1) (first_bar - 1))
   @ List.concat_map (constructor_edits tokens) constructors
   @ replace_at tokens ~first:declaration.span.last (variant_tail constructors)
       []
@@ -194,25 +206,20 @@ let type_declaration (tokens : Token.t array)
         (record_declarations Struct ~tag:name.node name.node)
         (head @ [ declaration.span.last ])
   | Alias type_name -> alias tokens ~location ~head name.node type_name
-  (* Design 10.2: the typedef of its representation. *)
-  | Distinct type_name ->
-      let distinct_word = grammar_token_before tokens type_name.span.first in
-      let equals = grammar_token_before tokens distinct_word in
-      alias tokens ~location ~head:(head @ [ equals ]) name.node type_name
+  (* Design 10.2: the typedef of its representation. [alias] replaces
+     the [distinct] word, and the head the [=] and [private] before it. *)
+  | Distinct { representation; _ } ->
+      let distinct_word =
+        grammar_token_before tokens representation.span.first
+      in
+      let definition_words =
+        grammar_tokens tokens (name.span.first + 1) (distinct_word - 1)
+      in
+      alias tokens ~location ~head:(head @ definition_words) name.node
+        representation
   | Record_alias record -> record_alias tokens ~location ~head name.node record
-  | Variant constructors ->
+  | Variant { constructors; _ } ->
       variant tokens ~location ~head declaration constructors
-
-(* The grammar tokens from [first] to [last], without the pragmas
-   between them, which stay. *)
-let grammar_tokens (tokens : Token.t array) first last =
-  List.init (last - first + 1) (fun offset -> first + offset)
-  |> List.filter (fun index ->
-         match tokens.(index).kind with
-         | Token.Pragma | Token.Typec_pragma -> false
-         | Token.Identifier | Token.Number | Token.Character _
-         | Token.String _ | Token.Punctuator _ ->
-             true)
 
 (* Design 13.5: a constructor expression becomes the compound literal
    [((struct N){ .tag = N_C, .u.C = { a, b } })], or inside an

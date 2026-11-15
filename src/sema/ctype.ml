@@ -5,6 +5,8 @@ open Unknown
 
 type record_kind = Struct | Union
 
+type privacy = Public | Private of Typec_cpp.File.t
+
 type record_tag = {
   record_id : int;
   kind : record_kind;
@@ -37,6 +39,7 @@ and shape =
 and distinct = {
   distinct_id : int;
   distinct_name : string;
+  distinct_privacy : privacy;
   representation : t;
 }
 
@@ -65,11 +68,17 @@ type record_definition = {
 
 type constructor = { constructor_name : string; fields : member list }
 
+(* What the definition of a variant adds to its structure. *)
+type variant_definition = {
+  privacy : privacy;
+  constructors : constructor list;
+}
+
 type tags = {
   mutable next_id : int;
   records : (int, record_definition) Hashtbl.t;
   enums : (int, Integer.t Unknown.answer) Hashtbl.t;
-  constructors : (int, constructor list) Hashtbl.t;
+  variants : (int, variant_definition) Hashtbl.t;
   mutable has_distinct : bool;
 }
 
@@ -287,7 +296,7 @@ let create_tags () =
   { next_id = 0;
     records = Hashtbl.create 16;
     enums = Hashtbl.create 16;
-    constructors = Hashtbl.create 16;
+    variants = Hashtbl.create 16;
     has_distinct = false }
 
 let fresh_id tags =
@@ -308,7 +317,7 @@ let declare_enum tags enum_name = { enum_id = fresh_id tags; enum_name }
 
 (* Design 3.4: an unqualified arithmetic or pointer type. An unknown type
    may be one; the casts that depend on what it is answer as unknown. *)
-let declare_distinct tags distinct_name representation =
+let declare_distinct tags distinct_name distinct_privacy representation =
   let representable =
     match representation.shape with
     | Arithmetic _ | Enum _ | Pointer _ | Unknown_type _ -> true
@@ -316,7 +325,10 @@ let declare_distinct tags distinct_name representation =
   in
   if representable && representation.qualifiers = Qualifiers.none then
     let distinct =
-      { distinct_id = fresh_id tags; distinct_name; representation }
+      { distinct_id = fresh_id tags;
+        distinct_name;
+        distinct_privacy;
+        representation }
     in
     let t = of_shape (Distinct distinct) in
     tags.has_distinct <- true;
@@ -606,20 +618,32 @@ let define_record target tags tag members =
       Ok ()
   | exception Invalid error -> Error error
 
-let define_variant target tags tag constructors members =
+let define_variant target tags tag privacy constructors members =
   if not tag.variant then invalid_arg "Ctype: a variant of no variant tag";
   Result.map
-    (fun () -> Hashtbl.replace tags.constructors tag.record_id constructors)
+    (fun () ->
+      Hashtbl.replace tags.variants tag.record_id { privacy; constructors })
     (define_record target tags tag members)
 
-let constructors tags t =
+let variant_definition tags t =
   match t.shape with
   | Record ({ variant = true; _ } as tag) ->
-      Hashtbl.find_opt tags.constructors tag.record_id
+      Hashtbl.find_opt tags.variants tag.record_id
   | Record { variant = false; _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None
+
+let constructors tags t =
+  Option.map
+    (fun (variant : variant_definition) -> variant.constructors)
+    (variant_definition tags t)
+
+let privacy tags t =
+  match (as_distinct t, variant_definition tags t) with
+  | Some distinct, _ -> distinct.distinct_privacy
+  | None, Some variant -> variant.privacy
+  | None, None -> Public
 
 (* Compatible and composite types *)
 

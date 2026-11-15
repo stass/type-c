@@ -120,9 +120,11 @@ any word is a member name, so `p->type` and `s.defer` always work.
 **Positional words.** `type`, `match`, `generic`, `unsafe`, `private` and
 `distinct` are ordinary identifiers that Type-C recognises only in the
 positions of the table in 2.2 (`private` and `distinct` only after the `=`
-of a type declaration, and `distinct` only before a token that begins a
-type name, so `type a = distinct;` is an alias of a typedef name). A
-variable, function or field may carry any of these names. One exception keeps C's meaning intact: where `type` or `generic` is
+of a type declaration, `private` only before `|` or the word `distinct`,
+and `distinct` only before a token that begins a type name, so
+`type a = distinct;` and `type b = private *;` are aliases of typedef
+names). A variable, function or field may carry any of these names. One
+exception keeps C's meaning intact: where `type` or `generic` is
 visible as a typedef name, `type x;` and `generic (x);` are the C
 declarations, and the Type-C construct is unavailable in that scope.
 

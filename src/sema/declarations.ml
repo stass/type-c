@@ -1630,18 +1630,31 @@ and read_type_declaration state (declaration : Tree.type_declaration) =
       let record = variant_record state name declared in
       Hashtbl.replace state.incomplete_variants (In_tree declared.id) record;
       bind (Ctype.record record)
-  | Variant constructors -> read_variant state declaration constructors bind
+  | Variant { is_private; constructors } ->
+      let privacy = privacy state declaration ~is_private in
+      read_variant state declaration privacy constructors bind
   | Alias type_name -> bind (read_type_name state type_name)
-  | Distinct type_name -> bind (distinct_type state name type_name)
+  | Distinct { is_private; representation } ->
+      let privacy = privacy state declaration ~is_private in
+      bind (distinct_type state name privacy representation)
   | Record_alias specifier ->
       read_record_alias state name declared specifier bind
 
+(* Design 9.2: a private type belongs to the file whose text declares
+   it. *)
+and privacy state (declaration : Tree.type_declaration) ~is_private :
+    Ctype.privacy =
+  if is_private then Private state.text.tokens.(declaration.span.first).owner
+  else Public
+
 (* Design 3.4: a new type over an unqualified arithmetic or pointer
    type. *)
-and distinct_type state (name : Tree.identifier) type_name =
+and distinct_type state (name : Tree.identifier) privacy type_name =
   let representation = read_type_name state type_name in
   let complete = Ctype.is_complete state.tags representation <> Answer false in
-  match Ctype.declare_distinct state.tags name.node representation with
+  match
+    Ctype.declare_distinct state.tags name.node privacy representation
+  with
   | Ok t when complete -> t
   | Ok _ | Error Invalid_representation ->
       fail state type_name.span
@@ -1667,8 +1680,8 @@ and variant_record state (name : Tree.identifier) (declared : Tree.declared) =
 (* The structure has a tag of the enumeration of the constructors and,
    where one has fields, a union of the struct of each one's fields
    (design 10.1 rule 3). *)
-and read_variant state (declaration : Tree.type_declaration) constructors
-    bind =
+and read_variant state (declaration : Tree.type_declaration) privacy
+    constructors bind =
   let { Tree.name; declared; _ } = declaration.node in
   let record = variant_record state name declared in
   let entity = bind (Ctype.record record) in
@@ -1684,7 +1697,7 @@ and read_variant state (declaration : Tree.type_declaration) constructors
         [ tag; variant_member Tree.union_member (Ctype.record union) ]
   in
   checked state declaration.span
-    (Ctype.define_variant state.target state.tags record
+    (Ctype.define_variant state.target state.tags record privacy
        (List.map fst read) members);
   entity
 
