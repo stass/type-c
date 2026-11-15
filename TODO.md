@@ -301,12 +301,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] Under `{0}` rule 7, a constant that is no valid 0 (`{0i}`, an
   integer too large) is refused as reaching into the variant rather
   than with the constant's own error.
-- [Medium] An unqualified constructor whose name is a visible typedef
-  name does not parse (`type A = int; type e = | A; e x = A;`): the
-  parser reads a typedef name in an expression as an error, before the
-  target type is known, against design P2. Say so in 3.3 or let the
-  parser read such a name as an identifier where `(`, `,`, `;`, `)` or
-  `:` follows.
 - [Medium] Design 13.5 says a constructor inside an initialiser lowers
   to its braced list so that static initialisers stay constant; one in
   parentheses (`static e x = (B(1));`) or reached through elided braces
@@ -963,6 +957,12 @@ types (design 13.3).
   record's members, as `Initialiser` checks it, deciding the text by the
   member's token rather than the first token of the operation (a line
   marker inside an expression makes them differ).
+- [Low] Typing does not read the body of a Clang block literal, so in
+  Type-C text a typedef name or an undeclared name used as an operand
+  there reaches the backend as written:
+  `typedef int T; void f(void) { void (^b)(void) = ^{ (void)T; }; }`
+  is Clang's error, not typec's. Type the body, which the item above on
+  design 3.2 rule 6 also wants.
 - [Medium] `offsetof(struct s, v.tag)` in Type-C text reaches the tag of
   the variant member `v`: `Expressions` refuses `offsetof` of a variant
   but does not resolve the member path of `offsetof`, so it cannot see
@@ -1027,13 +1027,6 @@ types (design 13.3).
   (execvp's ENOEXEC fallback), where glibc's posix_spawnp refused it;
   `tools/oracle/oracle.ml` still starts clang with `Unix.create_process`,
   so on glibc under qemu a missing clang there reads as status 127.
-- [High] An unqualified constructor whose name is also a visible typedef
-  name is refused: with `typedef struct Member Member;` in scope,
-  `n->kind = Member(n, m);` gives "expected an expression, found the
-  type name `Member`", against design 3.3's target-type resolution;
-  `NodeKind.Member(...)` and the pattern are accepted. Reproducers:
-  /Volumes/Optaine/type-c-pilot-a-notes/repro/node-probes/
-  ctor-typedef-name.tc and ctor-typedef-name-qualified.tc.
 - [Medium] Each arm with bindings lowers to a block of its own, and
   Clang at -O0 gives sibling blocks separate stack slots, so a match of
   many binding arms has a large frame: in Pilot A's chibicc `add_type`

@@ -124,6 +124,10 @@ breaks it, naming the rule.
   $ ./golden.exe own.tc
   own.tc:1: `t` is used in its own definition, which is not a structure or union specifier (design 3.1 rule 2) [TC0002]
   [1]
+  $ printf 'type t = int[t];\n' > own_operand.tc
+  $ ./golden.exe own_operand.tc
+  own_operand.tc:1: `t` is used in its own definition, which is not a structure or union specifier (design 3.1 rule 2) [TC0002]
+  [1]
   $ printf 'type pair = struct { int a; };\nstruct pair { int b; };\n' > tag.tc
   $ ./golden.exe tag.tc
   tag.tc:2: the tag `pair` is declared again, as a type declaration claims it (design 10.1 rule 6) [TC0004]

@@ -776,6 +776,15 @@ let fail_type_name state expected name =
     (Printf.sprintf "expected %s, found the type name %s" expected
        (quoted name))
 
+(* A type declaration names its type only inside a structure or union
+   specifier of its definition (design 3.1 rule 2). *)
+let fail_own_name state name =
+  fail state
+    (Rule.message Own_name
+       (quoted name
+       ^ " is used in its own definition, which is not a structure or \
+          union specifier"))
+
 let identifier state expected =
   match peek state with
   | Identifier_token name ->
@@ -1383,11 +1392,7 @@ and specifier state word ~alone =
   let start = state.position in
   (match word with
   | Typedef_word (name, { kind = Defining_type; _ }) ->
-      fail state
-        (Rule.message Own_name
-           (quoted name
-          ^ " is used in its own definition, which is not a structure or \
-             union specifier"))
+      fail_own_name state name
   | _ -> ());
   advance state;
   let node =
@@ -2086,17 +2091,35 @@ and arguments state =
     in
     loop []
 
+(* At an identifier where an expression begins. *)
+and name_operand state name =
+  let start = state.position in
+  let resolution = resolve state name in
+  advance state;
+  finish state start (Identifier { name; resolution })
+
+(* At a typedef name where an expression begins, which C's grammar has
+   not taken as beginning a type name. In Type-C text it is the variant
+   of a qualified constructor before [.], and otherwise a name that
+   typing reads as an unqualified constructor where the target type has
+   one and refuses elsewhere (design 3.3). C text has no constructors,
+   and a type's own definition has no target type that could have one. *)
+and typedef_name_operand state name (ordinary : ordinary) =
+  match ordinary.kind with
+  | Defining_type -> fail_own_name state name
+  | _ when begins_qualified_constructor state 0 ->
+      qualified_constructor state name
+  | _ when is_type_c_text_at state state.grammar.(state.position).index ->
+      name_operand state name
+  | _ -> fail_type_name state "an expression" name
+
 and primary_expression state =
   let start = state.position in
   match peek state with
-  | Identifier_token name when is_typedef_name state name ->
-      if begins_qualified_constructor state 0 then
-        qualified_constructor state name
-      else fail_type_name state "an expression" name
-  | Identifier_token name ->
-      let resolution = resolve state name in
-      advance state;
-      finish state start (Identifier { name; resolution })
+  | Identifier_token name -> (
+      match typedef_declaration state name with
+      | Some ordinary -> typedef_name_operand state name ordinary
+      | None -> name_operand state name)
   | Number_token -> (
       match Number.classify (next_spelling state) with
       | Number.Not_a_constant ->

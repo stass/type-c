@@ -69,6 +69,72 @@ The arguments keep their tokens and lines.
   );
   }
 
+An unqualified constructor may share its name with a visible typedef
+name: where the target type is a variant with that constructor, the
+name is the constructor (design 3.3, P2), in an initialiser, on the
+right of `=`, as an argument and as the operand of `return`.
+
+  $ cat > typedef_named.tc <<'EOF'
+  > typedef struct Member Member;
+  > struct Member { int offset; };
+  > typedef int A;
+  > type K = | A | Member(K *self, Member *m);
+  > void take(K k);
+  > K f(Member *m) {
+  >   K a = Member(0, m);
+  >   a = Member(&a, m);
+  >   take(Member(&a, m));
+  >   a = A;
+  >   return Member(&a, m);
+  > }
+  > EOF
+  $ ./golden.exe typedef_named.tc | grep -o 'tag = K_[A-Za-z]*'
+  tag = K_Member
+  tag = K_Member
+  tag = K_Member
+  tag = K_A
+  tag = K_Member
+
+Where C's grammar reads the typedef name as beginning a type name, it
+still does: a block item `T (n);` declares `n`, and `(T)(x)`,
+`sizeof(T)` and `(T){...}` are a cast, a size and a compound literal.
+
+  $ cat > typedef_readings.tc <<'EOF'
+  > typedef int T;
+  > type e = | T(int i);
+  > int f(int x) {
+  >   T (n);
+  >   n = (T)(x) + (int)sizeof(T) + (T){2};
+  >   e v = e.T(n);
+  >   (void)v;
+  >   return n;
+  > }
+  > EOF
+  $ ./golden.exe typedef_readings.tc | grep -v '^# ' | sed -n '/^int f/,/^}/p'
+  int f(int x) {
+    T (n);
+    n = (T)(x) + (int)sizeof(T) + (T){2};
+    e v = 
+  { .tag = e_T, .u.T = { 
+  n
+   } }
+  ;
+    (void)v;
+    return n;
+  }
+
+So after `(` the constructor is written qualified, and where no target
+type has it, the typedef name is no expression.
+
+  $ printf 'typedef int T;\ntype e = | T(int i);\ne v = (T(1));\n' > typedef_parenthesized.tc
+  $ ./golden.exe typedef_parenthesized.tc
+  typedef_parenthesized.tc:3: expected a declarator, found `1`
+  [1]
+  $ printf 'typedef int T;\ntype e = | T(int i);\nint n = T(1);\n' > typedef_untargeted.tc
+  $ ./golden.exe typedef_untargeted.tc
+  typedef_untargeted.tc:3: expected an expression, found the type name 'T'
+  [1]
+
 Constructors are refused where they do not fit.
 
   $ printf 'type e = | A | B(int i);\ne x = B;\n' > arguments.tc

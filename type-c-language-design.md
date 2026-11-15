@@ -340,10 +340,15 @@ A constructor is named in one of two ways.
   with a constructor `C`. *Provisional (P2):* there, `C` denotes the
   constructor even when an ordinary identifier `C` is visible, so the
   meaning of a constructor expression depends only on the type expected at
-  that point and not on which identifiers some header declares. Macros are
-  another matter: they are expanded before Type-C sees the tokens, so a
-  header that defines `None` as a macro breaks that constructor, as it
-  breaks any identifier.
+  that point and not on which identifiers some header declares. A typedef
+  name `C` is such an identifier too, except where C's grammar takes it
+  to begin a type name, since the parser decides that before any target
+  type is known: a block item `C (x);` declares `x`, and after a `(`
+  that opens a primary expression or the operand of `sizeof`, `C`
+  begins a cast, a compound literal or a type operand, so `(C(1))` needs
+  the qualified form. Macros are another matter: they are expanded
+  before Type-C sees the tokens, so a header that defines `None` as a
+  macro breaks that constructor, as it breaks any identifier.
 
 An expression has a target type in these positions and in no others:
 
@@ -1674,7 +1679,7 @@ numbers refer to the implementation plan.
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
 | P1 | `type`, `match` and the other new words are positional; `try` and `defer` are hidden by a declaration (2.3) | Stage 1 pilot: identifiers renamed and header macros broken by the port | As specified |
-| P2 | An unqualified constructor wins over an ordinary identifier under a variant target type (3.3) | Stage 1 pilot: any resolution that surprised its author | As specified |
+| P2 | An unqualified constructor wins over an ordinary identifier under a variant target type, and a typedef name keeps C's type-name readings (3.3) | Stage 1 pilot: any resolution that surprised its author | As specified |
 | P3 | The tag is a C enumeration (10.1) | Stage 1: size of pilot data against hand-written C; debugger use | Enumeration |
 | P4 | The `default` warning is off; there is no single-pattern test (4.2, 12) | Stage 1 pilot: share of matches with one `case` and a `default` | No new syntax; warning stays off |
 | P5 | Bindings are non-modifiable copies; none by reference (4.1, 12) | Stage 1 pilot: sites that need in-place update | As specified |

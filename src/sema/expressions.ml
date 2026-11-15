@@ -854,7 +854,12 @@ let identifier context span name (resolution : Tree.resolution) =
             (function_designator context span ~old_style_definition
                function_type)
       | Enumerator { enumerator_type; _ } -> value enumerator_type
-      | Typedef _ -> invalid_arg "Expressions: a typedef name as an operand")
+      (* The parser leaves a typedef name here only in Type-C text, where
+         it may be an unqualified constructor (design 3.3); where it is
+         none, it is no expression. *)
+      | Typedef _ ->
+          context.fail span
+            ("expected an expression, found the type name " ^ quote name))
 
 (* Members (6.5.2.3) *)
 
@@ -1496,7 +1501,8 @@ let identifier_constant context span name (resolution : Tree.resolution)
           let static_storage = storage = Static_storage in
           itself (Designator { static_storage; named = true })
       | Enumerator { value; _ } -> integer value
-      | Typedef _ -> invalid_arg "Expressions: a typedef name as an operand")
+      | Typedef _ ->
+          invalid_arg "Expressions: a typedef name that typing refused")
 
 (* 6.5.2.1p2: [e1[e2]] is [*(e1 + e2)]. An element of an array that a
    designator designates is part of that object. *)
