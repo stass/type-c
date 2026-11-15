@@ -1375,8 +1375,11 @@ once), `__real__` and `__imag__`, `__alignof__` of an expression,
 `__builtin_types_compatible_p`, the variable-argument and `offsetof`
 builtins, a table of
 builtin functions with their types, the typedef names that GCC and
-Clang declare before the first token (`__builtin_va_list`, and
-`__int128_t` and `__uint128_t` where the target has `__int128`),
+Clang declare before the first token (`__builtin_va_list`,
+`__int128_t` and `__uint128_t` where the target has `__int128`, and
+on AArch64 the Arm vector types that glibc names, the Neon
+`__Float32x4_t` and `__Float64x2_t` with GCC and the SVE
+`__SVFloat32_t`, `__SVFloat64_t` and `__SVBool_t` with both),
 `__int128` where the backend's `__SIZEOF_INT128__` says that it has the
 type, the optional floating types (`_Float16`, `_Float32`,
 `_Float64`, `_Float128`, `_Float32x`, `_Float64x` and `__float128`),
@@ -1399,7 +1402,11 @@ arguments; or unknown (P21), as for the vector builtins. An undeclared
 identifier is an error unless the table has it for the backend, and one
 that only the other compiler has, or that the backend has on other
 architectures only, is an error saying so, so a builtin is never
-guessed. *Provisional:* an optional floating type
+guessed. *Provisional:* no macro says which Arm vector types a backend
+declares, so the compiler and the architecture decide, as GCC 14 and
+Clang 20 declare them on AArch64 whatever the target's features; a
+later release that declares the names otherwise would settle it, and
+without one the rule stays. *Provisional:* an optional floating type
 is a keyword exactly where the backend's predefined macros say that it
 has the type, `__FLTN_MANT_DIG__` for `_FloatN`, `__FLTNX_MANT_DIG__`
 for `_FloatNx` and `__SIZEOF_FLOAT128__` for `__float128`, as on every
@@ -1471,7 +1478,9 @@ otherwise the opaque type stays.
 
 **Unknown types.** *Provisional (P21).* A type that the front end does
 not compute is unknown, never guessed: Clang's block pointers,
-the optional floating types, and the type that an attribute applies to when the front end does not record the attribute's effect
+the optional floating types, the Arm vector types, and the type that
+an attribute applies to when the front end does not record the
+attribute's effect
 there: one without an entry in the table of effects that the front end
 knows, as `mode` and `vector_size` change a type in ways it does not
 model, or `noreturn`, `gnu_inline` and `overloadable` anywhere but in
@@ -1486,7 +1495,9 @@ type is unknown. Elsewhere the backend checks: a redeclaration with an
 unknown type is not compared where the type is unknown, and the
 composite is the unknown type, since keeping the known side would guess
 that the unknown one adds nothing to it. The size of an unknown type is
-an opaque constant, as an aggregate's is (P16). An unknown type keeps
+an opaque constant, as an aggregate's is (P16), so an SVE type, which
+has no size, needs no model of sizeless types: the backend refuses its
+size and arrays of it. An unknown type keeps
 whether it is a function type where its declarator says so, since no
 attribute makes a function of an object. Typing bodies (0.9b) and the
 corpus settle it: a point that often needs an unknown type's properties

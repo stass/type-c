@@ -8,7 +8,12 @@ open Typec_test_support
 (* The keywords of gnu11 on a backend with every optional floating type
    and [__int128], which most cases are read with. *)
 let gnu_keywords : Keyword_set.t =
-  { dialect = Gnu; optional_floats = Optional_float.all; int128 = true }
+  {
+    dialect = Gnu;
+    optional_floats = Optional_float.all;
+    int128 = true;
+    vector_families = [];
+  }
 
 (* A text, read as from the file "in.i", which is C text, and the dump of
    its external declarations, separated by " | ", or its error. *)
@@ -1891,7 +1896,8 @@ let failures () =
     failed_with (outcome ?file ~parse ~spans) cases
   in
   let parse_with ?(int128 = true) dialect optional_floats =
-    Parser.parse ~keywords:{ dialect; optional_floats; int128 }
+    Parser.parse
+      ~keywords:{ dialect; optional_floats; int128; vector_families = [] }
   in
   let failed =
     List.concat_map (failed_cases ~spans:false)

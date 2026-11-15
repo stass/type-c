@@ -1918,28 +1918,47 @@ let read_external state (external_declaration : Tree.external_declaration) =
       Type_declaration (read_type_declaration state declaration)
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
-let builtin_type target : Builtin_typedef.t -> (Ctype.t, Ctype.error) result =
-  function
+(* The location that GCC gives a name declared before the first token,
+   which a diagnostic that depends on a builtin type cites. *)
+let predeclared : Typec_cpp.Location.t = { file = "<built-in>"; line = 0 }
+
+(* An Arm vector type is unknown: a Neon vector is an object type of 8 or
+   16 bytes, and an SVE type an object type without a size, whose size
+   and use as an array element the backend refuses. *)
+let arm_vector_type name =
+  Ctype.unknown
+    {
+      construct = "the Arm vector type " ^ quote name;
+      location = predeclared;
+      kind = Unknown_object;
+      cause = Not_typed;
+    }
+
+let builtin_type target name :
+    Builtin_typedef.t -> (Ctype.t, Ctype.error) result = function
   | Va_list -> Ok Ctype.va_list
   | Int128 -> Ctype.integer target Integer.Int128
   | Unsigned_int128 -> Ctype.integer target Integer.Unsigned_int128
+  | Arm_vector _ -> Ok (arm_vector_type name)
 
-(* The builtin typedef names whose type the target has are entities: the
-   names that the parser declares for the target's keywords
-   ({!Builtin_typedef.declared}). No other error can come from a table
-   that names no derived type. *)
+(* The builtin typedef names that the parser declares for the target's
+   keywords ({!Builtin_typedef.declared}) are entities, so the two agree
+   by construction. The dialect decides no builtin typedef name, and a
+   declared name has its type on the target, so no error can come. *)
 let declare_builtin_typedefs state =
-  List.iter
-    (fun (name, builtin) ->
-      match builtin_type state.target builtin with
-      | Ok t ->
-          let entity =
-            { name; entity = fresh_entity state; declared = Typedef t }
-          in
-          Hashtbl.replace state.entities (Builtin name) entity
-      | Error Int128_unavailable -> ()
-      | Error error -> invalid_arg (Ctype.error_message error))
-    Builtin_typedef.table
+  let keywords = Target.keywords state.target Gnu in
+  let declare (name, builtin) =
+    match builtin_type state.target name builtin with
+    | Ok t ->
+        let entity =
+          { name; entity = fresh_entity state; declared = Typedef t }
+        in
+        Hashtbl.replace state.entities (Builtin name) entity
+    | Error error -> invalid_arg (Ctype.error_message error)
+  in
+  Builtin_typedef.table
+  |> List.filter (fun (_, builtin) -> Builtin_typedef.declared keywords builtin)
+  |> List.iter declare
 
 let read target text unit =
   let state =

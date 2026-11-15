@@ -256,11 +256,22 @@ let model_of_macros macros backend =
   }
 
 
+(* No macro says which Arm vector types a backend names, so the compiler
+   and the architecture decide: GCC 14 and Clang 20 declare them on every
+   AArch64 target whatever its features, GCC Neon's and SVE's, Clang
+   SVE's only. *)
+let vector_families target : Typec_syntax.Keyword_set.vector_family list =
+  match (target.architecture, target.backend.compiler) with
+  | Aarch64, Gcc -> [ Neon; Sve ]
+  | Aarch64, Clang -> [ Sve ]
+  | (X86 | Arm | Powerpc | Systemz | Ve | Other), _ -> []
+
 let keywords target dialect : Typec_syntax.Keyword_set.t =
   {
     dialect;
     optional_floats = target.optional_floats;
     int128 = Option.is_some target.sizeof_int128;
+    vector_families = vector_families target;
   }
 
 (* GCC and Clang give no integer type padding bits, so a width is the

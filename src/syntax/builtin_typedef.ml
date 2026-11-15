@@ -20,6 +20,10 @@ type t =
           structure on x86-64 and [char *] on i386 and arm64 Darwin. *)
   | Int128  (** [__int128] *)
   | Unsigned_int128  (** [unsigned __int128] *)
+  | Arm_vector of Keyword_set.vector_family
+      (** An Arm vector type of the family, which typec does not compute
+          (design 13.3): a Neon vector of 8 or 16 bytes, or an SVE type,
+          which has no size. *)
 
 (* Also the spelling of the type in diagnostics and in C for a backend. *)
 let va_list_name = "__builtin_va_list"
@@ -29,6 +33,7 @@ let va_list_name = "__builtin_va_list"
 let declared (keywords : Keyword_set.t) = function
   | Va_list -> true
   | Int128 | Unsigned_int128 -> keywords.int128
+  | Arm_vector family -> List.mem family keywords.vector_families
 
 (** Each name with what it denotes. *)
 let table =
@@ -36,4 +41,9 @@ let table =
     (va_list_name, Va_list);
     ("__int128_t", Int128);
     ("__uint128_t", Unsigned_int128);
+    ("__Float32x4_t", Arm_vector Neon);
+    ("__Float64x2_t", Arm_vector Neon);
+    ("__SVFloat32_t", Arm_vector Sve);
+    ("__SVFloat64_t", Arm_vector Sve);
+    ("__SVBool_t", Arm_vector Sve);
   ]

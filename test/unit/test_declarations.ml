@@ -9,6 +9,8 @@ open Typec_test_support
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
 let ilp32 = Canned_targets.target Canned_targets.ilp32_macros
 let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
+let aarch64_gcc = Canned_targets.(target (as_gcc aarch64_macros))
+let aarch64_clang = Canned_targets.(target (as_clang aarch64_macros))
 
 (* [file] is "in.c", C text, unless a case reads Type-C text. *)
 let read ?(file = "in.c") target source =
@@ -1036,6 +1038,43 @@ let overloads () =
     "the declaration of the function 'f' depends on the attribute \
      'overloadable'"
 
+(* The Arm vector types that GCC and Clang declare on AArch64, as glibc's
+   bits/math-vector.h names them: GCC declares Neon's and SVE's, Clang
+   SVE's only, and other targets neither. Their types are unknown. *)
+let arm_vector_typedefs () =
+  declares ~target:aarch64_gcc "typedef __Float32x4_t __f32x4_t;" "__f32x4_t"
+    "typedef <the Arm vector type '__Float32x4_t'>";
+  declares ~target:aarch64_gcc "typedef __Float64x2_t __f64x2_t;" "__f64x2_t"
+    "typedef <the Arm vector type '__Float64x2_t'>";
+  declares ~target:aarch64_gcc
+    "typedef __Float32x4_t v; __attribute__((__aarch64_vector_pcs__)) v \
+     _ZGVnN4v_acosf(v);"
+    "_ZGVnN4v_acosf" "function <the attribute 'aarch64_vector_pcs'> \
+     external";
+  List.iter
+    (fun target ->
+      declares ~target "typedef __SVFloat32_t f; typedef __SVFloat64_t d; \
+                        typedef __SVBool_t __sv_bool_t;"
+        "__sv_bool_t" "typedef <the Arm vector type '__SVBool_t'>")
+    [ aarch64_gcc; aarch64_clang ];
+  declares ~target:aarch64_gcc
+    "typedef __SVFloat32_t __sv_f32_t; typedef __SVBool_t __sv_bool_t; \
+     __sv_f32_t _ZGVsMxv_acosf(__sv_f32_t, __sv_bool_t);"
+    "_ZGVsMxv_acosf"
+    "function <the Arm vector type '__SVFloat32_t'> (<the Arm vector type \
+     '__SVFloat32_t'>, <the Arm vector type '__SVBool_t'>) external";
+  rejects ~target:aarch64_gcc "int __SVBool_t;" "6.7p3";
+  declares ~target:aarch64_clang "int __Float32x4_t;" "__Float32x4_t"
+    "object int external static";
+  declares "int __SVBool_t;" "__SVBool_t" "object int external static";
+  (* SVE types have no size: the backend refuses one, as for any unknown
+     type whose size typec leaves to it. *)
+  declares ~target:aarch64_gcc "char c[sizeof(__SVBool_t)];" "c"
+    "object char[<constant>] external static";
+  rejects ~target:aarch64_gcc "char c[(__SVBool_t)2];"
+    "the value of a cast depends on the Arm vector type '__SVBool_t' at \
+     <built-in>:0"
+
 (* The typedef names that GCC and Clang declare before the first token.
    The representation of __builtin_va_list is the target's, so the reader
    sees no more of it than that it is a complete object type compatible
@@ -1862,6 +1901,7 @@ let () =
   arm_jumps ();
   zero_values ();
   builtin_typedefs ();
+  arm_vector_typedefs ();
   gnu_profile ();
   unknown_types ();
   fixed_enumerations ();
