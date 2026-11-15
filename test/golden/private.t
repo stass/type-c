@@ -41,7 +41,18 @@ makes the zero value; it builds neither.
   > unsigned raw(symbol s) { return (unsigned)s; }
   > instruction zero(void) { instruction i = {0}; return i; }
   > symbol none(void) { symbol s = {0}; return s; }
+  > symbol empty(void) { return (symbol){0}; }
+  > symbol blank(void) { return (symbol){}; }
+  > instruction cleared(void) { return (instruction){0}; }
   > EOF
+
+A compound literal is not a cast, so `(T){0}` writes the zero value in
+any expression (rule 4); any other value still needs the owner's cast.
+
+  $ client <<'EOF'
+  > symbol forged(void) { return (symbol){7}; }
+  > EOF
+  client.tc:2: a value of type 'int' does not convert to 'symbol' without a cast (design 3.4) [TC0012]
   $ client <<'EOF'
   > instruction forged(void) { return Move(1, 2); }
   > EOF

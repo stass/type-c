@@ -71,7 +71,7 @@ The arguments keep their tokens and lines.
 
 An unqualified constructor may share its name with a visible typedef
 name: where the target type is a variant with that constructor, the
-name is the constructor (design 3.3, P2), in an initialiser, on the
+name is the constructor (design 3.3), in an initialiser, on the
 right of `=`, as an argument and as the operand of `return`.
 
   $ cat > typedef_named.tc <<'EOF'

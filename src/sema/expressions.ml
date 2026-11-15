@@ -1982,7 +1982,7 @@ let named_in t constructors name =
 
 (* An unqualified name in Type-C text is a constructor where the target
    type of its position is a variant with a constructor of that name,
-   whatever else the name denotes there (design 3.3, P2). C text keeps
+   whatever else the name denotes there (design 3.3). C text keeps
    C's meaning of every name. *)
 let unqualified_constructor context position (span : Tree.span) name =
   match position with

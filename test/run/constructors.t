@@ -53,7 +53,7 @@ backend. Static objects take constructors as constant initialisers.
 Under elided braces an unqualified constructor is chosen by the type of
 the subobject that the initialiser reaches, so it means the same as in a
 direct initialiser even where an object of the same name is visible
-(design 3.3, P2).
+(design 3.3).
 
   $ cat > tag.h <<'EOF'
   > static int tagof(e v) { return v.tag; }

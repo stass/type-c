@@ -97,6 +97,7 @@ with a token sequence that C rejects:
 | `try` expression, `defer` statement | `try` or `defer` where no declaration of an ordinary identifier of that spelling is in scope (2.3) | An identifier that no declaration makes visible is not a primary expression (6.5.1p2), and C11 has no implicit function declaration. |
 | Type declaration | `type` *identifier*, starting a declaration | Two identifiers start a C declaration only when the first names a type; 2.3 excludes that case. |
 | `match` statement | `match (` ... `) {`, starting a statement | A call cannot be followed by `{`. |
+| Single-pattern test | `if (case` or `while (case` | `case` begins a labelled statement and never an expression, so it cannot begin a C condition. |
 | Generic function | `generic (` ... `)`, starting a file-scope declaration | C11 has no implicit `int`, so this starts a C declaration only when `generic` names a type; 2.3 excludes that case. |
 | `unsafe` block | `unsafe {`, starting a statement | An identifier cannot be followed by `{`. |
 | Type application, explicit instance | *G* `(` *types* `)`, where *G* names a generic | Only Type-C declares such a *G*. |
@@ -107,8 +108,6 @@ The consequence for adoption: a C file can be renamed to `.tc` and compiled
 before any Type-C construct is used in it.
 
 ### 2.3 Words
-
-*Provisional (P1).*
 
 **Hidden words.** In Type-C text, `try` is the operator of 5.1 and
 `defer` the statement of section 6 wherever no declaration of an ordinary
@@ -167,7 +166,10 @@ break struct fields named `type`, parser functions named `match`, and every
 `int result`, including uses that reach Type-C text through macros defined
 in C headers. Recognition by position costs nothing where the construct is
 invalid C anyway; Rust's contextual `union` and Go's universe block are the
-precedents.
+precedents. Pilot A, a port of chibicc, renamed no identifier for a word
+and broke no header macro: its function `match` and its local `type`
+compile unchanged. It has no identifier `try` or `defer`, so the hidden
+words rest on the argument above.
 
 ### 2.4 Preprocessing and C dialect
 
@@ -280,9 +282,10 @@ type expr =
 5. Since a field type must be complete, a variant can contain itself only
    through a pointer. No separate check for infinite size is needed. A
    variant is itself a value type.
-6. **A variant is opened only by `match`.** Type-C text cannot open a
+6. **A variant is opened only by matching**: a `match` (4.1) or a
+   single-pattern test (4.6). Type-C text cannot open a
    variant, that is, reach its tag or payload, as a value or by name:
-   constructors make them and `match` reads them, and no other operation
+   constructors make them and matching reads them, and no other operation
    does either, except that `{0}` and `{}` write the zero value (rule 7). Every
    operation that does not open the value takes it whole and is allowed.
    Copying it, as initialisation, assignment, passing and returning do,
@@ -338,7 +341,7 @@ A constructor is named in one of two ways.
 - **Qualified:** `T.C`, where `T` is a typedef name or a type application
   that denotes a variant. This works in every expression.
 - **Unqualified:** `C` alone, in a position whose *target type* is a variant
-  with a constructor `C`. *Provisional (P2):* there, `C` denotes the
+  with a constructor `C`. There, `C` denotes the
   constructor even when an ordinary identifier `C` is visible, so the
   meaning of a constructor expression depends only on the type expected at
   that point and not on which identifiers some header declares. A typedef
@@ -389,7 +392,10 @@ Rationale. Variants want short constructor names, and a C translation unit
 has one flat namespace of ordinary identifiers. Scoping constructors to
 their type keeps them out of it; target typing removes the qualification
 wherever the type is already written nearby. C# target-typed `new` and
-Swift implicit member expressions work the same way.
+Swift implicit member expressions work the same way. In Pilot A every
+constructor is unqualified, constructors of one name in two variants
+(`Var`, `Function`, `Num`) resolve by their target types, and no
+resolution surprised its author.
 
 ### 3.4 Distinct types
 
@@ -568,7 +574,7 @@ expression form; a C local assigned in each arm does that job.
 3. A pattern names a constructor of the scrutinee's type, unqualified, with
    one sub-pattern per field. A sub-pattern is an identifier, which is a
    *binding*, or `_`, which matches without binding.
-4. *Provisional (P5).* A binding declares a non-modifiable object of the
+4. A binding declares a non-modifiable object of the
    field's type in the scope of its arm, initialised with a copy of the
    field.
 5. Each arm is a block of its own. Its bindings and declarations are
@@ -587,6 +593,19 @@ a debugger shows under its own name. Making it non-modifiable turns the
 likeliest mistake, assigning to a binding in the belief that the payload
 changes, into a compile error. Updating a payload is done by assigning a new
 constructor value to the object; binding by reference is in section 12.
+Pilot A updates a payload at 24 sites in about 9000 lines and keeps two
+payloads behind pointers for it. That cost stands, because a reference to
+a payload dangles when the object's tag changes and nothing short of a
+lifetime tier (11.3) refuses that.
+
+Constructors that share an arm. Rule 6 keeps a shared arm from binding, so
+a family of constructors with the same fields that most code treats alike
+is declared as one constructor with a field that tells its members apart:
+`Binary(binary_op op, expr *left, expr *right)` rather than one
+constructor for each operator. One arm then binds the operands for the
+whole family, and a `match` or `switch` on `op` inside it handles the
+operators that differ. Pilot A declared a constructor for each operator
+and wrote 57 arms that repeat the body of another for it.
 
 ### 4.2 Exhaustiveness
 
@@ -596,7 +615,11 @@ constructor value to the object; binding by reference is in section 12.
 2. There is at most one `default`, and it must cover at least one
    constructor.
 3. A `default` hides constructors added later. *Provisional (P4):* a warning
-   for `default` on a variant exists and is off by default.
+   for `default` on a variant exists and is off by default. In Pilot A it
+   would flag 89 of 100 matches, 52 of them a match of one `case` and a
+   `default`, which a single-pattern test (4.6) replaces. What settles it
+   is the share of matches that keep a `default` in the pilot written
+   with that test.
 4. `match` accepts variants only. A C `enum` is not closed: its objects can
    hold values that are not enumerators.
 
@@ -619,10 +642,33 @@ an implicit `break`; it keeps C's explicit statements and requires them.
    arm could jump to it. A `case` or `default` label of an enclosing
    `switch` cannot appear inside a `match`.
 4. `switch` is unchanged.
+5. A `break` that leaves a match must end its arm, that is, be in *tail
+   position* of the arm. A statement is in tail position if it is the last
+   block item of the arm, the last block item of a block in tail position,
+   either branch of an `if` in tail position, including a single-pattern
+   test (4.6), or the statement inside a labelled statement or an `unsafe`
+   block in tail position. A `break` inside a statement expression, or in
+   the control of a statement (4.4), is never in tail position. A `break`
+   that leaves a match from any other position is refused. The rule binds
+   a `break` that is Type-C text (2.1); one that a C header brings into an
+   arm is judged by 4.3(1) alone, on both readings of 4.4. It reads as
+   leaving more than the arm: most often it left a loop from inside an
+   `if` before the code became an arm, and here it would leave only the
+   match, silently. An arm that is done early says so with `if` and
+   `else`, whose branches are in tail position. In Pilot A all 65 `break`
+   statements that leave a match are in tail position, so the rule finds
+   nothing there.
 
 The lowered code also ends every arm in a trap (13.5). If the analysis of
 4.4 and the generated code ever disagreed, execution would stop there and
 could not enter another arm's bindings.
+
+Porting note. A `break` that ends an arm leaves only the match, and rule
+5 has nothing to say about it. So C code in a loop of the form
+`if (k == A) { f(); break; }` changes meaning when it becomes the arm
+`case A: f(); break;`: the loop goes on. The port keeps the `if`, as a
+single-pattern test in the loop (4.6), whose `break` leaves the loop, or
+leaves the loop from the arm with `goto` or `return`.
 
 ### 4.4 Reachability
 
@@ -664,23 +710,43 @@ the block it contains: a `break`, `continue`, `goto` or label inside it
 counts for the statements around it. A `break` leaves the innermost
 loop, `switch` or `match` around it and a `continue` the innermost loop;
 the parser records which, so that the analysis reads the answer from one
-place. One in a statement expression in the condition of a `while` or
-`do`, or in the condition or step of a `for`, that leaves no loop,
-`switch` or `match` within the expression is *disputed*: Clang takes it
-to leave that loop, GCC the statement around the loop, and GCC refuses
-it where there is none (GCC 16, Apple Clang 21). Type-C text refuses a
-disputed jump. C text keeps it, and the backend picks its target: the
-parser records every statement that a backend may take, and the
-analysis lets each of them complete, so that an arm holding such C text,
-which a header included in the arm brings, passes these rules only if
-its end is unreachable on both readings. Whether a jump is Type-C text
-is decided by its `break` or `continue`, as for every other token. In
-the first clause of a `for` and the controlling expression of a
-`switch` both take it to leave the statement around that one, and so
-does typec there and in the scrutinee of a `match`, which lowers to a
-declaration before its `switch` (13.5). An arm that the rules reject
-but that cannot in fact fall through is fixed by adding the `break` the
-rules ask for.
+place.
+
+A statement's *control* is every expression or declaration that it holds
+outside its body, the body of an `if` being both of its branches: a
+condition, the clauses of a `for`, the controlling
+expression of a `switch`, the scrutinee of a `match`, the operand of a
+single-pattern test (4.6). A `break` or `continue` in a statement
+expression in the control, which no loop, `switch` or `match` within that
+expression takes, is not in the body, and what it leaves depends on when
+the control is evaluated.
+
+Control that is evaluated once, before the body, stands where a
+statement just before its own statement would: the jump goes to the
+loop, `switch` or `match` around that statement. GCC and Clang read the
+condition of an `if`, the first clause of a `for` and the controlling
+expression of a `switch` so. typec gives the scrutinee of a `match` and
+the operand of an `if` test the same meaning, and lowers each to a
+declaration before the statement it generates (13.5).
+
+Control that is evaluated again for each iteration makes the jump
+*disputed*: the condition of a `while` or `do` and the condition and
+step of a `for`. Clang takes a disputed jump in a C loop to leave that
+loop, GCC the statement around the loop, and GCC refuses it where there
+is none (GCC 16, Apple Clang 21). Type-C text refuses a disputed jump. C
+text keeps it, and the backend picks its target: the parser records
+every statement that a backend may take, and the analysis lets each of
+them complete, so that an arm holding such C text, which a header
+included in the arm brings, passes these rules only if its end is
+unreachable on both readings. The operand of a `while` test is evaluated
+for each iteration too, but nothing disputes it: the lowering evaluates
+it in the body of the loop it generates (13.5), so both backends take a
+jump there to leave that `while`, in Type-C text and C text alike.
+Whether a jump is Type-C text is decided by its `break` or `continue`,
+as for every other token.
+
+An arm that the rules reject but that cannot in fact fall through is
+fixed by adding the `break` the rules ask for.
 
 ### 4.5 Invalid tags
 
@@ -689,6 +755,98 @@ a value comes only from code that writes the bytes of the object behind its
 type (C code, or Type-C code that uses casts, unions or `memcpy`) or from
 an uninitialised object. The check is present in every match, including
 one with `default`: a `default` arm receives real constructors only.
+
+A single-pattern test (4.6) makes the same check: a value whose tag is
+none of its constructors traps and does not fail the test. A failed test
+stands where a `default` arm does, so it too receives real constructors
+only, and a match of one `case` and a `default` keeps its check when it
+is written as a test.
+
+### 4.6 Single-pattern test
+
+```c
+if (case Number(n) = *e)
+    return n;
+
+/* type list = | Nil | Cons(long head, list *tail); */
+while (case Cons(head, tail) = *l) {
+    sum += head;
+    l = tail;
+}
+```
+
+A single-pattern test asks whether a variant value holds one constructor
+and binds that constructor's fields if it does. It is the selection step
+of a `match`, written as the condition of an `if` or a `while`: the test
+*succeeds* where a match on the operand would select `case` *pattern*,
+*fails* where it would select another constructor, and traps where the
+match would trap (4.5). The statement it controls is C's `if` or `while`
+and not an arm.
+
+1. *Provisional (P4).* The forms are `if (case P = e) S`,
+   `if (case P = e) S else S2` and `while (case P = e) S`. The test is
+   the whole condition and stands nowhere else: not in a `for` or a `do`,
+   and not parenthesised, negated or joined with `&&` or `||`, since
+   `case` begins no C expression. There is one pattern; a test of several
+   constructors is a `match` whose labels share an arm (4.1(6)).
+2. The operand `e` is an expression that extends to the closing
+   parenthesis and obeys 4.1(1) as a scrutinee does: it has variant type,
+   and a pointer is not dereferenced implicitly. So `case P = e && c`
+   reads `e && c` as the operand and is refused, because that is not a
+   variant. The pattern `P` is that of a `case` label (4.1(3)): one
+   constructor of the operand's type, unqualified, with one sub-pattern
+   per field.
+3. Each time the condition is evaluated, once for an `if` and before
+   every iteration of a `while`, the operand is evaluated once and its
+   tag is read once. On success the bound fields are copied and then `S`
+   runs, as an arm does (4.1(7)); on failure nothing is bound, and `S2`
+   runs or the loop ends.
+4. A binding is the object of 4.1(4): non-modifiable, initialised with a
+   copy of the field. The bindings and `S` are one scope, as an arm and
+   its bindings are (4.1(5)): where `S` is a compound statement they
+   belong to its block, so a declaration there that redeclares a binding
+   is refused, and one in a nested block hides it. A match of one arm
+   written as a test therefore keeps its meaning. The scope ends with
+   `S`: a binding is not visible in `S2` or after the statement, and a
+   `while` makes its bindings anew for each iteration.
+5. `S` and `S2` are not arms, so 4.3(1) and 4.3(2) do not apply: either
+   may complete, and `break` and `continue` in `S` and `S2` alike mean
+   what they mean in a C `if` or `while`. A `break` in the `S` of an
+   `if` goes to the loop, `switch` or `match` around the `if`, and where
+   that is
+   a match 4.3(5) applies to it, as to every `break` that leaves a match.
+   One in the `S` of a `while` leaves that `while`, and `continue` there
+   evaluates the test again. For 4.4 the test is a condition that is not
+   a constant, and its operand is control: a jump in a statement
+   expression there goes to the loop, `switch` or `match` around an
+   `if`, as one in the scrutinee of a match does, and leaves a `while`
+   test's own loop.
+6. A successful test is the only way into `S`, since nothing else
+   initialises the bindings: 4.3(3) holds for `S` as for an arm, whether
+   or not the pattern binds, and the label rule of 4.4 treats `S` as one.
+   `S2` has no such limit.
+7. The test puts no requirement on the other constructors, and 4.2 does
+   not apply. A constructor added later fails the test, as it would reach
+   a `default`.
+
+Rationale. In Pilot A 52 of 100 matches have one `case` and a `default`,
+and the port wrote 20 predicate functions and 9 accessor functions, the
+accessors with an `unreachable()` default, only to ask whether a value
+holds one constructor (`WRITEUP.md`, P4, at commit 9898ecb of the pilot's
+repository). A test that binds also joins the question to the read it
+guards, which a predicate followed by an accessor does not. Every rule
+above is a rule of `match` or of C's `if` and `while`; the form adds only
+the place where a pattern may stand. `S` is not an arm because the
+statement of a C condition may complete and may leave a loop around it
+with `break`, and in the pilot a `break` ported into an arm left the
+match instead of the loop.
+
+What is provisional is how little the form allows. The pilot calls its
+predicates negated and inside `&&` and `||` as well as alone, and such a
+call keeps its predicate function, whose body becomes one test. The pilot
+written with the test settles whether those calls justify a test that is
+an expression, and whether its matches of one shared arm and a `default`
+justify a list of patterns. The default is the form as specified.
 
 ## 5. Errors: `option`, `result`, `try`
 
@@ -986,7 +1144,7 @@ symbol intern(str name);
    check is syntactic: every cast to a private distinct type outside its
    owner is refused, including those that create no value, such as
    `sizeof((symbol)1)` and the identity cast `(symbol)s`.
-2. *Provisional (P6).* The owner is the text of the file that contains the
+2. The owner is the text of the file that contains the
    declaration and, when that file is `M.tci`, the text of the primary
    source file `M.tc` of the translation unit.
    - `M.tci` and `M.tc` compare by their last component, the path split
@@ -1005,14 +1163,28 @@ symbol intern(str name);
    Type-C files. Only Type-C text is bound: C text, such as a header that
    a Type-C file includes, may cast to a private distinct type. `private`
    is a design aid, not a security boundary. The zero value is available
-   to every client, C code or unchecked Type-C can write any bytes, and a
-   line marker in the source can name the owner's file and so claim its
-   rights. Type-C text also makes a private value without a cast or a
+   to every client: `(T){0}` writes it in any expression, as the
+   initialisers `{0}` and `{}` do in a declaration, because a compound
+   literal is neither a cast nor a constructor expression and every
+   variant and distinct type takes these initialisers (3.2 rule 7, 3.4).
+   A compound literal of a private distinct type with another value,
+   `(symbol){7}`, is refused by 3.4, under which an `int` becomes a
+   `symbol` only by a cast, and that cast by rule 1. C code or unchecked
+   Type-C can write any bytes, and a line marker in the source can name
+   the owner's file and so claim its rights.
+   Type-C text also makes a private value without a cast or a
    constructor through any operation that reinterprets storage, such as a
    pointer conversion (`*(symbol *)p`), a union member, `va_arg` or
    copying bytes; these stay outside the rule, because refusing pointer
    conversions would break `malloc` code. Bounding them belongs to checked
    mode (section 11).
+
+Rationale for ownership by file name. It needs no declaration of who owns
+a type and no build model. In Pilot A one module owns a private variant
+and a private distinct type, and the rule holds through an include chain
+in which every file reaches `type.tci` through one shared header. Its cost
+is that a header owns nothing unless a source file of its name exists, so
+the types of each module stand in that module's own `.tci`.
 
 ### 9.3 C clients
 
@@ -1049,9 +1221,12 @@ struct expr {
 1. Tags number the constructors from 0 in declaration order. Reordering or
    removing constructors changes the ABI. Appending one adds a tag on which
    code compiled earlier traps.
-2. *Provisional (P3).* The tag has the generated enumeration type, with the
+2. The tag has the generated enumeration type, with the
    size and alignment the target's C ABI gives that enumeration. Debuggers
-   then print constructors by name, and layout has one authority.
+   then print constructors by name, and layout has one authority. Pilot A
+   gives no reason for a narrower tag: its structures shrink because the
+   payloads share one union, and in the two largest the union is aligned
+   to 16, so a smaller tag saves nothing.
 3. The union `u` has one member per constructor that has fields, named after
    the constructor: a struct of the fields in order. A variant whose
    constructors all lack fields has no union.
@@ -1149,9 +1324,9 @@ to the failing code. By default it is `__builtin_trap()` on GNU-compatible
 compilers. `--trap-function=name` calls `_Noreturn void name(void)`, which
 the program supplies, before the builtin; freestanding targets use this to
 report the failure. Where the compiler has no such builtin, the call is
-followed by an endless loop. The traps are: an invalid tag in `match`, the
-end of a match arm, a slice index or sub-slice out of range, and the checks
-of checked mode.
+followed by an endless loop. The traps are: an invalid tag in `match` or
+in a single-pattern test, the end of a match arm, a slice index or
+sub-slice out of range, and the checks of checked mode.
 
 ### 10.6 What C code sees
 
@@ -1276,8 +1451,7 @@ a design change to this document, not an implementation detail.
 
 | Feature | Sketch | Evidence that would bring it in |
 | --- | --- | --- |
-| Single-pattern test | `if (case Add(l, r) = *e) { ... }` and the same in `while`; bindings scoped to the controlled statement. `case` cannot begin a C condition. | A large share of pilot matches have one `case` and a `default` (P4). |
-| Binding by reference | `case Block(&stmts):` binds a pointer to the field, for in-place update of a payload. | Pilot code that rebuilds values only to change one field (P5). |
+| Binding by reference | `case Block(&stmts):` binds a pointer to the field, for in-place update of a payload. | A lifetime tier in checked mode (11.3) that keeps a pointer into a payload from outliving an assignment that changes the object's tag. Pilot A shows the need (4.1): 24 payload updates, and payloads moved behind pointers to allow them. |
 | Nested and constant patterns | `case Add(Number(0), r):`. Needs matrix-based exhaustiveness and a rule that tells a binding from a constructor without fields. | Pilot code that routinely nests matches two deep. |
 | `try` inside expressions | `f(try g(), h())`, with a defined order for the hoisted operands. | Many rewrites forced by 5.1(3) in pilot code (P8). |
 | `try` on `option` | Returns `None` from a function that returns an `option`. | Repeated hand-written propagation of `None`. |
@@ -1288,7 +1462,7 @@ a design change to this document, not an implementation detail.
 | External instances | One definition of an instance per program. | Measured code growth from per-unit instances (P12). |
 | Operations on distinct types | Declared arithmetic, so that `meters + meters` is `meters`. | Casts that dominate real arithmetic on distinct values. |
 | Tag ordinal | The tag as an integer, for tables and serialisation. | Tables in pilot code that a `match` expresses badly. |
-| Compact layouts | Smaller tags; `option(T *)` as a nullable pointer. An ABI change, so opt-in. | Measured size of pilot data against hand-written C (P3). |
+| Compact layouts | Smaller tags; `option(T *)` as a nullable pointer. An ABI change, so opt-in. | Measured size of pilot data against hand-written C (10.1). |
 | Equality and hashing | `==` on variants or a `derive` declaration. Needs a policy for pointers, floating point and cycles. | Hand-written equality functions that recur in pilot code. |
 | Closures | A code pointer with an environment pointer; no allocation. Needs capture rules and tier 2. | A lifetime tier that exists. |
 
@@ -1630,6 +1804,8 @@ Two properties follow by construction:
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
 | Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. Inside an initialiser, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. |
 | `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that declares the bindings and ends in a trap; `break`, `continue` and `return` unchanged; `default:` holding the trap. |
+| Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is the controlled statement with the binding declarations first in its block, or in a block made around a statement that is not a compound statement. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
+| Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The instance definition, once, at file scope before first use. |
 | Generic function instance | A `static` function: the body's tokens, with each type parameter replaced by a typedef of its argument. |
@@ -1713,12 +1889,7 @@ numbers refer to the implementation plan.
 
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
-| P1 | `type`, `match` and the other new words are positional; `try` and `defer` are hidden by a declaration (2.3) | Stage 1 pilot: identifiers renamed and header macros broken by the port | As specified |
-| P2 | An unqualified constructor wins over an ordinary identifier under a variant target type, and a typedef name keeps C's type-name readings (3.3) | Stage 1 pilot: any resolution that surprised its author | As specified |
-| P3 | The tag is a C enumeration (10.1) | Stage 1: size of pilot data against hand-written C; debugger use | Enumeration |
-| P4 | The `default` warning is off; there is no single-pattern test (4.2, 12) | Stage 1 pilot: share of matches with one `case` and a `default` | No new syntax; warning stays off |
-| P5 | Bindings are non-modifiable copies; none by reference (4.1, 12) | Stage 1 pilot: sites that need in-place update | As specified |
-| P6 | The owner of a private type is found by file name (9.2) | Stage 1 pilot with a module of several files | As specified |
+| P4 | The `default` warning is off (4.2); the single-pattern test is the whole condition of an `if` or `while` and has one pattern (4.6) | Pilot A written with the single-pattern test: the share of matches that keep a `default`; the tag tests the form does not fit, which are negated, joined with `&&` or `\|\|`, or of several constructors | Warning stays off; the form as specified |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions (5.1) | Stage 2 pilot: rewrites the limit forced | As specified |
 | P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rule 8 of section 6 (13.5) | Stage 2: code size on the pilot; how often rule 8 rejects code | Repetition |
@@ -1802,6 +1973,11 @@ assignment-expression: ... | "try" assignment-expression
 
 statement:             ... | match-statement | defer-statement
                            | unsafe-block
+selection-statement:   ... | "if" "(" pattern-test ")" statement
+                           | "if" "(" pattern-test ")" statement
+                             "else" statement
+iteration-statement:   ... | "while" "(" pattern-test ")" statement
+pattern-test:          "case" pattern "=" expression
 match-statement:       "match" "(" expression ")" "{" arm+ "}"
 arm:                   arm-label+ block-item+
 arm-label:             "case" pattern ":" | "default" ":"

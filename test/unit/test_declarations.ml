@@ -1588,7 +1588,8 @@ let constructors () =
     (in_function
        "e x; x = (e.A); (void)sizeof(e.A); e.A; \
         __typeof__(e.A) y = x; return y;");
-  (* An ordinary identifier of the name does not stand in the way (P2). *)
+  (* An ordinary identifier of the name does not stand in the way
+     (design 3.3). *)
   accepts ~file (variant ^ "int A; e x = A; int *p = &A;");
   (* Without a target type, the name is looked up as in C. *)
   rejects ~file (in_function "(void)A; return v;") "is not declared";

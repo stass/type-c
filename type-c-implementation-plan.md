@@ -139,6 +139,8 @@ keeping the parser for Type-C text, and an implementation inside Clang.
 | 1.8 | Diagnostic catalogue with stable codes; a negative golden test for every rule of the design. |
 | 1.9 | ABI tests: C callers in both directions, layout assertions, both backends. |
 | 1.10 | Pilot A. |
+| 1.11 | The single-pattern test (design 4.6): parsing, typing, the jump rules, lowering. The rule on a `break` that does not end its arm (design 4.3 rule 5). A negative golden test for each rule. |
+| 1.12 | Pilot A written with the single-pattern test. |
 
 **Pilot A.** Port the tree of an existing C compiler, its AST or IR with
 the passes that walk it, to variants and `match`. chibicc and QBE are the
@@ -146,12 +148,12 @@ candidates; the choice and its license check open the package. The port
 lives in its own repository and records:
 
 - lines changed, and the casts and tag tests removed;
-- identifiers renamed and header macros broken (P1);
-- constructor resolutions that surprised the author (P2);
-- the size of the data against the original (P3);
+- identifiers renamed and header macros broken (design 2.3);
+- constructor resolutions that surprised the author (design 3.3);
+- the size of the data against the original (design 10.1);
 - matches with one `case` and a `default`, as a share of all matches (P4);
-- sites that update a payload in place (P5);
-- how a module of several files used `private` (P6);
+- sites that update a payload in place (design 4.1);
+- how a module of several files used `private` (design 9.2);
 - friction that fits none of the above;
 - the bugs the port would have caught: each bug-fix commit in the
   original's history whose bug falls in a class of the C comparison
@@ -195,7 +197,7 @@ lives in its own repository and records:
    - a value of one distinct type used as another or as its
      representation, and an operator 3.4 does not allow on it;
    - a private value made outside its owner, between Type-C files and
-     apart from `{0}` (9.2);
+     apart from the zero value, written `{0}`, `{}` or `(T){0}` (9.2);
    - an invalid tag, from a cast or a union, which C reads as a stray
      member and Type-C traps on at run time (4.5); this entry checks the
      trap, not a diagnostic. An uninitialised tag is outside Stage 1
@@ -204,9 +206,18 @@ lives in its own repository and records:
    Each entry for a feature that Pilot A's port uses is also injected into
    the port and refused there; the record names the features it uses.
 
-**Decided at the gate:** P1 to P6. The single-pattern test and binding by
-reference (design section 12) are accepted or rejected here on the
-pilot's numbers. **Release 0.1.**
+**Package 1.12.** Pilot A's matches of one `case` and a `default`, and
+the predicate and accessor functions that only ask for one constructor,
+are rewritten with the single-pattern test. The record gives:
+
+- matches that keep a `default`, as a share of all matches (P4);
+- tag tests that the form does not fit, by shape (negated, joined with
+  `&&` or `||`, of several constructors), and the predicate functions
+  that stay for them (P4);
+- code size against package 1.10's port.
+
+**Decided at the gate:** P4, on the numbers of package 1.12.
+**Release 0.1.**
 
 ## Stage 2: generic types, `result`, `try` and `defer`
 
@@ -365,7 +376,7 @@ Type-C is considered here, not earlier.
 | The tail of C extensions does not end | Stage 0 change-of-course condition | The three options listed there |
 | The front end types C differently from the backend | Typing-oracle disagreements; backend errors in lowered code | Fix; the backend still compiles every token, so a divergence is loud |
 | Diagnostics without columns or macro context are too weak | Pilot records | A preprocessor of its own (P15) |
-| The first release is awkward for real code | Pilot A's numbers on single-constructor tests and in-place updates | The two features of design section 12 that address them |
+| The first release is awkward for real code | Package 1.12's numbers on tag tests the single-pattern test does not fit; Pilot A's numbers on in-place updates | A wider single-pattern test (design 4.6, P4); binding by reference (design section 12), which waits for a lifetime tier |
 | Duplicated instances bloat binaries | Stage 3 measurements | External instances (design section 12) |
 | The design moves under the implementation | Rework of merged packages | Gates settle provisional decisions before the next stage builds on them |
 | Too few OCaml contributors | Review latency | Keep the code plain: no advanced type-level features |
