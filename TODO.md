@@ -11,8 +11,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Before Stage 0 starts
 
-- [High] Check the license and provenance of each pilot candidate named
-  in the plan before fetching any of them.
 - [Medium] Decide where the corpus repository is hosted: it exists
   locally at `/Volumes/Optaine/type-c-corpus`, with no remote, and its
   README says what it holds. (`tools/hosts` runs the Linux hosts in
