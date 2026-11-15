@@ -196,6 +196,52 @@ or the front end refuses the preprocessed text; 81 for a usage error,
 when the backend cannot be started or gives no target model, or when a
 file cannot be read or written; 82 for an internal error.
 
+## What Stage 1 catches that C does not
+
+The C comparison catalogue of the plan (Stage 1, exit gate 6) is the
+cram test [`test/run/comparison.t`](test/run/comparison.t), so every
+`dune test` checks its facts on both backends; the test says which
+compiler releases its warning results were measured on. Each entry
+pairs a small C program that holds an error with its Type-C
+counterpart, records which warnings GCC and Clang give on the C
+program, with `-Wall -Wextra` and with `-Wswitch-enum`,
+`-Wimplicit-fallthrough` and `-Wconversion`, and shows the code with
+which `typec` refuses the Type-C one (the codes are in
+`_build/default/docs/diagnostics.md`). In summary:
+
+| Error | GCC `-Wall -Wextra` | Clang `-Wall -Wextra` | Other flags | `typec` |
+| --- | --- | --- | --- | --- |
+| Kind added; `switch` on the enum, no `default` | `-Wswitch` | `-Wswitch` | | TC0018 |
+| Kind added; `switch` with a `default` | none | none | `-Wswitch-enum`, both | TC0018 |
+| Kind added; kind field of type `int` | none | none | none | TC0018 |
+| Payload read under the wrong tag | none | none | none | TC0004, for naming the tag |
+| Payload read with no tag test | none | none | none | TC0007 |
+| Missing `break` at the end of an arm | `-Wimplicit-fallthrough` | none | `-Wimplicit-fallthrough`, Clang | TC0021 |
+| One id typedef passed as another | none | none | none | TC0012 |
+| An id used as its representation | none | none | none | TC0012 |
+| Arithmetic on an id | none | none | none | TC0011 |
+| Value made outside its module | none | none | none | TC0013 |
+| Invalid tag from a cast or a union | none | none | none on the tag | run-time trap |
+
+C's warnings catch some forms of these errors: a `switch` on an
+enumeration without a `default` under `-Wall`, one with a `default`
+under `-Wswitch-enum` (which also flags the `default` of the invalid-tag
+program, for standing in for an enumerator), and a missing `break`
+under GCC's `-Wextra` or Clang's `-Wimplicit-fallthrough`. A kind field
+of type `int`, a payload read, typedef'd ids and a value built outside
+its module pass every flag tried. Type-C does not catch everything in
+these rows either. A `match` with a `default` hides a new constructor
+as a C `default` does; Type-C refuses a `default` that covers no
+constructor (TC0019), so a vacuous `default` cannot be written ahead
+of the change. Private values are refused between Type-C files only,
+and the zero value `{0}` is allowed everywhere; a C file reads and
+writes the layout as C does. An invalid tag is caught at run time, not
+at compile time, and an uninitialised tag is outside Stage 1 (checked
+mode, design 11.2). The C remedies have costs that the entries name: a
+structure of one member for each id refuses the operators a distinct
+type keeps, such as `==`, and an opaque structure for the values of a
+module gives up passing them by value.
+
 ## Printing the target model
 
 `typec --print-target [OPTIONS]` runs the backend as
