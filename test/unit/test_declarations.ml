@@ -1365,8 +1365,13 @@ let matching () =
   match_error "match (v) { case D: break; default: break; }"
     "'D' names no constructor of the variant 'e' (design 4.1 rule 3) [TC0016]";
   match_error "match (v) { case C: break; default: break; }"
-    "the pattern 'C' has 0 sub-pattern(s), and the constructor has 1 \
-     field(s) (design 4.1 rule 3) [TC0016]";
+    "the case label 'C' omits the field list of a constructor with 1 \
+     field(s), which only a single-pattern test may (design 4.1 rule 3) \
+     [TC0016]";
+  match_error "match (v) { case A: break; case C: case B: break; }"
+    "the case label 'C' omits the field list";
+  match_error "match (v) { case A: break; case B(_, _): case C: break; }"
+    "the case label 'C' omits the field list";
   match_error "match (v) { case A(x): break; default: break; }"
     "the pattern 'A' has 1 sub-pattern(s), and the constructor has 0 \
      field(s)";
@@ -1937,10 +1942,16 @@ let single_pattern_test () =
   refused "while (case D = v) break;"
     "'D' names no constructor of the variant 'e' (design 4.1 rule 3) \
      [TC0016]";
-  refused "if (case B = v) return 1;"
-    "the pattern 'B' has 0 sub-pattern(s), and the constructor has 1 \
+  refused "if (case B(i, j) = v) return 1;"
+    "the pattern 'B' has 2 sub-pattern(s), and the constructor has 1 \
      field(s) (design 4.1 rule 3) [TC0016]";
-  refused "if (case B(i, j) = v) return 1;" "[TC0016]";
+  refused "if (case A(i) = v) return 1;" "[TC0016]";
+  (* 4.6 rule 2: a test may omit the field list of a constructor with
+     fields, and then binds nothing. *)
+  accepted "if (case B = v) return 1; else n = 2;";
+  accepted "while (case C = *p) break;";
+  refused "if (case B = v) return i;" "'i' is not declared";
+  accepted "if (case B = v) { long i = 2; return i; }";
   (* 4.3 rule 3 holds for the statement, whether or not it binds. *)
   let into =
     "a jump into the statement of a single-pattern test from outside it \

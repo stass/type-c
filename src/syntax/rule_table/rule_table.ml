@@ -88,8 +88,9 @@ let rows =
     Live { name = "Pattern"; code = 16; clause = Some "design 4.1 rule 3";
       meaning =
         "A pattern that names no constructor of the scrutinee's type, \
-         or whose sub-patterns do not match its fields; also the pattern \
-         of a single-pattern test (design 4.6 rule 2)." };
+         or whose sub-patterns do not match its fields, or a case label \
+         that omits the field list of a constructor with fields; also \
+         the pattern of a single-pattern test (design 4.6 rule 2)." };
     Live { name = "Shared_arm"; code = 17; clause = Some "design 4.1 rule 6";
       meaning =
         "An arm of several labels one of which binds." };

@@ -258,6 +258,29 @@ operand's type, unqualified, with one sub-pattern per field.
   arity.tc:3: the pattern 'Cons' has 1 sub-pattern(s), and the constructor has 2 field(s) (design 4.1 rule 3) [TC0016]
   [1]
 
+A test, and only a test, may omit the field list of a constructor with
+fields (4.6 rule 2): it then binds nothing, as if each field were `_`,
+and lowers as a test of a constructor without fields does.
+
+  $ cat > fieldless.tc <<'EOF'
+  > type list = | Nil | Cons(long head, list *tail);
+  > long f(list v) {
+  >   if (case Cons = v)
+  >     return 1;
+  >   return 0;
+  > }
+  > EOF
+  $ ./golden.exe fieldless.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^long f/,$p'
+  long f(list v) {
+  { const struct list *const __tc_match = &(
+   v
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
+  {
+  return 1;
+   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+  return 0;
+  }
+
 The bindings and the controlled statement are one scope: a declaration
 in its block that redeclares a binding is refused, and a binding is not
 visible in the else statement (4.6 rule 4).

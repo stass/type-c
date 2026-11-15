@@ -3,13 +3,14 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 Type-C code asks with single-pattern tests whether a variant holds one
 constructor and reads its bindings, on each backend (design 4.6): an if
-test with and without an else, a while test whose bindings are made anew
-for each iteration, break and continue in the controlled statement as in
-C, a nested block that hides a binding, and a jump from a statement
-expression in the operand, which in an if goes to the loop around it and
-in a while leaves that while (4.4). A value whose tag is none of its
-constructors, here written by C code, traps and does not fail the test
-(4.5, 10.5): the program stops on a signal. It flushes its output first.
+test with and without an else, one that omits the field list and binds
+nothing, a while test whose bindings are made anew for each iteration,
+break and continue in the controlled statement as in C, a nested block
+that hides a binding, and a jump from a statement expression in the
+operand, which in an if goes to the loop around it and in a while leaves
+that while (4.4). A value whose tag is none of its constructors, here
+written by C code, traps and does not fail the test (4.5, 10.5): the
+program stops on a signal. It flushes its output first.
 
   $ . ./backends.sh
 
@@ -67,6 +68,13 @@ constructors, here written by C code, traps and does not fail the test
   >   }
   >   return total;
   > }
+  > static int conses(const list *items, int n) {
+  >   int count = 0;
+  >   for (int i = 0; i < n; i++)
+  >     if (case Cons = items[i])
+  >       count++;
+  >   return count;
+  > }
   > static long sum_below(const list *l, long limit) {
   >   long total = 0;
   >   while (case Cons(head, tail) = ({ if (total >= limit) break; *l; })) {
@@ -80,7 +88,8 @@ constructors, here written by C code, traps and does not fail the test
   >   list minus = Cons(-5, &one), three = Cons(3, &minus);
   >   list four = Cons(4, &three);
   >   list items[3] = { Cons(1, &nil), Nil, Cons(2, &nil) };
-  >   printf("%ld %ld %ld\n", sum(&one), first(&one), first(&nil));
+  >   printf("%ld %ld %ld %d\n", sum(&one), first(&one), first(&nil),
+  >          conses(items, 3));
   >   printf("%ld %d %ld %ld\n", even_until_negative(&four),
   >          until_nil(items, 3), heads_after_first(items, 3),
   >          sum_below(&four, 5));
@@ -94,25 +103,25 @@ constructors, here written by C code, traps and does not fail the test
   > EOF
   $ typec --cc=$clang -Wall -Wextra -Werror -o clang-lists lists.tc
   $ ./clang-lists
-  3 1 -1
+  3 1 -1 2
   4 1 102 7
   $ sh -c './clang-lists while; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
-  3 1 -1
+  3 1 -1 2
   4 1 102 7
   trapped
   $ sh -c './clang-lists if; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
-  3 1 -1
+  3 1 -1 2
   4 1 102 7
   trapped
   $ typec --cc=$gcc -Wall -Wextra -Werror -o gcc-lists lists.tc
   $ ./gcc-lists
-  3 1 -1
+  3 1 -1 2
   4 1 102 7
   $ sh -c './gcc-lists while; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
-  3 1 -1
+  3 1 -1 2
   4 1 102 7
   trapped
   $ sh -c './gcc-lists if; exit $?' 2>/dev/null; test $? -gt 128 && echo trapped
-  3 1 -1
+  3 1 -1 2
   4 1 102 7
   trapped

@@ -213,6 +213,24 @@ sub-pattern for each of its fields (design 4.1 rule 3).
   pattern.tc:4: the pattern 'B' has 2 sub-pattern(s), and the constructor has 1 field(s) (design 4.1 rule 3) [TC0016]
   [1]
 
+A case label that omits the field list of a constructor with fields is
+refused: only a single-pattern test may (design 4.1 rule 3, 4.6 rule 2).
+
+  $ cat > label_fields.tc <<'EOF'
+  > type list = | Nil | Cons(long head, list *tail);
+  > long f(list v) {
+  >   match (v) {
+  >   case Cons:
+  >     return 1;
+  >   case Nil:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe label_fields.tc
+  label_fields.tc:4: the case label 'Cons' omits the field list of a constructor with 2 field(s), which only a single-pattern test may (design 4.1 rule 3) [TC0016]
+  [1]
+
 A match has at most one `default`, and that one covers a constructor
 (design 4.2 rule 2).
 

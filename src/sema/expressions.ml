@@ -215,6 +215,19 @@ end
    unqualified constructor (design 3.3), or none. *)
 type position = Untargeted | Targeted of Ctype.t
 
+(* Where a pattern stands, which decides whether it may omit the field
+   list of a constructor with fields: only a test may (design 4.1 rule 3,
+   4.6 rule 2). *)
+type pattern_site = Match_label | Test_pattern
+
+(* A pattern checked against the constructor it names: each sub-pattern
+   with its field, none without a field list. Only [pattern_constructor]
+   builds one, so that no binding pairs sub-patterns left unchecked. *)
+type checked_pattern = {
+  constructor : Ctype.constructor;
+  sub_fields : (Tree.sub_pattern * Ctype.member) list;
+}
+
 (* [depth] and [enclosing] belong to the walk in progress. Only the
    reader's failure leaves a walk early, and it ends the read, so neither
    is restored on it. [selections] and [compatibilities] hold the answers
@@ -2906,15 +2919,16 @@ and single_pattern_test context (statement : Tree.statement)
    (4.6 rules 4 and 6). *)
 and tested context variant constructors (pattern : Tree.pattern Tree.spanned)
     (controlled : Tree.statement) form =
-  let constructor =
-    pattern_constructor context variant constructors pattern.span pattern.node
+  let checked =
+    pattern_constructor context ~site:Test_pattern variant constructors
+      pattern.span pattern.node
   in
-  let bindings = pattern_bindings context pattern.node constructor in
+  let bindings = pattern_bindings context checked in
   let enclosing =
     { context.typed.enclosing with case_labels = Test_statement }
   in
   within context enclosing (fun () -> typed_statement context controlled);
-  { form; constructor = constructor.constructor_name;
+  { form; constructor = checked.constructor.constructor_name;
     constructors = List.map constructor_name constructors; bindings;
     controlled = controlled_of controlled }
 
@@ -3014,12 +3028,11 @@ and scrutinee_variant context ~what span t =
           ^ " is not of a variant type; a pointer is not dereferenced \
              implicitly"))
 
-(* The constructor that [pattern] names, with one sub-pattern per field
-   (4.1 rule 3). *)
-and pattern_constructor context variant constructors (label : Tree.span)
-    (pattern : Tree.pattern) =
+(* The constructor that [pattern] at [site] names, with one sub-pattern
+   per field or, in a test, no field list (4.1 rule 3, 4.6 rule 2). *)
+and pattern_constructor context ~site variant constructors
+    (label : Tree.span) (pattern : Tree.pattern) =
   let name = pattern.constructor.node in
-  let given = List.length (Option.value pattern.sub_patterns ~default:[]) in
   match
     List.find_opt
       (fun (constructor : Ctype.constructor) ->
@@ -3031,28 +3044,49 @@ and pattern_constructor context variant constructors (label : Tree.span)
         (Rule.message Pattern
            (Printf.sprintf "%s names no constructor of the variant %s"
               (quote name) (quote variant)))
-  | Some constructor when List.length constructor.fields <> given ->
+  | Some constructor ->
+      { constructor;
+        sub_fields = sub_pattern_fields context ~site label pattern constructor
+      }
+
+(* The sub-patterns of [pattern] with the fields of [constructor]: one
+   sub-pattern per field, or no field list, which only a test may omit
+   for a constructor with fields (4.1 rule 3, 4.6 rule 2). *)
+and sub_pattern_fields context ~site label (pattern : Tree.pattern)
+    (constructor : Ctype.constructor) =
+  let name = quote constructor.constructor_name in
+  let fields = List.length constructor.fields in
+  match (pattern.sub_patterns, site) with
+  | None, Match_label when fields > 0 ->
+      context.fail label
+        (Rule.message Pattern
+           (Printf.sprintf
+              "the case label %s omits the field list of a constructor \
+               with %d field(s), which only a single-pattern test may"
+              name fields))
+  | None, _ -> []
+  | Some sub_patterns, _ when List.length sub_patterns <> fields ->
       context.fail label
         (Rule.message Pattern
            (Printf.sprintf
               "the pattern %s has %d sub-pattern(s), and the constructor \
                has %d field(s)"
-              (quote name) given (List.length constructor.fields)))
-  | Some constructor -> constructor
+              name (List.length sub_patterns) fields))
+  | Some sub_patterns, _ -> List.combine sub_patterns constructor.fields
 
-(* Each label of [arm] with the constructor that its pattern names;
-   [None] for a [default]. *)
+(* Each label of [arm] with its pattern checked against the constructor
+   that it names; [None] for a [default]. *)
 and labelled_constructors context variant constructors (arm : Tree.arm) =
   List.map
     (fun (label : Tree.arm_label) ->
       match label.node with
       | Default_arm_label -> (label, None)
       | Pattern_label pattern ->
-          let constructor =
-            pattern_constructor context variant constructors label.span
-              pattern
+          let checked =
+            pattern_constructor context ~site:Match_label variant
+              constructors label.span pattern
           in
-          (label, Some constructor))
+          (label, Some checked))
     arm.node.labels
 
 (* 4.2 rules 1 and 2 over the labels of a match, in order: each
@@ -3066,7 +3100,7 @@ and coverage context ~statement variant constructors labelled =
           context.fail label.span
             (Rule.message Default_arm "a match has a second `default`");
         named seen (label :: defaults) rest
-    | (label, Some (constructor : Ctype.constructor)) :: rest ->
+    | (label, Some { constructor; _ }) :: rest ->
         let name = constructor.constructor_name in
         if List.mem name seen then
           context.fail label.span
@@ -3113,8 +3147,7 @@ and matched_arm context (arm : Tree.arm) labelled defaulted =
   let first = List.hd labels and last = List.hd (List.rev labels) in
   let bindings =
     match labelled with
-    | [ ({ Tree.node = Pattern_label pattern; _ }, Some constructor) ] ->
-        pattern_bindings context pattern constructor
+    | [ (_, Some checked) ] -> pattern_bindings context checked
     | _ ->
         List.iter (refuse_shared_binding context) labels;
         []
@@ -3122,7 +3155,8 @@ and matched_arm context (arm : Tree.arm) labelled defaulted =
   let cases =
     List.concat_map
       (function
-        | _, Some constructor -> [ constructor ] | _, None -> defaulted)
+        | _, Some { constructor; _ } -> [ constructor ]
+        | _, None -> defaulted)
       labelled
   in
   { arm = arm.span;
@@ -3146,22 +3180,23 @@ and refuse_shared_binding context (label : Tree.arm_label) =
         sub_patterns
   | Pattern_label { sub_patterns = None; _ } | Default_arm_label -> ()
 
-and pattern_bindings context (pattern : Tree.pattern)
-    (constructor : Ctype.constructor) =
-  let name = constructor.constructor_name in
-  let sub_patterns = Option.value pattern.sub_patterns ~default:[] in
-  List.concat
-    (List.map2
-       (fun (sub_pattern : Tree.sub_pattern) (field : Ctype.member) ->
-         match (sub_pattern, field.member_name) with
-         | Wildcard _, _ -> []
-         | Binding { name = binding; declared }, Some field_name ->
-             context.binding binding declared
-               (non_modifiable field.member_type);
-             [ { name = binding.node; constructor = name; field = field_name } ]
-         | Binding _, None ->
-             invalid_arg "Expressions.pattern_bindings: an unnamed field")
-       sub_patterns constructor.fields)
+(* A pattern without a field list has no sub-pattern to bind, as if each
+   field were [_] (4.6 rule 2). *)
+and pattern_bindings context (checked : checked_pattern) =
+  List.concat_map
+    (sub_pattern_binding context checked.constructor)
+    checked.sub_fields
+
+and sub_pattern_binding context (constructor : Ctype.constructor)
+    ((sub_pattern : Tree.sub_pattern), (field : Ctype.member)) =
+  match (sub_pattern, field.member_name) with
+  | Wildcard _, _ -> []
+  | Binding { name = binding; declared }, Some field_name ->
+      context.binding binding declared (non_modifiable field.member_type);
+      [ { name = binding.node; constructor = constructor.constructor_name;
+          field = field_name } ]
+  | Binding _, None ->
+      invalid_arg "Expressions.sub_pattern_binding: an unnamed field"
 
 (* A field type is unqualified and no array (design 3.2 rule 4), so it
    takes [const]. *)
