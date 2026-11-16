@@ -335,6 +335,10 @@ preprocessing (`-E`, `-M`, `-MM`), that change the preprocessed text
 (`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-dD`, `-dM` and the like,
 `-traditional-cpp`, `-fdirectives-only`), `-save-temps`, `-###`, `-ansi`,
 `--` and response files (`@FILE`), with a usage error naming the option.
+It also refuses `-arch` options that name more than one architecture: cc
+builds a universal binary from them, but step 1 preprocesses for one
+architecture only. Build each architecture with its own `-arch` and join
+the results with `lipo -create`.
 
 The temporary directory is made with mode 0700 in `TMPDIR`, or `/tmp`,
 and removed on every way out. SIGHUP, SIGINT, SIGPIPE, SIGQUIT and

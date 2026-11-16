@@ -16,6 +16,7 @@ type role =
   | Dependency of dependency
   | Link
   | Common
+  | Architecture
   | Dialect
   | Keywords of Typec_syntax.Keyword_set.dialect
   | Output
@@ -172,9 +173,10 @@ let table =
           "-static-libgcc"; "-shared-libgcc"; "-bundle"; "-dynamiclib";
         ];
       (* Every step. *)
+      entries Architecture (Separate 1) [ "-arch" ];
       entries Common (Separate 1)
         [
-          "-arch"; "-target"; "-target-variant"; "-darwin-target-variant";
+          "-target"; "-target-variant"; "-darwin-target-variant";
           "-darwin-target-variant-triple"; "-B"; "-F"; "-G"; "-V";
           "-isysroot"; "-Xclang"; "-Xclangas"; "-Xassembler"; "-Xanalyzer";
           "-Xcuda-fatbinary"; "-Xcuda-ptxas"; "-Xopenmp-target";

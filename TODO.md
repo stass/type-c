@@ -42,11 +42,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   has no `-std=`) and `-Wno-gnu-line-marker` that the emitted C needs.
   Decide whether that is acceptable, and then delete the object path,
   or keep the path for those command lines.
-- [Medium] Several `-arch` options make the `-E` step fail ("cannot use
-  'cpp-output' output with multiple -arch options"), where cc builds a
-  universal object. Refuse them with a `.tc` input with a clear message,
-  or run one translation per architecture and join the objects with
-  `lipo`.
 - [Low] The steps of the pipeline get `-Wno-unused-command-line-argument`
   so that Clang does not warn about the options of the whole command
   line that a step does not use; GCC ignores it, but adds a note that

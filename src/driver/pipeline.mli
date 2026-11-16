@@ -67,6 +67,8 @@ type error =
   | Output_for_several_inputs
       (** [-o] with [-c] or [-S] and more than one input *)
   | Emit_c_inputs  (** [--emit-c] without exactly one input, a [.tc] *)
+  | Several_architectures of string list
+      (** the distinct [-arch] names, in order, when there are several *)
 
 val has_type_c_input : Command_line.argument list -> bool
 

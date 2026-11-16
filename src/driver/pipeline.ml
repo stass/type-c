@@ -22,6 +22,7 @@ type error =
   | Missing_value of string
   | Output_for_several_inputs
   | Emit_c_inputs
+  | Several_architectures of string list
 
 (* Raised at the first reason the command line has no pipeline and
    caught in plan. *)
@@ -101,6 +102,27 @@ let refuse_unusable_options arguments =
       | _ -> ())
     arguments
 
+(* The -E step preprocesses for one architecture, so the translation
+   cannot follow cc into a universal build. cc collapses a repeated
+   name, so only distinct names count. *)
+let refuse_several_architectures arguments =
+  let names =
+    List.filter_map
+      (function
+        | Command_line.Option { role = Architecture; value; _ } -> Some value
+        | _ -> None)
+      arguments
+  in
+  (* The distinct names in the order of their first use, for the
+     message. *)
+  let distinct =
+    List.fold_left
+      (fun seen name -> if List.mem name seen then seen else name :: seen)
+      [] names
+  in
+  if List.length distinct > 1 then
+    raise (Failed (Several_architectures (List.rev distinct)))
+
 (* The keyword dialect of the -std= standard; raises Unaccepted_standard for one
    that Type-C does not accept. *)
 let standard_dialect arguments =
@@ -145,11 +167,13 @@ let check_outputs ~emit_c ~goal ~output arguments =
     | _ -> ()
 
 let preprocessing_role : Cc_option.role -> bool = function
-  | Preprocess | Dependency _ | Common | Dialect | Keywords _ -> true
+  | Preprocess | Dependency _ | Common | Architecture | Dialect | Keywords _
+    ->
+      true
   | Link | Output | Language | Stop _ | Refused _ | Typec _ -> false
 
 let compiling_role : Cc_option.role -> bool = function
-  | Common | Dialect | Keywords _ -> true
+  | Common | Architecture | Dialect | Keywords _ -> true
   | Preprocess | Dependency _ | Link | Output | Language | Stop _
   | Refused _ | Typec _ ->
       false
@@ -159,8 +183,8 @@ let compiling_role : Cc_option.role -> bool = function
    are unused. *)
 let linking_role : Cc_option.role -> bool = function
   | Preprocess | Dependency _ -> false
-  | Link | Common | Dialect | Keywords _ | Output | Language | Stop _
-  | Refused _ | Typec _ ->
+  | Link | Common | Architecture | Dialect | Keywords _ | Output | Language
+  | Stop _ | Refused _ | Typec _ ->
       true
 
 (* The name cc gives an output of [source] in the current directory. *)
@@ -342,6 +366,7 @@ let final_command shape ~objects ~emitted_files arguments =
 let plan ~program ~emit_c ~temp_dir arguments =
   try
     refuse_unusable_options arguments;
+    refuse_several_architectures arguments;
     let dialect = dialect_of arguments in
     let goal = goal_of arguments in
     let output = last_value Output arguments in
@@ -404,3 +429,8 @@ let error_message = function
   | Output_for_several_inputs ->
       "cannot specify -o with -c or -S and more than one input"
   | Emit_c_inputs -> "--emit-c needs exactly one input, a .tc file"
+  | Several_architectures names ->
+      Printf.sprintf
+        "-arch cannot name several architectures (%s) with a .tc input: \
+         build each with one -arch and join the results with lipo"
+        (String.concat ", " names)

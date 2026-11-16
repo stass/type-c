@@ -37,6 +37,11 @@ type role =
   | Dependency of dependency  (** The [-E] step, which writes the file. *)
   | Link  (** Matters to linking only, such as [-l]: the final command. *)
   | Common  (** Every step: the target, code generation, warnings. *)
+  | Architecture
+      (** [-arch NAME]: every step. A command line with a [.tc] input
+          names one architecture, given once or more: cc builds a
+          universal binary for several, but its [-E] step preprocesses
+          for one only. *)
   | Dialect  (** [-std=]: every step, once checked (design 2.4). *)
   | Keywords of Typec_syntax.Keyword_set.dialect
       (** [-fasm], [-fno-asm]: every step. They select the keywords

@@ -139,6 +139,32 @@ with a .tc input. Without one they reach the backend as they are.
   [81]
   $ typec --cc=$clang -std=c99 -c twice.c
 
+Several -arch options make Apple's cc build a universal binary, but its
+-E step preprocesses for one architecture only, so typec refuses two
+architectures with a .tc input. One architecture, given once or more,
+is a plain compile, and a command line without a .tc input still
+reaches the backend, which builds the universal object. Apple's cc
+leaves the objects of each architecture of a universal build in TMPDIR,
+so that build gets a directory of its own.
+
+  $ typec --cc=$clang -arch x86_64 -arch arm64 -c x.tc
+  typec: -arch cannot name several architectures (x86_64, arm64) with a .tc input: build each with one -arch and join the results with lipo
+  [81]
+  $ if [ "$(uname -s)" = Darwin ]; then
+  >   typec --cc=$clang -arch $(uname -m) -c x.tc -o out/one.o &&
+  >   typec --cc=$clang -arch $(uname -m) -arch $(uname -m) x.tc twice.c \
+  >     -o out/one
+  > fi
+  $ if [ "$(uname -s)" = Darwin ] &&
+  >   mkdir universal-tmp && universal_tmp=$PWD/universal-tmp &&
+  >   TMPDIR=$universal_tmp $clang -arch x86_64 -arch arm64 -c twice.c \
+  >     -o out/probe.o 2>/dev/null
+  > then
+  >   TMPDIR=$universal_tmp typec --cc=$clang -arch x86_64 -arch arm64 \
+  >     -c twice.c -o out/fat.o &&
+  >   lipo out/fat.o -verify_arch x86_64 arm64
+  > fi
+
 The keywords follow the dialect as in GCC and Clang: asm and typeof are
 identifiers in ISO C and under -fno-asm, so a C11 program that declares
 them compiles to the backend's object, and in GNU C they are keywords, to
