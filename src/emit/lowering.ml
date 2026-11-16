@@ -102,15 +102,19 @@ let record_declarations kind ~tag name =
   Printf.sprintf "%s; typedef %s %s;" record record name
 
 (* [type N = T;]: the typedef, with [N] where the declarator of [T]
-   would name it. [head] is the tokens [type N]. *)
-let alias tokens ~location ~head name (type_name : Tree.type_name) =
-  let equals = grammar_token_before tokens type_name.span.first in
+   would name it. [typedef] replaces the tokens before [T]: [type N =],
+   with the type parameters of a generic and the words of a distinct
+   type. *)
+let alias tokens ~location (declaration : Tree.type_declaration) name
+    (type_name : Tree.type_name) =
+  let before_type = grammar_token_before tokens type_name.span.first in
   let name_before =
     match type_name.node.abstract with
     | Some abstract -> name_position abstract
     | None -> type_name.span.last + 1
   in
-  replace tokens ~location "typedef" (head @ [ equals ])
+  replace tokens ~location "typedef"
+    (grammar_tokens tokens declaration.span.first before_type)
   @ [ insert tokens ~before:name_before name ]
 
 (* For a variant or a record alias [declaration]: the grammar tokens
@@ -121,9 +125,8 @@ let forward_declaration tokens (declaration : Tree.type_declaration) =
   (grammar_tokens tokens declaration.span.first (forward_end - 1), forward_end)
 
 (* A specifier without a tag of its own takes [name], before its body. *)
-let record_alias tokens ~location (declaration : Tree.type_declaration)
+let record_alias tokens ~location ~name (declaration : Tree.type_declaration)
     (specifier : Tree.record_specifier Tree.spanned) =
-  let name = (declaration.node.name :> Tree.identifier).node in
   let { Tree.kind; tag; members; _ } = specifier.node in
   let replace_head ~tag =
     replace tokens ~location
@@ -149,20 +152,19 @@ let has_payload constructors =
 (* The forward declaration of a variant: the structure and typedef,
    which the incomplete variant declares already where the variant
    [completes] one (design 10.1 rule 7). *)
-let variant_forward ~completes variant =
-  let name = (variant : Spelling.type_name :> string) in
+let variant_forward ~completes (variant : Spelling.c_name) =
+  let name = (variant :> string) in
   if completes then "" else record_declarations Struct ~tag:name name
 
 (* What comes between the forward declaration and the constructors: the
    enumeration of the tags, numbered from 0 in order (rule 1), and the
    structure up to its union where it has one (rule 3). *)
-let variant_head variant constructors =
-  let name = (variant : Spelling.type_name :> string) in
-  let c_name = Spelling.declared variant in
+let variant_head (variant : Spelling.c_name) constructors =
+  let name = (variant :> string) in
   let enumerator (constructor : Tree.constructor) =
-    Tree.enumerator_name ~variant:c_name constructor.node.name.node
+    Tree.enumerator_name ~variant constructor.node.name.node
   in
-  let tag_enum = "enum " ^ Tree.enum_tag_name c_name in
+  let tag_enum = "enum " ^ Tree.enum_tag_name variant in
   let union = if has_payload constructors then " union {" else "" in
   Printf.sprintf "%s { %s }; struct %s { %s %s;%s" tag_enum
     (String.concat ", " (List.map enumerator constructors))
@@ -201,46 +203,38 @@ let constructor_edits tokens (constructor : Tree.constructor) =
 
 (* [type N = ... ;]: the forward declaration replaces [type], the head
    [N =] and [private] where it follows, and the tail the [;]. *)
-let variant tokens ~location (declaration : Tree.type_declaration)
+let variant tokens ~location ~lowered (declaration : Tree.type_declaration)
     constructors =
-  let { Tree.name; declared; _ } = declaration.node in
-  let completes = declared.earlier <> None in
+  let completes = declaration.node.declared.earlier <> None in
   let first_bar = (List.hd constructors : Tree.constructor).span.first in
   let forward_tokens, forward_end = forward_declaration tokens declaration in
-  replace tokens ~location (variant_forward ~completes name.node) forward_tokens
+  replace tokens ~location (variant_forward ~completes lowered) forward_tokens
   @ replace tokens ~location
-      (variant_head name.node constructors)
+      (variant_head lowered constructors)
       (grammar_tokens tokens forward_end (first_bar - 1))
   @ List.concat_map (constructor_edits tokens) constructors
   @ replace_at tokens ~first:declaration.span.last (variant_tail constructors)
       []
 
-let type_declaration (tokens : Token.t array)
+(* The type declaration under the name [lowered], which is its own or,
+   for the definition of a generic, that of an instance (design 10.3). *)
+let type_declaration (tokens : Token.t array) ~(lowered : Spelling.c_name)
     (declaration : Tree.type_declaration) =
-  let { Tree.name; definition; _ } = declaration.node in
-  let name = (name :> Tree.identifier) in
+  let name = (lowered :> string) in
   let location = tokens.(declaration.span.first).location in
-  let head = [ declaration.span.first; name.span.first ] in
-  match definition with
+  match declaration.node.definition with
   | Incomplete_variant ->
       replace tokens ~location
-        (record_declarations Struct ~tag:name.node name.node)
-        (head @ [ declaration.span.last ])
-  | Alias type_name -> alias tokens ~location ~head name.node type_name
-  (* Design 10.2: the typedef of its representation. [alias] replaces
-     the [distinct] word, and the head the [=] and [private] before it. *)
+        (record_declarations Struct ~tag:name name)
+        (grammar_tokens tokens declaration.span.first declaration.span.last)
+  | Alias type_name -> alias tokens ~location declaration name type_name
+  (* Design 10.2: the typedef of its representation. *)
   | Distinct { representation; _ } ->
-      let distinct_word =
-        grammar_token_before tokens representation.span.first
-      in
-      let definition_words =
-        grammar_tokens tokens (name.span.first + 1) (distinct_word - 1)
-      in
-      alias tokens ~location ~head:(head @ definition_words) name.node
-        representation
-  | Record_alias record -> record_alias tokens ~location declaration record
+      alias tokens ~location declaration name representation
+  | Record_alias record ->
+      record_alias tokens ~location ~name declaration record
   | Variant { constructors; _ } ->
-      variant tokens ~location declaration constructors
+      variant tokens ~location ~lowered declaration constructors
 
 (* Design 13.5: a constructor expression becomes the compound literal
    [((struct N){ .tag = N_C, .u.C = { a, b } })], or inside an
@@ -279,6 +273,17 @@ let construction (tokens : Token.t array)
       @ replace tokens
           ~location:tokens.(span.last).location
           (" } " ^ closing) [ span.last ]
+
+(* The tokens that the head of a construction replaces: the callee and
+   its [(], or the whole construction without arguments. A qualifying
+   application in them goes with them. *)
+let construction_head (tokens : Token.t array)
+    (construction : Typec_sema.Expressions.construction) : Tree.span =
+  let span = construction.span in
+  match construction.callee with
+  | None -> span
+  | Some callee ->
+      { first = span.first; last = grammar_token_after tokens callee.last }
 
 (* Design 13.5, 10.5: a match becomes a block that reaches the scrutinee
    through [__tc_match], a pointer to it or to a copy of it, and a
@@ -519,13 +524,26 @@ let steered_controlling tokens (answered : Typec_sema.Expressions.answered) =
    around it. *)
 let outermost dropped =
   let contains outer inner =
-    outer <> inner
+    outer.span <> inner.span
     && outer.span.first <= inner.span.first
     && inner.span.last <= outer.span.last
   in
   List.filter
     (fun inner -> not (List.exists (fun outer -> contains outer inner) dropped))
     dropped
+
+(* The first of the ranges of each span: an answered construct's text
+   before the name of an application with the same tokens, such as the
+   steering type of an association that names an instance. *)
+let one_per_span dropped =
+  let seen = Hashtbl.create 16 in
+  let first range =
+    if Hashtbl.mem seen range.span then false
+    else (
+      Hashtbl.add seen range.span ();
+      true)
+  in
+  List.filter first dropped
 
 (* Whether [edit] goes with the dropped [span]: by the tokens it
    replaces, or for an insertion by the place it inserts at, between two
@@ -540,28 +558,208 @@ let dropped_edits tokens { span; text } =
   replace tokens ~location:tokens.(span.first).location text
     (grammar_tokens tokens span.first span.last)
 
-(* A type declaration may hold another, in a statement expression of
-   its definition, and a constructor's arguments other constructors, so
-   the edits of all are sorted; an insertion before a token comes before
-   an edit that replaces it. Two insertions before one token keep their
-   order in [lowered]. Two statements that end at one token nest, and
-   the inner one, which begins later, closes first, so the matchings go
-   in reverse source order. The steering of a generic selection
-   nests only because no other lowering inserts before the first token
-   of its controlling expression or the comma after it. The edits inside a
-   dropped range go, and the range's own edits replace them. *)
-let edits (text : Reader.t) declarations constructions matchings answered =
-  let tokens = text.tokens in
-  let dropped = outermost (List.concat_map dropped_ranges answered) in
-  let kept edit =
-    not (List.exists (goes_with edit) dropped)
+(* The edits of one text: the unit's own, or the definition of an
+   instance. A type declaration may hold another, in a statement
+   expression of its definition, and a constructor's arguments other
+   constructors; {!Emitter.in_order} orders the edits, an insertion
+   before a token ahead of an edit that replaces it, and two insertions
+   before one token in the order of the list. Two statements that end at
+   one token nest, and the inner one, which begins later, closes first,
+   so the matchings go in reverse source order. The steering of a
+   generic selection nests only because no other lowering inserts before
+   the first token of its controlling expression or the comma after it.
+   [replaced] are ranges that lowering replaces whole, such as an
+   application by the name of its instance, unless the head of a
+   construction replaces them; with those of [answered], the edits
+   inside one go, and the range's own edits replace them. *)
+let text_edits tokens ~declarations ~replaced typed =
+  let answered = Typec_sema.Expressions.answered typed in
+  let constructions = Typec_sema.Expressions.constructions typed in
+  let heads = List.map (construction_head tokens) constructions in
+  let in_head { span; _ } =
+    List.exists
+      (fun (head : Tree.span) ->
+        head.first <= span.first && span.last <= head.last)
+      heads
+  in
+  let dropped =
+    outermost
+      (one_per_span
+         (List.concat_map dropped_ranges answered
+         @ List.filter (fun range -> not (in_head range)) replaced))
+  in
+  let kept edit = not (List.exists (goes_with edit) dropped) in
+  let declaration (lowered, declaration) =
+    type_declaration tokens ~lowered declaration
   in
   let lowered =
-    List.concat_map (type_declaration tokens) declarations
+    List.concat_map declaration declarations
     @ List.concat_map (construction tokens) constructions
-    @ List.concat_map (matching tokens) (List.rev matchings)
+    @ List.concat_map (matching tokens)
+        (List.rev (Typec_sema.Expressions.matchings typed))
     @ List.concat_map (steered_controlling tokens) answered
   in
   List.concat_map (dropped_edits tokens) dropped @ List.filter kept lowered
-  |> List.stable_sort (fun (a : Emitter.edit) (b : Emitter.edit) ->
-         compare (a.range.first, a.range.count) (b.range.first, b.range.count))
+
+let named (span, name) = { span; text = name }
+
+(* Instances (design 10.3). Each text of an instance stands at the
+   anchor that its placement names, in a packing bracket; the texts at
+   one anchor share one bracket, in the order of the placements. *)
+
+(* The tokens [first] to [last] of a definition with [edits] applied, as
+   moved text: every token at its own location, and the text of each
+   edit at the edit's. *)
+let moved_text (text : Reader.t) edits ~first ~last =
+  let within (edit : Emitter.edit) =
+    first <= edit.range.first && edit.range.first <= last
+  in
+  let written (edit : Emitter.edit) =
+    match edit.text with
+    | Emitter.Code "" -> []
+    | Emitter.Code code -> [ Emitter.generated edit.location code ]
+    | Emitter.Bracketed _ -> invalid_arg "Lowering.moved_text: a bracket"
+  in
+  let token index =
+    match Emitter.token text index with
+    | Some piece -> piece
+    | None -> invalid_arg "Lowering.moved_text: an unmovable token"
+  in
+  let rec from index edits pieces =
+    match edits with
+    | _ when index > last -> List.concat (List.rev pieces)
+    | (edit : Emitter.edit) :: rest when edit.range.first = index ->
+        from (index + edit.range.count) rest (written edit :: pieces)
+    | (edit : Emitter.edit) :: _ when edit.range.first < index ->
+        invalid_arg "Lowering.moved_text: overlapping edits"
+    | _ -> from (index + 1) edits ([ token index ] :: pieces)
+  in
+  from first (Emitter.in_order (List.filter within edits)) []
+
+(* The generic's definition under the instance's name, with each type
+   parameter and application written as the name that the reading
+   found for it, from token [first] to its end. *)
+let instance_definition (text : Reader.t) instance ~first
+    (reading : Typec_sema.Declarations.instance_text) =
+  let lowered = Typec_sema.Encoding.variant_name (Applied instance) in
+  let edits =
+    text_edits text.tokens
+      ~declarations:[ (lowered, reading.generic) ]
+      ~replaced:(List.map named reading.names)
+      reading.typed
+  in
+  moved_text text edits ~first ~last:reading.generic.span.last
+
+(* What the texts of the placements are written from: the unit, what
+   its reading found, and the encodings whose typedefs stand already. *)
+type instance_context = {
+  unit : Reader.t;
+  declarations : Typec_sema.Declarations.t;
+  typedefs : (string, unit) Hashtbl.t;
+}
+
+(* Design 10.3: the typedef of each argument that no earlier instance
+   takes, after the forward declaration of each structure or union tag
+   that it names. *)
+let argument_typedefs context location (instance : Typec_sema.Ctype.instance)
+    arguments =
+  let tags = Typec_sema.Declarations.tags context.declarations in
+  let typedef encoding argument =
+    if Hashtbl.mem context.typedefs encoding then []
+    else (
+      Hashtbl.add context.typedefs encoding ();
+      let name = Typec_sema.Encoding.argument_name encoding in
+      List.filter_map Typec_sema.Type_name.forward_declaration
+        (Typec_sema.Ctype.named_tags argument)
+      @ [ "typedef "
+          ^ Typec_sema.Type_name.lowered_declaration tags argument name
+          ^ ";" ])
+  in
+  List.concat (List.map2 typedef instance.arguments arguments)
+  |> List.map (Emitter.generated location)
+
+let reading context instance =
+  match Typec_sema.Declarations.instance_text context.declarations instance with
+  | Some reading -> reading
+  | None -> invalid_arg "Lowering: an instance text without its reading"
+
+(* Step 1: [struct I; typedef struct I I;] for a structure, union or
+   variant, whose definition follows where it is needed; the whole
+   typedef of 10.2 for an alias or a distinct generic. *)
+let instance_declaration context location instance
+    (generic : Tree.type_declaration) =
+  let name = Typec_sema.Encoding.instance_name instance in
+  let forward kind =
+    [ Emitter.generated location (record_declarations kind ~tag:name name) ]
+  in
+  match generic.node.definition with
+  | Variant _ | Incomplete_variant -> forward Struct
+  | Record_alias specifier -> forward specifier.node.kind
+  | Alias _ | Distinct _ ->
+      let reading = reading context instance in
+      instance_definition context.unit instance
+        ~first:reading.generic.span.first reading
+
+(* Step 2: the rest of 10.1 or 10.2, after the forward declaration. *)
+let instance_rest context instance =
+  let reading = reading context instance in
+  match Tree.forward_declaration_end reading.generic with
+  | Some first -> instance_definition context.unit instance ~first reading
+  | None -> invalid_arg "Lowering.instance_rest: a typedef instance"
+
+let placement_text context (placement : Typec_sema.Declarations.placement) =
+  let location = context.unit.tokens.(placement.application.first).location in
+  match placement.step with
+  | Declared { generic; arguments } ->
+      argument_typedefs context location placement.instance arguments
+      @ instance_declaration context location placement.instance generic
+  | Defined -> instance_rest context placement.instance
+
+(* The placements in runs that share an anchor, each run in order. *)
+let by_anchor placements =
+  let add runs (placement : Typec_sema.Declarations.placement) =
+    match runs with
+    | (at, run) :: earlier when at = placement.at ->
+        (at, placement :: run) :: earlier
+    | _ -> (placement.at, [ placement ]) :: runs
+  in
+  List.rev_map
+    (fun (at, run) -> (at, List.rev run))
+    (List.fold_left add [] placements)
+
+let instance_brackets context =
+  let bracket (at, (run : Typec_sema.Declarations.placement list)) =
+    let first = List.hd run in
+    let location = context.unit.tokens.(first.application.first).location in
+    Emitter.bracketed context.unit ~at ~location
+      (List.concat_map (placement_text context) run)
+  in
+  List.map bracket
+    (by_anchor (Typec_sema.Declarations.placements context.declarations))
+
+(* The unit's own text: each type declaration that is no generic under
+   its own name, each generic's definition removed, as only its
+   instances write it, and each application replaced by the name of its
+   instance. *)
+let unit_edits (text : Reader.t) declarations =
+  let tokens = text.tokens in
+  let split (declaration : Tree.type_declaration) =
+    match declaration.node.type_parameters with
+    | [] ->
+        Either.Left
+          (Spelling.declared declaration.node.name.node, declaration)
+    | _ :: _ -> Either.Right { span = declaration.span; text = "" }
+  in
+  let own, generics =
+    List.partition_map split
+      (Typec_sema.Declarations.type_declarations declarations)
+  in
+  text_edits tokens ~declarations:own
+    ~replaced:
+      (generics
+      @ List.map named (Typec_sema.Declarations.instance_names declarations))
+    (Typec_sema.Declarations.typed declarations)
+
+let edits (text : Reader.t) declarations =
+  let context = { unit = text; declarations; typedefs = Hashtbl.create 16 } in
+  instance_brackets context @ unit_edits text declarations

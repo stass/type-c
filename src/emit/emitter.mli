@@ -19,9 +19,10 @@ type piece
 
 val token : Typec_cpp.Reader.t -> int -> piece option
 (** [token unit index] is the token [index] of [unit] at its own
-    location, wherever lowering writes it, or None where the token is a
-    pragma line; such a token cannot be moved, and its definition is
-    refused rather than moved without it.
+    location, wherever lowering writes it, or None where it is no
+    {!Typec_cpp.Token.is_movable} token, a pragma line or a [#]; such a
+    token cannot be moved, and its definition is refused rather than
+    moved without it.
     An identifier is written as its name ({!Typec_cpp.Reader.spelling}),
     in UTF-8 where universal character names spell it, which names the
     same identifier. *)
@@ -72,6 +73,11 @@ val bracketed : Typec_cpp.Reader.t -> at:Typec_syntax.Tree.anchor ->
     own, stands where a declaration may and never inside an
     expression. *)
 
+val in_order : edit list -> edit list
+(** [edits] in the order in which they apply: by the first token of
+    their ranges, an insertion before a token ahead of an edit that
+    replaces it, and edits of one range in the order of the list. *)
+
 (** What lowering makes of a unit: its edits, and the declarations that
     follow its text, the static assertions of {!Assumptions}. *)
 type lowered = { edits : edit list; assertions : string list }
@@ -101,8 +107,8 @@ val emit : Typec_cpp.Reader.t -> lowered -> string
     every token comes from a line marker or a [#line] directive.
 
     The ranges and pieces of the edits must be made from the tokens of
-    [unit], and a bracket's declaration parsed from them. The ranges
-    are in the order that {!Typec_cpp.Reader.rewrite} takes, and the
+    [unit], and a bracket's declaration parsed from them. [emit] applies
+    them {!in_order}; their ranges do not overlap, and the
     tokens an edit replaces belong to one file, so it never drops a
     marker that enters or leaves a file without its partner; [emit]
     raises [Invalid_argument] otherwise. *)

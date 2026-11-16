@@ -8,10 +8,9 @@ type piece = { text : string; location : Location.t }
 
 let token (unit : Reader.t) index =
   let token = unit.tokens.(index) in
-  match token.kind with
-  | Pragma _ | Typec_pragma -> None
-  | Identifier _ | Number | Character _ | String _ | Punctuator _ ->
-      Some { text = Reader.spelling unit token; location = token.location }
+  if Token.is_movable token.kind then
+    Some { text = Reader.spelling unit token; location = token.location }
+  else None
 
 (* The bytes of typec's own text: those of identifiers, UTF-8 included,
    the blank, and the punctuators of C but for '#', '%', '?', '/' and
@@ -169,8 +168,15 @@ let is_bracketed edit =
 let probes edits =
   if List.exists is_bracketed edits then [ packing_probe ] else []
 
-(* Reader.rewrite checks the order of the ranges. *)
+let in_order edits =
+  List.stable_sort
+    (fun a b ->
+      compare (a.range.first, a.range.count) (b.range.first, b.range.count))
+    edits
+
+(* Reader.rewrite checks that the ranges do not overlap. *)
 let emit (unit : Reader.t) { edits; assertions } =
+  let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;
   Reader.rewrite unit (List.map (replacement unit.tokens) edits)
   ^ assertion_block (assertions @ probes edits)

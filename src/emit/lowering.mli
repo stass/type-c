@@ -14,21 +14,19 @@
     [struct T; typedef struct T N;] before the specifier, whose tag [T]
     is [N] where it has none of its own. The leading [struct T;]
     declares the tag in the scope of the declaration (C11 6.7.2.3p7),
-    where a [typedef] alone would name one of an enclosing block. *)
+    where a [typedef] alone would name one of an enclosing block.
 
-val edits :
-  Typec_cpp.Reader.t ->
-  Typec_syntax.Tree.type_declaration list ->
-  Typec_sema.Expressions.construction list ->
-  Typec_sema.Expressions.matching list ->
-  Typec_sema.Expressions.answered list ->
-  Emitter.edit list
-(** [edits text declarations constructions matchings answered] lowers
-    [declarations], the constructor expressions [constructions], the
-    match statements and single-pattern tests [matchings] and the
-    constructs [answered], parsed
-    from [text], to edits in the order that
-    {!Emitter.emit} takes. An answered [__builtin_types_compatible_p]
+    A generic's definition is removed at its own place, and each
+    application becomes the name of its instance. The texts of the
+    instances (design 10.3) are written from the tokens of the
+    definitions, as moved text in packing brackets, at the anchors that
+    their placements name. *)
+
+val edits : Typec_cpp.Reader.t -> Typec_sema.Declarations.t -> Emitter.edit list
+(** [edits text declarations] lowers the unit [text] that [declarations]
+    read: its type declarations, constructor expressions, match
+    statements, single-pattern tests and answered constructs, and the
+    instances that it uses. An answered [__builtin_types_compatible_p]
     becomes its answer. An answered generic selection keeps its tokens,
     but the type names of its associations become types that steer the
     backend to typec's answer, and its controlling expression is wrapped

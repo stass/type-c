@@ -48,15 +48,36 @@ type item =
   | Generic_declaration
       (** a generic type (design 3.5), whose name alone is no type *)
 
-(** Where lowering places a text of an instance (design 10.3): directly
-    before the external declaration of this index in the unit, the
-    index of its {!item}, and, [within] the definition of an instance,
-    before that definition, as the use or need there counts where that
-    definition stands. *)
+(** The text of an instance that a placement writes (design 10.3): its
+    declaration, at its first use, which names the [arguments] of its
+    application of [generic] through their typedefs, or its definition,
+    at the first point that needs it complete. *)
+type step =
+  | Declared of { generic : Tree.type_declaration; arguments : Ctype.t list }
+  | Defined
+
+(** Where lowering places a text of an instance (design 10.3): at the
+    anchor [at], in front of the external declaration whose use or need
+    puts it there, or after the forward declaration that begins it. The
+    text that lowering writes from no token of the definition carries
+    the line of [application], an application of the instance. *)
 type placement = {
   instance : Ctype.instance;
-  external_declaration : int;
-  within : Ctype.instance option;
+  step : step;
+  at : Tree.anchor;
+  application : Tree.span;
+}
+
+(** The definition of an instance as lowering writes it (design 10.3):
+    the declaration of the [generic] whose definition it is, the name
+    that lowering writes for the tokens of each span in it, a use of a
+    type parameter or an application, and its constructs [typed] with
+    the instance's arguments. Spans may nest, as an application's
+    arguments do. *)
+type instance_text = {
+  generic : Tree.type_declaration;
+  names : (Tree.span * string) list;
+  typed : Expressions.t;
 }
 
 type t
@@ -64,15 +85,23 @@ type t
 val tags : t -> Ctype.tags
 val items : t -> item list
 
-val instances : t -> placement list
-(** The first use of each instance (design 10.3), where its declaration
-    stands, in the order of the first uses. *)
+val placements : t -> placement list
+(** The texts of the instances (design 10.3), in the order in which
+    they stand: a declaration where the instance is first used, and the
+    definition of a structure, union or variant instance where a point
+    first needs it complete. The texts that a definition needs, and
+    those of the instances that the definition of an alias or distinct
+    instance uses, which is its declaration, stand before it. A typedef
+    instance is whole at its declaration. *)
 
-val definitions : t -> placement list
-(** The first need of each structure, union or variant instance that a
-    point needs complete, where its definition stands, in the order in
-    which the definitions complete: one stands after the instances that
-    it needs complete. A typedef instance is whole at its declaration. *)
+val instance_names : t -> (Tree.span * string) list
+(** The name of the instance that each application of the unit's own
+    text, outside the definitions of generics, lowers to (design 13.5).
+    Spans may nest, as an application's arguments do. *)
+
+val instance_text : t -> Ctype.instance -> instance_text option
+(** The definition of an instance as its reading found it, [None] for
+    one whose definition no point needed. *)
 
 val entity : t -> Tree.reference -> entity option
 (** What a declaration that the reader has read declares, as of that
@@ -87,17 +116,10 @@ val type_declarations : t -> Tree.type_declaration list
 (** The type declarations that the reader has read, in source order:
     those that lowering replaces (design 13.5). *)
 
-val constructions : t -> Expressions.construction list
-(** The constructor expressions that the reader has typed, in source
-    order: those that lowering replaces (design 13.5). *)
-
-val matchings : t -> Expressions.matching list
-(** The match statements that the reader has typed, in source order,
-    which lowering replaces (design 13.5). *)
-
-val answered : t -> Expressions.answered list
-(** The constructs that typec answers in lowering; see
-    {!Expressions.answered}. *)
+val typed : t -> Expressions.t
+(** The expressions of the unit's own text that the reader has typed,
+    outside the definitions of generics: those whose constructs lowering
+    replaces (design 13.5). *)
 
 val linked : t -> string -> entity option
 (** The object or function with linkage (6.2.2) of that name: the one

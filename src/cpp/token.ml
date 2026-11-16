@@ -45,6 +45,15 @@ type kind =
       (** a [#pragma] line other than [#pragma typec] *)
   | Typec_pragma  (** a [#pragma typec] line, which [typec] consumes *)
 
+(** Whether lowering can write a token of this kind at a place other
+    than its own, as moved text (design 13.5): a pragma is a line and no
+    token, and a [#] would begin a directive where moved text starts a
+    line. A generic whose definition holds another is refused (design
+    10.3, P25). *)
+let is_movable = function
+  | Pragma _ | Typec_pragma | Punctuator Punctuator.Hash -> false
+  | Identifier _ | Number | Character _ | String _ | Punctuator _ -> true
+
 (** A token is the bytes [start] to [start + length - 1] of the text it
     was read from, and [length] is at least 1. A pragma token is its whole
     line, from [#] up to the newline. [location] is where diagnostics

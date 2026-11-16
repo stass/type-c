@@ -56,9 +56,55 @@ let parenthesized_under_pointer t =
   | Unknown_type _ ->
       false
 
+(* How a diagnostic names a structure, union, enumeration or distinct
+   type: by its tag, or by the name of its declaration. *)
+let shown_name t =
+  match t.shape with
+  | Enum tag -> tag_name "enum" tag.enum_name
+  | Record tag ->
+      tag_name (record_keyword tag.kind) (record_tag_name tag.record_name)
+  | Distinct distinct -> distinct.distinct_name
+  | Void | Arithmetic _ | Pointer _ | Va_list | Array _ | Function _
+  | Unknown_type _ ->
+      invalid_arg "Type_name.shown_name"
+
+let forward_declaration = function
+  | Ctype.Named_record { kind; record_name; _ } ->
+      Option.map
+        (fun tag -> record_keyword kind ^ " " ^ tag ^ ";")
+        (record_tag_name record_name)
+  | Named_enum _ -> None
+
+(* How lowered C names one (design 10.3): a type with a tag in the
+   lowered C, a variant or an alias of 10.2 included, by that tag; an
+   untagged one by the one typedef name that its encoding takes; a
+   distinct type by its typedef name, which is its instance name where
+   it is an instance. *)
+let lowered_name tags t =
+  let typedef_name () =
+    match Ctype.typedef_names tags t with
+    | [ name ] -> name
+    | [] | _ :: _ :: _ -> invalid_arg "Type_name.lowered_name: no one name"
+  in
+  match t.shape with
+  | Enum { enum_name = Some name; _ } -> "enum " ^ name
+  | Record { kind; record_name; _ } -> (
+      match record_tag_name record_name with
+      | Some name -> record_keyword kind ^ " " ^ name
+      | None -> typedef_name ())
+  | Enum { enum_name = None; _ } -> typedef_name ()
+  | Distinct { distinct_instance = Some instance; _ } ->
+      Encoding.instance_name instance
+  | Distinct { distinct_instance = None; distinct_name; _ } -> distinct_name
+  | Void | Arithmetic _ | Pointer _ | Va_list | Array _ | Function _
+  | Unknown_type _ ->
+      invalid_arg "Type_name.lowered_name"
+
 (* The declarator grows outward from the name as the type is unwrapped
-   from the outermost derivation to the specifier. *)
-let rec declaration t declarator =
+   from the outermost derivation to the specifier; [named] spells a
+   structure, union, enumeration or distinct type. *)
+let rec declared ~named t declarator =
+  let declaration = declared ~named in
   match t.shape with
   | Pointer referenced ->
       let declarator = pointer_declarator t.qualifiers declarator in
@@ -70,30 +116,29 @@ let rec declaration t declarator =
   | Array { element; length } ->
       declaration element (declarator ^ "[" ^ length_text length ^ "]")
   | Function { return; parameters } ->
-      declaration return (declarator ^ "(" ^ parameter_list parameters ^ ")")
+      declaration return
+        (declarator ^ "(" ^ parameter_list ~named parameters ^ ")")
   | Void -> specified t.qualifiers "void" declarator
   | Arithmetic arithmetic ->
       specified t.qualifiers (Arithmetic.name arithmetic) declarator
-  | Enum tag ->
-      specified t.qualifiers (tag_name "enum" tag.enum_name) declarator
-  | Record tag ->
-      let name =
-        tag_name (record_keyword tag.kind) (record_tag_name tag.record_name)
-      in
-      specified t.qualifiers name declarator
-  | Distinct distinct ->
-      specified t.qualifiers distinct.distinct_name declarator
+  | Enum _ | Record _ | Distinct _ ->
+      specified t.qualifiers (named t) declarator
   | Va_list ->
       specified t.qualifiers Typec_syntax.Builtin_typedef.va_list_name
         declarator
   | Unknown_type unknown ->
       specified t.qualifiers ("<" ^ unknown.construct ^ ">") declarator
 
-and parameter_list = function
+and parameter_list ~named = function
   | Prototype { types = []; variadic = false } -> "void"
   | Prototype { types; variadic } ->
       let ellipsis = if variadic then [ "..." ] else [] in
-      String.concat ", " (List.map of_ctype types @ ellipsis)
+      let parameter t = declared ~named t "" in
+      String.concat ", " (List.map parameter types @ ellipsis)
   | Unspecified | Old_style _ -> ""
 
-and of_ctype t = declaration t ""
+let declaration t name = declared ~named:shown_name t name
+let of_ctype t = declaration t ""
+
+let lowered_declaration tags t name =
+  declared ~named:(lowered_name tags) t name

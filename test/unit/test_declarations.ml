@@ -2568,21 +2568,42 @@ let generic_placement () =
   rejects ~file (in_c probe) "a block literal";
   accepts ~file (in_c ("struct X; " ^ probe))
 
-(* [source]'s first uses and definitions of instances: each instance name
-   with the index of its external declaration and the instance whose
-   definition holds the use or the need. *)
+(* [source]'s texts of instances in the order they stand: each instance
+   name, whether the text is its declaration or its definition, and the
+   index of the external declaration whose anchor it stands at. *)
 let placements source =
-  match read ~file:"in.tc" lp64 source with
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error);
-      ([], [])
-  | Ok (_, result) ->
+  let file = "in.tc" in
+  let text =
+    match Reader.read ~name:file (Preprocessed.text ~name:file source) with
+    | Ok text -> text
+    | Error error -> failwith (Reader.error_message error)
+  in
+  let keywords = Target.keywords lp64 Gnu in
+  let scopes =
+    match Parser.parse_with_scopes ~keywords text with
+    | Ok (_, scopes) -> scopes
+    | Error error -> failwith (Parser.error_message error)
+  in
+  let items = List.map fst scopes.declarations in
+  let declaration_at (anchor : Tree.anchor) =
+    let starts_before item = (Tree.anchor item).before <= anchor.before in
+    List.length (List.filter starts_before items) - 1
+  in
+  match Declarations.read lp64 text scopes with
+  | Error error ->
+      fail_case source ("error: " ^ Reader.error_message error);
+      []
+  | Ok result ->
       let shown (placement : Declarations.placement) =
-        ( Encoding.instance_name placement.instance,
-          placement.external_declaration,
-          Option.map Encoding.instance_name placement.within )
+        let step =
+          match placement.step with
+          | Declared _ -> "declared"
+          | Defined -> "defined"
+        in
+        (Encoding.instance_name placement.instance, step,
+         declaration_at placement.at)
       in
-      ( List.map shown (Declarations.instances result),
-        List.map shown (Declarations.definitions result) )
+      List.map shown (Declarations.placements result)
 
 let placement_indexes () =
   let expect source expected =
@@ -2592,15 +2613,26 @@ let placement_indexes () =
   expect
     (box ^ " struct s { int a; }; box(struct s) *p; \
             void f(void) { box(struct s) b; }")
-    ([ ("box__T1s", 2, None) ], [ ("box__T1s", 3, None) ]);
+    [ ("box__T1s", "declared", 2); ("box__T1s", "defined", 3) ];
   (* A nested use and need count where the definition that causes them
-     stands, which follows the definitions it needs. *)
+     stands, which follows the texts it needs. *)
   expect
     (box ^ " type wrap(T) = struct { box(T) b; }; int x; wrap(int) w;")
-    ( [ ("wrap__i", 3, None); ("box__i", 3, Some "wrap__i") ],
-      [ ("box__i", 3, Some "wrap__i"); ("wrap__i", 3, None) ] );
+    [ ("wrap__i", "declared", 3); ("box__i", "declared", 3);
+      ("box__i", "defined", 3); ("wrap__i", "defined", 3) ];
+  (* The definition of an alias instance is its declaration, which
+     follows the texts of the instances that it uses. *)
+  expect
+    (box ^ " type ref(T) = box(T) *; ref(int) r; box(int) b;")
+    [ ("box__i", "declared", 2); ("ref__i", "declared", 2);
+      ("box__i", "defined", 3) ];
+  (* Texts stand after the forward declaration of a variant that is no
+     generic, in its own external declaration. *)
+  expect
+    (box ^ " type e = | A(box(int) b);")
+    [ ("box__i", "declared", 1); ("box__i", "defined", 1) ];
   (* A definition check places nothing. *)
-  expect (box ^ " type wrap(T) = struct { box(T) b; };") ([], [])
+  expect (box ^ " type wrap(T) = struct { box(T) b; };") []
 
 let generic_definitions () =
   let file = "in.tc" in

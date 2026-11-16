@@ -425,10 +425,6 @@ structure that a variant lowers to (design 10.6).
 The constructs of later work packages are refused with the package that
 implements them.
 
-  $ printf 'type box(T) = struct { T value; };\n' > generic.tc
-  $ ./golden.exe generic.tc
-  generic.tc:1: lowering generic types is not implemented yet (design 10.3; work package 2.1) [TC0023]
-  [1]
   $ printf 'void f(void) { defer f(); }\n' > defer.tc
   $ ./golden.exe defer.tc
   defer.tc:1: `defer` is not implemented yet (design 6; work package 2.5) [TC0023]

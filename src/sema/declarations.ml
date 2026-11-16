@@ -17,22 +17,37 @@ type item =
   | Type_declaration of entity
   | Generic_declaration
 
+type step =
+  | Declared of { generic : Tree.type_declaration; arguments : Ctype.t list }
+  | Defined
+
 type placement = {
   instance : Ctype.instance;
-  external_declaration : int;
-  within : Ctype.instance option;
+  step : step;
+  at : Tree.anchor;
+  application : Tree.span;
 }
 
-(* The first use of each instance and the definitions of instances met
-   so far, each list latest first, as one value that a trial restores. *)
+type instance_text = {
+  generic : Tree.type_declaration;
+  names : (Tree.span * string) list;
+  typed : Expressions.t;
+}
+
+(* The instances used so far, the texts of instances met so far, latest
+   first, the names that lowering writes for the applications of the
+   unit's own text, and the reading of each instance's definition, as
+   one value that a trial restores. *)
 type placements = {
   used : unit Ctype.Instances.t;
-  uses : placement list;
-  definitions : placement list;
+  texts : placement list;
+  names : (Tree.span * string) list;
+  readings : instance_text Ctype.Instances.t;
 }
 
 let no_placements =
-  { used = Ctype.Instances.empty; uses = []; definitions = [] }
+  { used = Ctype.Instances.empty; texts = []; names = [];
+    readings = Ctype.Instances.empty }
 
 type t = {
   tags : Ctype.tags;
@@ -47,8 +62,11 @@ type t = {
 
 let tags result = result.tags
 let items result = result.items
-let instances result = List.rev result.placements.uses
-let definitions result = List.rev result.placements.definitions
+let placements result = List.rev result.placements.texts
+let instance_names result = result.placements.names
+
+let instance_text result instance =
+  Ctype.Instances.find_opt instance result.placements.readings
 
 let type_declarations result =
   Hashtbl.to_seq_values result.type_declarations
@@ -56,9 +74,7 @@ let type_declarations result =
   |> List.sort (fun (a : Tree.type_declaration) b ->
          compare a.span.first b.span.first)
 
-let constructions result = Expressions.constructions result.typed
-let matchings result = Expressions.matchings result.typed
-let answered result = Expressions.answered result.typed
+let typed result = result.typed
 let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name
@@ -153,15 +169,21 @@ and nesting = { depth : int; began : Tree.span; defining : Ctype.instance }
    first: the names that it uses and those that it declares, which the
    resolution property checks (design 13.5), and whether lowering writes
    the text, as it does for an instance but not for a definition check
-   or an instance read within one. *)
+   or an instance read within one. Where it does, [parameters] holds
+   the name of the typedef of each type parameter's argument, by the
+   parameter's reference, and [names] collects the name that lowering
+   writes for each use of a type parameter and each application. *)
 and moved = {
   mutable uses : Resolution.name list;
   mutable declares : Resolution.own list;
   written : bool;
+  parameters : (Tree.reference * string) list;
+  mutable names : (Tree.span * string) list;
 }
 
 (* What the placement of instances (design 10.3) asks of the external
-   declaration being read: its index in the unit, the moment it began,
+   declaration being read: the anchor where the texts of instances
+   stand, none before the first, the moment it began,
    the tags that its own text completes, with where, the tags that a
    mention in a nested scope of it declares only because none is
    visible (C11 6.7.2.3p8), and the moment of its first block literal.
@@ -172,7 +194,7 @@ and moved = {
    is a declaration of its own at file scope, which holds nothing else
    that the facts are asked about. *)
 and external_facts = {
-  index : int;
+  anchor : Tree.anchor option;
   start : Ctype.moment;
   completed : (Ctype.named_tag, Location.t) Hashtbl.t;
   nested_tags : (string, unit) Hashtbl.t;
@@ -183,7 +205,7 @@ and external_facts = {
 (* How the definition of an instance is read: [read declaration f] runs
    [f] with the type parameters of [declaration] bound to the instance's
    arguments, for an application or for the definition check. *)
-type reading = { read : 'a. Tree.type_declaration -> (unit -> 'a) -> 'a }
+type reader = { read : 'a. Tree.type_declaration -> (unit -> 'a) -> 'a }
 
 (* Raised at the first error; caught in [read]. *)
 exception Failed of error
@@ -212,8 +234,8 @@ let next_link nesting application defining =
   | Some { depth; began; defining = _ } ->
       { depth = depth + 1; began; defining }
 
-let declaration_state tags index view =
-  { index; start = Ctype.now tags; completed = Hashtbl.create 16;
+let declaration_state tags anchor view =
+  { anchor; start = Ctype.now tags; completed = Hashtbl.create 16;
     nested_tags = Hashtbl.create 16; block_literal = None;
     texts_at = { view; typedef_names = []; tags = [] } }
 
@@ -524,7 +546,8 @@ type specified = {
 type sorted = {
   storage_classes : Tree.storage_class list;
   basic : Tree.basic_type_specifier list;
-  others : Tree.type_specifier list;
+  others : (Tree.span * Tree.type_specifier) list;
+      (** each with the span of its specifier *)
   qualifiers : Tree.type_qualifier list;
   function_specifiers : Tree.function_specifier list;
   alignments : (Tree.span * Tree.alignment) list;
@@ -538,7 +561,8 @@ let sort_specifiers (specifiers : Tree.specifiers) =
     | Storage_class c ->
         { sorted with storage_classes = c :: sorted.storage_classes }
     | Type_specifier (Basic b) -> { sorted with basic = b :: sorted.basic }
-    | Type_specifier other -> { sorted with others = other :: sorted.others }
+    | Type_specifier other ->
+        { sorted with others = (specifier.span, other) :: sorted.others }
     | Type_qualifier q -> { sorted with qualifiers = q :: sorted.qualifiers }
     | Function_specifier f ->
         { sorted with function_specifiers = f :: sorted.function_specifiers }
@@ -979,9 +1003,11 @@ let declare_in state scope span specified declared (derived : derived) =
       entity)
   | None -> invalid_arg "Declarations: a declarator without a name"
 
-let is_untagged (others : Tree.type_specifier list) =
+let is_untagged (others : (Tree.span * Tree.type_specifier) list) =
   match others with
-  | [ Struct_or_union { tag = None; _ } ] | [ Enum { tag = None; _ } ] -> true
+  | [ (_, Struct_or_union { tag = None; _ }) ] | [ (_, Enum { tag = None; _ }) ]
+    ->
+      true
   | _ -> false
 
 (* Design 3.5 rule 2: a declarator that derives another type names that
@@ -1036,7 +1062,7 @@ and base_type state span sorted =
       | Some arithmetic ->
           checked state span (Ctype.arithmetic state.target arithmetic)
       | None -> complex_integer_type state span basic)
-  | [], [ other ] -> other_type state span other
+  | [], [ (own, other) ] -> other_type state span ~own other
   | _ ->
       fail state span
         (Rule.c_text "type specifiers that do not combine (C11 6.7.2p2)")
@@ -1077,7 +1103,8 @@ and complex_integer_type state span basic =
    completeness of a record, the facts that typec computes of it, while
    one may change the integer type of an enumeration, which is then
    unknown wherever the tag names it. *)
-and other_type state span (specifier : Tree.type_specifier) =
+and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
+    =
   match specifier with
   | Basic _ -> invalid_arg "Declarations.other_type"
   | Atomic_type type_name ->
@@ -1102,10 +1129,12 @@ and other_type state span (specifier : Tree.type_specifier) =
       t
   | Typeof_expression expression -> typeof_expression state expression
   | Application { name; generic; arguments } ->
-      applied_type state span name generic arguments
+      applied_type state own name generic arguments
   | Typedef_name { name; declaration } -> (
       match entity_used state span name declaration with
-      | Some { declared = Typedef t; _ } -> t
+      | Some { declared = Typedef t; _ } ->
+          note_parameter_use state own declaration;
+          t
       | Some _ | None ->
           fail state span (Rule.c_text (quote name ^ " is not a typedef name")))
 
@@ -1343,8 +1372,13 @@ and read_member_declarator state specified
    declaration that its text stands before. The point reports a type
    that stays incomplete, or leaves it to the backend. *)
 and needs_complete state t =
+  (* The application of the definition is one before its reading, not
+     one that the definition holds. *)
+  let applied_at = state.applied_at in
   (match Ctype.define_instance state.tags t with
-  | Some instance -> note_definition state instance
+  | Some instance ->
+      let application = Ctype.Instances.find instance applied_at in
+      note_text state instance Defined ~application
   | None -> ());
   let completed_here tag =
     Hashtbl.find_opt state.external_facts.completed tag
@@ -1354,15 +1388,18 @@ and needs_complete state t =
       fail_completed_here state nesting t completed
   | (Some _ | None), _ -> ()
 
-and placement_here state instance =
-  { instance; external_declaration = state.external_facts.index;
-    within = Option.map (fun nesting -> nesting.defining) state.nesting }
-
-and note_definition state instance =
+(* A text of [instance] at the anchor of the external declaration being
+   read, after every text met before it: what the reading of a
+   definition puts there is met before the text of that definition, as
+   it stands (design 10.3), so the order of the texts is the order in
+   which they are met. *)
+and note_text state instance step ~application =
+  let placement =
+    { instance; step; at = Option.get state.external_facts.anchor;
+      application }
+  in
   let placements = state.placements in
-  state.placements <-
-    { placements with
-      definitions = placement_here state instance :: placements.definitions }
+  state.placements <- { placements with texts = placement :: placements.texts }
 
 (* The text of the instance being read stands before this external
    declaration, which completes [t] only after it, at [completed]. *)
@@ -2332,6 +2369,7 @@ and alias_record state kind (name : Tree.identifier)
 and read_generic state (scoped : Tree.scoped_type_declaration) =
   let declaration = scoped.declaration in
   let { Tree.declared; type_parameters; _ } = declaration.node in
+  refuse_unmovable state declaration.span;
   Hashtbl.replace state.generics (Tree.In_tree declared.id) declaration;
   Hashtbl.replace state.definition_views declared.id
     state.external_facts.texts_at.view;
@@ -2347,11 +2385,27 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
     { read =
         (fun declaration read ->
           read_definition state declaration (List.map snd parameters)
-            ~written:false read) }
+            ~lowered:None read) }
   in
+  (* The check applies the generic at its own definition, which a
+     placement of the trial names as its application. *)
   in_trial state (fun () ->
       let instance = instance_of state declaration parameters in
+      state.applied_at <-
+        Ctype.Instances.add instance declaration.span state.applied_at;
       needs_complete state (instance_type state declaration instance check))
+
+(* Design 10.3, P25: every instance writes the definition as its tokens,
+   and a pragma line or a [#] is none that moved text can hold. *)
+and refuse_unmovable state (span : Tree.span) =
+  let tokens = state.text.tokens in
+  for index = span.first to span.last do
+    if not (Token.is_movable tokens.(index).kind) then
+      fail state { first = index; last = index }
+        (Rule.message Generic_pragma
+           "the definition of a generic type holds a pragma or a `#`, \
+            which the text of its instances cannot hold")
+  done
 
 (* [read ()] as a trial, after which the tags and the latest application
    of each instance are as they were before it. The entities and tags
@@ -2375,14 +2429,19 @@ and applied_type state span name reference arguments =
   in
   let arguments = List.map argument arguments in
   let instance = instance_of state declaration arguments in
-  note_application state instance arguments span;
+  let first_use = note_application state instance arguments span in
+  let types = List.map snd arguments in
   let applied =
     { read =
         (fun declaration read ->
-          in_instance state declaration instance (List.map snd arguments)
-            read) }
+          in_instance state declaration instance types read) }
   in
-  instance_type state declaration instance applied
+  let applied_type = instance_type state declaration instance applied in
+  if first_use then
+    note_text state instance ~application:span
+      (Declared { generic = declaration; arguments = types });
+  note_name state span (Encoding.instance_name instance);
+  applied_type
 
 (* The latest declaration of the generic that an application names: the
    variant that completes an incomplete one, once read. *)
@@ -2392,8 +2451,12 @@ and generic_declaration state span name reference =
   | None -> not_read state span name
 
 (* The latest application of each instance, where an error of its
-   definition is reported (rule 5), and its first use, where its texts
-   stand (10.3); a check forgets its own ([in_trial]). A mention that
+   definition is reported (rule 5), and whether it is the first use,
+   where its texts stand (10.3); a check forgets its own ([in_trial]).
+   The declaration of the instance is noted after its type is read,
+   which reads the definition of an alias or a distinct generic: what
+   that puts before the declaration, which is the whole of such an
+   instance, is met first. A mention that
    the forward declaration of a tag would change is refused at every
    application, as the tag line of an argument stands at the first use
    of its typedef, not of the instance; a later use in another external
@@ -2403,13 +2466,36 @@ and note_application state instance arguments span =
   state.applied_at <- Ctype.Instances.add instance span state.applied_at;
   List.iter (refuse_changed_mention state) arguments;
   let placements = state.placements in
-  if not (Ctype.Instances.mem instance placements.used) then (
+  let first_use = not (Ctype.Instances.mem instance placements.used) in
+  if first_use then (
     List.iter (refuse_undeclared_argument state) arguments;
     List.iter (note_tag_lines state) arguments;
     state.placements <-
       { placements with
-        used = Ctype.Instances.add instance () placements.used;
-        uses = placement_here state instance :: placements.uses })
+        used = Ctype.Instances.add instance () placements.used });
+  first_use
+
+(* The name that lowering writes for the text at [span] (design 10.3):
+   in the unit's own text, or in the definition of the instance being
+   read where lowering writes it. *)
+and note_name state span name =
+  match state.moved with
+  | Some moved ->
+      if moved.written then moved.names <- (span, name) :: moved.names
+  | None ->
+      let placements = state.placements in
+      state.placements <-
+        { placements with names = (span, name) :: placements.names }
+
+(* A use of a type parameter in a definition that lowering writes is
+   written as the typedef of its argument (design 10.3). *)
+and note_parameter_use state span reference =
+  match state.moved with
+  | Some moved -> (
+      match List.assoc_opt reference moved.parameters with
+      | Some name -> note_name state span name
+      | None -> ())
+  | None -> ()
 
 (* Design 10.3: before the typedef of an argument, which stands with the
    instance at its first use, lowering writes [struct T;] for each
@@ -2617,8 +2703,9 @@ and in_instance :
   let written =
     match state.moved with Some outer -> outer.written | None -> true
   in
+  let lowered = if written then Some instance else None in
   let read_instance () =
-    read_definition state declaration arguments ~written read
+    read_definition state declaration arguments ~lowered read
   in
   match Fun.protect ~finally:restore read_instance with
   | result -> result
@@ -2629,28 +2716,52 @@ and in_instance :
    to [arguments], in views of its own, followed by the one check of the
    resolution property (design 13.5) on what the reading found: at the
    place in front of the external declaration being read, where the
-   instance's text stands, if lowering writes the text. *)
+   instance's text stands, if lowering writes the text: the text of the
+   [lowered] instance, whose reading it records. *)
 and read_definition :
       'a.
       state ->
       Tree.type_declaration ->
       Ctype.t list ->
-      written:bool ->
+      lowered:Ctype.instance option ->
       (unit -> 'a) ->
       'a =
- fun state declaration arguments ~written read ->
+ fun state declaration arguments ~lowered read ->
   let outer = state.moved in
-  let moved = { uses = []; declares = []; written } in
+  let moved =
+    { uses = []; declares = []; written = Option.is_some lowered;
+      parameters = argument_names declaration lowered; names = [] }
+  in
   state.moved <- Some moved;
   let read_and_check () =
-    let result =
+    let result, typed =
       in_own_views state (fun () ->
-          with_arguments state declaration arguments read)
+          let result = with_arguments state declaration arguments read in
+          (result, state.typed))
     in
     check_resolution state declaration moved;
+    Option.iter (note_instance_text state declaration moved typed) lowered;
     result
   in
   Fun.protect ~finally:(fun () -> state.moved <- outer) read_and_check
+
+(* The name of the typedef of each argument of [lowered], by the
+   reference of its type parameter (design 10.3). *)
+and argument_names (declaration : Tree.type_declaration) lowered =
+  let named (parameter : Tree.parameter_name) encoding =
+    (Tree.In_tree parameter.declared.id, Encoding.argument_name encoding)
+  in
+  match lowered with
+  | Some (instance : Ctype.instance) ->
+      List.map2 named declaration.node.type_parameters instance.arguments
+  | None -> []
+
+and note_instance_text state generic moved typed instance =
+  let text = { generic; names = moved.names; typed } in
+  let placements = state.placements in
+  state.placements <-
+    { placements with
+      readings = Ctype.Instances.add instance text placements.readings }
 
 and check_resolution state (declaration : Tree.type_declaration) moved =
   let text =
@@ -2917,9 +3028,17 @@ let note_forward_declaration state (scoped : Tree.scoped_type_declaration) =
           tags = lowered :: facts.texts_at.tags }
   | [], (Incomplete_variant | Alias _ | Distinct _) | _ :: _, _ -> ()
 
-let read_external state index
-    ((item : Tree.external_declaration Tree.item), view) =
-  state.external_facts <- declaration_state state.tags index view;
+(* The texts of instances stand in front of an external declaration, or
+   after the forward declaration that begins it, where its instances
+   follow that ([note_forward_declaration]). *)
+let texts_anchor item =
+  match Tree.after_forward_declaration item with
+  | Some after -> after
+  | None -> Tree.anchor item
+
+let read_external state ((item : Tree.external_declaration Tree.item), view) =
+  state.external_facts <-
+    declaration_state state.tags (Some (texts_anchor item)) view;
   match item.declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
@@ -2997,14 +3116,14 @@ let read target text (scopes : Parser.scopes) =
       applied_at = Ctype.Instances.empty;
       instance_tokens = 0;
       nesting = None;
-      external_facts = declaration_state tags 0 Parser.View.empty;
+      external_facts = declaration_state tags None Parser.View.empty;
       placements = no_placements;
       place = At_file_scope;
       next_entity = 0;
     }
   in
   declare_builtin_typedefs state;
-  let read_all () = List.mapi (read_external state) scopes.declarations in
+  let read_all () = List.map (read_external state) scopes.declarations in
   let end_deferral () = Ctype.end_deferral state.tags in
   match Fun.protect ~finally:end_deferral read_all with
   | items ->

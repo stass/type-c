@@ -32,13 +32,7 @@ let lowered source =
   let unit = List.map fst scopes.declarations in
   match Declarations.read lp64 text scopes with
   | Ok declarations ->
-      let edits =
-        Lowering.edits text
-          (Declarations.type_declarations declarations)
-          (Declarations.constructions declarations)
-          (Declarations.matchings declarations)
-          (Declarations.answered declarations)
-      in
+      let edits = Lowering.edits text declarations in
       (text, unit, edits)
   | Error error -> failwith (Reader.error_message error)
 
@@ -137,12 +131,7 @@ let bracketed_after_forward source =
     Emitter.bracketed text ~at ~location
       [ Emitter.generated location "struct s { int i; };" ]
   in
-  let edits =
-    List.stable_sort
-      (fun (a : Emitter.edit) (b : Emitter.edit) ->
-        compare (a.range.first, a.range.count) (b.range.first, b.range.count))
-      (bracket :: edits)
-  in
+  let edits = bracket :: edits in
   words (before_typec_text (Emitter.emit text { edits; assertions = [] }))
 
 let bracket =

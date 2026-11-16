@@ -6,22 +6,144 @@ applications and the refusals that the parser makes. Each source is
 preprocessed text, as the backend writes it for -E; a file named *.tc
 holds Type-C text.
 
-Lowering writes no instance yet, so a program that declares a generic
-type is refused once its typing has passed (design 10.3; work package
-2.1).
+A generic's definition is removed at its own place, each application
+becomes the name of its instance, and each instance is written from the
+definition's tokens in a packing bracket before the external
+declaration of its first use: its declaration there, with the typedef
+of each argument, and its definition before the first point that needs
+it complete (design 10.3). A use under a pointer needs nothing
+complete.
 
   $ cat > list.tc <<'EOF'
   > type list(T) = | Nil | Cons(T head, list(T) *tail);
   > list(int) *numbers;
   > EOF
   $ ./golden.exe list.tc
-  list.tc:1: lowering generic types is not implemented yet (design 10.3; work package 2.1) [TC0023]
+  # 1 "list.tc"
+  
+  # 1 "list.tc"
+  
+  # 1 "list.tc"
+  
+  
+  # 2 "list.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "list.tc"
+  typedef int __tc_arg__i; struct list__i; typedef struct list__i list__i;
+  # 2 "list.tc"
+  #pragma pack(pop)
+  # 2 "list.tc"
+  
+  # 2 "list.tc"
+  list__i
+  # 2 "list.tc"
+   *numbers;
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+A structure needed complete is defined where the need is: a file-scope
+object needs its type complete. An argument that is an instance is
+named by its tag, so that its typedef and the instances that take it
+stand before the typedef name is declared, and the instance's own
+forward declaration of the tag comes first (design 10.3).
+
+  $ cat > pair.tc <<'EOF'
+  > type vector(T) = struct { T *data; unsigned long length; };
+  > type pair(A, B) = struct { A first; B second; };
+  > vector(int) *numbers;
+  > pair(vector(int), int) p;
+  > EOF
+  $ ./golden.exe pair.tc | sed '/<typec>/,$d'
+  # 1 "pair.tc"
+  
+  # 1 "pair.tc"
+  
+  # 1 "pair.tc"
+  
+  
+  # 2 "pair.tc"
+  
+  # 2 "pair.tc"
+  
+  
+  # 3 "pair.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 3 "pair.tc"
+  typedef int __tc_arg__i; struct vector__i; typedef struct vector__i vector__i;
+  # 3 "pair.tc"
+  #pragma pack(pop)
+  # 3 "pair.tc"
+  
+  # 3 "pair.tc"
+  vector__i
+  # 3 "pair.tc"
+   *numbers;
+  
+  # 4 "pair.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 4 "pair.tc"
+  struct vector__i; typedef struct vector__i __tc_arg__I6vectoriE; struct pair__I6vectoriEi; typedef struct pair__I6vectoriEi pair__I6vectoriEi;
+  # 1 "pair.tc"
+  struct vector__i { __tc_arg__i * data ; unsigned long length ; } ;
+  # 2 "pair.tc"
+  struct pair__I6vectoriEi { __tc_arg__I6vectoriE first ; __tc_arg__i second ; } ;
+  # 4 "pair.tc"
+  #pragma pack(pop)
+  # 4 "pair.tc"
+  
+  # 4 "pair.tc"
+  pair__I6vectoriEi
+  # 4 "pair.tc"
+   p;
+  
+
+An association of an answered generic selection whose type name is an
+application is steered as any other: the steering type replaces the
+application (design 13.5).
+
+  $ cat > steered.tc <<'EOF'
+  > type handle(T) = distinct T *;
+  > handle(int) h;
+  > int a = _Generic(h, handle(int): 1, int *: 2);
+  > EOF
+  $ ./golden.exe steered.tc | grep -v '^#' | grep -F 'char (*)'
+  ), (char (*)[1])0)
+  char (*)[1]
+  char (*)[2]
+
+A generic whose definition holds a pragma line, which is also what a
+_Pragma operator becomes, is refused: the text of an instance holds no
+pragma (design 10.3, P25).
+
+  $ cat > pragma.tc <<'EOF'
+  > type box(T) = struct {
+  > #pragma pack(1)
+  >   T value;
+  > };
+  > EOF
+  $ ./golden.exe pragma.tc
+  pragma.tc:2: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold (design 10.3, P25) [TC0047]
   [1]
 
 An instance of a generic variant is a variant (design 3.5 rule 3): its
 constructors build it, qualified or against a target type, and matching
-opens it (design 3.3, 4). Typing passes here, and lowering refuses the
-unit.
+opens it (design 3.3, 4).
 
   $ cat > construct.tc <<'EOF'
   > type list(T) = | Nil | Cons(T head, list(T) *tail);
@@ -35,8 +157,94 @@ unit.
   > }
   > EOF
   $ ./golden.exe construct.tc
-  construct.tc:1: lowering generic types is not implemented yet (design 10.3; work package 2.1) [TC0023]
-  [1]
+  # 1 "construct.tc"
+  
+  # 1 "construct.tc"
+  
+  # 1 "construct.tc"
+  
+  
+  # 2 "construct.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "construct.tc"
+  typedef int __tc_arg__i; struct list__i; typedef struct list__i list__i;
+  # 1 "construct.tc"
+  enum list__i_tag { list__i_Nil, list__i_Cons }; struct list__i { enum list__i_tag tag; union { struct { __tc_arg__i head ; list__i * tail ; } Cons; } u; };
+  # 2 "construct.tc"
+  #pragma pack(pop)
+  # 2 "construct.tc"
+  int sum(
+  # 2 "construct.tc"
+  list__i
+  # 2 "construct.tc"
+   l) {
+    
+  # 3 "construct.tc"
+  list__i
+  # 3 "construct.tc"
+   rest = 
+  # 3 "construct.tc"
+  { .tag = list__i_Nil }
+  # 3 "construct.tc"
+  , first = 
+  # 3 "construct.tc"
+  { .tag = list__i_Cons, .u.Cons = { 
+  # 3 "construct.tc"
+  1, &rest
+  # 3 "construct.tc"
+   } }
+  # 3 "construct.tc"
+  ;
+    (void)first;
+    
+  # 5 "construct.tc"
+  { const struct list__i *const __tc_match = &(
+  # 5 "construct.tc"
+  l
+  # 5 "construct.tc"
+  ); switch (__tc_match->tag) {
+  # 5 "construct.tc"
+  
+    
+  # 6 "construct.tc"
+  case list__i_Nil: {
+  # 6 "construct.tc"
+   return 0;
+    
+  # 7 "construct.tc"
+   __builtin_trap(); }
+  # 7 "construct.tc"
+  
+  # 7 "construct.tc"
+  case list__i_Cons: { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail; {
+  # 7 "construct.tc"
+   return head + (tail ? sum(*tail) : 0);
+    
+  # 8 "construct.tc"
+   } __builtin_trap(); }
+  # 8 "construct.tc"
+  
+  # 8 "construct.tc"
+  default: __builtin_trap(); } }
+  # 8 "construct.tc"
+  
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
 A match on an instance covers each of its constructors (design 4.2 rule
 1), and only constructors and matching open it (design 3.2 rule 6). Its

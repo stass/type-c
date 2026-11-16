@@ -16,3 +16,15 @@ val of_ctype : Ctype.t -> string
 val declaration : Ctype.t -> string -> string
 (** [declaration t name] declares [name] with type [t], such as
     ["int (*name)[3]"]. *)
+
+val forward_declaration : Ctype.named_tag -> string option
+(** [struct T;] or [union T;] for a structure or union whose tag in the
+    lowered C is [T] (design 10.3); [None] for an enumeration, which ISO
+    C does not declare so, and for an untagged type. *)
+
+val lowered_declaration : Ctype.tags -> Ctype.t -> string -> string
+(** {!declaration} as lowered C writes it (design 10.3), of a type that
+    has an encoding: a structure, union or enumeration by its tag in the
+    lowered C, that of a variant or an alias of 10.2 included, or else
+    by the one typedef name that names it, and a distinct type by its
+    name. *)

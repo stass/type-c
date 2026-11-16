@@ -212,7 +212,9 @@ let outside ~first ~count =
 let () =
   check "overlapping edits"
     (out_of_order [ replacement; edit unit ~first:3 ~count:1 (at 1) "2" ]);
-  check "edits out of order" (out_of_order [ insertion; replacement ]);
+  check "edits in any order"
+    (emit unit [ insertion; replacement ]
+    = emit unit [ replacement; insertion ]);
   check "replacement past the last token" (outside ~first:9 ~count:3);
   check "insertion after the last token" (outside ~first:11 ~count:0);
   check "range before the first token" (outside ~first:(-1) ~count:1);

@@ -2156,8 +2156,11 @@ much as a definition, stands between the lines `#pragma pack(push)` and
 `#pragma pack()` before it and `#pragma pack(pop)` after it. The layout
 of an instance is then the one that the command line gives, whatever
 packing a pragma has put in force where its first use puts it, and the
-packing around it stays as it was. No rule need say which of these texts
-can hold a layout, since all are written through the one bracket. A
+packing around it stays as it was. The texts that stand at one place,
+before an external declaration or after the forward declaration that
+begins one, share one bracket, in their order. No rule need say
+which of these texts can hold a layout, since all are written through
+the one bracket. A
 generic that is defined under `#pragma pack` is not packed by it; a
 struct or union in a generic that is to be packed says so in the
 definition, with `__attribute__((packed))`, which every instance then
@@ -2932,9 +2935,9 @@ takes the line of that token. Text of an instance that lowering writes
 from no token of the definition, as the declaration of an argument's
 typedef, the forward declaration of a tag and the packing bracket are,
 carries the line of the application or call that puts it there, the
-construct that it lowers. The marker after the text gives the place of
-the external
-declaration that follows. Every one of these markers takes the flags 3
+construct that it lowers; the texts at one place share one bracket,
+whose lines carry that of the first. The marker after the text gives
+the place of the external declaration that follows. Every one of these markers takes the flags 3
 and 4 of its location by the rule above, and moved text has no rule of
 its own for them. An instance of a generic that a system header defines
 is therefore exempt from warnings as the header is, wherever its first

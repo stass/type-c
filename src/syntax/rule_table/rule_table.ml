@@ -250,6 +250,12 @@ let rows =
          type parameter, a generic or a universe name, where the place \
          that lowering writes it at declares a C entity of its \
          spelling, which the backend would read." };
+    Live { name = "Generic_pragma"; code = 47;
+      clause = Some "design 10.3, P25";
+      meaning =
+        "A generic whose definition holds a [#pragma] line, which a \
+         [_Pragma] operator also becomes, or a [#] punctuator, which the \
+         text of an instance cannot hold." };
   ]
 
 let () =

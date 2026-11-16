@@ -708,26 +708,29 @@ is [type-c-language-design.md](type-c-language-design.md).
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
-- [High] Pragma lines in a generic's definition. Design 10.3 makes a
-  generic whose definition holds a pragma an error (P25), and nothing
-  reports it: `Emitter.token` makes no piece of a pragma line or of a
-  `#` punctuator, so lowering could only drop the token. Part 9 of
-  package 2.1 refuses such a generic with a rule code of its own, a
-  generic type and a generic function alike. Tests: a generic with a
-  `#pragma` line and one with a `_Pragma` operator are refused with
-  that code, and the same definitions without the pragma give
-  instances. The design does not say what becomes of a `#` punctuator
-  in a definition, which `Emitter.token` drops as well: in an attribute
-  argument, which the parser skips, dropping it would change the
-  argument. Refuse it in part 9 too unless the design gives it a piece.
-- [Medium] The order of edits that `Emitter.emit` takes is made by the
-  sort at the end of `Lowering.edits`, and a test that adds a bracket
-  (`test_lowering.ml`, `bracketed_after_forward`) repeats it. A bracket
-  at the anchor after a variant's forward declaration is valid only as
-  an insertion that sorts before the head replacing the name, so part 9
-  of package 2.1, which merges brackets with the edits of lowering,
-  would repeat it again. Keep the order in one place: one function that
-  merges edits, or the sort in `Emitter.emit`.
+- [Medium] Lowering is quadratic in the replaced ranges of a unit:
+  every application is one, and `outermost`, `kept` and `in_head` in
+  `Lowering.text_edits` compare each with each (8000 lines of
+  `box(int) *p;` take 1.5 s, against 0.09 s without the application).
+  Sort the ranges by first token and longest first and sweep once.
+- [Medium] An application or a type parameter in the arguments of an
+  attribute, which typing does not read, gets no name and reaches the
+  backend as written: `aligned(sizeof(box(long)))`, and `sizeof(U)` in
+  an attribute of a generic's definition. Name each such identifier at
+  the scan that `Resolution` makes of unread text, or refuse a generic
+  or type parameter there with a rule code.
+- [Medium] The forward declarations of tags before an argument's
+  typedef are decided twice: `note_tag_lines` in `Declarations` records
+  those of `Named` records for the resolution check, and `Lowering`
+  writes one for every tagged record (`Type_name.forward_declaration`),
+  variant, alias and instance tags too, which file scope declares
+  already. Let the `Declared` step carry the lines and the encodings
+  whose typedefs are new, so lowering writes what sema checked and
+  needs no table of written typedefs.
+- [Low] `external_facts.anchor` is an option only for the state before
+  the first external declaration, and `note_text` takes it with
+  `Option.get`. Build the facts at the first external declaration, or
+  make the facts themselves optional.
 - [Medium] The record of what a generic's definition uses and declares,
   which `Resolution.check` reads, is complete only while every lookup of
   a use in `state.entities` and `state.tag_types` goes through
