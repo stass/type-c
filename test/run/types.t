@@ -5,8 +5,8 @@ typec agrees with its backends on the types of C. type_probe reads the
 target model from a backend's predefined macros and writes static
 assertions of what typec computes for that target: the integer promotions,
 those of bit-fields, the usual arithmetic conversions, the integer type of
-enumerations and the compatibility of pairs of types. The backend compiles
-the file only if it agrees on every one. The backends are those that
+enumerations and the compatibility of pairs of types, where typec knows
+it. The backend compiles the file only if it agrees on every one. The backends are those that
 backends.sh names, for two targets (its second_target), in C11 so that
 `int ()` declares no prototype.
 

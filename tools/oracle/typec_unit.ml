@@ -21,6 +21,7 @@ let model ~cc options =
       | Error error -> failwith (Target_query.error_message ~program:cc error))
 
 type t = {
+  target : Target.t;
   text : Reader.t;
   unit : Tree.translation_unit;
   declarations : Declarations.t;
@@ -33,7 +34,7 @@ let read dialect target ~name contents =
   let keywords = Target.keywords target dialect in
   let* unit = Parser.parse ~keywords text in
   let* declarations = Declarations.read target text unit in
-  Ok { text; unit; declarations }
+  Ok { target; text; unit; declarations }
 
 type expression = { first : int; limit : int; typed : Expressions.typed }
 

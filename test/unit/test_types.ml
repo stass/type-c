@@ -323,7 +323,8 @@ let oversized_composite () =
   check "oversized composite"
     (error_of (Ctype.composite lp64 tags location a b))
     (Some Too_large)
-  && check "oversized composite, compatible" (Ctype.compatible lp64 tags a b)
+  && check "oversized composite, compatible"
+       (Ctype.compatible lp64 tags location a b)
        (Answer true)
 
 let construction_facts () =
@@ -338,9 +339,9 @@ let construction_facts () =
                                    function_type ]))
        (func int_type (prototype [ int_type; pointer char_type;
                                    pointer function_type ]))
-  && check "the return type is unqualified"
-       (func (qualify const int_type) Unspecified)
-       (func int_type Unspecified)
+  && check "the return type keeps its qualifiers"
+       (Type_name.of_ctype (func (qualify const int_type) (prototype [])))
+       "const int (void)"
   && check "lvalue conversion drops qualifiers"
        (Ctype.lvalue_conversion (qualify { const with atomic = true } int_type))
        int_type
@@ -634,7 +635,7 @@ let check_composite (name, a, b, expected) =
     | None -> Error Ctype.Incompatible
   in
   check name (Ctype.composite lp64_clang tags location a b) expected_composite
-  && check (name ^ ", compatible") (Ctype.compatible lp64 tags b a)
+  && check (name ^ ", compatible") (Ctype.compatible lp64 tags location b a)
        (Answer (Option.is_some expected))
 
 (* GCC gives an enumerated type and its compatible integer type the
@@ -657,9 +658,59 @@ let enum_integer_composite_with_gcc () =
        (Ok (qualify const composite))
   && check "enum u, enum u with GCC" (composite_with_gcc enum enum) (Ok enum)
 
+(* Clang keeps the qualifiers of a return type and GCC drops all but
+   _Atomic of them, so with GCC a comparison that turns on them depends on
+   an unknown type, and the composite is an unknown function type. *)
+let return_qualifiers () =
+  let unknown kind =
+    { Unknown.construct = "the qualifiers of a function's return type";
+      location;
+      kind;
+      cause = Typed_differently }
+  in
+  let returning return = func return (prototype []) in
+  let const_int = returning (qualify const int_type)
+  and plain_int = returning int_type
+  and plain_long = returning long_type
+  and atomic_int = returning (qualify atomic int_type) in
+  let compatible target a b = Ctype.compatible target tags location a b
+  and composite target a b = Ctype.composite target tags location a b
+  and same_type target a b = Ctype.same_type target tags location a b in
+  let unknown_function = Ctype.unknown (unknown Unknown_function) in
+  check "const int (void), int (void) with Clang"
+    (compatible lp64_clang const_int plain_int) (Answer false)
+  && check "const int (void), int (void) with GCC"
+       (compatible lp64 const_int plain_int)
+       (Depends_on (unknown Unknown_object))
+  && check "const int (*)(void), int (*)(void) with GCC"
+       (compatible lp64 (pointer const_int) (pointer plain_int))
+       (Depends_on (unknown Unknown_object))
+  && check "const int (void), long (void) with GCC"
+       (compatible lp64 const_int plain_long) (Answer false)
+  && check "_Atomic int (void), int (void) with GCC"
+       (compatible lp64 atomic_int plain_int) (Answer false)
+  && check "const int (void) with itself with GCC"
+       (compatible lp64 const_int const_int) (Answer true)
+  && check "composite of const int (void), int (void) with Clang"
+       (composite lp64_clang const_int plain_int) (Error Incompatible)
+  && check "composite of const int (void), int (void) with GCC"
+       (composite lp64 const_int plain_int) (Ok unknown_function)
+  && check "composite of const int (*)(void), int (*)(void) with GCC"
+       (composite lp64 (pointer const_int) (pointer plain_int))
+       (Ok (pointer unknown_function))
+  && check "composite of const int (void), long (void) with GCC"
+       (composite lp64 const_int plain_long) (Error Incompatible)
+  && check "same type const int (void), int (void) with Clang"
+       (same_type lp64_clang const_int plain_int) (Answer false)
+  && check "same type const int (void), int (void) with GCC"
+       (same_type lp64 const_int plain_int)
+       (Depends_on (unknown Unknown_object))
+  && check "same type const int (void), long (void) with GCC"
+       (same_type lp64 const_int plain_long) (Answer false)
+
 let unsigned_short_parameter () =
   check "int(unsigned short), int() on a 16-bit int target"
-    (Ctype.compatible int16 tags
+    (Ctype.compatible int16 tags location
        (func int_type (prototype [ integer Unsigned_short ]))
        (func int_type Unspecified))
     (Answer false)
@@ -747,33 +798,34 @@ let unknown_facts () =
        (error_of (Ctype.qualify const f))
        (Some Qualified_function)
   && check "compatible with an unknown type"
-       (Ctype.compatible lp64 tags (pointer u) (pointer int_type))
+       (Ctype.compatible lp64 tags location (pointer u) (pointer int_type))
        (Depends_on object_unknown)
   && check "known parts decide incompatibility"
-       (Ctype.compatible lp64 tags (pointer u) (array u (Constant 1)))
+       (Ctype.compatible lp64 tags location (pointer u) (array u (Constant 1)))
        (Answer false)
   && check "an object is not a function, unknown or not"
-       (Ctype.compatible lp64 tags u function_type)
+       (Ctype.compatible lp64 tags location u function_type)
        (Answer false)
   && check "the composite is the unknown side"
        (Ctype.composite lp64 tags location (array int_type Unknown) u)
        (Ok u)
   && check "an enumeration of unknown integer type and int"
-       (Ctype.compatible lp64 tags packed int_type)
+       (Ctype.compatible lp64 tags location packed int_type)
        (Depends_on object_unknown)
   && check "the composite of such an enumeration and int is int"
        (Ctype.composite lp64_clang tags location packed int_type)
        (Ok int_type)
   && check "promotion of an enumeration of unknown integer type"
-       (Ctype.compatible lp64 tags
+       (Ctype.compatible lp64 tags location
           (func int_type (prototype [ packed ]))
           (func int_type Unspecified))
        (Depends_on object_unknown)
   && check "the same type as an unknown one"
-       (Ctype.same_type (pointer u) (pointer int_type))
+       (Ctype.same_type lp64 tags location (pointer u) (pointer int_type))
        (Depends_on object_unknown)
   && check "not the same type, whatever the unknown one is"
-       (Ctype.same_type (pointer u) (array int_type (Constant 1)))
+       (Ctype.same_type lp64 tags location (pointer u)
+          (array int_type (Constant 1)))
        (Answer false)
 
 let () =
@@ -781,7 +833,8 @@ let () =
     [ unknown_facts (); check_ranks (); floating_promotions ();
       construction_facts ();
       member_facts (); doubling_typedefs (); oversized_composite ();
-      enum_integer_composite_with_gcc (); unsigned_short_parameter ();
+      enum_integer_composite_with_gcc (); return_qualifiers ();
+      unsigned_short_parameter ();
       declaration_facts () ]
     @ List.map check_promotion promotion_cases
     @ List.map check_conversion conversion_cases

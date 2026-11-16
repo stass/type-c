@@ -441,6 +441,40 @@ let enum_integer_composites () =
     ("the value of _Generic depends on the composite of an enumerated type \
       and its integer type at in.c:1, which GCC types otherwise than Clang")
 
+(* Clang keeps the qualifiers of a function's return type and GCC drops
+   all but _Atomic of them, which with GCC makes a redeclaration that
+   turns on them unknown. *)
+let return_qualifiers () =
+  let qualifiers = "<the qualifiers of a function's return type>" in
+  declares "const int cf(void);" "cf" "function const int (void) external";
+  rejects ~target:lp64_clang "const int cf(void); int cf(void);" "6.7p4";
+  declares "const int cf(void); int cf(void);" "cf"
+    ("function " ^ qualifiers ^ " external");
+  declares "const int cf(void); const int cf(void);" "cf"
+    "function const int (void) external";
+  rejects "_Atomic int af(void); int af(void);" "6.7p4";
+  rejects "const int cf(void); long cf(void);" "6.7p4";
+  rejects ~target:lp64_clang "typedef const int F(void); typedef int F(void);"
+    "6.7p3";
+  accepts "typedef const int F(void); typedef int F(void);";
+  rejects "typedef const int F(void); typedef long F(void);" "6.7p3";
+  (* GCC drops volatile and restrict too, and keeps _Atomic. *)
+  rejects ~target:lp64_clang "volatile int vf(void); int vf(void);" "6.7p4";
+  accepts "volatile int vf(void); int vf(void);";
+  accepts "int *restrict rf(void); int *rf(void);";
+  accepts "const _Atomic int af(void); _Atomic int af(void);";
+  rejects "const _Atomic int af(void); int af(void);" "6.7p4";
+  (* The difference counts wherever a function type stands. *)
+  rejects ~target:lp64_clang
+    "int g(const int (*)(void)); int g(int (*)(void));" "6.7p4";
+  accepts "int g(const int (*)(void)); int g(int (*)(void));";
+  rejects ~target:lp64_clang
+    "typedef const int (*P)(void); typedef int (*P)(void);" "6.7p3";
+  accepts "typedef const int (*P)(void); typedef int (*P)(void);";
+  rejects ~target:lp64_clang "const int h(); int h(x) int x; { return x; }"
+    "6.7p4";
+  accepts "const int h(); int h(x) int x; { return x; }"
+
 let constant_expressions () =
   evaluates_int "1 + 2 * 3" "7";
   evaluates_int "-7 / 2" "-3";
@@ -2063,6 +2097,7 @@ let () =
   linkage ();
   composites ();
   enum_integer_composites ();
+  return_qualifiers ();
   constant_expressions ();
   enumerations ();
   deep_expression ();

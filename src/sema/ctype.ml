@@ -267,9 +267,7 @@ let function_returning return parameters =
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Unknown_type { kind = Unknown_object | Object_or_function; _ } ->
       if has_void_parameter parameters then Error Void_parameter
-      else
-        let return = unqualified return in
-        within_limit (of_shape (Function { return; parameters }))
+      else within_limit (of_shape (Function { return; parameters }))
 
 (* 6.7.3p2: restrict needs a pointer to an object type. A va_list may be
    one, which the backend checks. *)
@@ -744,15 +742,31 @@ let verdict dependence =
   | Some unknown -> Depends_on unknown
   | None -> Answer true
 
-(* [composite_location] is where the composite is formed, for the unknown
-   type that the backend may give a part of it (Backend_difference); there
-   is none where only compatibility is asked, which drops the composite. *)
+(* [location] is where the comparison is asked, for the unknown type that
+   the backend may give a part of it or its verdict (Backend_difference). *)
 type comparison = {
   target : Target.t;
   tags : tags;
   dependence : dependence;
-  composite_location : Typec_cpp.Location.t option;
+  location : Typec_cpp.Location.t;
 }
+
+(* Whether the qualifiers of two return types make their function types
+   incompatible: in Clang, which keeps them, where they differ, and in
+   GCC, which drops all but _Atomic of them, where that differs
+   (Backend_difference.Return_qualifiers). The qualifiers of an unknown
+   type are part of what is unknown, which the comparison passes over. *)
+let return_qualifiers_differ comparison a b =
+  match (a.shape, b.shape) with
+  | Unknown_type _, _ | _, Unknown_type _ -> Answer false
+  | _ ->
+      if a.qualifiers = b.qualifiers then Answer false
+      else
+        Backend_difference.answer comparison.target
+          (Return_qualifiers (a.qualifiers, b.qualifiers))
+          comparison.location true
+
+let qualified_as like t = { t with qualifiers = like.qualifiers }
 
 (* Whether one type is known to be a function type and the other known
    not to be one, which no unknown part of them changes. *)
@@ -806,9 +820,8 @@ and merge_known comparison a b =
       let length = merge_length x.length y.length in
       of_shape (Array { element; length })
   | Function x, Function y ->
-      let return = merge x.return y.return in
       let parameters = merge_parameters comparison x.parameters y.parameters in
-      of_shape (Function { return; parameters })
+      merge_function comparison x.return y.return parameters
   | ( ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
       | Pointer _ | Array _ | Function _ | Unknown_type _ ),
       _ ) ->
@@ -824,16 +837,28 @@ and require_enum_integer comparison tag integer =
    integer type as their composite whatever the order, and GCC the
    enumerated type. *)
 and enum_integer_composite comparison integer_type =
-  match comparison.composite_location with
-  | None -> integer_type
-  | Some location -> (
-      match
-        Backend_difference.answer comparison.target Enum_integer_composite
-          location integer_type
-      with
-      | Answer t -> t
-      | Depends_on unknown ->
-          make integer_type.qualifiers (Unknown_type unknown))
+  match
+    Backend_difference.answer comparison.target Enum_integer_composite
+      comparison.location integer_type
+  with
+  | Answer t -> t
+  | Depends_on unknown -> make integer_type.qualifiers (Unknown_type unknown)
+
+(* 6.7.6.3p15: the return types [a] and [b] are compatible. Where the
+   backend decides whether their qualifiers are, the composite is an
+   unknown function type, and the returns are compared as if equally
+   qualified, so that a difference elsewhere still decides. *)
+and merge_function comparison a b parameters =
+  match return_qualifiers_differ comparison a b with
+  | Answer false ->
+      of_shape (Function { return = merge comparison a b; parameters })
+  | Answer true -> raise Not_compatible
+  (* The verdict's unknown stays an object, as the value of a construct
+     that compares; the composite is a function type. *)
+  | Depends_on backend ->
+      passed_over comparison.dependence backend;
+      ignore (merge comparison (qualified_as b a) b);
+      unknown { backend with kind = Unknown_function }
 
 (* 6.7.6.3p15 and 6.2.7p3: a prototype gives the composite its parameter
    types; without one the parameters are not compared, except that an
@@ -874,19 +899,14 @@ and merge_parameters comparison a b =
 (* A composite can exceed both types in size, as when each gives
    parameter types the other lacks, so it passes the limit again. *)
 let composite target tags location a b =
-  let comparison =
-    { target;
-      tags;
-      dependence = no_dependence ();
-      composite_location = Some location }
-  in
+  let comparison = { target; tags; dependence = no_dependence (); location } in
   match merge comparison a b with
   | t -> within_limit t
   | exception Not_compatible -> Error Incompatible
 
-let compatible target tags a b =
+let compatible target tags location a b =
   let dependence = no_dependence () in
-  let comparison = { target; tags; dependence; composite_location = None } in
+  let comparison = { target; tags; dependence; location } in
   match merge comparison a b with
   | _ -> verdict dependence
   | exception Not_compatible -> Answer false
@@ -902,36 +922,44 @@ let same_length a b =
   in
   a = b || (is_constant a && is_constant b && merges ())
 
-(* Whether the known parts of two types are the same; [dependence] notes
-   the unknown parts. *)
-let rec same dependence a b =
+(* Whether the known parts of two types are the same; the dependence of
+   [comparison] notes the unknown parts. *)
+let rec same comparison a b =
   (not (different_kinds a b))
   &&
   match (a.shape, b.shape) with
   | Unknown_type unknown, _ | _, Unknown_type unknown ->
-      passed_over dependence unknown;
+      passed_over comparison.dependence unknown;
       true
-  | _ -> a.qualifiers = b.qualifiers && same_shape dependence a b
+  | _ -> a.qualifiers = b.qualifiers && same_shape comparison a b
 
 (* [same] has passed over the unknown types. *)
-and same_shape dependence a b =
-  let same = same dependence in
+and same_shape comparison a b =
+  let same = same comparison in
   match (a.shape, b.shape) with
   | Pointer x, Pointer y -> same x y
   | Array x, Array y ->
       same_length x.length y.length && same x.element y.element
   | Function x, Function y ->
-      same x.return y.return
-      && same_parameters dependence x.parameters y.parameters
+      same_return comparison x.return y.return
+      && same_parameters comparison x.parameters y.parameters
   | ( ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
       | Unknown_type _ ),
       _ ) ->
       a.shape = b.shape
   | (Pointer _ | Array _ | Function _), _ -> false
 
-and same_parameters dependence a b =
+and same_return comparison a b =
+  match return_qualifiers_differ comparison a b with
+  | Answer false -> same comparison a b
+  | Answer true -> false
+  | Depends_on backend ->
+      passed_over comparison.dependence backend;
+      same comparison (qualified_as b a) b
+
+and same_parameters comparison a b =
   let same_types x y =
-    List.compare_lengths x y = 0 && List.for_all2 (same dependence) x y
+    List.compare_lengths x y = 0 && List.for_all2 (same comparison) x y
   in
   match (a, b) with
   | Prototype x, Prototype y ->
@@ -940,9 +968,10 @@ and same_parameters dependence a b =
   | Unspecified, Unspecified -> true
   | (Prototype _ | Old_style _ | Unspecified), _ -> false
 
-let same_type a b =
+let same_type target tags location a b =
   let dependence = no_dependence () in
-  if same dependence a b then verdict dependence else Answer false
+  let comparison = { target; tags; dependence; location } in
+  if same comparison a b then verdict dependence else Answer false
 let error_message = function
   | Too_large ->
       Printf.sprintf "type has more than %d parts, counting each use of a \

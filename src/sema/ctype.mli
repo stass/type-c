@@ -110,7 +110,10 @@ and shape =
           [va_list], which i386 and arm64 Darwin accept. *)
   | Array of { element : t; length : length }
   | Function of { return : t; parameters : parameters }
-      (** The return type is unqualified (6.7.6.3p5). *)
+      (** The return type keeps its qualifiers, as Clang keeps them and
+          GCC does not (C17 6.7.6.3p5,
+          {!Backend_difference.Return_qualifiers}); a call has the
+          unqualified type. *)
   | Unknown_type of Unknown.t
       (** A type that typec does not compute. Its qualifiers are those
           written on it; any within it, as [typeof] of a [const] object
@@ -210,8 +213,7 @@ val array_of : tags -> t -> length -> (t, error) result
 (** The element type must be a complete object type at this point. *)
 
 val function_returning : t -> parameters -> (t, error) result
-(** Adjusts and unqualifies the parameter types and unqualifies the return
-    type. *)
+(** Adjusts and unqualifies the parameter types. *)
 
 val qualify : Qualifiers.t -> t -> (t, error) result
 (** Adds qualifiers. On an array type they go to its element type. *)
@@ -405,19 +407,26 @@ val promoted : Target.t -> tags -> t -> t Unknown.answer
     prototype is in scope (6.5.2.2p6): the default argument promotion of
     an arithmetic type, any other type unchanged. *)
 
-val compatible : Target.t -> tags -> t -> t -> bool Unknown.answer
+val compatible :
+  Target.t -> tags -> Typec_cpp.Location.t -> t -> t -> bool Unknown.answer
 (** Whether two types are compatible (6.2.7p1, 6.7.3p10, 6.7.6.1p2,
-    6.7.6.2p6, 6.7.6.3p15). The parameters of a prototype and of an
-    old-style definition are compared as C11 says, by their promoted
-    types, which rejects some pairs that GCC and Clang accept with a
-    warning, such as [int g(float);] before [int g(x) float x; {...}].
+    6.7.6.2p6, 6.7.6.3p15), asked at [location]. The parameters of a
+    prototype and of an old-style definition are compared as C11 says, by
+    their promoted types, which rejects some pairs that GCC and Clang
+    accept with a warning, such as [int g(float);] before
+    [int g(x) float x; {...}]. Function types whose return types are
+    qualified differently are incompatible, as in Clang; with GCC, which
+    drops all but [_Atomic] of those qualifiers, the answer depends on an
+    unknown type at [location] ({!Backend_difference.Return_qualifiers}).
     Parts that differ where they are known make two types incompatible
     whatever their unknown parts are. *)
 
-val same_type : t -> t -> bool Unknown.answer
+val same_type :
+  Target.t -> tags -> Typec_cpp.Location.t -> t -> t -> bool Unknown.answer
 (** Whether two types are the same (6.7p3), as for the redefinition of a
-    typedef name: equal, but that an {!Opaque} length is the same as any
-    constant one, which the backend checks. *)
+    typedef name, asked at [location]: equal, but that an {!Opaque} length
+    is the same as any constant one, which the backend checks, and that
+    the qualifiers of return types compare as for {!compatible}. *)
 
 val composite :
   Target.t -> tags -> Typec_cpp.Location.t -> t -> t -> (t, error) result
@@ -427,6 +436,10 @@ val composite :
     the integer type as their composite, as in Clang; with GCC, which
     types it otherwise, it is an unknown type at [location], where the
     composite is formed ({!Backend_difference.Enum_integer_composite}).
+    With GCC, the composite of two function types whose compatibility
+    depends on the qualifiers of their return types is an unknown
+    function type at [location]
+    ({!Backend_difference.Return_qualifiers}).
     Where one type is unknown the composite is that unknown type: keeping
     the known side would guess that the unknown one adds nothing to it,
     as [extern int a[];] with an unknown type for [a] that gives its

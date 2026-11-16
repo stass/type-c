@@ -665,6 +665,30 @@ let enum_integer_composites () =
   both ~declarations "x ? up : ep" ~clang:"unsigned int *" ~gcc:composite;
   both ~declarations "x ? ep : ep" ~clang:"enum e *" ~gcc:"enum e *"
 
+(* Clang keeps the qualifiers of a function's return type and GCC drops
+   all but _Atomic of them, so with GCC a comparison that turns on them
+   is unknown; a call has the unqualified type in both. *)
+let return_qualifiers () =
+  let declarations =
+    "const int cf(void); _Atomic int af(void); int (*fp)(void); int x; "
+  in
+  let qualifiers = "<the qualifiers of a function's return type>" in
+  both ~declarations "cf()" ~clang:"int" ~gcc:"int";
+  both ~declarations "&cf" ~clang:"const int (*)(void)"
+    ~gcc:"const int (*)(void)";
+  both ~declarations "_Generic(&cf, int (*)(void): 1L, default: 2)"
+    ~clang:"int" ~gcc:qualifiers;
+  both ~declarations "_Generic(&cf, const int (*)(void): 1L, default: 2)"
+    ~clang:"long" ~gcc:"long";
+  both ~declarations "_Generic(&af, int (*)(void): 1L, default: 2)"
+    ~clang:"int" ~gcc:"int";
+  both ~declarations "x ? &cf : fp" ~clang:"void *" ~gcc:(qualifiers ^ " *");
+  both ~declarations "x ? &cf : &cf" ~clang:"const int (*)(void)"
+    ~gcc:"const int (*)(void)";
+  accepts_source "const int g(void) { return 1; }";
+  accepts_source
+    "struct s { int m; }; const struct s g(struct s v) { return v; }"
+
 (* 6.8: the constraints that typing checks. *)
 let statements () =
   accepts "if (p) x; else if (d) x; while (ip) break; do continue; while (z)";
@@ -955,6 +979,7 @@ let () =
   anonymous_members ();
   old_style_definitions ();
   enum_integer_composites ();
+  return_qualifiers ();
   statements ();
   labels ();
   left_to_backend ();

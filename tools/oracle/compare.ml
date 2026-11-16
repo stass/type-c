@@ -159,7 +159,12 @@ let compare_types report allow_list unit record (typed : Expressions.typed)
   | Spellings.Unresolved why -> unresolved report unit record why
   | Resolved clang_type -> (
       let counts = report.counts in
-      match Ctype.same_type typed.expression_type clang_type with
+      let tags = Declarations.tags unit.Typec_unit.declarations in
+      let location = Typec_unit.location unit record.Record.first in
+      match
+        Ctype.same_type unit.target tags location typed.expression_type
+          clang_type
+      with
       | Answer true -> counts.agree <- counts.agree + 1
       | Answer false -> disagree report allow_list line
       | Depends_on _ ->

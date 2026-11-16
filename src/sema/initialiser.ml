@@ -13,6 +13,7 @@ type typing = {
   source : Tree.expression -> Tree.expression Unknown.answer;
   initialises_whole : Ctype.t -> Tree.expression -> unit;
   type_c_text : Tree.span -> bool;
+  location : Tree.span -> Typec_cpp.Location.t;
   index :
     Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
 }
@@ -201,15 +202,16 @@ let wide_units typing =
     (fun integer -> Result.to_option (Ctype.integer target integer))
     [ target.wchar_type; target.char16_type; target.char32_type ]
 
-let compatible typing a b =
-  Ctype.compatible typing.target typing.tags (Ctype.unqualified a) b
+let compatible typing span a b =
+  Ctype.compatible typing.target typing.tags (typing.location span)
+    (Ctype.unqualified a) b
 
 (* Whether a string literal initialises an array of [element]: one of a
    character type or of a code unit of a prefixed literal. *)
-let takes_strings typing element : bool Unknown.answer =
+let takes_strings typing span element : bool Unknown.answer =
   let answers =
     is_character typing element
-    :: List.map (compatible typing element) (wide_units typing)
+    :: List.map (compatible typing span element) (wide_units typing)
   in
   let is_unknown : bool Unknown.answer -> bool = function
     | Depends_on _ -> true
@@ -221,11 +223,11 @@ let takes_strings typing element : bool Unknown.answer =
     | Some unknown -> unknown
     | None -> Answer false
 
-(* Whether an expression of [form] is a string literal that initialises a
-   whole array of [element]. *)
-let string_for typing element form : bool Unknown.answer =
+(* Whether an expression of [form] at [span] is a string literal that
+   initialises a whole array of [element]. *)
+let string_for typing span element form : bool Unknown.answer =
   match form with
-  | String_form -> takes_strings typing element
+  | String_form -> takes_strings typing span element
   | Unknown_form unknown -> Depends_on unknown
   | Compound_form | Other_form -> Answer false
 
@@ -241,7 +243,7 @@ let string_initialiser typing element literal (literal_type : Ctype.t) =
       let fits =
         if is_character typing unit = Answer true then
           is_character typing element <> Answer false
-        else compatible typing element unit <> Answer false
+        else compatible typing literal.span element unit <> Answer false
       in
       if not fits then
         typing.fail literal.span
@@ -455,7 +457,7 @@ let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
   match t.shape with
   | Array { element; _ } -> (
       let form = form typing expression in
-      match (string_for typing element form, form) with
+      match (string_for typing expression.span element form, form) with
       | Answer true, _ ->
           ignore
             (string_initialiser typing element expression
@@ -467,7 +469,7 @@ let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
       | Answer false, (String_form | Other_form | Unknown_form _) -> Elided)
   | Record _ -> (
       let value_type = Ctype.lvalue_conversion (Lazy.force expression_type) in
-      match compatible typing t value_type with
+      match compatible typing expression.span t value_type with
       | Answer true ->
           typing.initialises expression;
           Whole
@@ -543,7 +545,8 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
           { designators = []; initialiser = Expression_initialiser literal };
         _ }
       :: excess )
-    when string_for typing element (form typing literal) = Answer true ->
+    when string_for typing literal.span element (form typing literal)
+         = Answer true ->
       let length =
         string_initialiser typing element literal
           (typing.value (Some t) literal)
@@ -671,8 +674,9 @@ let array_from typing t expression =
            "an array is initialised by a compound literal that is not an array \
             (C11 6.7.9p16)")
 
-let array_initialiser typing t element expression =
-  match string_for typing element (form typing expression) with
+let array_initialiser typing t element (expression : Tree.expression) =
+  let form = form typing expression in
+  match string_for typing expression.span element form with
   | Answer true ->
       let length =
         string_initialiser typing element expression

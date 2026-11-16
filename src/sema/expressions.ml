@@ -355,6 +355,10 @@ let void_pointer context span =
 let location_of context (span : Tree.span) =
   context.text.tokens.(span.first).location
 
+(* Whether two types are compatible, asked by the construct at [span]. *)
+let compatible context span a b =
+  Ctype.compatible context.target context.tags (location_of context span) a b
+
 let unknown_at context span construct kind : Unknown.t =
   { construct; location = location_of context span; kind; cause = Not_typed }
 
@@ -480,8 +484,8 @@ let read_operand context span ~reads (typed : typed) =
 
 (* Design 3.4: [==], [!=] and [?:] take two values of one distinct type,
    [t], where they take one; [one_distinct] says whether they are. *)
-let one_distinct context (t : Ctype.t) other =
-  Ctype.compatible context.target context.tags t other = Answer true
+let one_distinct context span (t : Ctype.t) other =
+  compatible context span t other = Answer true
 
 let refuse_mixed context span (t : Ctype.t) =
   let name =
@@ -493,8 +497,7 @@ let refuse_mixed context span (t : Ctype.t) =
     (Rule.message Distinct_operation
        ("the operands are not both of the distinct type " ^ name))
 
-let differs context a b =
-  Ctype.compatible context.target context.tags a b = Answer false
+let differs context span a b = compatible context span a b = Answer false
 
 (* Design 3.4: [D *] and [U *] are incompatible. GNU C only warns where
    two pointers to incompatible types meet, and the backend, which sees
@@ -502,12 +505,12 @@ let differs context a b =
    pointers whose referenced types [a] and [b] mention a distinct type
    meet only where those are compatible or one is void. This is the one
    rule for conversions and for the operations on two pointers. *)
-let pointers_differ context (a : Ctype.t) (b : Ctype.t) =
+let pointers_differ context span (a : Ctype.t) (b : Ctype.t) =
   let a = Ctype.unqualified a and b = Ctype.unqualified b in
   Ctype.is_void a = Answer false
   && Ctype.is_void b = Answer false
   && (Ctype.mentions_distinct a || Ctype.mentions_distinct b)
-  && differs context a b
+  && differs context span a b
 
 (* Design 3.4: Type-C text converts no value implicitly to or from a
    distinct type, nor a pointer to a type with one in it to another
@@ -522,11 +525,11 @@ let refuse_distinct_conversion context span target (typed : typed) =
   let source = Ctype.lvalue_conversion typed.expression_type in
   let crosses =
     match (target.shape, source.shape) with
-    | Pointer t, Pointer s -> pointers_differ context t s
+    | Pointer t, Pointer s -> pointers_differ context span t s
     | (Record _ | Array _), _ -> false
     | _ ->
         (Ctype.as_distinct target <> None || Ctype.as_distinct source <> None)
-        && differs context target source
+        && differs context span target source
   in
   if crosses && is_type_c_text context span then
     context.fail span
@@ -620,7 +623,7 @@ let refuse_mixed_pointers context span left right =
   match (left, right) with
   | Pointer_operand a, Pointer_operand b
     when is_type_c_text context span
-         && pointers_differ context a.referenced b.referenced ->
+         && pointers_differ context span a.referenced b.referenced ->
       context.fail span
         (Rule.message Distinct_operation
            (Printf.sprintf
@@ -1016,13 +1019,14 @@ let check_arity context span (parameters : Ctype.parameters) count =
   | Unspecified | Old_style _ -> ()
 
 (* 6.5.2.2p1, p5: the callee is a pointer to a function, after the
-   conversion of a function designator; the call has its return type. *)
+   conversion of a function designator; the call has its return type,
+   unqualified as a value is. *)
 let call_type context span (callee : typed) count =
   match operand context callee with
   | Pointer_operand
       { referenced = { shape = Function { return; parameters }; _ }; _ } ->
       check_arity context span parameters count;
-      return
+      Ctype.unqualified return
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
       unknown_value unknown
@@ -1192,7 +1196,7 @@ let ordinary_comparison context span ~relational ~clause left right =
 let comparison context span ~relational ~clause left right =
   match (left, right) with
   | Distinct_operand a, Distinct_operand b
-    when (not relational) && one_distinct context a b ->
+    when (not relational) && one_distinct context span a b ->
       int_type context span
   | Distinct_operand t, _ | _, Distinct_operand t when not relational ->
       refuse_mixed context span t
@@ -1284,7 +1288,7 @@ let other_conditional context span (a : Ctype.t) (b : Ctype.t) =
   if Ctype.is_void a = Answer true || Ctype.is_void b = Answer true then
     Ctype.void
   else
-    match Ctype.compatible context.target context.tags a b with
+    match compatible context span a b with
     | Answer true -> a
     | Depends_on unknown -> unknown_value unknown
     | Answer false -> fail_operands context span "6.5.15p3"
@@ -1300,8 +1304,6 @@ type association = {
   result : Tree.expression;
 }
 
-let compatible context a b = Ctype.compatible context.target context.tags a b
-
 (* 6.5.1.1p2: no two associations name compatible types. Where that
    depends on an unknown type the backend checks it. *)
 let check_distinct context associations =
@@ -1309,7 +1311,9 @@ let check_distinct context associations =
     match association.association_type with
     | None -> earlier
     | Some t ->
-        if List.exists (fun u -> compatible context t u = Answer true) earlier
+        let span = association.association_span in
+        if List.exists (fun u -> compatible context span t u = Answer true)
+             earlier
         then
           context.fail association.association_span
             (Rule.c_text
@@ -1340,7 +1344,7 @@ let select context span controlling_type associations default =
     match association.association_type with
     | None -> ()
     | Some t -> (
-        match compatible context controlling_type t with
+        match compatible context span controlling_type t with
         | Depends_on dependence -> unknown := Some dependence
         | Answer true ->
             compatible_results := association.result :: !compatible_results
@@ -1366,7 +1370,7 @@ let select context span controlling_type associations default =
    which for Clang do not include [_Atomic]. *)
 let types_compatible_answer context span first second =
   match
-    compatible context
+    compatible context span
       (Ctype.without_top_qualifiers first)
       (Ctype.without_top_qualifiers second)
   with
@@ -2390,9 +2394,7 @@ and constructor_argument context named (field : Ctype.member) argument =
   initialises_whole context field_type argument;
   let is_record t = Ctype.is_record t = Answer true in
   if is_record field_type || is_record argument_type then
-    match
-      Ctype.compatible context.target context.tags field_type argument_type
-    with
+    match compatible context argument.span field_type argument_type with
     | Answer true | Depends_on _ -> ()
     | Answer false ->
         context.fail argument.span
@@ -2582,7 +2584,9 @@ and conditional context span position condition if_true if_false =
   and third_operand = branch_operand third in
   refuse_mixed_pointers context span second_operand third_operand;
   match (second_operand, third_operand) with
-  | Distinct_operand a, Distinct_operand b when one_distinct context a b -> a
+  | Distinct_operand a, Distinct_operand b when one_distinct context span a b
+    ->
+      a
   | Arithmetic_operand a, Arithmetic_operand b ->
       converted context span a.promoted b.promoted
   | Pointer_operand a, Pointer_operand b ->
@@ -2763,8 +2767,7 @@ and initialises_whole context t (initialising : Tree.expression) =
   | Some construction ->
       let variant_type = (operand_typed context initialising).expression_type in
       if
-        Ctype.compatible context.target context.tags
-          (Ctype.without_top_qualifiers t) variant_type
+        compatible context span (Ctype.without_top_qualifiers t) variant_type
         = Answer true
       then Sites.brace context.typed.sites construction
   | None -> ()
@@ -2798,6 +2801,7 @@ and initialiser context ~constant t initialiser =
       source = source_through (selection_of context);
       initialises_whole = initialises_whole context;
       type_c_text = is_type_c_text context;
+      location = location_of context;
       index = integer_constant context;
     }
   in

@@ -96,6 +96,19 @@ type t =
           [__builtin_types_compatible_p(typeof(g), int (int))] is 0 in
           Clang and 1 in GCC. GCC 16 and Clang 21 (Apple), 22 and 23 give
           these answers. *)
+  | Return_qualifiers of Qualifiers.t * Qualifiers.t
+      (** A comparison of two function types whose known return types
+          have these different qualifiers. Clang keeps the qualifiers of
+          a return type, and GCC drops all but [_Atomic] of them (C17
+          6.7.6.3p5): with [const int cf(void);] and [int f(void);],
+          [__builtin_types_compatible_p(typeof(cf), int (void))] is 0 in
+          Clang and 1 in GCC, [_Generic(&cf, typeof(&f): 1, default: 2)]
+          is 2 and 1, [x ? &cf : &f] is a [void *] and a pointer to
+          [int (void)], and Clang refuses [typeof(&f) p = cf;], a later
+          [int cf(void);] and
+          [typedef const int F(void); typedef int F(void);], which GCC
+          accepts. Both keep [_Atomic], and both give [cf()] the type
+          [int]. GCC 16 and Clang 21 (Apple) give these answers. *)
 
 val answer :
   Target.t -> t -> Typec_cpp.Location.t -> 'a -> 'a Unknown.answer

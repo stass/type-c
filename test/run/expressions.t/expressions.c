@@ -21,6 +21,8 @@ int g(int, ...);
 int h();
 double vd(void);
 const int cf(void);
+_Atomic int af(void);
+int (*ifp)(void);
 struct s sf(void);
 int (*fp)(int);
 _Bool flag;
@@ -154,6 +156,13 @@ void differences(int x, struct bits v, struct qualified q,
 	__builtin_types_compatible_p(const _Atomic int, _Atomic int);
 	__builtin_types_compatible_p(__typeof__(v.b++), unsigned);
 	x ? ep : ip; x ? ip : ep;
+	&cf; &af; _Generic(&cf, int (*)(void): 1L, default: 2);
+	_Generic(&cf, const int (*)(void): 1L, default: 2);
+	_Generic(&af, int (*)(void): 1L, default: 2);
+	__builtin_types_compatible_p(__typeof__(cf), int (void));
+	__builtin_types_compatible_p(__typeof__(cf), const int (void));
+	__builtin_types_compatible_p(__typeof__(cf), long (void));
+	x ? &cf : ifp; x ? &cf : &cf;
 }
 
 void blocks(int n)

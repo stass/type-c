@@ -156,7 +156,10 @@ let compatibility_types target tags enums =
   let int_type = arithmetic target (Integer Int) in
   let pointer t = get (Ctype.pointer_to t) in
   let array t length = get (Ctype.array_of tags t length) in
-  let func parameters = get (Ctype.function_returning int_type parameters) in
+  let returning return parameters =
+    get (Ctype.function_returning return parameters)
+  in
+  let func = returning int_type in
   let prototype types = Ctype.Prototype { types; variadic = false } in
   let const_qualifier = { Qualifiers.none with const = true } in
   let const t = get (Ctype.qualify const_qualifier t) in
@@ -177,24 +180,33 @@ let compatibility_types target tags enums =
     func (Prototype { types = [ int_type ]; variadic = true });
     func (prototype [ const int_type; array int_type (Constant 2) ]);
     func (prototype [ int_type; pointer int_type ]);
+    returning (const int_type) (prototype []);
+    returning (get (Ctype.atomic int_type)) (prototype []);
     pointer Ctype.void; pointer int_type; pointer (const int_type);
     pointer (array int_type Unknown); pointer (array int_type (Constant 3));
     struct_type "a"; struct_type "b" ]
   @ enums
 
+(* The comparisons have no source; an unknown answer would name this. *)
+let probe_location =
+  { Typec_cpp.Location.file = "type_probe"; line = 1; flags = No_flags }
+
+(* A pair whose compatibility typec leaves to the backend, as GCC types
+   some otherwise than Clang, has no assertion. *)
 let print_compatibility target tags types =
   let pointer t = name (get (Ctype.pointer_to t)) in
+  let print a b = function
+    | Unknown.Depends_on _ -> ()
+    | Answer compatible ->
+        Printf.printf
+          "_Static_assert(_Generic((%s)0, %s: 1, default: 0) == %d, \
+           \"%s and %s\");\n"
+          (pointer a) (pointer b) (Bool.to_int compatible) (name a) (name b)
+  in
   List.iter
     (fun a ->
       List.iter
-        (fun b ->
-          let expected =
-            if Ctype.compatible target tags a b = Answer true then 1 else 0
-          in
-          Printf.printf
-            "_Static_assert(_Generic((%s)0, %s: 1, default: 0) == %d, \
-             \"%s and %s\");\n"
-            (pointer a) (pointer b) expected (name a) (name b))
+        (fun b -> print a b (Ctype.compatible target tags probe_location a b))
         types)
     types
 

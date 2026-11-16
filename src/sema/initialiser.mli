@@ -48,6 +48,7 @@ open Typec_syntax
       that initialises a whole subobject of the type with no brace
       elided before it, where a braced list could stand in for it.
     - [type_c_text] says whether a span begins in Type-C text.
+    - [location] gives the location where a span begins.
     - [index] gives the value of the expression of an array designator,
       or the span of what keeps it from being an integer constant
       expression.
@@ -65,6 +66,7 @@ type typing = {
   source : Tree.expression -> Tree.expression Unknown.answer;
   initialises_whole : Ctype.t -> Tree.expression -> unit;
   type_c_text : Tree.span -> bool;
+  location : Tree.span -> Typec_cpp.Location.t;
   index :
     Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
 }

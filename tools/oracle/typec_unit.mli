@@ -16,6 +16,7 @@ val model :
     the options are refused. *)
 
 type t = private {
+  target : Target.t;
   text : Typec_cpp.Reader.t;
   unit : Typec_syntax.Tree.translation_unit;
   declarations : Declarations.t;

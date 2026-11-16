@@ -204,7 +204,10 @@ let composite state span name prior next =
 let redeclared state span name prior next =
   match (prior, next) with
   | Typedef old, Typedef same -> (
-      match Ctype.same_type old same with
+      match
+        Ctype.same_type state.target state.tags (location_of state span) old
+          same
+      with
       | Answer true | Depends_on _ -> next
       | Answer false ->
           fail state span
