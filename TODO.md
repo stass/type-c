@@ -982,6 +982,13 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
 ## Corpus
 
+- [Low] The corpus reference compile takes its commands from
+  `Pipeline.plan` (eb0e656), so it shares typec's option routing: if
+  `Pipeline` dropped a code-generation option from the compile step,
+  both objects would lose it and the unit would still report
+  identical. If that class of bug matters, give the reference one
+  independent check: compare the compile step's options against the
+  user's command line.
 The front end accepts the 246 units of the corpus with Clang and with
 GCC 16 (macOS x86-64), and each gives the object that the backend builds
 alone; block pointers and `_Float16` in the SDK's headers have unknown
