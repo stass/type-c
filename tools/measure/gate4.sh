@@ -18,10 +18,10 @@
 # REVISION the revision of the tree (by default what
 # tools/corpus/revision.sh prints for it; a copy of the tree without its
 # git directory names it, as that script prints it where the copy was
-# made). The
-# script runs on FreeBSD, whose hwpmc counts the instructions and
-# cycles of one process (pmcstat), and needs size; the code size is the
-# bytes of the .text* sections of each ELF object.
+# made). The script runs on FreeBSD, whose hwpmc counts the instructions
+# and cycles of one process (pmcstat), with a libpmc that honors the usr
+# qualifier of a pmu event, and needs size; the code size is the bytes
+# of the .text* sections of each ELF object.
 
 set -eu
 
@@ -107,25 +107,51 @@ build() {
 }
 
 # Runs a program once under pmcstat in process mode and appends the
-# instructions it retired and the core cycles it took, in that order, to
-# a file of counts. The two events are the hwpmc aliases of the CPU's
-# own, and pmcstat prints their counts in the order they are given, under
-# a line that names them. $1 is the program, $2 the file of counts, the
-# rest the arguments of the program.
+# instructions it retired and the core cycles it took in user mode, in
+# that order, to a file of counts. The two events are the hwpmc aliases
+# of the CPU's own, and pmcstat prints their counts in the order they
+# are given, under a line that names them. $1 is the program, $2 the
+# file of counts, the rest the arguments of the program. Every program
+# runs from one path, a copy of it: the length of the path a program is
+# run by moves the instructions its startup retires by tens, which
+# would set apart twins of the same code.
 count() {
   counted=$1 counts=$2
   shift 2
+  cp -f "$counted" "$out/work/counted"
   # Without this, a pmcstat that wrote nothing would leave the counts of
   # the run before for awk to read.
   rm -f "$counts.run"
-  pmcstat -o "$counts.run" -p instructions -p unhalted-cycles \
-    "$counted" "$@" > /dev/null
+  pmcstat -o "$counts.run" -p instructions,usr -p unhalted-cycles,usr \
+    "$out/work/counted" "$@" > /dev/null
   awk 'NR == 1 && !/p\/instructions +p\/unhalted-cycles/ { exit 1 }
     NR == 2 && NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
       print $1, $2; found = 1
     }
     END { if (!found) exit 1 }' "$counts.run" >> "$counts" ||
     fail "pmcstat printed no counts for $counted in $counts.run"
+}
+
+# Fails unless pmcstat counts user mode alone under the usr qualifier.
+# A libpmc without pmu_parse_qualifiers ignores it silently and counts
+# kernel mode too, whose interrupts and page faults move a count by more
+# than the differences the gate looks for. The check counts a dd that
+# retires most of its instructions in the kernel (four in five on Zen
+# 3), so under the qualifier it must retire less than half as many.
+# Checking one event is enough: libpmc reads the qualifiers of every
+# pmu event in one place.
+check_user_mode() {
+  probe=$out/work/user-mode.run
+  rm -f "$probe"
+  pmcstat -o "$probe" -p instructions,usr -p instructions \
+    dd if=/dev/zero of=/dev/null bs=1 count=10000 status=none
+  awk 'NR == 1 && !/p\/instructions +p\/instructions/ { exit 1 }
+    NR == 2 && NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ &&
+      $1 > 0 && 2 * $1 < $2 { found = 1 }
+    END { if (!found) exit 1 }' "$probe" ||
+    fail "pmcstat counts kernel mode under the usr qualifier, or" \
+      "printed no counts in $probe; README.md, \"Measuring against" \
+      "hand-written C\", says how to get a libpmc that honors it"
 }
 
 # Checks that the twins print the same, then counts RUNS runs of each,
@@ -211,18 +237,19 @@ $(sysctl -n hw.model | sed "s/ *$//").
 * gcc: $("$gcc" --version | head -n 1)
 * flags: $flags
 * counting: pmcstat in process mode, the hwpmc events instructions and
-  unhalted-cycles, $runs runs of each program, alternating the C twin
-  and the Type-C program
+  unhalted-cycles in user mode, $runs runs of each program, alternating
+  the C twin and the Type-C program
 * code: bytes of the .text* sections of the object (size -A)
 
 Code size has no noise, so it is within noise only when equal. Speed
 is judged on the instructions a program retires, which the load of the
 host hardly moves. Each count is the median of its runs, with the
 spread, the largest count less the smallest, in parentheses. The
-counters count in user and kernel mode alike, so a count includes the
-page faults and system calls of the program and the interrupts taken
-while it runs; the spread shows how much these move it. The noise is
-the larger spread of the two twins. The instruction count is within
+counters count in user mode alone, leaving out the page faults, system
+calls and interrupts the kernel serves while the program runs, and
+every program runs from one path, since the length of that path moves
+the count of its startup. The noise is the larger spread of the two
+twins. The instruction count is within
 noise when it differs from that of the C twin by at most the noise,
 and the verdict is inconclusive when the noise exceeds
 $inconclusive_percent% of the count of the C twin.
@@ -246,6 +273,7 @@ EOF
 # The results go to a temporary file first, so that a run that stops
 # part-way leaves no table that reads as complete.
 mkdir -p "$out/work"
+check_user_mode
 header > "$out/results.md.tmp"
 for source in "$sources"/*.tc; do
   program=$(basename "$source" .tc)

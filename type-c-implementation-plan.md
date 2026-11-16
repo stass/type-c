@@ -179,12 +179,12 @@ lives in its own repository and records:
    fields a binding reads are copied into locals when the case is
    entered (design 4.1). The gate then measures the cost
    of the lowering, not of the guarantees. Speed is the count of
-   instructions a program retires, read from the hardware counters of
-   the FreeBSD test host (`pmcstat`), not its wall time: that host is
-   never idle, and its load moves wall time by more than the
-   differences the gate looks for, while it moves the instruction
-   count by a few parts in ten thousand at most. Within noise then
-   means the same count up to its spread between runs. The count of
+   instructions a program retires in user mode, read from the hardware
+   counters of the FreeBSD test host (`pmcstat`), not its wall time:
+   that host is never idle, and its load moves wall time by more than
+   the differences the gate looks for, while the instruction count of
+   a run of a billion instructions repeats to within a hundred. Within
+   noise then means the same count up to its spread between runs. The count of
    unhalted core cycles is recorded beside it and gates nothing: it
    moves with the load, but it shows the stalls on memory, which a
    program bound by memory spends its time in and the instruction

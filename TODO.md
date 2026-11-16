@@ -924,14 +924,14 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   lowering of the default (design 13.5) worth changing, for example to
   one trap block shared by the `match` sites of a function, without
   weakening design 4.5?
-- [Low] `tools/measure/gate4.sh` counts instructions and cycles in
-  user and kernel mode alike, so the interrupts taken while a program
-  runs move its count (spreads up to a few parts in ten thousand on
-  p620). The libpmc installed on p620 ignores the `usr` and `os`
-  qualifiers of a pmu event (`instructions,usr` and `instructions,os`
-  give the same count); the `pmu_parse_qualifiers` of its `/usr/src`
-  honors them, but the installed library is older. Once p620's libpmc
-  honors them, count `instructions,usr` and `unhalted-cycles,usr`.
+- [Medium] The libpmc installed on p620 ignores the `usr` and `os`
+  qualifiers of a pmu event (`instructions,usr` counts kernel mode
+  too), so `tools/measure/gate4.sh` refuses to run with it. The
+  `pmu_parse_qualifiers` of p620's `/usr/src` honors them, but the
+  installed library is older. Until p620's libpmc is installed from
+  `/usr/src`, the gate runs there with one built from it in
+  `~/typec-gate4-libpmc` through `LD_LIBRARY_PATH` (README, "Measuring
+  against hand-written C").
 - [Low] No host sets `TYPEC_TEST_REQUIRE_M32`, which makes `dune test`
   fail when the backends cannot compile `<limits.h>` with `-m32`. The
   Dockerfiles install no 32-bit headers; `tools/hosts/freebsd.sh` probably

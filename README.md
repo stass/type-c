@@ -872,14 +872,26 @@ backends, checks that the two print the same, and writes the bytes of
 machine code of each object, and the instructions and core cycles each
 program takes, to `OUT/results.md`, with the objects, the lowered C and
 the raw counts under `OUT/work`. It runs on FreeBSD, where `pmcstat`
-counts the events of one process (the `hwpmc` module must be loaded),
-and reads the code size of the ELF objects (the `.text*` sections) with
-`size -A`. Name the backends (`TYPEC_TEST_CLANG`, `TYPEC_TEST_GCC`),
-and on a copy of the tree without its git directory the revision
-(`REVISION`, as `tools/corpus/revision.sh` prints it where the copy was
-made). `results.md` states how the verdicts are drawn.
+counts the events of one process in user mode, and reads the code size
+of the ELF objects (the `.text*` sections) with `size -A`. Name the
+backends (`TYPEC_TEST_CLANG`, `TYPEC_TEST_GCC`), and on a copy of the
+tree without its git directory the revision (`REVISION`, as
+`tools/corpus/revision.sh` prints it where the copy was made). `results.md` states how the verdicts are drawn.
 
 ```sh
 TYPEC_TEST_CLANG=/usr/local/bin/clang21 TYPEC_TEST_GCC=/usr/local/bin/gcc14 \
   tools/measure/gate4.sh ~/typec-gate4-out
+```
+
+The `hwpmc` module must be loaded, and libpmc must honor the `usr`
+qualifier of a pmu event (`pmu_parse_qualifiers` in
+`lib/libpmc/libpmc.c`), which the script checks; an older libpmc
+counts kernel mode too. A libpmc built from newer sources serves
+without being installed, through `LD_LIBRARY_PATH`, with `DIR` a
+private directory of the account:
+
+```sh
+MAKEOBJDIRPREFIX=DIR make -C /usr/src/lib/libpmc/pmu-events obj all
+MAKEOBJDIRPREFIX=DIR make -C /usr/src/lib/libpmc obj all
+export LD_LIBRARY_PATH=DIR/usr/src/amd64.amd64/lib/libpmc
 ```
