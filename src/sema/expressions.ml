@@ -2218,7 +2218,9 @@ and expression_node context position (whole : Tree.expression) =
         lvalue = false;
         bit_field = value_of right.bit_field }
   | Statement_expression block -> value (statement_expression context block)
-  | Label_address _ -> value (void_pointer context span)
+  | Label_address _ ->
+      label_address context span;
+      value (void_pointer context span)
   | Va_arg { list; type_name } ->
       ignore (typed list);
       value (Ctype.unqualified (context.type_name type_name))
@@ -2598,6 +2600,15 @@ and assignment context span (op : Tree.assignment_operator) left right =
   { expression_type = Ctype.lvalue_conversion left.expression_type;
     lvalue = false;
     bit_field = value_of left.bit_field }
+
+(* GNU: the address of a label of the function being typed, so none
+   outside a function body, not even in its parameters. Whether the
+   label is defined there is Reachability's. *)
+and label_address context span =
+  if context.typed.enclosing.function_name = None then
+    context.fail span
+      "the address of a label outside a function body (GCC manual, \
+       \"Labels as Values\")"
 
 (* GNU: the value of the last statement of the block, or void. *)
 and statement_expression context (block : Tree.block) =

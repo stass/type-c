@@ -1488,6 +1488,11 @@ let arm_termination () =
   refused "match (v) { default: break; }";
   refused "asm goto (\"\" : : : : out);";
   refused "switch (n) { case 1: switch (n) { default: return 1; } }";
+  (* The jumps and labels in a type count, though it completes. *)
+  refused "for (;;) { int w[n + ({ break; 1; })]; (void)w; }";
+  refused "for (;;) { (void)sizeof (int [({ break; 1; })]); }";
+  refused "for (;;) { __typeof__ (({ if (n) break; 1; })) w = 0; (void)w; }";
+  refused "return 1; int w[n + ({ in: 1; })]; (void)w;";
   (* Which function of an overload set a call names is unknown. *)
   rejects ~file
     (variant

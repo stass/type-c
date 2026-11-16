@@ -183,13 +183,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   constant evaluator of `Declarations` counts its depth against
   `max_expression_depth` and expression typing `Expressions.max_depth`,
   and the test dump must count too or walk chains in loops.
-- [Medium] Nothing checks the GNU label rules that the backends
-  enforce: a label address (`&&a`) outside a function body, a
-  `__label__` declaration that names a label twice, `&&a` of a label
-  that is not defined, and a jump into a statement expression from
-  outside it. Check them where `Reachability` resolves labels; the
-  third needs its walk to read type names, as a statement expression
-  in an array length may define the label.
+- [Low] `&&a` of a label that is not defined is left to the backend,
+  which refuses it: the parser keeps the arguments of an attribute as
+  tokens, and both backends compile `&&b` where `b` is defined in a
+  statement expression in `__attribute__ ((aligned (sizeof ({ b: 0;
+  }))))` once optimization drops the address. Refuse it in
+  `Reachability.refuse_undefined` once the parser reads attribute
+  arguments as expressions, if a consumer needs that.
+- [Low] Two GNU rules that both backends enforce are left to them: a
+  case or default label inside a statement expression for a switch
+  outside it (GCC manual, "Statement Exprs"), and `&&a` in the
+  parameters of a block literal, which typing does not read. Check the
+  first with the case labels in `Expressions`.
 - [Medium] `test/support/file_scope_names.ml` finds what a unit declares
   at file scope from its external declarations alone, so
   `declaration_probe` and `test_declarations` miss file-scope names
@@ -653,12 +658,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   aggregates. How often real code needs each is for the corpus to show.
 
 ## Matching
-
-- [Low] Reachability does not walk type names: a break, continue or
-  goto in a statement expression in an array length or a `typeof` is not
-  seen by the arms and loops around it, nor a label there by the jump
-  rule. (A match there is checked, since typing asks rule 1 of each arm
-  it reads.)
 
 - [Medium] typec does not check that `&` takes no `register` object
   (C11 6.5.3.2p1): `register struct s r; (&r)->m` is a backend error.

@@ -700,10 +700,74 @@ let labels () =
   rejects "goto b" "6.8.6.1p1";
   rejects "__asm__ goto (\"\" : : : : b)" "6.8.6.1p1";
   rejects "{ __label__ b; goto b; } b: ;" "6.8.6.1p1";
-  (* Typing reads no type name for labels, so it cannot tell a label
-     inside an array length from no label: the address of one is the
-     backend's, which both accept. *)
-  accepts "int n = x; void *p = &&b; int a[({ b: n; })]; (void)p; (void)a"
+  (* A label in an expression that a type or a constant holds is one of
+     the function, as everywhere in the body. *)
+  let defined_twice inside = rejects (inside ^ "; b: ;") "6.8.1p3" in
+  defined_twice "int n = x; int v[n + ({ b: 0; })]; (void)v";
+  defined_twice "__typeof__ (({ b: 0; })) y = 0; (void)y";
+  defined_twice "_Atomic (__typeof__ (({ b: 0; }))) y = 0; (void)y";
+  defined_twice "_Alignas (sizeof ({ b: 0; })) int y; (void)y";
+  defined_twice "enum { E = sizeof ({ b: 0; }) }";
+  defined_twice "struct t { int m : sizeof ({ b: 0; }); } v; (void)v";
+  defined_twice
+    "struct t { _Static_assert (sizeof ({ b: 0; }), \"\"); int m; } v; (void)v";
+  defined_twice "void q (int (*r)[sizeof ({ b: 0; })])";
+  defined_twice "for (int v[sizeof ({ b: 0; })]; ; ) break";
+  defined_twice "_Static_assert (sizeof ({ b: 0; }), \"\")";
+  defined_twice "switch (x) { case sizeof ({ b: 0; }): ; }";
+  defined_twice "int v[8] = { [sizeof ({ b: 0; })] = 1 }; (void)v";
+  defined_twice "(void)sizeof (int [({ b: 1; })])";
+  defined_twice "(void)_Alignof (int [sizeof ({ b: 0; })])";
+  defined_twice "(void)(int (*)[({ b: 1; })])0";
+  defined_twice "(void)(int [sizeof ({ b: 0; })]){ 0 }";
+  defined_twice "(void)_Generic (0, int (*)[({ b: 1; })]: 1, default: 2)";
+  defined_twice
+    "(void)__builtin_types_compatible_p (int [sizeof ({ b: 0; })], int)";
+  defined_twice
+    "struct u { int v[8]; }; \
+     (void)__builtin_offsetof (struct u, v[sizeof ({ b: 0; })])";
+  (* GNU: the address of a label is taken in a function body. *)
+  rejects_source "void *q = &&a;" "Labels as Values";
+  rejects_source "int q = sizeof (&&a);" "Labels as Values";
+  rejects_source "void t(int (*q)[sizeof (&&a)]) { a: ; }" "Labels as Values";
+  rejects_source "int t(r) int r[sizeof (&&a)]; { a: return 0; }"
+    "Labels as Values";
+  accepts "static void *q = &&a; a: (void)q";
+  accepts "void r(int (*q)[sizeof (&&a)]); a: ;";
+  (* GNU: a block declares a local label once; an inner block may declare
+     it again. *)
+  rejects "__label__ a, a; a: ;" "Local Labels";
+  rejects "{ __label__ a; __label__ a; }" "Local Labels";
+  accepts "{ __label__ a; { __label__ a; a: ; } a: ; }";
+  (* GNU: a goto does not jump into a statement expression from outside
+     it, but may jump out of one or within it. *)
+  rejects "goto b; (void)({ b: 0; })" "Statement Exprs";
+  rejects "(void)({ b: 0; }); goto b" "Statement Exprs";
+  rejects "(void)({ goto b; 0; }); (void)({ b: 0; })" "Statement Exprs";
+  rejects "(void)({ ({ b: 0; }); goto b; 0; })" "Statement Exprs";
+  rejects "__asm__ goto (\"\" : : : : b); (void)({ b: 0; })" "Statement Exprs";
+  rejects "goto b; (void)sizeof ({ b: 0; })" "Statement Exprs";
+  accepts "(void)({ b: 0; ({ goto b; 0; }); })";
+  accepts "void *q = &&b; (void)q; (void)({ b: 0; })";
+  (* The backends disagree on a goto into or out of a statement
+     expression that a type or a constant holds, which Clang does not
+     check, and on a computed goto into one, which GCC does not: both stay
+     with them. *)
+  accepts "int n = x; goto b; int v[n + ({ b: 0; })]; (void)v";
+  accepts "int n = x; (void)({ int v[n + ({ b: 0; })]; (void)v; goto b; 0; })";
+  accepts "int n = x; (void)({ b: 0; }); int v[n + ({ goto b; 0; })]; (void)v";
+  accepts "(void)({ b: 0; }); _Static_assert (sizeof ({ goto b; 0; }), \"\")";
+  accepts "(void)({ b: 0; }); switch (x) { case sizeof ({ goto b; 0; }): ; }";
+  accepts "(void)({ b: 0; }); int v[8] = { [sizeof ({ goto b; 0; })] = 1 }; \
+           (void)v";
+  accepts "void *q = &&b; goto *q; (void)({ b: 0; })";
+  (* The parser keeps the arguments of an attribute as tokens, so typing
+     cannot tell a label defined in one from no label: the address of an
+     undefined label stays with the backend, as both compile this one
+     with optimization. *)
+  accepts
+    "int y __attribute__ ((aligned (sizeof ({ b: 0; })))); void *q = &&b; \
+     (void)q; (void)y"
 
 (* Constraints of statements that both backends accept in GNU C, so
    typec leaves them to the backend: any storage class but _Thread_local
