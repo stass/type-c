@@ -97,6 +97,44 @@ The options reach the backend, so they change the model.
   char_signed: false
   $ typec --cc=$gcc --print-target -std=gnu11 | grep stdc_version
   stdc_version: 201112
+  $ typec --cc=$clang -fshort-wchar --print-target | grep '^wchar_type:'
+  wchar_type: unsigned short
+  $ typec --cc=$gcc -fshort-wchar --print-target | grep '^wchar_type:'
+  wchar_type: unsigned short
+
+Some options change a type of C but no macro that the model reads:
+-fshort-enums gives an enumeration the narrowest integer type that
+holds its values, and GCC's -funsigned-bitfields, also spelled
+-fno-signed-bitfields, makes a bit-field declared without signed or
+unsigned unsigned, and its -fsingle-precision-constant makes an
+unsuffixed floating constant float. typec refuses them with a .tc
+input, even when a later option undoes them. Their negations, which
+keep the model's types, pass, and so do the refused options on a
+command line without a .tc input.
+
+  $ cat > enum.tc <<'EOF'
+  > enum colour { red, green };
+  > struct flags { int field : 3; };
+  > EOF
+  $ typec --cc=$clang -fshort-enums -c enum.tc
+  typec: -fshort-enums cannot be used with a .tc input: it gives an enumeration the narrowest integer type that holds its values, which typec's target model does not read
+  [81]
+  $ typec --cc=$gcc -fshort-enums -fno-short-enums -c enum.tc
+  typec: -fshort-enums cannot be used with a .tc input: it gives an enumeration the narrowest integer type that holds its values, which typec's target model does not read
+  [81]
+  $ typec --cc=$gcc -funsigned-bitfields -c enum.tc
+  typec: -funsigned-bitfields cannot be used with a .tc input: GCC makes every bit-field declared without signed or unsigned unsigned, which typec's target model does not read
+  [81]
+  $ typec --cc=$gcc -fno-signed-bitfields -c enum.tc
+  typec: -fno-signed-bitfields cannot be used with a .tc input: GCC makes every bit-field declared without signed or unsigned unsigned, which typec's target model does not read
+  [81]
+  $ typec --cc=$gcc -fsingle-precision-constant -c enum.tc
+  typec: -fsingle-precision-constant cannot be used with a .tc input: GCC makes an unsuffixed floating constant float, which typec's target model does not read
+  [81]
+  $ typec --cc=$gcc -fno-short-enums -fsigned-bitfields \
+  >   -fno-unsigned-bitfields -fno-single-precision-constant -c enum.tc
+  $ typec --cc=$clang -fno-short-enums -fsigned-bitfields -c enum.tc
+  $ typec --cc=$gcc -fshort-enums --print-target > /dev/null
 
 A backend that fails, cannot be started, prints something other than
 macro definitions, prints without end, or omits a macro the model needs

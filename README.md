@@ -336,6 +336,12 @@ preprocessing (`-E`, `-M`, `-MM`), that change the preprocessed text
 (`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-dD`, `-dM` and the like,
 `-traditional-cpp`, `-fdirectives-only`), `-save-temps`, `-###`, `-ansi`,
 `--` and response files (`@FILE`), with a usage error naming the option.
+It refuses the options known to change a type of C without changing a
+macro that the target model reads, which the model therefore cannot
+see: `-fshort-enums`, `-funsigned-bitfields` or `-fno-signed-bitfields`,
+and `-fsingle-precision-constant`, even when a later option undoes
+them. An option that changes a macro the model reads, such as
+`-funsigned-char` or `-fshort-wchar`, reaches the target model.
 It also refuses `-arch` options that name more than one architecture: cc
 builds a universal binary from them, but step 1 preprocesses for one
 architecture only. Build each architecture with its own `-arch` and join

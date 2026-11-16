@@ -58,6 +58,18 @@ let changes_preprocessed_text =
 let keeps_intermediate_files =
   "typec keeps no intermediate files; --emit-c writes the C"
 
+let short_enums =
+  "it gives an enumeration the narrowest integer type that holds its \
+   values, which typec's target model does not read"
+
+let unsigned_bit_fields =
+  "GCC makes every bit-field declared without signed or unsigned \
+   unsigned, which typec's target model does not read"
+
+let float_constants =
+  "GCC makes an unsuffixed floating constant float, which typec's \
+   target model does not read"
+
 (* The options of typec, and those of the C compilers that typec
    supports (Target.minimum_major_version) up to GCC 16 and Clang 21,
    Apple's included, that the pipeline must tell apart or that take a
@@ -105,6 +117,18 @@ let table =
         Flag [ "-ansi" ];
       entries (Refused "typec does not read the inputs after it") Flag
         [ "--" ];
+      (* Options that change a type of C but no macro the target model
+         reads, so the model would disagree with the backend. Each is
+         refused wherever it stands, even before the option that undoes
+         it. Options that change a macro the model reads, such as
+         -fshort-wchar, reach it through the target query, and the front
+         end computes no layout, so the options of layout alone, such as
+         -fpack-struct, pass. *)
+      entries (Refused short_enums) Flag [ "-fshort-enums" ];
+      entries (Refused unsigned_bit_fields) Flag
+        [ "-funsigned-bitfields"; "-fno-signed-bitfields" ];
+      entries (Refused float_constants) Flag
+        [ "-fsingle-precision-constant" ];
       (* Preprocessing. *)
       entries Preprocess Joined_or_separate
         [
