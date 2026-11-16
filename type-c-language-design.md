@@ -41,8 +41,8 @@ them must say which and why.
 4. **Costs stay visible.** No heap allocation, garbage collection,
    exceptions, unwinding, runtime library or link dependency. The compiler
    adds code the source does not spell out in four places only: the traps
-   of `match`, the bounds check of slice indexing, the cleanup that `defer`
-   schedules, and the checks of checked mode.
+   of `match`, the bounds check of slice indexing, the cleanups and the
+   trap of `defer`, and the checks of checked mode.
 5. **Claim only what is checked.** Each guarantee names the code it covers
    and what it depends on (section 14). C code and unchecked Type-C code can
    break any of them.
@@ -986,8 +986,8 @@ leaves the loop from the arm with `goto` or `return`.
 Rule 4.3(1) needs a definition on which every implementation agrees. It is
 syntactic and conservative, in the manner of the Java and C# rules, and
 does not evaluate conditions other than constants. Rule 1 of section 6
-reads from the same definition which blocks have an end that control
-reaches.
+reads from the same definition which blocks have an end that lowering
+treats as an exit.
 
 A statement *can complete* as follows.
 
@@ -1025,18 +1025,16 @@ whose targets are the `case` and `default` labels that belong to it. A
 computed `goto *e` is one whose targets are the labels whose address the
 function takes.
 
-The GNU address of a label, `&&L`, has two readings, one for each
-question that these rules ask. The rules that ask what may reach a
-label, 4.3(3) and rule 5 of section 6, read it as a jump to `L` from
-every point of the function, because a computed `goto *e` at any point
-may be given that address. Rule 4 of section 6 asks what leaves a
-deferred statement and counts the jumps written in it. There `&&L` is no
-jump and leaves nothing: the computed `goto *e` that is given the
-address is the jump, and the rule refuses it where it stands, as it
-does every `goto`, `goto *e` and `asm goto` in a deferred statement.
-Rule 10 of section 6 asks neither question. It refuses every computed
-`goto *e` and `asm goto` in the scope of a `defer` statement, whatever
-its targets.
+The GNU address of a label, `&&L`, has two readings. The rules that
+ask what may reach a label, 4.3(3) and rule 5 of section 6, read it as
+a jump to `L` from every point of the function, because a computed
+`goto *e` at any point may be given that address. Rules 4 and 10 of
+section 6 do not ask where a jump goes. Each refuses jumps by their
+kind, whatever their targets: rule 4 every `goto`, `goto *e` and
+`asm goto` that is written in a deferred statement, and rule 10 every
+`goto *e` and `asm goto` in the scope of a `defer` statement. To them
+`&&L` is no jump: the computed `goto *e` that is given the address is
+the jump, and it is refused where it stands.
 
 *Provisional.* The first reading refuses the address of a label that
 stands in a match arm or in the scope of a `defer` statement even where
@@ -1443,31 +1441,21 @@ defer fclose(f);
    when control leaves that scope: by reaching the end of the block; by
    `return`, `break`, `continue` or `goto` to a point outside the scope,
    which includes a `goto` back to before the `defer` statement; or by
-   the error path of `try`. Control reaches the end of a block that can
-   complete (4.4) and of no other. The end of a block that cannot is no
-   exit: of one whose last item is a `return`, or of the block of a
-   match arm, whose end 4.3 rule 1 makes unreachable. Lowering writes
-   no copy of `S` there (13.5), and rule 8 asks nothing of that place.
+   the error path of `try`. Lowering treats the end of the block as an
+   exit where the block can complete (4.4), and writes a copy of `S`
+   there (13.5). Where 4.4 judges that the block cannot complete, as
+   one whose last item is a `return` or the block of a match arm (4.3
+   rule 1), its end is no exit: lowering writes no copy of `S` there
+   but a trap (10.5), the one that ends every match arm, and rule 8
+   asks nothing of that place. If the analysis of 4.4 and the
+   generated code ever disagreed, as over a constant that the front
+   end and the backend fold differently or a call that only one of
+   them takes not to return, execution would stop at the trap and
+   would not go on past a cleanup that did not run.
    When several scopes are left together, their statements run in the
    reverse order of the `defer` statements. The body of a block literal
    is a function of its own (4.4): a `return` in it leaves no scope
-   around the literal. No `defer` statement stands
-   among the tokens that typing does not read (unread text, 13.5), in
-   any text: the statement would reach the backend as written. One
-   scan passes over every such token, whatever holds it: the body of a
-   block literal, a function body that is passed through unread
-   (13.3), an attribute argument, or anything else that typing passes
-   over. A `#pragma` line alone is not scanned: a pragma holds no
-   statement, so `_Defer` or `defer` on its line is a word of the
-   pragma, which the backend reads, and is no error. The scan refuses
-   `_Defer` in every token it passes over, and the word `defer` in an
-   attribute argument of Type-C text, where no declaration hides the
-   word (2.3). Every token outside a `#pragma` line is thus read by
-   typing or by the scan; the rule lists no kind of unread text that
-   it covers, so it can miss none. The word begins a statement in
-   Type-C text alone; of its unread tokens only an attribute argument
-   can hold a statement, since a block literal and a function body
-   that is passed through unread hold no token of Type-C text (13.3).
+   around the literal.
    `S` is any statement, a null statement included: `defer ;` is
    allowed and runs nothing. `S` is moved text, so it holds no block
    literal (13.5).
@@ -1573,13 +1561,13 @@ defer fclose(f);
     It is not the statement of a labelled statement, a `case` or
     `default` of a `switch` included: write `case 1: { defer S; ... }`.
     It is not a block item of the compound statement of a statement
-    expression. A `defer` statement, under either spelling, stands
-    only in a function body. Outside one, only a block inside a
-    statement expression could hold it, and it is an error wherever
-    that expression stands: in the definition of a generic type (3.5),
-    as in the size of an array member, in the head of a function,
-    generic (section 7) or not, or in any other declaration of file
-    scope, in C text too.
+    expression. A `defer` statement, which C text writes too, as
+    `_Defer` (rule 10), stands only in a function body. Outside one,
+    only a block inside a statement expression could hold it, and it
+    is an error wherever that expression stands: in the definition of
+    a generic type (3.5), as in the size of an array member, in the
+    head of a function, generic (section 7) or not, or in any other
+    declaration of file scope, in C text too.
 12. *Provisional (P9).* Lowering writes a `return` in the scope of a
     `defer` statement as a block (13.5), which ends where the `return`
     does. Its operand therefore declares no name that is in scope
@@ -1597,6 +1585,23 @@ defer fclose(f);
     object whose life has ended in the lowered code (GCC 16 at `-O2`
     gives another value). A `return` in the operand leaves the
     function, and is no such jump.
+13. No `defer` statement stands among the tokens that typing does not
+    read (unread text, 13.5), in any text: the statement would reach
+    the backend as written. One scan passes over every such token,
+    whatever holds it: the body of a block literal, a function body
+    that is passed through unread (13.3), an attribute argument, or
+    anything else that typing passes over. The scan refuses `_Defer`
+    in every token it passes over, and the word `defer` in an
+    attribute argument of Type-C text, where no declaration hides the
+    word (2.3). The word begins a statement in Type-C text alone, and
+    of the unread tokens of Type-C text only an attribute argument can
+    hold a statement: a block literal and a function body that is
+    passed through unread hold no token of Type-C text (13.3). A
+    `#pragma` line alone is not scanned: a pragma holds no statement,
+    so `_Defer` or `defer` on its line is a word of the pragma, which
+    the backend reads, and is no error. Every token outside a
+    `#pragma` line is thus read by typing or by the scan; the rule
+    lists no kind of unread text that it covers, so it can miss none.
 
 Rules 1, 5 and 10 make the set of deferred statements that a jump leaves
 a static fact, so `defer` needs no flags or run-time bookkeeping. Rules
@@ -1606,17 +1611,13 @@ and no label, object or type defined twice, and rule 12 lets it write a
 `return` as a block. `typec` lowers every `defer` statement itself
 (13.5) and hands the backend none: a `defer` statement stands either
 in text that typing reads, where it is lowered, or among the tokens
-that typing does not read, where the scan of rule 1 refuses it under
-both its spellings: `_Defer` in every such token, and `defer` in each
-one that is Type-C text, the only text in which the word begins a
-statement (2.3). A `#pragma` line holds no statement and is not
-scanned. It does not depend on the C compiler implementing
-the TS.
+that typing does not read, where the scan of rule 13 refuses it.
+`defer` so does not depend on the C compiler implementing the TS.
 
-The measurement of P9 (section 15) counts the refusals of rule 8, of
-rule 9, of rule 12 and of each refusal of the form of a `return` (13.5)
-apart, and their diagnostics tell them apart (13.6). The count of a
-rule reads codes and matches no message text. A failure of the
+The measurement of P9 (section 15) counts apart the refusals of rule
+8, of rule 9, of rule 12 and of the form of a `return` on each of its
+grounds (13.5), and their diagnostics tell them apart (13.6). The
+count of a rule reads codes and matches no message text. A failure of the
 resolution property for a deferred statement is a refusal under rule 8
 and carries the code of rule 8: one code, whichever clause of the
 property fails. Rule 8 has no check of its own for that. The one check
@@ -1624,8 +1625,8 @@ of the property derives the code from the kind of text that it reads
 (13.5). Rule 9 has one code. Under rule 12, a declaration in the
 operand fails the same check on the operand of a `return` and carries
 the code of that kind of text, and a jump out of the operand a code of
-its own; no other rule has either code. The refusals of the form of a
-`return` share one code, each with a message of its own.
+its own; no other rule has either code. Each refusal of the form of a
+`return` has a code of its own (13.5).
 
 Rationale for rule 11. C makes the substatement of a selection or
 iteration statement a block of its own (C11 6.8.4p3, 6.8.5p5), so the
@@ -1635,7 +1636,7 @@ C11 or in the accepted dialect (2.4, 13.3), and a `defer` statement
 stands where a declaration does. The last expression of a statement
 expression is its value and leaves `S` no place after it. Outside a
 function body a block stands only in a statement expression, or in the
-body of a block literal, which is unread text (rule 1). Neither backend
+body of a block literal, which is unread text (rule 13). Neither backend
 takes a statement expression there. Apple Clang 21 and GCC 16 refuse
 one in a declaration of file scope: in an array size, in a
 `__typeof__`, in an initialiser and in the value of an enumeration
@@ -2557,8 +2558,9 @@ the program supplies, before the builtin; freestanding targets use this to
 report the failure. Where the compiler has no such builtin, the call is
 followed by an endless loop. The traps are: an invalid tag in `match`,
 in a single-pattern test (4.5) or in `try` (5.1 rule 2), the end of a
-match arm, a slice index or sub-slice out of range, and the checks of
-checked mode.
+match arm, the end of a block that holds a `defer` statement and cannot
+complete (section 6 rule 1), a slice index or sub-slice out of range,
+and the checks of checked mode.
 
 ### 10.6 What C code sees
 
@@ -2960,7 +2962,7 @@ only, as a block literal is C text only (below): every token from its
 `{` to its `}` decides, and one that is Type-C text, or C text of a
 file that is no system header, is an error. The body is unread text
 (13.5), and the one scan of the tokens that typing does not read
-finds such a token (section 6 rule 1). A body is therefore passed
+finds such a token (section 6 rule 13). A body is therefore passed
 through unread only where every token of it is C text of a system
 header, and no body that holds Type-C text goes unread: a `.tci` that
 a system header includes inside a body is refused. A body whose `{`
@@ -2980,7 +2982,7 @@ text writes, one that an include puts Type-C text inside, and one that a
 C macro builds around its argument, as `ASYNC(try f())` does. Typing
 does not read the body of a block literal. The one scan of the tokens
 that typing does not read passes over the body, for this rule and for
-`_Defer` (section 6 rule 1). A Type-C
+`_Defer` (section 6 rule 13). A Type-C
 construct in the body, which typing finds for lowering, would reach the
 backend as written; typing the body needs Clang's rules for blocks,
 chiefly that a captured automatic variable is a `const` copy, without
@@ -3117,7 +3119,8 @@ warning. The table is the one list of marks:
   takes the form whatever the arguments. `typec` cannot tell the two
   kinds apart without reading the arguments, so every `availability`
   is marked. Few functions that a program defines carry the attribute,
-  and P9 counts the refusals.
+  and P9 counts the refusals for a marked attribute, which have a code
+  of their own (13.5).
 - Clang's `diagnose_if`, whatever its arguments. It reports a mention
   of the name where its condition holds, as an error or as a warning,
   whichever an argument says, and `typec` cannot tell which without
@@ -3311,7 +3314,7 @@ Two properties follow by construction:
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. A statement `try e;` reads no field: nothing is written after its test, as said below the table. It is the one position of a `try` whose `T` is `void` (5.1 rule 2), where `Ok` has no field (3.5 rule 6). Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
-| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4), and gets no copy where it cannot (section 6 rule 1). A `defer` statement inside `S` is lowered in `S`, so its copies are part of the text that each copy of `S` repeats (section 6 rule 4). A `break`, `continue`, `goto` or `return;` that leaves the scope is written as a block that holds the copies it runs and then the jump, `{ copies jump; }`. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;`, stays one statement; a jump that is a block item gets the same block. A `return e;` in the scope becomes a block of its own form, as said below the table; "Moved text" below says at which place each exit has its copies. |
+| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). A `defer` statement inside `S` is lowered in `S`, so its copies are part of the text that each copy of `S` repeats (section 6 rule 4). Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
 | Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes, named as said below the table. |
 | Checked-mode checks | Inline tests that trap. |
 
@@ -3573,6 +3576,12 @@ third.
   is. In a function that returns a value the form needs no type of `e`,
   so an operand of unknown type is no error there.
 
+Each refusal of the form has a code of its own (13.6), so that a count
+tells them apart: one for each of the two refusals that follow from the
+inner block, one for each of the two ways in which `typec` decides the
+first of the three cases, the `target` attributes and the marked
+attribute, and one for each of the other two cases.
+
 In a function that returns `void` there is no value to hold and no
 typedef. `return e;` with a void expression for `e`, as in
 `return g();`, becomes `{ e; /* cleanups */ return; }`. The `return` of
@@ -3611,7 +3620,7 @@ at `-O0` and `-O2`, and with Clang's `-Weverything`:
 | Clang `-Wreturn-stack-address` (on by default), `return &x;` of a local | Reported | Lost |
 | GCC `-Wreturn-local-addr` (on by default), the same | Reported | Lost at `-O0`; reported at `-O2` |
 | Clang `-Wnonnull` (on by default), `return 0;` in a function declared `returns_nonnull` or with a `_Nonnull` return type | Reported | Lost |
-| `-Wmisleading-indentation` (in `-Wall`), both backends, `if (c) return x;` followed by a statement indented as if the `if` guarded it | Reported | Lost: the `return` stands in a block |
+| `-Wmisleading-indentation` (in `-Wall`), both backends, `if (c) return x;` followed by a statement indented as if the `if` guarded it; the same for every other jump that runs copies, as `if (c) break;`, which stands in a block too (the `defer` row) | Reported | Lost: the jump stands in a block |
 | `-Wunused-parameter`, `-Wunused-but-set-parameter`, both backends | Reported | Lost for every parameter of the function |
 | Clang `-Wunused-function`, an unused `static` function | Reported | Replaced by `-Wunneeded-internal-declaration`; GCC reports `-Wunused-function` for both |
 | `-Wshadow`, both backends, where `e` holds a statement expression with such a `return` of its own | None | Added: the inner `__tc_r` hides the outer one |
@@ -3623,7 +3632,11 @@ at `-O0` and `-O2`, and with Clang's `-Weverything`:
 
 Clang's `-Weverything` also reports every `__tc_` name that a lowered
 unit declares under `-Wreserved-identifier`, as it does those of an
-emitted header (9.3).
+emitted header (9.3). Clang's `-Wunreachable-code`, which neither
+`-Wall` nor `-Wextra` turns on, reports the trap that follows a
+`return`, at the end of a match arm as at the end of a block that
+holds a `defer` statement (Apple Clang 21); GCC 16 reports nothing
+there.
 
 Pilot B judges the form against this list and the refusals above, with
 the rest of P9; the P9 row of section 15 is the one list of what it
@@ -3739,9 +3752,11 @@ copies of deferred statements stand at one place for each exit (section
 - for the end of a block that can complete (4.4), directly before its
   `}`;
 - for a `return e;`, directly before the `return` keyword. Lowering
-  writes the copies after the initialiser that holds `e` (above), and
-  the same names are in scope at both places, since `e` declares none
-  that is in scope after it (section 6 rule 12);
+  writes the copies after the initialiser, or the expression statement,
+  that holds `e` (above). The names in scope there are those in scope
+  before the `return` of the source, since `e` declares none that is in
+  scope after it (section 6 rule 12), and `__tc_r` where the block
+  declares it, which is reserved (2.3), so that no copy names it;
 - for the error path of a `try`, with its test: before the statement or
   declaration that holds the `try` and after the labels of that
   statement (above), so a declaration that holds a `try` is not in
@@ -3801,8 +3816,7 @@ Three rules carry the property into unread text.
   undeclared, and what the backend finds under it at a place of writing
   is the backend's to say. A word that does denote something is counted,
   and a declaration that hides it at a place of writing is refused
-  though it would change nothing. The measurements of P9 and P23 count
-  these refusals.
+  though it would change nothing.
 - For the second half, an identifier in an attribute argument or a
   `#pragma` line may denote, at its place, what lowering writes under a
   name of its own: a type parameter, a universe name or a generic.
@@ -3926,25 +3940,30 @@ structures of the packing probe that ends one (10.3), one of each.
   code. Stable codes let tests and editors refer to a diagnostic without
   matching its text.
 - A stable code is `TC` and four digits. It names a rule of this design
-  that Type-C text breaks, a limit of the GNU profile (13.3) that C
+  that the text breaks, a limit of the GNU profile (13.3) that C
   text or Type-C text meets, or a construct that a later work package
   implements, and ends the diagnostic in brackets after the clause that
   states the rule, as GCC and Clang end a warning with its option:
   `file:line: text (design 4.2 rule 1) [TC0018]`. Each rule's code is
   written beside it in the one table of rules, which generates the
   catalogue of diagnostics; a code is never renumbered or reused.
-- A refusal of C text carries no code: it states no rule of this design,
-  and C11, the GCC manual or the backend's own diagnostic names what is
-  wrong. A translation limit of `typec` (C11 5.2.4.1), such as the
+- A refusal of C text that states no rule of this design carries no
+  code: C11, the GCC manual or the backend's own diagnostic names what
+  is wrong. A translation limit of `typec` (C11 5.2.4.1), such as the
   parser's bound on the nesting of brackets, is such a refusal. The
   limit on nested instantiation is none: 3.5 rule 7 states it as a rule
   of Type-C, so it carries a code. A limit of the GNU profile, a
   construct
   outside the profile or one that needs what `typec` does not compute,
   is a refusal of the accepted dialect by this design rather than by C,
-  so it carries a code. Every refusal of the front end is either coded
-  or a refusal of C text, and only the function that appends a rule's
-  code makes a coded one.
+  so it carries a code. C text that breaks a rule of this design is
+  refused with the rule's code, as Type-C text is: a `defer` statement
+  that C text writes with `_Defer` is refused under rules 8, 9, 11 and
+  12 of section 6, and a `return` in its scope under the refusals of
+  the form (13.5), each with the code it has in Type-C text. Every
+  refusal of the front end is either coded or a refusal of C text that
+  states no rule of this design, and only the function that appends a
+  rule's code makes a coded one.
 - Debuggers step through the original lines. Bindings are C locals under
   their source names. A variant value appears as its lowered struct, with
   the tag printed by name. Generic instances appear under their instance
@@ -3997,7 +4016,7 @@ numbers refer to the implementation plan.
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions, in a statement or declaration that neither holds nor directly follows a pragma line (5.1) | Stage 2, Pilot B: rewrites the limit forced, and statements refused for a pragma | As specified |
-| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6, and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; among those of rule 8, the refusals that 13.5 makes for an identifier in an attribute argument or a `#pragma` line of a deferred statement; how often each refusal of the form (13.5) rejects a function or a `return`; the returns where the plain form reports a diagnostic of the list of 13.5 that the form loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
+| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6, and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; how often each refusal of the form (13.5) rejects a function or a `return`; the returns, and the other jumps that run copies, where the plain statement reports a diagnostic of the list of 13.5 that its block loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
 | P12 | Instances are per translation unit (7.3) | Stage 3: code size of the library and pilot | Per unit |
@@ -4011,7 +4030,7 @@ numbers refer to the implementation plan.
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties, the declarations that the resolution check of 13.5 refuses for one among them | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
-| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, the refusals that 13.5 makes for an identifier in an attribute argument of a definition among them. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
+| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
 | P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
 | P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
 | P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |
