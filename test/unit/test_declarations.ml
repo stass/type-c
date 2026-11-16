@@ -2830,6 +2830,41 @@ let generic_resolution () =
   (* Declared again before the alias, the typedef name makes the alias
      inexact at its own place, and the argument is refused there. *)
   rejects ~file (plain ^ wide ^ " " ^ alias ^ " box(a(int)) x;") "[TC0041]";
+  (* An object or a function declared again through an inexact typedef
+     name, or with an attribute, may give [__typeof__] of it another type
+     for the backend, as for a typedef name: Clang aligns a member of
+     [__typeof__(obj)] as the latest declaration of [obj] says. *)
+  let typed_wide = "typedef int wide __attribute__((aligned(16))); " in
+  let reads_obj = "type g(T) = struct { __typeof__(obj) v; T t; }; " in
+  let reads_f = "type g(T) = struct { __typeof__(*f()) v; T t; }; " in
+  rejects ~file
+    ("extern int obj; " ^ reads_obj ^ typed_wide ^ "extern wide obj; g(int) x;")
+    added;
+  accepts ~file
+    ("extern int obj; " ^ reads_obj ^ "g(int) early; " ^ typed_wide
+   ^ "extern wide obj; g(int) x;");
+  accepts ~file ("extern int obj; " ^ reads_obj ^ "extern int obj; g(int) x;");
+  rejects ~file
+    ("extern int obj; " ^ reads_obj
+   ^ "extern int obj __attribute__((aligned(16))); g(int) x;")
+    added;
+  rejects ~file
+    (typed_wide ^ "extern wide obj; " ^ reads_obj ^ "extern int obj; g(int) x;")
+    "[TC0044]";
+  rejects ~file
+    (typed_wide ^ "int *f(void); " ^ reads_f ^ "wide *f(void); g(int) x;")
+    added;
+  accepts ~file
+    (typed_wide ^ "int *f(void); " ^ reads_f ^ "int *f(void); g(int) x;");
+  (* A definition is inexact as a declaration is; a declaration in a
+     block that file scope does not see leaves the entity there exact. *)
+  rejects ~file
+    ("int *f(int); type g(T) = struct { __typeof__(*f(0)) v; T t; }; \
+      int *f(int a __attribute__((unused))) { return 0; } g(int) x;")
+    added;
+  accepts ~file
+    (typed_wide ^ "void h(void) { extern wide obj; } extern int obj; "
+   ^ reads_obj ^ "extern int obj; g(int) x;");
   (* Unread text: an attribute's identifier that denotes a type
      parameter is refused at the definition, and one that denotes a
      declaration is a use of it. *)

@@ -40,17 +40,7 @@ type declared =
               list (6.9.1p6), whose uses see no prototype in Clang
               (DR 316). *)
     }
-  | Typedef of {
-      typedef_type : Ctype.t;
-      inexact : bool;
-          (** Declared with an attribute or a [__typeof__] of an
-              expression at the depth of design 3.5 rule 2, so that the
-              backend's type of the name may hold an attribute that
-              [typedef_type] lacks and the name spells no type argument:
-              one stands among the specifiers of its declaration, in its
-              declarator or after it, or a typedef name that the
-              declaration writes is declared with one. *)
-    }
+  | Typedef of { typedef_type : Ctype.t }
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
       (** The type is [int] when every value of the enumeration fits it,
           else the enumerated type; while its list is read, the type is
@@ -58,4 +48,16 @@ type declared =
           that typec does not evaluate is an error (design P16). *)
 
 (** The declarations of one object or function share its [entity]. *)
-type t = { name : string; entity : int; declared : declared }
+type t = {
+  name : string;
+  entity : int;
+  declared : declared;
+  inexact : bool;
+      (** This declaration, or an earlier one of the entity that it
+          sees, is inexact (design 3.5 rule 2, 13.5): its text holds an
+          attribute or a [__typeof__] of an expression, or a typedef name
+          or alias declared with one, so that the backend's type may hold
+          an attribute that the type in [declared] lacks. A Type-C type
+          declaration other than an alias names a type of its own, which
+          no argument shares, and is exact. *)
+}

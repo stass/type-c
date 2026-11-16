@@ -567,15 +567,19 @@ is [type-c-language-design.md](type-c-language-design.md).
   computed by a walk of the tree of its own
   (`Declarations.specifiers_are_inexact` and the functions after it),
   which must agree with the reader on what it visits. Have the reader
-  return the fact with the type that it reads.
-- [Medium] Only a typedef name records that its declaration is inexact
-  (`Entity.Typedef.inexact`), so the moved-text check (design 13.5,
-  `Resolution.check_same_attributes`) misses an object declared again
-  through an inexact typedef name: after `extern int obj;` and a generic
-  whose body holds `__typeof__(obj) v;`, `extern p obj;` with `p` an
-  `int` aligned(16) gives the instance alignment 16 on Clang, 4 on GCC,
-  and typec accepts it. Record the fact for every entity, next to
-  `declared`, so the check covers each kind.
+  return the fact with the type that it reads. `for_declarator` runs the
+  walk for every declarator, members and nested parameters included,
+  which nothing reads there and which costs depth times size.
+- [Medium] The moved-text check (design 13.5,
+  `Resolution.check_same_attributes`) compares the declarations of the
+  names that a text reads, not those of the typedef names that their
+  declarations write: after `typedef int t; extern t obj;` and a generic
+  whose body holds `__typeof__(obj) v;`, `typedef int t
+  __attribute__((aligned(16)));` gives the instance alignment 16 on GCC,
+  which changes the typedef in place, and 4 on Clang, and typec accepts
+  it. Decide between refusing a typedef redeclaration that changes its
+  exactness (a C program that both backends accept) and extending 13.5
+  to the typedef names that a declaration writes.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it

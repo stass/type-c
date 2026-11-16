@@ -3705,13 +3705,17 @@ each. A third clause covers the text around it.
   type, and neither does declaring an entity again with the type it has:
   a member that names a structure of file scope reads alike where the
   structure is completed between the text and the place of writing.
-  A typedef name declared again with an attribute or a `__typeof__` of
-  an expression (3.5 rule 2), or after such a declaration, may have
-  another type for the backend, which reads the attribute that typec's
-  types lack and cannot compare; such a declaration is an error as one
-  that changes the type is. The exactness of a type argument, which
-  3.5 rule 2 reads from the text of an alias at its own place, so holds
-  at each place where lowering writes the alias.
+  A typedef name, an object or a function declared again with an
+  attribute or a `__typeof__` of an expression at the depth of 3.5
+  rule 2, or through a typedef name declared with one, or after such a
+  declaration, may have another type for the backend, which reads the
+  attribute that typec's types lack and cannot compare: Clang gives
+  `__typeof__(obj)` the alignment of `extern wide obj;` after
+  `extern int obj;`, where `wide` is an `int` aligned to 16. Such a
+  declaration is an error as one that changes the type is. The
+  exactness of a type argument, which 3.5 rule 2 reads from the text of
+  an alias at its own place, so holds at each place where lowering
+  writes the alias.
   *Provisional (P21).* Where an entity that the text uses is declared
   again between the two and whether its type stays the same depends on
   an unknown type (13.3), that declaration is an error, as one that

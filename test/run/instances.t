@@ -215,6 +215,43 @@ so the argument is exact on both backends.
   >   typec --cc=$cc $flags -fsyntax-only early.tc || echo "$cc"
   > done
 
+An object declared again through an inexact typedef name after a
+generic whose text reads it gives the text another type where an
+instance first stands after that declaration (design 13.5): Clang
+aligns g(int) as wide there, and as int where the definition stands,
+so one instance name would have two layouts.
+
+  $ cat > object.tc <<'EOF'
+  > extern int obj;
+  > type g(T) = struct { __typeof__(obj) v; T t; };
+  > typedef int wide __attribute__((aligned(16)));
+  > extern wide obj;
+  > g(int) x;
+  > _Static_assert(_Alignof(g(int)) == _Alignof(int), "g");
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -fsyntax-only object.tc
+  > done
+  typec: object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  typec: object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [80]
+
+An instance that stands before that declaration reads obj as the
+definition does, on both backends.
+
+  $ cat > object_early.tc <<'EOF'
+  > extern int obj;
+  > type g(T) = struct { __typeof__(obj) v; T t; };
+  > g(int) early;
+  > typedef int wide __attribute__((aligned(16)));
+  > extern wide obj;
+  > g(int) x;
+  > _Static_assert(_Alignof(g(int)) == _Alignof(int), "g");
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -fsyntax-only object_early.tc || echo "$cc"
+  > done
+
 A declaration in a block cannot hide a name of an instance that
 lowering writes there (design 10.3): the enumerator would make the
 constructor Some of option(int) the tag of None on both backends.

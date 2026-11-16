@@ -169,20 +169,14 @@ let check_same_type context span name ~declaration (used : Entity.t) there =
             that depends on %s, whose type typec does not compute"
            (quote name) cited unknown.construct)
 
-(* Whether the entity is a typedef name whose type for the backend may
-   hold an attribute that its typec type lacks (design 3.5 rule 2). *)
-let is_inexact (entity : Entity.t) =
-  match entity.declared with
-  | Typedef { inexact; _ } -> inexact
-  | Object _ | Function _ | Enumerator _ -> false
-
 (* The backend reads a type with its attributes, which typec's types do
-   not hold, so typec cannot tell that a typedef name declared again
-   with one keeps the type it has at the text's own place; the
-   exactness of a type argument (design 3.5 rule 2), read at that
-   place, rests on this. *)
-let check_same_attributes context span name ~cited there =
-  if is_inexact there then
+   not hold, so typec cannot tell that a name declared again with one
+   keeps the type it has at the text's own place; the exactness of a
+   type argument (design 3.5 rule 2), read at that place, rests on
+   this. A declaration after an inexact one is inexact too, so this
+   refuses as well one that drops the attribute. *)
+let check_same_attributes context span name ~cited (there : Entity.t) =
+  if there.inexact then
     refuse span Moved_text
       (Printf.sprintf
          "the declaration of %s at %s, between the text and a place where \
@@ -340,7 +334,7 @@ let check_exact context place (use : name) =
   match Parser.View.find place.view use.name with
   | Some { declaration; _ } -> (
       match context.entity declaration with
-      | Some there when is_inexact there ->
+      | Some there when there.inexact ->
           refuse use.span Moved_text
             (Printf.sprintf
                "the declaration of %s at %s gives it a type that may hold an \

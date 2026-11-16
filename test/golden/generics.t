@@ -485,6 +485,25 @@ refused.
   before.tc:5: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
   [1]
 
+An object or a function declared again through an inexact typedef name
+between the text and the place where an instance first stands gives
+`__typeof__` of it another type there, as a typedef name does (design
+13.5).
+
+  $ printf '%s\n' 'extern int obj;' \
+  >   'type g(T) = struct { __typeof__(obj) v; T t; };' \
+  >   'typedef int wide __attribute__((aligned(16)));' 'extern wide obj;' \
+  >   'g(int) x;' > object.tc
+  $ ./golden.exe object.tc
+  object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [1]
+  $ printf '%s\n' 'typedef int wide __attribute__((aligned(16)));' \
+  >   'int *f(void);' 'type g(T) = struct { __typeof__(*f()) v; T t; };' \
+  >   'wide *f(void);' 'g(int) x;' > function.tc
+  $ ./golden.exe function.tc
+  function.tc:5: in the instance 'g__i' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [1]
+
 An argument holds no `__typeof__` of an expression at the same depth,
 as the backend gives the expression the type of the typedef that
 declared it, attribute included (design 3.5 rule 2). `__typeof__` of a

@@ -418,10 +418,7 @@ let redeclared state span name prior next =
         Ctype.same_type state.target state.tags (location_of state span)
           old.typedef_type same.typedef_type
       with
-      | Answer true | Depends_on _ ->
-          Typedef
-            { same with
-              inexact = old.inexact || same.inexact }
+      | Answer true | Depends_on _ -> Typedef same
       | Answer false ->
           fail state span
             (Rule.c_text
@@ -468,8 +465,10 @@ let bind_entity state name (declared : Tree.declared) entity =
 (* An overload (design 13.3) is a new entity, which is not linked under
    its name, and stands beside what a declaration in its place would
    redeclare. *)
-let bind_overload state span name (declared : Tree.declared) next =
-  let entity = { name; entity = fresh_entity state; declared = next } in
+let bind_overload state span name (declared : Tree.declared) ~inexact next =
+  let entity =
+    { name; entity = fresh_entity state; declared = next; inexact }
+  in
   let reference = Tree.In_tree declared.id in
   bind_entity state name declared entity;
   Hashtbl.replace state.beside reference
@@ -493,31 +492,34 @@ let record state name (declared : Tree.declared) entity =
 
 (* Records what [declared] declares [name] as: a new entity, or [prior],
    the visible declaration it redeclares, with the composite of their
-   types. *)
-let bind_to state span name (declared : Tree.declared) prior next =
-  if is_overload next then bind_overload state span name declared next
+   types. [inexact] is the declaration's own; after an inexact [prior]
+   the entity stays inexact, as the backend may keep an attribute that
+   a later declaration does not repeat. *)
+let bind_to state span name (declared : Tree.declared) prior ~inexact next =
+  if is_overload next then bind_overload state span name declared ~inexact next
   else
     let entity =
       match prior with
-      | None -> { name; entity = fresh_entity state; declared = next }
+      | None -> { name; entity = fresh_entity state; declared = next; inexact }
       | Some prior ->
           { prior with
-            declared = redeclared state span name prior.declared next }
+            declared = redeclared state span name prior.declared next;
+            inexact = prior.inexact || inexact }
     in
     record state name declared entity
 
 (* [bind_to] the declaration before [declared] in its scope. *)
-let bind state span name declared next =
+let bind state span name declared ~inexact next =
   bind_to state span name declared (earlier_entity state span name declared)
-    next
+    ~inexact next
 
 (* A declaration with linkage of a name whose declarations with linkage
    it does not see, as one in a block of another function: the same
    entity (6.2.2p4, p5), of a compatible type (6.2.7p2), with its own
    type, as no declaration in scope composes with it (6.2.7p4). *)
-let bind_unseen state span name declared (other : entity) next =
+let bind_unseen state span name declared (other : entity) ~inexact next =
   ignore (redeclared state span name other.declared next);
-  record state name declared { other with declared = next }
+  record state name declared { other with declared = next; inexact }
 
 (* Where a declaration of an ordinary identifier stands, for its linkage
    and storage duration (6.2.2, 6.2.4). *)
@@ -572,7 +574,7 @@ type specified = {
           2). *)
   inexact : bool;
       (** The specifiers are inexact ([specifiers_are_inexact]);
-          [read_init_declarator] adds its declarator's. *)
+          [for_declarator] adds its declarator's. *)
 }
 
 (* The declaration specifiers of each kind, in order. *)
@@ -878,12 +880,6 @@ let with_inner_effect derived attributes =
       let read = read_attributes ~onto:no_attributes attributes in
       { derived with inner_effect = read.effect_attribute }
 
-(* [specified] for one declarator: its attributes extend those of the
-   specifiers. *)
-let for_declarator specified attributes =
-  let onto = specified.attributed in
-  { specified with attributed = read_attributes ~onto attributes }
-
 (* Identifiers declared at file scope or in a block *)
 
 let no_function_specifiers state span specified =
@@ -990,9 +986,7 @@ let declared_as state scope span specified name declared (derived : derived) =
   | Some Typedef, _ ->
       no_function_specifiers state span specified;
       no_alignment state span specified "a typedef";
-      Typedef
-        { typedef_type = derived.declared_type;
-          inexact = specified.inexact }
+      Typedef { typedef_type = derived.declared_type }
   | Some (Auto | Register | Thread_local), File_scope ->
       fail state span (Rule.c_text "auto or register at file scope (C11 6.9p2)")
   | storage, _ -> (
@@ -1025,19 +1019,21 @@ let declare_in state scope span specified declared (derived : derived) =
         declared_as state scope span specified name declared derived
       in
       let has_linkage = has_linkage next in
+      let inexact = specified.inexact in
+      let bind_after prior =
+        bind_to state span name declared prior ~inexact next
+      in
       let entity =
         match (earlier_entity state span name declared, scope) with
-        | Some prior, _ -> bind_to state span name declared (Some prior) next
-        | None, _ when not has_linkage ->
-            bind_to state span name declared None next
+        | Some prior, _ -> bind_after (Some prior)
+        | None, _ when not has_linkage -> bind_after None
         | None, Block_scope when Hashtbl.mem state.at_file_scope name ->
-            bind_to state span name declared
-              (Hashtbl.find_opt state.at_file_scope name)
-              next
+            bind_after (Hashtbl.find_opt state.at_file_scope name)
         | None, (File_scope | Block_scope) -> (
             match Hashtbl.find_opt state.linked name with
-            | Some other -> bind_unseen state span name declared other next
-            | None -> bind_to state span name declared None next)
+            | Some other ->
+                bind_unseen state span name declared other ~inexact next
+            | None -> bind_after None)
       in
       note_at_file_scope state scope entity;
       entity)
@@ -1068,6 +1064,12 @@ let naming_name (init_declarator : Tree.init_declarator) =
       (Tree.declared_name declarator)
   else None
 
+(* The declarator of a parameter, which an abstract one may omit. *)
+let parameter_declarator (parameter : Tree.parameter_declarator) =
+  match parameter with
+  | Named_parameter { declarator; declared = _ } -> Some declarator
+  | Abstract_parameter declarator -> declarator
+
 (* Whether the text that spells a type is inexact: it holds an attribute
    or a [__typeof__] of an expression at the depth of design 3.5 rule 2,
    where a typedef name's entity records its own. typec's types carry no
@@ -1092,7 +1094,7 @@ and type_specifier_is_inexact state : Tree.type_specifier -> bool =
       type_name_is_inexact state type_name
   | Typedef_name { declaration; name = _ } -> (
       match Hashtbl.find_opt state.entities declaration with
-      | Some { declared = Typedef { inexact; _ }; _ } -> inexact
+      | Some { declared = Typedef _; inexact; _ } -> inexact
       | Some _ | None -> false)
   | Application { generic; name = _; arguments = _ } ->
       alias_is_inexact state generic
@@ -1149,14 +1151,20 @@ and parameter_is_inexact state (parameter : Tree.parameter) =
   let ({ specifiers; declarator; attributes } : Tree.parameter_node) =
     parameter.node
   in
-  let declarator =
-    match declarator with
-    | Named_parameter { declarator; declared = _ } -> Some declarator
-    | Abstract_parameter declarator -> declarator
-  in
   attributes <> []
   || specifiers_are_inexact state specifiers
-  || optional_declarator_is_inexact state declarator
+  || optional_declarator_is_inexact state (parameter_declarator declarator)
+
+(* The specifiers as they apply to one declarator, which [attributes]
+   follow: a declaration is inexact when its specifiers, its declarator
+   or these attributes are. *)
+let for_declarator state specified attributes declarator =
+  let onto = specified.attributed in
+  { specified with
+    attributed = read_attributes ~onto attributes;
+    inexact =
+      specified.inexact || attributes <> []
+      || optional_declarator_is_inexact state declarator }
 
 let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
@@ -1478,7 +1486,7 @@ and read_member_declarator state specified
     (declarator : Tree.member_declarator) =
   match declarator.node with
   | Field { declarator = field; attributes } ->
-      let specified = for_declarator specified attributes in
+      let specified = for_declarator state specified attributes (Some field) in
       let derived =
         declare_type state ~parameter:false specified (Some field)
       in
@@ -1486,7 +1494,7 @@ and read_member_declarator state specified
       { Ctype.member_name = derived.name; member_type = derived.declared_type;
         bit_field_width = None }
   | Bit_field { declarator = field; width; attributes } ->
-      let specified = for_declarator specified attributes in
+      let specified = for_declarator state specified attributes field in
       Option.iter
         (fun span ->
           fail state span
@@ -1599,8 +1607,10 @@ and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
     in
     let enumerator_type = integer_type state name.span integer in
     let constant = Integer_constant.known state.target integer value in
+    (* An enumerator holds only the attributes of the table, which change
+       no type ([check_enumerator_attributes]). *)
     let entity =
-      bind state name.span name.node declared
+      bind state name.span name.node declared ~inexact:false
         (Enumerator { enumerator_type; value = constant })
     in
     (Some typed, (declared.id, entity, value) :: read)
@@ -1648,7 +1658,8 @@ and define_fixed_enum state span enum (integer : Integer.t Unknown.answer)
       fixed_enumerator_value state integer previous enumerator.span value
     in
     let enumerator = Enumerator { enumerator_type = Ctype.enum enum; value } in
-    ignore (bind state name.span name.node declared enumerator);
+    (* As in [define_enum], the attributes change no type. *)
+    ignore (bind state name.span name.node declared ~inexact:false enumerator);
     Some value
   in
   ignore (List.fold_left declare None enumerators)
@@ -1975,7 +1986,10 @@ and read_parameter state (parameter : Tree.parameter) =
     parameter.node
   in
   let specified =
-    for_declarator (parameter_specifiers state span specifiers) attributes
+    for_declarator state
+      (parameter_specifiers state span specifiers)
+      attributes
+      (parameter_declarator declarator)
   in
   match declarator with
   | Named_parameter { declarator; declared } ->
@@ -2022,7 +2036,7 @@ and declare_parameter state span specified derived name declared =
         register;
       }
   in
-  ignore (bind state span name declared parameter);
+  ignore (bind state span name declared ~inexact:specified.inexact parameter);
   object_type
 
 (* Design P20: a va_list parameter is adjusted as the target's va_list
@@ -2075,7 +2089,9 @@ and read_old_style_declarator state types specified
       (Rule.c_text
          "a declaration before a function body has an initializer (C11 \
           6.9.1p6)");
-  let specified = for_declarator specified attributes in
+  let specified =
+    for_declarator state specified attributes (Some declarator)
+  in
   let derived =
     declare_type state ~parameter:true specified (Some declarator)
   in
@@ -2156,12 +2172,8 @@ and read_init_declarator state scope specified
   let { Tree.declarator; declared; asm_label = _; attributes; initialiser } =
     init_declarator.node
   in
-  let specified = for_declarator specified attributes in
   let specified =
-    { specified with
-      inexact =
-        specified.inexact || attributes <> []
-        || declarator_is_inexact state declarator }
+    for_declarator state specified attributes (Some declarator)
   in
   (* The effects of attributes are recorded where design 13.3 places
      them: on a function declared at file scope, not on a typedef. *)
@@ -2266,7 +2278,7 @@ and read_named_type state
   let bind_spelled ~inexact typedef_type =
     record state name.node declared
       { name = name.node; entity = fresh_entity state;
-        declared = Typedef { typedef_type; inexact } }
+        declared = Typedef { typedef_type }; inexact }
   in
   let bind = bind_spelled ~inexact:false in
   match definition with
@@ -2418,7 +2430,9 @@ and declare_tag_enumerators state span variant constructors ~scope =
     let declared_as = Enumerator { enumerator_type; value } in
     ignore
       (record state name declared
-         { name; entity = fresh_entity state; declared = declared_as })
+         (* A constructor's tag spells no type. *)
+         { name; entity = fresh_entity state; declared = declared_as;
+           inexact = false })
   in
   List.iteri declare constructors
 
@@ -2888,7 +2902,7 @@ and with_arguments :
       (* [applied_type] has refused an inexact argument. *)
       { name = parameter.name.node; entity = fresh_entity state;
         declared =
-          Typedef { typedef_type = argument; inexact = false } };
+          Typedef { typedef_type = argument }; inexact = false };
     (reference, saved)
   in
   let restore (reference, saved) =
@@ -3177,7 +3191,9 @@ and bind_binding state (name : Tree.identifier) declared object_type =
         register = false }
   in
   let earlier = earlier_entity state name.span name.node declared in
-  ignore (bind_to state name.span name.node declared earlier next)
+  (* A binding spells no type, so nothing in it is inexact. *)
+  ignore
+    (bind_to state name.span name.node declared earlier ~inexact:false next)
 
 (* External declarations (6.9) *)
 
@@ -3218,8 +3234,9 @@ let read_function_definition state (definition : Tree.function_definition) =
   in
   let span = definition.span in
   let specified =
-    for_declarator (read_specifiers state specifiers)
-      attributes
+    for_declarator state
+      (read_specifiers state specifiers)
+      attributes (Some declarator)
   in
   (match (specified.storage, specified.thread_local) with
   | (None | Some (Extern | Static)), false -> ()
@@ -3332,9 +3349,10 @@ let declare_builtin_typedefs state =
   let declare (name, builtin) =
     match builtin_type state.target name builtin with
     | Ok t ->
+        (* No source text spells the type, the target's own. *)
         let entity =
           { name; entity = fresh_entity state;
-            declared = Typedef { typedef_type = t; inexact = false } }
+            declared = Typedef { typedef_type = t }; inexact = false }
         in
         Hashtbl.replace state.entities (Builtin name) entity
     | Error error -> invalid_arg (Ctype.error_message error)
