@@ -46,7 +46,7 @@ let grammar_tokens (tokens : Token.t array) first last =
   |> List.filter (fun index ->
          match tokens.(index).kind with
          | Token.Pragma | Token.Typec_pragma -> false
-         | Token.Identifier | Token.Number | Token.Character _
+         | Token.Identifier _ | Token.Number | Token.Character _
          | Token.String _ | Token.Punctuator _ ->
              true)
 
@@ -56,7 +56,7 @@ let rec grammar_token_before (tokens : Token.t array) index =
   let before = index - 1 in
   match tokens.(before).kind with
   | Token.Pragma | Token.Typec_pragma -> grammar_token_before tokens before
-  | Token.Identifier | Token.Number | Token.Character _ | Token.String _
+  | Token.Identifier _ | Token.Number | Token.Character _ | Token.String _
   | Token.Punctuator _ ->
       before
 
@@ -65,7 +65,7 @@ let rec grammar_token_after (tokens : Token.t array) index =
   let after = index + 1 in
   match tokens.(after).kind with
   | Token.Pragma | Token.Typec_pragma -> grammar_token_after tokens after
-  | Token.Identifier | Token.Number | Token.Character _ | Token.String _
+  | Token.Identifier _ | Token.Number | Token.Character _ | Token.String _
   | Token.Punctuator _ ->
       after
 

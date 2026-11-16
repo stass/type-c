@@ -17,7 +17,9 @@ type encoding =
     [defer] is a keyword depends on the file the token belongs to, which
     the parser decides. *)
 type kind =
-  | Identifier
+  | Identifier of string
+      (** an identifier, by its name in UTF-8 however [cc -E] wrote its
+          characters: the one source of the name for every later stage *)
   | Number
       (** a preprocessing number (C11 6.4.8), which is not always a
           constant: the macOS SDK writes versions such as [10.13.4] in

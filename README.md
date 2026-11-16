@@ -152,6 +152,8 @@ golden output, so a new rule needs a golden case. `test/run` holds cram
 tests that run `typec` and the backends;
 `types.t` and `declarations.t` compile static assertions of what typec
 computes, so a backend that disagrees fails to compile them.
+`test/misuse` holds OCaml that an interface must refuse; its rule passes
+only when `ocamlc` rejects the file for the abstract type it misuses.
 
 ### Linux test hosts
 

@@ -25,9 +25,11 @@ let or_exit message = function
       prerr_endline (message error);
       exit 1
 
-let source_text (text : Reader.t) (span : Tree.span) =
+(* The bytes of [span] as written in [contents], the text that [text]
+   was read from. *)
+let source_text contents (text : Reader.t) (span : Tree.span) =
   let first = text.tokens.(span.first) and last = text.tokens.(span.last) in
-  String.sub text.text first.start (last.start + last.length - first.start)
+  String.sub contents first.start (last.start + last.length - first.start)
 
 let spelled t =
   match (Ctype.pointer_to t, Ctype.is_variably_modified t) with
@@ -37,8 +39,8 @@ let spelled t =
   | Ok _, (Answer true | Depends_on _) | Error _, _ -> None
 
 (* The C that checks what typec gives [expression]. *)
-let assertions text result (typed : Expressions.typed) expression =
-  let written = source_text text expression.Tree.span in
+let assertions contents text result (typed : Expressions.typed) expression =
+  let written = source_text contents text expression.Tree.span in
   let type_check =
     match spelled typed.expression_type with
     | Some pointer when not (Expressions.designates_bit_field typed) ->
@@ -63,31 +65,32 @@ let assertions text result (typed : Expressions.typed) expression =
   String.concat " " (type_check @ lvalue_check @ value_check)
 
 (* The byte after each probed statement, with what to insert there. *)
-let rec block_insertions text result (block : Tree.block) =
+let rec block_insertions contents text result (block : Tree.block) =
   List.concat_map
     (function
       | Tree.Block_statement statement ->
-          statement_insertions text result statement
+          statement_insertions contents text result statement
       | Block_declaration _ | Block_type_declaration _ -> [])
     block.node.items
 
-and statement_insertions text result (statement : Tree.statement) =
+and statement_insertions contents text result (statement : Tree.statement) =
   match statement.node with
-  | Compound block -> block_insertions text result block
+  | Compound block -> block_insertions contents text result block
   | Expression_statement expression -> (
       match Declarations.expression result expression with
       | Some typed ->
           let last = text.Reader.tokens.(statement.span.last) in
-          let inserted = assertions text result typed expression in
+          let inserted = assertions contents text result typed expression in
           [ (last.start + last.length, " " ^ inserted) ]
-      | None -> failwith ("untyped: " ^ source_text text expression.span))
+      | None ->
+          failwith ("untyped: " ^ source_text contents text expression.span))
   | _ -> []
 
-let insertions text result (unit : Tree.translation_unit) =
+let insertions contents text result (unit : Tree.translation_unit) =
   List.concat_map
     (function
       | Tree.Function_definition { node = { body = Parsed block; _ }; _ } ->
-          block_insertions text result block
+          block_insertions contents text result block
       | _ -> [])
     unit
 
@@ -108,9 +111,9 @@ let () =
         or_exit Target.error_message
           (Target.of_predefined_macros (read_file dump))
       in
+      let contents = read_file source in
       let text =
-        or_exit Reader.error_message
-          (Reader.read ~name:source (read_file source))
+        or_exit Reader.error_message (Reader.read ~name:source contents)
       in
       let keywords = Target.keywords target Gnu in
       let unit =
@@ -119,7 +122,7 @@ let () =
       let result =
         or_exit Reader.error_message (Declarations.read target text unit)
       in
-      print_with text.text (insertions text result unit)
+      print_with contents (insertions contents text result unit)
   | _ ->
       prerr_endline "usage: expression_probe MACRO-DUMP PREPROCESSED-C";
       exit 2

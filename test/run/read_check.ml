@@ -47,12 +47,13 @@ let count_typec_pragmas (result : Reader.t) =
 let () =
   match Array.to_list Sys.argv with
   | _ :: path :: names -> (
-      match Reader.read ~name:path (read_file path) with
+      let text = read_file path in
+      match Reader.read ~name:path text with
       | Error error -> fail (Reader.error_message error)
       | Ok result ->
-          if not (Spans.spell_text result) then
+          if not (Spans.spell_text text result) then
             fail "the tokens and gaps do not spell the text";
-          if not (Spans.gaps_are_layout result) then
+          if not (Spans.gaps_are_layout text result) then
             fail "a gap holds more than white space and line markers";
           List.iter (show_owners result) names;
           let typec_pragmas = count_typec_pragmas result in

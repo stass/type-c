@@ -15,7 +15,7 @@ let encoding_name = function
   | Token.Wide -> "(L)"
 
 let kind_name = function
-  | Token.Identifier -> "id"
+  | Token.Identifier _ -> "id"
   | Token.Number -> "number"
   | Token.Character encoding -> "char" ^ encoding_name encoding
   | Token.String encoding -> "str" ^ encoding_name encoding
@@ -23,13 +23,15 @@ let kind_name = function
   | Token.Pragma -> "pragma"
   | Token.Typec_pragma -> "typec-pragma"
 
+(* Each [show] takes the text read, the reader's result and a token. *)
+
 (* "kind spelling" for each token. *)
-let show_kind result token =
+let show_kind _text result token =
   kind_name token.Token.kind ^ " " ^ Reader.spelling result token
 
 (* "spelling owner presumed-file:line" for each token, where "!" after the
    owner's name marks a system header. *)
-let show_place result (token : Token.t) =
+let show_place _text result (token : Token.t) =
   Printf.sprintf "%s %s%s %s:%d"
     (Reader.spelling result token)
     token.owner.name
@@ -39,13 +41,13 @@ let show_place result (token : Token.t) =
 let outcome show case =
   match Reader.read ~name:"in.i" case.text with
   | Error error -> "error: " ^ Reader.error_message error
-  | Ok result when not (Spans.spell_text result) ->
+  | Ok result when not (Spans.spell_text case.text result) ->
       "the tokens and gaps do not spell the text"
-  | Ok result when not (Spans.gaps_are_layout result) ->
+  | Ok result when not (Spans.gaps_are_layout case.text result) ->
       "a gap holds more than white space and line markers"
   | Ok result ->
       Array.to_list result.tokens
-      |> List.map (show result)
+      |> List.map (show case.text result)
       |> String.concat " | "
 
 let case name text expected = { name; text; expected }
@@ -175,9 +177,10 @@ let kind_cases =
   ]
 
 (* "spelling = written" for each token: the name of an identifier
-   against the bytes that the text keeps for emission. *)
-let show_written result token =
-  Reader.spelling result token ^ " = " ^ Reader.written result token
+   against its bytes in the text, which emission copies. *)
+let show_written text result (token : Token.t) =
+  Reader.spelling result token ^ " = "
+  ^ String.sub text token.start token.length
 
 let written_cases =
   [

@@ -95,6 +95,12 @@ let typedef_types (unit : Typec_unit.t) =
 let is_tag_keyword spelling =
   spelling = "struct" || spelling = "union" || spelling = "enum"
 
+let is_identifier (token : Token.t) =
+  match token.kind with
+  | Identifier _ -> true
+  | Number | Character _ | String _ | Punctuator _ | Pragma | Typec_pragma ->
+      false
+
 (* The candidates with a tag that their typedef declares, at file scope or
    in the prototype scope of a parameter, rather than names: no
    declaration at file scope declares a tag of its name, so the
@@ -105,7 +111,7 @@ let candidates_declaring_tags (unit : Typec_unit.t) ~first_token =
   for index = first_token to Array.length tokens - 2 do
     if
       is_tag_keyword (Reader.spelling unit.text tokens.(index))
-      && tokens.(index + 1).kind = Identifier
+      && is_identifier tokens.(index + 1)
       && Declarations.tag unit.declarations (Tag_at (index + 1)) <> None
     then Hashtbl.replace found (index_of tokens.(index).location.line) ()
   done;

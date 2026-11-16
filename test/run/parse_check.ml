@@ -28,7 +28,7 @@ let span_of = function
 let is_pragma (token : Token.t) =
   match token.kind with
   | Token.Pragma | Token.Typec_pragma -> true
-  | Token.Identifier | Token.Number | Token.Character _ | Token.String _
+  | Token.Identifier _ | Token.Number | Token.Character _ | Token.String _
   | Token.Punctuator _ ->
       false
 

@@ -13,14 +13,6 @@ let marker (owner : File.t) (location : Location.t) =
   let system_flag = if owner.system_header then " 3" else "" in
   Printf.sprintf "\n# %d \"%s\"%s\n" location.line location.file system_flag
 
-(* The bytes of the text that an edit replaces, as (start, stop). *)
-let replaced_bytes (tokens : Token.t array) edit =
-  let start = tokens.(edit.first).start in
-  if edit.count = 0 then (start, start)
-  else
-    let last = tokens.(edit.first + edit.count - 1) in
-    (start, last.start + last.length)
-
 (* The presumed location of the line where the replaced bytes end: no
    token of cc -E output spans lines, so it is the line of the last token
    replaced, or of the token an insertion precedes. *)
@@ -54,23 +46,17 @@ let check_edits tokens edits =
   in
   ignore (List.fold_left check 0 edits)
 
+(* The edit as the backend reads it: between markers that give its
+   location and then the location where the replaced tokens end. *)
+let replacement (tokens : Token.t array) edit : Reader.replacement =
+  (* The edit lies in one file (check_edits). *)
+  let owner = tokens.(edit.first).owner in
+  let text =
+    marker owner edit.location ^ edit.text
+    ^ marker owner (end_location tokens edit)
+  in
+  { first = edit.first; count = edit.count; text }
+
 let emit (unit : Reader.t) edits =
   check_edits unit.tokens edits;
-  let buffer = Buffer.create (String.length unit.text) in
-  let copy start stop =
-    Buffer.add_substring buffer unit.text start (stop - start)
-  in
-  (* [copied] is the end of the text copied so far. *)
-  let apply copied edit =
-    let start, stop = replaced_bytes unit.tokens edit in
-    copy copied start;
-    (* The edit lies in one file (check_edits). *)
-    let owner = unit.tokens.(edit.first).owner in
-    Buffer.add_string buffer (marker owner edit.location);
-    Buffer.add_string buffer edit.text;
-    Buffer.add_string buffer (marker owner (end_location unit.tokens edit));
-    stop
-  in
-  let copied = List.fold_left apply 0 edits in
-  copy copied (String.length unit.text);
-  Buffer.contents buffer
+  Reader.rewrite unit (List.map (replacement unit.tokens) edits)

@@ -1,11 +1,9 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* The name of each identifier whose bytes spell it otherwise, by the
-   position of its first byte: one that universal character names
-   spell. *)
-type names = (int, string) Hashtbl.t
-type t = { text : string; tokens : Token.t array; names : names }
+type text = string
+type t = { text : text; tokens : Token.t array }
+type replacement = { first : int; count : int; text : string }
 type error = { location : Location.t; message : string }
 
 (* The largest line number a line marker or #line may give (C11 6.10.4);
@@ -33,7 +31,6 @@ type state = {
           nothing recurses over it. *)
   mutable owners : File.t Owners.t;  (** each owner made so far *)
   mutable tokens : Token.t list;  (** in reverse *)
-  names : names;
 }
 
 (* Raised at the first part of the text that is not cc -E output. *)
@@ -228,8 +225,7 @@ let check_extended_char state c ~initial =
 
 (* The name of an identifier is in UTF-8 however its characters are
    written, so that each name has one spelling in every later stage;
-   the reader records it where it differs from the identifier's bytes,
-   which emission copies unchanged. *)
+   the text keeps the bytes, which emission copies unchanged. *)
 let scan_identifier state =
   let start = state.pos in
   let name = Buffer.create 16 in
@@ -243,10 +239,7 @@ let scan_identifier state =
         Buffer.add_utf_8_uchar name c
     | None -> continues := false
   done;
-  let name = Buffer.contents name in
-  if name <> String.sub state.text start (state.pos - start) then
-    Hashtbl.replace state.names start name;
-  Token.Identifier
+  Token.Identifier (Buffer.contents name)
 
 (* A preprocessing number (C11 6.4.8): a digit, or '.' and a digit, then
    digits, identifier characters, '.' and signs after e, E, p and P. *)
@@ -481,7 +474,6 @@ let read ~name text =
       include_stack = [];
       owners = Owners.empty;
       tokens = [];
-      names = Hashtbl.create 16;
     }
   in
   match
@@ -491,16 +483,40 @@ let read ~name text =
   with
   | () ->
       let tokens = Array.of_list (List.rev state.tokens) in
-      Ok { text; tokens; names = state.names }
+      Ok { text; tokens }
   | exception Failed error -> Error error
 
-let written (result : t) (token : Token.t) =
-  String.sub result.text token.start token.length
-
 let spelling (result : t) (token : Token.t) =
-  match Hashtbl.find_opt result.names token.start with
-  | Some name -> name
-  | None -> written result token
+  match token.kind with
+  | Identifier name -> name
+  | Number | Character _ | String _ | Punctuator _ | Pragma | Typec_pragma ->
+      String.sub result.text token.start token.length
+
+(* The bytes of the text that a replacement replaces, as (start, stop). *)
+let replaced_bytes (tokens : Token.t array) replacement =
+  let start = tokens.(replacement.first).start in
+  if replacement.count = 0 then (start, start)
+  else
+    let last = tokens.(replacement.first + replacement.count - 1) in
+    (start, last.start + last.length)
+
+let rewrite (result : t) replacements =
+  let buffer = Buffer.create (String.length result.text) in
+  (* [copied] is the end of the text copied so far. A replacement that
+     starts before it overlaps or is out of order; one that ends before
+     it starts has a negative count. *)
+  let apply copied replacement =
+    let start, stop = replaced_bytes result.tokens replacement in
+    if start < copied || stop < start then
+      invalid_arg "Reader.rewrite: replacements out of order";
+    Buffer.add_substring buffer result.text copied (start - copied);
+    Buffer.add_string buffer replacement.text;
+    stop
+  in
+  let copied = List.fold_left apply 0 replacements in
+  Buffer.add_substring buffer result.text copied
+    (String.length result.text - copied);
+  Buffer.contents buffer
 
 let escaped_byte c = Printf.sprintf "\\x%02X" (Char.code c)
 

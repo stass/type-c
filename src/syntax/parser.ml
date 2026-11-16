@@ -123,13 +123,12 @@ exception Failed of error
    in the grammar and one may stand between any two tokens, so the
    grammar passes over it. A [#pragma typec] line is passed over the same
    way until Stage 5 gives it a meaning. *)
-let lexeme_of keywords reader (token : Token.t) =
+let lexeme_of keywords (token : Token.t) =
   match token.kind with
-  | Token.Identifier -> (
-      let spelling = Reader.spelling reader token in
-      match Keyword.of_spelling keywords spelling with
+  | Token.Identifier name -> (
+      match Keyword.of_spelling keywords name with
       | Some keyword -> Some (Keyword_token keyword)
-      | None -> Some (Identifier_token spelling))
+      | None -> Some (Identifier_token name))
   | Token.Number -> Some Number_token
   | Token.Character encoding -> Some (Character_token encoding)
   | Token.String encoding -> Some (String_token encoding)
@@ -141,7 +140,7 @@ let grammar_tokens keywords (reader : Reader.t) =
   |> Seq.filter_map (fun (index, token) ->
          Option.map
            (fun lexeme -> { lexeme; index })
-           (lexeme_of keywords reader token))
+           (lexeme_of keywords token))
   |> Array.of_seq
 
 let peek_at state offset =

@@ -56,6 +56,21 @@ let () =
        # 2 \"a.tc\"\n\
        int z;\n")
 
+(* An edit between identifiers that universal character names spell
+   leaves their bytes as written, though their names are in UTF-8. *)
+let () =
+  let written = "caf\\u00e9 = x\\U0001F600;\n" in
+  let edit =
+    { Emitter.first = 1; count = 1; location = at 1; text = "+=" }
+  in
+  check "an edit keeps universal character names as written"
+    (Emitter.emit (read written) [ edit ]
+    = "caf\\u00e9 \n\
+       # 1 \"a.tc\"\n\
+       +=\n\
+       # 1 \"input.i\"\n\
+      \ x\\U0001F600;\n")
+
 (* y becomes w in the system header h.h, which stays one for the
    backend's warnings. *)
 let () =

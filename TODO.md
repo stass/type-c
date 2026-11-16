@@ -90,11 +90,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Reader of preprocessed text
 
-- [Medium] An identifier's name is right only where a stage asks
-  `Reader.spelling`; one that slices `Reader.t.text` by token offsets
-  gets the characters as written, universal character names included.
-  Carry the name in the token (`Token.Identifier of string`) so every
-  consumer sees it by construction, and keep the text for emission.
+- [Low] A range of tokens, `first` and `count` with 0 for an insertion
+  before `first`, is modelled twice: `Emitter.edit` and
+  `Reader.replacement`, read by `end_location` and `replaced_bytes`,
+  and checked in token indexes by `Emitter.check_edits` and in bytes by
+  `Reader.rewrite` (`Lowering`'s `dropped` has a third form). Give it
+  one type with one check in the reader, leaving the emitter to check
+  only that an edit stays in one file.
+- [Low] `Spans.spell_text` checks only that the tokens are in order and
+  within the text: the text the reader keeps is its input by
+  construction. Check instead that each identifier's written bytes,
+  read alone, give one identifier of the name its token carries.
 - [Medium] The emitter gives its markers flag 3 when the edited tokens'
   owner is a system header (`src/emit/emitter.ml`, `marker`), but the
   backend's exemption follows the last marker in effect: a header made

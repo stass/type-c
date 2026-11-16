@@ -20,16 +20,16 @@ let classify_numbers (result : Reader.t) =
         ignore (Number.classify (Reader.spelling result token)))
     result.tokens
 
-let check_accepted (result : Reader.t) =
-  if not (Spans.spell_text result) then
+let check_accepted text (result : Reader.t) =
+  if not (Spans.spell_text text result) then
     violated "the tokens and gaps spell the text";
-  if not (Spans.gaps_are_layout result) then
+  if not (Spans.gaps_are_layout text result) then
     violated "the gaps hold only white space and line markers";
-  if Typec_emit.Emitter.emit result [] <> result.text then
+  if Typec_emit.Emitter.emit result [] <> text then
     violated "a unit without edits is emitted as it was read";
   classify_numbers result
 
 let check text =
   match Reader.read ~name:"fuzz.i" text with
-  | Ok result -> check_accepted result
+  | Ok result -> check_accepted text result
   | Error error -> Property.check_refusal error

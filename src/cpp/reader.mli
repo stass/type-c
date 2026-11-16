@@ -9,12 +9,13 @@
     directive; after a blank it is a punctuator. Comments and other
     directives are errors, as is any byte that starts no token.
 
-    The name of an identifier is in UTF-8, whether its extended
-    characters are written as universal character names, as GCC writes
-    them, or in UTF-8, as Clang does, so each name has one spelling; the
-    text keeps the bytes as written. Each extended character must be one
-    that C11 Annex D allows in an identifier, and a universal character
-    name must name a character that C11 6.4.3p2 allows it to name.
+    The name of an identifier, which its token carries, is in UTF-8,
+    whether its extended characters are written as universal character
+    names, as GCC writes them, or in UTF-8, as Clang does, so each name
+    has one spelling; the text keeps the bytes as written, for emission
+    alone. Each extended character must be one that C11 Annex D allows
+    in an identifier, and a universal character name must name a
+    character that C11 6.4.3p2 allows it to name.
 
     Every token belongs to a file (its owner, {!File.t}) and has a
     presumed location ({!Location.t}). The enter (1) and return (2) flags
@@ -36,13 +37,16 @@
     Reading takes time and memory linear in the size of the text and
     never recurses on it. *)
 
-(** The names of the identifiers whose bytes spell them otherwise. *)
-type names
+(** The text as [cc -E] wrote it, which only {!spelling} and {!rewrite}
+    read: a stage cannot slice it by token offsets and take the bytes of
+    an identifier for its name. {!rewrite} gives the bytes for emission
+    alone. *)
+type text
 
 (** The text and its tokens in order. The bytes before, between and after
     the tokens are white space and line markers only, so the tokens with
     those gaps spell the text exactly. *)
-type t = private { text : string; tokens : Token.t array; names : names }
+type t = private { text : text; tokens : Token.t array }
 
 (** Why a text is not [cc -E] output: the message and the presumed
     location of the line where reading stopped. *)
@@ -53,13 +57,19 @@ val read : name:string -> string -> (t, error) result
     [name] is the presumed file name until a line marker changes it. *)
 
 val spelling : t -> Token.t -> string
-(** [spelling result token] is what [token] means: the name of an
-    identifier, in UTF-8, and the bytes of any other token. *)
+(** [spelling result token] is what [token] means: the name that an
+    identifier carries, in UTF-8, and the bytes of any other token. *)
 
-val written : t -> Token.t -> string
-(** [written result token] is the bytes of [token] in [result.text], as
-    [cc -E] wrote them: the text that emission copies, in which the
-    bytes of an identifier may differ from its {!spelling}. *)
+(** [text] in place of the [count] tokens from the token [first], or in
+    front of the token [first] when [count] is 0. *)
+type replacement = { first : int; count : int; text : string }
+
+val rewrite : t -> replacement list -> string
+(** [rewrite result replacements] is the text as [cc -E] wrote it with
+    the replacements made: the bytes that emission copies, in which those
+    of an identifier may differ from its {!spelling}. The replacements
+    are in the order of the text, do not overlap and lie within the
+    tokens; [Invalid_argument] otherwise. *)
 
 val error_message : error -> string
 (** ["file:line: message"], the form of a C compiler's diagnostics, with

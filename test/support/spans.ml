@@ -2,14 +2,15 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 (* What the tokens of a read text leave out: the gaps before, between and
-   after them. *)
+   after them. Each check takes the text that the reader read, which a
+   stage never sees. *)
 
 open Typec_cpp
 
 (* The gaps as (start, stop) byte ranges, one more than there are
    tokens, or None when the tokens are empty, overlap or are out of
    order. *)
-let gaps (result : Reader.t) =
+let gaps text (result : Reader.t) =
   let ordered = ref true and previous_end = ref 0 and gaps = ref [] in
   Array.iter
     (fun (token : Token.t) ->
@@ -19,28 +20,16 @@ let gaps (result : Reader.t) =
         previous_end := token.start + token.length
       end)
     result.tokens;
-  let text_end = String.length result.text in
+  let text_end = String.length text in
   if !ordered && !previous_end <= text_end then
     Some (List.rev ((!previous_end, text_end) :: !gaps))
   else None
 
-(* The gaps and the tokens, alternating, spell the text. *)
-let spell_text (result : Reader.t) =
-  match gaps result with
-  | None -> false
-  | Some gaps ->
-      let gaps = Array.of_list gaps in
-      let buffer = Buffer.create (String.length result.text) in
-      let add_gap (start, stop) =
-        Buffer.add_string buffer (String.sub result.text start (stop - start))
-      in
-      add_gap gaps.(0);
-      Array.iteri
-        (fun index token ->
-          Buffer.add_string buffer (Reader.written result token);
-          add_gap gaps.(index + 1))
-        result.tokens;
-      Buffer.contents buffer = result.text
+(* The gaps and the tokens, alternating, spell the text: the tokens are
+   in order and apart, and the text that the reader keeps for emission
+   is the text it read. *)
+let spell_text text (result : Reader.t) =
+  Option.is_some (gaps text result) && Reader.rewrite result [] = text
 
 let is_space = function
   | ' ' | '\t' | '\r' | '\011' | '\012' | '\n' -> true
@@ -88,7 +77,7 @@ let gap_is_layout text (start, stop) =
          String.for_all is_space line || (whole && is_marker_line line))
        lines)
 
-let gaps_are_layout (result : Reader.t) =
-  match gaps result with
+let gaps_are_layout text (result : Reader.t) =
+  match gaps text result with
   | None -> false
-  | Some gaps -> List.for_all (gap_is_layout result.text) gaps
+  | Some gaps -> List.for_all (gap_is_layout text) gaps

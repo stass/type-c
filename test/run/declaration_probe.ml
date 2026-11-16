@@ -95,9 +95,9 @@ let () =
         or_exit Target.error_message
           (Target.of_predefined_macros (read_file dump))
       in
+      let contents = read_file source in
       let text =
-        or_exit Reader.error_message
-          (Reader.read ~name:source (read_file source))
+        or_exit Reader.error_message (Reader.read ~name:source contents)
       in
       let keywords = Target.keywords target Gnu in
       let unit =
@@ -106,7 +106,7 @@ let () =
       let result =
         or_exit Reader.error_message (Declarations.read target text unit)
       in
-      print_string text.text;
+      print_string contents;
       List.iter (print_identifier result)
         (File_scope_names.all_ordinary (File_scope_names.of_unit unit))
   | _ ->
