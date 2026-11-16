@@ -487,6 +487,13 @@ val holds : tags -> t -> held option Unknown.answer
     incomplete structure or union holds none. The answer is found when a
     structure or union is defined, so asking costs no walk. *)
 
+val holds_variant : tags -> t -> bool
+(** Whether an object of the type, or each element of one of the array
+    type, is a variant or holds one as {!holds} holds a member. An
+    incomplete structure or union and an unknown type hold none. The
+    answer is found when a structure or union is defined, so asking costs
+    no walk. *)
+
 (** A member found by name. [path] is where: the position of the member
     that holds it (see {!member_at}), then its position in each anonymous
     member down to it. [anonymous_qualifiers] are the [const] and

@@ -742,14 +742,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   that only the parser makes, one per external declaration, would make
   a bracket inside an expression unwritable.
 
-- [High] `Initialiser.holds_variant` walks every member of every nested
-  structure or union and remembers nothing, so a type holding two copies
-  of the structure below it, n levels deep, costs 2^n, once for each
-  element of a Type-C braced list after its walk is lost (at an array of
-  opaque or variable length or an unknown type; found by reading the
-  code, not reproduced yet). Find whether a record
-  holds a variant once, when it is defined, beside the `holds` of its
-  definition in `Ctype` (`Ctype.holds`), and ask that fact instead.
+- [Medium] `Initialiser.first_variant` follows the first member of each
+  nested structure or union down to a variant or a scalar, remembering
+  nothing, once for each expression initialiser of a braced list, so the
+  time is the nesting depth times the length of the list: a 294 KB
+  source of 8000 levels and 8000 elements takes 5.5 s. Find the first
+  variant along the first members once, when a record is defined, beside
+  `Ctype.holds_variant`, or bound the walk at the brace elision limit
+  `max_levels`, past which no initialiser reaches.
 - [Medium] The needs of a type complete (design 10.3) are calls of
   `Declarations.needs_complete` at each construct of the list, so a
   construct that typing reads and the list misses leaves an instance

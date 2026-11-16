@@ -389,26 +389,6 @@ and untargeted_element typing (element : Tree.designated_initialiser) =
   List.iter (designator_expressions typing) element.node.designators;
   untargeted typing element.node.initialiser
 
-(* Whether an object of type [t] is a variant or has one among its
-   subobjects. *)
-let rec holds_variant typing (t : Ctype.t) =
-  match (Ctype.as_variant t, t.shape) with
-  | Some _, _ -> true
-  | None, Array { element; _ } -> holds_variant typing element
-  | None, Record tag -> members_hold_variant typing tag 0
-  | ( None,
-      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
-      | Function _
-      | Unknown_type _ ) ) ->
-      false
-
-and members_hold_variant typing tag position =
-  match Ctype.member_at typing.tags tag position with
-  | Some member ->
-      holds_variant typing member.member_type
-      || members_hold_variant typing tag (position + 1)
-  | None -> false
-
 (* Braced lists (6.7.9p17, p20) *)
 
 (* What an expression initialises at a subobject of type [t]: all of it,
@@ -589,7 +569,7 @@ and initialise_element typing ~zeroes t walk
   let walked = place_element typing ~zeroes t walk element in
   (match walked.cursor with
   | Lost when typing.type_c_text element.span && not zeroes ->
-      if holds_variant typing t then
+      if Ctype.holds_variant typing.tags t then
         typing.fail element.span
           (Rule.message Zero_value
              "the subobject that an initialiser reaches depends on what \

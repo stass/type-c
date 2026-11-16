@@ -85,8 +85,9 @@ type held = Const_member | Flexible_array_member
 
 (* The members in order; those with a position, which are those that an
    initialiser reaches; every member by name, those of anonymous members
-   included; and the first member, at any depth, of a kind that [held]
-   names, found from the [holds] of the records among the members, so
+   included; the first member, at any depth, of a kind that [held]
+   names; and whether it holds a variant at any depth. The last two are
+   found from the answers stored for the records among the members, so
    that no question walks the members of a record again and a record
    held twice costs once. *)
 type record_definition = {
@@ -94,6 +95,7 @@ type record_definition = {
   positions : member array;
   by_name : found_member Names.t;
   holds : held option Unknown.answer;
+  holds_variant : bool;
 }
 
 type constructor = {
@@ -440,7 +442,7 @@ let declare_opaque tags name =
   let record = new_record tags Struct (Opaque_name name) ~at_file_scope:true in
   add_record_definition tags record.record_id
     { members = []; positions = [||]; by_name = Names.empty;
-      holds = Answer None };
+      holds = Answer None; holds_variant = false };
   record
 
 let trial tags read =
@@ -723,6 +725,26 @@ let rec first_held tags = function
       | Answer None -> first_held tags rest
       | found -> found)
 
+(* As for [holds], pointed-to types are not held, nor the representation
+   of a distinct type. A definition is final, so its [holds_variant]
+   never goes stale. *)
+let holds_variant tags t =
+  let element = innermost_element t in
+  match (as_variant element, element.shape) with
+  | Some _, _ -> true
+  | None, Record tag -> (
+      match record_definition tags tag with
+      | Some definition -> definition.holds_variant
+      | None -> false)
+  (* [Array] is not an innermost element. *)
+  | ( None,
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+      | Array _ | Function _ | Unknown_type _ ) ) ->
+      false
+
+let members_hold_variant tags members =
+  List.exists (fun member -> holds_variant tags member.member_type) members
+
 let rec is_complete tags t =
   match t.shape with
   | Void | Function _ | Unknown_type { kind = Unknown_function; _ } ->
@@ -960,7 +982,11 @@ let definition_of target tags tag members =
     List.mapi (fun index member -> (index, member)) (Array.to_list positions)
   in
   let by_name = List.fold_left (add_member_names tags) Names.empty indexed in
-  { members; positions; by_name; holds = first_held tags members }
+  { members;
+    positions;
+    by_name;
+    holds = first_held tags members;
+    holds_variant = members_hold_variant tags members }
 
 let define_record target tags tag members =
   match definition_of target tags tag members with

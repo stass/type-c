@@ -1810,6 +1810,30 @@ let zero_values () =
   rejects ~file
     (variant ^ "struct s z = { (_Complex int)2, 1234 };")
     "depends on what typec does not know, in an object that holds a variant";
+  (* Whether a record holds a variant is found once per record, so the
+     time is linear in the text, not in the size of the value. *)
+  let lost_walk last =
+    variant ^ doubling_structures 30 last
+    ^ " struct top z = { (_Complex int)2, 1 };"
+  in
+  let started = Sys.time () in
+  accepts ~file (lost_walk " int k;");
+  rejects ~file (lost_walk " e k;") "in an object that holds a variant";
+  if Sys.time () -. started > 2.0 then
+    fail_case "lost_walk 30" "took over 2 s";
+  (* A variant held through a member record, an array member or an
+     anonymous member; a pointed-to variant is not held. The walk is lost
+     where the complex value meets the first member, a structure. *)
+  let lost source =
+    variant ^ source ^ " struct w z = { (_Complex int)2, 1 };"
+  in
+  let held = "in an object that holds a variant" in
+  rejects ~file (lost "struct w { struct s in; int n; };") held;
+  rejects ~file
+    (lost "struct t { int n; e a[2]; }; struct w { struct t t[1]; };")
+    held;
+  rejects ~file (lost "struct w { struct { int m; e v; }; int n; };") held;
+  accepts ~file (lost "struct w { struct { int m; e *p; }; int n; };");
   (* C text initialises the representation (design 10.6). *)
   accepts ~file
     (variant ^ "\n# 1 \"v.h\" 1\ne x = { .tag = e_B, .u.B = { 1 } };\n\
