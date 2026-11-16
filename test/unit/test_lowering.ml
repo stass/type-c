@@ -17,7 +17,8 @@ let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
 let emitted source =
   let text =
-    match Reader.read ~name:"in.tc" source with
+    let preprocessed = Preprocessed.text ~name:"in.tc" source in
+    match Reader.read ~name:"in.tc" preprocessed with
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in

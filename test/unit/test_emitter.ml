@@ -60,11 +60,12 @@ let () =
 (* An edit between identifiers that universal character names spell
    leaves their bytes as written, though their names are in UTF-8. *)
 let () =
-  let written = read "caf\\u00e9 = x\\U0001F600;\n" in
+  let written = read "# 1 \"input.i\"\ncaf\\u00e9 = x\\U0001F600;\n" in
   let edit = edit written ~first:1 ~count:1 (at 1) "+=" in
   check "an edit keeps universal character names as written"
     (Emitter.emit written [ edit ]
-    = "caf\\u00e9 \n\
+    = "# 1 \"input.i\"\n\
+       caf\\u00e9 \n\
        # 1 \"a.tc\"\n\
        +=\n\
        # 1 \"input.i\"\n\

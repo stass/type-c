@@ -23,7 +23,6 @@ end)
 (* The position in the text and what the line markers before it said. *)
 type state = {
   text : string;
-  input_name : string;
   mutable pos : int;
   mutable presumed : Location.t;  (** of the current line *)
   mutable include_stack : File.t list;
@@ -108,15 +107,16 @@ let owner state ~main name system_header =
       state.owners <- Owners.add key file state.owners;
       file
 
-(* Text before the first line marker that names a file belongs to a main
-   file named for the input. *)
+(* A token before the first line marker that names a file has no owner:
+   without line markers, which -P and Clang's -fuse-line-directives
+   remove, no token can be placed in its file or in a system header. *)
 let current_owner state =
   match state.include_stack with
   | file :: _ -> file
   | [] ->
-      let main = owner state ~main:true state.input_name false in
-      state.include_stack <- [ main ];
-      main
+      fail state
+        "token before the first line marker, as when an option such as \
+         -P removes the line markers"
 
 let add_token state kind start =
   let token =
@@ -324,7 +324,9 @@ let scan_token state =
       if starts_number state then scan_number state
       else if starts_identifier state then scan_identifier state
       else if looking_at state "/*" || looking_at state "//" then
-        fail state "comment in preprocessed text"
+        fail state
+          "comment in preprocessed text, as when an option such as -C \
+           keeps the comments"
       else scan_punctuator state
 
 (* Directives. *)
@@ -403,6 +405,7 @@ let stack_after_marker state motion name (flags : Location.flags) =
     | System | Extern_c_system -> true
   in
   match (motion, state.include_stack) with
+  | Enter, [] -> fail state "line marker enters a file before the main file"
   | Enter, stack -> owner state ~main:false name system_header :: stack
   | Stay, [] -> [ owner state ~main:true name system_header ]
   | Stay, stack -> stack
@@ -476,7 +479,6 @@ let read ~name text =
   let state =
     {
       text;
-      input_name = name;
       pos = 0;
       presumed = { Location.file = name; line = 1; flags = No_flags };
       include_stack = [];

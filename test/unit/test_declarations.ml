@@ -15,7 +15,7 @@ let aarch64_clang = Canned_targets.(target (as_clang aarch64_macros))
 (* [file] is "in.c", C text, unless a case reads Type-C text. *)
 let read ?(file = "in.c") target source =
   let text =
-    match Reader.read ~name:file source with
+    match Reader.read ~name:file (Preprocessed.text ~name:file source) with
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in

@@ -54,7 +54,21 @@ let outcome show case =
 
 let case name text expected = { name; text; expected }
 
+(* The messages that name the option that likely made the text. *)
+let comment_message =
+  "comment in preprocessed text, as when an option such as -C keeps the \
+   comments"
+
+let no_marker_message =
+  "token before the first line marker, as when an option such as -P removes \
+   the line markers"
+
+(* A case whose text, read as the file "in.i", has no line markers of its
+   own, after the marker that opens that file. *)
+let opened case = { case with text = Preprocessed.text ~name:"in.i" case.text }
+
 let kind_cases =
+  List.map opened
   [
     case "a declaration" "int x = 42;"
       "id int | id x | punct = | number 42 | punct ;";
@@ -160,8 +174,8 @@ let kind_cases =
     case "unterminated character" "'a" "error: in.i:1: unterminated literal";
     case "empty character" "''" "error: in.i:1: empty character constant";
     case "block comment" "a /* c */"
-      "error: in.i:1: comment in preprocessed text";
-    case "line comment" "a // c" "error: in.i:1: comment in preprocessed text";
+      ("error: in.i:1: " ^ comment_message);
+    case "line comment" "a // c" ("error: in.i:1: " ^ comment_message);
     case "other directives" "#define X 1"
       "error: in.i:1: unsupported directive #define";
     case "null directive" "#\n" "error: in.i:1: unsupported directive #";
@@ -185,6 +199,7 @@ let show_written text result (token : Token.t) =
   ^ String.sub text token.start token.length
 
 let written_cases =
+  List.map opened
   [
     case "a name in UTF-8 keeps the bytes as written"
       "caf\\u00e9 x\\U0001F600 caf\xc3\xa9 1\\u00e9 \"\\u00e9\""
@@ -195,8 +210,10 @@ let written_cases =
 
 let place_cases =
   [
-    case "no line markers" "a\nb\n\n c" "a in.i in.i:1 | b in.i in.i:2 \
-                                         | c in.i in.i:4";
+    case "no line markers, as under -P" "\n\na\nb"
+      ("error: in.i:3: " ^ no_marker_message);
+    case "#line in place of line markers, as under -fuse-line-directives"
+      "#line 1 \"t.c\"\na" ("error: t.c:1: " ^ no_marker_message);
     case "Clang's prologue and a system header"
       "# 1 \"t.c\"\n\
        # 1 \"<built-in>\" 1\n\
@@ -248,10 +265,10 @@ let place_cases =
       "# 1 \"t.c\"\n# 1 \"a.h\" 1\n# 1 \"b.h\" 1\nb\n# 2 \"a.h\" 2\na\n\
        # 2 \"t.c\" 2\nt"
       "b b.h b.h:1 | a a.h a.h:2 | t t.c t.c:2";
-    case "text before the first marker keeps the input's name"
-      "a\n# 1 \"t.c\"\nb" "a in.i in.i:1 | b in.i t.c:1";
-    case "a first marker that enters names the main file"
-      "# 1 \"t.c\" 1\na" "a t.c t.c:1";
+    case "a token before the first marker" "a\n# 1 \"t.c\"\nb"
+      ("error: in.i:1: " ^ no_marker_message);
+    case "a first marker that enters a file" "# 1 \"t.c\" 1\na"
+      "error: in.i:1: line marker enters a file before the main file";
     case "a pragma belongs to its file"
       "# 1 \"t.c\"\n# 1 \"h.h\" 1 3\n#pragma typec x\n"
       "#pragma typec x h.h! h.h:1 3";
@@ -438,7 +455,8 @@ let punctuator_cases =
 let failed_punctuator_cases () =
   List.filter
     (fun (spelling, punctuator) ->
-      match Reader.read ~name:"in.i" (" " ^ spelling) with
+      let text = Preprocessed.text ~name:"in.i" (" " ^ spelling) in
+      match Reader.read ~name:"in.i" text with
       | Ok { tokens = [| token |]; _ } ->
           token.kind <> Token.Punctuator punctuator
       | Ok _ | Error _ -> true)
@@ -455,11 +473,11 @@ let owners_are_shared () =
   | _ -> false
 
 (* The main file is the one at the bottom of the stack: the first marker
-   or the first token opens it, and a marker that enters a file of the
-   same name opens another file. A marker without a flag, which [#line]
-   also writes, changes no owner. *)
+   opens it, and a marker that enters a file of the same name opens
+   another file. A marker without a flag, which [#line] also writes,
+   changes no owner. *)
 let main_cases =
-  [ ("a\n", [ ("in.i", true) ]);
+  [
     ( "# 1 \"m.tc\"\na\n# 1 \"m.tc\" 1\nb\n# 2 \"m.tc\" 2\nc\n",
       [ ("m.tc", true); ("m.tc", false); ("m.tc", true) ] );
     ("# 1 \"m.tc\"\na\n# 7 \"n.tc\"\nb\n", [ ("m.tc", true); ("m.tc", true) ])

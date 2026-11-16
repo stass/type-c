@@ -26,7 +26,7 @@ let case name text expected = { name; text; expected }
 let type_c_file = "in.tc"
 
 let outcome ?(file = "in.i") ~parse ~spans text =
-  match Reader.read ~name:file text with
+  match Reader.read ~name:file (Preprocessed.text ~name:file text) with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match parse reader with
@@ -41,7 +41,7 @@ let outcome ?(file = "in.i") ~parse ~spans text =
 
 (* The scope entries of a text, or its error. *)
 let resolutions ?(file = "in.i") text =
-  match Reader.read ~name:file text with
+  match Reader.read ~name:file (Preprocessed.text ~name:file text) with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with
@@ -78,7 +78,7 @@ let scope_ends ?(file = type_c_file) text =
         List.concat_map (item reader) block.node.items
     | _ -> []
   in
-  match Reader.read ~name:file text with
+  match Reader.read ~name:file (Preprocessed.text ~name:file text) with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with
@@ -165,7 +165,7 @@ let jump_targets ?(file = type_c_file) text =
         items reader block.node.items
     | _ -> []
   in
-  match Reader.read ~name:file text with
+  match Reader.read ~name:file (Preprocessed.text ~name:file text) with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with
@@ -1661,7 +1661,7 @@ let nesting_texts levels =
 (* What the parser gives for [text] read from [file]: None if it parses,
    or else its error. *)
 let parse_failure file text =
-  match Reader.read ~name:file text with
+  match Reader.read ~name:file (Preprocessed.text ~name:file text) with
   | Error _ -> Some "read error"
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with

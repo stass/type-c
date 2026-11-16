@@ -52,7 +52,7 @@ let prelude =
 
 let read target source =
   let text =
-    match Reader.read ~name:"in.c" source with
+    match Reader.read ~name:"in.c" (Preprocessed.text ~name:"in.c" source) with
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in

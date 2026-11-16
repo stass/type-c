@@ -22,10 +22,11 @@
     of the line markers keep a stack of the files being read, and the
     owner of a token is the top of that stack. A file is a system header
     when the marker that opened it carries flag 3. Any other line marker
-    and [#line] change the presumed location only. The main file is
-    opened by the first token or the first line marker with a file name,
-    whichever comes first: a marker opens it under the marker's name and
-    flags, and a token under the input's name, not a system header.
+    and [#line] change the presumed location only. The first line marker
+    with a file name opens the main file, under the marker's name and
+    flags; it is an error for that marker to enter a file, or for a
+    token to come before it, as in text without line markers ([-P]),
+    where no token can be placed in its file.
 
     GCC and Clang also write a marker with flag 3 and without flag 1 or 2
     for [#pragma GCC system_header], and GCC writes one around the tokens

@@ -139,6 +139,26 @@ with a .tc input. Without one they reach the backend as they are.
   [81]
   $ typec --cc=$clang -std=c99 -c twice.c
 
+The options inside -Wp, and after -Xpreprocessor reach the -E step
+unseen, so the reader refuses the text they change: text without line
+markers, in which no token can be placed in its file, and text that
+keeps comments or directives. Where the refused text stands depends on
+the backend and its headers, so its location is cut.
+
+  $ without_location() { sed 's/^typec: .*:[0-9]*: //'; }
+  $ typec --cc=$clang -Wp,-P -c x.tc 2>&1 | without_location
+  token before the first line marker, as when an option such as -P removes the line markers
+  $ typec --cc=$gcc -Wp,-P -c x.tc 2>&1 | without_location
+  token before the first line marker, as when an option such as -P removes the line markers
+  $ typec --cc=$clang -Xpreprocessor -P -c x.tc 2>&1 | without_location
+  token before the first line marker, as when an option such as -P removes the line markers
+  $ typec --cc=$gcc -Xpreprocessor -P -c x.tc 2>&1 | without_location
+  token before the first line marker, as when an option such as -P removes the line markers
+  $ typec --cc=$clang -Wp,-C -c x.tc 2>&1 | without_location
+  comment in preprocessed text, as when an option such as -C keeps the comments
+  $ typec --cc=$gcc -Xpreprocessor -dD -c x.tc 2>&1 | without_location
+  unsupported directive #define
+
 Several -arch options make Apple's cc build a universal binary, but its
 -E step preprocesses for one architecture only, so typec refuses two
 architectures with a .tc input. One architecture, given once or more,

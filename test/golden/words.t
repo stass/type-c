@@ -14,6 +14,7 @@ A function `try` at file scope, defined and called.
   > int main(void) { return try("00", 0); }
   > EOF
   $ ./golden.exe function.tc
+  # 1 "function.tc"
   static int try(char *hex, int err) { return hex != 0 && err == 0; }
   int main(void) { return try("00", 0); }
 
@@ -24,6 +25,7 @@ A parameter `try`, and an object `defer` in a block.
   > void f(void) { int defer = spill(0); defer++; }
   > EOF
   $ ./golden.exe local.tc
+  # 1 "local.tc"
   static int spill(int try) { return try + 1; }
   void f(void) { int defer = spill(0); defer++; }
 
@@ -35,6 +37,7 @@ A typedef and an enumerator hide them as well.
   > try f(void) { try x = defer; return x; }
   > EOF
   $ ./golden.exe kinds.tc
+  # 1 "kinds.tc"
   typedef int try;
   enum { defer };
   try f(void) { try x = defer; return x; }
@@ -47,6 +50,7 @@ words are names wherever they stand.
   > int f(struct try *p) { goto defer; defer: return p->defer; }
   > EOF
   $ ./golden.exe spaces.tc
+  # 1 "spaces.tc"
   struct try { int defer; };
   int f(struct try *p) { goto defer; defer: return p->defer; }
 
@@ -92,6 +96,7 @@ which hides the operator in the Type-C text after it.
   > int f(void) { return try(0); }
   > EOF
   $ ./golden.exe header.tc
+  # 1 "header.tc"
   int f(void);
   # 1 "try.h" 1
   int try(int err);

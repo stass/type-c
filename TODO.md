@@ -112,15 +112,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   which Clang and GCC accept in gnu11, are misread: as an identifier and
   a string, as an unterminated literal, or with their inner lines taken
   as directives. Lex them, counting their newlines.
-- [Medium] With `-P` or Clang's `-fuse-line-directives` the `-E` output
-  has no enter and return flags, and every token silently belongs to the
-  main file, which is not a system header. The driver refuses both with
-  a `.tc` input, but `-Wp,-P` and `-Xpreprocessor -P` still reach the
-  `-E` step, and so do `-C` and `-dD` that way, which the reader refuses
-  with a message about the text instead of the option. Classify the
-  options inside `-Wp,` and `-Xpreprocessor` with the same table, or
-  make the reader refuse output without a line marker before its first
-  token.
 - [Low] Diagnostics of later stages print names and spellings from the
   text, and file names from line markers (`Expressions.needing`), where
   a crafted name can hold control bytes or a fake `[TC0018]`; route them

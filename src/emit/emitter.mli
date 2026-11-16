@@ -29,9 +29,8 @@ val emit : Typec_cpp.Reader.t -> edit list -> string
     ({!Typec_cpp.Location.flags}) and no enter or return flag, so the
     backend exempts the text from warnings as it would the tokens there,
     and the reader keeps the owner of every token. File names are written
-    as the reader spelled them: escaped as in a line marker, or the
-    input's name before the first marker, which the output of [cc -E]
-    always starts with.
+    as the reader spelled them, escaped as in a line marker: the file of
+    every token comes from a line marker or a [#line] directive.
 
     The ranges of the edits must be made from the tokens of [unit]. They
     are in the order that {!Typec_cpp.Reader.rewrite} takes, and the

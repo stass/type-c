@@ -552,6 +552,7 @@ a break in a C file; the loop reaches the C unchanged.
   > }
   > EOF
   $ ./golden.exe plain_loop.c
+  # 1 "plain_loop.c"
   int f(int n) {
     for (;;)
       while (({ if (n) break; n; })) n--;

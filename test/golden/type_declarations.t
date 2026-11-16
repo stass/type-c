@@ -15,6 +15,7 @@ so the C keeps the lines of the source.
   > handler handlers[2];
   > EOF
   $ ./golden.exe alias.tc
+  # 1 "alias.tc"
   
   # 1 "alias.tc"
   typedef
@@ -48,6 +49,7 @@ the specifier without a tag of its own takes the declared name.
   > type tree = union branch { tree *left; node *leaf; };
   > EOF
   $ ./golden.exe records.tc
+  # 1 "records.tc"
   
   # 1 "records.tc"
   struct node; typedef struct node node;
@@ -81,6 +83,7 @@ A type declaration in a block is lowered in place.
   > }
   > EOF
   $ ./golden.exe block.tc
+  # 1 "block.tc"
   int f(void) {
     
   # 2 "block.tc"
@@ -104,6 +107,7 @@ text and in C text, where try and defer are identifiers.
   > int result = 1;
   > EOF
   $ ./golden.exe plain.tc
+  # 1 "plain.tc"
   typedef int type;
   type x;
   int result = 1;
@@ -111,6 +115,7 @@ text and in C text, where try and defer are identifiers.
   > int try, defer;
   > EOF
   $ ./golden.exe plain.c
+  # 1 "plain.c"
   int try, defer;
 
 Each rule that a type declaration breaks is an error at the token that
@@ -156,6 +161,7 @@ typedef.
   >           expr *right);
   > EOF
   $ ./golden.exe variant.tc
+  # 1 "variant.tc"
   
   # 1 "variant.tc"
   struct expr; typedef struct expr expr;
@@ -381,6 +387,7 @@ structure that a variant lowers to (design 10.6).
   > int f(e v) { return is_b(v); }
   > EOF
   $ ./golden.exe header.tc
+  # 1 "header.tc"
   
   # 1 "header.tc"
   struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {

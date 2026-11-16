@@ -139,6 +139,7 @@ tokens stay as they are.
   > int m = __builtin_types_compatible_p(int, long);
   > EOF
   $ ./golden.exe plain.tc
+  # 1 "plain.tc"
   int n = _Generic(1, int: 2, default: 3);
   int m = __builtin_types_compatible_p(int, long);
 

@@ -10,7 +10,7 @@
     is whether that marker carried the system header flag (3). [main] is
     whether the file is the primary source file of the translation unit,
     the one at the bottom of the stack of files being read, which the
-    first line marker or the first token opens; a file that a marker with
+    first line marker with a file name opens; a file that a marker with
     the enter flag opens never is.
 
     The reader makes one value per name and flags, so owners compare with

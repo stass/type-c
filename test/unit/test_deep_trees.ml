@@ -20,7 +20,8 @@ let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
 (* The C that [text] lowers to, or the error that refuses it. *)
 let lowered file text =
-  Result.bind (Reader.read ~name:file text) (fun reader ->
+  let preprocessed = Preprocessed.text ~name:file text in
+  Result.bind (Reader.read ~name:file preprocessed) (fun reader ->
       Result.map
         (fun edits -> Typec_emit.Emitter.emit reader edits)
         (Typec_driver.Front_end.lower Gnu lp64 reader))
