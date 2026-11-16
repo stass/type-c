@@ -47,31 +47,18 @@ type declared =
           that of its value, as in C23 6.7.2.2 and GCC and Clang. A value
           that typec does not evaluate is an error (design P16). *)
 
-(** What the text of a declaration says of the type that the backend
-    reads for it, which may hold an attribute that the type in
-    [declared] lacks (design 3.5 rule 2, 13.5). *)
-type spelling = {
-  inexact : bool;
-      (** The text, or that of an earlier declaration of the entity that
-          it sees, holds an attribute or a [__typeof__] of an expression,
-          or a typedef name or alias declared with one. A Type-C type
-          declaration other than an alias names a type of its own, which
-          no argument shares, and is exact. *)
-  written_through : Typec_syntax.Tree.reference list;
-      (** The declarations that the typedef names of the text denote, and
-          those of an earlier declaration that it sees, at the depth of
-          [inexact]. The backend reads each typedef name as declared
-          where it reads the entity, as GCC changes a typedef name
-          declared again with an attribute in place. *)
-}
-
-(** The spelling of a type that no source text spells. *)
-let exact = { inexact = false; written_through = [] }
-
 (** The declarations of one object or function share its [entity]. *)
 type t = {
   name : string;
   entity : int;
   declared : declared;
-  spelling : spelling;  (** That of this declaration and those it sees. *)
+  inexact : bool;
+      (** This declaration, or an earlier one of the entity that it
+          sees, is inexact (design 3.5 rule 2, 13.5): its text holds an
+          attribute, an alignment specifier or a [__typeof__] of an
+          expression, or a typedef name or alias declared with one, so
+          that the backend's type may hold an attribute that the type in
+          [declared] lacks. A Type-C type declaration other than an alias
+          names a type of its own, which no argument shares, and is
+          exact. *)
 }

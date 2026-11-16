@@ -3724,22 +3724,31 @@ each. A third clause covers the text around it.
   Completing a structure or union changes neither an entity nor its
   type, and neither does declaring an entity again with the type it has:
   a member that names a structure of file scope reads alike where the
-  structure is completed between the text and the place of writing.
-  A typedef name, an object or a function declared again with an
-  attribute or a `__typeof__` of an expression at the depth of 3.5
-  rule 2, or through a typedef name declared with one, or after such a
-  declaration, may have another type for the backend, which reads the
-  attribute that typec's types lack and cannot compare, and so may one
-  whose declaration is written through a typedef name, at that depth
-  and through each typedef name in turn, that is declared so again:
-  Clang gives `__typeof__(obj)` the alignment of `extern wide obj;`
-  after `extern int obj;`, where `wide` is an `int` aligned to 16, and
-  GCC that of `typedef int t __attribute__((aligned(16)));` after
-  `typedef int t; extern t obj;`, as it changes `t` in place. Such a
-  declaration is an error as one that changes the type is. The
-  exactness of a type argument, which 3.5 rule 2 reads from the text of
-  an alias at its own place, so holds at each place where lowering
-  writes the alias.
+  structure is completed between the text and a place of writing after
+  it. The backend reads attributes that typec's types lack and cannot
+  compare, so the declarations that may change what the text reads are
+  found by where they stand rather than by what the text names. Between
+  the text's own place and a place of writing, in either order and in
+  any scope, three declarations are errors. One declares again,
+  inexactly, an object or a function that the text uses; only a use of
+  its name reads an object or a function. One declares again,
+  inexactly, a typedef name declared before both places, whether or not
+  the text uses it: GCC changes the name in place, and with it every
+  declaration and member written through it. One completes a tag
+  declared before a place of writing that precedes the text, whether or
+  not the text names it; a completion changes nothing for text written
+  after it. A declaration is inexact if it or an earlier declaration of
+  its entity that it sees holds an attribute, an alignment specifier or
+  a `__typeof__` of an expression (3.5 rule 2), or is written through a
+  typedef name so declared. Clang gives `__typeof__(obj)` the alignment
+  of `extern wide obj;` after `extern int obj;`, where `wide` is an
+  `int` aligned to 16, and GCC that of `typedef int t
+  __attribute__((aligned(16)));` after `typedef int t; extern t obj;`.
+  The exactness of a type argument, which 3.5 rule 2 reads from the
+  text of an alias at its own place, so holds at each place where
+  lowering writes the alias. The one name of an untagged type has no
+  own place that vouches for it, so its declaration where the typedef
+  of the type argument is written must be exact itself.
   *Provisional (P21).* Where an entity that the text uses is declared
   again between the two and whether its type stays the same depends on
   an unknown type (13.3), that declaration is an error, as one that

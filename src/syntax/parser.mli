@@ -172,6 +172,9 @@ type try_views = {
       (** in front of the statement or declaration that holds the [try],
           after the labels of a statement but not those of a [match]
           arm, which are the arm's: where lowering writes the operand *)
+  place_before : int;
+      (** the index in [Reader.t.tokens] of the token that [place] stands
+          in front of *)
   own : View.t;  (** at the operand, where the source reads it *)
 }
 

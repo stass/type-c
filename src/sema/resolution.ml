@@ -23,15 +23,20 @@ type lowered = { lowered_name : string; written_for : Tree.span }
 
 type place = {
   view : Parser.View.t;
+  before : int;
   typedef_names : lowered list;
   tags : lowered list;
 }
+
+module Events = Map.Make (Int)
 
 type context = {
   tokens : Reader.t;
   views : Parser.views;
   entity : Tree.reference -> Entity.t option;
-  same_tag : Tree.tag_id -> Tree.tag_id -> bool;
+  tag : Tree.tag_id -> Ctype.named_tag option;
+  redeclared : Entity.t Events.t;
+  completed : Ctype.named_tag Events.t;
   same_type : Ctype.t -> Ctype.t -> bool Unknown.answer;
 }
 
@@ -187,22 +192,6 @@ let check_same_type context span name ~declaration (used : Entity.t) there =
             that depends on %s, whose type typec does not compute"
            (quote name) cited unknown.construct)
 
-(* The backend reads a type with its attributes, which typec's types do
-   not hold, so typec cannot tell that a name declared again with one
-   keeps the type it has at the text's own place; the exactness of a
-   type argument (design 3.5 rule 2), read at that place, rests on
-   this. A declaration after an inexact one is inexact too, so this
-   refuses as well one that drops the attribute. *)
-let check_same_attributes context span name ~cited (there : Entity.t) =
-  if there.spelling.inexact then
-    refuse span Moved_text
-      (Printf.sprintf
-         "the declaration of %s at %s, between the text and a place where \
-          lowering writes it, gives it a type that may hold an attribute or \
-          `typeof` of an expression, which may change the type that the \
-          text uses"
-         (quote name) (declared_at context cited))
-
 let refuse_other_entity context span name cited =
   refuse span Moved_text
     (Printf.sprintf
@@ -219,8 +208,7 @@ let check_ordinary context place span name reference =
       match (context.entity reference, there) with
       | Some used, Some there when used.entity = there.entity ->
           let cited = Ordinary declaration in
-          check_same_type context span name ~declaration:cited used there;
-          check_same_attributes context span name ~cited there
+          check_same_type context span name ~declaration:cited used there
       | Some _, Some _ | None, _ | _, None ->
           refuse_other_entity context span name (Source (Ordinary declaration)))
   | None -> (
@@ -231,9 +219,22 @@ let check_ordinary context place span name reference =
             (Printf.sprintf "%s is not visible where lowering writes the text"
                (quote name)))
 
+let same_named_tag (first : Ctype.named_tag) (second : Ctype.named_tag) =
+  match (first, second) with
+  | Named_record a, Named_record b -> a.record_id = b.record_id
+  | Named_enum a, Named_enum b -> a.enum_id = b.enum_id
+  | (Named_record _ | Named_enum _), _ -> false
+
+(* Whether two tag declarations declare one tag, as a completion or a
+   redeclaration does (C11 6.7.2.3p4). *)
+let same_tag context first second =
+  match (context.tag first, context.tag second) with
+  | Some a, Some b -> same_named_tag a b
+  | Some _, None | None, _ -> false
+
 let check_tag context place span name tag =
   match tag_at place name with
-  | Some (Source (Tag found)) when found = tag || context.same_tag tag found ->
+  | Some (Source (Tag found)) when found = tag || same_tag context tag found ->
       ()
   | Some cited ->
       refuse span Moved_text
@@ -252,81 +253,132 @@ let check_name context place (use : name) =
       check_ordinary context place use.span use.name reference
   | Tag tag -> check_tag context place use.span use.name tag
 
-(* [check] of each declaration of a typedef name that [declared] is
-   written through, at any depth, once however many paths reach it.
-   Each declaration is written through names declared before it, so the
-   walk ends. *)
-let iter_written_through context (declared : Entity.t) check =
-  let seen = Hashtbl.create 16 in
-  let rec visit reference =
-    if not (Hashtbl.mem seen reference) then (
-      Hashtbl.replace seen reference ();
-      check reference;
-      match context.entity reference with
-      | Some typedef -> List.iter visit typedef.spelling.written_through
-      | None -> ())
+(* A place stands in front of the token [before], so an event at that
+   token follows the place. *)
+let place_precedes text place = place.before <= text.span.first
+
+(* The events of [events] in the window of design 13.5: between the
+   text's own place and the place of writing, in either order, without
+   those of the text itself, which move with it. *)
+let within_window text place events =
+  let first, after =
+    if place_precedes text place then (place.before, text.span.first)
+    else (text.span.last + 1, place.before)
   in
-  List.iter visit declared.spelling.written_through
+  Events.to_seq_from first events
+  |> Seq.take_while (fun (index, _) -> index < after)
 
-(* The declaration of the typedef name [typedef] in [view], if the name
-   denotes that entity there. *)
-let typedef_in context view (typedef : Entity.t) =
-  match Parser.View.find view typedef.name with
-  | Some { declaration; _ } -> (
-      match context.entity declaration with
-      | Some found when found.entity = typedef.entity -> Some declaration
-      | Some _ | None -> None)
-  | None -> None
+(* The window as the check reads it: the index of a declaration of each
+   object or function declared again inexactly in it, by entity, so that
+   each use costs one lookup; the typedef names declared so; and the tags
+   completed in it, which only a place before the text reads. *)
+type window = {
+  objects : (int, int) Hashtbl.t;
+  typedefs : (int * Entity.t) list;
+  completions : (int * Ctype.named_tag) list;
+}
 
-(* The backend reads a typedef name that the use's declaration is
-   written through as it is declared where the text is written: GCC
-   changes a typedef name declared again with an attribute in place, and
-   each entity written through it with it. So the declaration of each
-   at the place is that at the text's own place, or exact. Where the
-   name does not denote the typedef at the place, no declaration of it
-   stands between the two places: a typedef name is declared again only
-   in its own scope, which holds a generic's places at file scope, and
-   the operand of a [try] and its place in one block. *)
-let check_through context text place (use : name) reference =
-  match context.entity reference with
-  | Some typedef -> (
-      let own = typedef_in context text.own_place typedef in
-      match typedef_in context place.view typedef with
-      | Some there when Some there <> own -> (
-          match context.entity there with
-          | Some declared when declared.spelling.inexact ->
-              refuse use.span Moved_text
-                (Printf.sprintf
-                   "the declaration of %s at %s, between the text and a \
-                    place where lowering writes it, gives it a type that \
-                    may hold an attribute or `typeof` of an expression, \
-                    and the declaration of %s is written through %s, which \
-                    may change the type that the text uses"
-                   (quote typedef.name)
-                   (declared_at context (Ordinary there))
-                   (quote use.name) (quote typedef.name))
-          | Some _ | None -> ())
-      | Some _ | None -> ())
+let window context text place =
+  let objects = Hashtbl.create 8 and typedefs = ref [] in
+  let sort (index, (again : Entity.t)) =
+    match again.declared with
+    | Object _ | Function _ -> Hashtbl.replace objects again.entity index
+    | Typedef _ -> typedefs := (index, again) :: !typedefs
+    | Enumerator _ -> ()
+  in
+  Seq.iter sort (within_window text place context.redeclared);
+  let completions =
+    if place_precedes text place then
+      List.of_seq (within_window text place context.completed)
+    else []
+  in
+  { objects; typedefs = !typedefs; completions }
+
+(* The view at the earlier of the two places, which sees what is
+   declared before both. *)
+let earlier_view text place =
+  if place_precedes text place then place.view else text.own_place
+
+(* The window's first clause: only a use of its name reads an object or
+   a function, so one declared again inexactly in the window changes
+   what the text reads where the text uses it. typec's types hold no
+   attribute, so it cannot tell that the declaration keeps the type. *)
+let check_redeclared context window (use : name) (used : Entity.t) =
+  match Hashtbl.find_opt window.objects used.entity with
+  | Some index ->
+      refuse use.span Moved_text
+        (Printf.sprintf
+           "the declaration of %s at %s, between the text and a place where \
+            lowering writes it, gives it a type that may hold an attribute or \
+            `typeof` of an expression, which may change the type that the \
+            text uses"
+           (quote use.name) (location_of context index))
   | None -> ()
 
-(* The second check of a use, after [check_name] has found that its name
-   denotes at the place the entity it denotes at the text's own place:
-   each typedef name that the entity's declaration there is written
-   through reads alike at both places. *)
-let check_written_through context text place (use : name) =
-  match (use.declaration, Parser.View.find place.view use.name) with
-  | Ordinary _, Some { declaration; _ } ->
-      Option.iter
-        (fun there ->
-          iter_written_through context there
-            (check_through context text place use))
-        (context.entity declaration)
-  | Ordinary _, None | Tag _, _ -> ()
-
-let check_use context text place (use : name) =
+let check_use context window text place (use : name) =
   if is_outside text use.declaration then (
     check_name context place use;
-    check_written_through context text place use)
+    match use.declaration with
+    | Ordinary reference ->
+        Option.iter
+          (check_redeclared context window use)
+          (context.entity reference)
+    | Tag _ -> ())
+
+(* Whether [view] gives the name of [entity] that entity. *)
+let denotes context view (entity : Entity.t) =
+  match Parser.View.find view entity.name with
+  | Some { declaration; _ } -> (
+      match context.entity declaration with
+      | Some found -> found.entity = entity.entity
+      | None -> false)
+  | None -> false
+
+(* The window's second clause, which holds whether or not the text uses
+   the name: GCC changes a typedef name declared again inexactly in
+   place, and with it every declaration and member written through it. *)
+let check_typedef context text place (index, (typedef : Entity.t)) =
+  if denotes context (earlier_view text place) typedef then
+    refuse text.span Moved_text
+      (Printf.sprintf
+         "the declaration of the typedef name %s at %s, between the text and \
+          a place where lowering writes it, gives it a type that may hold an \
+          attribute or `typeof` of an expression, which may change each type \
+          written through it"
+         (quote typedef.name) (location_of context index))
+
+(* The name of [tag] if the place declares that tag under it. *)
+let tag_at_place context place (tag : Ctype.named_tag) =
+  let name =
+    match tag with
+    | Named_record { record_name = Named name; _ } -> Some name
+    | Named_record _ -> None
+    | Named_enum { enum_name; _ } -> enum_name
+  in
+  let declares name =
+    match Parser.View.find_tag place.view name with
+    | Some found -> (
+        match context.tag found with
+        | Some declared -> same_named_tag declared tag
+        | None -> false)
+    | None -> false
+  in
+  match name with
+  | Some name when declares name -> Some name
+  | Some _ | None -> None
+
+(* The window's third clause, which holds whether or not the text names
+   the tag: a tag completed after a place of writing is incomplete there,
+   before the text. *)
+let check_completion context text place (index, tag) =
+  match tag_at_place context place tag with
+  | Some name ->
+      refuse text.span Moved_text
+        (Printf.sprintf
+           "the tag %s is completed at %s, between a place where lowering \
+            writes the text and the text, so it is incomplete there"
+           (quote name) (location_of context index))
+  | None -> ()
 
 (* The second half: a name that the text declares for itself is read as
    a declarator, so it must not become a typedef name of the scope
@@ -377,37 +429,41 @@ let check_own_spelling context place span name own =
 (* An identifier of unread text counts as a use of what it denotes at its
    own place, in either name space, as typec cannot tell which the
    backend reads; one that denotes nothing is a word of the attribute. *)
-let check_unread_identifier context text place view span name =
+let check_unread_identifier context window text place view span name =
   let found = Parser.View.find view name in
   (match (Parser.own_name found name, found) with
   | Some own, _ -> check_own_spelling context place span name own
   | None, Some { declaration; _ } ->
       let use = { name; span; declaration = Ordinary declaration } in
-      check_use context text place use
+      check_use context window text place use
   | None, None -> ());
   match Parser.View.find_tag view name with
   | Some tag ->
-      check_use context text place { name; span; declaration = Tag tag }
+      check_use context window text place { name; span; declaration = Tag tag }
   | None -> ()
 
-let check_unread context text place ((arguments : Tree.span), view) =
+let check_unread context window text place ((arguments : Tree.span), view) =
   for index = arguments.first to arguments.last do
     match context.tokens.tokens.(index).kind with
     | Identifier name ->
         let span = { Tree.first = index; last = index } in
-        check_unread_identifier context text place view span name
+        check_unread_identifier context window text place view span name
     | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
       ->
         ()
   done
 
-(* The first two clauses, at a place where lowering writes the text. *)
+(* The first two clauses, with the window, at a place where lowering
+   writes the text. *)
 let check_reading context text place =
-  List.iter (check_use context text place) text.uses;
+  let window = window context text place in
+  List.iter (check_use context window text place) text.uses;
   List.iter (check_own context text place) text.declares;
   List.iter
-    (check_unread context text place)
-    (Parser.attributes_within context.views text.span)
+    (check_unread context window text place)
+    (Parser.attributes_within context.views text.span);
+  List.iter (check_typedef context text place) window.typedefs;
+  List.iter (check_completion context text place) window.completions
 
 let check context text ~at =
   checking (kind_rule text.kind) (fun () ->
@@ -422,7 +478,7 @@ let check_exact context place (use : name) =
   match Parser.View.find place.view use.name with
   | Some { declaration; _ } -> (
       match context.entity declaration with
-      | Some there when there.spelling.inexact ->
+      | Some there when there.inexact ->
           refuse use.span Moved_text
             (Printf.sprintf
                "the declaration of %s at %s gives it a type that may hold an \

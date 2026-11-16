@@ -476,7 +476,7 @@ refused.
   >   'type box(T) = struct { T value; };' \
   >   'typedef int p __attribute__((aligned(16)));' 'box(a(int)) x;' > late.tc
   $ ./golden.exe late.tc
-  late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0044]
   [1]
   $ printf '%s\n' 'typedef int p;' \
   >   'typedef int p __attribute__((aligned(16)));' 'type a(T) = p;' \
@@ -513,7 +513,7 @@ changes the typedef in place.
   >   'typedef int plain __attribute__((aligned(16)));' 'g(int) x;' \
   >   > widened.tc
   $ ./golden.exe widened.tc
-  widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, and the declaration of 'obj' is written through 'plain', which may change the type that the text uses (design 13.5) [TC0044]
+  widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0044]
   [1]
 
 An argument holds no `__typeof__` of an expression at the same depth,
@@ -753,7 +753,7 @@ though the argument's own declaration is exact.
   > option(p) o;
   > EOF
   $ ./golden.exe spelled.tc
-  spelled.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:3, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  spelled.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:3 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
   [1]
 
 The one name is that of the first declarator that gives it, as a later
@@ -764,7 +764,7 @@ one in the same declaration may add an attribute.
   > option(q) o;
   > EOF
   $ ./golden.exe spelled_twice.tc
-  spelled_twice.tc:2: in `typedef n *__tc_arg__P1n;`, which lowering writes for this application: the declaration of 'n' at spelled_twice.tc:1, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  spelled_twice.tc:2: in `typedef n *__tc_arg__P1n;`, which lowering writes for this application: the declaration of 'n' at spelled_twice.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
   [1]
 
 The declarator that gives the one name may hold the attribute itself,

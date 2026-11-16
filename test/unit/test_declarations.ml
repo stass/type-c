@@ -2814,14 +2814,20 @@ let generic_resolution () =
      and the place where lowering writes it gives the text another type
      there, through an alias generic and a structure alike; where the
      instance stands before that declaration, or the typedef name is
-     declared again without one, the text reads alike. *)
+     declared again without one, the text reads alike. The text of
+     [box] does not use [p], but [p] is declared again inexactly between
+     it and the place where [box(a(int))] first stands. *)
   let plain = "typedef int p; " in
   let wide = " typedef int p __attribute__((aligned(16)));" in
   let alias = "type a(T) = p; type box(T) = struct { T value; };" in
   let holder = "type g(T) = struct { p v; T t; };" in
   let added = "may hold an attribute or `typeof` of an expression" in
   rejects ~file (plain ^ alias ^ wide ^ " box(a(int)) x;") added;
-  accepts ~file (plain ^ alias ^ " a(int) early;" ^ wide ^ " box(a(int)) x;");
+  rejects ~file
+    (plain ^ alias ^ " a(int) early;" ^ wide ^ " box(a(int)) x;")
+    "in the instance 'box__i'";
+  accepts ~file
+    (plain ^ alias ^ " box(a(int)) early;" ^ wide ^ " box(a(int)) x;");
   rejects ~file (plain ^ holder ^ wide ^ " g(int) y;") added;
   accepts ~file (plain ^ holder ^ " g(int) early;" ^ wide ^ " g(int) y;");
   accepts ~file (plain ^ holder ^ " typedef int p; g(int) y;");
@@ -2904,8 +2910,9 @@ let generic_resolution () =
    ^ "g(int) x;")
     added;
   (* GCC copies the type of [q] at its declaration, so [q] keeps its
-     alignment, but typec does not tell which types the backend copies
-     and follows every typedef name. *)
+     alignment, but typec does not tell which types the backend copies:
+     a typedef name declared again inexactly between the two places is
+     refused whatever the text writes through it. *)
   rejects ~file
     (plain ^ "typedef plain q; type g(T) = struct { q v; T t; }; " ^ widened
    ^ "g(int) x;")
@@ -2919,6 +2926,52 @@ let generic_resolution () =
   accepts ~file
     (typed_wide ^ "void h(void) { extern wide obj; } extern int obj; "
    ^ reads_obj ^ "extern int obj; g(int) x;");
+  (* Between the text and the place, a declaration in any scope counts,
+     as GCC changes the object in place, and an alignment specifier is
+     inexact as an attribute is. *)
+  rejects ~file
+    ("extern int obj; " ^ reads_obj
+   ^ "void f(void) { { extern int obj __attribute__((aligned(16))); } } \
+      g(int) x;")
+    added;
+  rejects ~file
+    ("extern int obj; type g(T) = struct { char c[__alignof__(obj)]; T t; }; \
+      extern _Alignas(16) int obj; g(int) x;")
+    added;
+  rejects ~file
+    ("extern int obj; " ^ reads_obj
+   ^ "void f(void) { int obj; { extern int obj __attribute__((aligned(16))); \
+      } } g(int) x;")
+    added;
+  (* So does a use in the arguments of an attribute, which typing does
+     not read. *)
+  rejects ~file
+    ("extern int obj; \
+      type g(T) = struct { T v __attribute__((aligned(__alignof__(obj)))); \
+      }; extern int obj __attribute__((aligned(16))); g(int) x;")
+    added;
+  (* An object or a function that the text does not use may be declared
+     again inexactly; a typedef name declared before the text may not,
+     as GCC changes the members written through it too. *)
+  accepts ~file
+    ("extern int obj; int *h(int a __attribute__((unused))); " ^ reads_obj
+   ^ "int *h(int a) { return 0; } g(int) x;");
+  rejects ~file
+    (plain ^ "struct holder { plain m; }; \
+              type g(T) = struct { __typeof__(((struct holder *)0)->m) v; \
+              T t; }; " ^ widened ^ "g(int) x;")
+    added;
+  rejects ~file
+    (plain ^ "type g(T) = struct { int v; T t; }; " ^ widened ^ "g(int) x;")
+    added;
+  accepts ~file
+    ("type g(T) = struct { int v; T t; }; " ^ plain ^ widened ^ "g(int) x;");
+  (* A structure completed after the text is complete at the place, where
+     the text reads it through a pointer as it does at its own place. *)
+  accepts ~file
+    "struct s; extern struct s *ps; \
+     type g(T) = struct { T v; __typeof__(ps) p; }; \
+     struct s { int a; }; g(int) x;";
   (* Unread text: an attribute's identifier that denotes a type
      parameter is refused at the definition, and one that denotes a
      declaration is a use of it. *)

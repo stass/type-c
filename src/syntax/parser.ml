@@ -97,7 +97,7 @@ type scope = (ordinary, tag_entry) Scope.t
 module Places = Map.Make (Int)
 
 (* The scopes at a [try]; parser.mli says what they are. *)
-type try_views = { place : scope; own : scope }
+type try_views = { place : scope; place_before : int; own : scope }
 
 (* The scopes that unread and moved text stands in (design 13.5), by the
    index of a token: at the [(] of the arguments of each attribute, and
@@ -171,6 +171,7 @@ type state = {
           or statement without a substatement after its labels, being
           read: where lowering writes the operand of a [try] that the
           statement or declaration holds (design 5.1 rule 3) *)
+  mutable place_start : int;  (** the position in [grammar] of [place] *)
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
   mutable labels : body_labels option;  (** [None] outside every body *)
@@ -1308,17 +1309,22 @@ let begins_defer state =
 (* Runs [read] with [state.place] at the scope in front of what it
    reads, and restores the place around it after. *)
 let in_place state read =
-  let around = state.place in
+  let around = state.place and around_start = state.place_start in
   state.place <- state.scope;
+  state.place_start <- state.position;
   let result = read state in
   state.place <- around;
+  state.place_start <- around_start;
   result
 
 (* At the [try] that [begins_try] recognises: records its views and
    returns the node it makes of its operand. *)
 let try_prefix state =
   let token = state.grammar.(state.position).index in
-  let views = { place = state.place; own = state.scope } in
+  let views =
+    { place = state.place; place_before = first_token state state.place_start;
+      own = state.scope }
+  in
   state.views <-
     { state.views with tries = Places.add token views state.views.tries };
   let scope = scope_depth state in
@@ -4804,6 +4810,7 @@ let parse_with_scopes ~keywords reader =
       open_brackets = [];
       scope = Scope.file;
       place = Scope.file;
+      place_start = 0;
       jumps = Function_body;
       arm = None;
       labels = None;

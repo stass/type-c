@@ -1441,6 +1441,70 @@ nothing in the scope around it that the left operand would read.
   operand_declares.tc:5: 'K' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 5.1 rule 3, 13.5) [TC0061]
   [1]
 
+A tag declared before the holder and completed in it before the try is
+incomplete where lowering writes the operand, whether the operand names
+the tag or reads a member through a pointer to it.
+
+  $ cat > completed_named.tc <<'EOF'
+  > result(int, int) g(int);
+  > result(int, int) h(void) {
+  >   struct S;
+  >   int a[32];
+  >   a[sizeof(struct S { int x; })] = try g(sizeof(struct S));
+  >   return Ok(a[0]);
+  > }
+  > EOF
+  $ ./golden.exe completed_named.tc
+  completed_named.tc:5: the tag 'S' is completed at completed_named.tc:5, between a place where lowering writes the text and the text, so it is incomplete there (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+  $ cat > completed_unnamed.tc <<'EOF'
+  > result(int, int) g(int);
+  > result(int, int) h(void *v) {
+  >   struct S;
+  >   struct S *p = v;
+  >   int a[32];
+  >   a[sizeof(struct S { int x; })] = try g(p->x);
+  >   return Ok(a[0]);
+  > }
+  > EOF
+  $ ./golden.exe completed_unnamed.tc
+  completed_unnamed.tc:6: the tag 'S' is completed at completed_unnamed.tc:6, between a place where lowering writes the text and the text, so it is incomplete there (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+An object declared again with an attribute in the holder before the try,
+in a block of its own, has another alignment where lowering writes the
+operand on GCC, which changes the object in place.
+
+  $ cat > redeclared_in_block.tc <<'EOF'
+  > extern int o;
+  > result(int, int) g(int);
+  > result(int, int) h(void) {
+  >   int a[32];
+  >   a[({ extern int o __attribute__((aligned(16))); 0; })] =
+  >     try g(__alignof__(o));
+  >   return Ok(a[0]);
+  > }
+  > EOF
+  $ ./golden.exe redeclared_in_block.tc
+  redeclared_in_block.tc:6: the declaration of 'o' at redeclared_in_block.tc:5, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+A tag that the holder declares anew, in a block of its own, is none
+that the place declares, so completing it there changes nothing for the
+operand.
+
+  $ cat > completed_inner.tc <<'EOF'
+  > result(int, int) g(int);
+  > result(int, int) h(void) {
+  >   struct S;
+  >   int a[32];
+  >   a[({ struct S { int x; } s = { 1 }; s.x; })] = try g(2);
+  >   return Ok(a[0]);
+  > }
+  > EOF
+  $ ./golden.exe completed_inner.tc > /dev/null
+
 A name that is declared before the holder reads alike at both places,
 also one declared with an attribute, and so does a name whose scope
 ends inside the operand.

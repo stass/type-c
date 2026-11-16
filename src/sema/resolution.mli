@@ -66,23 +66,36 @@ type lowered = { lowered_name : string; written_for : Tree.span }
 
 (** A place of writing: the view of the source's declarations there,
     which the parser takes in front of an external declaration or in any
-    other scope, and the typedef names and tags that lowering declares
-    after them. *)
+    other scope, the index in [Reader.t.tokens] of the token that the
+    place stands in front of, and the typedef names and tags that
+    lowering declares after the source's declarations. *)
 type place = {
   view : Parser.View.t;
+  before : int;
   typedef_names : lowered list;
   tags : lowered list;
 }
 
+(** Values by the index of a token in [Reader.t.tokens]; a token holds
+    at most one declarator's name or one specifier's first token. *)
+module Events : Map.S with type key = int
+
 (** What the check asks of the reader of the unit: its tokens, the
     parser's views of its unread text, what each declaration declares and
     each tag declaration names, as the reader records them, and whether
-    two types are the same (6.7p3). *)
+    two types are the same (6.7p3). The events of the window of design
+    13.5 that the reader has met are kept apart, as a window after the
+    text reads only the first kind: [redeclared] holds each inexact
+    declaration of an entity declared before it, at its name, with the
+    entity as that declaration records it, and [completed] each tag
+    completed, at the first token of its specifier. *)
 type context = {
   tokens : Reader.t;
   views : Parser.views;
   entity : Tree.reference -> Entity.t option;
-  same_tag : Tree.tag_id -> Tree.tag_id -> bool;
+  tag : Tree.tag_id -> Ctype.named_tag option;
+  redeclared : Entity.t Events.t;
+  completed : Ctype.named_tag Events.t;
   same_type : Ctype.t -> Ctype.t -> bool Unknown.answer;
 }
 
