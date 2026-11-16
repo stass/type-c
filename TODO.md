@@ -474,10 +474,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   `attribute_effects` reads as neutral, `aligned` among them, and
   nullability, which `qualifiers_of` drops, are not. Record on each
   typedef name whether its declaration holds one, and walk the
-  argument's type name. Also refuse a type parameter in the arguments of
-  an attribute in a generic's definition (`aligned(sizeof(T))`), which
-  the parser keeps as an unread token span: the parser, which resolves
-  the parameter, is the place.
+  argument's type name.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it
@@ -713,12 +710,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Lowering.text_edits` compare each with each (8000 lines of
   `box(int) *p;` take 1.5 s, against 0.09 s without the application).
   Sort the ranges by first token and longest first and sweep once.
-- [Medium] An application or a type parameter in the arguments of an
-  attribute, which typing does not read, gets no name and reaches the
-  backend as written: `aligned(sizeof(box(long)))`, and `sizeof(U)` in
-  an attribute of a generic's definition. Name each such identifier at
-  the scan that `Resolution` makes of unread text, or refuse a generic
-  or type parameter there with a rule code.
+- [Low] A constructor in the arguments of an attribute reaches the
+  backend as written (`aligned(sizeof(B(1)))`, which it refuses as a
+  call of an undeclared function), though design 13.5 refuses one in
+  Type-C text as it refuses a generic: the parser's scope does not hold
+  constructors, so `Parser.own_name` cannot say that an identifier is
+  one. Add `Own_constructor` once the parser knows constructors by
+  name.
 - [Medium] The forward declarations of tags before an argument's
   typedef are decided twice: `note_tag_lines` in `Declarations` records
   those of `Named` records for the resolution check, and `Lowering`

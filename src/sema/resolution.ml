@@ -242,10 +242,12 @@ let check_own context text place (own : own) =
       | None -> ())
   | Tag _ -> ()
 
-(* Lowering writes a type parameter, a generic or a universe name under a
-   name of its own, but leaves unread text as the source spells it: the
-   backend reads the spelling as the place declares it. *)
-let check_own_spelling context place span name what =
+(* Lowering writes a [Parser.own_name] under a name of its own, but
+   leaves unread text as the source spells it: the backend reads the
+   spelling as the place declares it. The parser refuses one in the
+   arguments of an attribute of Type-C text, and a type parameter there
+   in any text, so this check reaches moved text that is C text. *)
+let check_own_spelling context place span name own =
   match ordinary_at is_c_entity place name with
   | Some cited ->
       refuse span Unread_own_name
@@ -253,24 +255,21 @@ let check_own_spelling context place span name what =
            "%s in the arguments of an attribute denotes %s, but where \
             lowering writes the text the backend reads the declaration of \
             %s there, %s"
-           (quote name) what (quote name) (cite context cited))
+           (quote name) (Parser.own_name_kind own) (quote name)
+           (cite context cited))
   | None -> ()
 
 (* An identifier of unread text counts as a use of what it denotes at its
    own place, in either name space, as typec cannot tell which the
    backend reads; one that denotes nothing is a word of the attribute. *)
 let check_unread_identifier context text place view span name =
-  (match Parser.View.find view name with
-  | Some { kind = Type_parameter; _ } ->
-      check_own_spelling context place span name "a type parameter"
-  | Some { kind = Declared_type { parameters; _ }; _ } when parameters > 0 ->
-      check_own_spelling context place span name "a generic"
-  | Some { declaration; _ } ->
+  let found = Parser.View.find view name in
+  (match (Parser.own_name found name, found) with
+  | Some own, _ -> check_own_spelling context place span name own
+  | None, Some { declaration; _ } ->
       let use = { name; span; declaration = Ordinary declaration } in
       check_use context text place use
-  | None when Option.is_some (Universe.find name) ->
-      check_own_spelling context place span name "a universe name"
-  | None -> ());
+  | None, None -> ());
   match Parser.View.find_tag view name with
   | Some tag ->
       check_use context text place { name; span; declaration = Tag tag }

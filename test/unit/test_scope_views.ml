@@ -204,11 +204,11 @@ let attribute_cases =
   [
     case "the identifiers of an attribute in a generic, where it stands"
       "typedef char T;\nenum { N = 4 };\n\
-       type box(T) = struct {\n\
-       T v __attribute__((aligned(sizeof(T))));\n\
+       type box(U) = struct {\n\
+       U v __attribute__((aligned(sizeof(T))));\n\
        int w __attribute__((vector_size(N * sizeof(int))));\n\
        int u __attribute__((packed));\n};"
-      [] "sizeof=- T=parameter@3 | N=object@2 sizeof=- int=- | none";
+      [] "sizeof=- T=typedef@1 | N=object@2 sizeof=- int=- | none";
     case "a later declaration leaves the view of an attribute"
       "type box(T) = struct {\nT v __attribute__((aligned(sizeof(n))));\n};\n\
        int n;"

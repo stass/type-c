@@ -1435,7 +1435,63 @@ let skip_balanced state expected =
   loop ();
   span_from state start
 
-(* GNU attributes (GCC manual 6.39). *)
+(* Unread text (design 13.5). *)
+
+(* What lowering writes under a name of its own, which unread text keeps
+   under the spelling of the source; parser.mli says more. *)
+type own_name = Own_type_parameter | Own_generic | Own_universe_name
+
+let own_name (found : ordinary option) name =
+  match found with
+  | Some { kind = Type_parameter; _ } -> Some Own_type_parameter
+  | Some { kind = Declared_type { parameters; _ }; _ } when parameters > 0 ->
+      Some Own_generic
+  | Some _ -> None
+  | None when Option.is_some (Universe.find name) -> Some Own_universe_name
+  | None -> None
+
+let own_name_kind = function
+  | Own_type_parameter -> "a type parameter"
+  | Own_generic -> "a generic"
+  | Own_universe_name -> "a universe name"
+
+(* Lowering leaves the arguments of an attribute as written, so the
+   identifier [name] at the token [index] there, which [scope] resolves,
+   must not denote an [own_name]: a type parameter in the definition of
+   a generic, whatever its text (design 3.5 rule 4), and a generic or a
+   universe name in Type-C text. *)
+let refuse_own_name state scope index name =
+  match own_name (Scope.find scope name) name with
+  | Some Own_type_parameter ->
+      fail_at_token state index
+        (Rule.message Generic_definition
+           (Printf.sprintf
+              "the type parameter %s is used in the arguments of an \
+               attribute"
+              (quoted name)))
+  | Some ((Own_generic | Own_universe_name) as own)
+    when is_type_c_text_at state index ->
+      fail_at_token state index
+        (Rule.message Unread_own_name
+           (Printf.sprintf
+              "%s in the arguments of an attribute denotes %s, which \
+               lowering writes under a name of its own, but it leaves the \
+               arguments as written"
+              (quoted name) (own_name_kind own)))
+  | Some (Own_generic | Own_universe_name) | None -> ()
+
+(* Each identifier of the arguments [arguments], which [scope]
+   resolves. *)
+let refuse_own_names state scope (arguments : span) =
+  for index = arguments.first to arguments.last do
+    match state.reader.tokens.(index).kind with
+    | Token.Identifier name -> refuse_own_name state scope index name
+    | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
+      ->
+        ()
+  done
+
+(* Attributes, GNU (GCC manual 6.39) and C23. *)
 
 (* The arguments of an attribute, if the cursor is at their [(]. The
    parser does not read them, so it keeps the scope there, under the
@@ -1448,6 +1504,7 @@ let attribute_arguments state =
     let arguments =
       skip_balanced state "`)` to end the arguments of an attribute"
     in
+    refuse_own_names state scope arguments;
     state.views <-
       {
         state.views with

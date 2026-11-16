@@ -346,6 +346,31 @@ holds it (design 3.5 rule 4).
   $ ./golden.exe align_expression.tc
   align_expression.tc:1: the type parameter `T` is used in `_Alignas` (design 3.5 rule 4) [TC0038]
   [1]
+
+The arguments of an attribute are unread text, which lowering leaves as
+the source spells it, so a type parameter there would reach every
+instance as written; it is refused at the definition, whatever text
+writes it.
+
+  $ cat > attribute.tc <<'EOF'
+  > type a(T) = struct { T v __attribute__((aligned(sizeof(T)))); };
+  > EOF
+  $ ./golden.exe attribute.tc
+  attribute.tc:1: the type parameter `T` is used in the arguments of an attribute (design 3.5 rule 4) [TC0038]
+  [1]
+  $ cat > c_attribute.tc <<'EOF'
+  > # 1 "c.h" 1
+  > type a(T) = struct { T v __attribute__((aligned(sizeof(T)))); };
+  > EOF
+  $ ./golden.exe c_attribute.tc
+  c.h:1: the type parameter `T` is used in the arguments of an attribute (design 3.5 rule 4) [TC0038]
+  [1]
+  $ cat > standard.tc <<'EOF'
+  > type a(T) = struct { [[gnu::aligned(sizeof(T))]] T v; };
+  > EOF
+  $ ./golden.exe standard.tc
+  standard.tc:1: the type parameter `T` is used in the arguments of an attribute (design 3.5 rule 4) [TC0038]
+  [1]
   $ printf 'type node(T) = struct node { T v; };\n' > tagged.tc
   $ ./golden.exe tagged.tc
   tagged.tc:1: the structure or union `node` has a body in the definition of a generic type, where a body has no tag (design 3.5 rule 4) [TC0038]
@@ -441,8 +466,9 @@ The definition of a generic reads where the text of an instance stands
 as at the definition (design 13.5, 3.5 rule 8). A tag of a prototype's
 own scope that file scope declares before the instance is refused at
 the application, as is a declaration of a used entity whose type may
-change through a type that typec does not compute (P21), and a type
-parameter in an attribute whose spelling C declares there.
+change through a type that typec does not compute (P21), and, in a
+generic that C text defines, a universe name in an attribute whose
+spelling C declares there.
 
   $ cat > handler.tc <<'EOF'
   > type handler(T) = struct { void (*call)(struct ctx *c, T value); };
@@ -464,10 +490,63 @@ parameter in an attribute whose spelling C declares there.
   [1]
 
   $ cat > aligned.tc <<'EOF'
-  > typedef char T;
-  > type g(T) = struct { T v __attribute__((aligned(sizeof(T)))); };
+  > # 1 "c.h" 1
+  > type g(T) = struct { T v __attribute__((aligned(sizeof(option)))); };
+  > int option;
+  > # 2 "aligned.tc" 2
   > g(int) x;
   > EOF
   $ ./golden.exe aligned.tc
-  aligned.tc:3: in the instance 'g__i' that this application names, at aligned.tc:2: 'T' in the arguments of an attribute denotes a type parameter, but where lowering writes the text the backend reads the declaration of 'T' there, the one declared at aligned.tc:1 (design 13.5) [TC0046]
+  aligned.tc:2: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 (design 13.5) [TC0046]
   [1]
+
+Type-C text names no generic and no universe name in the arguments of an
+attribute, whether a declaration of C would take the spelling or not:
+lowering leaves the arguments as written, so the backend would find
+nothing under the spelling or read it as a word of the attribute
+(design 13.5). A universe name that a declaration hides denotes what
+the declaration declares, and C text that does not move is the
+backend's to read.
+
+  $ cat > application.tc <<'EOF'
+  > type vector(T) = struct { T *data; long n; };
+  > vector(int) v;
+  > int y __attribute__((aligned(_Alignof(vector(int)))));
+  > EOF
+  $ ./golden.exe application.tc
+  application.tc:3: `vector` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  [1]
+  $ cat > bare.tc <<'EOF'
+  > type g(T) = struct { T v; };
+  > int y __attribute__((aligned(sizeof(g))));
+  > EOF
+  $ ./golden.exe bare.tc
+  bare.tc:2: `g` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  [1]
+  $ printf 'int y __attribute__((aligned(_Alignof(option(int)))));\n' \
+  >   > universe.tc
+  $ ./golden.exe universe.tc
+  universe.tc:1: `option` in the arguments of an attribute denotes a universe name, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  [1]
+  $ cat > hidden.tc <<'EOF'
+  > int option;
+  > int y __attribute__((aligned(sizeof(option))));
+  > EOF
+  $ ./golden.exe hidden.tc
+  # 1 "hidden.tc"
+  int option;
+  int y __attribute__((aligned(sizeof(option))));
+  $ cat > c_word.tc <<'EOF'
+  > type open(T) = struct { T v; };
+  > # 1 "c.h" 1
+  > enum __attribute__((enum_extensibility(open))) k { K };
+  > EOF
+  $ ./golden.exe c_word.tc
+  # 1 "c_word.tc"
+  
+  # 1 "c_word.tc"
+  
+  # 1 "c_word.tc"
+  
+  # 1 "c.h" 1
+  enum __attribute__((enum_extensibility(open))) k { K };

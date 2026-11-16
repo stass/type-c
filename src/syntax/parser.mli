@@ -92,6 +92,20 @@ type kind =
     kind. *)
 type ordinary = { declaration : Tree.reference; kind : kind }
 
+(** What lowering writes under a name of its own (design 13.5): a type
+    parameter, a generic and a universe name. Unread text keeps the
+    spelling of the source, so the backend does not read such a name as
+    Type-C means it. *)
+type own_name = Own_type_parameter | Own_generic | Own_universe_name
+
+val own_name : ordinary option -> string -> own_name option
+(** [own_name found name] is what the identifier [name] denotes, if it is
+    an [own_name], where a scope finds [found] under it: a name that no
+    scope declares may be a universe name. *)
+
+val own_name_kind : own_name -> string
+(** The kind of name, as a message says it: ["a generic"]. *)
+
 (** A view of the scopes open at a place of the unit (C11 6.2.1), as the
     parser resolved names there: what the resolution property of design
     13.5 compares between the place of moved text and a place where

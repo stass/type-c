@@ -2700,15 +2700,13 @@ let generic_resolution () =
     "[TC0045]";
   accepts ~file ("static _Float16 a(_Float16); " ^ uses ^ " g(int) x;");
   (* Unread text: an attribute's identifier that denotes a type
-     parameter is refused where C declares its spelling, and one that
-     denotes a declaration is a use of it. *)
+     parameter is refused at the definition, and one that denotes a
+     declaration is a use of it. *)
   let aligned =
     "type g(T) = struct { T v __attribute__((aligned(sizeof(T)))); };"
   in
-  rejects ~file ("typedef char T; " ^ aligned ^ " g(int) x;") "[TC0046]";
-  rejects ~file (aligned ^ " typedef char T; g(int) x;")
-    "denotes a type parameter";
-  accepts ~file (aligned ^ " g(int) x;");
+  rejects ~file ("typedef char T; " ^ aligned ^ " g(int) x;") "[TC0038]";
+  rejects ~file aligned "[TC0038]";
   accepts ~file
     "enum { N = 8 }; \
      type g(T) = struct { T v __attribute__((aligned(N))); }; g(int) x;";
@@ -2720,7 +2718,7 @@ let generic_resolution () =
   rejects ~file
     "type g(T) = struct { T v __attribute__((aligned(sizeof(option)))); }; \
      int option; g(int) x;"
-    "denotes a universe name";
+    "denotes a universe name, which lowering writes under a name";
   accepts ~file
     "type named(T) = struct { int name; T value; }; int name; \
      named(int) n;";

@@ -598,9 +598,10 @@ id(stmt) s;                             /* e = s is an error */
 4. A generic definition uses a type parameter only as a type: of a member,
    a field, a pointed-to object, an element, a parameter or a result, or as
    a type argument. It does not use one directly after `distinct`, in a
-   bit-field or in `_Alignas`, and no constant expression in it depends on
-   one. A struct or union specifier with a body in it has no tag, and
-   stands only where the definition of an instance holds it (10.3): as
+   bit-field, in `_Alignas` or in the arguments of an attribute, which
+   lowering leaves as the source spells them (13.5), and no constant
+   expression in it depends on one. A struct or union specifier with a
+   body in it has no tag, and stands only where the definition of an instance holds it (10.3): as
    the whole definition of an alias, in a field of a variant, where a
    variant that is not generic may have one too, or inside either.
    Elsewhere no definition of an instance holds it: the instance of a
@@ -3410,17 +3411,32 @@ Three rules carry the property into unread text.
   name of its own: a type parameter, a universe name, a constructor or
   a generic. Lowering leaves unread text as the source spells it,
   whether the text is moved or not, so the backend reads the spelling
-  as the lowered C declares it there. Where the Type-C name hides a C
-  entity of that spelling, the backend would read that entity, with no
-  message, and the identifier is an error, in all Type-C text and in
-  moved text that is C text: with `typedef char T;` at file scope,
+  as the lowered C declares it there. In an attribute argument such an
+  identifier is an error whatever the C around it declares: a type
+  parameter in the definition of a generic, in any text (3.5 rule 4),
+  and a generic, a constructor or a universe name in Type-C text. The
+  backend would read a C entity of the spelling with no message, as
   `__attribute__((aligned(sizeof(T))))` in a generic with a type
-  parameter `T` would take the size of `char` in every instance. Where
-  it hides none, the lowered C declares nothing under the spelling and
-  the backend decides: it refuses a name that it cannot find, as the
-  `option` of `__attribute__((aligned(_Alignof(option(int)))))`, and
-  takes a word that is no name, as the `push` of `#pragma pack(push)`
-  in the scope of a generic named `push`.
+  parameter `T` would take the size of `char` in every instance after
+  `typedef char T;`; or find nothing and refuse the lowered C, as it
+  refuses the `vector` of
+  `__attribute__((aligned(_Alignof(vector(int)))))`; or take the
+  spelling for a word of the attribute, which the Type-C name does not
+  mean. The cost is an attribute word that Type-C text spells as a
+  generic, as the `open` of `enum_extensibility(open)` in the scope of
+  a generic named `open`, which then takes another name. A `#pragma`
+  line, whose words are many and common (`push`, `pop`, `pack`), is held
+  to less, and so is an attribute argument of moved text that is C
+  text, which Type-C text does not write: where the Type-C name hides a
+  C entity of the spelling, the backend would read that entity, with no
+  message, and the identifier is an error, in Type-C text and in moved
+  text that is C text. With `int option;` between the definition of a
+  generic that C text writes and an instance of it,
+  `__attribute__((aligned(sizeof(option))))` in the definition is such
+  an error. Where it hides none, the lowered C declares nothing under
+  the spelling and the backend decides, as it takes the `push` of
+  `#pragma pack(push)` in the scope of a generic named `push`. C text
+  that does not move is the backend's to read.
 - No other unread text stands in moved text, in any text. The two
   rules above cover attribute arguments and `#pragma` lines, whose
   identifiers `typec` looks at. All other unread text is a body that

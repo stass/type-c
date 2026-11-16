@@ -197,10 +197,11 @@ let rows =
         "In the definition of a generic type: a type parameter, written \
          or through a transparent alias, directly after [distinct], as \
          the type of a bit-field, in [_Alignas], [_Atomic( )] or \
-         [typeof( )], qualified by [_Atomic], or in an expression; a \
-         structure or union specifier with a body and a \
-         tag, or with a body where the definition of an instance does \
-         not hold it; an enumeration specifier with a body." };
+         [typeof( )], qualified by [_Atomic], in an expression or in the \
+         arguments of an attribute; a structure or union specifier \
+         with a body and a tag, or with a body where the definition of \
+         an instance does not hold it; an enumeration specifier with a \
+         body." };
     Live { name = "Moved_declaration"; code = 39;
       clause = Some "design 13.5";
       meaning =
@@ -247,9 +248,10 @@ let rows =
     Live { name = "Unread_own_name"; code = 46; clause = Some "design 13.5";
       meaning =
         "An identifier in the arguments of an attribute that denotes a \
-         type parameter, a generic or a universe name, where the place \
-         that lowering writes it at declares a C entity of its \
-         spelling, which the backend would read." };
+         generic or a universe name, which lowering writes under a name \
+         of its own: in Type-C text, and in moved text that is C text \
+         where the place that lowering writes it at declares a C entity \
+         of its spelling, which the backend would read." };
     Live { name = "Generic_pragma"; code = 47;
       clause = Some "design 10.3, P25";
       meaning =
