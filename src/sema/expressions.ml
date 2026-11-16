@@ -1458,25 +1458,25 @@ let composite_pointer context span (a : Ctype.t) (b : Ctype.t) =
   | Error Incompatible -> void_pointer context span
   | Error error -> context.fail span (Rule.c_text (Ctype.error_message error))
 
-(* The second and third operands of a conditional: the expression, for
-   whether it is a null pointer constant, with its type. *)
+(* An operand whose value an expression may give, kept as the expression,
+   for whether it is a null pointer constant, with its type. The second
+   and third operands of a conditional are branches, and so are the
+   associations of a selection that typec cannot decide. *)
 type branch = { branch : Tree.expression; branch_typed : typed }
 
-(* GNU C: a conditional of type [t] discards the value of each branch
-   where [t] is void (design 5.2). Where typec does not know whether it
-   is void (design 13.3) and the conditional's own value is discarded, a
-   branch of a result type is dropped either way, so it is refused; where
-   the value is used, a void conditional is the backend's error. *)
-let discard_branches context position (t : Ctype.t) branches =
+(* Design 5.2: refuses each of [branches] of a result type whose value
+   the expression that holds them, standing in [position], discards.
+   [discards] answers whether it discards them all, as a void conditional
+   does, or depends on what the backend decides: whether a conditional is
+   void, or which association a selection selects (design 13.3). Where it
+   depends and the expression's own value is discarded, a branch of a
+   result type may be dropped, so it is refused as needing [need]; where
+   the value is used, it is not dropped. *)
+let discard_branches context position ~need discards branches =
   let diagnostic =
-    match (Ctype.is_void t, position) with
-    | Answer true, _ -> Some dropped_result
-    | Depends_on unknown, Discarded ->
-        Some
-          (needing
-             "the type of a discarded conditional with a branch of a \
-              result type"
-             unknown)
+    match (discards, position) with
+    | Unknown.Answer true, _ -> Some dropped_result
+    | Depends_on unknown, Discarded -> Some (needing need unknown)
     | Answer false, _ | Depends_on _, (Untargeted | Targeted _) -> None
   in
   let refuse diagnostic { branch; branch_typed } =
@@ -2977,26 +2977,32 @@ and unary context span (op : Tree.unary_operator) typed =
    bit-field where it is one, as GCC and Clang do. Every one of the
    [operands] that it may select is typed, as GCC and Clang check the
    ones they do not select: the chosen one, whose value it gives,
-   discarded where the selection is, and the others, or all where the
-   selection is unknown, in no position. *)
+   discarded where the selection is, and the others in no position.
+   Where the selection is unknown, each stands where the chosen one
+   would (design 5.2). *)
 and selected context position (selecting : Tree.expression) operands =
   let selection = selection_of context selecting in
-  let chosen_span =
+  let may_be_chosen (operand : Tree.expression) =
     match selection with
-    | Unknown.Answer (chosen : Tree.expression) -> Some chosen.span
-    | Depends_on _ -> None
+    | Unknown.Answer (chosen : Tree.expression) -> chosen.span = operand.span
+    | Depends_on _ -> true
   in
   let type_operand (operand : Tree.expression) =
     let operand_position =
-      if chosen_span = Some operand.span then value_position position
-      else Untargeted
+      if may_be_chosen operand then value_position position else Untargeted
     in
-    ignore (positioned context operand_position operand)
+    { branch = operand;
+      branch_typed = positioned context operand_position operand }
   in
-  List.iter type_operand operands;
+  let branches = List.map type_operand operands in
   match selection with
   | Answer chosen -> operand_typed context chosen
   | Depends_on unknown ->
+      discard_branches context position
+        ~need:
+          "the choice of a discarded selection with an association of a \
+           result type"
+        (Depends_on unknown) branches;
       value (Ctype.unknown { unknown with kind = Object_or_function })
 
 (* The operand that a _Generic or __builtin_choose_expr selects, made
@@ -3083,7 +3089,10 @@ and conditional context span position condition if_true if_false =
   in
   let third = { branch = if_false; branch_typed = branch_typed if_false } in
   let result = conditional_type context span second third in
-  discard_branches context position result [ second; third ];
+  discard_branches context position
+    ~need:
+      "the type of a discarded conditional with a branch of a result type"
+    (Ctype.is_void result) [ second; third ];
   result
 
 (* 6.5.15p3 to p6: the type of a conditional of these branches. *)

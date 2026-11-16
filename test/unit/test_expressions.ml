@@ -790,6 +790,11 @@ let dropped_results () =
     rejects_source ~file:"in.tc" (type_c body)
       "the type of a discarded conditional with a branch of a result type"
   in
+  let unchosen body =
+    rejects_source ~file:"in.tc" (type_c body)
+      "the choice of a discarded selection with an association of a result \
+       type depends on"
+  in
   let accepts body = accepts_source ~file:"in.tc" (type_c body) in
   rejects "f()";
   rejects "r";
@@ -826,6 +831,18 @@ let dropped_results () =
   accepts "(void)_Generic(0, int: f())";
   accepts "_Generic(0, int: x, default: f())";
   accepts "_Generic(0, int: x, long: x ? f() : u)";
+  unchosen "__builtin_choose_expr(__builtin_constant_p(x), f(), f())";
+  unchosen "__builtin_choose_expr(__builtin_constant_p(x), x, f())";
+  unchosen "__builtin_choose_expr(__builtin_constant_p(x), f(), u)";
+  unchosen "_Generic(u, int: f(), default: 0)";
+  unchosen "(x, (_Generic(u, int: x, default: ({ f(); }))))";
+  unchosen "return _Generic(u, int: f(), default: 0)";
+  rejects "_Generic(u, default: f())";
+  undecided "_Generic(u, int: x ? f() : u, default: 0)";
+  accepts "(void)__builtin_choose_expr(__builtin_constant_p(x), f(), x)";
+  accepts "r = _Generic(u, int: f(), default: r)";
+  accepts "__builtin_choose_expr(__builtin_constant_p(x), x, u)";
+  accepts "_Generic(u, int: x, default: (void)f())";
   accepts "(void)({ x ? f() : u; })";
   accepts "r = _Generic(0, int: f())";
   accepts "r = ({ f(); })";

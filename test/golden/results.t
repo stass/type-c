@@ -73,6 +73,31 @@ conditional is void or not, and typec refuses it (design 13.3).
   unknown_branch.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'vector_size' at unknown_branch.tc:2, which typec does not type yet (design 13.3) [TC0031]
   [1]
 
+Where typec cannot tell which association a discarded selection
+selects, each of its associations is discarded if the backend selects
+it, and typec refuses one of a result type (design 13.3).
+
+  $ cat > unknown_choice.tc <<'EOF'
+  > result(int, int) get(void);
+  > void f(int n) {
+  >   __builtin_choose_expr(__builtin_constant_p(n), get(), get());
+  > }
+  > EOF
+  $ ./golden.exe unknown_choice.tc
+  unknown_choice.tc:3: the choice of a discarded selection with an association of a result type depends on the condition of __builtin_choose_expr at unknown_choice.tc:3, which typec does not type yet (design 13.3) [TC0031]
+  [1]
+
+  $ cat > unknown_controlling.tc <<'EOF'
+  > result(int, int) g(void);
+  > void v(void) __attribute__((ms_abi));
+  > void f(void) {
+  >   _Generic(v(), int: g(), default: 0);
+  > }
+  > EOF
+  $ ./golden.exe unknown_controlling.tc
+  unknown_controlling.tc:4: the choice of a discarded selection with an association of a result type depends on the attribute 'ms_abi' at unknown_controlling.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  [1]
+
 The association that a selection selects and the last expression
 statement of a statement expression give their value to the expression
 around them, so theirs is discarded where that one's is.
@@ -127,6 +152,8 @@ around them, so theirs is discarded where that one's is.
   >   (void)_Generic(0, int: g());
   >   (void)_Generic(0, int: c ? g() : v());
   >   r = ({ g(); });
+  >   (void)__builtin_choose_expr(__builtin_constant_p(c), g(), 0);
+  >   r = _Generic(v(), int: g(), default: r);
   >   (void)r;
   > }
   > EOF

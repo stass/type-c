@@ -586,15 +586,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   may be void. Refusing them through `needing` would refuse every
   discarded call of a function of unknown type; decide by what P21
   measures.
-- [Medium] A discarded selection that depends on what typec does not
-  know drops an operand of a result type without a word, as in
-  `__builtin_choose_expr(__builtin_constant_p(c), g(), 0);` or
-  `_Generic(v(), int: g(), default: 0);` where `v` has a type typec does
-  not know: every operand is typed in no position and the selection's
-  type is unknown. It is the conditional's case of design 5.2, the
-  backend picking the operand: refuse it as `discard_branches` does,
-  through one funnel for every construct whose value is one of
-  operands typec cannot pick.
+- [Medium] A discarded selection that typec cannot decide refuses every
+  association of a result type (design 5.2), also one it can never
+  select: `_Generic(x, long: f(), V: 0, default: 0);` and
+  `_Generic(x, int: 0, V: 1, default: f());` where `x` is an int and `V`
+  a vector type, as `select` answers `Depends_on` when any association's
+  compatibility is unknown. Let `select` and `choice` give the operands
+  that may be chosen (known compatible, unknown, and the default only
+  where none is known compatible), decide the selection where one is
+  left, and have `selected` judge exactly those; then where each of them
+  is a result, report TC0048 rather than a dependence on typec.
 - [Medium] Which operand gives the value of the expression around it
   is decided in several places that must agree: `as_enclosing` and
   `value_position` (positions), `is_assignment` (parentheses only, so
