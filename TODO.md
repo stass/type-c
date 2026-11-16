@@ -293,11 +293,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   union, which `Expressions` checks. A wrong scalar or pointer argument
   is then the backend's error on lowered code; check 6.5.16.1p1 in
   typec once typing models assignment conversions.
-- [Medium] An integer constant expression carries its type twice: in
-  its `Integer_constant.t` and in its typed expression, and nothing makes
-  the two agree. The operations take their result type from typing; let
-  the leaves (constants, enumerators, `sizeof`) take theirs from it too,
-  or let `Integer_constant.t` hold no type.
+- [Low] `Integer_constant.binary` raises on a comparison and
+  `Integer_constant.comparison` on any other operator; only the order of
+  the arms of `Expressions.classify_node` routes each operator to its
+  function. Give the comparisons a type of their own in
+  `Tree.binary_operator` (for example `Comparison of comparison`), so
+  that a misrouted operator does not compile.
 - [Medium] The rule that the initialiser of an object of static or
   thread storage duration is constant (6.7.9p4) reports only what both
   GCC and Clang refuse (`Expressions.Not_constant`). Each takes other

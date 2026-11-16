@@ -10,8 +10,10 @@
     does a left shift of a signed value, whose overflow GCC defines and
     both accept.
 
-    An enumerated type takes part as its compatible integer type, so a
-    value has an integer type of {!Integer.t}. *)
+    A value holds no type: the type of an integer constant expression is
+    the one that typing gives it, which each operation takes as an
+    argument. An enumerated type takes part as its compatible integer
+    type, a {!Integer.t}. *)
 
 open Typec_cpp
 
@@ -24,11 +26,10 @@ open Typec_cpp
     do not compute; and any operation with an opaque operand. The
     expression is still an integer constant expression: an array whose
     length is one is not a variable length array. *)
-type value =
-  | Known of Exact_integer.t  (** in the range of the type *)
+type t =
+  | Known of Exact_integer.t
+      (** in the range of the type that typing gives the expression *)
   | Opaque
-
-type t = private { integer_type : Integer.t; value : value }
 
 type error =
   | Overflow  (** 6.6p4: a signed result outside its type, 6.5.5p6 *)
@@ -54,8 +55,6 @@ val error_message : error -> string
 val known : Target.t -> Integer.t -> Exact_integer.t -> t
 (** A value converted to the type, as {!convert} converts. *)
 
-val opaque : Integer.t -> t
-
 val fits : Target.t -> Integer.t -> Exact_integer.t -> bool
 (** Whether the type holds the value. *)
 
@@ -70,19 +69,20 @@ val of_integer_constant :
   Number.base ->
   string ->
   Number.integer_suffix ->
-  (t, error) result
-(** [of_integer_constant target base digits suffix] is the constant with
-    those digits, without the prefix of their base: the first type of its
-    list that holds the value (6.4.4.1p5). *)
+  (Integer.t * t, error) result
+(** [of_integer_constant target base digits suffix] is the type and value
+    of the constant with those digits, without the prefix of their base:
+    its type is the first of its list that holds the value (6.4.4.1p5).
+    Typing takes the type and the evaluation the value. *)
 
 val of_character_constant :
-  Target.t -> Token.encoding -> string -> (t, error) result
-(** [of_character_constant target encoding spelling] is the value of the
-    character constant spelled [spelling], prefix and quotes included
-    (6.4.4.4p10, p11). A plain constant has type [int]: of one character,
-    the value of that [char]; of more, its bytes in order, the first most
-    significant and the excess first ones dropped, as both GCC and Clang
-    evaluate them. *)
+  Target.t -> Token.encoding -> string -> (Integer.t * t, error) result
+(** [of_character_constant target encoding spelling] is the type and value
+    of the character constant spelled [spelling], prefix and quotes
+    included (6.4.4.4p10, p11). A plain constant has type [int]: of one
+    character, the value of that [char]; of more, its bytes in order, the
+    first most significant and the excess first ones dropped, as both GCC
+    and Clang evaluate them. *)
 
 (** {1 Operations}
 
@@ -109,10 +109,23 @@ val binary :
   t ->
   t ->
   t * error option
-(** The binary operators of 6.5.5 to 6.5.14, as {!unary}. A comparison
-    compares its operands in their common type (6.5.8p3, 6.5.9p4). A false
-    left operand of [&&] or a true one of [||] decides the value whatever
-    the right one is. *)
+(** The binary operators of 6.5.5 to 6.5.14 but the comparisons, which
+    raise [Invalid_argument], as {!unary}. A false left operand of [&&] or
+    a true one of [||] decides the value whatever the right one is. *)
+
+val comparison :
+  Target.t ->
+  left_type:Integer.t ->
+  right_type:Integer.t ->
+  Typec_syntax.Tree.binary_operator ->
+  t ->
+  t ->
+  t
+(** The relational and equality operators (6.5.8, 6.5.9), which never
+    fail; another operator raises [Invalid_argument]. The operands have
+    the types that typing gives them and compare in their common type
+    (6.5.8p3, 6.5.9p4). That common type is the one type an operation
+    decides here, as typing records only the result type, [int]. *)
 
 val conditional : Target.t -> result:Integer.t -> t -> t -> t -> t
 (** [conditional target ~result condition if_true if_false] (6.5.15). *)

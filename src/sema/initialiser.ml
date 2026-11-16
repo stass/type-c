@@ -13,7 +13,8 @@ type typing = {
   source : Tree.expression -> Tree.expression Unknown.answer;
   initialises_whole : Ctype.t -> Tree.expression -> unit;
   type_c_text : Tree.span -> bool;
-  index : Tree.expression -> (Integer_constant.t, Tree.span) result;
+  index :
+    Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
 }
 
 (* Clang's default limit on nested brackets, which the parser keeps. *)
@@ -40,9 +41,9 @@ let is_zero_initialiser typing (list : Tree.initialiser_list) =
       match
         Integer_constant.of_integer_constant typing.target base digits suffix
       with
-      | Ok { value = Known value; _ } ->
+      | Ok (_, Known value) ->
           Exact_integer.equal value Exact_integer.zero
-      | Ok { value = Opaque; _ } | Error _ -> false)
+      | Ok (_, Opaque) | Error _ -> false)
   | _ -> false
 
 (* Type-C text reaches the tag and fields of a variant only through
@@ -276,8 +277,8 @@ let array_index typing (length : Ctype.length) expression =
         (Rule.c_text
            "an array designator is not an integer constant expression (C11 \
             6.7.9p6)")
-  | Ok { value = Opaque; _ } -> Opaque_index
-  | Ok { value = Known value; _ } -> (
+  | Ok (_, Opaque) -> Opaque_index
+  | Ok (_, Known value) -> (
       if Exact_integer.is_negative value then
         typing.fail expression.span
           (Rule.c_text "an array designator is negative (C11 6.7.9p6)");

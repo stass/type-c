@@ -447,7 +447,8 @@ let wrong_kind_of_tag state (name : Tree.identifier) =
 (* The outcome of reading an expression as an integer constant
    expression. *)
 type evaluation =
-  | Constant of Integer_constant.t
+  | Constant of { integer_type : Integer.t; value : Integer_constant.t }
+      (** The type that typing gives the expression, and its value. *)
   | Not_constant of Tree.span
       (** The operand or operator that 6.6p3 and p6 do not allow. *)
 
@@ -1143,12 +1144,11 @@ and fixed_enumerator_value state integer previous span
             (Rule.c_text
                "an enumerator value is not an integer constant expression (C11 \
                 6.7.2.2p2)")
-      | Constant { value = Opaque; _ } -> Integer_constant.opaque integer
+      | Constant { value = Opaque; _ } -> Opaque
       | Constant { value = Known value; _ } -> held expression.span value)
   | None, None -> held span Exact_integer.zero
-  | None, Some { Integer_constant.value = Opaque; _ } ->
-      Integer_constant.opaque integer
-  | None, Some { value = Known previous; _ } ->
+  | None, Some Integer_constant.Opaque -> Opaque
+  | None, Some (Known previous) ->
       held span (Exact_integer.add previous Exact_integer.one)
 
 (* The type and value of an enumerator while its list is read: int when
@@ -1235,8 +1235,8 @@ and static_assert state ({ condition; message } : Tree.static_assertion) =
         (Rule.c_text
            "the condition of a static assertion is not an integer constant \
             expression (C11 6.7.10p2)")
-  | Constant constant -> (
-      match Integer_constant.truth constant with
+  | Constant { value; _ } -> (
+      match Integer_constant.truth value with
       | Some false ->
           let first = (List.hd message).span in
           fail state condition.span
@@ -1613,7 +1613,7 @@ and read_new_type_name state (type_name : Tree.type_name) =
    not a constant. *)
 and constant_expression state expression =
   match Expressions.integer_constant (typing state) expression with
-  | Ok value -> Constant value
+  | Ok (integer_type, value) -> Constant { integer_type; value }
   | Error span -> Not_constant span
 
 (* Declarations in blocks and what typing asks of the reader *)

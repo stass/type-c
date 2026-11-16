@@ -65,7 +65,8 @@ type typing = {
   source : Tree.expression -> Tree.expression Unknown.answer;
   initialises_whole : Ctype.t -> Tree.expression -> unit;
   type_c_text : Tree.span -> bool;
-  index : Tree.expression -> (Integer_constant.t, Tree.span) result;
+  index :
+    Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
 }
 
 val max_levels : int

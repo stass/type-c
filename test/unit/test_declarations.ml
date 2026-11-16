@@ -42,7 +42,7 @@ let linkage_name : Entity.linkage -> string = function
   | No_linkage -> "none"
 
 let value_name (constant : Integer_constant.t) =
-  match constant.value with
+  match constant with
   | Known value -> Exact_integer.to_string value
   | Opaque -> "opaque"
 
@@ -131,8 +131,8 @@ let constant_type ?(target = lp64) spelling expected =
           Integer_constant.of_integer_constant target base digits suffix
         in
         match constant with
-        | Ok constant ->
-            Integer.name constant.integer_type ^ " = " ^ value_name constant
+        | Ok (integer, value) ->
+            Integer.name integer ^ " = " ^ value_name value
         | Error error -> Integer_constant.error_message error)
     | Floating _ | Not_a_constant -> "not an integer constant"
   in

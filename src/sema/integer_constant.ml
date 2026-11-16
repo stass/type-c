@@ -4,8 +4,7 @@
 open Typec_cpp
 module Tree = Typec_syntax.Tree
 
-type value = Known of Exact_integer.t | Opaque
-type t = { integer_type : Integer.t; value : value }
+type t = Known of Exact_integer.t | Opaque
 
 type error =
   | Overflow
@@ -18,7 +17,6 @@ type error =
   | Multiple_characters
   | Empty_character
 
-let opaque integer_type = { integer_type; value = Opaque }
 let width = Target.integer_width
 
 let minimum target integer =
@@ -49,17 +47,14 @@ let known target integer x =
   match integer with
   | Integer.Bool ->
       let truth = not (Exact_integer.equal x Exact_integer.zero) in
-      let value = Exact_integer.of_int (Bool.to_int truth) in
-      { integer_type = Bool; value = Known value }
-  | _ -> { integer_type = integer; value = Known (wrap target integer x) }
+      Known (Exact_integer.of_int (Bool.to_int truth))
+  | _ -> Known (wrap target integer x)
 
-let convert target integer constant =
-  match constant.value with
+let convert target integer = function
   | Known x -> known target integer x
-  | Opaque -> opaque integer
+  | Opaque -> Opaque
 
-let truth constant =
-  match constant.value with
+let truth = function
   | Known x -> Some (not (Exact_integer.equal x Exact_integer.zero))
   | Opaque -> None
 
@@ -69,38 +64,37 @@ let arithmetic_result target integer x =
     Error Overflow
   else Ok (known target integer x)
 
-let of_truth target integer truth =
-  known target integer (Exact_integer.of_int (Bool.to_int truth))
+(* 0 or 1, which every integer type holds. *)
+let of_truth truth = Known (Exact_integer.of_int (Bool.to_int truth))
 
 (* 6.5.8p3, 6.5.9p4: the operands of a comparison are compared in their
    common type, which is no type of the comparison's value. *)
-let compared_type target a b =
+let compared_type target left_type right_type =
   match
     Arithmetic.usual_arithmetic_conversions target
-      (Arithmetic.promote target (Integer a.integer_type))
-      (Arithmetic.promote target (Integer b.integer_type))
+      (Arithmetic.promote target (Integer left_type))
+      (Arithmetic.promote target (Integer right_type))
   with
   | Integer integer -> integer
   | Real _ | Complex _ ->
       invalid_arg "Integer_constant: integer operands convert to an integer"
 
 (* Applies [operation] to the values of the operands, or gives an opaque
-   [integer] when one is opaque. *)
-let with_value integer operation operand =
-  match operand.value with
+   value when one is opaque. *)
+let with_value operation = function
   | Known x -> operation x
-  | Opaque -> Ok (opaque integer)
+  | Opaque -> Ok Opaque
 
-let with_values integer operation left right =
-  match (left.value, right.value) with
+let with_values operation left right =
+  match (left, right) with
   | Known x, Known y -> operation x y
-  | Opaque, _ | _, Opaque -> Ok (opaque integer)
+  | Opaque, _ | _, Opaque -> Ok Opaque
 
 (* A failed operation has an opaque value: what it has where it is not
    evaluated, and its undefined behaviour no error (6.6p3, p11). *)
-let settle integer = function
+let settle = function
   | Ok value -> (value, None)
-  | Error error -> (opaque integer, Some error)
+  | Error error -> (Opaque, Some error)
 
 (* Unary operators *)
 
@@ -108,15 +102,14 @@ let settle integer = function
    typing decides. *)
 let unary_value target integer operator operand =
   match (operator : Tree.unary_operator) with
-  | Unary_plus ->
-      with_value integer (fun x -> Ok (known target integer x)) operand
+  | Unary_plus -> with_value (fun x -> Ok (known target integer x)) operand
   | Unary_minus ->
-      with_value integer
+      with_value
         (fun x -> arithmetic_result target integer (Exact_integer.neg x))
         operand
   (* In two's complement ~x is -x - 1, which is always in range. *)
   | Bitwise_not ->
-      with_value integer
+      with_value
         (fun x ->
           let complement =
             Exact_integer.sub (Exact_integer.neg x) Exact_integer.one
@@ -125,8 +118,8 @@ let unary_value target integer operator operand =
         operand
   | Logical_not -> (
       match truth operand with
-      | Some truth -> Ok (of_truth target integer (not truth))
-      | None -> Ok (opaque integer))
+      | Some truth -> Ok (of_truth (not truth))
+      | None -> Ok Opaque)
   | Address | Indirection | Pre_increment | Pre_decrement | Real_part
   | Imaginary_part ->
       invalid_arg "Integer_constant.unary"
@@ -157,7 +150,7 @@ let shift target integer ~left_shift left right =
     if left_shift then Exact_integer.mul x (Exact_integer.power_of_two count)
     else Exact_integer.floor_shift_right x count
   in
-  with_values integer
+  with_values
     (fun x count ->
       match Exact_integer.to_int count with
       | Some count when count >= 0 && count < width target integer ->
@@ -173,14 +166,14 @@ let compare_with operator order =
   | Greater_or_equal -> order >= 0
   | Equal_to -> order = 0
   | Not_equal_to -> order <> 0
-  | _ -> invalid_arg "Integer_constant.compare_with"
+  | _ -> invalid_arg "Integer_constant.comparison"
 
 (* A decisive left operand gives the value without the right one. *)
-let logical target integer ~decisive left right =
+let logical ~decisive left right =
   match (truth left, truth right) with
-  | Some l, _ when l = decisive -> Ok (of_truth target integer decisive)
-  | Some _, Some r -> Ok (of_truth target integer r)
-  | Some _, None | None, _ -> Ok (opaque integer)
+  | Some l, _ when l = decisive -> Ok (of_truth decisive)
+  | Some _, Some r -> Ok (of_truth r)
+  | Some _, None | None, _ -> Ok Opaque
 
 (* An operator of the usual arithmetic conversions on the values of its
    operands converted to their common type [integer], its result type. *)
@@ -200,32 +193,35 @@ let binary_value target integer operator left right =
   match (operator : Tree.binary_operator) with
   | Shift_left -> shift target integer ~left_shift:true left right
   | Shift_right -> shift target integer ~left_shift:false left right
-  | Logical_and -> logical target integer ~decisive:false left right
-  | Logical_or -> logical target integer ~decisive:true left right
-  | Less_than | Greater_than | Less_or_equal | Greater_or_equal | Equal_to
-  | Not_equal_to ->
-      let compared = compared_type target left right in
-      let order x y = compare_with operator (Exact_integer.compare x y) in
-      with_values integer
-        (fun x y -> Ok (of_truth target integer (order x y)))
-        (convert target compared left) (convert target compared right)
+  | Logical_and -> logical ~decisive:false left right
+  | Logical_or -> logical ~decisive:true left right
   | Multiply | Divide | Remainder | Add | Subtract | Bitwise_and | Bitwise_xor
   | Bitwise_or ->
-      with_values integer
+      with_values
         (arithmetic_operation target integer operator)
         (convert target integer left) (convert target integer right)
+  | Less_than | Greater_than | Less_or_equal | Greater_or_equal | Equal_to
+  | Not_equal_to ->
+      invalid_arg "Integer_constant.binary"
 
 let conditional target ~result condition if_true if_false =
   match truth condition with
   | Some true -> convert target result if_true
   | Some false -> convert target result if_false
-  | None -> opaque result
+  | None -> Opaque
 
 let unary target ~result operator operand =
-  settle result (unary_value target result operator operand)
+  settle (unary_value target result operator operand)
 
 let binary target ~result operator left right =
-  settle result (binary_value target result operator left right)
+  settle (binary_value target result operator left right)
+
+let comparison target ~left_type ~right_type operator left right =
+  let compared = compared_type target left_type right_type in
+  match (convert target compared left, convert target compared right) with
+  | Known x, Known y ->
+      of_truth (compare_with operator (Exact_integer.compare x y))
+  | Opaque, _ | _, Opaque -> Opaque
 
 (* Integer constants (6.4.4.1) *)
 
@@ -278,13 +274,14 @@ let of_integer_constant target base digits (suffix : Number.integer_suffix) =
         (fun integer -> fits target integer value)
         (candidate_types base suffix)
     with
-    | Some integer -> Ok { integer_type = integer; value = Known value }
+    | Some integer -> Ok (integer, Known value)
     | None -> Error Too_large
 
 (* Character constants (6.4.4.4) *)
 
 (* The type of a constant with [encoding] and the type of its code
-   unit. *)
+   unit. A plain constant has type int, the type of a multicharacter
+   one's value. *)
 let character_types target (encoding : Token.encoding) =
   match encoding with
   | Plain -> (Integer.Int, Integer.Unsigned_char)
@@ -323,11 +320,12 @@ let character_value target encoding units =
   | [ unit ] when encoding = Token.Plain ->
       (* The value of the char, then converted to int. *)
       let char_value = known target Char (Exact_integer.of_int unit) in
-      Ok (convert target constant_type char_value)
+      Ok (constant_type, convert target constant_type char_value)
   | [ unit ] ->
       let unit_value = known target unit_type (Exact_integer.of_int unit) in
-      Ok (convert target constant_type unit_value)
-  | _ :: _ :: _ when encoding = Token.Plain -> Ok (multicharacter target units)
+      Ok (constant_type, convert target constant_type unit_value)
+  | _ :: _ :: _ when encoding = Token.Plain ->
+      Ok (constant_type, multicharacter target units)
   | _ :: _ :: _ -> Error Multiple_characters
 
 let of_character_constant target encoding spelling =

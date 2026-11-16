@@ -47,7 +47,7 @@ let c_constant value =
   else Exact_integer.to_string value ^ "ULL"
 
 let print_value name (constant : Integer_constant.t) =
-  match constant.value with
+  match constant with
   | Known value ->
       Printf.printf "_Static_assert(%s == %s, \"%s\");\n" name
         (c_constant value) name

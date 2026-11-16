@@ -686,7 +686,7 @@ let constant_type context span (number : Number.t) =
       match
         Integer_constant.of_integer_constant context.target base digits suffix
       with
-      | Ok constant -> integer_type context span constant.integer_type
+      | Ok (integer, _) -> integer_type context span integer
       (* GNU [_Complex int], which typec does not model. *)
       | Error Imaginary ->
           unknown context span "an imaginary integer constant" Unknown_object
@@ -709,7 +709,7 @@ let character_type context span encoding =
     Integer_constant.of_character_constant context.target encoding
       (spelling context span)
   with
-  | Ok constant -> integer_type context span constant.integer_type
+  | Ok (integer, _) -> integer_type context span integer
   | Error error ->
       context.fail span
         (Rule.c_text (Integer_constant.error_message error))
@@ -1475,6 +1475,29 @@ let invalid span (failure : Integer_constant.error option) =
 
 let integer value = Integer_expression { value; flaw = None }
 
+(* The integer type that typing gives an integer constant expression,
+   the one source of its type, as C text sees a distinct type (design
+   10.2). No integer constant has an unknown type, as the declarations
+   give an enumerator one only with its value; were one to, the
+   expression would be refused. *)
+let integer_type_of context (typed : typed) =
+  match
+    Ctype.as_arithmetic context.tags
+      (Ctype.representation typed.expression_type)
+  with
+  | Answer (Some (Integer integer)) -> Ok integer
+  | Depends_on unknown ->
+      Error (needing "the type of an integer constant expression" unknown)
+  | Answer (Some (Real _ | Complex _) | None) ->
+      invalid_arg "Expressions: integer constants typed as no integer"
+
+(* Applies [compute] to the integer type that typing gives an integer
+   constant expression; one of unknown type is unevaluable at [span]. *)
+let with_integer_type context span (typed : typed) compute =
+  match integer_type_of context typed with
+  | Ok integer -> compute integer
+  | Error diagnostic -> Unevaluable { span; diagnostic }
+
 (* The size of a type that the target model gives (6.5.3.4p2, p4); the
    front end knows no other (design P16). The size of an unknown object
    type is the backend's too, as a constant: an unknown type is a variable
@@ -1523,14 +1546,14 @@ let rec size_of context (t : Ctype.t) =
             Backend_size)
 
 (* 6.5.3.4p2: an integer constant but for a variable length array. *)
-let size_constant context span t =
-  let size_type = context.target.size_type in
+let size_constant context span typed t =
   match size_of context t with
   | Bytes bytes ->
-      integer
-        (Integer_constant.known context.target size_type
-           (Exact_integer.of_int bytes))
-  | Backend_size -> integer (Integer_constant.opaque size_type)
+      with_integer_type context span typed (fun size_type ->
+          integer
+            (Integer_constant.known context.target size_type
+               (Exact_integer.of_int bytes)))
+  | Backend_size -> integer Opaque
   | Variable_size -> Not_integer { kind = Backend_constant; first = span }
   | No_size ->
       Unevaluable
@@ -1609,23 +1632,10 @@ let address_kind context operand =
       Not_constant
   | Integer_expression _ | Unevaluable _ | Not_integer _ -> Backend_constant
 
-(* Applies [compute] to the integer type that typing gives an operation on
-   integer constant expressions. No integer constant has an unknown type,
-   as the declarations give an enumerator one only with its value; were
-   one to, the value would be unevaluable at [span], a safe refusal. *)
-let with_result_type context span (typed : typed) compute =
-  match Ctype.as_arithmetic context.tags typed.expression_type with
-  | Answer (Some (Integer result)) -> compute result
-  | Depends_on unknown ->
-      let diagnostic = needing "the value of the operation" unknown in
-      Unevaluable { span; diagnostic }
-  | Answer (Some (Real _ | Complex _) | None) ->
-      invalid_arg "Expressions: integer constants typed as no integer"
-
 let unary_constant context span typed op operand =
   match part context Evaluated operand with
   | Part (value, flaw) ->
-      with_result_type context span typed (fun result ->
+      with_integer_type context span typed (fun result ->
           let value, failure =
             Integer_constant.unary context.target ~result op value
           in
@@ -1650,7 +1660,7 @@ let binary_kind context (op : Tree.binary_operator) left right =
 let binary_constant context span typed op left right =
   match (part context Evaluated left, part context Evaluated right) with
   | Part (left_value, left_flaw), Part (right_value, right_flaw) ->
-      with_result_type context span typed (fun result ->
+      with_integer_type context span typed (fun result ->
           let value, failure =
             Integer_constant.binary context.target ~result op left_value
               right_value
@@ -1658,6 +1668,23 @@ let binary_constant context span typed op left right =
           let operand_flaw = first_flaw left_flaw right_flaw in
           let flaw = first_flaw operand_flaw (invalid span failure) in
           Integer_expression { value; flaw })
+  | Breaks broken, _ | Part _, Breaks broken ->
+      broken_by broken (binary_kind context op left right)
+
+(* A comparison takes the types of its operands, not of its result. *)
+let comparison_constant context span op left right =
+  let typed_left = operand_typed context left in
+  let typed_right = operand_typed context right in
+  match (part context Evaluated left, part context Evaluated right) with
+  | Part (left_value, left_flaw), Part (right_value, right_flaw) ->
+      with_integer_type context span typed_left (fun left_type ->
+          with_integer_type context span typed_right (fun right_type ->
+              let value =
+                Integer_constant.comparison context.target ~left_type
+                  ~right_type op left_value right_value
+              in
+              let flaw = first_flaw left_flaw right_flaw in
+              Integer_expression { value; flaw }))
   | Breaks broken, _ | Part _, Breaks broken ->
       broken_by broken (binary_kind context op left right)
 
@@ -1681,7 +1708,7 @@ let logical_constant context span typed ~decisive op left right =
       in
       match part context right_role right with
       | Part (right_value, right_flaw) ->
-          with_result_type context span typed (fun result ->
+          with_integer_type context span typed (fun result ->
               let value, _ =
                 Integer_constant.binary context.target ~result op left_value
                   right_value
@@ -1712,7 +1739,7 @@ let conditional_constant context span typed condition second third =
         (part context second_role second, part context third_role third)
       with
       | Part (if_true, true_flaw), Part (if_false, false_flaw) ->
-          with_result_type context span typed (fun result ->
+          with_integer_type context span typed (fun result ->
               let value =
                 Integer_constant.conditional context.target ~result
                   condition_value if_true if_false
@@ -1760,21 +1787,22 @@ let is_floating_constant context expression =
 (* 6.6p6, p8, p9: a cast to an integer type of an integer constant
    expression, or of a floating constant, whose value the backend
    computes; a cast between arithmetic types; a cast to a pointer type of
-   an integer constant expression or an address constant. *)
-let representation_cast_constant context span (cast_type : Ctype.t) operand
-    =
+   an integer constant expression or an address constant. The value
+   converts to the type that typing gives the cast. *)
+let representation_cast_constant context span typed (cast_type : Ctype.t)
+    operand =
   let itself kind = Not_integer { kind; first = span } in
   let operand_kind = operand_kind context operand in
   match Ctype.as_arithmetic context.tags cast_type with
-  | Answer (Some (Integer integer_type))
-    when is_floating_constant context operand ->
-      integer (Integer_constant.opaque integer_type)
-  | Answer (Some (Integer integer_type)) -> (
+  | Answer (Some (Integer _)) when is_floating_constant context operand ->
+      integer Opaque
+  | Answer (Some (Integer _)) -> (
       match part context Evaluated operand with
       | Part (value, flaw) ->
-          let target = context.target in
-          let value = Integer_constant.convert target integer_type value in
-          Integer_expression { value; flaw }
+          with_integer_type context span typed (fun integer_type ->
+              let target = context.target in
+              let value = Integer_constant.convert target integer_type value in
+              Integer_expression { value; flaw })
       | Breaks broken -> broken_by broken (combined [ operand_kind ]))
   | Answer (Some (Real _ | Complex _)) -> itself (combined [ operand_kind ])
   | Answer None when Ctype.is_pointer cast_type = Answer true ->
@@ -1791,14 +1819,16 @@ let representation_cast_constant context span (cast_type : Ctype.t) operand
    where the cast to its representation is, but no integer constant
    expression, as a distinct type is no integer type. C text casts to the
    representation (design 10.2). *)
-let cast_constant context span (cast_type : Ctype.t) operand =
+let cast_constant context span typed (cast_type : Ctype.t) operand =
+  let of_representation =
+    representation_cast_constant context span typed
+  in
   match Ctype.as_distinct cast_type with
   | Some { representation; _ } when not (is_type_c_text context span) ->
-      representation_cast_constant context span representation operand
-  | None -> representation_cast_constant context span cast_type operand
+      of_representation representation operand
+  | None -> of_representation cast_type operand
   | Some { representation; _ } -> (
-      match representation_cast_constant context span representation operand
-      with
+      match of_representation representation operand with
       | Integer_expression _ ->
           let kind = combined [ operand_kind context operand ] in
           Not_integer { kind; first = span }
@@ -1827,7 +1857,7 @@ let classify_node context (whole : Tree.expression) typed =
       identifier_constant context span name resolution typed
   | Constant (Integer { base; digits; suffix }) -> (
       match Integer_constant.of_integer_constant target base digits suffix with
-      | Ok value -> integer value
+      | Ok (_, value) -> integer value
       | Error error -> unevaluable error)
   | Constant (Floating _) -> itself Arithmetic_constant
   | Constant Not_a_constant ->
@@ -1837,7 +1867,7 @@ let classify_node context (whole : Tree.expression) typed =
         Integer_constant.of_character_constant target encoding
           (spelling context span)
       with
-      | Ok value -> integer value
+      | Ok (_, value) -> integer value
       | Error error -> unevaluable error)
   | String _ -> itself (Designator { static_storage = true; named = false })
   | Parenthesized inner -> operand_constant context inner
@@ -1846,13 +1876,11 @@ let classify_node context (whole : Tree.expression) typed =
   | Generic _ -> selected_constant context span "_Generic"
   | Choose _ -> selected_constant context span "__builtin_choose_expr"
   | Types_compatible _ -> (
-      let int = Integer.Int in
       match Hashtbl.find_opt context.typed.compatibilities span with
+      (* 0 or 1, which every integer type holds. *)
       | Some (Answer compatible) ->
-          integer
-            (Integer_constant.known target int
-               (Exact_integer.of_int (Bool.to_int compatible)))
-      | Some (Depends_on _) -> integer (Integer_constant.opaque int)
+          integer (Known (Exact_integer.of_int (Bool.to_int compatible)))
+      | Some (Depends_on _) -> integer Opaque
       | None -> invalid_arg "Expressions: an untyped builtin")
   (* 6.5.2.5p5: of static storage duration outside the body of a
      function. *)
@@ -1878,20 +1906,25 @@ let classify_node context (whole : Tree.expression) typed =
       itself Not_constant
   | Sizeof_expression operand ->
       let operand_type = (operand_typed context operand).expression_type in
-      size_constant context span operand_type
+      size_constant context span typed operand_type
   | Sizeof_type type_name ->
-      size_constant context span (context.type_name type_name)
+      size_constant context span typed (context.type_name type_name)
   (* [offsetof] expands to [__builtin_offsetof], an integer constant
      (C11 7.19p3). *)
-  | Alignof _ | Alignof_expression _ | Offsetof _ ->
-      integer (Integer_constant.opaque target.size_type)
+  | Alignof _ | Alignof_expression _ | Offsetof _ -> integer Opaque
   | Cast { type_name; operand } ->
-      cast_constant context span (context.type_name type_name) operand
+      cast_constant context span typed (context.type_name type_name) operand
   | Binary (Logical_and, left, right) ->
       logical_constant context span typed ~decisive:false Logical_and left
         right
   | Binary (Logical_or, left, right) ->
       logical_constant context span typed ~decisive:true Logical_or left right
+  | Binary
+      ( (( Less_than | Greater_than | Less_or_equal | Greater_or_equal
+         | Equal_to | Not_equal_to ) as op),
+        left,
+        right ) ->
+      comparison_constant context span op left right
   | Binary (op, left, right) ->
       binary_constant context span typed op left right
   | Conditional { condition; if_true; if_false } ->
@@ -1994,10 +2027,10 @@ let choice context span condition first second =
          Object_or_function)
   in
   match operand_constant context condition with
-  | Integer_expression { value = { value = Known value; _ }; flaw = None } ->
+  | Integer_expression { value = Known value; flaw = None } ->
       if Exact_integer.equal value Exact_integer.zero then Unknown.Answer second
       else Answer first
-  | Integer_expression { value = { value = Opaque; _ }; flaw = None }
+  | Integer_expression { value = Opaque; flaw = None }
   | Integer_expression { flaw = Some (Comma_operator _); _ }
   | Not_integer { kind = Backend_constant; _ } ->
       undecided ()
@@ -2625,11 +2658,10 @@ and zero_constant context candidate =
     (Ctype.is_integer typed.expression_type, operand_constant context candidate)
   with
   | Depends_on _, _ -> Opaque_constant
-  | _, Integer_expression { value = { value = Known value; _ }; flaw = None }
+  | _, Integer_expression { value = Known value; flaw = None }
     when Exact_integer.equal value Exact_integer.zero ->
       Null
-  | _, (Integer_expression { value = { value = Opaque; _ }; _ } | Unevaluable _)
-    ->
+  | _, (Integer_expression { value = Opaque; _ } | Unevaluable _) ->
       Opaque_constant
   | _, (Integer_expression _ | Not_integer _) -> Not_null
 
@@ -2724,10 +2756,13 @@ and integer_constant context candidate =
   ignore (expression context candidate);
   constant_value context candidate
 
-(* The value of an integer constant expression typed before. *)
+(* The type and value of an integer constant expression typed before. *)
 and constant_value context candidate =
   match operand_constant context candidate with
-  | Integer_expression { value; flaw = None } -> Ok value
+  | Integer_expression { value; flaw = None } -> (
+      match integer_type_of context (operand_typed context candidate) with
+      | Ok integer -> Ok (integer, value)
+      | Error diagnostic -> context.fail candidate.span diagnostic)
   | Integer_expression { flaw = Some (Comma_operator span); _ } -> Error span
   | Integer_expression { flaw = Some (Invalid { span; diagnostic }); _ }
   | Unevaluable { span; diagnostic } ->

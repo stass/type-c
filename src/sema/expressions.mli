@@ -109,7 +109,8 @@ type kind =
 
 type constant =
   | Integer_expression of { value : Integer_constant.t; flaw : flaw option }
-      (** An integer constant expression (6.6p6) and its value. *)
+      (** An integer constant expression (6.6p6) and its value, whose type
+          is the one that typing gives the expression. *)
   | Not_integer of { kind : kind; first : Tree.span }
       (** [first] is the first operand or operator that 6.6p6 does not
           allow. *)
@@ -294,12 +295,14 @@ val whole_value : context -> Tree.expression -> typed
     [Invalid_argument]: it is typed once. *)
 
 val integer_constant :
-  context -> Tree.expression -> (Integer_constant.t, Tree.span) result
+  context ->
+  Tree.expression ->
+  (Integer.t * Integer_constant.t, Tree.span) result
 (** Types an expression where an integer constant expression is needed
-    (6.6p6), and gives its value, or the span of the first operand or
-    operator that keeps it from being one. One that typec cannot evaluate
-    or whose evaluation fails is an error. An expression typed before
-    raises [Invalid_argument]. *)
+    (6.6p6), and gives the type that typing gives it and its value, or
+    the span of the first operand or operator that keeps it from being
+    one. One that typec cannot evaluate or whose evaluation fails is an
+    error. An expression typed before raises [Invalid_argument]. *)
 
 val initialiser :
   context -> constant:bool -> Ctype.t -> Tree.initialiser -> Ctype.t

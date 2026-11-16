@@ -864,7 +864,7 @@ let describe_constant (constant : Expressions.constant) =
   match constant with
   | Integer_expression { value; flaw } ->
       let value =
-        match value.value with
+        match value with
         | Known value -> Exact_integer.to_string value
         | Opaque -> "opaque"
       in
