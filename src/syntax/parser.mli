@@ -110,15 +110,24 @@ module View : sig
   (** The tag of the name that is visible. *)
 end
 
-(** The views that the parser takes at the [(] of the arguments of each
-    attribute of a unit. The parser does not read the arguments, so a
-    view says what each identifier among them denotes where they
-    stand. *)
+(** The views that the parser takes where unread text stands in a unit:
+    at the [(] of the arguments of each attribute, and at each pragma
+    token. The parser does not read that text, so a view says what each
+    identifier in it denotes where it stands. *)
 type views
 
 val attribute_view : views -> Tree.attribute -> View.t option
 (** The view at the arguments of an attribute of the unit that [views]
     were taken in, or [None] for an attribute without arguments. *)
+
+val pragma_view : views -> int -> View.t option
+(** [pragma_view views index] is the view at the token at [index] in
+    [Reader.t.tokens] of the unit that [views] were taken in, if it is a
+    pragma token ([Token.Pragma] or [Token.Typec_pragma]), and [None]
+    for any other token. A pragma stands between two grammar tokens, and
+    its view is the one in front of the grammar token after it, or file
+    scope as the unit leaves it after the last grammar token. In a function body that the parser passes
+    through unread, it is the view where the body starts. *)
 
 (** What the parser records of the scopes of a unit beside its tree. *)
 type scopes = {
@@ -126,7 +135,7 @@ type scopes = {
   declarations : (Tree.external_declaration * View.t) list;
       (** the external declarations of the unit in order, each with the
           view in front of it, which is file scope there *)
-  attribute_views : views;
+  views : views;
 }
 
 val parse_with_scopes :

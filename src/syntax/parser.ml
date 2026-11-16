@@ -96,9 +96,10 @@ type scope = (ordinary, tag_entry) Scope.t
 (* Values by the index of a token in [Reader.t.tokens]. *)
 module Places = Map.Make (Int)
 
-(* The scope at the [(] of the arguments of each attribute, by that
-   token (design 13.5). *)
-type views = scope Places.t
+(* The scopes that unread text stands in (design 13.5), by the index of
+   a token: at the [(] of the arguments of each attribute, and at each
+   pragma token. *)
+type views = { attributes : scope Places.t; pragmas : scope Places.t }
 
 (* The innermost statement around the cursor that a break or continue
    may leave. A break leaves a loop, switch or match, and a continue the
@@ -158,7 +159,7 @@ type state = {
   mutable generic : generic_place option;
       (** [None] outside the definition of a generic type *)
   mutable in_type_argument : bool;  (** design 3.5 rule 2 *)
-  mutable attribute_views : views;  (** taken so far *)
+  mutable views : views;  (** taken so far *)
   counter : Spanned.counter;  (** of the nodes made so far *)
 }
 
@@ -648,9 +649,28 @@ let close state closer =
   | Open_conditional :: _ -> fail_expected state "`:` of a conditional"
   | [] -> fail_expected state "a token that opens no bracket"
 
+(* The index in [Reader.t.tokens] after the last grammar token read. *)
+let after_last_read state =
+  if state.position = 0 then 0 else last_read state + 1
+
+(* Keeps the scope at each pragma token after the last grammar token read
+   and before the token at [before], none of which the grammar reads.
+   The parser takes the scope that holds at a place before it moves past
+   the next grammar token, so a pragma token gets the scope in front of
+   the grammar token after it (design 13.5). *)
+let take_pragma_views state ~before =
+  for index = after_last_read state to before - 1 do
+    state.views <-
+      {
+        state.views with
+        pragmas = Places.add index state.scope state.views.pragmas;
+      }
+  done
+
 (* The one way the cursor moves, called only after [peek] has matched a
    token. A [:] closes a [?] and nothing else. *)
 let advance state =
+  take_pragma_views state ~before:(first_token state state.position);
   (match (peek state, state.open_brackets) with
   | Punctuator_token
       ((P.Left_paren | P.Left_bracket | P.Left_brace) as opener), _ ->
@@ -1436,8 +1456,11 @@ let attribute_arguments state =
     let arguments =
       skip_balanced state "`)` to end the arguments of an attribute"
     in
-    state.attribute_views <-
-      Places.add arguments.first scope state.attribute_views;
+    state.views <-
+      {
+        state.views with
+        attributes = Places.add arguments.first scope state.views.attributes;
+      };
     Some arguments
   end
   else None
@@ -3939,11 +3962,15 @@ let external_declaration state =
   else Complete (c_external_declaration state, view)
 
 (* The external declarations, each with the scope in front of it. File
-   scope closes with the text, whose last token may be a pragma token. *)
+   scope closes with the text, whose last tokens may be pragma tokens,
+   which stand in it. *)
 let translation_unit state =
   let rec loop read =
-    if peek state = End_of_input then
-      close_scope ~scope_end:(Array.length state.reader.tokens - 1) read
+    if peek state = End_of_input then begin
+      let tokens = Array.length state.reader.tokens in
+      take_pragma_views state ~before:tokens;
+      close_scope ~scope_end:(tokens - 1) read
+    end
     else loop (external_declaration state :: read)
   in
   loop []
@@ -3977,16 +4004,18 @@ end
 type scopes = {
   file_scope : file_scope;
   declarations : (external_declaration * View.t) list;
-  attribute_views : views;
+  views : views;
 }
 
 (* [attribute_arguments] keeps a view under the first token of each span
    of arguments that it makes, which is the only way a parsed attribute
    gets one, so [Places.find] finds it. *)
-let attribute_view attribute_views (attribute : attribute) =
+let attribute_view (views : views) (attribute : attribute) =
   Option.map
-    (fun (arguments : span) -> Places.find arguments.first attribute_views)
+    (fun (arguments : span) -> Places.find arguments.first views.attributes)
     attribute.node.arguments
+
+let pragma_view (views : views) token = Places.find_opt token views.pragmas
 
 let parse_with_scopes ~keywords reader =
   let state =
@@ -4001,7 +4030,7 @@ let parse_with_scopes ~keywords reader =
       labels = None;
       generic = None;
       in_type_argument = false;
-      attribute_views = Places.empty;
+      views = { attributes = Places.empty; pragmas = Places.empty };
       counter = Spanned.counter ~max_depth;
     }
   in
@@ -4014,9 +4043,7 @@ let parse_with_scopes ~keywords reader =
       (* Every scope the unit opens is closed, so [state.scope] is file
          scope as the unit leaves it. *)
       let file_scope = file_scope_declarations state.scope in
-      let scopes =
-        { file_scope; declarations; attribute_views = state.attribute_views }
-      in
+      let scopes = { file_scope; declarations; views = state.views } in
       Ok (List.map fst declarations, scopes)
   | exception Failed error -> Error error
 

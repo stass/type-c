@@ -138,11 +138,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Parser
 
-- [Medium] The parser takes no view of the scopes at a `#pragma` line
-  inside the definition of a generic, so the resolution check of
-  design 13.5 cannot yet say what a pragma's identifiers denote there,
-  as it can for an attribute's arguments (`Parser.attribute_view`).
-  Take one where the parser passes over a pragma token in moved text.
 - [Low] Design 2.3 refuses an identifier that begins with `__tc_`
   anywhere in the text, C text included; the parser checks the grammar
   tokens only, not the identifiers of a `#pragma` line
