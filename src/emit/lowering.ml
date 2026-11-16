@@ -317,17 +317,27 @@ let case_label ~variant constructor =
 (* The [default] that only a tag that is no constructor's reaches. *)
 let invalid_tag = Printf.sprintf "default: %s" trap
 
+(* The text that opens the block of an arm and the text that closes it
+   after the last item. An arm that binds holds its items in a block of
+   their own after the bindings, so that they begin a block as written,
+   where a pragma such as STDC FENV_ACCESS must stand; one that binds
+   nothing begins its block with them already. A declaration in that
+   inner block could hide a binding in C, but none redeclares one,
+   since typec refuses it in the one scope of an arm (4.1 rule 5). *)
+let arm_block (bindings : Typec_sema.Expressions.binding list) =
+  match bindings with
+  | [] -> ("{", " " ^ trap ^ " }")
+  | _ -> ("{" ^ binding_declarations bindings ^ " {", " } " ^ trap ^ " }")
+
 (* The labels of an arm become the [case] of each constructor it takes
    and open its block; a trap closes the block after its last item. *)
 let matched_arm tokens ~variant (arm : Typec_sema.Expressions.matched_arm) =
-  let opening =
-    String.concat " " (List.map (case_label ~variant) arm.cases)
-    ^ " {"
-    ^ binding_declarations arm.bindings
-  in
-  replace tokens ~location:tokens.(arm.labels.first).location opening
+  let opening, closing = arm_block arm.bindings in
+  let cases = String.concat " " (List.map (case_label ~variant) arm.cases) in
+  replace tokens ~location:tokens.(arm.labels.first).location
+    (cases ^ " " ^ opening)
     (grammar_tokens tokens arm.labels.first arm.labels.last)
-  @ [ insert tokens ~before:(arm.arm.last + 1) (" " ^ trap ^ " }") ]
+  @ [ insert tokens ~before:(arm.arm.last + 1) closing ]
 
 let match_statement (tokens : Token.t array) matching arms =
   let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
@@ -353,9 +363,16 @@ let match_statement (tokens : Token.t array) matching arms =
 
 (* Design 13.5: a single-pattern test becomes the block of a match that
    reads the tag once into [__tc_tag] and has an [if] on it. Its true
-   branch is the statement in a block that declares the bindings first;
-   its false branch traps on a tag that is no constructor's (4.5), with
-   a [switch] whose cases are those of a match, and then runs the [else]
+   branch is a block that the [)] of the test opens, which declares the
+   bindings and then holds the statement as written: a compound
+   statement still begins a block, where a pragma such as STDC
+   FENV_ACCESS must stand, a pragma before the statement still precedes
+   it, and an [if] in the statement cannot take the [else] of the false
+   branch. A declaration in a compound statement could hide a binding
+   in C, but none redeclares one, since typec refuses it in the one
+   scope of the bindings and the statement (4.6 rule 4). The false
+   branch traps on a tag that is no constructor's (4.5), with a
+   [switch] whose cases are those of a match, and then runs the [else]
    statement of an [if]. A [while] test is the body of an endless loop
    whose false branch ends in [break], so that the operand is evaluated
    in that loop (4.4). *)
@@ -371,38 +388,21 @@ let tag_check ~variant constructors =
     (String.concat " " (List.map (case_label ~variant) constructors))
     invalid_tag
 
-(* The span of the statement [controlled], the edits that declare the
-   bindings in its block, and the text that closes a block made around
-   it, if one is. *)
-let controlled_block tokens (test : Typec_sema.Expressions.test) =
-  let declarations = binding_declarations test.bindings in
-  match test.controlled with
-  | Compound_controlled { span; bindings_before = _ } when test.bindings = []
-    ->
-      (span, [], None)
-  | Compound_controlled { span; bindings_before } ->
-      (span, [ insert tokens ~before:bindings_before declarations ], None)
-  | Wrapped_controlled span ->
-      ( span,
-        [ insert tokens ~before:span.first ("{" ^ declarations ^ " ") ],
-        Some " }" )
-
 (* The false branch of a test of [form] after the statement that ends at
-   [controlled_last], whose block [unwrap] closes if lowering made it:
-   the [check] of the tag, then the [else] statement of an [if], or the
-   end of the loop of a [while]. *)
-let false_branch tokens form ~controlled_last ~unwrap ~check =
-  let close = Option.value unwrap ~default:"" in
+   [controlled_last]: the end of the block around that statement, the
+   [check] of the tag, then the [else] statement of an [if], or the end
+   of the loop of a [while]. *)
+let false_branch tokens form ~controlled_last ~check =
   let after_controlled text =
-    insert tokens ~before:(controlled_last + 1) (close ^ text)
+    insert tokens ~before:(controlled_last + 1) (" }" ^ text)
   in
   match (form : Typec_sema.Expressions.test_form) with
   | If_test { otherwise = None } ->
       [ after_controlled (" else { " ^ check ^ "} }") ]
   | If_test { otherwise = Some otherwise } ->
       let else_token = grammar_token_before tokens otherwise.first in
-      Option.to_list (Option.map (fun _ -> after_controlled "") unwrap)
-      @ replace tokens ~location:tokens.(else_token).location
+      after_controlled ""
+      :: replace tokens ~location:tokens.(else_token).location
           ("else { " ^ check)
           [ else_token ]
       @ [ insert tokens ~before:(otherwise.last + 1) " } }" ]
@@ -421,16 +421,15 @@ let single_pattern_test (tokens : Token.t array) matching
     Printf.sprintf "if (%s == %s) " tag_local
       (Tree.enumerator_name ~variant test.constructor)
   in
-  let controlled, declarations, unwrap = controlled_block tokens test in
   let check = tag_check ~variant test.constructors in
   replace tokens ~location:tokens.(statement.first).location
     (loop ^ opening)
     (grammar_tokens tokens statement.first equals)
   @ replace tokens ~location:tokens.(close_paren).location
-      (held ^ tag_declaration ^ selected)
+      (held ^ tag_declaration ^ selected ^ "{"
+      ^ binding_declarations test.bindings)
       [ close_paren ]
-  @ declarations
-  @ false_branch tokens test.form ~controlled_last:controlled.last ~unwrap
+  @ false_branch tokens test.form ~controlled_last:test.controlled.last
       ~check
 
 let matching (tokens : Token.t array)
@@ -532,9 +531,7 @@ let dropped_edits tokens { span; text } =
    an edit that replaces it. Two insertions before one token keep their
    order in [lowered]. Two statements that end at one token nest, and
    the inner one, which begins later, closes first, so the matchings go
-   in reverse source order. That holds for the insertions that open
-   blocks too only because a matching inserts nothing before its own
-   first token, which it replaces. The steering of a generic selection
+   in reverse source order. The steering of a generic selection
    nests only because no other lowering inserts before the first token
    of its controlling expression or the comma after it. The edits inside a
    dropped range go, and the range's own edits replace them. *)

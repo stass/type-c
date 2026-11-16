@@ -7,7 +7,9 @@ or else to a copy, and a switch on its tag with a case for every
 constructor, the arm of a default taking those no label names. Each arm
 is a block that declares its bindings and ends in a trap, and the
 switch's default, which only an invalid tag reaches, traps (design 13.5,
-10.5). The scrutinee and the block items keep their tokens and lines.
+10.5). An arm that binds holds its items in a block of their own after
+the bindings, so that they begin a block as written. The scrutinee and
+the block items keep their tokens and lines.
 
   $ cat > lower.tc <<'EOF'
   > type e = | A | B(int i, e *next) | C(long l);
@@ -32,9 +34,9 @@ switch's default, which only an invalid tag reaches, traps (design 13.5,
   { const struct e *const __tc_match = &(
   *p
   ); switch (__tc_match->tag) {
-  case e_B: { const __typeof__(__tc_match->u.B.i) i = __tc_match->u.B.i;
+  case e_B: { const __typeof__(__tc_match->u.B.i) i = __tc_match->u.B.i; {
       return i;
-   __builtin_trap(); }
+   } __builtin_trap(); }
   case e_A: case e_C: {
       break;
    __builtin_trap(); }
@@ -42,7 +44,7 @@ switch's default, which only an invalid tag reaches, traps (design 13.5,
   { const struct e *const __tc_match = &(
   v
   ); switch (__tc_match->tag) {
-  case e_C: { const __typeof__(__tc_match->u.C.l) l = __tc_match->u.C.l;
+  case e_C: { const __typeof__(__tc_match->u.C.l) l = __tc_match->u.C.l; {
   { const struct e *const __tc_match = &(
   *p
   ); switch (__tc_match->tag) {
@@ -50,7 +52,7 @@ switch's default, which only an invalid tag reaches, traps (design 13.5,
    return l;
    __builtin_trap(); }
   default: __builtin_trap(); } }
-   __builtin_trap(); }
+   } __builtin_trap(); }
   case e_A: case e_B: {
       break;
    __builtin_trap(); }
@@ -87,12 +89,12 @@ another array is reached through a pointer.
   { const struct e __tc_copy = (
   r
   ), *const __tc_match = &__tc_copy; switch (__tc_match->tag) {
-  case e_B: { const __typeof__(__tc_match->u.B.i) i = __tc_match->u.B.i;
+  case e_B: { const __typeof__(__tc_match->u.B.i) i = __tc_match->u.B.i; {
    {
       int i = 2;
       return i;
     }
-   __builtin_trap(); }
+   } __builtin_trap(); }
   case e_A: {
       return 0;
    __builtin_trap(); }
@@ -178,6 +180,26 @@ Each refusal is located at the construct it concerns.
   > EOF
   $ ./golden.exe scrutinee.tc
   scrutinee.tc:3: the scrutinee of a match is not of a variant type; a pointer is not dereferenced implicitly (design 4.1 rule 1) [TC0014]
+  [1]
+
+The bindings and the items of an arm are one scope (design 4.1 rules 4
+and 5): an item that redeclares a binding is refused, although the
+block that lowering makes around the items would hide the binding.
+
+  $ cat > redeclared.tc <<'EOF'
+  > type e = | A | B(int i);
+  > int f(e v) {
+  >   match (v) {
+  >   case B(i):
+  >     int i = 1;
+  >     return i;
+  >   case A:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe redeclared.tc
+  redeclared.tc:5: 'i' is declared twice in one scope without linkage (C11 6.7p3)
   [1]
 
 A match body is a sequence of arms, each of labels and at least one

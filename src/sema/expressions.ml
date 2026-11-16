@@ -69,10 +69,6 @@ type matched_arm = {
   bindings : binding list;
 }
 
-type controlled =
-  | Compound_controlled of { span : Tree.span; bindings_before : int }
-  | Wrapped_controlled of Tree.span
-
 type test_form = If_test of { otherwise : Tree.span option } | While_test
 
 type test = {
@@ -80,7 +76,7 @@ type test = {
   constructor : Spelling.constructor;
   constructors : Spelling.constructor list;
   bindings : binding list;
-  controlled : controlled;
+  controlled : Tree.span;
 }
 
 type selection = Arms of matched_arm list | Test of test
@@ -3016,21 +3012,7 @@ and tested context variant constructors ~pattern_span
   within context enclosing (fun () -> typed_statement context controlled);
   { form; constructor = checked.constructor.constructor_name;
     constructors = List.map constructor_name constructors; bindings;
-    controlled = controlled_of controlled }
-
-(* Where lowering declares the bindings of a test (13.5): after the brace
-   of a compound statement and its GNU local labels, which come first in
-   a block. *)
-and controlled_of (controlled : Tree.statement) =
-  match controlled.node with
-  | Compound block ->
-      let bindings_before =
-        match List.rev block.node.local_labels with
-        | last :: _ -> last.span.last + 1
-        | [] -> block.span.first + 1
-      in
-      Compound_controlled { span = controlled.span; bindings_before }
-  | _ -> Wrapped_controlled controlled.span
+    controlled = controlled.span }
 
 (* The arms of a match of [variant]: their labels, the coverage of the
    constructors and the items of each arm. *)

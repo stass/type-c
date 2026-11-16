@@ -690,6 +690,11 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] Where `match` is a typedef name, `match (f(void)) { ... }` in a
   block, a GNU nested function, now reports an expression error rather
   than the GNU profile's refusal of nested functions.
+- [Low] An arm is a block (design 4.1 rule 5), but the parser refuses
+  GNU `__label__` at the start of its items ("expected an expression,
+  found `__label__`"), which a compound statement accepts. Either read
+  local labels at the start of an arm, which lowering already places at
+  the start of a block, or say in 4.1 that an arm declares none.
 
 ## Fuzzing
 

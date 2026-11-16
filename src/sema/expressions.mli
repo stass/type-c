@@ -171,28 +171,20 @@ type matched_arm = {
   bindings : binding list;
 }
 
-(** The statement that a single-pattern test controls, which lowering
-    makes a block that declares the bindings first (design 13.5): a
-    compound statement, whose bindings go before the token
-    [bindings_before], after its brace and its GNU local labels; or
-    another statement, which lowering puts in a block of its own. *)
-type controlled =
-  | Compound_controlled of { span : Tree.span; bindings_before : int }
-  | Wrapped_controlled of Tree.span
-
 (** Whether a test is the condition of an [if], with the span of its
     [else] statement if it has one, or of a [while]. *)
 type test_form = If_test of { otherwise : Tree.span option } | While_test
 
 (** A single-pattern test (design 4.6): its form, the constructor that it
     asks for, every constructor of its variant in order, whose tags are
-    the valid ones (4.5), its bindings in order, and its statement. *)
+    the valid ones (4.5), its bindings in order, and the span of its
+    statement. *)
 type test = {
   form : test_form;
   constructor : Spelling.constructor;
   constructors : Spelling.constructor list;
   bindings : binding list;
-  controlled : controlled;
+  controlled : Tree.span;
 }
 
 (** What a matching selects with the tag of its scrutinee: the arms of a

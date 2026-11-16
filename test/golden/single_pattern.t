@@ -3,10 +3,10 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 A single-pattern test (design 4.6) becomes a block that holds its
 operand as a match holds its scrutinee, reads the tag once into a
-local, and tests it with an if. The true branch is the controlled
-statement with the bindings declared first in its block, after its GNU
-local labels, or in a block made around a statement that is not a
-compound statement. The false branch traps on a tag that is no
+local, and tests it with an if. The true branch is a block that
+declares the bindings and then holds the controlled statement as
+written, so that a compound statement begins its block with its GNU
+local labels. The false branch traps on a tag that is no
 constructor's, with the cases of a match, and then holds the else
 statement. A while test is the same block as the body of an endless
 loop, whose false branch ends in break (design 13.5, 4.5, 10.5).
@@ -36,39 +36,36 @@ loop, whose false branch ends in break (design 13.5, 4.5, 10.5).
     long total = 0;
   { const struct list *const __tc_match = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
-  { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
-  total = head;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
+      total = head;
    } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
   { const struct list *const __tc_match = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil)
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
    {
       __label__ again;
     again:
       total++;
     }
+   }
   else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
       total--;
    } }
   for (;;) { const struct list *const __tc_match = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
    {
-   const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
-  total += head;
+      total += head;
       l = tail;
     }
-   else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
   { const struct list *const __tc_match = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
-  { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
   { const struct list *const __tc_match = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil)
-  {
-  return head;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+   return head;
    } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
    } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
   return total;
@@ -102,21 +99,19 @@ before the if, or in the body of that loop (design 4.4).
     for (; n; n--)
   { const struct list __tc_copy = (
    ({ if (n == 2) continue; *l; })
-  ), *const __tc_match = &__tc_copy; const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
-  { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
-  total += head;
+  ), *const __tc_match = &__tc_copy; const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
+        total += head;
    } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
   for (;;) { const struct list __tc_copy = (
    ({ if (total > 9) break; *l; })
-  ), *const __tc_match = &__tc_copy; const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
+  ), *const __tc_match = &__tc_copy; const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
    {
-   const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
-  l = tail;
+      l = tail;
       if (head < 0)
         break;
       total += head;
     }
-   else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
   return total;
   }
 
@@ -154,9 +149,8 @@ test whose body is an if test with an else.
   case list_Cons: {
   { const struct list *const __tc_match = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil)
-  {
-  return 1;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+   return 1;
    }
   else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
    return 2;
@@ -167,16 +161,14 @@ test whose body is an if test with an else.
   long g(const list *l, list v) {
   { const struct list *const __tc_match = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil)
-  {
-  return 0;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+   return 0;
    }
   else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
   { const struct list *const __tc_match = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil)
-  {
-  return 1;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+   return 1;
    }
   else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
    return 2;
@@ -187,13 +179,11 @@ test whose body is an if test with an else.
     long n = 0;
   for (;;) { const struct list *const __tc_match = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
-  { const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
   { const struct list *const __tc_match = &(
    *tail
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil)
-  {
-  break;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+   break;
    }
   else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
    l = tail, n++;
@@ -274,16 +264,17 @@ and lowers as a test of a constructor without fields does.
   long f(list v) {
   { const struct list *const __tc_match = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons)
-  {
-  return 1;
+  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) {
+      return 1;
    } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
   return 0;
   }
 
 The bindings and the controlled statement are one scope: a declaration
-in its block that redeclares a binding is refused, and a binding is not
-visible in the else statement (4.6 rule 4).
+in its block that redeclares a binding is refused, although lowering
+declares the bindings in a block around the statement, which C would
+let the declaration hide, and a binding is not visible in the else
+statement (4.6 rule 4).
 
   $ cat > redeclared.tc <<'EOF'
   > type list = | Nil | Cons(long head, list *tail);
