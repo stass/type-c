@@ -280,6 +280,15 @@ end
    type that typec does not know needs to tell (design 5.2). *)
 type position = Untargeted | Targeted of Ctype.t | Discarded
 
+(* The position of an operand whose value is that of the expression
+   around it, which stands in [position]: the association that a
+   selection selects and the last item of a statement expression. It is
+   discarded where that expression is (design 5.2), but has no target
+   type, as design 3.3 gives neither one. *)
+let value_position = function
+  | Discarded -> Discarded
+  | Untargeted | Targeted _ -> Untargeted
+
 (* Where a pattern stands, which decides whether it may omit the field
    list of a constructor with fields: only a test may (design 4.1 rule 3,
    4.6 rule 2). *)
@@ -1943,6 +1952,11 @@ let comma_constant context span left right =
       let kinds = [ operand_kind context left; operand_kind context right ] in
       Not_integer { kind = refused_or_backend kinds; first = span }
 
+(* The expression that a _Generic is if it selects [association]. *)
+let association_result (association : Tree.generic_association) =
+  match association.node with
+  | Association (_, result) | Default_association result -> result
+
 (* The expression whose value [expression] is, through parentheses and
    the selections of _Generic and __builtin_choose_expr (6.5.1p5,
    6.5.1.1p4) that [select] gives. *)
@@ -2635,7 +2649,9 @@ and expression_node context position (whole : Tree.expression) =
   | Character encoding -> value (character_type context span encoding)
   | String literal -> lvalue (string_type context literal)
   | Parenthesized inner -> as_enclosing inner
-  | Generic _ -> selected context whole
+  | Generic { associations; _ } ->
+      selected context position whole
+        (List.map association_result associations)
   | Compound_literal { type_name; values } ->
       compound_literal context type_name values
   | Subscript { operand; index } ->
@@ -2701,7 +2717,8 @@ and expression_node context position (whole : Tree.expression) =
       let right = as_enclosing right in
       context.needs_complete right.expression_type;
       { (value (value_type right)) with bit_field = value_of right.bit_field }
-  | Statement_expression block -> value (statement_expression context block)
+  | Statement_expression block ->
+      value (statement_expression context position block)
   | Label_address _ -> value (void_pointer context span)
   | Va_arg { list; type_name } ->
       ignore (typed list);
@@ -2716,7 +2733,8 @@ and expression_node context position (whole : Tree.expression) =
       in
       offsetof_path context span (context.type_name type_name) path;
       value (size_type context span)
-  | Choose _ -> selected context whole
+  | Choose { first; second; _ } ->
+      selected context position whole [ first; second ]
   | Types_compatible (first, second) ->
       let first = type_as_seen context span (context.type_name first) in
       let second = type_as_seen context span (context.type_name second) in
@@ -2941,17 +2959,35 @@ and unary context span (op : Tree.unary_operator) typed =
   | Imaginary_part -> complex_part context span ~imaginary:true typed
 
 (* A selection gives the chosen operand as it is, an lvalue or a
-   bit-field where it is one, as GCC and Clang do. *)
-and selected context (selecting : Tree.expression) =
-  match selection_of context selecting with
-  | Unknown.Answer chosen -> operand_typed context chosen
+   bit-field where it is one, as GCC and Clang do. Every one of the
+   [operands] that it may select is typed, as GCC and Clang check the
+   ones they do not select: the chosen one, whose value it gives,
+   discarded where the selection is, and the others, or all where the
+   selection is unknown, in no position. *)
+and selected context position (selecting : Tree.expression) operands =
+  let selection = selection_of context selecting in
+  let chosen_span =
+    match selection with
+    | Unknown.Answer (chosen : Tree.expression) -> Some chosen.span
+    | Depends_on _ -> None
+  in
+  let type_operand (operand : Tree.expression) =
+    let operand_position =
+      if chosen_span = Some operand.span then value_position position
+      else Untargeted
+    in
+    ignore (positioned context operand_position operand)
+  in
+  List.iter type_operand operands;
+  match selection with
+  | Answer chosen -> operand_typed context chosen
   | Depends_on unknown ->
       value (Ctype.unknown { unknown with kind = Object_or_function })
 
 (* The operand that a _Generic or __builtin_choose_expr selects, made
-   once. Making it types the operands, in their own positions, but not
-   the selection, so an initialiser can find a string literal that a
-   selection gives before it types the selection in its position. *)
+   once. Making it types none of the operands that it may select, so an
+   initialiser can find a string literal that a selection gives before
+   it types the selection in its position. *)
 and selection_of context (selecting : Tree.expression) =
   let span = selecting.span in
   match Hashtbl.find_opt context.typed.selections span with
@@ -2969,10 +3005,9 @@ and selection_of context (selecting : Tree.expression) =
       selection
 
 (* 6.5.1.1p4: the selection is its result expression, an lvalue or a
-   function designator if that is one. Every association is typed, as
-   GCC and Clang check the ones they do not select. The type that
-   selects is that of the controlling expression after lvalue conversion,
-   as C17 says and GCC and Clang do in every mode. *)
+   function designator if that is one. The type that selects is that of
+   the controlling expression after lvalue conversion, as C17 says and
+   GCC and Clang do in every mode. *)
 and generic context span controlling associations =
   let controlling_typed = whole_value context controlling in
   let associations_typed =
@@ -2995,11 +3030,8 @@ and generic context span controlling associations =
     selection;
   selection
 
-(* Both operands are typed. *)
 and choose context span condition first second =
   ignore (expression context condition);
-  ignore (whole_value context first);
-  ignore (whole_value context second);
   choice context span condition first second
 
 (* The association of the selection at [span], with its type as the text
@@ -3014,7 +3046,6 @@ and generic_association context span
         (Some (type_as_seen context span t), result)
     | Default_association result -> (None, result)
   in
-  ignore (whole_value context result);
   { association_span = association.span; association_type; result }
 
 (* 6.5.2.5p4: an lvalue of the type name's type, which the initialiser
@@ -3139,20 +3170,22 @@ and assignment context span (op : Tree.assignment_operator) left right =
   { (value (value_type left)) with bit_field = value_of left.bit_field }
 
 (* GNU: the value of the last block item, or void. That item gives its
-   value rather than discarding it (design 5.2). *)
-and statement_expression context (block : Tree.block) =
+   value rather than discarding it (design 5.2), so it is discarded
+   where the statement expression is. *)
+and statement_expression context position (block : Tree.block) =
   let enclosing =
     { context.typed.enclosing with try_positions = No_positions }
   in
-  within context enclosing (fun () -> statement_expression_items context block)
+  within context enclosing (fun () ->
+      statement_expression_items context position block)
 
 (* No try stands in a statement expression (design 5.1 rule 3), whose
    statements [statement_expression] gives no positions. *)
-and statement_expression_items context (block : Tree.block) =
+and statement_expression_items context position (block : Tree.block) =
   match List.rev block.node.items with
   | Block_statement last :: before ->
       items context (List.rev before);
-      statement_value context last
+      statement_value context position last
   | (Block_declaration _ | Block_type_declaration _ | Block_defer _) :: _
   | [] ->
       block_items context block;
@@ -3163,15 +3196,15 @@ and statement_expression_items context (block : Tree.block) =
    expression statement past the named labels before it, as Clang reads
    it; void for any other statement. The value is no bit-field in Clang,
    and has no _Atomic type, as Clang refuses an [Atomic_value] there. *)
-and statement_value context (statement : Tree.statement) =
+and statement_value context position (statement : Tree.statement) =
   match statement.node with
   | Expression_statement value ->
-      Ctype.unqualified
-        (value_type (statement_operand context Untargeted value))
+      let typed = statement_operand context (value_position position) value in
+      Ctype.unqualified (value_type typed)
   | Labeled
       { label = { node = Named_label _; _ } as label; statement = labeled } ->
       label_of context label;
-      statement_value context labeled
+      statement_value context position labeled
   | Labeled
       { label = { node = Case_label _ | Case_range _ | Default_label; _ }; _ }
   | Compound _ | Null_statement | Attribute_statement _ | If _ | Switch _

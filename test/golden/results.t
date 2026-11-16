@@ -73,6 +73,66 @@ conditional is void or not, and typec refuses it (design 13.3).
   unknown_branch.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'vector_size' at unknown_branch.tc:2, which typec does not type yet (design 13.3) [TC0031]
   [1]
 
+The association that a selection selects and the last expression
+statement of a statement expression give their value to the expression
+around them, so theirs is discarded where that one's is.
+
+  $ cat > unknown_selected.tc <<'EOF'
+  > result(int, int) g(void);
+  > void v(void) __attribute__((ms_abi));
+  > void f(int c) {
+  >   _Generic(0, int: c ? g() : v());
+  > }
+  > EOF
+  $ ./golden.exe unknown_selected.tc
+  unknown_selected.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'ms_abi' at unknown_selected.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  [1]
+
+  $ cat > unknown_last.tc <<'EOF'
+  > result(int, int) g(void);
+  > void v(void) __attribute__((ms_abi));
+  > void f(int c) {
+  >   ({ c ? g() : v(); });
+  > }
+  > EOF
+  $ ./golden.exe unknown_last.tc
+  unknown_last.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'ms_abi' at unknown_last.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  [1]
+
+  $ cat > selected.tc <<'EOF'
+  > result(int, int) g(void);
+  > void f(void) {
+  >   _Generic(0, int: g());
+  > }
+  > EOF
+  $ ./golden.exe selected.tc
+  selected.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  [1]
+
+  $ cat > last.tc <<'EOF'
+  > result(int, int) g(void);
+  > void f(void) {
+  >   ({ g(); });
+  > }
+  > EOF
+  $ ./golden.exe last.tc
+  last.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  [1]
+
+  $ cat > selected_used.tc <<'EOF'
+  > result(int, int) g(void);
+  > void v(void) __attribute__((ms_abi));
+  > void f(int c) {
+  >   result(int, int) r;
+  >   (void)_Generic(0, int: g());
+  >   (void)_Generic(0, int: c ? g() : v());
+  >   r = ({ g(); });
+  >   (void)r;
+  > }
+  > EOF
+  $ ./golden.exe selected_used.tc > /dev/null && echo accepted
+  accepted
+
 A function that returns void discards the value of a return statement,
 as GNU C returns a void expression and GCC and Clang accept any other
 under -Wno-return-mismatch.

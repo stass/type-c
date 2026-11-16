@@ -1386,6 +1386,13 @@ know (13.3), the result is dropped whether the conditional is `void` or
 not, and the conditional is an error (P21). Where its value is used, a
 `void` conditional is an error of C.
 
+An expression whose value is the value of the expression around it is
+discarded where that one is: in parentheses, as the right operand of
+`,`, as the association that a `_Generic` or `__builtin_choose_expr`
+selects, and as the last block item of a statement expression (below).
+So `_Generic(0, int: c ? f() : u);` is the error that `c ? f() : u;`
+is, where `typec` does not know the type of `u`.
+
 A `result` type is what rule 1 of 5.1 asks of an operand: an instance
 of the `result` of the universe scope, under a typedef name or an alias
 as well, with top-level qualifiers or without.

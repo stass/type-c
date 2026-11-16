@@ -553,10 +553,26 @@ is [type-c-language-design.md](type-c-language-design.md).
   `return` in a function whose return type typec does not know, which
   may be void. Refusing them through `needing` would refuse every
   discarded call of a function of unknown type; decide by what P21
-  measures. A conditional of a result and such a value is refused where
-  it is discarded, but not as the last item of a statement expression or
-  as the association that a selection selects, which do not pass on
-  that their value is discarded.
+  measures.
+- [Medium] A discarded selection that depends on what typec does not
+  know drops an operand of a result type without a word, as in
+  `__builtin_choose_expr(__builtin_constant_p(c), g(), 0);` or
+  `_Generic(v(), int: g(), default: 0);` where `v` has a type typec does
+  not know: every operand is typed in no position and the selection's
+  type is unknown. It is the conditional's case of design 5.2, the
+  backend picking the operand: refuse it as `discard_branches` does,
+  through one funnel for every construct whose value is one of
+  operands typec cannot pick.
+- [Medium] Which operand gives the value of the expression around it
+  is decided in several places that must agree: `as_enclosing` and
+  `value_position` (positions), `is_assignment` (parentheses only, so
+  an assignment in a selection is refused, as noted above) and
+  `source_through` (parentheses and selections) in
+  `src/sema/expressions.ml`, and design 3.3 and 5.2. Give one function
+  that names that operand and derive the rest from it; whether design
+  3.3 then gives a selected association and the value of a statement
+  expression a target type (so `x = _Generic(0, int: None)` names a
+  constructor) is a language decision.
 - [Low] Type-C text accepts a string literal longer than the character
   array it initialises, `char s[2] = "abcd";`, which C11 6.7.9p2 makes
   a constraint violation and GCC and Clang only warn about. It drops no
