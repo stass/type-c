@@ -287,10 +287,6 @@ type context = {
       (** declares a binding of a match as an object of the type *)
 }
 
-val max_depth : int
-(** The deepest nesting of expressions and statements that is typed; a
-    deeper one is an error. *)
-
 val whole_value : context -> Tree.expression -> typed
 (** Types an expression and every expression in it, for a use that
     takes its value whole, as GNU [typeof] does: a value of a distinct

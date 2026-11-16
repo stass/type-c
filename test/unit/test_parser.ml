@@ -1659,17 +1659,20 @@ let nesting_texts levels =
       ^ ";" );
   ]
 
+(* What the parser gives for [text] read from [file]: None if it parses,
+   or else its error. *)
+let parse_failure file text =
+  match Reader.read ~name:file text with
+  | Error _ -> Some "read error"
+  | Ok reader -> (
+      match Parser.parse ~keywords:gnu_keywords reader with
+      | Ok _ -> None
+      | Error error -> Some error.message)
+
 (* Each construct parses just within the bound and fails just beyond it,
    at the token where it went too deep. *)
 let failed_nesting_cases () =
-  let parses text =
-    match Reader.read ~name:"in.i" text with
-    | Error _ -> Some "read error"
-    | Ok reader -> (
-        match Parser.parse ~keywords:gnu_keywords reader with
-        | Ok _ -> None
-        | Error error -> Some error.message)
-  in
+  let parses = parse_failure "in.i" in
   let too_deep =
     Printf.sprintf "more than %d nested brackets or conditionals"
       Parser.max_nesting
@@ -1692,78 +1695,49 @@ let failed_nesting_cases () =
         beyond;
     ]
 
-(* Chains that the parser reads in loops, so their length is not bounded
-   by the nesting bound. *)
-let failed_chain_cases () =
-  let length = 100_000 in
+let in_body statements = "void f(void) { " ^ statements ^ " }"
+
+(* Chains that the parser reads in loops and that nest, [links] levels
+   deep, each with the file it is read from. *)
+let nesting_chain_texts links =
   let chain separator last =
-    String.concat separator (List.init length (fun _ -> "a")) ^ last
+    String.concat separator (List.init links (fun _ -> "a")) ^ last
   in
-  let in_body statements = "void f(void) { " ^ statements ^ " }" in
-  let texts =
+  let c_texts =
     [
       ("binary operators", "int x = " ^ chain " + " ";");
       ("assignments", "int x = " ^ chain " = " ";");
       ("conditionals", "int x = " ^ chain " ? a : " ";");
       ("omitted middle operands", "int x = " ^ chain " ?: " ";");
       ("comma operators", "int x = (" ^ chain ", " ");");
-      ("sizeof", "int x = " ^ repeat length "sizeof " ^ "a;");
-      ("unary operators", "int x = " ^ repeat length "- " ^ "a;");
+      ("sizeof", "int x = " ^ repeat links "sizeof " ^ "a;");
+      ("unary operators", "int x = " ^ repeat links "- " ^ "a;");
       ( "real and imaginary parts",
-        "int x = " ^ repeat length "__real__ __imag__ " ^ "a;" );
-      ("alignof", "int x = " ^ repeat length "__alignof__ " ^ "a;");
-      ("increments", "int x = " ^ repeat length "++" ^ "a;");
-      ("casts", "int x = " ^ repeat length "(int)" ^ "a;");
-      ("postfix operators", "int x = a" ^ repeat length "[0]" ^ ";");
-      ("pointers", "int " ^ String.make length '*' ^ "p;");
-      ("arrays", "int a" ^ repeat length "[1]" ^ ";");
-      ("a body", "int f(void) {" ^ repeat length "{}" ^ "}");
-      ("statements in a block", in_body (repeat length "a; "));
-      ("ifs", in_body (repeat length "if (a) " ^ ";"));
-      ("else-if chains", in_body (repeat length "if (a) ; else " ^ ";"));
+        "int x = " ^ repeat (links / 2) "__real__ __imag__ " ^ "a;" );
+      ("alignof", "int x = " ^ repeat links "__alignof__ " ^ "a;");
+      ("increments", "int x = " ^ repeat links "++" ^ "a;");
+      ("casts", "int x = " ^ repeat links "(int)" ^ "a;");
+      ("postfix operators", "int x = a" ^ repeat links "[0]" ^ ";");
+      ("pointers", "int " ^ String.make links '*' ^ "p;");
+      ("arrays", "int a" ^ repeat links "[1]" ^ ";");
+      ("ifs", in_body (repeat links "if (a) " ^ ";"));
+      ("else-if chains", in_body (repeat links "if (a) ; else " ^ ";"));
       ( "dangling elses",
-        in_body (repeat length "if (a) " ^ ";" ^ repeat length " else ;") );
-      ("labels", in_body (repeat length "a: " ^ ";"));
-      ("case labels", in_body ("switch (a) " ^ repeat length "case 1: " ^ ";"));
-      ("default labels", in_body (repeat length "default: " ^ ";"));
-      ("switches", in_body (repeat length "switch (a) " ^ ";"));
-      ("whiles", in_body (repeat length "while (a) " ^ ";"));
-      ("fors", in_body (repeat length "for (int i = 0;;) " ^ ";"));
-      ( "dos",
-        in_body (repeat length "do " ^ ";" ^ repeat length " while (a);") );
-      ( "attribute specifiers",
-        "int x" ^ repeat length " __attribute__((a))" ^ ";" );
-      ("attributes in a list", "int x __attribute__((" ^ chain ", " "));");
-      ("attribute arguments", "int x __attribute__((a(" ^ chain ", " ")));");
-      ( "asm operands",
-        in_body
-          ("asm(\"\" : : "
-          ^ String.concat ", " (List.init length (fun _ -> "\"r\"(a)"))
-          ^ ");") );
+        in_body (repeat links "if (a) " ^ ";" ^ repeat links " else ;") );
+      ("labels", in_body (repeat links "a: " ^ ";"));
+      ("case labels", in_body ("switch (a) " ^ repeat links "case 1: " ^ ";"));
+      ("default labels", in_body (repeat links "default: " ^ ";"));
+      ("switches", in_body (repeat links "switch (a) " ^ ";"));
+      ("whiles", in_body (repeat links "while (a) " ^ ";"));
+      ("fors", in_body (repeat links "for (int i = 0;;) " ^ ";"));
+      ("dos", in_body (repeat links "do " ^ ";" ^ repeat links " while (a);"));
       ( "case ranges",
-        in_body ("switch (a) " ^ repeat length "case 1 ... 2: " ^ ";") );
-      ("block pointers", "int " ^ String.make length '^' ^ "p;");
+        in_body ("switch (a) " ^ repeat links "case 1 ... 2: " ^ ";") );
+      ("block pointers", "int " ^ String.make links '^' ^ "p;");
       ( "attributed pointers",
-        "int " ^ repeat length "* __attribute__((a)) const " ^ "p;" );
+        "int " ^ repeat links "* __attribute__((a)) const " ^ "p;" );
       ( "attributed labels",
-        in_body (repeat length "a: __attribute__((a)) " ^ ";") );
-      ( "attributed declarators",
-        "int a" ^ repeat length ", __attribute__((a)) a" ^ ";" );
-      ( "attributes after a parenthesis",
-        "int x = sizeof(int (" ^ repeat length "__attribute__((a)) " ^ "*));" );
-      ( "attribute statements",
-        in_body (repeat length "__attribute__((a)); ") );
-      ( "extra semicolons in a member list",
-        "struct s { int a;" ^ String.make length ';' ^ " };" );
-      ("block literals in a row", in_body (repeat length "^{ a; }(); "));
-      ("nullability qualifiers", "int *" ^ repeat length "_Nonnull " ^ "p;");
-      ("statement expressions in a row", in_body (repeat length "({ a; }); "));
-      ("__extension__", "int x = " ^ repeat length "__extension__ " ^ "a;");
-      ("local label declarations", in_body (repeat length "__label__ a; "));
-      ( "range designators",
-        "int a[] = {" ^ repeat length "[0 ... 1] = 1, " ^ "};" );
-      ( "offsetof designators",
-        "int x = __builtin_offsetof(struct s, a" ^ repeat length ".a" ^ ");" );
+        in_body (repeat links "a: __attribute__((a)) " ^ ";") );
     ]
   in
   (* Each break of the chain is in tail position of the arm (design 4.3
@@ -1772,19 +1746,77 @@ let failed_chain_cases () =
     [
       ( "else-if chains of breaks in an arm",
         "type e = | A; void f(e v, int a) { match (v) { default: "
-        ^ repeat length "if (a) break; else " ^ "break; } }" );
+        ^ repeat links "if (a) break; else " ^ "break; } }" );
     ]
   in
-  let failures file =
-    List.filter_map (fun (name, text) ->
-        match Reader.read ~name:file text with
-        | Error _ -> Some (name, "read error")
-        | Ok reader -> (
-            match Parser.parse ~keywords:gnu_keywords reader with
-            | Ok _ -> None
-            | Error error -> Some (name, error.message)))
+  List.map (fun (name, text) -> (name, "in.i", text)) c_texts
+  @ List.map (fun (name, text) -> (name, type_c_file, text)) type_c_texts
+
+(* Chains that the parser reads in loops and that list, [length] long, so
+   that their trees are as wide as they are long. *)
+let listing_chain_texts length =
+  let chain separator last =
+    String.concat separator (List.init length (fun _ -> "a")) ^ last
   in
-  failures "in.i" texts @ failures type_c_file type_c_texts
+  [
+    ("a body", "int f(void) {" ^ repeat length "{}" ^ "}");
+    ("statements in a block", in_body (repeat length "a; "));
+    ( "attribute specifiers",
+      "int x" ^ repeat length " __attribute__((a))" ^ ";" );
+    ("attributes in a list", "int x __attribute__((" ^ chain ", " "));");
+    ("attribute arguments", "int x __attribute__((a(" ^ chain ", " ")));");
+    ( "asm operands",
+      in_body
+        ("asm(\"\" : : "
+        ^ String.concat ", " (List.init length (fun _ -> "\"r\"(a)"))
+        ^ ");") );
+    ( "attributed declarators",
+      "int a" ^ repeat length ", __attribute__((a)) a" ^ ";" );
+    ( "attributes after a parenthesis",
+      "int x = sizeof(int (" ^ repeat length "__attribute__((a)) " ^ "*));" );
+    ("attribute statements", in_body (repeat length "__attribute__((a)); "));
+    ( "extra semicolons in a member list",
+      "struct s { int a;" ^ String.make length ';' ^ " };" );
+    ("block literals in a row", in_body (repeat length "^{ a; }(); "));
+    ("nullability qualifiers", "int *" ^ repeat length "_Nonnull " ^ "p;");
+    ("statement expressions in a row", in_body (repeat length "({ a; }); "));
+    ("__extension__", "int x = " ^ repeat length "__extension__ " ^ "a;");
+    ("local label declarations", in_body (repeat length "__label__ a; "));
+    ( "range designators",
+      "int a[] = {" ^ repeat length "[0 ... 1] = 1, " ^ "};" );
+    ( "offsetof designators",
+      "int x = __builtin_offsetof(struct s, a" ^ repeat length ".a" ^ ");" );
+  ]
+
+(* A chain that nests parses just within Parser.max_depth and fails just
+   beyond it; one that lists parses at any length. *)
+let failed_chain_cases () =
+  let too_deep =
+    Printf.sprintf
+      "a construct nested more than %d levels deep, where each link of a \
+       chain such as `a + b + c` or `else if` is a level (a translation \
+       limit, C11 5.2.4.1)"
+      Parser.max_depth
+  in
+  let within (name, file, text) =
+    Option.map (fun message -> (name ^ " within the bound", message))
+      (parse_failure file text)
+  in
+  let beyond (name, file, text) =
+    match parse_failure file text with
+    | Some message when message = too_deep -> None
+    | Some message -> Some (name ^ " beyond the bound", message)
+    | None -> Some (name ^ " beyond the bound", "parsed")
+  in
+  let listed (name, text) =
+    Option.map (fun message -> (name, message)) (parse_failure "in.i" text)
+  in
+  List.concat
+    [
+      List.filter_map within (nesting_chain_texts (Parser.max_depth - 16));
+      List.filter_map beyond (nesting_chain_texts (Parser.max_depth + 1));
+      List.filter_map listed (listing_chain_texts 100_000);
+    ]
 
 (* Every case runs on the small stack that the fuzz harness runs the
    parser on, so that a chain the parser reads in a loop fails loudly if

@@ -232,13 +232,13 @@ type checked_pattern = {
   sub_fields : (Tree.sub_pattern * Ctype.member) list;
 }
 
-(* [depth] and [enclosing] belong to the walk in progress. Only the
-   reader's failure leaves a walk early, and it ends the read, so neither
-   is restored on it. [selections] and [compatibilities] hold the answers
-   to the constructs that ask whether types are compatible, by the span
-   of the construct, and [answered] those that lowering replaces with
-   their answer. [types] holds the type of each expression, which
-   [positioned] alone gives, once. *)
+(* [enclosing] belongs to the walk in progress. Only the reader's failure
+   leaves a walk early, and it ends the read, so it is not restored on
+   it. [selections] and [compatibilities] hold the answers to the
+   constructs that ask whether types are compatible, by the span of the
+   construct, and [answered] those that lowering replaces with their
+   answer. [types] holds the type of each expression, which [positioned]
+   alone gives, once. *)
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
@@ -246,7 +246,6 @@ type t = {
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
   answered : (Tree.span, answered) Hashtbl.t;
   sites : Sites.t;
-  mutable depth : int;
   mutable enclosing : enclosing;
 }
 
@@ -260,7 +259,6 @@ let create () =
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
     sites = Sites.create ();
-    depth = 0;
     enclosing = outside_functions }
 
 let find view (expression : Tree.expression) =
@@ -297,11 +295,6 @@ type context = {
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
 }
 
-(* Far above the nesting of real code, it bounds the recursion on the
-   chains that the parser reads in loops (operators, else-if), whose
-   trees are as deep as they are long. *)
-let max_depth = 10_000
-
 let needing need (unknown : Unknown.t) =
   let why =
     match unknown.cause with
@@ -311,17 +304,6 @@ let needing need (unknown : Unknown.t) =
   Rule.message Profile
     (Printf.sprintf "%s depends on %s at %s:%d, %s (design 13.3)" need
        unknown.construct unknown.location.file unknown.location.line why)
-
-(* [walk] one level deeper. *)
-let nested context span walk =
-  let view = context.typed in
-  if view.depth >= max_depth then
-    context.fail span
-      (Rule.c_text "an expression or statement is nested too deeply");
-  view.depth <- view.depth + 1;
-  let result = walk () in
-  view.depth <- view.depth - 1;
-  result
 
 let within context enclosing walk =
   let view = context.typed in
@@ -2152,11 +2134,9 @@ and positioned context position (expression : Tree.expression) =
   if Hashtbl.mem context.typed.types expression.span then
     invalid_arg "Expressions: an expression typed twice";
   let typed =
-    nested context expression.span (fun () ->
-        match constructor_expression context position expression with
-        | Some (named, arguments) ->
-            construct context expression named arguments
-        | None -> expression_node context position expression)
+    match constructor_expression context position expression with
+    | Some (named, arguments) -> construct context expression named arguments
+    | None -> expression_node context position expression
   in
   (match position with
   | Targeted target ->
@@ -2790,9 +2770,6 @@ and items context =
     | Block_statement statement -> typed_statement context statement)
 
 and typed_statement context (statement : Tree.statement) =
-  nested context statement.span (fun () -> statement_node context statement)
-
-and statement_node context (statement : Tree.statement) =
   let enclosing = context.typed.enclosing in
   let scalar ~clause condition =
     require_scalar context condition.Tree.span ~clause

@@ -8,6 +8,8 @@
 
     Every node is {!spanned}: it records the tokens it was parsed from,
     which emission copies when it leaves the node untouched (design 13.4).
+    A node's span holds the spans of its parts, in token order, which the
+    parser's bound on the depth of the tree relies on.
     The tree holds what the grammar decides and nothing the tokens already
     say: the spelling of a constant or a string is read from its span.
 

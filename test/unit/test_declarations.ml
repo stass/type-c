@@ -644,14 +644,13 @@ let enumerations () =
   compatible "enum e { A = 0x100000000 };" "unsigned long";
   compatible "enum e { A = -1, B = 0x80000000 };" "long"
 
-(* A constant expression deeper than the bound is an error, not a crash;
-   the parser reads the chain in a loop. *)
+(* The evaluator recurses as deep as the tree, which the parser bounds
+   (test_parser): a constant expression just within the bound is
+   evaluated. *)
 let deep_expression () =
-  let terms = Expressions.max_depth + 1 in
-  let chain = String.concat " + " (List.init terms (fun _ -> "1")) in
-  rejects ("enum { V = " ^ chain ^ " };") "too deeply";
-  let chain = String.concat " + " (List.init 1000 (fun _ -> "1")) in
-  evaluates_int chain "1000"
+  let within = Parser.max_depth - 16 in
+  let chain = String.concat " + " (List.init within (fun _ -> "1")) in
+  evaluates_int chain (string_of_int within)
 
 (* Huge constants take bounded work. *)
 let huge_constants () =
@@ -1525,8 +1524,8 @@ let arm_termination () =
   accepts ~file
     "int c(int n) { switch (n) { case 1: n++; case 2: n--; } \
      for (;;) { if (n) break; } return n; }";
-  (* The analysis recurses as deep as typing, which bounds the nesting:
-     the parser bounds brackets, typing a chain of statements. *)
+  (* The analysis recurses as deep as the tree, which the parser
+     bounds, chains of statements included. *)
   let repeat depth text =
     String.concat "" (List.init depth (fun _ -> text))
   in

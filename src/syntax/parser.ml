@@ -23,6 +23,18 @@ type error = Reader.error = { location : Location.t; message : string }
    keeps the stack small. *)
 let max_nesting = 256
 
+(* The deepest tree that the parser gives, in nodes on a path, so that
+   the stages after it, which recurse over the tree, need no bound of
+   their own (design 13.7). A chain that the parser reads in a loop, such
+   as [a + b + c] or an else-if, is a level for each link. The deepest
+   tree of the corpus programs is 139 nodes, a Csmith program; of the
+   programs people wrote, 92, SQLite's shell.c, whose longest else-if
+   chain has 66 links. 10000 is seventy times the deepest, and a tree
+   that deep needs under 140K words (1.1 MiB) of stack in the later
+   stages, on macOS and Linux, against the runtime's default limit of
+   128M words. *)
+let max_depth = 10_000
+
 (* How much of a token's spelling an error message quotes, so that a long
    string literal does not make a long message. *)
 let max_quoted_spelling = 40
@@ -95,6 +107,10 @@ type jump_scope =
    judges them where the arm ends. *)
 type arm_breaks = { matched : jump_target; mutable leaving : int list }
 
+(* A node that [finish] made: the first token of its span and its height,
+   the most nodes on a path from it to a leaf. *)
+type made = { first_token : int; height : int }
+
 (* The cursor. [scope] is persistent, so leaving a scope restores the
    value saved on entering it, and so is [jumps]; leaving an arm restores
    [arm]. An error abandons the state, so it needs no restoring on one. *)
@@ -107,6 +123,10 @@ type state = {
   mutable scope : scope;
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
+  mutable outermost : made list;
+      (** the nodes made and not yet inside a node made after them,
+          latest first, so their first tokens decrease: [recorded] takes
+          every entry at or after the first token it pushes *)
 }
 
 (* The function derivation applied to the name that a declarator
@@ -152,8 +172,10 @@ let peek_at state offset =
 let peek state = peek_at state 0
 
 (* Spans. A node starts at a grammar position taken before it is read and
-   ends at the last token read, so [finish] is the only way to make one
-   and every node holds at least one token. *)
+   ends at the last token read, so every node holds at least one token.
+   [recorded] is the only way to give a node its span: [finish] for a
+   node read from [start], or directly for a node that wraps another in
+   the same span or whose span was taken before it is built. *)
 
 (* The index in [Reader.t.tokens] of the last grammar token read. *)
 let last_read state = state.grammar.(state.position - 1).index
@@ -164,7 +186,6 @@ let first_token state start = state.grammar.(start).index
 let span_from state start =
   { first = first_token state start; last = last_read state }
 
-let finish state start node = { span = span_from state start; node }
 
 (* The target of the loop, switch or match statement that begins at
    [start], as {!Tree.jump_target_of} reads it from the statement that
@@ -211,6 +232,38 @@ let fail state diagnostic =
 let fail_at_token state index diagnostic =
   let location = state.reader.tokens.(index).location in
   raise (Failed { location; message = Rule.text diagnostic })
+
+(* The depth bound. *)
+
+let too_deep =
+  Printf.sprintf
+    "a construct nested more than %d levels deep, where each link of a \
+     chain such as `a + b + c` or `else if` is a level (a translation \
+     limit, C11 5.2.4.1)"
+    max_depth
+
+(* Records a node with [span] and gives the span back: the nodes made
+   since whose first token lies in the span are its parts or inside them
+   (a node's span holds its parts, which are made before it), so the
+   node is one taller than the tallest of them, whatever loop or
+   recursion read it. The height is never below the node's, but for a
+   leaf that [constructor_names] makes unrecorded, an error of one that
+   does not grow. *)
+let recorded state (span : span) =
+  let rec take_parts tallest = function
+    | (part : made) :: rest when part.first_token >= span.first ->
+        take_parts (max tallest part.height) rest
+    | rest -> (tallest, rest)
+  in
+  let tallest_part, outside = take_parts 0 state.outermost in
+  let height = tallest_part + 1 in
+  if height > max_depth then
+    fail_at_token state span.first (Rule.c_text too_deep);
+  state.outermost <- { first_token = span.first; height } :: outside;
+  span
+
+let finish state start node =
+  { span = recorded state (span_from state start); node }
 
 (* The refusal of the break or continue at [start]. *)
 let fail_jump state start diagnostic =
@@ -2608,7 +2661,7 @@ and type_declaration state : int -> type_declaration =
       declared_definition
     end
   in
-  let span = span_from state start in
+  let span = recorded state (span_from state start) in
   fun scope_end -> { span; node = { name; declared; definition; scope_end } }
 
 and incomplete_variant state checked =
@@ -2727,7 +2780,7 @@ and pattern_test state keyword =
   let start = state.position in
   advance state;
   let words = pattern_words state in
-  let pattern_span = span_from state start in
+  let pattern_span = recorded state (span_from state start) in
   expect state P.Equal "`=` after the pattern of a single-pattern test";
   let operand = expression state in
   expect state P.Right_paren
@@ -2877,7 +2930,7 @@ and open_statements state opened =
   | Punctuator_token P.Left_brace when binds_substatement opened ->
       let body = compound_statement state in
       (close_statements [@tailcall]) state opened
-        { span = body.span; node = Compound body }
+        { span = recorded state body.span; node = Compound body }
   | _ ->
       let statement = simple_statement state in
       (close_statements [@tailcall]) state opened statement
@@ -2951,7 +3004,7 @@ and simple_statement state =
   match peek state with
   | Punctuator_token P.Left_brace ->
       let body = block state in
-      { span = body.span; node = Compound body }
+      { span = recorded state body.span; node = Compound body }
   | Punctuator_token P.Semicolon ->
       advance state;
       finish state start Null_statement
@@ -3342,6 +3395,7 @@ let parse_with_file_scope ~keywords reader =
       scope = initial_scope keywords;
       jumps = Function_body;
       arm = None;
+      outermost = [];
     }
   in
   match

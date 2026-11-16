@@ -840,16 +840,15 @@ let block_linkage () =
   | Some { declared = Entity.Object { linkage = External; _ }; _ } -> ()
   | Some _ | None -> fail_case source "fresh is not external"
 
-(* A chain deeper than the bound is an error, not a crash. *)
+(* Typing recurses as deep as the tree, which the parser bounds
+   (test_parser): a chain just within the bound is typed. *)
 let deep_bodies () =
-  let terms n = String.concat " + " (List.init n (fun _ -> "x")) in
-  types (terms 1000) "int";
-  rejects (terms (Expressions.max_depth + 1)) "too deeply";
-  let chain n =
-    String.concat " else " (List.init n (fun _ -> "if (x) x;")) ^ " x"
+  let within = Parser.max_depth - 16 in
+  types (String.concat " + " (List.init within (fun _ -> "x"))) "int";
+  let chain =
+    String.concat " else " (List.init within (fun _ -> "if (x) x;")) ^ " x"
   in
-  types (chain 1000) "int lvalue";
-  rejects (chain (Expressions.max_depth + 1)) "too deeply"
+  types chain "int lvalue"
 
 (* The class of constant expression (C11 6.6) that typing gives. *)
 let describe_constant (constant : Expressions.constant) =

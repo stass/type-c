@@ -157,17 +157,19 @@ is [type-c-language-design.md](type-c-language-design.md).
   `_Generic(const int, const int: 1, int: 2)`), which GCC 16 and Clang
   accept in gnu11, is a syntax error. Read it, with its type unconverted,
   if the corpus has one.
-- [Medium] The parser reads chains in loops (left-associative binary
-  operators, the comma operator, postfix operators, casts and the prefix
-  operators, assignments, the last operands of conditionals, the
-  pointer, array and function derivations of a declarator, and the
-  statements that end in a substatement: `if (a) if (b) ...`, `else if`
-  chains, loops and labels), so a chain is not bounded by
-  `Parser.max_nesting`, and its tree is as deep as it is long. A pass
-  that recurses over the tree can exhaust the stack on a long chain: the
-  constant evaluator of `Declarations` counts its depth against
-  `max_expression_depth` and expression typing `Expressions.max_depth`,
-  and the test dump must count too or walk chains in loops.
+- [Medium] `Parser.max_depth` holds because every node gets its span
+  from `Parser.recorded` and a node's span holds its parts, but
+  `Tree.spanned` is a public record, so a wrap written as `{ span =
+  x.span; node = W x }` in a loop would escape the count and undercount
+  without limit. Make `spanned` private behind a `tree.mli` with one
+  constructor, and let the fuzzer and `test/run/parse_check.ml` check
+  that no dumped tree is deeper than the bound.
+- [Medium] No test holds the later stages to the stack the
+  `Parser.max_depth` comment measures (under 140K words at the bound):
+  the sema tests type a chain at the bound on the default 128M-word
+  stack, and only `+` and else-if chains. Run every nesting chain of
+  `test_parser` at the bound through `Front_end.lower` on a stack
+  limited to 256K words.
 - [Low] `&&a` of a label that is not defined is left to the backend,
   which refuses it: the parser keeps the arguments of an attribute as
   tokens, and both backends compile `&&b` where `b` is defined in a

@@ -25,10 +25,9 @@ type facts = {
 
 type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
 
-(** Both walk a tree that typing has read, whose nesting it has bounded:
-    that of expressions and statements by {!Expressions.max_depth}, and
-    that of a declarator by the size of its type ({!Ctype.max_size}), so
-    their recursion is bounded too. *)
+(** Both walk a tree that the parser has bounded in depth
+    ({!Typec_syntax.Parser.max_depth}), so their recursion is bounded
+    too. *)
 
 val arm_refusal : facts -> Tree.arm -> refusal option
 (** The breach of design 4.3 rule 1 by the arm, if its end can be

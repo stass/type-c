@@ -26,7 +26,10 @@
 
     Parsing takes time linear in the number of tokens, up to a logarithmic
     factor for each name it looks up, and its recursion is bounded by
-    {!max_nesting}. *)
+    {!max_nesting}. The tree it gives is at most {!max_depth} nodes deep,
+    so a stage that recurses over its nesting needs no bound of its own;
+    a list in it, which has no bound on its length, is walked in a
+    loop. *)
 
 open Typec_cpp
 
@@ -38,6 +41,11 @@ type error = Reader.error = { location : Location.t; message : string }
 val max_nesting : int
 (** The most brackets ([(], [[], [{]) and conditional operators that the
     parser accepts open at once; one more is an error. *)
+
+val max_depth : int
+(** The most nodes on a path from a top-level declaration of the tree to
+    a leaf, chains that the parser reads in loops included; one more is
+    an error. *)
 
 val parse :
   keywords:Keyword_set.t ->
