@@ -707,16 +707,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
-- [High] `Emitter.token` makes no piece of a pragma line or of a `#`
-  punctuator, so the bracket of an instance holds no pragma, but design
-  13.5 speaks of the `#pragma` lines of moved text as written, and a
-  generic function's body may hold `#pragma GCC diagnostic` or
-  `_Pragma` lines. Lowering (part 9 of package 2.1) must refuse a
-  generic whose definition holds such a token, never drop it (a `#` in
-  an attribute argument, which the parser skips, would change the
-  argument), and design 10.3 and 13.5 say so. If the pragmas other than
-  `pack` are to be kept, a piece for them can admit a line whose first
-  word is not `pack` and that reads as tokens.
+- [High] Pragma lines in a generic's definition. Design 10.3 makes a
+  generic whose definition holds a pragma an error (P25), and nothing
+  reports it: `Emitter.token` makes no piece of a pragma line or of a
+  `#` punctuator, so lowering could only drop the token. Part 9 of
+  package 2.1 refuses such a generic with a rule code of its own, a
+  generic type and a generic function alike. Tests: a generic with a
+  `#pragma` line and one with a `_Pragma` operator are refused with
+  that code, and the same definitions without the pragma give
+  instances. The design does not say what becomes of a `#` punctuator
+  in a definition, which `Emitter.token` drops as well: in an attribute
+  argument, which the parser skips, dropping it would change the
+  argument. Refuse it in part 9 too unless the design gives it a piece.
 - [Medium] `Emitter.bracketed` anchors a bracket only in front of an
   external declaration of the tree, but design 10.3 also puts the
   instances that a variant or a record alias uses directly after its

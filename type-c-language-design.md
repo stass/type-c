@@ -2215,6 +2215,19 @@ leave in force. The three Clangs fail it under `-fapple-pragma-pack`,
 with and without those two values of `-fpack-struct`, and Apple Clang 21
 fails it for AIX, where the other reading is the default of the target.
 
+*Provisional (P25).* A generic whose definition holds a pragma is an
+error: a `#pragma` line, which is also how a `_Pragma` operator reaches
+`typec`. The text of an instance then holds no pragma, and the three
+lines of the bracket are the only packing pragmas that reach it. A
+definition is written into each instance as its tokens (13.5), and a
+pragma is a line and no token, so writing one there would need a form
+of moved text that lowering does not have. A `#pragma pack` line of a
+definition would stand inside the bracket and give the instance a
+packing that the probe does not test. The definition of a generic is
+expected to hold a pragma rarely. A count of the generic definitions
+that hold one, in Pilot B or the corpus, settles the refusal; it stays
+if that cannot settle it.
+
 What a definition names means in the instance what it means in the
 generic (3.5 rule 8).
 
@@ -3346,7 +3359,15 @@ so `typec` does not read it there. In C text that does not move `typec`
 looks at the
 identifiers of no pragma and passes every line on whole: GCC keeps some
 pragmas verbatim in its `-E` output, the free text of a `#pragma mark`
-line among them. Three rules carry the property into unread text.
+line among them.
+
+Of the kinds of moved text, a deferred statement and the operand of a
+`try` can hold a `#pragma` line. The definition of a generic holds
+none, since a generic whose definition holds one is an error (10.3).
+What the rules below say of a `#pragma` line of moved text they say of
+those two kinds.
+
+Three rules carry the property into unread text.
 
 - For the first half, an identifier in an attribute argument or a
   `#pragma` line of moved text that denotes something at the text's own
@@ -3550,8 +3571,9 @@ numbers refer to the implementation plan.
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties, the declarations that the resolution check of 13.5 refuses for one among them | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
-| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, the refusals that 13.5 makes for an identifier in an attribute argument or a `#pragma` line of a definition among them. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
+| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, the refusals that 13.5 makes for an identifier in an attribute argument of a definition among them. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
 | P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
+| P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
 
 ## 16. Non-goals
 
