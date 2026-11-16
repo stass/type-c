@@ -223,9 +223,12 @@ The FreeBSD x86-64 host is a machine reached over ssh, not a container:
 `tools/hosts/freebsd.sh`, or `tools/hosts/run.sh freebsd`, which runs
 it. The header of the script says which environment variables name the
 account (`TYPEC_FREEBSD_TARGET`, `TYPEC_FREEBSD_KEY`,
-`TYPEC_FREEBSD_DIR`) and the corpus programs to run
-(`TYPEC_FREEBSD_CORPUS`), which compilers and tools the host must
-supply, and which OCaml and dune it builds. Everything goes to
+`TYPEC_FREEBSD_DIR`), the corpus programs to run
+(`TYPEC_FREEBSD_CORPUS`) and the corpus repository and its cache
+(`TYPEC_CORPUS`, `TYPEC_CORPUS_CACHE`), which compilers and tools the
+host must supply, and which OCaml and dune it builds. The host fetches
+nothing for the corpus: as for the containers, `fetch.sh` must have
+filled the cache here, and the script sends its sources. Everything goes to
 `~/typec-host` of the account and nothing runs as root; the corpus
 programs are third-party code run with the account's own rights, so use
 an account that holds nothing else. ssh asks no question, so the key
@@ -239,8 +242,13 @@ TYPEC_FREEBSD_CORPUS="c-testsuite zlib lua sqlite chibicc qbe" \
 
 The run prints whether the suite passed, and the log holds the whole
 output, including the record of each corpus run (the runner's status 3,
-substitute tests only, counts as a pass). The toolchain, the build tree
-and the corpus cache stay between runs. To remove them all:
+substitute tests only, counts as a pass). The records the runner writes
+come back into `CORPUS/runs/freebsd-amd64/`, after a check that the
+host sent only plain files named for the programs and compilers of the
+run, as the host runs third-party code; the runner's logs
+stay on the host, under `typec-host/corpus-cache/build/`. The toolchain,
+the build tree and the build trees of the corpus stay between runs. To
+remove them all:
 `ssh USER@HOST "sh -c 'chmod -R u+w typec-host; rm -rf typec-host'"`.
 
 ## Choosing the backend

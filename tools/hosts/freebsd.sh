@@ -22,9 +22,11 @@
 #   TYPEC_CORPUS          the corpus repository (README, "Running the
 #                         corpus"), by default
 #                         /Volumes/Optaine/type-c-corpus.
+#   TYPEC_CORPUS_CACHE    its cache, as fetch.sh fills it, by default
+#                         /Volumes/Optaine/type-c-corpus-cache.
 #
 # The host supplies its own GCC and Clang, which this script only checks
-# for, together with gmake and curl. OCaml and dune are built from
+# for, together with gmake. OCaml and dune are built from
 # source tarballs, pinned by SHA-256, into DIR/toolchain once, and again
 # when a pin changes. Each run copies the files of the working tree that
 # git tracks or would track into DIR/src, read-only, builds in DIR/build,
@@ -33,10 +35,15 @@
 # a HOME inside DIR. The corpus programs are third-party code that runs
 # with the account's own rights, so the account should be one that
 # holds nothing else. The corpus repository goes to DIR/corpus as the
-# working tree does, without its git directory, and the runner gets the
-# revision of each tree as this machine sees it (tools/corpus/revision.sh)
-# on its command line. The output goes to LOG, by default
-# ${TMPDIR:-/tmp}/typec-host-freebsd.log, outside the repository.
+# working tree does, without its git directory and its records, and the
+# sources of the cache go to DIR/corpus-cache/src, so the host fetches
+# nothing and a run needs only the archives of its programs. The runner
+# gets the revision of each tree as this machine sees it
+# (tools/corpus/revision.sh) on its command line. The records it writes
+# come back into the corpus repository, where it would write them on
+# this machine; its logs stay in DIR/corpus-cache/build. The output goes
+# to LOG, by default ${TMPDIR:-/tmp}/typec-host-freebsd.log, outside the
+# repository.
 
 set -eu
 
@@ -67,6 +74,7 @@ key=${TYPEC_FREEBSD_KEY:-}
 dir=${TYPEC_FREEBSD_DIR:-typec-host}
 programs=${TYPEC_FREEBSD_CORPUS:-}
 corpus=${TYPEC_CORPUS:-/Volumes/Optaine/type-c-corpus}
+cache=${TYPEC_CORPUS_CACHE:-/Volumes/Optaine/type-c-corpus-cache}
 log=${1:-${TMPDIR:-/tmp}/typec-host-freebsd.log}
 
 # Everything sent to the host is a plain word (see run_script), and the
@@ -93,8 +101,16 @@ if [ -n "$programs" ] && [ ! -d "$corpus/programs" ]; then
   echo "$0: $corpus is not a corpus repository" >&2
   exit 2
 fi
+if [ -n "$programs" ] && [ ! -d "$cache/src" ]; then
+  echo "$0: $cache holds no sources: run $corpus/fetch.sh" >&2
+  exit 2
+fi
 
 repo=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
+
+# The archives this script sends and the records it takes back.
+stage=$(mktemp -d "${TMPDIR:-/tmp}/typec-freebsd.XXXXXX")
+trap 'rm -rf "$stage"' EXIT
 
 # ssh never asks anything, so a host that needs a password or has an
 # unknown host key fails the run, and it forwards nothing to the host.
@@ -146,9 +162,7 @@ if [ "$(uname -sm)" != "FreeBSD amd64" ]; then
   echo "not FreeBSD amd64" >&2
   exit 1
 fi
-for tool in gmake curl; do
-  command -v "$tool" > /dev/null || { echo "no $tool" >&2; exit 1; }
-done
+command -v gmake > /dev/null || { echo "no gmake" >&2; exit 1; }
 for compiler in "$@"; do
   [ -x "$compiler" ] || { echo "no $compiler" >&2; exit 1; }
   "$compiler" --version | head -n 1
@@ -199,15 +213,16 @@ echo "$pins" > toolchain/pins
 SCRIPT
 }
 
-# Empties DIR/src, whose files are read-only, and DIR/corpus; DIR/build
-# and DIR/corpus-cache are kept. The toolchain step has made DIR.
+# Empties DIR/src, whose files are read-only, DIR/corpus and the sources
+# of DIR/corpus-cache; DIR/build and the build trees of the cache are
+# kept. The toolchain step has made DIR.
 prepare_script() {
   cat <<'SCRIPT'
 set -eu
 cd "$1"
 [ ! -e src ] || chmod -R u+w src
-rm -rf src corpus
-mkdir src corpus
+rm -rf src corpus corpus-cache/src
+mkdir -p src corpus corpus-cache
 SCRIPT
 }
 
@@ -237,10 +252,10 @@ exit $status
 SCRIPT
 }
 
-# Fetches the sources of DIR/corpus into DIR/corpus-cache and runs the
-# corpus runner, built by the suite, on the programs after the compilers.
-# It prints the record of each run, which the next run deletes with
-# DIR/corpus.
+# Runs the corpus runner, built by the suite, on the programs after the
+# compilers, with DIR/corpus and DIR/corpus-cache. The records of
+# DIR/corpus go first, so that every record there afterwards is one this
+# run wrote. The runner prints each record too.
 corpus_script() {
   cat <<'SCRIPT'
 set -eu
@@ -248,10 +263,10 @@ dir=$1 clang_oldest=$2 clang_newest=$3 gcc=$4
 typec_revision=$5 corpus_revision=$6
 shift 6
 cd "$dir"
+rm -rf corpus/runs
 HOME=$PWD/home
 export HOME
 mkdir -p "$HOME"
-TYPEC_CORPUS_CACHE=$PWD/corpus-cache corpus/fetch.sh
 build/default/tools/corpus/corpus.exe --corpus corpus \
   --cache "$PWD/corpus-cache" --typec build/install/default/bin/typec \
   --typec-revision "$typec_revision" --corpus-revision "$corpus_revision" \
@@ -259,15 +274,100 @@ build/default/tools/corpus/corpus.exe --corpus corpus \
 SCRIPT
 }
 
+# Prints the records of DIR/corpus, the directories under runs, as a tar
+# archive.
+records_script() {
+  cat <<'SCRIPT'
+set -eu
+cd "$1/corpus"
+mkdir -p runs
+tar -cf - -C runs .
+SCRIPT
+}
+
 # Writes the files of the working tree TREE that git tracks or does not
-# ignore, as a tar archive, without the contents of the repositories
-# nested in it or its git directory, which git does not list.
+# ignore as the tar archive FILE, without the contents of the
+# repositories nested in it or its git directory, which git does not
+# list. Each step writes a file, so that a failure of either is the
+# function's status.
 tree_archive() (
-  cd "$1"
-  git ls-files -z --cached --others --exclude-standard \
-    | tar -cf - --no-recursion --no-xattrs --no-mac-metadata --no-acls \
-      --null -T -
+  tree=$1 file=$2
+  cd "$tree" \
+    && git ls-files -z --cached --others --exclude-standard > "$file.list" \
+    && tar -cf "$file" --no-recursion --no-xattrs --no-mac-metadata \
+      --no-acls --null -T "$file.list"
 )
+
+# Sends the tar archive FILE to the host, to unpack in the directory
+# INTO there.
+send_archive() {
+  remote tar -xf - -C "$2" < "$1"
+}
+
+# The directory of the host's records: the runner's label (probe_host in
+# tools/corpus/corpus.ml) for the system the toolchain step requires.
+host_label=freebsd-amd64
+
+# Prints, one per line, the records that the run of the programs may
+# write: HOST/PROGRAM.BACKEND.txt, a BACKEND being the file name of a
+# compiler (write_record in tools/corpus/corpus.ml).
+expected_records() {
+  for program in $programs; do
+    for compiler in "$oldest_clang" "$newest_clang" "$gcc"; do
+      echo "$host_label/$program.${compiler##*/}.txt"
+    done
+  done
+}
+
+# Unpacks the tar archive FILE of records from the host into the
+# directory DIR here.
+unpack_records() {
+  mkdir "$2"
+  tar -xf "$1" -C "$2" >> "$log" 2>&1 || fail "the records do not unpack"
+}
+
+# Fails unless the directory DIR holds only records the run may write,
+# as plain files. The host ran third-party code with the rights of the
+# account, so the archive could hold anything; what is wrong goes to
+# the log, not to the terminal, as the names are the host's.
+check_records() {
+  # A record is a plain file and HOST the one directory; anything else
+  # is listed again after "not plain: ", which no allowed line matches.
+  (cd "$1" && find . -mindepth 1 \
+    && find . \( ! -type d ! -type f -o -path './*/*' -type d \) \
+      -exec printf 'not plain: %s\n' {} +) \
+    > "$stage/found" || fail "the records cannot be listed"
+  { echo "./$host_label"; expected_records | sed 's,^,./,'; } \
+    > "$stage/allowed"
+  unexpected=0
+  grep -v -x -F -f "$stage/allowed" "$stage/found" >> "$log" \
+    || unexpected=$?
+  case $unexpected in
+    0) fail "the records hold what the runner does not write" ;;
+    1) ;;
+    *) fail "the records cannot be checked" ;;
+  esac
+}
+
+# Copies the records in the directory DIR, which check_records passed,
+# into the corpus repository.
+copy_records() {
+  mkdir -p "$corpus/runs/$host_label"
+  for record in $(expected_records); do
+    [ -f "$1/$record" ] || continue
+    # cat, not cp, so that the mode is the repository's, not the host's.
+    cat "$1/$record" > "$corpus/runs/$record"
+    say "copied the record $corpus/runs/$record"
+  done
+}
+
+# Takes the records in the tar archive FILE, from records_script, into
+# the corpus repository.
+take_records() {
+  unpack_records "$1" "$stage/records"
+  check_records "$stage/records"
+  copy_records "$stage/records"
+}
 
 : > "$log"
 say "checking the host and the toolchain; log in $log"
@@ -279,9 +379,10 @@ toolchain_script \
 say "copying the source"
 # The revision of the source as it is copied, which the corpus runs on.
 typec_revision=$("$repo/tools/corpus/revision.sh" "$repo")
+tree_archive "$repo" "$stage/src.tar" || fail "the source does not archive"
 prepare_script | run_script "$dir" >> "$log" 2>&1 \
   || fail "the source directory is not ready"
-tree_archive "$repo" | remote tar -xf - -C "$dir/src" >> "$log" 2>&1 \
+send_archive "$stage/src.tar" "$dir/src" >> "$log" 2>&1 \
   || fail "the source does not copy"
 
 say "running dune build and dune test"
@@ -291,15 +392,27 @@ suite_script \
 say "the suite passes"
 
 if [ -n "$programs" ]; then
-  say "running the corpus runner on: $programs"
+  say "copying the corpus and the sources of its cache"
   corpus_revision=$("$repo/tools/corpus/revision.sh" "$corpus")
-  tree_archive "$corpus" | remote tar -xf - -C "$dir/corpus" >> "$log" 2>&1 \
+  tree_archive "$corpus" "$stage/corpus.tar" \
+    || fail "the corpus does not archive"
+  tar -cf "$stage/sources.tar" --no-xattrs --no-mac-metadata --no-acls \
+    -C "$cache" src || fail "the sources do not archive"
+  send_archive "$stage/corpus.tar" "$dir/corpus" >> "$log" 2>&1 \
     || fail "the corpus does not copy"
+  send_archive "$stage/sources.tar" "$dir/corpus-cache" >> "$log" 2>&1 \
+    || fail "the sources do not copy"
+
+  say "running the corpus runner on: $programs"
   status=0
   corpus_script \
     | run_script "$dir" "$oldest_clang" "$newest_clang" "$gcc" \
       "$typec_revision" "$corpus_revision" "$programs" >> "$log" 2>&1 \
     || status=$?
+  # A run that fails writes records too, of the programs it ran.
+  records_script | run_script "$dir" > "$stage/records.tar" 2>> "$log" \
+    || fail "the records do not copy"
+  take_records "$stage/records.tar"
   # The runner's status 3 is a run in which nothing failed but some
   # tests are substitutes (README, "Running the corpus").
   case $status in

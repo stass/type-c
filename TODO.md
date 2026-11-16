@@ -663,18 +663,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 (musl) in containers, each on x86-64 and on arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
-- [Medium] `tools/hosts/freebsd.sh` runs `corpus/fetch.sh` for the whole
-  manifest, GCC's archive included, whichever programs it runs, so an
-  archive that does not download fails a run that does not need it.
-  Let the runner or `fetch.sh` resolve a program to its archives.
-- [Medium] The records of a corpus run on the FreeBSD host exist only in
-  the log: `tools/hosts/freebsd.sh` deletes `DIR/corpus` on the next run
-  and does not copy `runs/` back into the corpus repository.
-- [Low] `tools/hosts/freebsd.sh` copies the source and the corpus with
-  a pipeline of `git ls-files` and `tar` without `pipefail`, so a
-  failure of either that leaves a partial tree shows up later, as a
-  failure of dune, `fetch.sh` or the runner. Two runs on
-  one `DIR` at once are not guarded.
+- [Low] Two runs of `tools/hosts/freebsd.sh` on one `DIR` at once are
+  not guarded: each empties the other's source and corpus.
+- [Medium] `tools/hosts/run.sh` (`take_results`, `changed_records`) and
+  `tools/hosts/freebsd.sh` (`check_records`, `copy_records`) each check
+  and copy the records a host sends back, in different ways, and
+  `run.sh` accepts any one host directory and any record names. Give
+  both one funnel that takes only the records of the host, programs and
+  compilers of the run, with `runs/` removed before the run instead of
+  comparing against what was sent.
+- [Low] Neither host script bounds the size of the results a host sends
+  back, so a host that runs hostile corpus code can fill the local disk.
 - [Medium] In `test/run/abi.t` the C side declares the Type-C functions
   with the hand-written tags `struct c_scalar` and the like, while the
   lowering uses `struct scalar`: across translation units the types are
