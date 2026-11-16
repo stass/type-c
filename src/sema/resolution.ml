@@ -8,7 +8,10 @@ type declaration = Ordinary of Tree.reference | Tag of Tree.tag_id
 type name = { name : string; span : Tree.span; declaration : declaration }
 type own = { declared : name; implicit : bool; scope : Tree.scope_depth }
 
+type kind = Generic_definition | Try_operand
+
 type text = {
+  kind : kind;
   span : Tree.span;
   scope : Tree.scope_depth;
   own_place : Parser.View.t;
@@ -32,14 +35,29 @@ type context = {
   same_type : Ctype.t -> Ctype.t -> bool Unknown.answer;
 }
 
-(* Raised at the first point of the text that breaks the property;
-   caught in [check]. *)
-exception Reads_otherwise of Tree.span * Rule.diagnostic
+(* Raised at the first point of the text that breaks the property, with
+   the rule of the clause that it breaks; caught in [checking]. *)
+exception Reads_otherwise of Tree.span * Rule.t * string
 
 let quote = Expressions.quote
 
-let refuse span rule message =
-  raise (Reads_otherwise (span, Rule.message rule message))
+let refuse span rule message = raise (Reads_otherwise (span, rule, message))
+
+(* The rule whose code a failure on a text of [kind] carries, for the
+   rule [clause] of the clause that fails: the code of the kind (design
+   13.5), where the kind has one. *)
+let kind_rule kind clause =
+  match kind with
+  | Generic_definition -> clause
+  | Try_operand -> Rule.Try_moved_operand
+
+(* The one failure path: [run] of the clauses, with the failure made a
+   diagnostic under the rule that [rule_of] gives for its clause. *)
+let checking rule_of run =
+  match run () with
+  | () -> Ok ()
+  | exception Reads_otherwise (span, clause, message) ->
+      Error (span, Rule.message (rule_of clause) message)
 
 let location_of context index =
   let location = context.tokens.tokens.(index).location in
@@ -319,12 +337,9 @@ let check_reading context text place =
     (Parser.attributes_within context.views text.span)
 
 let check context text ~at =
-  match
-    List.iter (check_scope text) text.declares;
-    Option.iter (check_reading context text) at
-  with
-  | () -> Ok ()
-  | exception Reads_otherwise (span, diagnostic) -> Error (span, diagnostic)
+  checking (kind_rule text.kind) (fun () ->
+      List.iter (check_scope text) text.declares;
+      Option.iter (check_reading context text) at)
 
 (* A name that lowering spells in a text of its own has no own place
    whose exactness 3.5 rule 2 vouches for: the declarator that gives it
@@ -352,6 +367,4 @@ let check_spelled_name context place use =
 (* The first half of the property for a text that lowering makes and
    that spells [names] of the source. *)
 let check_spelled context names ~at =
-  match List.iter (check_spelled_name context at) names with
-  | () -> Ok ()
-  | exception Reads_otherwise (span, diagnostic) -> Error (span, diagnostic)
+  checking Fun.id (fun () -> List.iter (check_spelled_name context at) names)

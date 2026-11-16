@@ -362,7 +362,9 @@ type context = {
   needs_complete : Ctype.t -> unit;
   block_literal : unit -> unit;
   views : Parser.views;
-  moved_operand : Tree.span -> (unit -> typed) -> typed;
+  moved_operand :
+    Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
+    (unit -> typed) -> typed;
 }
 
 let needing need (unknown : Unknown.t) =
@@ -2545,11 +2547,10 @@ let try_value context span (held : try_holder) ok_field =
            "the value of try is void, which only the statement try e; \
             discards")
 
-(* The view that the parser took in front of the statement or
-   declaration that holds the try at [span]. *)
-let operand_view context (span : Tree.span) =
+(* The views that the parser took at the try at [span]. *)
+let try_views context (span : Tree.span) =
   match Parser.try_views context.views span.first with
-  | Some views -> views.place
+  | Some views -> views
   | None -> invalid_arg "Expressions: a try without views"
 
 (* The first of [arguments] take [positions], those past them none. *)
@@ -2717,18 +2718,20 @@ and expression_node context position (whole : Tree.expression) =
   | Block_literal _ ->
       context.block_literal ();
       value (unknown context span "a block literal" Unknown_object)
-  | Try { operand; scope = _ } -> try_expression context whole operand
+  | Try { operand; scope } -> try_expression context whole operand scope
 
 (* Design 5.1: a try in the position that the statement being typed
    gives it (rule 3). Its operand, which has no target type (3.3), is a
    result whose error type is the one that the function returns (rule
    1); the try has the value of its Ok, which is no lvalue (rule 2). *)
-and try_expression context (whole : Tree.expression) operand =
+and try_expression context (whole : Tree.expression) operand scope =
   let span = whole.span in
   let held = placed_try context span in
   refuse_try_pragma context span held.holder;
+  let views = try_views context span in
+  let type_operand () = whole_value context operand in
   let operand_type =
-    (context.moved_operand span (fun () -> whole_value context operand))
+    (context.moved_operand views ~scope operand.span type_operand)
       .expression_type
   in
   let operand_instance = operand_result context operand.span operand_type in
@@ -2746,7 +2749,7 @@ and try_expression context (whole : Tree.expression) operand =
     { try_span = span;
       operand = operand.span;
       holder = held.holder;
-      place = operand_view context span;
+      place = views.place;
       temporary = List.length view.function_tries;
       operand_instance;
       return_instance;

@@ -344,6 +344,14 @@ let rows =
          goto] from outside to a label there, or the GNU address of a \
          label in the scope, which a computed [goto] could jump to from \
          anywhere in the function." };
+    Live { name = "Try_moved_operand"; code = 61;
+      clause = Some "design 5.1 rule 3, 13.5";
+      meaning =
+        "The operand of a [try], which is moved text, where it breaks \
+         any clause of the resolution property: a name that it uses \
+         reads otherwise in front of the statement or declaration that \
+         holds the [try], as one that the holder declares does, or it \
+         declares a name that is in scope after it." };
   ]
 
 let () =

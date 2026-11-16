@@ -389,3 +389,78 @@ pragma takes the next statement out.
   $ ./golden.exe pragma_then_null.tc
   pragma_then_null.tc:5: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
   [1]
+
+The operand of a try is moved text (rule 3): lowering writes it before
+the statement or declaration that holds the try, where it reads as at
+its own place (design 13.5). A declarator is in scope in its own
+initialiser, so the operand would name another object there, or none.
+
+  $ cat > own_declarator.tc <<'EOF'
+  > result(int, int) rd(int *);
+  > result(int, int) h(void) {
+  >   int n = 0;
+  >   {
+  >     int n = try rd(&n);
+  >     return Ok(n);
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe own_declarator.tc
+  own_declarator.tc:5: 'n' denotes another entity where lowering writes the text, the one declared at own_declarator.tc:3 (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+  $ cat > undeclared_there.tc <<'EOF'
+  > result(int, int) rd(int *);
+  > result(int, int) h(void) {
+  >   int n = try rd(&n);
+  >   return Ok(n);
+  > }
+  > EOF
+  $ ./golden.exe undeclared_there.tc
+  undeclared_there.tc:3: 'n' is not visible where lowering writes the text (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+The left operand of an assignment is read before the try, so the
+operand names nothing that it declares, and the operand declares
+nothing in the scope around it that the left operand would read.
+
+  $ cat > left_declares.tc <<'EOF'
+  > result(int, int) g(int);
+  > result(int, int) h(void) {
+  >   int a[8];
+  >   a[sizeof(enum { K = 5 })] = try g(K);
+  >   return Ok(a[0]);
+  > }
+  > EOF
+  $ ./golden.exe left_declares.tc
+  left_declares.tc:4: 'K' is not visible where lowering writes the text (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+  $ cat > operand_declares.tc <<'EOF'
+  > enum { K = 1 };
+  > result(int, int) g(int);
+  > result(int, int) h(void) {
+  >   int a[8];
+  >   a[K] = try g(sizeof(enum { K = 5 }));
+  >   return Ok(a[1]);
+  > }
+  > EOF
+  $ ./golden.exe operand_declares.tc
+  operand_declares.tc:5: 'K' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+A name that is declared before the holder reads alike at both places,
+also one declared with an attribute, and so does a name whose scope
+ends inside the operand.
+
+  $ cat > reads_alike.tc <<'EOF'
+  > typedef int wide __attribute__((aligned(16)));
+  > result(int, int) g(int);
+  > result(int, int) h(int n) {
+  >   int x = try g((wide)n + ({ int y = 1; y; }));
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe reads_alike.tc
+  reads_alike.tc:4: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
+  [1]

@@ -831,7 +831,12 @@ let tries () =
      result(result(int, int), int) nested(void); int k(int); \
      int half __attribute__((vector_size(16))); \
      typedef result(int, int) checked; checked typed(void); \
-     const result(int, int) constant; "
+     const result(int, int) constant; \
+     result(int, int) from(long); result(int, int) read_into(int *); \
+     result(void *, int) at(void *); \
+     typedef int wide __attribute__((aligned(16))); \
+     extern int aligned __attribute__((aligned(16))); \
+     type box(T) = struct { T value; }; "
   in
   let source ?(returns = "result(int, int)") body =
     declarations ^ returns ^ " t(int n) { " ^ body ^ "; return Ok(0); }"
@@ -922,6 +927,30 @@ let tries () =
   rejects_source ~file:"in.tc"
     (declarations ^ "int v = try f();")
     "[TC0054]";
+  (* Rule 3: the operand is moved text, which reads before the holder as
+     at its own place (design 13.5), and declares nothing that is in
+     scope after it. *)
+  let moved body = refuses body "TC0061" in
+  moved "{ int n = try read_into(&n); }";
+  moved "int fresh = try from(fresh)";
+  moved "int a[8]; a[sizeof(enum { K = 5 })] = try from(K)";
+  moved "enum { K = 1 }; int a[8]; \
+         { a[K] = try from(sizeof(enum { K = 5 })); }";
+  moved "x = try from(sizeof(struct fresh { int m; }))";
+  moved "x = try from(sizeof(struct fresh *))";
+  moved "struct p { int m; } *v = try at(sizeof(struct p))";
+  moved "typedef char t; { long t = try from(sizeof(t)); }";
+  accepts "int fresh = try from(n)";
+  accepts "{ int n = try read_into(&x); }";
+  accepts "x = try from(({ int y = 1; struct inner { int m; } i = { y }; \
+           i.m; }))";
+  accepts "x = try at(&&done); done: ;";
+  accepts "x = try from((wide)n)";
+  accepts "x = try from(aligned)";
+  accepts "struct s *u = 0; x = try at(u)";
+  (* The definition of an instance that the operand applies is moved
+     text of its own, whose names are not the operand's. *)
+  accepts "x = try from(sizeof(box(short)))";
   (* The pragma rule: a pragma line in the stretch from directly before
      the statement, its C labels included, to its final ;. The labels of
      an arm are the arm's. *)

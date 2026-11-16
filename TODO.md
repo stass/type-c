@@ -1343,6 +1343,20 @@ types (design 13.3).
   a pragma. Decide how the operand gets into the bracket: a function of
   the emitter from moved text without pragma lines to pieces, or a
   lowering of `try` there without `Moved`.
+- [Low] The resolution check sees a name of moved text only where
+  typing passes it to `Declarations.note_use` or `note_own`, so a
+  typing path that reads `state.entities` directly would let a name
+  escape the check unseen. The parser resolves every name: it could
+  record the uses and declarations by span for `Resolution` to read.
+- [Medium] Design 13.5 gives each kind of moved text one code, whichever
+  clause of the resolution property fails, but `Resolution.kind_rule`
+  gives that code to the operand of a `try` alone: the definition of a
+  generic carries the code of the clause (`Moved_declaration`,
+  `Moved_text`, `Moved_text_unknown`), and so does the one name of an
+  untagged type (`check_spelled`). Decide whether those kinds take one
+  code each, and how the measurement of P21, which counts
+  `Moved_text_unknown`, then counts its refusals, a `try` operand's
+  under `Try_moved_operand` included.
 - [Medium] `Emitter.moved` takes any range, so only the lowering that
   calls it keeps the text of an instance, which needs the packing
   bracket of design 10.3, from being written without one. When packages

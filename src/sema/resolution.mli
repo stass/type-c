@@ -33,14 +33,23 @@ type name = { name : string; span : Tree.span; declaration : declaration }
     the scope around the text would replace. *)
 type own = { declared : name; implicit : bool; scope : Tree.scope_depth }
 
-(** The moved text: its tokens, the scope that holds it, the view around
-    it at its own place, which is that in front of the declaration that
-    holds it, and what its reader found in it: each name that it uses, a
+(** The kinds of moved text that {!check} reads: the definition of a
+    generic (design 3.5 rule 8) and the operand of a [try] (5.1 rule 3).
+    A failure on the operand of a [try] carries the code of its kind,
+    whichever clause fails; one on the definition of a generic carries
+    the code of the clause. *)
+type kind = Generic_definition | Try_operand
+
+(** The moved text: its kind, its tokens, the scope that holds it, the
+    view around it at its own place, which is that in front of the
+    declaration that holds a generic's definition and at the operand of
+    a [try], and what its reader found in it: each name that it uses, a
     use of a declaration within the text, such as of a type parameter,
     included, and each name that it declares. A name that the text
     declares in [scope], as a first mention of a tag in a member of a
     structure does, is in scope after the text ({!Tree.scope_depth}). *)
 type text = {
+  kind : kind;
   span : Tree.span;
   scope : Tree.scope_depth;
   own_place : Parser.View.t;
@@ -87,7 +96,8 @@ val check :
     reads there as at its own place; otherwise it is a point of the text
     that breaks the property, the first that the clauses meet in their
     order, with the diagnostic that cites the declaration that makes it
-    so. A text that lowering writes nowhere, as
+    so, under the code that the text's {!kind} gives. A text that
+    lowering writes nowhere, as
     the definition of a generic is in its check, has no place [at]. *)
 
 val check_spelled :

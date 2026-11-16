@@ -149,13 +149,15 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    [definition_views] holds the view in front of each declaration of a
    generic, by its id, which is the own place of its definition (design
    13.5). [moved] collects what the reading of a generic's definition
-   finds in it, none outside one. *)
+   finds in it, none outside one, and [found] the names that each moved
+   text being read uses and declares, innermost first. *)
 type state = {
   target : Target.t;
   text : Reader.t;
   views : Parser.views;
   definition_views : (Tree.declaration_id, Parser.View.t) Hashtbl.t;
   mutable moved : moved option;
+  mutable found : found list;
   tags : Ctype.tags;
   entities : (Tree.reference, entity) Hashtbl.t;
   tag_types : (Tree.tag_id, tag) Hashtbl.t;
@@ -183,23 +185,29 @@ type state = {
    whose definition is being read, the last. *)
 and nesting = { depth : int; began : Tree.span; defining : Ctype.instance }
 
-(* What the reading of a generic's definition finds in its text, latest
-   first: the names that it uses and those that it declares, which the
-   resolution property checks (design 13.5), and whether lowering writes
-   the text, as it does for an instance but not for a definition check
-   or an instance read within one. Where it does, [parameters] holds
+(* What the reading of a generic's definition finds in its text besides
+   its names: whether lowering writes the text, as it does for an
+   instance but not for a definition check or an instance read within
+   one. Where it does, [parameters] holds
    the name of the typedef of each type parameter's argument, by the
    parameter's reference, and [names] collects the name that lowering
    writes for each use of a type parameter and each application.
    [void_field_spans] are the fields that a void argument removes (design
    3.5 rule 6). *)
 and moved = {
-  mutable uses : Resolution.name list;
-  mutable declares : Resolution.own list;
   written : bool;
   parameters : (Tree.reference * string) list;
   mutable names : (Tree.span * string) list;
   mutable void_field_spans : Tree.span list;
+}
+
+(* The names that the reading of the moved text at [text_span] finds in
+   it, latest first: those that it uses and those that it declares,
+   which the resolution property checks (design 13.5). *)
+and found = {
+  text_span : Tree.span;
+  mutable uses : Resolution.name list;
+  mutable declares : Resolution.own list;
 }
 
 (* What the placement of instances (design 10.3) asks of the external
@@ -342,23 +350,39 @@ let not_read state span name =
       ^ " is declared where typec does not read declarations yet (design \
          13.3)"))
 
-(* What the text of a generic's definition being read uses and declares
-   (design 13.5): every use of a name passes [note_use], and every
-   declaration of one [note_own], with the scope that the parser
-   declared it in. *)
+(* What the moved texts being read use and declare (design 13.5): every
+   use of a name passes [note_use], and every declaration of one
+   [note_own], with the scope that the parser declared it in. A name
+   belongs to each text whose tokens hold it: a text inside another
+   moves with it, and the definition of an instance that the operand of
+   a try applies stands apart from the operand. *)
+let holding state span =
+  let holds found =
+    found.text_span.first <= span.Tree.first
+    && span.last <= found.text_span.last
+  in
+  List.filter holds state.found
+
 let note_use state span name declaration =
-  match state.moved with
-  | Some moved ->
-      moved.uses <- { Resolution.name; span; declaration } :: moved.uses
-  | None -> ()
+  let note found =
+    found.uses <- { Resolution.name; span; declaration } :: found.uses
+  in
+  List.iter note (holding state span)
 
 let note_own state span name declaration ~scope ~implicit =
-  match state.moved with
-  | Some moved ->
-      let declared = { Resolution.name; span; declaration } in
-      moved.declares <-
-        { Resolution.declared; implicit; scope } :: moved.declares
-  | None -> ()
+  let declared = { Resolution.name; span; declaration } in
+  let note found =
+    found.declares <- { Resolution.declared; implicit; scope } :: found.declares
+  in
+  List.iter note (holding state span)
+
+(* [read] of the moved text at [text_span], with what it finds. *)
+let finding state text_span read =
+  let found = { text_span; uses = []; declares = [] } in
+  let outer = state.found in
+  state.found <- found :: outer;
+  let result = Fun.protect ~finally:(fun () -> state.found <- outer) read in
+  (result, found)
 
 (* What [reference] denotes at the use of [name] at [span], if the reader
    has met its declaration. *)
@@ -2977,18 +3001,19 @@ and read_definition :
  fun state declaration arguments ~lowered read ->
   let outer = state.moved in
   let moved =
-    { uses = []; declares = []; written = Option.is_some lowered;
+    { written = Option.is_some lowered;
       parameters = argument_names declaration lowered; names = [];
       void_field_spans = [] }
   in
   state.moved <- Some moved;
   let read_and_check () =
-    let result, typed =
-      in_own_views state (fun () ->
-          let result = with_arguments state declaration arguments read in
-          (result, state.typed))
+    let (result, typed), found =
+      finding state declaration.span (fun () ->
+          in_own_views state (fun () ->
+              let result = with_arguments state declaration arguments read in
+              (result, state.typed)))
     in
-    check_resolution state declaration moved;
+    check_resolution state moved found declaration;
     Option.iter (note_instance_text state declaration moved typed) lowered;
     result
   in
@@ -3015,19 +3040,24 @@ and note_instance_text state generic moved typed instance =
     { placements with
       readings = Ctype.Instances.add instance text placements.readings }
 
-and check_resolution state (declaration : Tree.type_declaration) moved =
+and check_resolution state moved found (declaration : Tree.type_declaration) =
   let text =
-    { Resolution.span = declaration.span;
+    { Resolution.kind = Generic_definition;
+      span = declaration.span;
       (* The text is the declaration, which holds its own name. *)
       scope = declaration.node.declared.scope;
       own_place =
         Hashtbl.find state.definition_views declaration.node.declared.id;
-      uses = List.rev moved.uses;
-      declares = List.rev moved.declares }
+      uses = List.rev found.uses;
+      declares = List.rev found.declares }
   in
-  let context = resolution_context state declaration.span in
   let at = if moved.written then Some state.external_facts.texts_at else None in
-  match Resolution.check context text ~at with
+  check_moved state text ~at
+
+(* The one check of the resolution property on [text], whose failure is
+   the error of the unit. *)
+and check_moved state (text : Resolution.text) ~at =
+  match Resolution.check (resolution_context state text.span) text ~at with
   | Ok () -> ()
   | Error (span, diagnostic) -> fail state span diagnostic
 
@@ -3184,8 +3214,31 @@ and typing state : Expressions.context =
     needs_complete = needs_complete state;
     block_literal = (fun () -> note_block_literal state);
     views = state.views;
-    moved_operand = (fun _ type_operand -> type_operand ());
+    moved_operand = type_moved_operand state;
   }
+
+(* The operand at [operand] of a try with the [views], typed with what
+   it finds, and then the one check of the resolution property (design
+   13.5) on it, at the place in front of its holder where lowering
+   writes it. Lowering declares nothing between the holder and that
+   place: what it declares stands in front of the external declaration,
+   where both places see it. *)
+and type_moved_operand state (views : Parser.try_views) ~scope operand
+    type_operand =
+  let typed, found = finding state operand type_operand in
+  let text =
+    { Resolution.kind = Try_operand;
+      span = operand;
+      scope;
+      own_place = views.own;
+      uses = List.rev found.uses;
+      declares = List.rev found.declares }
+  in
+  let place =
+    { Resolution.view = views.place; typedef_names = []; tags = [] }
+  in
+  check_moved state text ~at:(Some place);
+  typed
 
 and note_block_literal state =
   let facts = state.external_facts in
@@ -3380,6 +3433,7 @@ let read target text (scopes : Parser.scopes) =
       views = scopes.views;
       definition_views = Hashtbl.create 16;
       moved = None;
+      found = [];
       tags;
       entities = Hashtbl.create 1024;
       tag_types = Hashtbl.create 256;

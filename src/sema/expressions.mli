@@ -322,9 +322,9 @@ val constant : t -> Tree.expression -> constant option
     the type to (design 10.3), and [block_literal] is told of each block
     literal, whose body typec does not read, where it stands.
     [views] are those that the parser took in the unit, and
-    [moved_operand span type_operand] types the operand of the [try] at
-    [span] with [type_operand], where lowering moves it (design 5.1 rule
-    3). *)
+    [moved_operand views ~scope operand type_operand] types the operand
+    at [operand] of a [try] with the [views], in the scope [scope], with
+    [type_operand], where lowering moves it (design 5.1 rule 3). *)
 type context = {
   typed : t;
   target : Target.t;
@@ -341,7 +341,9 @@ type context = {
   needs_complete : Ctype.t -> unit;
   block_literal : unit -> unit;
   views : Parser.views;
-  moved_operand : Tree.span -> (unit -> typed) -> typed;
+  moved_operand :
+    Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
+    (unit -> typed) -> typed;
 }
 
 val whole_value : context -> Tree.expression -> typed
