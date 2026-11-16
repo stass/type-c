@@ -1004,13 +1004,6 @@ types (design 13.3).
   written out in `tools/hosts/corpus-in-container.sh`,
   `tools/hosts/freebsd.sh` and the README's example; `run.sh` and
   `freebsd.sh` could share one script that runs it.
-- [Low] README "Running the corpus" (step 2 and the CPU-time paragraph)
-  still describes the reference compile as hand-written commands on
-  `U.ref.i`; it is typec's own `Pipeline` commands, reading a copy of
-  that text in `BUILD.reference/`. `corpus.ml` (`reference_step`) and
-  `tools/oracle/typec_unit.ml` (`model`) each plan, pick the one
-  translation and read the target, which a `Pipeline` helper could do
-  once.
 - [Low] `debian-amd64` and `alpine-amd64` write their corpus records to
   the same `runs/linux-x86_64/` and their logs to the same
   `CACHE/build/linux-x86_64/`, since the runner names a host by

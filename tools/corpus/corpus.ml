@@ -642,7 +642,7 @@ let build_lines build =
     Printf.sprintf "  typec --emit-c                   %8.2f" total.emit_c;
     Printf.sprintf "  typec front end (the difference) %8.2f"
       (total.emit_c -. total.preprocess);
-    Printf.sprintf "  backend -fsyntax-only on the .i  %8.2f" total.syntax_only;
+    Printf.sprintf "  backend -fsyntax-only on the text %7.2f" total.syntax_only;
   ]
   @ List.concat_map detail build.units
   @ List.map (Printf.sprintf "not linked   %s") build.not_linked

@@ -597,9 +597,16 @@ recipe (`programs/PROGRAM/recipe`, in the format of
 
 1. `typec --cc=BACKEND -c U.tc -o U.o`, where `U.tc` is a copy of `U.c`
    next to it, so that its includes resolve as before;
-2. the reference, as `test/run/pipeline.t` builds it:
-   `BACKEND -E -x c -D__TYPEC__=1 -std=gnu11 ... U.tc > U.ref.i`, then
-   `BACKEND -x cpp-output -std=gnu11 ... -c U.ref.i -o U.ref.o`;
+2. the reference, made of the commands of typec's own pipeline
+   (`src/driver/pipeline.mli`) for the same goal on `U.tc`, so that
+   its options are routed as typec routes them: the backend preprocesses
+   `U.tc` to `U.ref.i`, and the plan's compile step reads a copy of that
+   text at the path where the plan puts the emitted C, where typec's own
+   compile step reads the C that typec emits. The copy is in
+   `CACHE/build/HOST/PROGRAM/BACKEND.reference/`, outside the build
+   tree, so that a test script looking for the tree's C sources does not
+   find it. The reference makes `U.ref.o` and differs from step 1 only in
+   its front end;
 3. `U.o` and `U.ref.o` must be equal byte for byte.
 
 Each unit ends in one of five states: identical, different, refused by
@@ -645,12 +652,12 @@ only on HOST` for a line limited to other hosts, which is neither a pass
 nor a failure; and `FAILED` or `not run` otherwise. Its results line
 counts the `TEST` lines (passed, failed, failed with the backend too)
 and lists the failures. The record ends with the CPU time of
-preprocessing, of `typec --emit-c` and of the backend's `-fsyntax-only`
-on `U.ref.i`, summed over the units, whose first two differ by the time
-of `typec`'s front end. The stderr of every command and the stdout of
-the test scripts go to `CACHE/build/HOST/PROGRAM/BACKEND.log`, and the
-stdout of each script is kept beside it in `BACKEND.tests/N.SCRIPT`, for
-the Nth test line.
+preprocessing, of `typec --emit-c` and of the compile step that the
+pipeline plans for `-fsyntax-only` on the preprocessed text, summed over
+the units, whose first two differ by the time of `typec`'s front end.
+The stderr of every command and the stdout of the test scripts go to
+`CACHE/build/HOST/PROGRAM/BACKEND.log`, and the stdout of each script is
+kept beside it in `BACKEND.tests/N.SCRIPT`, for the Nth test line.
 
 Exit status: 0 when every unit gave identical objects, every program
 linked, every test line that applies to the host passed and each
