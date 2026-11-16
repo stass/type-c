@@ -230,9 +230,9 @@ condition, with a field list optional in a test (design 4.2, 4.6).
 
 | | Package |
 | --- | --- |
-| 2.1 | Generic type declarations and applications: identity, lazy instantiation and limits. The one check of the resolution property (design 13.5), built here and applied to type definitions (rule 8 of design 3.5); packages 2.4 and 2.5 pass the operand of `try`, deferred statements and the operand of a `return` through the same check and add none of their own. The packing bracket with its probe (design 10.3), and the driver's refusal of `-fpack-struct` without a value (design 13.2), in `src/driver/cc_option.ml`. |
+| 2.1 | Generic type declarations and applications: identity, lazy instantiation and limits. `void` is an argument here wherever the substituted definition is valid C, as in `ptr(void)` with `type ptr(T) = T *;`; a variant field whose type becomes `void` (design 3.5 rule 6) is refused as a construct of package 2.3. The one check of the resolution property (design 13.5), built here and applied to type definitions (rule 8 of design 3.5); packages 2.4 and 2.5 pass the operand of `try`, deferred statements and the operand of a `return` through the same check and add none of their own. The packing bracket with its probe (design 10.3), and the driver's refusal of `-fpack-struct` without a value (design 13.2), in `src/driver/cc_option.ml`. |
 | 2.2 | Instance names and emission order; property tests that the naming is injective. |
-| 2.3 | The universe types `option` and `result`; `void` arguments. |
+| 2.3 | The universe types `option` and `result`; the variant field whose type becomes `void` (design 3.5 rule 6), which ends the refusal of package 2.1. |
 | 2.4 | `try`: typing, the three positions, lowering; the rule against dropped results. |
 | 2.5 | `defer`: the rules, the jump constraints, lowering with name hygiene; interplay with `try`, `match` and loops. |
 | 2.6 | Pilot B: a binary reader or a parser with a single error path. |

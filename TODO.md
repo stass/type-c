@@ -989,6 +989,13 @@ types (design 13.3).
   name through the claim functions of the parser, the one funnel that
   refuses a derived name claimed twice, and check a generic function's
   name as a file-scope type name (design 7.1 rule 1).
+- [Low] A type argument that carries a nullability qualifier of Clang
+  or a keyword of an address space is refused (design 3.5 rule 2),
+  because the encodings of design 10.3 have no row for either. If a
+  consumer needs such an argument, as code that instantiates over the
+  `_Nonnull` pointer typedefs of an SDK would, give each an encoding
+  and a place in the type model, which drops nullability where it reads
+  a qualifier (`qualifiers_of` in `src/sema/declarations.ml`).
 - [Medium] C text may write the Type-C constructs (design 2.1), and one
   in a body that typing does not read reaches the backend unlowered: a
   header that writes `^{ type x = | a; }` or a match in a Clang block
