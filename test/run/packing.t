@@ -6,16 +6,10 @@ which checks that the backend reads '#pragma pack()' as a reset to the
 packing of the command line, as the bracket assumes. pack_probe emits a
 preprocessed unit with a bracketed structure inserted before its first
 token, as an instance of a generic would be. The backends are those
-that backends.sh names, and they compile the output as typec's compile
-step does.
+that backends.sh names, and its compile_emitted compiles the output as
+typec's compile step does.
 
   $ . ./backends.sh
-  $ compile() {
-  >   cc=$1 file=$2
-  >   shift 2
-  >   "$cc" "$@" -Wall -Wextra -pedantic-errors -Werror -fsyntax-only \
-  >     -x cpp-output "$file"
-  > }
   $ printf '# 1 "unit.c"\nint x;\n' > unit.i
   $ ./pack_probe.exe unit.i > probe.i
 
@@ -25,7 +19,7 @@ C11 and C17.
   $ for cc in $clang $gcc; do
   >   for packing in "" -fpack-struct=1 -fpack-struct=2; do
   >     for std in c11 c17; do
-  >       compile $cc probe.i -std=$std $packing ||
+  >       compile_emitted $cc probe.i -std=$std $packing ||
   >         echo "$cc $packing $std"
   >     done
   >   done
@@ -44,7 +38,7 @@ the probe.
   >                "the instance is not packed");
   > EOF
   $ for cc in $clang $gcc; do
-  >   compile $cc region-checked.i -std=c11 || echo "$cc"
+  >   compile_emitted $cc region-checked.i -std=c11 || echo "$cc"
   > done
 
 Under Clang's -fapple-pragma-pack, '#pragma pack()' pops the stack, and

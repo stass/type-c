@@ -316,6 +316,18 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
+- [High] Clang 20 keeps `_Atomic` on a member of a structure value,
+  where Clang 21 and 23, Apple Clang 21 and the front end drop it: with
+  `struct t { _Atomic int a; } tf(void);`, Clang 20 selects
+  `_Atomic int` in `_Generic(tf().a, int: 1, _Atomic int: 2)`, and in
+  the same with `(0, tf().a)` or `x ? tf().a : tf().a` as the operand,
+  and gives `(0, tf().a)` the type `_Atomic int`. test/run/expressions.t
+  fails with Clang 20 for it. Design 13.3 makes the minimum Clang the
+  first release that types C as the front end does, which would raise
+  `Target.minimum_major_version` to 21 (and the oldest Clang of
+  tools/hosts); the other way is an unknown type for such a member with
+  Clang 20, which `Backend_difference` cannot express yet since it
+  tells compilers apart by family only. Decide which.
 - [Medium] Design 13.5: the type name of an association of an answered
   `_Generic`, or an operand of an answered
   `__builtin_types_compatible_p`, is dropped with what it declares and

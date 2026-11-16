@@ -9,14 +9,13 @@ error at the line of its token. moved_pragma_probe deletes the tokens
 in front of the last external declaration of a preprocessed unit and
 writes them, pragma lines among them, in front of that declaration,
 whose marker puts it at line 20. The backends are those that
-backends.sh names, and they compile the output as typec's compile step
-does; compile prints the file and line of each error.
+backends.sh names, and its compile_emitted compiles the output as
+typec's compile step does; compile prints the file and line of each
+error.
 
   $ . ./backends.sh
   $ compile() {
-  >   cc=$1 file=$2
-  >   "$cc" -std=c11 -Wall -Wextra -pedantic-errors -Werror -fsyntax-only \
-  >     -x cpp-output "$file" 2>&1 |
+  >   compile_emitted "$1" "$2" -std=c11 2>&1 |
   >     grep -o '^[^ :]*:[0-9]*:[0-9]*: error' | cut -d: -f1,2
   > }
   $ unit() {

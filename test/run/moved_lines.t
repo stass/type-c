@@ -7,15 +7,13 @@ backend reports an error in an instance at the line of its generic's
 definition. moved_probe deletes the first external declaration of a
 preprocessed unit and writes its tokens in a packing bracket in front
 of the last, as lowering writes the definition of a generic in an
-instance. The backends are those that backends.sh names, and they
-compile the output as typec's compile step does; compile prints the
-file and line of each error.
+instance. The backends are those that backends.sh names, and its
+compile_emitted compiles the output as typec's compile step does;
+compile prints the file and line of each error.
 
   $ . ./backends.sh
   $ compile() {
-  >   cc=$1 file=$2
-  >   "$cc" -std=c11 -Wall -Wextra -pedantic-errors -Werror -fsyntax-only \
-  >     -x cpp-output "$file" 2>&1 |
+  >   compile_emitted "$1" "$2" -std=c11 2>&1 |
   >     grep -o '^[^ :]*:[0-9]*:[0-9]*: error' | cut -d: -f1,2
   > }
   $ unit() {
