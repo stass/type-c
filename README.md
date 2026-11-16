@@ -372,11 +372,11 @@ The fine print, for a `.tc` file:
   and Clang extensions that system headers and common code use
   ([design 13.3](type-c-language-design.md#133-front-end)). Any other
   `-std=` is refused, so a build that selects C99 or C23 changes its
-  option for the file. Without a `-std=`, `typec` selects `-std=gnu11`,
-  older than the default of current GCC and Clang, so
-  `__STDC_VERSION__` is `201112L`. A build that relies on Clang's
-  current default, `gnu17`, keeps it with `-std=gnu17`; the `gnu23` of
-  GCC 15 and later cannot be kept.
+  option for the file. Without a `-std=`, `typec` selects `-std=gnu17`,
+  the default of Clang 11 and later, so `__STDC_VERSION__` is `201710L`.
+  GCC 15 and later default to `gnu23`, which cannot be kept: a build
+  with such a GCC passes `-std=gnu17` (or `-std=gnu11`) so that its
+  `.c` and `.tc` files share one dialect.
 - An extension outside that set, such as a GNU nested function, is
   refused with a message, and so is a call of a builtin function that
   the table of `typec` lacks, such as `__builtin_cpu_supports`
@@ -980,7 +980,7 @@ bug in `typec`. Every other status is the backend's.
 An input whose name ends in `.tc`, with no `-x` other than `-x none`
 before it, goes through three steps:
 
-1. `BACKEND -E -D__TYPEC__=1 -std=gnu11 OPTIONS -x c FILE.tc`, with its
+1. `BACKEND -E -D__TYPEC__=1 -std=gnu17 OPTIONS -x c FILE.tc`, with its
    stdout in a private temporary directory;
 2. `typec` reads the preprocessed text, parses it and reads its
    declarations at file scope, then emits it. The declarations are read
@@ -989,7 +989,7 @@ before it, goes through three steps:
    refuses stops `typec` with one message, `FILE:LINE: MESSAGE`. With no
    Type-C construct the emitted text is the preprocessed text, byte for
    byte;
-3. `BACKEND -std=gnu11 OPTIONS -c -o OUTPUT -x cpp-output EMITTED
+3. `BACKEND -std=gnu17 OPTIONS -c -o OUTPUT -x cpp-output EMITTED
    -Wno-gnu-line-marker`, with `-fno-trigraphs` last on Clang, or `-S`,
    or `-fsyntax-only`, as the command line asks. The first option keeps
    Clang 20 from calling the line markers of EMITTED, which no user
@@ -997,7 +997,7 @@ before it, goes through three steps:
    makes Clang read EMITTED without trigraphs, as `typec` read it
    (design 13.2).
 
-`-std=gnu11` is left out when the command line gives `-std=` for C11 or
+`-std=gnu17` is left out when the command line gives `-std=` for C11 or
 C17 (`c11`, `c17`, `c18`, `gnu11`, `gnu17`, `gnu18`, `c1x`, `gnu1x`,
 `iso9899:2011`, `iso9899:2017`, `iso9899:2018`); any other `-std=` is a
 usage error. Step 2 reads `asm` and `typeof` as keywords in the GNU forms
@@ -1077,7 +1077,7 @@ sizes of the scalar types, the
 signedness of `char`, the types behind `size_t` and the other standard
 typedefs, the byte order and `__STDC_VERSION__`, one `field: value` per
 line. The other arguments are the backend options that select the
-target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu11`;
+target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu17`;
 inputs, `-o` and dependency options do not belong there.
 
 Exit status: 0 with the model on stdout; 81 when the backend fails,

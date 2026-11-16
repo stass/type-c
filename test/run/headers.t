@@ -103,11 +103,11 @@ The C11 headers (C11 7.1.2) and then the POSIX.1-2017 headers.
   > wordexp.h
   > EOF
 
-The modes: ISO and GNU C11, and the feature macros that widen what the
-headers declare.
+The modes: GNU C17, which typec selects without a -std=, ISO and GNU
+C11, and the feature macros that widen what the headers declare.
 
   $ cat > modes.txt <<'EOF'
-  > -std=gnu11
+  > -std=gnu17
   > -std=c11
   > -std=gnu11 -D_GNU_SOURCE
   > -std=c11 -D_DARWIN_C_SOURCE

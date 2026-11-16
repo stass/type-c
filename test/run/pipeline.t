@@ -43,16 +43,16 @@ x.tc includes system headers and declares atoi in a header of its own;
 Without Type-C constructs the emitted text is the preprocessed text, so
 the object equals, byte for byte, the one that the backend builds from
 the same preprocessed text without typec (exit gate 2 of Stage 0). Both
-references preprocess and compile with -std=gnu11, the dialect that
+references preprocess and compile with -std=gnu17, the dialect that
 typec selects (design 2.4).
 
-  $ $clang -E -x c -D__TYPEC__=1 -std=gnu11 -O2 x.tc > clang.i
-  $ $clang -x cpp-output -std=gnu11 -O2 -c clang.i -o clang-ref.o
+  $ $clang -E -x c -D__TYPEC__=1 -std=gnu17 -O2 x.tc > clang.i
+  $ $clang -x cpp-output -std=gnu17 -O2 -c clang.i -o clang-ref.o
   $ typec --cc=$clang -O2 -c x.tc -o clang.o
   $ cmp clang-ref.o clang.o
 
-  $ $gcc -E -x c -D__TYPEC__=1 -std=gnu11 -O2 x.tc > gcc.i
-  $ $gcc -x cpp-output -std=gnu11 -O2 -c gcc.i -o gcc-ref.o
+  $ $gcc -E -x c -D__TYPEC__=1 -std=gnu17 -O2 x.tc > gcc.i
+  $ $gcc -x cpp-output -std=gnu17 -O2 -c gcc.i -o gcc-ref.o
   $ typec --cc=$gcc -O2 -c x.tc -o gcc.o
   $ cmp gcc-ref.o gcc.o
   $ ls -A tmp
@@ -61,15 +61,28 @@ typec selects (design 2.4).
 the SDK declares for Clang.
 
   $ printf '#include <stdlib.h>\nint main(void) { return abs(0); }\n' > lib.tc
-  $ $gcc -E -x c -D__TYPEC__=1 -std=gnu11 lib.tc > lib-gcc.i
-  $ $gcc -x cpp-output -std=gnu11 -c lib-gcc.i -o lib-gcc-ref.o
+  $ $gcc -E -x c -D__TYPEC__=1 -std=gnu17 lib.tc > lib-gcc.i
+  $ $gcc -x cpp-output -std=gnu17 -c lib-gcc.i -o lib-gcc-ref.o
   $ typec --cc=$gcc -c lib.tc -o lib-gcc.o
   $ cmp lib-gcc-ref.o lib-gcc.o
-  $ $clang -E -x c -D__TYPEC__=1 -std=gnu11 lib.tc > lib-clang.i
-  $ $clang -x cpp-output -std=gnu11 -c lib-clang.i -o lib-clang-ref.o
+  $ $clang -E -x c -D__TYPEC__=1 -std=gnu17 lib.tc > lib-clang.i
+  $ $clang -x cpp-output -std=gnu17 -c lib-clang.i -o lib-clang-ref.o
   $ typec --cc=$clang -c lib.tc -o lib-clang.o
   $ cmp lib-clang-ref.o lib-clang.o
   $ ls -A tmp
+
+The default dialect gives a .tc file the __STDC_VERSION__ of C17 on
+either backend, and a -std= of the command line replaces it.
+
+  $ printf 'long version(void) { return __STDC_VERSION__; }\n' > version.tc
+  $ typec --cc=$clang --emit-c version.tc | grep -o '[0-9][0-9]*L'
+  201710L
+  $ typec --cc=$gcc --emit-c version.tc | grep -o '[0-9][0-9]*L'
+  201710L
+  $ typec --cc=$clang -std=gnu11 --emit-c version.tc | grep -o '[0-9][0-9]*L'
+  201112L
+  $ typec --cc=$gcc -std=gnu11 --emit-c version.tc | grep -o '[0-9][0-9]*L'
+  201112L
 
 Without -o, the object is named after the input in the current
 directory, as cc names it.
@@ -105,7 +118,7 @@ its final command, without the options that only preprocessing uses.
 --emit-c writes the emitted C, on stdout or to the -o file, and compiles
 nothing. It is the preprocessed text.
 
-  $ $clang -E -x c -D__TYPEC__=1 -std=gnu11 x.tc > plain.i
+  $ $clang -E -x c -D__TYPEC__=1 -std=gnu17 x.tc > plain.i
   $ typec --cc=$clang --emit-c x.tc | cmp - plain.i
   $ typec --cc=$clang --emit-c x.tc -o out/x.i && cmp out/x.i plain.i
   $ typec --cc=$clang --emit-c x.tc twice.c

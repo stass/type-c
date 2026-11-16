@@ -44,7 +44,9 @@ let accepted_standards : (string * Typec_syntax.Keyword_set.dialect) list =
     ("gnu11", Gnu); ("gnu1x", Gnu); ("gnu17", Gnu); ("gnu18", Gnu);
   ]
 
-let default_standard = "gnu11"
+(* The standard of a command line without -std=, the default of Clang 11
+   and later (design 2.4). *)
+let default_standard = "gnu17"
 
 (* Design 2.1: a shared header can tell Type-C from C. *)
 let type_c_macro = "-D__TYPEC__=1"

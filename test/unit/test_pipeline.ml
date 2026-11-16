@@ -129,14 +129,14 @@ let () =
   check "-c -o: preprocess"
     (translation.preprocess
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu11"; quiet; "-O2"; "-Iinc"; "-DX";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-O2"; "-Iinc"; "-DX";
         "-x"; "c"; "x.tc";
       ]);
   check "-c -o: compile"
     (for_gcc translation.compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-O2"; "-c"; "-o"; "out/x.o";
+          "cc"; "-std=gnu17"; quiet; "-O2"; "-c"; "-o"; "out/x.o";
           "-x"; "cpp-output"; "/T/1/x.c"; quiet_markers;
         ]);
   check "-c -o: files"
@@ -144,7 +144,7 @@ let () =
     && translation.preprocessed = "/T/1/preprocessed.i"
     && translation.emitted = File "/T/1/x.c");
   check "-c -o: target options are the compile step's"
-    (plan.target_options = [ "-std=gnu11"; quiet; "-O2" ]);
+    (plan.target_options = [ "-std=gnu17"; quiet; "-O2" ]);
   check "-c -o: no final command" (Option.is_none plan.final)
 
 (* The compile step reads typec's output, which is UTF-8 whatever the
@@ -157,7 +157,7 @@ let () =
     (for_gcc translation.compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
           "/T/1/x.c"; quiet_markers;
         ])
 
@@ -167,7 +167,7 @@ let () =
     (compile [ "-c"; "dir/x.tc" ]
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
           "/T/1/x.c"; quiet_markers;
         ]);
   check "-S"
@@ -181,7 +181,7 @@ let () =
     (compile [ "-fsyntax-only"; "x.tc"; "-o"; "x" ]
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-fsyntax-only"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; quiet; "-fsyntax-only"; "-x"; "cpp-output";
           "/T/1/x.c"; quiet_markers;
         ])
 
@@ -194,7 +194,7 @@ let () =
     (for_gcc (only_translation plan).compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
           "/T/1/x.c"; quiet_markers;
         ]);
   let plan = planned [ "-Iinc"; "-MD"; "a.tc"; "b.tc"; "-lm" ] in
@@ -202,7 +202,7 @@ let () =
     (for_gcc plan.final
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
+          "cc"; "-std=gnu17"; quiet; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
           "cpp-output"; "/T/2/b.c"; "-lm"; quiet_markers;
         ]);
   check "link .tc inputs only: no compile step"
@@ -230,14 +230,14 @@ let () =
     (for_clang (only_translation plan).compile
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-trigraphs"; "-c"; "-o"; "x.o"; "-x";
+          "cc"; "-std=gnu17"; quiet; "-trigraphs"; "-c"; "-o"; "x.o"; "-x";
           "cpp-output"; "/T/1/x.c"; quiet_markers; "-fno-trigraphs";
         ]);
   check "Clang: the final command compiles without trigraphs"
     (for_clang (planned [ "x.tc" ]).final
     = Some
         [
-          "cc"; "-std=gnu11"; quiet; "-x"; "cpp-output"; "/T/1/x.c";
+          "cc"; "-std=gnu17"; quiet; "-x"; "cpp-output"; "/T/1/x.c";
           quiet_markers; "-fno-trigraphs";
         ]);
   let plan = planned [ "x.tc"; "y.c" ] in
@@ -249,27 +249,27 @@ let () =
   check "-MD names the file and target after -o"
     (preprocess [ "-MD"; "-c"; "x.tc"; "-o"; "out/x.o" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu11"; quiet; "-MD"; "-MF";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MD"; "-MF";
         "out/x.d";
         "-MQ"; "out/x.o"; "-x"; "c"; "x.tc";
       ]);
   check "-MMD names the file and target after the input"
     (preprocess [ "-MMD"; "-MP"; "-c"; "dir/x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu11"; quiet; "-MMD"; "-MP"; "-MF";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MMD"; "-MP"; "-MF";
         "x.d"; "-MQ"; "x.o"; "-x"; "c"; "dir/x.tc";
       ]);
   check "-MF and -MT are kept"
     (preprocess [ "-MD"; "-MF"; "d"; "-MTt"; "-c"; "x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu11"; quiet; "-MD"; "-MF"; "d";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MD"; "-MF"; "d";
         "-MTt";
         "-x"; "c"; "x.tc";
       ]);
   check "-MF without -MD adds nothing"
     (preprocess [ "-MF"; "d"; "-c"; "x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu11"; quiet; "-MF"; "d"; "-x"; "c";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MF"; "d"; "-x"; "c";
         "x.tc";
       ])
 
@@ -311,12 +311,12 @@ let () =
   check "a .tc input after -x c is not one"
     (not (Pipeline.has_type_c_input (Command_line.read [ "-x"; "c"; "x.tc" ])))
 
-(* The keywords are those of the last -std=, else of gnu11, unless the
+(* The keywords are those of the last -std=, else of gnu17, unless the
    last -fasm or -fno-asm overrides them wherever it stands, as in GCC
    and Clang. *)
 let () =
   let keywords words = (only_translation (planned words)).dialect in
-  check "gnu11 by default" (keywords [ "x.tc" ] = Gnu);
+  check "gnu17 by default" (keywords [ "x.tc" ] = Gnu);
   check "-std=c11" (keywords [ "-std=c11"; "x.tc" ] = Iso);
   check "--std iso9899:2018"
     (keywords [ "--std"; "iso9899:2018"; "x.tc" ] = Iso);

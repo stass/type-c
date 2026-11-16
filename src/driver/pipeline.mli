@@ -22,7 +22,7 @@
     and option reaches the backend as given, so a [.c] input is compiled
     as cc compiles it.
 
-    The commands that read the text of a translation get [-std=gnu11]
+    The commands that read the text of a translation get [-std=gnu17]
     unless the command line selects C11 or C17 (design 2.4). A
     dependency file ([-MD], [-MMD]) comes from the [-E] step, named as cc
     names it: after [-MF], else after [-o] with [.d] for its suffix, else

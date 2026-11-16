@@ -45,7 +45,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   files of `-gsplit-dwarf` and the `-fstack-usage` and
   `-fcallgraph-info` files. A link of `.tc` inputs alone compiles the
   emitted C in its final command and keeps them. Doing that always
-  would give the other inputs the `-std=gnu11` (when the command line
+  would give the other inputs the `-std=gnu17` (when the command line
   has no `-std=`) and `-Wno-gnu-line-marker` that the emitted C needs.
   Decide whether that is acceptable, and then delete the object path,
   or keep the path for those command lines.
@@ -1134,9 +1134,6 @@ types (design 13.3).
 - [Low] The corpus test scripts: c-testsuite's has no CPU limit like the
   others, Csmith's stops at a failed reference link, and a Csmith program
   that times out in both builds with the same output counts as agreeing.
-- [Low] The corpus runner's reference recipe repeats what
-  `src/driver/pipeline.ml` passes to the backend (`-D__TYPEC__=1`, the
-  default `-std=gnu11`), as `test/run/pipeline.t` does.
 
 ## Typing oracle
 

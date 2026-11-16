@@ -24,7 +24,7 @@ val query :
 
     The options are passed as they are, so the caller chooses them: those
     of the compilation that select the target or the dialect, such as
-    [-m32], [-funsigned-char] or [-std=gnu11]. Inputs, [-o] and
+    [-m32], [-funsigned-char] or [-std=gnu17]. Inputs, [-o] and
     dependency options such as [-M] change what the backend prints or
     where, so they must not be among them. *)
 

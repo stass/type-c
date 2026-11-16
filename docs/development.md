@@ -376,10 +376,10 @@ build=/Volumes/Optaine/typec-oracle/_build
 dune build --root . --workspace tools/oracle/oracle.workspace \
   --build-dir "$build" @tools/oracle/runtest
 "$build/oracle/tools/oracle/oracle.exe" /usr/bin/clang lvm.tc.ref.i \
-  /Volumes/Optaine/typec-oracle/lvm.records -std=gnu11
+  /Volumes/Optaine/typec-oracle/lvm.records -std=gnu17
 "$build/oracle/tools/oracle/compare.exe" /usr/bin/clang lvm.tc.ref.i \
   /Volumes/Optaine/typec-oracle/lvm.records tools/oracle/allow-list \
-  -std=gnu11
+  -std=gnu17
 ```
 
 `tools/oracle/oracle.workspace` makes a dune context named `oracle` of

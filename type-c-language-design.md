@@ -191,7 +191,7 @@ inclusion, and:
 
 The accepted dialect is ISO C11 plus a *GNU profile*: the GNU and Clang
 extensions that system headers and common code rely on (13.3). `typec`
-passes `-std=gnu11` to the C compiler unless the command line selects C11
+passes `-std=gnu17` to the C compiler unless the command line selects C11
 or C17 in ISO or GNU form. Other dialects are not accepted. The GNU
 keywords spelled without underscores, `asm` and `typeof`, are keywords in
 the GNU form and identifiers in the ISO form, as for the C compiler;
@@ -199,8 +199,14 @@ the GNU form and identifiers in the ISO form, as for the C compiler;
 keywords in both.
 
 Rationale. Headers select constructs by `__STDC_VERSION__`; pinning the
-dialect bounds what the front end must parse. Everything Type-C lowers to
-compiles in the dialect the command line selects: ISO C11 plus only GNU
+dialect bounds what the front end must parse. The default is `gnu17`,
+the default of Clang 11 and later, so a `.c` file renamed to `.tc`
+keeps the `__STDC_VERSION__` it had, `201710L`. C17 is C11 with defect
+fixes and no new syntax, so the front end reads the same language in
+either. GCC 15 and later default to `gnu23`, which `typec` does not
+read; a build with such a GCC that wants its `.c` and `.tc` files in
+one dialect passes `-std=gnu17` or `-std=gnu11`. Everything Type-C
+lowers to compiles in the dialect the command line selects: ISO C11 plus only GNU
 forms that GCC and Clang accept in every dialect, also under
 `-pedantic-errors`. Three are used: `__typeof__`, which C23 standardises
 as `typeof` and which names a type where no name for it is sure to be
