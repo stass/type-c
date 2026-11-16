@@ -186,7 +186,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   first consumer of such an argument must not look names up itself:
   parse the arguments of the attributes whose grammar is known (an
   expression for `aligned` and `vector_size`, an identifier for
-  `cleanup`) through the parser's scope.
+  `cleanup`) through the parser's scope. Two more consumers: a
+  constructor qualified through a typedef name (`aligned(sizeof(v.A))`)
+  is left to the backend, which refuses it as a syntax error, where
+  typec could refuse it with its own message (design 13.5); and an instance named
+  through a typedef name (`typedef o(int) oi;` then
+  `aligned(sizeof(oi))`) is not completed (design 10.3), so the backend
+  refuses `sizeof` of an incomplete type.
 - [Low] `Reachability.label_refusal` checks the jumps into a statement
   expression and into a guarded statement (design 4.3 rule 3) in a
   second walk, which must visit every node where the parser reads a
@@ -701,13 +707,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
-- [Low] A constructor in the arguments of an attribute reaches the
-  backend as written (`aligned(sizeof(B(1)))`, which it refuses as a
-  call of an undeclared function), though design 13.5 refuses one in
-  Type-C text as it refuses a generic: the parser's scope does not hold
-  constructors, so `Parser.own_name` cannot say that an identifier is
-  one. Add `Own_constructor` once the parser knows constructors by
-  name.
 - [Low] `external_facts.anchor` is an option only for the state before
   the first external declaration, and `note_text` takes it with
   `Option.get`. Build the facts at the first external declaration, or
@@ -730,13 +729,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   knows every scope, record in `Tree.declared` and `Declares` whether
   the declaration's scope is file scope, and read that instead; generic
   functions (package 2.2), which have bodies, need it right.
-- [Medium] Design 13.5 refuses an identifier of unread text that
-  denotes a constructor where C declares its spelling, and refuses the
-  identifiers of the second unread-text rule in all Type-C text.
-  `Resolution` checks only moved text, and cannot tell a constructor:
-  the parser's views hold none, as a target type selects one (3.3).
-  Decide with package 2.3 how unread text names a constructor, and check
-  the rule for Type-C text that does not move at its own place.
 - [Low] Design 3.5's example `type named(T) = struct { str name; T
   value; }; int str; named(int) n;` is valid, but the parser reads
   `str` as an ordinary identifier until package 3.4 gives it its

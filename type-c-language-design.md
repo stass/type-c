@@ -378,7 +378,8 @@ address.
 A constructor is named in one of two ways.
 
 - **Qualified:** `T.C`, where `T` is a typedef name or a type application
-  that denotes a variant. This works in every expression.
+  that denotes a variant. This works in every expression that typing
+  reads.
 - **Unqualified:** `C` alone, in a position whose *target type* is a variant
   with a constructor `C`. There, `C` denotes the
   constructor even when an ordinary identifier `C` is visible, so the
@@ -415,8 +416,16 @@ that is no variant selects no constructor:
 with the constructor `A` of `e`, whatever object `A` is visible.
 
 Everywhere else an unqualified name is looked up as C looks it up, and a
-constructor needs the qualified form. String literals use the same
-mechanism to become `str` (section 8).
+constructor needs the qualified form. The positions are those of text
+that typing reads: unread text (13.5) has no target type, since the
+backend reads it as C, so an unqualified name there means what C
+declares even in such a position. In the scope of `enum { A = 8 };`
+and `type v = | A;`, the `A` of
+`__attribute__((assume(g((struct s){ A, 1 }))))`, where the first
+field of `struct s` has the type `v`, is the enumerator, as the backend
+reads it. The cost is that unread text names no constructor, since
+the qualified form is not C either (13.5). String literals use the
+same mechanism to become `str` (section 8).
 
 A constructor expression, qualified or not, stands within the scope of its
 variant's declaration: from the type declaration to the end of the block,
@@ -3479,14 +3488,14 @@ Three rules carry the property into unread text.
   these refusals.
 - For the second half, an identifier in an attribute argument or a
   `#pragma` line may denote, at its place, what lowering writes under a
-  name of its own: a type parameter, a universe name, a constructor or
-  a generic. Lowering leaves unread text as the source spells it,
-  whether the text is moved or not, so the backend reads the spelling
-  as the lowered C declares it there. In an attribute argument such an
-  identifier is an error whatever the C around it declares: a type
-  parameter in the definition of a generic, in any text (3.5 rule 4),
-  and a generic, a constructor or a universe name in Type-C text. The
-  backend would read a C entity of the spelling with no message, as
+  name of its own: a type parameter, a universe name or a generic.
+  Lowering leaves unread text as the source spells it, whether the text
+  is moved or not, so the backend reads the spelling as the lowered C
+  declares it there. In an attribute argument such an identifier is
+  an error whatever the C around it declares: a type parameter in the
+  definition of a generic, in any text (3.5 rule 4), and a generic or a
+  universe name in Type-C text. The backend would read a C entity of
+  the spelling with no message, as
   `__attribute__((aligned(sizeof(T))))` in a generic with a type
   parameter `T` would take the size of `char` in every instance after
   `typedef char T;`; or find nothing and refuse the lowered C, as it
@@ -3507,7 +3516,11 @@ Three rules carry the property into unread text.
   an error. Where it hides none, the lowered C declares nothing under
   the spelling and the backend decides, as it takes the `push` of
   `#pragma pack(push)` in the scope of a generic named `push`. C text
-  that does not move is the backend's to read.
+  that does not move is the backend's to read. A constructor is not
+  among these names. Unread text has no target type (3.3), so an
+  unqualified name there means what C declares. The qualified `T.C` is
+  refused through a generic or a universe name `T`; through a typedef
+  name it is not C, and the backend refuses it.
 - No other unread text stands in moved text, in any text. The two
   rules above cover attribute arguments and `#pragma` lines, whose
   identifiers `typec` looks at. All other unread text is a body that
