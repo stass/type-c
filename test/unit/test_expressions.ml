@@ -994,12 +994,13 @@ let try_sites () =
     | Substatement -> "sub"
   in
   let describe (site : Expressions.try_site) =
-    Printf.sprintf "%d %s%s %s %s %b %b" site.temporary
+    let field = Option.value ~default:"-" in
+    Printf.sprintf "%d %s%s %s %s %s %s" site.temporary
       (standing site.holder.standing)
       (if Option.is_some site.holder.labels then " labelled" else "")
       (String.concat "," site.operand_instance.arguments)
       (String.concat "," site.return_instance.arguments)
-      site.ok_has_field site.err_has_field
+      (field site.ok_field) (field site.err_field)
   in
   match read ~file:"in.tc" lp64 source with
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
@@ -1008,10 +1009,10 @@ let try_sites () =
         List.map describe (Expressions.tries (Declarations.typed result))
       in
       let expected =
-        [ "0 item i,i i,i true true";
-          "1 sub labelled i,i i,i true true";
-          "0 item v,l c,l false true";
-          "0 item i,v c,v true false" ]
+        [ "0 item i,i i,i value error";
+          "1 sub labelled i,i i,i value error";
+          "0 item v,l c,l - error";
+          "0 item i,v c,v value -" ]
       in
       if actual <> expected then
         fail_case source (String.concat "; " actual)

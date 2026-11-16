@@ -4,8 +4,13 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 A try stands in three positions (design 5.1 rule 3): the whole of an
 expression statement, the whole right operand of a simple assignment
 that is one, and the whole initialiser of the one declarator of a
-declaration that is a block item. Each is typed and, until lowering
-writes it, refused there.
+declaration that is a block item. Lowering writes a temporary that
+holds the operand and its test before the statement or declaration
+that holds the try, and the Ok field where the try stood (design 13.5).
+The error path traps on a tag that is neither Ok nor Err, and returns
+the Err built from the temporary. A statement try e; reads no field and
+leaves nothing after the test; a void T has no Ok field, and a void E
+no Err field, so the Err is built without one.
 
   $ cat > statement.tc <<'EOF'
   > result(void, int) g(void);
@@ -15,8 +20,146 @@ writes it, refused there.
   > }
   > EOF
   $ ./golden.exe statement.tc
-  statement.tc:3: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "statement.tc"
+  
+  # 1 "statement.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "statement.tc"
+  typedef void __tc_arg__v; typedef int __tc_arg__i; struct result__vi; typedef struct result__vi result__vi;
+  # 1 "statement.tc"
+  #pragma pack(pop)
+  # 1 "statement.tc"
+  
+  # 1 "statement.tc"
+  result__vi
+  # 1 "statement.tc"
+   g(void);
+  
+  # 2 "statement.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "statement.tc"
+  struct result__ii; typedef struct result__ii result__ii;
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
+  # 2 "statement.tc"
+  #pragma pack(pop)
+  # 2 "statement.tc"
+  
+  # 2 "statement.tc"
+  result__ii
+  # 2 "statement.tc"
+   h(void) {
+    
+  # 3 "statement.tc"
+  const struct result__vi __tc_t0 = g ( ) ; if (__tc_t0.tag != result__vi_Ok) { if (__tc_t0.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 3 "statement.tc"
+  
+  # 3 "statement.tc"
+  
+  # 3 "statement.tc"
+  
+    return 
+  # 4 "statement.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 4 "statement.tc"
+  0
+  # 4 "statement.tc"
+   } })
+  # 4 "statement.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+A statement try e; discards the value of an Ok that has a field: no
+read of the field is left as a statement of its own.
+
+  $ cat > discarded.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(void) {
+  >   try f();
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe discarded.tc
+  # 1 "discarded.tc"
+  
+  # 1 "discarded.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "discarded.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 1 "discarded.tc"
+  #pragma pack(pop)
+  # 1 "discarded.tc"
+  
+  # 1 "discarded.tc"
+  result__ii
+  # 1 "discarded.tc"
+   f(void);
+  
+  # 2 "discarded.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 2 "discarded.tc"
+  #pragma pack(pop)
+  # 2 "discarded.tc"
+  
+  # 2 "discarded.tc"
+  result__ii
+  # 2 "discarded.tc"
+   h(void) {
+    
+  # 3 "discarded.tc"
+  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 3 "discarded.tc"
+  
+  # 3 "discarded.tc"
+  
+  # 3 "discarded.tc"
+  
+    return 
+  # 4 "discarded.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 4 "discarded.tc"
+  0
+  # 4 "discarded.tc"
+   } })
+  # 4 "discarded.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
   $ cat > assignment.tc <<'EOF'
   > result(int, int) f(void);
@@ -27,8 +170,70 @@ writes it, refused there.
   > }
   > EOF
   $ ./golden.exe assignment.tc
-  assignment.tc:4: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "assignment.tc"
+  
+  # 1 "assignment.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "assignment.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 1 "assignment.tc"
+  #pragma pack(pop)
+  # 1 "assignment.tc"
+  
+  # 1 "assignment.tc"
+  result__ii
+  # 1 "assignment.tc"
+   f(void);
+  
+  # 2 "assignment.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 2 "assignment.tc"
+  #pragma pack(pop)
+  # 2 "assignment.tc"
+  
+  # 2 "assignment.tc"
+  result__ii
+  # 2 "assignment.tc"
+   h(void) {
+    int x;
+    
+  # 4 "assignment.tc"
+  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 4 "assignment.tc"
+  x = 
+  # 4 "assignment.tc"
+  __tc_t0.u.Ok.value
+  # 4 "assignment.tc"
+  ;
+    return 
+  # 5 "assignment.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 5 "assignment.tc"
+  x
+  # 5 "assignment.tc"
+   } })
+  # 5 "assignment.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
   $ cat > declaration.tc <<'EOF'
   > result(int, int) f(void);
@@ -38,8 +243,69 @@ writes it, refused there.
   > }
   > EOF
   $ ./golden.exe declaration.tc
-  declaration.tc:3: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "declaration.tc"
+  
+  # 1 "declaration.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "declaration.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 1 "declaration.tc"
+  #pragma pack(pop)
+  # 1 "declaration.tc"
+  
+  # 1 "declaration.tc"
+  result__ii
+  # 1 "declaration.tc"
+   f(void);
+  
+  # 2 "declaration.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 2 "declaration.tc"
+  #pragma pack(pop)
+  # 2 "declaration.tc"
+  
+  # 2 "declaration.tc"
+  result__ii
+  # 2 "declaration.tc"
+   h(void) {
+    
+  # 3 "declaration.tc"
+  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 3 "declaration.tc"
+  int x = 
+  # 3 "declaration.tc"
+  __tc_t0.u.Ok.value
+  # 3 "declaration.tc"
+  ;
+    return 
+  # 4 "declaration.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 4 "declaration.tc"
+  x
+  # 4 "declaration.tc"
+   } })
+  # 4 "declaration.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
 A label of C stands before the statement that holds a try, and an arm
 holds one as any block does.
@@ -56,8 +322,73 @@ holds one as any block does.
   > }
   > EOF
   $ ./golden.exe labelled.tc
-  labelled.tc:6: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "labelled.tc"
+  
+  # 1 "labelled.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "labelled.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 1 "labelled.tc"
+  #pragma pack(pop)
+  # 1 "labelled.tc"
+  
+  # 1 "labelled.tc"
+  result__ii
+  # 1 "labelled.tc"
+   f(void);
+  
+  # 2 "labelled.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 2 "labelled.tc"
+  #pragma pack(pop)
+  # 2 "labelled.tc"
+  
+  # 2 "labelled.tc"
+  result__ii
+  # 2 "labelled.tc"
+   h(int c) {
+    int x;
+    switch (c) {
+    case 1:
+    again: 
+  # 6 "labelled.tc"
+  ; const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 6 "labelled.tc"
+  x = 
+  # 6 "labelled.tc"
+  __tc_t0.u.Ok.value
+  # 6 "labelled.tc"
+  ;
+    }
+    return 
+  # 8 "labelled.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 8 "labelled.tc"
+  x
+  # 8 "labelled.tc"
+   } })
+  # 8 "labelled.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
   $ cat > arm.tc <<'EOF'
   > result(int, int) f(void);
@@ -72,8 +403,541 @@ holds one as any block does.
   > }
   > EOF
   $ ./golden.exe arm.tc
-  arm.tc:5: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "arm.tc"
+  
+  # 1 "arm.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "arm.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 1 "arm.tc"
+  #pragma pack(pop)
+  # 1 "arm.tc"
+  
+  # 1 "arm.tc"
+  result__ii
+  # 1 "arm.tc"
+   f(void);
+  
+  # 2 "arm.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 2 "arm.tc"
+  #pragma pack(pop)
+  # 2 "arm.tc"
+  
+  # 2 "arm.tc"
+  result__ii
+  # 2 "arm.tc"
+   h(
+  # 2 "arm.tc"
+  result__ii
+  # 2 "arm.tc"
+   r) {
+    
+  # 3 "arm.tc"
+  { const struct result__ii *const __tc_match = &(
+  # 3 "arm.tc"
+  r
+  # 3 "arm.tc"
+  ); switch (__tc_match->tag) {
+  # 3 "arm.tc"
+  
+    
+  # 4 "arm.tc"
+  case result__ii_Ok: { const __typeof__(__tc_match->u.Ok.value) v = __tc_match->u.Ok.value; {
+  # 4 "arm.tc"
+  
+      
+  # 5 "arm.tc"
+  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 5 "arm.tc"
+  int w = 
+  # 5 "arm.tc"
+  __tc_t0.u.Ok.value
+  # 5 "arm.tc"
+  ;
+      return 
+  # 6 "arm.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 6 "arm.tc"
+  v + w
+  # 6 "arm.tc"
+   } })
+  # 6 "arm.tc"
+  ;
+    
+  # 7 "arm.tc"
+   } __builtin_trap(); }
+  # 7 "arm.tc"
+  
+  # 7 "arm.tc"
+  case result__ii_Err: {
+  # 7 "arm.tc"
+  
+      return r;
+    
+  # 9 "arm.tc"
+   __builtin_trap(); }
+  # 9 "arm.tc"
+  
+  # 9 "arm.tc"
+  default: __builtin_trap(); } }
+  # 9 "arm.tc"
+  
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+A substatement that holds a try becomes a block, which holds the null
+statement of its labels, the temporary, the test and the statement, so
+that the labels stay under the statement around it.
+
+  $ cat > substatement.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(void, int) g(void);
+  > result(int, int) h(int c) {
+  >   int x = 0;
+  >   if (c)
+  >     x = try f();
+  >   else
+  >   again: try g();
+  >   while (c--) try g();
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe substatement.tc
+  # 1 "substatement.tc"
+  
+  # 1 "substatement.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "substatement.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 1 "substatement.tc"
+  #pragma pack(pop)
+  # 1 "substatement.tc"
+  
+  # 1 "substatement.tc"
+  result__ii
+  # 1 "substatement.tc"
+   f(void);
+  
+  # 2 "substatement.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "substatement.tc"
+  typedef void __tc_arg__v; struct result__vi; typedef struct result__vi result__vi;
+  # 2 "substatement.tc"
+  #pragma pack(pop)
+  # 2 "substatement.tc"
+  
+  # 2 "substatement.tc"
+  result__vi
+  # 2 "substatement.tc"
+   g(void);
+  
+  # 3 "substatement.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
+  # 3 "substatement.tc"
+  #pragma pack(pop)
+  # 3 "substatement.tc"
+  
+  # 3 "substatement.tc"
+  result__ii
+  # 3 "substatement.tc"
+   h(int c) {
+    int x = 0;
+    if (c)
+      
+  # 6 "substatement.tc"
+  {
+  # 6 "substatement.tc"
+  
+  # 6 "substatement.tc"
+  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 6 "substatement.tc"
+  x = 
+  # 6 "substatement.tc"
+  __tc_t0.u.Ok.value
+  # 6 "substatement.tc"
+  ;
+    
+  # 7 "substatement.tc"
+  }
+  # 7 "substatement.tc"
+  else
+    
+  # 8 "substatement.tc"
+  {
+  # 8 "substatement.tc"
+  again: 
+  # 8 "substatement.tc"
+  ; const struct result__vi __tc_t1 = g ( ) ; if (__tc_t1.tag != result__vi_Ok) { if (__tc_t1.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
+  # 8 "substatement.tc"
+  
+  # 8 "substatement.tc"
+  
+  # 8 "substatement.tc"
+  
+    
+  # 9 "substatement.tc"
+  }
+  # 9 "substatement.tc"
+  while (c--) 
+  # 9 "substatement.tc"
+  {
+  # 9 "substatement.tc"
+  
+  # 9 "substatement.tc"
+  const struct result__vi __tc_t2 = g ( ) ; if (__tc_t2.tag != result__vi_Ok) { if (__tc_t2.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); }
+  # 9 "substatement.tc"
+  
+  # 9 "substatement.tc"
+  
+  # 9 "substatement.tc"
+  
+    
+  # 10 "substatement.tc"
+  }
+  # 10 "substatement.tc"
+  return 
+  # 10 "substatement.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 10 "substatement.tc"
+  x
+  # 10 "substatement.tc"
+   } })
+  # 10 "substatement.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+Where E is void, Err has no field, and the function returns the Err
+without one. The Ok of the operand's type may be a result of its own.
+
+  $ cat > void_error.tc <<'EOF'
+  > result(int, void) f(void);
+  > result(long, void) h(void) {
+  >   long x = try f();
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe void_error.tc
+  # 1 "void_error.tc"
+  
+  # 1 "void_error.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "void_error.tc"
+  typedef int __tc_arg__i; typedef void __tc_arg__v; struct result__iv; typedef struct result__iv result__iv;
+  # 1 "void_error.tc"
+  #pragma pack(pop)
+  # 1 "void_error.tc"
+  
+  # 1 "void_error.tc"
+  result__iv
+  # 1 "void_error.tc"
+   f(void);
+  
+  # 2 "void_error.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "void_error.tc"
+  typedef long __tc_arg__l; struct result__lv; typedef struct result__lv result__lv;
+  # 2 "<universe>" 3
+  enum result__lv_tag { result__lv_Err, result__lv_Ok }; struct result__lv { enum result__lv_tag tag; union { struct { __tc_arg__l value ; } Ok; } u; }; enum result__iv_tag { result__iv_Err, result__iv_Ok }; struct result__iv { enum result__iv_tag tag; union { struct { __tc_arg__i value ; } Ok; } u; };
+  # 2 "void_error.tc"
+  #pragma pack(pop)
+  # 2 "void_error.tc"
+  
+  # 2 "void_error.tc"
+  result__lv
+  # 2 "void_error.tc"
+   h(void) {
+    
+  # 3 "void_error.tc"
+  const struct result__iv __tc_t0 = f ( ) ; if (__tc_t0.tag != result__iv_Ok) { if (__tc_t0.tag != result__iv_Err) __builtin_trap(); return ((struct result__lv){ .tag = result__lv_Err }); }
+  # 3 "void_error.tc"
+  long x = 
+  # 3 "void_error.tc"
+  __tc_t0.u.Ok.value
+  # 3 "void_error.tc"
+  ;
+    return 
+  # 4 "void_error.tc"
+  ((struct result__lv){ .tag = result__lv_Ok, .u.Ok = { 
+  # 4 "void_error.tc"
+  x
+  # 4 "void_error.tc"
+   } })
+  # 4 "void_error.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+  $ cat > nested.tc <<'EOF'
+  > result(result(int, char), int) f(void);
+  > result(char, int) h(void) {
+  >   result(int, char) inner = try f();
+  >   match (inner) {
+  >   case Ok(v):
+  >     return Ok((char)v);
+  >   case Err(e):
+  >     return Ok(e);
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe nested.tc
+  # 1 "nested.tc"
+  
+  # 1 "nested.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "nested.tc"
+  typedef int __tc_arg__i; typedef char __tc_arg__c; struct result__ic; typedef struct result__ic result__ic; struct result__ic; typedef struct result__ic __tc_arg__I6resulticE; struct result__I6resulticEi; typedef struct result__I6resulticEi result__I6resulticEi;
+  # 1 "nested.tc"
+  #pragma pack(pop)
+  # 1 "nested.tc"
+  
+  # 1 "nested.tc"
+  result__I6resulticEi
+  # 1 "nested.tc"
+   f(void);
+  
+  # 2 "nested.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "nested.tc"
+  struct result__ci; typedef struct result__ci result__ci;
+  # 2 "<universe>" 3
+  enum result__ci_tag { result__ci_Err, result__ci_Ok }; struct result__ci { enum result__ci_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__c value ; } Ok; } u; }; enum result__ic_tag { result__ic_Err, result__ic_Ok }; struct result__ic { enum result__ic_tag tag; union { struct { __tc_arg__c error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__I6resulticEi_tag { result__I6resulticEi_Err, result__I6resulticEi_Ok }; struct result__I6resulticEi { enum result__I6resulticEi_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__I6resulticE value ; } Ok; } u; };
+  # 2 "nested.tc"
+  #pragma pack(pop)
+  # 2 "nested.tc"
+  
+  # 2 "nested.tc"
+  result__ci
+  # 2 "nested.tc"
+   h(void) {
+    
+  # 3 "nested.tc"
+  const struct result__I6resulticEi __tc_t0 = f ( ) ; if (__tc_t0.tag != result__I6resulticEi_Ok) { if (__tc_t0.tag != result__I6resulticEi_Err) __builtin_trap(); return ((struct result__ci){ .tag = result__ci_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 3 "nested.tc"
+  
+  # 3 "nested.tc"
+  result__ic
+  # 3 "nested.tc"
+   inner = 
+  # 3 "nested.tc"
+  __tc_t0.u.Ok.value
+  # 3 "nested.tc"
+  ;
+    
+  # 4 "nested.tc"
+  { const struct result__ic *const __tc_match = &(
+  # 4 "nested.tc"
+  inner
+  # 4 "nested.tc"
+  ); switch (__tc_match->tag) {
+  # 4 "nested.tc"
+  
+    
+  # 5 "nested.tc"
+  case result__ic_Ok: { const __typeof__(__tc_match->u.Ok.value) v = __tc_match->u.Ok.value; {
+  # 5 "nested.tc"
+  
+      return 
+  # 6 "nested.tc"
+  ((struct result__ci){ .tag = result__ci_Ok, .u.Ok = { 
+  # 6 "nested.tc"
+  (char)v
+  # 6 "nested.tc"
+   } })
+  # 6 "nested.tc"
+  ;
+    
+  # 7 "nested.tc"
+   } __builtin_trap(); }
+  # 7 "nested.tc"
+  
+  # 7 "nested.tc"
+  case result__ic_Err: { const __typeof__(__tc_match->u.Err.error) e = __tc_match->u.Err.error; {
+  # 7 "nested.tc"
+  
+      return 
+  # 8 "nested.tc"
+  ((struct result__ci){ .tag = result__ci_Ok, .u.Ok = { 
+  # 8 "nested.tc"
+  e
+  # 8 "nested.tc"
+   } })
+  # 8 "nested.tc"
+  ;
+    
+  # 9 "nested.tc"
+   } __builtin_trap(); }
+  # 9 "nested.tc"
+  
+  # 9 "nested.tc"
+  default: __builtin_trap(); } }
+  # 9 "nested.tc"
+  
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+The operand is moved text with its own lowering: a constructor and the
+name of an instance in it move with it.
+
+  $ cat > moved.tc <<'EOF'
+  > result(int, int) f(option(int) o, const void *p);
+  > result(int, int) h(const void *p) {
+  >   int x = try f(Some(1), (const option(long) *)p);
+  >   int y = try f(None, p);
+  >   return Ok(x + y);
+  > }
+  > EOF
+  $ ./golden.exe moved.tc
+  # 1 "moved.tc"
+  
+  # 1 "moved.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "moved.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii; struct option__i; typedef struct option__i option__i;
+  # 1 "moved.tc"
+  #pragma pack(pop)
+  # 1 "moved.tc"
+  
+  # 1 "moved.tc"
+  result__ii
+  # 1 "moved.tc"
+   f(
+  # 1 "moved.tc"
+  option__i
+  # 1 "moved.tc"
+   o, const void *p);
+  
+  # 2 "moved.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 1 "<universe>" 3
+  enum option__i_tag { option__i_None, option__i_Some }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
+  # 3 "moved.tc"
+  typedef long __tc_arg__l; struct option__l; typedef struct option__l option__l;
+  # 2 "moved.tc"
+  #pragma pack(pop)
+  # 2 "moved.tc"
+  
+  # 2 "moved.tc"
+  result__ii
+  # 2 "moved.tc"
+   h(const void *p) {
+    
+  # 3 "moved.tc"
+  const struct result__ii __tc_t0 = f ( ((struct option__i){ .tag = option__i_Some, .u.Some = {  1  } }) , ( const option__l * ) p ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 3 "moved.tc"
+  int x = 
+  # 3 "moved.tc"
+  __tc_t0.u.Ok.value
+  # 3 "moved.tc"
+  ;
+    
+  # 4 "moved.tc"
+  const struct result__ii __tc_t1 = f ( ((struct option__i){ .tag = option__i_None }) , p ) ; if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
+  # 4 "moved.tc"
+  int y = 
+  # 4 "moved.tc"
+  __tc_t1.u.Ok.value
+  # 4 "moved.tc"
+  ;
+    return 
+  # 5 "moved.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 5 "moved.tc"
+  x + y
+  # 5 "moved.tc"
+   } })
+  # 5 "moved.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
 The operand of try has a result type, and the function returns one with
 the identical error type (rule 1); a top-level qualifier counts on
@@ -87,8 +951,73 @@ neither.
   > }
   > EOF
   $ ./golden.exe qualified.tc
-  qualified.tc:3: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "qualified.tc"
+  
+  # 1 "qualified.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "qualified.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 1 "qualified.tc"
+  #pragma pack(pop)
+  # 1 "qualified.tc"
+  const 
+  # 1 "qualified.tc"
+  result__ii
+  # 1 "qualified.tc"
+   r;
+  
+  # 2 "qualified.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "qualified.tc"
+  typedef long __tc_arg__l; struct result__li; typedef struct result__li result__li;
+  # 2 "<universe>" 3
+  enum result__li_tag { result__li_Err, result__li_Ok }; struct result__li { enum result__li_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__l value ; } Ok; } u; };
+  # 2 "qualified.tc"
+  #pragma pack(pop)
+  # 2 "qualified.tc"
+  const 
+  # 2 "qualified.tc"
+  result__li
+  # 2 "qualified.tc"
+   h(void) {
+    
+  # 3 "qualified.tc"
+  const struct result__ii __tc_t0 = r ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__li){ .tag = result__li_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 3 "qualified.tc"
+  int x = 
+  # 3 "qualified.tc"
+  __tc_t0.u.Ok.value
+  # 3 "qualified.tc"
+  ;
+    return 
+  # 4 "qualified.tc"
+  ((struct result__li){ .tag = result__li_Ok, .u.Ok = { 
+  # 4 "qualified.tc"
+  x
+  # 4 "qualified.tc"
+   } })
+  # 4 "qualified.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
   $ cat > operand.tc <<'EOF'
   > result(int, int) h(void) {
@@ -387,8 +1316,71 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_then_null.tc
-  pragma_then_null.tc:5: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "pragma_then_null.tc"
+  
+  # 1 "pragma_then_null.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 1 "pragma_then_null.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 1 "pragma_then_null.tc"
+  #pragma pack(pop)
+  # 1 "pragma_then_null.tc"
+  
+  # 1 "pragma_then_null.tc"
+  result__ii
+  # 1 "pragma_then_null.tc"
+   f(void);
+  
+  # 2 "pragma_then_null.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 2 "pragma_then_null.tc"
+  #pragma pack(pop)
+  # 2 "pragma_then_null.tc"
+  
+  # 2 "pragma_then_null.tc"
+  result__ii
+  # 2 "pragma_then_null.tc"
+   h(void) {
+  #pragma GCC diagnostic push
+    ;
+    
+  # 5 "pragma_then_null.tc"
+  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 5 "pragma_then_null.tc"
+  int x = 
+  # 5 "pragma_then_null.tc"
+  __tc_t0.u.Ok.value
+  # 5 "pragma_then_null.tc"
+  ;
+    return 
+  # 6 "pragma_then_null.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 6 "pragma_then_null.tc"
+  x
+  # 6 "pragma_then_null.tc"
+   } })
+  # 6 "pragma_then_null.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
 The operand of a try is moved text (rule 3): lowering writes it before
 the statement or declaration that holds the try, where it reads as at
@@ -462,5 +1454,67 @@ ends inside the operand.
   > }
   > EOF
   $ ./golden.exe reads_alike.tc
-  reads_alike.tc:4: lowering of `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
-  [1]
+  # 1 "reads_alike.tc"
+  typedef int wide __attribute__((aligned(16)));
+  
+  # 2 "reads_alike.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "reads_alike.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 2 "reads_alike.tc"
+  #pragma pack(pop)
+  # 2 "reads_alike.tc"
+  
+  # 2 "reads_alike.tc"
+  result__ii
+  # 2 "reads_alike.tc"
+   g(int);
+  
+  # 3 "reads_alike.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 3 "reads_alike.tc"
+  #pragma pack(pop)
+  # 3 "reads_alike.tc"
+  
+  # 3 "reads_alike.tc"
+  result__ii
+  # 3 "reads_alike.tc"
+   h(int n) {
+    
+  # 4 "reads_alike.tc"
+  const struct result__ii __tc_t0 = g ( ( wide ) n + ( { int y = 1 ; y ; } ) ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 4 "reads_alike.tc"
+  int x = 
+  # 4 "reads_alike.tc"
+  __tc_t0.u.Ok.value
+  # 4 "reads_alike.tc"
+  ;
+    return 
+  # 5 "reads_alike.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 5 "reads_alike.tc"
+  x
+  # 5 "reads_alike.tc"
+   } })
+  # 5 "reads_alike.tc"
+  ;
+  }
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");

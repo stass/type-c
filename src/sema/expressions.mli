@@ -241,23 +241,32 @@ type holder = {
   standing : standing;
 }
 
+(** The positions of design 5.1 rule 3: the whole of an expression
+    statement, [try e;]; the whole right operand of a simple assignment
+    that is one; and the whole initialiser of the one declarator of a
+    block-item declaration. *)
+type try_form = Whole_statement | Assigned | Initialiser
+
 (** A [try] (design 5.1) that lowering replaces (13.5): its span and that
-    of its operand; its holder; the view that the parser took in front
-    of the holder, where lowering writes the operand; the number of its
-    temporary, counted from 0 in each function in source order; the
+    of its operand; its holder and its position there; the view that
+    the parser took in front of the holder, where lowering writes the
+    operand; the number of its temporary, counted from 0 in each
+    function in source order; the
     instance of [result] that the operand is, and that the function
-    returns; and whether the [Ok] and the [Err] of the operand's type
-    have a field, which a void argument does not (design 3.5 rule 6). *)
+    returns; and the names of the fields of the [Ok] and the [Err] of
+    the operand's type, [None] where the argument is void (design 3.5
+    rule 6). *)
 type try_site = {
   try_span : Tree.span;
   operand : Tree.span;
   holder : holder;
+  form : try_form;
   place : Parser.View.t;
   temporary : int;
   operand_instance : Ctype.instance;
   return_instance : Ctype.instance;
-  ok_has_field : bool;
-  err_has_field : bool;
+  ok_field : string option;
+  err_field : string option;
 }
 
 val tries : t -> try_site list

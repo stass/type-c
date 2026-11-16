@@ -265,6 +265,29 @@ let type_declaration (tokens : Token.t array) ~(lowered : Spelling.c_name)
    rather than the typedef name, which a block may hide. The arguments
    keep their tokens; only the name of the constructor, the [(] and the
    [)] are replaced. *)
+
+(* The opening of the compound literal of a constructor of [variant]. *)
+let literal_opening (variant : Spelling.c_name) =
+  Printf.sprintf "((struct %s){ " (variant :> string)
+
+let literal_closing = "})"
+
+(* The designation of the tag of a constructor's value, its enumerator. *)
+let tag_designation ~variant constructor =
+  Printf.sprintf ".%s = %s" Tree.tag_member
+    (Tree.enumerator_name ~variant constructor)
+
+(* The designator of the structure of a constructor's fields. *)
+let fields_designator (constructor : Spelling.constructor) =
+  Printf.sprintf ".%s.%s" Tree.union_member (constructor :> string)
+
+(* What stands between the designation of the tag and the values of a
+   constructor's fields, and after those values. *)
+let fields_opening constructor =
+  Printf.sprintf ", %s = { " (fields_designator constructor)
+
+let fields_closing = " } "
+
 let construction (tokens : Token.t array)
     (construction : Typec_sema.Expressions.construction) =
   let { Typec_sema.Expressions.span; variant; constructor; callee; braced; _ } =
@@ -272,29 +295,22 @@ let construction (tokens : Token.t array)
   in
   let location = tokens.(span.first).location in
   let variant = Typec_sema.Encoding.variant_name variant in
-  let enumerator = Tree.enumerator_name ~variant constructor in
-  let opening =
-    if braced then "{ "
-    else Printf.sprintf "((struct %s){ " (variant :> string)
-  in
-  let closing = if braced then "}" else "})" in
-  let tag = Printf.sprintf ".%s = %s" Tree.tag_member enumerator in
+  let opening = if braced then "{ " else literal_opening variant in
+  let closing = if braced then "}" else literal_closing in
+  let tag = tag_designation ~variant constructor in
   match callee with
   | None ->
       replace tokens ~location
         (opening ^ tag ^ " " ^ closing)
         (grammar_tokens tokens span.first span.last)
   | Some callee ->
-      let fields =
-        Printf.sprintf "%s, .%s.%s = { " tag Tree.union_member
-          (constructor :> string)
-      in
       let left_paren = grammar_token_after tokens callee.last in
-      replace tokens ~location (opening ^ fields)
+      replace tokens ~location
+        (opening ^ tag ^ fields_opening constructor)
         (grammar_tokens tokens span.first left_paren)
       @ replace tokens
           ~location:tokens.(span.last).location
-          (" } " ^ closing) [ span.last ]
+          (fields_closing ^ closing) [ span.last ]
 
 (* The tokens that the head of a construction replaces: the callee and
    its [(], or the whole construction without arguments. A qualifying
@@ -480,6 +496,36 @@ let matching (tokens : Token.t array)
   | Arms arms -> match_statement tokens matching arms
   | Test test -> single_pattern_test tokens matching test
 
+(* The tokens [first] to [last] of a text with [edits] applied, as moved
+   text: every token at its own location, and the text of each edit at
+   the edit's. *)
+let moved_text (text : Reader.t) edits ~first ~last =
+  let within (edit : Emitter.edit) =
+    first <= edit.range.first && edit.range.first <= last
+  in
+  let written (edit : Emitter.edit) =
+    match edit.text with
+    | Emitter.Code { code = ""; _ } -> []
+    | Emitter.Code { location; code } -> [ Emitter.generated location code ]
+    | Emitter.Bracketed _ -> invalid_arg "Lowering.moved_text: a bracket"
+    | Emitter.Moved _ -> invalid_arg "Lowering.moved_text: moved text"
+  in
+  let token index =
+    match Emitter.token text index with
+    | Some piece -> piece
+    | None -> invalid_arg "Lowering.moved_text: an unmovable token"
+  in
+  let rec from index edits pieces =
+    match edits with
+    | _ when index > last -> List.concat (List.rev pieces)
+    | (edit : Emitter.edit) :: rest when edit.range.first = index ->
+        from (index + edit.range.count) rest (written edit :: pieces)
+    | (edit : Emitter.edit) :: _ when edit.range.first < index ->
+        invalid_arg "Lowering.moved_text: overlapping edits"
+    | _ -> from (index + 1) edits ([ token index ] :: pieces)
+  in
+  from first (Emitter.in_order (List.filter within edits)) []
+
 (* Design 13.5: a construct that typec answers, where the backend would
    answer for the representation of a distinct type, is steered to or
    replaced by the answer. Each range of its tokens that lowering
@@ -606,6 +652,175 @@ let dropped_edits tokens { span; text } =
   replace tokens ~location:tokens.(span.first).location text
     (grammar_tokens tokens span.first span.last)
 
+(* Design 5.1, 13.5: a try becomes a temporary of the operand's result
+   type that holds the operand, and a test of the temporary's tag that
+   only Ok passes, written directly before the statement or declaration
+   that holds the try; the try becomes the read of the Ok field, and a
+   statement [try e;] becomes nothing. The labels of that statement stay
+   in place on a null statement before the temporary, and a statement
+   that is the substatement of another becomes a block around the
+   labels, the temporary, the test and itself, so that the labels stay
+   under the statement around it. The temporary is const and names the
+   instance by its claimed tag, as the copy of a match does. *)
+
+let temporary_name number = Printf.sprintf "__tc_t%d" number
+
+(* The constructors of the universe's result (design 3.6). *)
+let result_constructor name =
+  match Spelling.constructor name with
+  | Ok constructor -> constructor
+  | Error _ -> invalid_arg "Lowering: a constructor of result"
+
+let ok_constructor = result_constructor Typec_sema.Ctype.result_ok
+let err_constructor = result_constructor Typec_sema.Ctype.result_err
+
+(* typec's own text of a try, at the location of its [try]. *)
+let try_piece location text = Emitter.Piece (Emitter.generated location text)
+
+(* Whether the tag of [temporary], an object of [variant], is not that
+   of [constructor]. *)
+let tag_differs ~temporary ~variant constructor =
+  Printf.sprintf "%s.%s != %s" temporary Tree.tag_member
+    (Tree.enumerator_name ~variant constructor)
+
+let field_read ~temporary constructor field =
+  Printf.sprintf "%s%s.%s" temporary (fields_designator constructor) field
+
+(* The Err of the function's [returned] instance, built from the error
+   that [temporary] holds, or without a field where E is void. The field
+   of the operand's Err is that of the function's, since typing refuses
+   a try whose two error types differ (design 5.1 rule 1). *)
+let returned_err ~returned ~temporary (err_field : string option) =
+  let tag = tag_designation ~variant:returned err_constructor in
+  match err_field with
+  | None -> literal_opening returned ^ tag ^ " " ^ literal_closing
+  | Some field ->
+      literal_opening returned ^ tag
+      ^ fields_opening err_constructor
+      ^ field_read ~temporary err_constructor field
+      ^ fields_closing ^ literal_closing
+
+(* The error path in the four parts of the [try] row of 13.5: the test
+   that only Ok passes; the trap of a tag that is not Err either (5.1
+   rule 2); the cleanups, the copies of the deferred statements that are
+   active at the try (section 6); and the return of the Err, built from
+   the temporary after them. *)
+let error_path ~location ~variant (site : Typec_sema.Expressions.try_site)
+    ~cleanups =
+  let temporary = temporary_name site.temporary in
+  let returned =
+    Typec_sema.Encoding.variant_name (Applied site.return_instance)
+  in
+  let test =
+    Printf.sprintf "if (%s) {" (tag_differs ~temporary ~variant ok_constructor)
+  in
+  let trap_unless_err =
+    Printf.sprintf "if (%s) %s"
+      (tag_differs ~temporary ~variant err_constructor)
+      trap
+  in
+  let return =
+    Printf.sprintf "return %s; }"
+      (returned_err ~returned ~temporary site.err_field)
+  in
+  [ try_piece location test; try_piece location trap_unless_err ]
+  @ cleanups
+  @ [ try_piece location return ]
+
+(* Typing refuses a defer statement (TC0023), so no cleanup is active at
+   any try. *)
+let no_cleanups = []
+
+(* The text in front of the holder: the null statement of its labels,
+   the temporary initialised with the operand, which moves with the
+   edits inside it, and the error path. *)
+let front (text : Reader.t) edits ~location
+    (site : Typec_sema.Expressions.try_site) =
+  let variant =
+    Typec_sema.Encoding.variant_name (Applied site.operand_instance)
+  in
+  let null_statement =
+    match site.holder.labels with
+    | Some _ -> [ try_piece location ";" ]
+    | None -> []
+  in
+  let declaration =
+    Printf.sprintf "const struct %s %s =" (variant :> string)
+      (temporary_name site.temporary)
+  in
+  let operand =
+    moved_text text edits ~first:site.operand.first ~last:site.operand.last
+  in
+  null_statement
+  @ [ try_piece location declaration ]
+  @ List.map (fun piece -> Emitter.Piece piece) operand
+  @ [ try_piece location ";" ]
+  @ error_path ~location ~variant site ~cleanups:no_cleanups
+
+(* The tokens that the try's value replaces: the try, or for [try e;]
+   the whole statement, so that no read of the Ok field is left as a
+   statement whose value goes unused (-Wunused-value). *)
+let replaced_span (site : Typec_sema.Expressions.try_site) =
+  match site.form with
+  | Whole_statement -> site.holder.statement
+  | Assigned | Initialiser -> site.try_span
+
+(* What replaces [replaced_span]: the read of the Ok field, which an
+   assignment or an initialiser takes only where T is not void. *)
+let try_value (site : Typec_sema.Expressions.try_site) =
+  match (site.form, site.ok_field) with
+  | Whole_statement, _ -> ""
+  | (Assigned | Initialiser), Some field ->
+      field_read ~temporary:(temporary_name site.temporary) ok_constructor
+        field
+  | (Assigned | Initialiser), None ->
+      invalid_arg "Lowering: the void value of a try that is no statement"
+
+(* The edits of a try: those in front of its holder and in place of the
+   try, and those after the holder, which close the block of a
+   substatement. *)
+type try_lowering = {
+  opening : Emitter.edit list;
+  closing : Emitter.edit list;
+}
+
+let lower_try (text : Reader.t) edits (site : Typec_sema.Expressions.try_site)
+    =
+  let tokens = text.tokens in
+  let { Typec_sema.Expressions.statement; labels; standing } = site.holder in
+  let location = tokens.(site.try_span.first).location in
+  let in_front =
+    Emitter.moved
+      (Reader.range tokens ~first:statement.first ~count:0)
+      (front text edits ~location site)
+  in
+  let replaced = replaced_span site in
+  let value =
+    replace tokens ~location:tokens.(replaced.first).location
+      (try_value site)
+      (grammar_tokens tokens replaced.first replaced.last)
+  in
+  match standing with
+  | Block_item -> { opening = in_front :: value; closing = [] }
+  | Substatement ->
+      let first = (Option.value labels ~default:statement).first in
+      { opening = insert tokens ~before:first "{" :: in_front :: value;
+        closing = [ insert tokens ~before:(statement.last + 1) "}" ] }
+
+(* The edits of a text with its tries lowered. The edits inside the
+   tokens that a try replaces go with its operand, which moves, and the
+   try's own replace them. Where another construct inserts at the token
+   where a try's holder begins or ends, the two nest: one that ends
+   where the holder begins closes before the try's opening, and one
+   around the holder closes after the try's block. So the closings of
+   the tries go first and their openings last. *)
+let with_tries text edits tries =
+  let replaced = cover (List.map replaced_span tries) in
+  let lowered = List.map (lower_try text edits) tries in
+  List.concat_map (fun lowered -> lowered.closing) lowered
+  @ List.filter (fun edit -> not (goes_with replaced edit)) edits
+  @ List.concat_map (fun lowered -> lowered.opening) lowered
+
 (* The edits of one text: the unit's own, or the definition of an
    instance. A type declaration may hold another, in a statement
    expression of its definition, and a constructor's arguments other
@@ -619,8 +834,12 @@ let dropped_edits tokens { span; text } =
    [replaced] are ranges that lowering replaces whole, such as an
    application by the name of its instance, unless the head of a
    construction replaces them; with those of [answered], the edits
-   inside one go, and the range's own edits replace them. *)
-let text_edits tokens ~declarations ~void_field_spans ~replaced typed =
+   inside one go, and the range's own edits replace them. Last, the
+   tries are lowered ({!with_tries}), and the edits inside the operand
+   of one move with it. *)
+let text_edits (text : Reader.t) ~declarations ~void_field_spans ~replaced
+    typed =
+  let tokens = text.tokens in
   let answered = Typec_sema.Expressions.answered typed in
   let constructions = Typec_sema.Expressions.constructions typed in
   let heads = cover (List.map (construction_head tokens) constructions) in
@@ -648,43 +867,15 @@ let text_edits tokens ~declarations ~void_field_spans ~replaced typed =
         (List.rev (Typec_sema.Expressions.matchings typed))
     @ List.concat_map (steered_controlling tokens) answered
   in
-  List.concat_map (dropped_edits tokens) dropped @ List.filter kept lowered
+  with_tries text
+    (List.concat_map (dropped_edits tokens) dropped @ List.filter kept lowered)
+    (Typec_sema.Expressions.tries typed)
 
 let named (span, name) = { span; text = name }
 
 (* Instances (design 10.3). Each text of an instance stands at the
    anchor that its placement names, in a packing bracket; the texts at
    one anchor share one bracket, in the order of the placements. *)
-
-(* The tokens [first] to [last] of a definition with [edits] applied, as
-   moved text: every token at its own location, and the text of each
-   edit at the edit's. *)
-let moved_text (text : Reader.t) edits ~first ~last =
-  let within (edit : Emitter.edit) =
-    first <= edit.range.first && edit.range.first <= last
-  in
-  let written (edit : Emitter.edit) =
-    match edit.text with
-    | Emitter.Code { code = ""; _ } -> []
-    | Emitter.Code { location; code } -> [ Emitter.generated location code ]
-    | Emitter.Bracketed _ -> invalid_arg "Lowering.moved_text: a bracket"
-    | Emitter.Moved _ -> invalid_arg "Lowering.moved_text: moved text"
-  in
-  let token index =
-    match Emitter.token text index with
-    | Some piece -> piece
-    | None -> invalid_arg "Lowering.moved_text: an unmovable token"
-  in
-  let rec from index edits pieces =
-    match edits with
-    | _ when index > last -> List.concat (List.rev pieces)
-    | (edit : Emitter.edit) :: rest when edit.range.first = index ->
-        from (index + edit.range.count) rest (written edit :: pieces)
-    | (edit : Emitter.edit) :: _ when edit.range.first < index ->
-        invalid_arg "Lowering.moved_text: overlapping edits"
-    | _ -> from (index + 1) edits ([ token index ] :: pieces)
-  in
-  from first (Emitter.in_order (List.filter within edits)) []
 
 (* The generic's definition under the instance's name, with each type
    parameter and application written as the name that the reading
@@ -693,7 +884,7 @@ let instance_definition (text : Reader.t) instance ~first
     (reading : Typec_sema.Declarations.instance_text) =
   let lowered = Typec_sema.Encoding.variant_name (Applied instance) in
   let edits =
-    text_edits text.tokens
+    text_edits text
       ~declarations:[ (lowered, reading.generic) ]
       ~void_field_spans:reading.void_field_spans
       ~replaced:(List.map named reading.names)
@@ -781,7 +972,6 @@ let instance_brackets context =
    instances write it, and each application replaced by the name of its
    instance. *)
 let unit_edits (text : Reader.t) declarations =
-  let tokens = text.tokens in
   let split (declaration : Tree.type_declaration) =
     match declaration.node.type_parameters with
     | [] ->
@@ -793,7 +983,7 @@ let unit_edits (text : Reader.t) declarations =
     List.partition_map split
       (Typec_sema.Declarations.type_declarations declarations)
   in
-  text_edits tokens ~declarations:own ~void_field_spans:[]
+  text_edits text ~declarations:own ~void_field_spans:[]
     ~replaced:
       (generics
       @ List.map named (Typec_sema.Declarations.instance_names declarations))

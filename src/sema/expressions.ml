@@ -61,23 +61,24 @@ type holder = {
   standing : standing;
 }
 
-type try_site = {
-  try_span : Tree.span;
-  operand : Tree.span;
-  holder : holder;
-  place : Parser.View.t;
-  temporary : int;
-  operand_instance : Ctype.instance;
-  return_instance : Ctype.instance;
-  ok_has_field : bool;
-  err_has_field : bool;
-}
-
 (* The positions of design 5.1 rule 3: the whole of an expression
    statement, the whole right operand of a simple assignment that is
    one, and the whole initialiser of the one declarator of a block-item
    declaration. *)
 type try_form = Whole_statement | Assigned | Initialiser
+
+type try_site = {
+  try_span : Tree.span;
+  operand : Tree.span;
+  holder : holder;
+  form : try_form;
+  place : Parser.View.t;
+  temporary : int;
+  operand_instance : Ctype.instance;
+  return_instance : Ctype.instance;
+  ok_field : string option;
+  err_field : string option;
+}
 
 (* The try at [held_span] that [holder], the statement or declaration
    being typed, holds in the position [form]. *)
@@ -2523,23 +2524,30 @@ let error_encoding (instance : Ctype.instance) =
   | [ _value; error ] -> error
   | _ -> invalid_arg "Expressions: a result of other than two arguments"
 
-(* The type of the field of the constructor [name] of a complete result,
-   or [None] where it has none, its type being void (design 3.5 rule 6). *)
+(* The field of the constructor [name] of a complete result, or [None]
+   where it has none, its type being void (design 3.5 rule 6). *)
 let result_field context (result : Ctype.t) name =
   match
     Option.bind (Ctype.constructors context.tags result) (fun constructors ->
         find_constructor constructors name)
   with
-  | Some { fields = [ field ]; _ } -> Some field.member_type
+  | Some { fields = [ field ]; _ } -> Some field
   | Some { fields = []; _ } -> None
   | Some { fields = _ :: _ :: _; _ } | None ->
       invalid_arg "Expressions: a result without its constructors"
+
+(* The name of a field of result, which the universe declares (design
+   3.6), so that lowering spells it as the instance does. *)
+let field_name (field : Ctype.member) =
+  match field.member_name with
+  | Some name -> name
+  | None -> invalid_arg "Expressions: a field of result without a name"
 
 (* Rule 2: the type of the value of a try, that of the field of Ok, or
    void, which only the statement try e; holds. *)
 let try_value context span (held : try_holder) ok_field =
   match (ok_field, held.form) with
-  | Some (t : Ctype.t), _ -> Ctype.unqualified t
+  | Some (field : Ctype.member), _ -> Ctype.unqualified field.member_type
   | None, Whole_statement -> Ctype.void
   | None, (Assigned | Initialiser) ->
       context.fail span
@@ -2749,13 +2757,15 @@ and try_expression context (whole : Tree.expression) operand scope =
     { try_span = span;
       operand = operand.span;
       holder = held.holder;
+      form = held.form;
       place = views.place;
       temporary = List.length view.function_tries;
       operand_instance;
       return_instance;
-      ok_has_field = Option.is_some ok_field;
-      err_has_field =
-        Option.is_some (result_field context operand_type Ctype.result_err) }
+      ok_field = Option.map field_name ok_field;
+      err_field =
+        Option.map field_name
+          (result_field context operand_type Ctype.result_err) }
   in
   view.function_tries <- site :: view.function_tries;
   value value_type
