@@ -1356,8 +1356,11 @@ before the statement holds the `try`. General placement is in section 12.
 
 An expression of a `result` type whose value is discarded is an error: as
 an expression statement, as the left operand of `,`, and as the first or
-third clause of `for`. Handle the value with `try` or `match`, store it, or
-discard it on purpose with a cast to `void`.
+third clause of `for`, and as a branch of a conditional whose type is
+`void`, as GNU C makes one with a `void` branch. Handle the value with
+`try` or `match`, store it, or discard it on purpose with a cast to
+`void`. The value of an assignment is the value it stored, so
+discarding it drops nothing: `r = f();` is no error.
 
 A `result` type is what rule 1 of 5.1 asks of an operand: an instance
 of the `result` of the universe scope, under a typedef name or an alias
