@@ -408,10 +408,12 @@ An expression has a target type in these positions and in no others:
 | Parenthesised expression; second and third operand of `?:`; right operand of `,` | The target type of the enclosing expression |
 
 The operand of `try` is not among them: `try` reads `T` and `E` from the
-type of its operand (5.1), so no type is expected of it, and
-`x = try Ok(1);` is an error where `x = try result(int, e).Ok(1);` is
-none. The target type of a position that holds a `try` ends at the
-`try`, whose value of type `T` converts to it as if by assignment.
+type of its operand (5.1), so no type is expected of it. The `Ok` of
+`x = try Ok(1);` names no constructor and means what C declares, a
+function `Ok` or nothing, where `x = try result(int, e).Ok(1);` names
+the constructor. The target type of a position that holds a `try` ends
+at the `try`, whose value of type `T` converts to it as if by
+assignment.
 
 Where a braced list elides braces (C11 6.7.9p20), which subobject an
 initialiser initialises depends on its type, so its target type cannot
@@ -1218,14 +1220,16 @@ result(uint32_t, parse_error) read_number(reader *r)
    the universe scope (3.6), also where a declaration hides that name.
    Anything else is an error; there is no implicit conversion between
    error types. The two `E` are identical where their encodings are
-   equal (10.3), the one comparison that says whether two instances are
-   one type (3.5 rule 3): a qualifier inside `E` counts, and an operand
-   of type `result(int, const char *)` is an error in a function that
-   returns `result(int, char *)`. A top-level qualifier of the
-   operand's type or of the return type does not count, since `try`
-   reads a value and returns one. A typedef name or an alias (3.1) of such a type is that
-   type, and no distinct type is over one (3.4). The operand has no
-   target type (3.3).
+   equal (10.3), qualifiers at every level of `E` included: it is the
+   one comparison that says whether two instances are one type (3.5
+   rule 3). An operand of type `result(int, const char *)` is an error
+   in a function that returns `result(int, char *)`, and so is one of
+   type `result(int, const void)` in a function that returns
+   `result(int, void)`. A top-level qualifier of the operand's type or
+   of the return type does not count, since `try` reads a value and
+   returns one. A typedef name or an alias (3.1) of such a type is
+   that type, and no distinct type is over one (3.4). The operand has
+   no target type (3.3).
 2. `try` evaluates its operand once and abbreviates a `match` on the
    value (section 4). In the arm of `Err(x)` the function returns
    `Err(x)` exactly as a `return` statement would, running the deferred
@@ -1278,21 +1282,36 @@ result(uint32_t, parse_error) read_number(reader *r)
    single-pattern test (4.6) are not among the positions. Parentheses
    around a `try` take it out of them: in `x = (try f());` the right
    operand is a parenthesised expression, and the `try` is not the
-   whole of it. The operand of a `try` may be parenthesised, so nothing
-   needs the form. A `try` in any other place is one error, with one
-   message whatever holds it: as an operand of a unary or binary
-   operator, in `-try f()` or `a + try f()`, where the grammar of
-   Appendix A derives no `try`, as in an argument or a condition, where
-   it does. The remedy is the same in each, a statement or declaration
-   of its own for the `try`. No `try` stands inside a statement
-   expression, whatever its position there: it would return from
-   inside the expression around it, where C does not say which of the
-   other operands have been evaluated. None stands inside a
-   block literal either: a block literal holds no Type-C text (13.3,
-   P24), and `try` is a word in Type-C text alone (2.3). And none
-   stands in a statement or declaration that has a pragma directly
-   before it or before any of its labels, for the reason that 13.5
-   gives with the rule.
+   whole of it; in `(x = try f());` the expression of the statement is
+   a parenthesised expression and no assignment. Both are errors. The
+   operand of a `try` may be parenthesised, so nothing needs either
+   form. A `try` in any other place is one error, with one message
+   whatever holds it: as an operand of a unary or binary operator, in
+   `-try f()` or `a + try f()`, where the grammar of Appendix A derives
+   no `try`, as in an argument or a condition, where it does. The
+   error comes from one rule, which the parser applies wherever it
+   meets the word `try`: a `try` that is in none of the three
+   positions is this error. No place that holds an expression has a
+   check of its own, so none can be missing. The remedy is the same in
+   each, a statement or declaration of its own for the `try`. No `try`
+   stands inside a statement expression, whatever its position there:
+   it would return from inside the expression around it, where C does
+   not say which of the other operands have been evaluated. None
+   stands inside a block literal either: a block literal holds no
+   Type-C text (13.3, P24), and `try` is a word in Type-C text alone
+   (2.3).
+
+   No `try` stands in a statement or declaration that holds a pragma.
+   A `try` is an error where a `#pragma` line, which is also how a
+   `_Pragma` operator reaches `typec`, stands anywhere from directly
+   before the statement or declaration that holds the `try`, its
+   labels included, to its final `;`, the operand of the `try`
+   included. 13.5 gives the reason with the rule. The cost is a macro
+   whose expansion holds a `_Pragma`: one that wraps its argument in
+   `_Pragma("GCC diagnostic ...")`, to silence a warning in it, cannot
+   be used in a statement or declaration that holds a `try`, and its
+   use takes a statement or declaration of its own. The measurement of
+   P8 counts these refusals, in Pilot B.
 4. `try` cannot appear in a deferred statement.
 5. *Provisional (P21).* A `try` is an error where one of these rules
    asks something of an unknown type (13.3): whether the type of the
@@ -1336,11 +1355,21 @@ is evaluated: `sizeof(f(), 1)` is an error where `f` returns a
 evaluates, which for `sizeof` depends on a variably modified type, and
 a result dropped there is no more meant than one dropped elsewhere.
 
+The last expression statement of a statement expression of the GNU
+profile does not discard its value, which is the value of the statement
+expression. The statement expression is judged where it stands:
+`({ g(); f(); });` is an error where `f` returns a `result`, and
+`x = ({ g(); f(); });` is none. Every other expression statement in it
+discards its value, as `g();` does.
+
 The rule binds Type-C text (2.1), judged by the first token of the
-expression. C text keeps C's meaning (2.2): C drops a structure value
-without a word, and a header that C compiles as well means the same in
-both. Only a Type-C declaration makes a value of a `result` type, so C
-text holds one only where it is written against such a declaration.
+expression: some one token has to decide, and the tokens of an
+expression come from more than one file only where an `#include` line
+stands inside it. C text keeps C's meaning (2.2): C drops a structure
+value without a word, and a header that C compiles as well means the
+same in both. Only a Type-C declaration makes a value of a `result`
+type, so C text holds one only where it is written against such a
+declaration.
 
 ### 5.3 Other error conventions
 
@@ -2432,11 +2461,14 @@ answer.
 1. `#pragma typec checked`, at file scope in Type-C text, makes the rest of
    that file *checked text*; `#pragma typec unchecked` ends it. The state
    does not carry into an included file or out of one. A `#pragma typec`
-   line in moved text (13.5) is an error: the line sets the state of the
-   place where it stands, and lowering writes moved text at other
-   places. The operand of a `try` and a deferred statement are the
-   moved text that could hold one; the definition of a generic holds no
-   pragma at all (10.3).
+   line stands outside every external declaration, in Type-C text, and
+   is an error anywhere else: inside an external declaration, which is
+   in a function body and also in a structure body or a parameter list
+   at file scope, and anywhere in C text. The line sets the state of
+   the text after it, so an external declaration is checked text as a
+   whole or not at all. Every kind of moved text (13.5) stands inside
+   an external declaration, so no moved text holds the line: the rule
+   names no kind of moved text and can miss none.
 2. A function defined in checked text is a *checked function*, and its body
    obeys 11.2.
 3. A function declared in checked text is a *trusted contract*: its author
@@ -3145,7 +3177,7 @@ Two properties follow by construction:
 | --- | --- |
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
 | Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. Inside an initialiser, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. |
-| `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. |
+| `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
@@ -3184,14 +3216,12 @@ in the same block, so the operand is moved text. The temporary is named
 `__tc_t` and a number, which counts the `try` expressions of the
 function from 0 in the order of the source: the temporaries of one block
 share a scope, so each needs a name of its own. A temporary is
-declared as `const struct R __tc_t0 = e;`, where `struct R` names the
-instance of the operand's type by its claimed tag (10.3) and `e` is the
-operand, as the copy that a `match` holds of its scrutinee is declared:
-no declaration hides a claimed name (10.1 rule 6), and nothing writes
-to the temporary after its initialiser. The labels of the statement
-stay in place on a null statement, `L: ;`, and the temporary, the test
-and the statement follow it. No block is then made around a
-labelled statement, and a tag that the statement declares keeps the
+declared as `const struct R __tc_t0 = e;`, where `e` is the operand:
+it has the type that the copy of a `match` has (the `match` row
+above), for the same reasons. The labels of the statement stay in
+place on a null statement, `L: ;`, and the temporary, the test and the
+statement follow it. No block is then made around a labelled
+statement, and a tag that the statement declares keeps the
 scope it has in the source. Where the statement is not a block item once
 its labels are set aside, it is the substatement of another statement,
 which C makes a block of its own (C11 6.8.4p3, 6.8.5p5), and a block is
@@ -3206,19 +3236,51 @@ A statement that only read the `Ok` field, `__tc_t0.u.Ok.value;`, would
 do nothing, and Apple Clang 21 and GCC 16 report it under `-Wall`
 (`-Wunused-value`).
 
-Nothing stands between the test and the statement, so a pragma before
-the statement or before one of its labels would come to stand before
-the temporary, or before the null statement of the labels. A `try` is
-therefore an error where a pragma stands directly before the statement
-or declaration that holds it, or directly before any of its labels: a
-`#pragma` line, which is also how a `_Pragma` operator reaches `typec`.
-`typec` sees the line as tokens and applies the rule without reading
-them, whatever the pragma. A pragma there may govern the one statement
-after it, as OpenMP's `critical` does. It would govern the declaration
-of the temporary, which GCC 16 refuses under `-fopenmp` and the front
-end of Apple Clang 21 under `-Xclang -fopenmp` (Apple's driver rejects
-`-fopenmp` itself), and the error path of the `try` would leave the
-governed statement.
+A pragma is a line and no token: it acts from the place where it
+stands, on the text after it. Lowering moves the operand ahead of
+every token of its statement that stands before it, the labels
+excepted, and writes nothing between the test and the statement. A
+`try` is therefore an error where a pragma stands anywhere from
+directly before the statement or declaration that holds it, its labels
+included, to its final `;`, the operand included: a `#pragma` line,
+which is also how a `_Pragma` operator reaches `typec`. `typec` sees
+the line as tokens and applies the rule without reading them, whatever
+the pragma. No pragma then stands between the place where the operand
+is written and its place in the source, so the operand is written
+under the pragma state of its own place. At each place in that stretch
+lowering would otherwise change what a pragma acts on:
+
+- Directly before the statement or one of its labels, a pragma would
+  come to stand before the temporary, or before the null statement of
+  the labels. It may govern the one statement after it, as OpenMP's
+  `critical` does. It would govern the declaration of the temporary,
+  which GCC 16 refuses under `-fopenmp` and the front end of Apple
+  Clang 21 under `-Xclang -fopenmp` (Apple's driver rejects `-fopenmp`
+  itself), and the error path of the `try` would leave the governed
+  statement.
+- Inside the statement and before the operand, a pragma would cease to
+  act on the operand. Apple Clang 21 applies a `#pragma pack(1)` line
+  between the specifiers and the declarator of a declaration to its
+  initialiser:
+
+  ```c
+  int
+  #pragma pack(1)
+  n = sizeof(struct { char c; int i; });
+  ```
+
+  gives `n` the value 5, and 8 without the line. With `try
+  f(sizeof(struct { char c; int i; }))` as the initialiser, the operand
+  would be written before the declaration and so before the line, and
+  `f` would be passed 8. GCC 16 refuses a pragma at that place.
+- Inside the operand, a pragma would move with it, and act on the test
+  and on the tokens of the statement that stand before it in the
+  source.
+- Between the operand and the `;` of `try e;`, a pragma has no place to
+  be written: nothing of that statement follows the test.
+
+One rule over the whole stretch asks for no reading of a pragma and no
+list of the places where one would be harmless.
 
 The temporaries share the block of their statements, so a build that
 asks for C90's order of declarations or for C++'s jump rule hears of
@@ -3550,16 +3612,16 @@ identifiers of no pragma and passes every line on whole: GCC keeps some
 pragmas verbatim in its `-E` output, the free text of a `#pragma mark`
 line among them.
 
-Of the kinds of moved text, a deferred statement and the operand of a
-`try` can hold a `#pragma` line. The definition of a generic holds
-none, since a generic whose definition holds one is an error (10.3).
-What the rules below say of a `#pragma` line of moved text they say of
-those two kinds. The line moves with the text: lowering writes it on a
-line of its own at its place among the tokens of the text, which for
-the operand of a `try` is in the initialiser of the temporary, before
-the statement or declaration that holds the `try`. A `#pragma typec`
-line is no such line: its state is that of its place in the file, and
-it is an error in moved text (11.1).
+Of the kinds of moved text, only a deferred statement can hold a
+`#pragma` line. The definition of a generic holds none, since a generic
+whose definition holds one is an error (10.3), and the operand of a
+`try` holds none, since a `try` is an error where a pragma stands in
+the statement or declaration that holds it (5.1 rule 3). What the rules
+below say of a `#pragma` line of moved text they say of a deferred
+statement. The line moves with the statement: lowering writes it on a
+line of its own, at its place among the tokens of each copy. A `#pragma
+typec` line stands outside every external declaration (11.1 rule 1),
+so no moved text holds one.
 
 Three rules carry the property into unread text.
 
@@ -3627,7 +3689,9 @@ Three rules carry the property into unread text.
 
 The state that positional pragmas set is that of the place where the
 text is written, and it is outside the property. A deferred statement
-declares no type for such state to lay out (section 6 rule 9). An
+declares no type for such state to lay out (section 6 rule 9). The
+operand of a `try` is written under the state of its own place, since
+no pragma stands between the two (5.1 rule 3). An
 instance is kept from `#pragma pack` by the bracket of 10.3 and from no
 other pragma that changes a layout, among them `#pragma ms_struct on`,
 GCC's `#pragma scalar_storage_order` and a `#pragma clang attribute
@@ -3769,7 +3833,7 @@ numbers refer to the implementation plan.
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
-| P8 | `try` is limited to three positions (5.1) | Stage 2 pilot: rewrites the limit forced | As specified |
+| P8 | `try` is limited to three positions, in a statement or declaration that holds no pragma (5.1) | Stage 2, Pilot B: rewrites the limit forced, and statements refused for a pragma | As specified |
 | P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6, and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; among those of rule 8, the refusals that 13.5 makes for an identifier in an attribute argument or a `#pragma` line of a deferred statement; how often each refusal of the form (13.5) rejects a function or a `return`; the returns where the plain form reports a diagnostic of the list of 13.5 that the form loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |

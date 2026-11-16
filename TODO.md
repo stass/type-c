@@ -228,11 +228,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] `Tree.Constant` holds a `Number.t` that is never
   `Not_a_constant`. Have `Number.classify` return an option, so that the
   tree cannot represent the case.
-- [Low] The parser passes over `#pragma typec` lines like other
-  pragmas, and they stay inside the spans of the nodes around them, so
-  emission copies them to the backend. Stage 5, which gives them a
-  meaning, decides where they may stand and what emission does with
-  them.
+- [Medium] Design 11.1 rule 1 makes a `#pragma typec` line an error
+  everywhere but outside the external declarations of Type-C text. The
+  parser passes over `Token.Typec_pragma` like any other pragma,
+  wherever it stands (`lexeme_of` in `src/syntax/parser.ml`). Refuse
+  the line inside an external declaration and in C text, with a rule
+  code of its own.
+- [Low] A `#pragma typec` line stays inside the spans of the nodes
+  around it, so emission copies it to the backend. Stage 5, which gives
+  the line a meaning, decides what emission does with it.
 - [Low] `Parser.error` and `Declarations.error` are `Reader.error`,
   whose documentation describes text that is not `cc -E` output. Give
   the located error a module of its own in `typec_cpp`.
