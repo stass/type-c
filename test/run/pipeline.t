@@ -113,7 +113,22 @@ its final command, without the options that only preprocessing uses.
   $ typec --cc=$clang -Werror -Fout $link_flag -Iinc -DX lib.tc -o prog
   $ typec --cc=$clang -Werror -fmacro-prefix-map=/a=/b lib.tc -o prog
   $ typec --cc=$clang -Werror -Fout -c x.tc -o out/x.o
+  $ typec --cc=$clang -Werror -lm -c x.tc -o out/x.o
   $ ls -A tmp
+
+Only Clang's steps get the option that quiets those warnings: GCC does
+not know it, and names it in a note after any diagnostic of a step that
+gets it.
+
+  $ cat > gcc-warns.tc <<'EOF'
+  > #warning in the preprocessing step
+  > int f(void) { int unused; return 0; }
+  > EOF
+  $ typec --cc=$gcc -Wall -c gcc-warns.tc -o out/gcc-warns.o 2> gcc-warns.err
+  $ grep -c 'warning:' gcc-warns.err
+  2
+  $ grep 'unrecognized command-line option' gcc-warns.err
+  [1]
 
 --emit-c writes the emitted C, on stdout or to the -o file, and compiles
 nothing. It is the preprocessed text.

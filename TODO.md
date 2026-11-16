@@ -49,14 +49,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   has no `-std=`) and, on Clang, the `-fno-trigraphs` that the emitted C
   needs. Decide whether that is acceptable, and then delete the object
   path, or keep the path for those command lines.
-- [Low] The steps of the pipeline get `-Wno-unused-command-line-argument`
-  so that Clang does not warn about the options of the whole command
-  line that a step does not use; GCC ignores it, but adds a note that
-  names it to any diagnostic of that step. The target query names the
-  backend's family before any step runs, so pass the option only to
-  Clang in each step, which makes `translation.preprocess` a
-  `Pipeline.command` like `compile`; the target query, which runs
-  before the family is known, still gets it.
+- [Low] The target query gets `-Wno-unused-command-line-argument`
+  whatever the backend, as it runs before the backend's family is
+  known, so GCC adds a note that names the option to any diagnostic of
+  the query, such as for `-mtune=bogus` or `-Wformat-security`, and the
+  note points at the wrong option. Clang needs the option there: it
+  fails the query under `-Werror` for `-stdlib=`, `-rtlib=` or
+  `-unwindlib=`. A first query without options can name the family, as
+  `tools/corpus/corpus.ml` does, at the cost of one more backend run;
+  then `Pipeline.t.target_options` becomes a `Pipeline.command`.
 - [Low] A backend's diagnostic on a line that holds a lowered construct
   quotes a fragment of the emitted text, not the source line: for a
   call that passes a `list(double)` where a `list(int)` is wanted,

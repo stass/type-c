@@ -34,9 +34,11 @@ type destination = File of string | Standard_output
 
 (** A backend command: the argument vector, whose first element is the
     backend, for the compiler that {!Target_query.query} finds the
-    backend to be. It depends on the compiler because a command that
-    compiles emitted C turns Clang's trigraphs off, which typec's reader
-    does not read (design 13.2). *)
+    backend to be. It depends on the compiler because only Clang gets the
+    option that quiets its warning about the options of the command line
+    that a step does not use, and a command that compiles emitted C turns
+    Clang's trigraphs off, which typec's reader does not read (design
+    13.2). *)
 type command = Typec_sema.Target.compiler -> string list
 
 (** The commands for one [.tc] input. *)
@@ -45,7 +47,7 @@ type translation = {
   directory : string;
       (** the directory, in the temporary one, of the files of the
           translation, which the caller makes *)
-  preprocess : string list;
+  preprocess : command;
       (** writes the preprocessed text on stdout, which goes to
           [preprocessed] *)
   preprocessed : string;
@@ -61,9 +63,10 @@ type translation = {
 
 type t = {
   target_options : string list;
-      (** the options of the compile step, without its inputs and
-          outputs, for {!Target_query.query}: the target model is that of
-          the compilation *)
+      (** the options of the compile step for Clang, without its inputs
+          and outputs, for {!Target_query.query}: the target model is that
+          of the compilation, and the query runs before the backend's
+          family is known *)
   translations : translation list;
   final : command option;
 }

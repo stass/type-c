@@ -144,8 +144,8 @@ let typec_identity options =
   Printf.sprintf "blake2b-256 %s (checkout at run time: %s)" digest
     options.typec_revision
 
-(* The compiler that [cc] is, which no option changes: the commands that
-   compile C that typec emitted depend on it. *)
+(* The compiler that [cc] is, which no option changes: typec's commands
+   for a translation depend on it. *)
 let backend_compiler cc =
   match Target_query.query ~program:cc [] with
   | Ok target -> target.backend.compiler
@@ -312,7 +312,7 @@ let reference_step context ~temp_dir arguments =
   match (translation.emitted, translation.compile) with
   | File text_file, Some compile ->
       {
-        preprocess = translation.preprocess;
+        preprocess = translation.preprocess context.compiler;
         directory = translation.directory;
         text_file;
         compile = compile context.compiler;

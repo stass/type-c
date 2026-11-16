@@ -995,9 +995,11 @@ before it, goes through three steps:
    Clang, which makes Clang read EMITTED without trigraphs, as `typec`
    read it (design 13.2).
 
-Steps 1 and 3 also get `-Wno-unused-command-line-argument` before
-OPTIONS, so that Clang does not warn about an option of the command
-line that the step does not use.
+On Clang, steps 1 and 3 also get `-Wno-unused-command-line-argument`
+before OPTIONS, so that Clang does not warn about an option of the
+command line that the step does not use. GCC does not know the option,
+so its steps go without it. The query for the target model runs before
+the backend is known and gets it on both.
 
 `-std=gnu17` is left out when the command line gives `-std=` for C11 or
 C17 (`c11`, `c17`, `c18`, `gnu11`, `gnu17`, `gnu18`, `c1x`, `gnu1x`,

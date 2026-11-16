@@ -72,9 +72,9 @@ let with_file path flags f =
 
 let new_file_flags = Unix.[ O_WRONLY; O_CREAT; O_TRUNC ]
 
-let preprocess ~null (translation : Pipeline.translation) =
+let preprocess ~null compiler (translation : Pipeline.translation) =
   with_file translation.preprocessed new_file_flags (fun stdout ->
-      run_step ~stdin:null ~stdout translation.preprocess)
+      run_step ~stdin:null ~stdout (translation.preprocess compiler))
 
 let read_preprocessed (translation : Pipeline.translation) =
   let text =
@@ -134,7 +134,7 @@ let make_directory path =
 let translate ~null (target : Target.t) (translation : Pipeline.translation)
     =
   make_directory translation.directory;
-  preprocess ~null translation;
+  preprocess ~null target.backend.compiler translation;
   let text = read_preprocessed translation in
   let lowered = lower translation.dialect target text in
   write_emitted translation.emitted (Typec_emit.Emitter.emit text lowered);

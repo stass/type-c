@@ -10,7 +10,7 @@ type command = Target.compiler -> string list
 type translation = {
   source : string;
   directory : string;
-  preprocess : string list;
+  preprocess : command;
   preprocessed : string;
   dialect : Typec_syntax.Keyword_set.dialect;
   emitted : destination;
@@ -53,9 +53,13 @@ let type_c_macro = "-D__TYPEC__=1"
 
 (* Each step gets the options of the whole command line that it may not
    use, such as -F or a linker flag, and Clang warns about those, which
-   -Werror makes fatal; GCC ignores the option. It comes before the
-   user's options, so that a -W option of theirs still counts. *)
-let quiet_unused_options = "-Wno-unused-command-line-argument"
+   -Werror makes fatal. GCC does not know the option and names it in a
+   note after any diagnostic of the step, so only Clang gets it. It
+   comes before the user's options, so that a -W option of theirs still
+   counts. *)
+let quiet_unused_options : Target.compiler -> string list = function
+  | Clang -> [ "-Wno-unused-command-line-argument" ]
+  | Gcc -> []
 
 (* What the command line makes of its inputs. *)
 type goal = Linked | Stopped of Cc_option.stop
@@ -261,15 +265,20 @@ let emit_c_destination output =
   | Some output when output <> "-" -> File output
   | Some _ | None -> Standard_output
 
-(* What a backend command that reads the text of a translation gets in
-   front of the [options] of the command line. *)
-let with_standard shape options =
-  shape.standard @ (quiet_unused_options :: options)
+(* What a backend command for [compiler] that reads the text of a
+   translation gets in front of the [options] of the command line. *)
+let with_standard shape compiler options =
+  shape.standard @ quiet_unused_options compiler @ options
 
-(* The target model is read with these options so that it describes the
-   target that the compile step compiles for (design 13.3). *)
-let compile_options shape arguments =
-  with_standard shape (options_where compiling_role arguments)
+let compile_options shape compiler arguments =
+  with_standard shape compiler (options_where compiling_role arguments)
+
+(* The target model is read with the compile step's options so that it
+   describes the target that the step compiles for (design 13.3). The
+   query is what names the backend's family, so it gets Clang's options
+   whatever the backend: Clang fails it under -Werror for an unused
+   option such as -stdlib=, and GCC adds its note to any diagnostic. *)
+let target_options shape arguments = compile_options shape Clang arguments
 
 (* Under -std=c11, -std=c17 or -trigraphs, Clang 21 reads a trigraph in
    preprocessed input, which typec's reader does not, and a macro can
@@ -283,31 +292,33 @@ let without_trigraphs : Target.compiler -> string list = function
 
 let as_preprocessed file = [ "-x"; "cpp-output"; file ]
 
-(* A backend command that compiles emitted C: [words] are its options
-   and inputs, and the backend reads the C as typec's reader did. *)
+(* A backend command that compiles emitted C: [words] gives its options
+   and inputs for the compiler, and the backend reads the C as typec's
+   reader did. *)
 let emitted_c_command shape words compiler =
-  (shape.program :: words) @ without_trigraphs compiler
+  (shape.program :: words compiler) @ without_trigraphs compiler
 
 (* A backend command that reads no emitted C. *)
 let same_for_every_compiler words (_ : Target.compiler) = words
 
 let compile_command shape arguments ~linked_object source emitted_file =
-  emitted_c_command shape
-    (compile_options shape arguments
-    @ compile_outputs ~goal:shape.goal ~output:shape.output ~linked_object
-        source
-    @ as_preprocessed emitted_file)
+  emitted_c_command shape (fun compiler ->
+      compile_options shape compiler arguments
+      @ compile_outputs ~goal:shape.goal ~output:shape.output ~linked_object
+          source
+      @ as_preprocessed emitted_file)
+
+let preprocess_command shape arguments source compiler =
+  (shape.program :: "-E" :: type_c_macro
+   :: with_standard shape compiler
+        (options_where preprocessing_role arguments))
+  @ dependency_options ~output:shape.output arguments source
+  @ [ "-x"; "c"; source ]
 
 (* [linked_object] is the object that the step makes when the command
    line links. *)
 let translation shape arguments ~linked_object index source =
   let directory = translation_directory shape.temp_dir index in
-  let preprocess =
-    (shape.program :: "-E" :: type_c_macro
-     :: with_standard shape (options_where preprocessing_role arguments))
-    @ dependency_options ~output:shape.output arguments source
-    @ [ "-x"; "c"; source ]
-  in
   let emitted_file = emitted_file directory source in
   let emitted, compile =
     if shape.emit_c then (emit_c_destination shape.output, None)
@@ -321,7 +332,7 @@ let translation shape arguments ~linked_object index source =
   {
     source;
     directory;
-    preprocess;
+    preprocess = preprocess_command shape arguments source;
     preprocessed = Filename.concat directory "preprocessed.i";
     dialect = shape.dialect;
     emitted;
@@ -371,7 +382,9 @@ let final_command shape ~objects ~emitted_files arguments =
         let compiled =
           with_replaced_inputs (List.map as_preprocessed emitted_files) linked
         in
-        Some (emitted_c_command shape (with_standard shape compiled))
+        Some
+          (emitted_c_command shape (fun compiler ->
+               with_standard shape compiler compiled))
     | Linked ->
         let objects = List.map (fun file -> [ file ]) objects in
         let words = with_replaced_inputs objects linked in
@@ -430,7 +443,7 @@ let plan ~program ~emit_c ~temp_dir arguments =
     in
     Ok
       {
-        target_options = compile_options shape arguments;
+        target_options = target_options shape arguments;
         translations;
         final = final_command shape ~objects ~emitted_files arguments;
       }

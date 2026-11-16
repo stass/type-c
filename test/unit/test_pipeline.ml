@@ -99,7 +99,8 @@ let () =
 
 let temp_dir = "/T"
 
-(* What every step gets before the options of the command line. *)
+(* What Clang's steps and the target query get before the options of
+   the command line. *)
 let quiet = "-Wno-unused-command-line-argument"
 
 let plan ?(emit_c = false) words =
@@ -110,7 +111,7 @@ let planned ?emit_c words =
   | Ok plan -> plan
   | Error error -> failwith (Pipeline.error_message error)
 
-(* A command for GCC, for which no option is added to the user's. *)
+(* A command for GCC, which gets no option of typec's own. *)
 let for_gcc = Option.map (fun (command : Pipeline.command) -> command Gcc)
 
 let only_translation (plan : Pipeline.t) =
@@ -124,16 +125,16 @@ let () =
   in
   let translation = only_translation plan in
   check "-c -o: preprocess"
-    (translation.preprocess
+    (translation.preprocess Gcc
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-O2"; "-Iinc"; "-DX";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-O2"; "-Iinc"; "-DX";
         "-x"; "c"; "x.tc";
       ]);
   check "-c -o: compile"
     (for_gcc translation.compile
     = Some
         [
-          "cc"; "-std=gnu17"; quiet; "-O2"; "-c"; "-o"; "out/x.o";
+          "cc"; "-std=gnu17"; "-O2"; "-c"; "-o"; "out/x.o";
           "-x"; "cpp-output"; "/T/1/x.c";
         ]);
   check "-c -o: files"
@@ -149,12 +150,12 @@ let () =
 let () =
   let charset = "-finput-charset=ISO-8859-1" in
   let translation = only_translation (planned [ charset; "-c"; "x.tc" ]) in
-  check "-finput-charset: preprocess" (List.mem charset translation.preprocess);
+  check "-finput-charset: preprocess" (List.mem charset (translation.preprocess Gcc));
   check "-finput-charset: not compile"
     (for_gcc translation.compile
     = Some
         [
-          "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
           "/T/1/x.c";
         ])
 
@@ -164,21 +165,21 @@ let () =
     (compile [ "-c"; "dir/x.tc" ]
     = Some
         [
-          "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
           "/T/1/x.c";
         ]);
   check "-S"
     (compile [ "-S"; "-c"; "x.tc"; "-std=c17" ]
     = Some
         [
-          "cc"; quiet; "-std=c17"; "-S"; "-o"; "x.s"; "-x"; "cpp-output";
+          "cc"; "-std=c17"; "-S"; "-o"; "x.s"; "-x"; "cpp-output";
           "/T/1/x.c";
         ]);
   check "-fsyntax-only"
     (compile [ "-fsyntax-only"; "x.tc"; "-o"; "x" ]
     = Some
         [
-          "cc"; "-std=gnu17"; quiet; "-fsyntax-only"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; "-fsyntax-only"; "-x"; "cpp-output";
           "/T/1/x.c";
         ])
 
@@ -191,7 +192,7 @@ let () =
     (for_gcc (only_translation plan).compile
     = Some
         [
-          "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
+          "cc"; "-std=gnu17"; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
           "/T/1/x.c";
         ]);
   let plan = planned [ "-Iinc"; "-MD"; "a.tc"; "b.tc"; "-lm" ] in
@@ -199,7 +200,7 @@ let () =
     (for_gcc plan.final
     = Some
         [
-          "cc"; "-std=gnu17"; quiet; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
+          "cc"; "-std=gnu17"; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
           "cpp-output"; "/T/2/b.c"; "-lm";
         ]);
   check "link .tc inputs only: no compile step"
@@ -216,13 +217,20 @@ let () =
     (for_gcc (planned [ "-c"; "x.tc"; "y.c"; "-O2" ]).final
     = Some [ "cc"; "-c"; "y.c"; "-O2" ])
 
-(* Clang reads no trigraph in the emitted C, after the user's options;
-   GCC reads none there and refuses the option (design 13.2). *)
+(* Clang's steps quiet its warning about unused options, which GCC does
+   not know. Clang reads no trigraph in the emitted C, after the user's
+   options; GCC reads none there and refuses the option (design 13.2). *)
 let () =
   let for_clang =
     Option.map (fun (command : Pipeline.command) -> command Clang)
   in
   let plan = planned [ "-trigraphs"; "-c"; "x.tc" ] in
+  check "Clang: preprocess quiets unused options"
+    ((only_translation plan).preprocess Clang
+    = [
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-trigraphs"; "-x";
+        "c"; "x.tc";
+      ]);
   check "Clang: compile without trigraphs"
     (for_clang (only_translation plan).compile
     = Some
@@ -242,31 +250,31 @@ let () =
     (for_clang plan.final = for_gcc plan.final)
 
 let () =
-  let preprocess words = (only_translation (planned words)).preprocess in
+  let preprocess words = (only_translation (planned words)).preprocess Gcc in
   check "-MD names the file and target after -o"
     (preprocess [ "-MD"; "-c"; "x.tc"; "-o"; "out/x.o" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MD"; "-MF";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MD"; "-MF";
         "out/x.d";
         "-MQ"; "out/x.o"; "-x"; "c"; "x.tc";
       ]);
   check "-MMD names the file and target after the input"
     (preprocess [ "-MMD"; "-MP"; "-c"; "dir/x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MMD"; "-MP"; "-MF";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MMD"; "-MP"; "-MF";
         "x.d"; "-MQ"; "x.o"; "-x"; "c"; "dir/x.tc";
       ]);
   check "-MF and -MT are kept"
     (preprocess [ "-MD"; "-MF"; "d"; "-MTt"; "-c"; "x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MD"; "-MF"; "d";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MD"; "-MF"; "d";
         "-MTt";
         "-x"; "c"; "x.tc";
       ]);
   check "-MF without -MD adds nothing"
     (preprocess [ "-MF"; "d"; "-c"; "x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-MF"; "d"; "-x"; "c";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MF"; "d"; "-x"; "c";
         "x.tc";
       ])
 
