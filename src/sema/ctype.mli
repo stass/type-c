@@ -568,6 +568,11 @@ val as_variant : t -> variant_name option
 (** The name of the variant whose structure [t] is, qualified or not, or
     [None] where [t] is no variant. *)
 
+val as_result : t -> instance option
+(** The instance of the universe's [result] (design 3.6) that [t] is,
+    qualified or not, whichever name a declaration gives it: what design
+    5.1 and 5.2 call a result type. [None] where [t] is no result type. *)
+
 val has_distinct : tags -> bool
 (** Whether a distinct type has been declared, so that a type that typec
     does not know may be one or have one inside it. *)

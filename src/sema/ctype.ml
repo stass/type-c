@@ -227,6 +227,17 @@ let as_variant t =
   | Function _ | Unknown_type _ ->
       None
 
+(* No generic of a unit has a universe name (design 3.6), so an instance
+   of a generic of this name is one of the universe's result. *)
+let universe_result = "result"
+
+let as_result t =
+  match as_variant t with
+  | Some (Applied instance)
+    when (instance.generic :> string) = universe_result ->
+      Some instance
+  | Some (Applied _ | Declared _) | None -> None
+
 let rec top_qualifiers t =
   match t.shape with
   | Array { element; _ } -> top_qualifiers element

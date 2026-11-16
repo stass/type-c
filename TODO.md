@@ -481,6 +481,40 @@ is [type-c-language-design.md](type-c-language-design.md).
   kind of tag only at run time. Give encodings a private type that only
   the encoder makes, and hand the `define` of
   `Ctype.declare_variant_instance` a definer bound to its tag.
+- [Medium] The rule against dropped results (design 5.2) is checked at
+  each position where C makes a value void: `refuse_dropped_result` in
+  `src/sema/expressions.ml` is called by the expression statement, the
+  left operand of a comma, both expression clauses of `for` and a void
+  conditional, and a new such position (the operand of `try e;`, a
+  deferred statement) must remember to call it. Make one funnel that
+  types an expression evaluated as a void expression and refuses a
+  result there, which those positions use and only a cast to void
+  bypasses; it would also reach a `return f();` in a void function,
+  which typec leaves to the backend (refused by default, accepted under
+  `-Wno-return-mismatch`), and give every position the completeness
+  check of 6.3.2.1p2 that only the expression statement does now. A
+  conditional of a result and a branch of a type that typec does not
+  know is not checked, though the backend may make it void.
+- [Medium] A definition check of a generic passes a definition that
+  discards a value of a type parameter, which an instance at `result`
+  then fails, against design 3.5 rule 4: `type pair(T) = struct { int
+  n[sizeof(({ T x = {0}; x; }), 1)]; };` is accepted and `pair(result(int,
+  int))` refused at the instance (TC0048). The way in is a declaration
+  of `T` inside a statement expression, which rule 4 does not refuse.
+  Refuse a discarded value of an opaque type parameter in a definition
+  check, or close the gap in rule 4; section 7.1 rule 3 meets the same
+  question for generic functions.
+- [Low] `Ctype.as_result` knows the universe's `result` by the literal
+  name `"result"`, a second spelling of the name that
+  `File.universe_text` declares: renaming it there would turn the rule
+  of design 5.2 off with only the tests to notice. Identify the
+  universe's declaration itself, or take the name from `Universe`.
+- [Low] An assignment is exempt from the rule against dropped results
+  only bare or parenthesized, so `c ? (r = f()) : (r = g());`,
+  `__extension__ (r = f());` and `({ r = f(); });` are refused although
+  they only store. If a real program meets one, see through `?:`,
+  `__extension__`, a selection and the value of a statement expression
+  as well.
 
 ## Declarations
 

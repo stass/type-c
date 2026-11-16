@@ -52,9 +52,9 @@ let prelude =
 
 (* A parse error is the case's error as a typing error is: the parser
    refuses some constraints, those on labels among them. *)
-let read target source =
+let read ?(file = "in.c") target source =
   let text =
-    match Reader.read ~name:"in.c" (Preprocessed.text ~name:"in.c" source) with
+    match Reader.read ~name:file (Preprocessed.text ~name:file source) with
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in
@@ -123,8 +123,8 @@ let contains text part =
   in
   at 0
 
-let rejects_source ?(target = lp64) source expected =
-  match read target source with
+let rejects_source ?(target = lp64) ?file source expected =
+  match read ?file target source with
   | Ok _ -> fail_case source "accepted"
   | Error { message; _ } ->
       if not (contains message expected) then
@@ -133,8 +133,8 @@ let rejects_source ?(target = lp64) source expected =
 let rejects ?target ?declarations body expected =
   rejects_source ?target (in_function ?declarations body) expected
 
-let accepts_source ?(target = lp64) source =
-  match read target source with
+let accepts_source ?(target = lp64) ?file source =
+  match read ?file target source with
   | Ok _ -> ()
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
 
@@ -775,6 +775,38 @@ let statements () =
   rejects "int v = undeclared" "6.5.1p2";
   rejects "int v = { 1, { undeclared } }" "6.5.1p2"
 
+(* Design 5.2: Type-C text discards no value of a result type, which
+   C text may. *)
+let dropped_results () =
+  let declarations = "int x; result(int, int) r; result(int, int) f(void); " in
+  let type_c body = in_function ~declarations body in
+  let rejects body =
+    rejects_source ~file:"in.tc" (type_c body) "[TC0048]"
+  in
+  let accepts body = accepts_source ~file:"in.tc" (type_c body) in
+  rejects "f()";
+  rejects "r";
+  rejects "x ? f() : r";
+  rejects "x ? f() : (void)0";
+  accepts "x ? (void)0 : (void)f()";
+  rejects "(f(), 1)";
+  rejects "for (f(); x; ) ;";
+  rejects "for (; x; f()) ;";
+  rejects "x = sizeof (f(), 1)";
+  rejects "({ f(); })";
+  rejects "x = ({ f(); x; })";
+  accepts "(void)f()";
+  accepts "r = f()";
+  accepts "((r = f()))";
+  accepts "(r = f(), x)";
+  accepts "for (r = f(); x; r = f()) ;";
+  accepts "r = ({ x; f(); })";
+  accepts "r = ({ x; done: f(); })";
+  rejects "({ f(); int y = 0; })";
+  accepts "result(int, int) s = f(); (void)s";
+  accepts_source ~file:"in.tc"
+    (declarations ^ "\n# 1 \"c.h\" 1\nvoid t(void) { f(); r; }\n")
+
 (* 6.8.1p3, 6.8.6.1p1: a label is defined once in its scope, the
    function or the block of a GNU local label, and a goto or an asm goto
    names one defined there. *)
@@ -1047,6 +1079,7 @@ let () =
   return_qualifiers ();
   atomic_returns ();
   statements ();
+  dropped_results ();
   labels ();
   left_to_backend ();
   block_declarations ();

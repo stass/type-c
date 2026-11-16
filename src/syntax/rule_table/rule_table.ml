@@ -260,6 +260,12 @@ let rows =
         "A generic whose definition holds a [#pragma] line, which a \
          [_Pragma] operator also becomes, or a [#] punctuator, which the \
          text of an instance cannot hold." };
+    Live { name = "Dropped_result"; code = 48; clause = Some "design 5.2";
+      meaning =
+        "A value of a [result] type that Type-C text discards other than \
+         by a cast to [void]: as an expression statement, the left \
+         operand of [,], or the first or third clause of [for]. An \
+         assignment discards none, having stored it." };
   ]
 
 let () =

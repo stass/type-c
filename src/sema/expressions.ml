@@ -440,6 +440,27 @@ let refuse_variant context (span : Tree.span) (t : Ctype.t) =
               (quoted_variant name)))
   | Some _ | None -> ()
 
+(* An assignment, which has stored the value that it gives. *)
+let rec is_assignment (expression : Tree.expression) =
+  match expression.node with
+  | Assignment _ -> true
+  | Parenthesized inner -> is_assignment inner
+  | _ -> false
+
+(* Design 5.2: Type-C text discards no value of a result type, judged by
+   the first token of [discarded], whose typing [typed] is; discarding an
+   assignment drops nothing. *)
+let refuse_dropped_result context (discarded : Tree.expression) typed =
+  match Ctype.as_result typed.expression_type with
+  | Some _
+    when is_type_c_text context discarded.span
+         && not (is_assignment discarded) ->
+      context.fail discarded.span
+        (Rule.message Dropped_result
+           "a value of a result type is discarded; handle it with try or \
+            match, store it, or cast it to void")
+  | Some _ | None -> ()
+
 (* Distinct types (design 3.4, 10.2) *)
 
 (* C text sees a distinct type as the typedef of its representation that
@@ -2367,7 +2388,7 @@ and expression_node context position (whole : Tree.expression) =
       assignment context span op left_typed (typed right)
   (* 6.5.17p2: the right operand's value. *)
   | Comma (left, right) ->
-      ignore (as_whole left);
+      refuse_dropped_result context left (as_whole left);
       let right = as_enclosing right in
       context.needs_complete right.expression_type;
       { (value (value_type right)) with bit_field = value_of right.bit_field }
@@ -2663,6 +2684,16 @@ and conditional context span position condition if_true if_false =
     | None -> { branch = condition; branch_typed = condition_typed }
   in
   let third = { branch = if_false; branch_typed = branch_typed if_false } in
+  let result = conditional_type context span second third in
+  (* GNU C: a void conditional discards the value of its other branch. *)
+  if Ctype.is_void result = Answer true then begin
+    refuse_dropped_result context second.branch second.branch_typed;
+    refuse_dropped_result context third.branch third.branch_typed
+  end;
+  result
+
+(* 6.5.15p3 to p6: the type of a conditional of these branches. *)
+and conditional_type context span second third =
   let branch_operand branch =
     context.needs_complete branch.branch_typed.expression_type;
     operand context (as_seen context span branch.branch_typed)
@@ -2759,29 +2790,44 @@ and assignment context span (op : Tree.assignment_operator) left right =
   | Compound_assign op -> ignore (binary_type context span op left right));
   { (value (value_type left)) with bit_field = value_of left.bit_field }
 
-(* GNU: the value of the last statement of the block, or void. *)
+(* GNU: the value of the last block item, or void. That item gives its
+   value rather than discarding it (design 5.2). *)
 and statement_expression context (block : Tree.block) =
-  block_items context block;
   match List.rev block.node.items with
-  | Block_statement last :: _ -> statement_value context last
-  | (Block_declaration _ | Block_type_declaration _) :: _ | [] -> Ctype.void
+  | Block_statement last :: before ->
+      items context (List.rev before);
+      statement_value context last
+  | (Block_declaration _ | Block_type_declaration _) :: _ | [] ->
+      block_items context block;
+      Ctype.void
 
-(* The value of an expression statement past the named labels before
-   it, as Clang reads it; void for any other statement. The value is no
-   bit-field in Clang, and has no _Atomic type, as Clang refuses an
-   [Atomic_value] there. *)
+(* Types the last block item of a statement expression, a statement,
+   and gives the value of the statement expression: that of an
+   expression statement past the named labels before it, as Clang reads
+   it; void for any other statement. The value is no bit-field in Clang,
+   and has no _Atomic type, as Clang refuses an [Atomic_value] there. *)
 and statement_value context (statement : Tree.statement) =
   match statement.node with
   | Expression_statement value ->
-      Ctype.unqualified (value_type (operand_typed context value))
-  | Labeled { label = { node = Named_label _; _ }; statement = labeled } ->
+      Ctype.unqualified (value_type (statement_operand context value))
+  | Labeled
+      { label = { node = Named_label _; _ } as label; statement = labeled } ->
+      label_of context label;
       statement_value context labeled
   | Labeled
       { label = { node = Case_label _ | Case_range _ | Default_label; _ }; _ }
   | Compound _ | Null_statement | Attribute_statement _ | If _ | Switch _
   | While _ | Do _ | For _ | Goto _ | Computed_goto _ | Continue _ | Break _
   | Return _ | Asm _ | Match _ ->
+      typed_statement context statement;
       Ctype.void
+
+(* 6.3.2.1p2: the expression of an expression statement, an lvalue
+   converted to its value. *)
+and statement_operand context value =
+  let typed = whole_value context value in
+  context.needs_complete typed.expression_type;
+  typed
 
 (* 7.19p3: each step of the member path of [offsetof] reaches into the
    type that the steps before it reach, which may not be a variant (design
@@ -2915,8 +2961,7 @@ and typed_statement context (statement : Tree.statement) =
       typed_statement context labeled
   | Compound block -> block_items context block
   | Expression_statement value ->
-      (* 6.3.2.1p2: an lvalue statement is converted to its value. *)
-      context.needs_complete (whole_value context value).expression_type
+      refuse_dropped_result context value (statement_operand context value)
   | Computed_goto value -> ignore (expression context value)
   | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _ ->
       ()
@@ -2952,7 +2997,10 @@ and typed_statement context (statement : Tree.statement) =
   | For { clause; condition; step; body } ->
       Option.iter (for_clause context) clause;
       Option.iter (scalar ~clause:"6.8.5p2") condition;
-      Option.iter (fun step -> ignore (whole_value context step)) step;
+      Option.iter
+        (fun step ->
+          refuse_dropped_result context step (whole_value context step))
+        step;
       typed_statement context body
   (* 6.8.6.4p1 is left to the backend: GCC and Clang refuse a return
      that mismatches the function by default but accept it under
@@ -2984,7 +3032,8 @@ and typed_statement context (statement : Tree.statement) =
 and for_clause context (clause : Tree.for_clause) =
   match clause with
   | Clause_declaration declaration -> context.declaration declaration
-  | Clause_expression value -> ignore (whole_value context value)
+  | Clause_expression value ->
+      refuse_dropped_result context value (whole_value context value)
 
 (* 6.8.4.2p1. *)
 and switch_controlling context controlling =
