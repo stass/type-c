@@ -110,6 +110,11 @@ type error = Reader.error = { location : Location.t; message : string }
    and [*] only in a parameter list that is not that of a definition. *)
 type place = At_file_scope | In_prototype | In_definition | In_block
 
+(* A generic type: its latest declaration, and whether it is an alias
+   whose text is inexact (design 3.5 rule 2), read where the definition
+   stands, as nothing later changes what the text names there. *)
+type generic = { declaration : Tree.type_declaration; inexact : bool }
+
 (* The reader follows the links that the parser records in the tree
    (design 13.3): [entities] holds what each declaration that it has read
    declares, as of that declaration, [tag_types] the tag that each tag
@@ -129,12 +134,12 @@ type place = At_file_scope | In_prototype | In_definition | In_block
    The reading of an instance (design 10.3) and the definition check of
    a generic have [typed] and [type_names] of their own, as they read
    the text of the generic's definition again.
-   [generics] holds the declaration of each generic type by the
-   reference of each of its declarations, the latest, which is the
-   variant that completes an incomplete one; [applied_at] the latest
-   application of each instance, where an error of its definition is
-   reported (design 3.5 rule 5), and [nesting] the chain of instances
-   whose definitions are being read (rule 7), none outside one.
+   [generics] holds each generic type by the reference of each of its
+   declarations, with the latest declaration, which is the variant that
+   completes an incomplete one; [applied_at] the latest application of
+   each instance, where an error of its definition is reported (design
+   3.5 rule 5), and [nesting] the chain of instances whose definitions
+   are being read (rule 7), none outside one.
    [instance_tokens] counts the tokens of the definitions read for
    instances so far, those of definition checks included, which a trial
    does not undo. [external_facts] are those of the external declaration
@@ -163,7 +168,7 @@ type state = {
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
       (* the structure of each [type N;], which its variant completes *)
-  generics : (Tree.reference, Tree.type_declaration) Hashtbl.t;
+  generics : (Tree.reference, generic) Hashtbl.t;
   mutable applied_at : Tree.span Ctype.Instances.t;
   mutable nesting : nesting option;
   mutable instance_tokens : int;
@@ -1096,19 +1101,12 @@ and type_specifier_is_inexact state : Tree.type_specifier -> bool =
       match Hashtbl.find_opt state.entities declaration with
       | Some { declared = Typedef _; inexact; _ } -> inexact
       | Some _ | None -> false)
-  | Application { generic; name = _; arguments = _ } ->
-      alias_is_inexact state generic
+  | Application { generic = reference; name = _; arguments = _ } -> (
+      match Hashtbl.find_opt state.generics reference with
+      | Some { inexact; declaration = _ } -> inexact
+      | None -> false)
   | Typeof_expression _ -> true
   | Basic _ | Struct_or_union _ | Enum _ -> false
-
-(* Each generic read names only generics read before it, so the look
-   through definitions ends; a type parameter in one adds nothing, as
-   its argument is checked where the application is read. *)
-and alias_is_inexact state generic =
-  match Hashtbl.find_opt state.generics generic with
-  | Some { node = { definition = Alias type_name; _ }; _ } ->
-      type_name_is_inexact state type_name
-  | Some _ | None -> false
 
 and type_name_is_inexact state (type_name : Tree.type_name) =
   let { Tree.specifier_qualifiers; abstract } = type_name.node in
@@ -1154,6 +1152,15 @@ and parameter_is_inexact state (parameter : Tree.parameter) =
   attributes <> []
   || specifiers_are_inexact state specifiers
   || optional_declarator_is_inexact state (parameter_declarator declarator)
+
+(* Whether a generic's definition is an alias whose text is inexact. The
+   parser lets a definition name only generics read before it, whose
+   fact is then recorded; a type parameter in it adds nothing, as its
+   argument is checked where the application is read. *)
+let definition_is_inexact state (declaration : Tree.type_declaration) =
+  match declaration.node.definition with
+  | Alias type_name -> type_name_is_inexact state type_name
+  | Incomplete_variant | Variant _ | Distinct _ | Record_alias _ -> false
 
 (* The specifiers as they apply to one declarator, which [attributes]
    follow: a declaration is inexact when its specifiers, its declarator
@@ -2557,11 +2564,14 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
   let declaration = scoped.declaration in
   let { Tree.declared; type_parameters; _ } = declaration.node in
   refuse_unmovable state declaration.span;
-  Hashtbl.replace state.generics (Tree.In_tree declared.id) declaration;
+  let generic =
+    { declaration; inexact = definition_is_inexact state declaration }
+  in
+  Hashtbl.replace state.generics (Tree.In_tree declared.id) generic;
   Hashtbl.replace state.definition_views declared.id
     state.external_facts.texts_at.view;
   Option.iter
-    (fun earlier -> Hashtbl.replace state.generics earlier declaration)
+    (fun earlier -> Hashtbl.replace state.generics earlier generic)
     declared.earlier;
   let parameter (written : Tree.parameter_name) =
     let opaque = Ctype.declare_opaque state.tags written.name.node in
@@ -2649,7 +2659,7 @@ and refuse_inexact state (written : Tree.type_name) (_, t) =
    variant that completes an incomplete one, once read. *)
 and generic_declaration state span name reference =
   match Hashtbl.find_opt state.generics reference with
-  | Some declaration -> declaration
+  | Some { declaration; inexact = _ } -> declaration
   | None -> not_read state span name
 
 (* The latest application of each instance, where an error of its
@@ -2869,7 +2879,7 @@ and instance_type state (declaration : Tree.type_declaration) instance
    instance derives its names from its instance name (design 10.3);
    typing declares none of them, as Type-C text names none. *)
 and variant_instance state generic instance reading record =
-  let declaration = Hashtbl.find state.generics generic in
+  let { declaration; inexact = _ } = Hashtbl.find state.generics generic in
   let define privacy constructors () =
     let span = declaration.span in
     let variant = Encoding.variant_name (Applied instance) in

@@ -2830,6 +2830,18 @@ let generic_resolution () =
   (* Declared again before the alias, the typedef name makes the alias
      inexact at its own place, and the argument is refused there. *)
   rejects ~file (plain ^ wide ^ " " ^ alias ^ " box(a(int)) x;") "[TC0041]";
+  (* The exactness of an alias generic is read once, at its definition,
+     so a chain of aliases each applied takes time linear in its length,
+     not in its square. *)
+  let link index =
+    Printf.sprintf "type g%d(T) = g%d(int); g%d(int) x%d;" index (index - 1)
+      index index
+  in
+  let chain = List.init 4000 (fun index -> link (index + 1)) in
+  let started = Sys.time () in
+  accepts ~file (String.concat " " ("type g0(T) = int; g0(int) x0;" :: chain));
+  if Sys.time () -. started > 2.0 then
+    fail_case "a chain of 4000 alias generics" "took over 2 s";
   (* An object or a function declared again through an inexact typedef
      name, or with an attribute, may give [__typeof__] of it another type
      for the backend, as for a typedef name: Clang aligns a member of
