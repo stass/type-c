@@ -1086,13 +1086,6 @@ GCC 16 (macOS x86-64), and each gives the object that the backend builds
 alone; block pointers and `_Float16` in the SDK's headers have unknown
 types (design 13.3).
 
-- [High] Record the whole corpus on one revision of typec and of the
-  corpus repository, on every gating host, and commit the records: the
-  macOS records of c-testsuite, chibicc, lua and zlib are rewritten but
-  uncommitted, and the Linux records of musl and zlib name a corpus
-  revision that was `-dirty`. A Linux record comes from
-  `tools/hosts/run.sh --corpus` (docs/development.md, "Linux test
-  hosts").
 - [Low] The runner's command line and the meaning of its status 3 are
   written out in `tools/hosts/corpus-in-container.sh`,
   `tools/hosts/freebsd.sh` and the example in `docs/development.md`;
@@ -1414,10 +1407,12 @@ types (design 13.3).
   (`./type.tci`); and a binding of another arm used in an arm reads
   "'addr' is not declared (C11 6.5.1p2)" with no code, where a message
   naming the arm that binds it would point at the mistake.
-- [Medium] The Linux host images have no csmith, so the csmith recipe
-  fails to set up there (`prepare.sh: csmith is not installed`). Add a
-  pinned csmith to tools/hosts/debian.Dockerfile and alpine.Dockerfile,
-  or limit the recipe's lines to the hosts that have it.
+- [Medium] The Linux host images and the FreeBSD host have no csmith,
+  so the csmith recipe fails to set up there (`prepare.sh: csmith is
+  not installed`). Add a pinned csmith to tools/hosts/debian.Dockerfile
+  and alpine.Dockerfile and have the FreeBSD host's owner install the
+  devel/csmith port, or limit the recipe's lines to the hosts that have
+  it.
 - [High] Write the formal model for checked-mode lifetimes before any
   implementation of tier 2 (design 11.3). Nothing about lifetimes may be
   claimed until it exists.
