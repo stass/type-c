@@ -558,8 +558,9 @@ id(stmt) s;                             /* e = s is an error */
    `typedef struct { int x; } n, *np;` gives its struct the one name
    `n`. An argument holds no attribute, whatever the attribute: none is
    written in it, and no typedef name that it uses, at any depth, is
-   declared with one. An instance name is built after typedef expansion
-   and encodes no attribute (10.3), so
+   declared with one before the text that uses the name, which 13.5
+   keeps true where lowering writes an alias. An instance name is built
+   after typedef expansion and encodes no attribute (10.3), so
    `vector(int)` and `vector(wide)`, where `wide` is a typedef of `int`
    with the GNU attribute `aligned(16)`, would have one name and two
    layouts in one translation unit, as another attribute would give one
@@ -3377,6 +3378,13 @@ each. A third clause covers the text around it.
   type, and neither does declaring an entity again with the type it has:
   a member that names a structure of file scope reads alike where the
   structure is completed between the text and the place of writing.
+  A typedef name declared again with an attribute or a `__typeof__` of
+  an expression (3.5 rule 2), or after such a declaration, may have
+  another type for the backend, which reads the attribute that typec's
+  types lack and cannot compare; such a declaration is an error as one
+  that changes the type is. The exactness of a type argument, which
+  3.5 rule 2 reads from the text of an alias at its own place, so holds
+  at each place where lowering writes the alias.
   *Provisional (P21).* Where an entity that the text uses is declared
   again between the two and whether its type stays the same depends on
   an unknown type (13.3), that declaration is an error, as one that

@@ -237,7 +237,8 @@ let rows =
         "A declaration between moved text and a place where lowering \
          writes it that makes a name of the text read otherwise there: a \
          name that the text uses denotes another entity or tag, or an \
-         entity of another type, or a name that the text declares for \
+         entity of another type, as a typedef name declared again with \
+         an attribute may be, or a name that the text declares for \
          itself is a typedef name or a tag of the scope around it." };
     Live { name = "Moved_text_unknown"; code = 45;
       clause = Some "design 13.5, P21";

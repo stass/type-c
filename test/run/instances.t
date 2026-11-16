@@ -172,3 +172,45 @@ declarator's alone.
   $ typec --cc=$clang $flags -fsyntax-only wide.tc
   typec: wide.tc:3: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
   [80]
+
+A typedef name declared again with an attribute after an alias generic
+that uses it gives the alias's text another type where an instance
+first stands after that declaration (design 13.5); the backend would
+read a(int) as aligned and box(a(int)) as box(int).
+
+  $ cat > late.tc <<'EOF'
+  > typedef int p;
+  > type a(T) = p;
+  > type box(T) = struct { T value; };
+  > typedef int p __attribute__((aligned(16)));
+  > box(a(int)) x;
+  > EOF
+  $ typec --cc=$clang $flags -fsyntax-only late.tc
+  typec: late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [80]
+
+An instance that stands before that declaration, and a typedef name
+declared through the first declaration, keep the type that typec reads,
+so the argument is exact on both backends.
+
+  $ cat > early.tc <<'EOF'
+  > typedef int p;
+  > typedef p q;
+  > type a(T) = p;
+  > type b(T) = q;
+  > type box(T) = struct { T value; };
+  > type g(T) = struct { p v; T t; };
+  > a(int) early_a;
+  > g(int) early_g;
+  > typedef int p __attribute__((aligned(16)));
+  > box(a(int)) x;
+  > box(b(int)) y;
+  > g(int) z;
+  > _Static_assert(_Alignof(p) == 16, "p");
+  > _Static_assert(_Alignof(a(int)) == _Alignof(__typeof__(x.value)), "a");
+  > _Static_assert(_Alignof(b(int)) == _Alignof(__typeof__(y.value)), "b");
+  > _Static_assert(_Alignof(g(int)) == _Alignof(int), "g");
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -fsyntax-only early.tc || echo "$cc"
+  > done

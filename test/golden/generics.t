@@ -466,6 +466,25 @@ both backends do.
   redeclared.tc:4: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
   [1]
 
+A typedef name that an alias generic uses, declared again with an
+attribute after the alias, gives the alias's text another type where an
+instance first stands after that declaration (design 13.5). Declared
+again before the alias, it makes the alias inexact, and the argument is
+refused.
+
+  $ printf '%s\n' 'typedef int p;' 'type a(T) = p;' \
+  >   'type box(T) = struct { T value; };' \
+  >   'typedef int p __attribute__((aligned(16)));' 'box(a(int)) x;' > late.tc
+  $ ./golden.exe late.tc
+  late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [1]
+  $ printf '%s\n' 'typedef int p;' \
+  >   'typedef int p __attribute__((aligned(16)));' 'type a(T) = p;' \
+  >   'type box(T) = struct { T value; };' 'box(a(int)) x;' > before.tc
+  $ ./golden.exe before.tc
+  before.tc:5: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  [1]
+
 An argument holds no `__typeof__` of an expression at the same depth,
 as the backend gives the expression the type of the typedef that
 declared it, attribute included (design 3.5 rule 2). `__typeof__` of a

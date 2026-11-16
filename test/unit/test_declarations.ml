@@ -2775,6 +2775,29 @@ let generic_resolution () =
    ^ " static _Float16 a(_Float16 x) { return x; } g(int) x;")
     "[TC0045]";
   accepts ~file ("static _Float16 a(_Float16); " ^ uses ^ " g(int) x;");
+  (* A typedef name declared again with an attribute between the text
+     and the place where lowering writes it gives the text another type
+     there, through an alias generic and a structure alike; where the
+     instance stands before that declaration, or the typedef name is
+     declared again without one, the text reads alike. *)
+  let plain = "typedef int p; " in
+  let wide = " typedef int p __attribute__((aligned(16)));" in
+  let alias = "type a(T) = p; type box(T) = struct { T value; };" in
+  let holder = "type g(T) = struct { p v; T t; };" in
+  let added = "may hold an attribute or `typeof` of an expression" in
+  rejects ~file (plain ^ alias ^ wide ^ " box(a(int)) x;") added;
+  accepts ~file (plain ^ alias ^ " a(int) early;" ^ wide ^ " box(a(int)) x;");
+  rejects ~file (plain ^ holder ^ wide ^ " g(int) y;") added;
+  accepts ~file (plain ^ holder ^ " g(int) early;" ^ wide ^ " g(int) y;");
+  accepts ~file (plain ^ holder ^ " typedef int p; g(int) y;");
+  (* An attribute that the text has already may change, and typec does
+     not compare attributes, so any declaration with one is refused. *)
+  let narrow = "typedef int p __attribute__((aligned(8))); " in
+  rejects ~file (narrow ^ holder ^ wide ^ " g(int) y;") "[TC0044]";
+  rejects ~file (narrow ^ holder ^ " typedef int p; g(int) y;") "[TC0044]";
+  (* Declared again before the alias, the typedef name makes the alias
+     inexact at its own place, and the argument is refused there. *)
+  rejects ~file (plain ^ wide ^ " " ^ alias ^ " box(a(int)) x;") "[TC0041]";
   (* Unread text: an attribute's identifier that denotes a type
      parameter is refused at the definition, and one that denotes a
      declaration is a use of it. *)

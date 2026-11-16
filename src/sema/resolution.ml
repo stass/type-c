@@ -164,6 +164,28 @@ let check_same_type context span name ~declaration (used : Entity.t) there =
             that depends on %s, whose type typec does not compute"
            (quote name) cited unknown.construct)
 
+(* Whether the entity is a typedef name whose type for the backend may
+   hold an attribute that its typec type lacks (design 3.5 rule 2). *)
+let is_inexact (entity : Entity.t) =
+  match entity.declared with
+  | Typedef { inexact; _ } -> inexact
+  | Object _ | Function _ | Enumerator _ -> false
+
+(* The backend reads a type with its attributes, which typec's types do
+   not hold, so typec cannot tell that a typedef name declared again
+   with one keeps the type it has at the text's own place; the
+   exactness of a type argument (design 3.5 rule 2), read at that
+   place, rests on this. *)
+let check_same_attributes context span name ~cited there =
+  if is_inexact there then
+    refuse span Moved_text
+      (Printf.sprintf
+         "the declaration of %s at %s, between the text and a place where \
+          lowering writes it, gives it a type that may hold an attribute or \
+          `typeof` of an expression, which may change the type that the \
+          text uses"
+         (quote name) (declared_at context cited))
+
 let refuse_other_entity context span name cited =
   refuse span Moved_text
     (Printf.sprintf
@@ -179,8 +201,9 @@ let check_ordinary context place span name reference =
       let there = context.entity declaration in
       match (context.entity reference, there) with
       | Some used, Some there when used.entity = there.entity ->
-          check_same_type context span name ~declaration:(Ordinary declaration)
-            used there
+          let cited = Ordinary declaration in
+          check_same_type context span name ~declaration:cited used there;
+          check_same_attributes context span name ~cited there
       | Some _, Some _ | None, _ | _, None ->
           refuse_other_entity context span name (Source (Ordinary declaration)))
   | None -> (
