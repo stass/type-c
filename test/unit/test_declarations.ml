@@ -2878,6 +2878,16 @@ let generic_resolution () =
   (* Moved text declares no name that is in scope after it, even where
      no instance is written (design 13.5, 3.5 rule 8). *)
   rejects ~file "type link(T) = struct { struct node *next; T v; };"
+    "the tag 'node' is declared in the scope around the text";
+  (* The block of a statement expression is a scope of its own, which
+     ends inside the text, whatever scope the reader reads it in. *)
+  let counted = "int a[sizeof(({ int k = 1; k; }))];" in
+  accepts ~file ("type g(T) = struct { T v; " ^ counted ^ " };");
+  accepts ~file
+    "type g(T) = struct { T v; \
+     int a[sizeof(({ struct q *p = 0; p == 0; }))]; };";
+  rejects ~file
+    ("type g(T) = struct { T v; " ^ counted ^ " struct node *n; };")
     "the tag 'node' is declared in the scope around the text"
 
 let () =

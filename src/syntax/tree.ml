@@ -77,14 +77,30 @@ type label_name = { name : identifier; label : label_id }
     first token ({!Builtin_typedef.table}). *)
 type reference = In_tree of declaration_id | Builtin of string
 
+(** The scope that a declaration declares its identifier in, as the
+    number of scopes open there in the C that the text lowers to, file
+    scope counted: [1] at file scope. The scope of a generic's type
+    parameters stands for file scope while its definition is read
+    (design 3.5 rule 8), and is a scope inside file scope where the
+    parameters themselves are declared. Sibling scopes share a depth,
+    so a depth identifies a scope only together with a point inside it,
+    as the third clause of the resolution check compares it (design
+    13.5). *)
+type scope_depth = Scope_depth of int
+
 (** A declaration of an ordinary identifier, made where the identifier
-    enters scope (6.2.1p7): its id, and the declaration of the same
-    identifier in the same scope that it redeclares, if one entered scope
-    before it, which an enumerator in a declarator's own array length
-    does though its token comes later. A redeclaration denotes the same
-    entity or breaks a constraint (6.7p3), which the declaration reader
-    checks, except where either is a Clang overload (design 13.3). *)
-type declared = { id : declaration_id; earlier : reference option }
+    enters scope (6.2.1p7): its id, the scope it declares the identifier
+    in, and the declaration of the same identifier in the same scope that
+    it redeclares, if one entered scope before it, which an enumerator in
+    a declarator's own array length does though its token comes later. A
+    redeclaration denotes the same entity or breaks a constraint (6.7p3),
+    which the declaration reader checks, except where either is a Clang
+    overload (design 13.3). *)
+type declared = {
+  id : declaration_id;
+  scope : scope_depth;
+  earlier : reference option;
+}
 
 (** The declaration that a use of an ordinary identifier refers to: the
     one visible at the use (6.2.1p2), or none. A use of no declaration is
@@ -97,9 +113,14 @@ type resolution = Resolved of reference | Undeclared
 type tag = { name : identifier; binding : tag_binding }
 
 and tag_binding =
-  | Declares of { id : tag_id; earlier : tag_id option; implicit : bool }
-      (** declares the tag in the current scope: before a body or an
-          enumerator list (p6), alone in a declaration (p7, and C23's
+  | Declares of {
+      id : tag_id;
+      scope : scope_depth;
+      earlier : tag_id option;
+      implicit : bool;
+    }
+      (** declares the tag in the current scope, [scope]: before a body
+          or an enumerator list (p6), alone in a declaration (p7, and C23's
           [enum e : T;]), or where no tag of its name is visible (p8; for
           an enumeration a GNU forward reference, against p3). [earlier]
           is the tag of its name that the scope declares already, which

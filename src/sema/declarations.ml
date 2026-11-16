@@ -327,21 +327,20 @@ let not_read state span name =
 
 (* What the text of a generic's definition being read uses and declares
    (design 13.5): every use of a name passes [note_use], and every
-   declaration of one [note_own], whose scope is that around the text
-   where the reader reads it at file scope. *)
+   declaration of one [note_own], with the scope that the parser
+   declared it in. *)
 let note_use state span name declaration =
   match state.moved with
   | Some moved ->
       moved.uses <- { Resolution.name; span; declaration } :: moved.uses
   | None -> ()
 
-let note_own state span name declaration ~implicit =
+let note_own state span name declaration ~scope ~implicit =
   match state.moved with
   | Some moved ->
       let declared = { Resolution.name; span; declaration } in
-      let in_scope_after = state.place = At_file_scope in
       moved.declares <-
-        { Resolution.declared; implicit; in_scope_after } :: moved.declares
+        { Resolution.declared; implicit; scope } :: moved.declares
   | None -> ()
 
 (* What [reference] denotes at the use of [name] at [span], if the reader
@@ -451,7 +450,7 @@ let bind_entity state name (declared : Tree.declared) entity =
   let reference = Tree.In_tree declared.id in
   let (Ordinary_at token) = declared.id in
   note_own state { first = token; last = token } name
-    (Resolution.Ordinary reference) ~implicit:false;
+    (Resolution.Ordinary reference) ~scope:declared.scope ~implicit:false;
   Hashtbl.replace state.entities reference entity
 
 (* An overload (design 13.3) is a new entity, which is not linked under
@@ -1292,7 +1291,7 @@ and prior_tag state (tag : Tree.tag) =
     known id
   in
   match tag.binding with
-  | Declares { earlier; id = _; implicit = _ } -> Option.map used earlier
+  | Declares { earlier; _ } -> Option.map used earlier
   | Names id -> Some (used id)
 
 (* A mention that declares its tag in a parameter list or a block only
@@ -1308,8 +1307,8 @@ and note_nested_mention state (tag : Tree.tag) =
 (* [tag] is a declaration of [found] where it declares one. *)
 and bind_tag state (tag : Tree.tag) found =
   match tag.binding with
-  | Declares { id; earlier = _; implicit } ->
-      note_own state tag.name.span tag.name.node (Resolution.Tag id)
+  | Declares { id; scope; implicit; earlier = _ } ->
+      note_own state tag.name.span tag.name.node (Resolution.Tag id) ~scope
         ~implicit;
       Hashtbl.replace state.tag_types id found
   | Names _ -> ()
@@ -2370,7 +2369,8 @@ and variant_tag_enum state (declaration : Tree.type_declaration)
   Hashtbl.replace state.tag_types
     (Tree.derived_enum_tag ~type_keyword:span.first)
     (Enum_tag enum);
-  declare_tag_enumerators state span variant constructors;
+  declare_tag_enumerators state span variant constructors
+    ~scope:declaration.node.declared.scope;
   enum
 
 and defined_tag_enum state span tag constructors =
@@ -2385,14 +2385,15 @@ and defined_tag_enum state span tag constructors =
        (Answer (enum_integer state span values)));
   enum
 
-(* The enumerator [N_C] of each constructor, whose value is its index. *)
-and declare_tag_enumerators state span variant constructors =
+(* The enumerator [N_C] of each constructor, whose value is its index,
+   in the scope of the variant. *)
+and declare_tag_enumerators state span variant constructors ~scope =
   let enumerator_type = integer_type state span Int in
   let declare index (constructor : Tree.constructor) =
     let name = Tree.enumerator_name ~variant constructor.node.name.node in
     let declared : Tree.declared =
       let token = constructor.node.name.span.first in
-      { id = Tree.derived_enumerator token; earlier = None }
+      { id = Tree.derived_enumerator token; scope; earlier = None }
     in
     let value =
       Integer_constant.known state.target Int (Exact_integer.of_int index)
@@ -2952,6 +2953,8 @@ and note_instance_text state generic moved typed instance =
 and check_resolution state (declaration : Tree.type_declaration) moved =
   let text =
     { Resolution.span = declaration.span;
+      (* The text is the declaration, which holds its own name. *)
+      scope = declaration.node.declared.scope;
       own_place =
         Hashtbl.find state.definition_views declaration.node.declared.id;
       uses = List.rev moved.uses;

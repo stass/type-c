@@ -792,6 +792,19 @@ let refuse_second_definition state (name : identifier) kind earlier =
              declaration"))
   | Some _ | None -> ()
 
+(* The depth of the innermost scope in the C that the text lowers to
+   ({!Tree.scope_depth}), where the scope of a generic's type parameters
+   stands for file scope. *)
+let scope_depth state =
+  let depth = Scope.depth state.scope in
+  match state.generic with
+  | Some { parameter_depth; _ } -> Scope_depth (depth - parameter_depth + 1)
+  | None -> Scope_depth depth
+
+(* The declaration [id] of an ordinary identifier in the innermost
+   scope, which redeclares [earlier]. *)
+let declared_here state id ~earlier = { id; scope = scope_depth state; earlier }
+
 (* Declares the ordinary identifier [name] in the innermost scope, where
    its scope begins. *)
 let declare state ~kind (name : identifier) =
@@ -802,7 +815,8 @@ let declare state ~kind (name : identifier) =
   refuse_second_definition state name kind earlier;
   state.scope <-
     Scope.declare state.scope name.node { declaration = In_tree id; kind };
-  { id; earlier = Option.map (fun ordinary -> ordinary.declaration) earlier }
+  declared_here state id
+    ~earlier:(Option.map (fun ordinary -> ordinary.declaration) earlier)
 
 (* The kind of the name of a type declaration with [parameters] type
    parameters at [stage]. *)
@@ -880,10 +894,7 @@ let resolve state name =
 
 (* Whether the innermost scope is file scope in the C that the text
    lowers to, where the scope of a generic's type parameters is not. *)
-let at_file_level state =
-  match state.generic with
-  | Some { parameter_depth; _ } -> Scope.depth state.scope = parameter_depth
-  | None -> Scope.is_file state.scope
+let at_file_level state = scope_depth state = Scope_depth 1
 
 (* A tag that a type argument declares has one name only at file scope
    (design 3.5 rule 2). *)
@@ -907,7 +918,12 @@ let declare_tag state (name : identifier) ~implicit =
   state.scope <-
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
   Declares
-    { id; earlier = Option.map (fun entry -> entry.tag) earlier; implicit }
+    {
+      id;
+      scope = scope_depth state;
+      earlier = Option.map (fun entry -> entry.tag) earlier;
+      implicit;
+    }
 
 (* The name of a type declaration, which its spelling lets derive names
    for C (design 3.1 rules 6 and 7). [name] is the node made last, which
@@ -1008,7 +1024,7 @@ let declare_variant state (checked : Spelling.type_name spanned)
         let id = Ordinary_at (token_of name) in
         let completed = { declaration = In_tree id; kind } in
         state.scope <- Scope.declare state.scope name.node completed;
-        { id; earlier = Some declaration }
+        declared_here state id ~earlier:(Some declaration)
     | Some _ | None ->
         let declared = declare state ~kind name in
         if not generic then claim_own_tag state name;

@@ -17,12 +17,14 @@ type name_space = Ordinary | Tag | Label
 type target = Token of int | Builtin_target
 
 (* A declaration or a use of a name that a dump node shows, which only
-   [resolutions] prints. A use of no declaration has no [target]. *)
+   [resolutions] and [scope_depths] print. A use of no declaration has
+   no [target]. *)
 type scope_entry =
   | Declaration_entry of {
       space : name_space;
       name : string;
       token : int;
+      scope : scope_depth;
       earlier : target option;
     }
   | Use_entry of { space : name_space; name : string; target : target option }
@@ -48,9 +50,10 @@ let ordinary_target = function
 
 let tag_target (Tag_at token) = Token token
 
-let declaration_entry name ({ id = Ordinary_at token; earlier } : declared) =
+let declaration_entry name
+    ({ id = Ordinary_at token; scope; earlier } : declared) =
   Declaration_entry
-    { space = Ordinary; name; token;
+    { space = Ordinary; name; token; scope;
       earlier = Option.map ordinary_target earlier }
 
 let use_entry name resolution =
@@ -379,9 +382,10 @@ and tag_part (tag : tag) =
   let name = tag.name.node in
   let entry =
     match tag.binding with
-    | Declares { id = Tag_at token; earlier; implicit = _ } ->
+    | Declares { id = Tag_at token; scope; earlier; implicit = _ } ->
         Declaration_entry
-          { space = Tag; name; token; earlier = Option.map tag_target earlier }
+          { space = Tag; name; token; scope;
+            earlier = Option.map tag_target earlier }
     | Names id ->
         Use_entry { space = Tag; name; target = Some (tag_target id) }
   in
@@ -657,7 +661,8 @@ and type_declaration reader (d : type_declaration) =
   let claim =
     noted
       (Declaration_entry
-         { space = Tag; name = name.node; token; earlier = None })
+         { space = Tag; name = name.node; token; scope = declared.scope;
+           earlier = None })
       (leaf "claims")
   in
   let claims = if generic then [] else [ claim ] in
@@ -680,21 +685,24 @@ and type_declaration reader (d : type_declaration) =
                { space = Tag;
                  name = enum_tag_name (Spelling.declared checked.node);
                  token;
+                 scope = declared.scope;
                  earlier = None })
             (leaf "claims")
         in
         let enum_claims = if generic then [] else [ enum_claim ] in
         privacy ~is_private @ own @ enum_claims
-        @ List.map (constructor reader checked ~generic) constructors
+        @ List.map
+            (constructor reader checked ~generic ~scope:declared.scope)
+            constructors
   in
   node d.span "type" ((declared_name :: parameters) @ parts)
 
 (* The word [private] of a definition (design 9.2) as a [private] part. *)
 and privacy ~is_private = if is_private then [ leaf "private" ] else []
 
-(* A constructor as [(C fields)], noted with the enumerator it claims,
-   unless its variant is [generic]. *)
-and constructor reader variant ~generic (c : constructor) =
+(* A constructor as [(C fields)], noted with the enumerator it claims in
+   the scope of its variant, unless its variant is [generic]. *)
+and constructor reader variant ~generic ~scope (c : constructor) =
   let { name; fields } = c.node in
   let (Ordinary_at token) = derived_enumerator name.span.first in
   let field (f : field) =
@@ -712,6 +720,7 @@ and constructor reader variant ~generic (c : constructor) =
              enumerator_name ~variant:(Spelling.declared variant.node)
                name.node;
            token;
+           scope;
            earlier = None })
       dumped
 
@@ -769,6 +778,18 @@ let external_declaration reader = function
 let translation_unit (reader : Reader.t) unit =
   List.map (external_declaration reader) (Tree.external_declarations unit)
 
+(* The scope entries of a dump in source order. *)
+let scope_entries dump =
+  let rec entries sexp =
+    Option.to_list sexp.entry @ List.concat_map entries sexp.parts
+  in
+  List.concat_map entries dump
+
+let space_prefix = function
+  | Ordinary -> ""
+  | Tag -> "tag "
+  | Label -> "label "
+
 (* The scope entries of a dump in source order: a declaration as [x#n],
    [n] counting the declarations of [x] in its name space in token order,
    with [<#m] after it where it redeclares [x#m]; a use as [x->#n], or
@@ -778,10 +799,7 @@ let translation_unit (reader : Reader.t) unit =
    mention of one is a use [label a->#n], [n] counting the labels named
    [a] by the token of their first mention. *)
 let resolutions dump =
-  let rec entries sexp =
-    Option.to_list sexp.entry @ List.concat_map entries sexp.parts
-  in
-  let all = List.concat_map entries dump in
+  let all = scope_entries dump in
   let declared_ids space name =
     List.filter_map
       (function
@@ -807,21 +825,32 @@ let resolutions dump =
         | Some index -> "#" ^ string_of_int index
         | None -> "#unknown")
   in
-  let prefix = function Ordinary -> "" | Tag -> "tag " | Label -> "label " in
   let show = function
-    | Declaration_entry { space; name; token; earlier } ->
+    | Declaration_entry { space; name; token; earlier; scope = _ } ->
         let earlier =
           match earlier with
           | None -> ""
           | Some earlier -> "<" ^ reference space name earlier
         in
-        prefix space ^ name ^ reference space name (Token token) ^ earlier
+        space_prefix space ^ name ^ reference space name (Token token)
+        ^ earlier
     | Use_entry { space; name; target } ->
         let target =
           match target with
           | Some target -> reference space name target
           | None -> "?"
         in
-        prefix space ^ name ^ "->" ^ target
+        space_prefix space ^ name ^ "->" ^ target
   in
   String.concat " " (List.map show all)
+
+(* The declarations of a dump in source order, each as [x:d], where [d]
+   is the depth of the scope that it declares [x] in
+   ({!Tree.scope_depth}); a tag's begins with [tag]. *)
+let scope_depths dump =
+  let show = function
+    | Declaration_entry { space; name; scope = Scope_depth depth; _ } ->
+        Some (Printf.sprintf "%s%s:%d" (space_prefix space) name depth)
+    | Use_entry _ -> None
+  in
+  String.concat " " (List.filter_map show (scope_entries dump))

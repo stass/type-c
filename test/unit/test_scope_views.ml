@@ -243,6 +243,22 @@ let pragma_cases =
       "weak=- a=- | weak=- b=-";
   ]
 
+(* The depth that the tree records of the scope of each declaration
+   ({!Tree.scope_depth}), in source order. *)
+let scope_depths reader unit _scopes _names =
+  Tree_dump.scope_depths (Tree_dump.translation_unit reader unit)
+
+let depth_cases =
+  [
+    case "blocks nest, and sibling blocks have one depth"
+      "int a;\nvoid f(int p) { int q; { int r; } { struct s *t; } }" []
+      "a:1 f:1 p:2 q:2 r:3 tag s:3 t:3";
+    case "a generic's definition stands at file scope, a block in it not"
+      "type g(T) = struct { T v;\nint a[sizeof(({ int k = 1; k; }))];\n\
+       struct n *m; };"
+      [] "g:1 T:2 k:2 tag n:1";
+  ]
+
 let () =
   let failed_with see ?file cases =
     List.filter_map
@@ -256,6 +272,7 @@ let () =
     @ failed_with declaration_views ~file:"in.tc" type_c_declaration_cases
     @ failed_with attribute_views ~file:"in.tc" attribute_cases
     @ failed_with pragma_views ~file:"in.tc" pragma_cases
+    @ failed_with scope_depths ~file:"in.tc" depth_cases
   in
   List.iter
     (fun (case, actual) ->

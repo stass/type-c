@@ -10,21 +10,22 @@ type ('ordinary, 'tag) frame = {
   tags : 'tag Names.t;
 }
 
-(* An open scope: what it declares, and what is visible in it, which is
-   what it declares over what is visible around it. Keeping [visible]
-   makes a lookup cost the same at any depth, so that a long chain of
-   nested statements, which the parser reads in a loop, takes linear
-   time. *)
+(* An open scope: what it declares, what is visible in it, which is
+   what it declares over what is visible around it, and its depth.
+   Keeping [visible] and [depth] makes a lookup and the depth cost the
+   same at any depth, so that a long chain of nested statements, which
+   the parser reads in a loop, takes linear time. *)
 type ('ordinary, 'tag) level = {
   declared : ('ordinary, 'tag) frame;
   visible : ('ordinary, 'tag) frame;
+  depth : int;
 }
 
 (* The innermost scope first; never empty, as file scope is last. *)
 type ('ordinary, 'tag) t = ('ordinary, 'tag) level list
 
 let empty_frame = { ordinary = Names.empty; tags = Names.empty }
-let file = [ { declared = empty_frame; visible = empty_frame } ]
+let file = [ { declared = empty_frame; visible = empty_frame; depth = 1 } ]
 
 let innermost = function
   | level :: _ -> level
@@ -33,16 +34,24 @@ let innermost = function
 (* Only what the universe makes visible stays: its levels are not
    scopes of the unit, so file scope is still the outermost one. *)
 let file_within universe =
-  [ { declared = empty_frame; visible = (innermost universe).visible } ]
+  [
+    {
+      declared = empty_frame;
+      visible = (innermost universe).visible;
+      depth = 1;
+    };
+  ]
 
 let enter scopes =
-  { declared = empty_frame; visible = (innermost scopes).visible } :: scopes
+  let around = innermost scopes in
+  { declared = empty_frame; visible = around.visible; depth = around.depth + 1 }
+  :: scopes
 
 let is_file = function
   | [ _ ] -> true
   | _ -> false
 
-let depth = List.length
+let depth scopes = (innermost scopes).depth
 
 (* [inner]'s declarations, hiding those of [outer] of the same name. *)
 let hiding outer inner =
@@ -50,14 +59,14 @@ let hiding outer inner =
 
 let reenter outer ~inner =
   let declared = (innermost inner).declared in
-  let around = (innermost outer).visible in
+  let around = innermost outer in
   let visible =
     {
-      ordinary = hiding around.ordinary declared.ordinary;
-      tags = hiding around.tags declared.tags;
+      ordinary = hiding around.visible.ordinary declared.ordinary;
+      tags = hiding around.visible.tags declared.tags;
     }
   in
-  { declared; visible } :: outer
+  { declared; visible; depth = around.depth + 1 } :: outer
 
 let replace_innermost scopes level =
   match scopes with
@@ -76,11 +85,12 @@ let add_ordinary name binding frame =
   { frame with ordinary = Names.add name binding frame.ordinary }
 
 let declare scopes name binding =
-  let { declared; visible } = innermost scopes in
+  let level = innermost scopes in
   replace_innermost scopes
     {
-      declared = add_ordinary name binding declared;
-      visible = add_ordinary name binding visible;
+      level with
+      declared = add_ordinary name binding level.declared;
+      visible = add_ordinary name binding level.visible;
     }
 
 let find_tag scopes name = Names.find_opt name (innermost scopes).visible.tags
@@ -95,9 +105,10 @@ let add_tag name binding frame =
   { frame with tags = Names.add name binding frame.tags }
 
 let declare_tag scopes name binding =
-  let { declared; visible } = innermost scopes in
+  let level = innermost scopes in
   replace_innermost scopes
     {
-      declared = add_tag name binding declared;
-      visible = add_tag name binding visible;
+      level with
+      declared = add_tag name binding level.declared;
+      visible = add_tag name binding level.visible;
     }

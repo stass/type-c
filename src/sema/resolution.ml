@@ -6,10 +6,11 @@ open Typec_syntax
 
 type declaration = Ordinary of Tree.reference | Tag of Tree.tag_id
 type name = { name : string; span : Tree.span; declaration : declaration }
-type own = { declared : name; implicit : bool; in_scope_after : bool }
+type own = { declared : name; implicit : bool; scope : Tree.scope_depth }
 
 type text = {
   span : Tree.span;
+  scope : Tree.scope_depth;
   own_place : Parser.View.t;
   uses : name list;
   declares : own list;
@@ -127,9 +128,13 @@ let tag_at place name =
 
 (* The third clause: moved text declares no name that is in scope after
    it, which the text after its own place would lose and the text after
-   a place of writing gain. *)
-let check_scope (own : own) =
-  if own.in_scope_after then
+   a place of writing gain. A text closes every scope that opens in it,
+   so a name it declares is in scope after it exactly when it is
+   declared in the scope that holds the text, the only one no deeper. *)
+let check_scope text (own : own) =
+  let (Scope_depth declared) = own.scope in
+  let (Scope_depth around) = text.scope in
+  if declared <= around then
     let named =
       match own.declared.declaration with
       | Tag _ -> "the tag " ^ quote own.declared.name
@@ -319,7 +324,7 @@ let check_reading context text place =
 
 let check context text ~at =
   match
-    List.iter check_scope text.declares;
+    List.iter (check_scope text) text.declares;
     Option.iter (check_reading context text) at
   with
   | () -> Ok ()

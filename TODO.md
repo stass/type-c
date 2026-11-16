@@ -732,15 +732,20 @@ is [type-c-language-design.md](type-c-language-design.md).
   them, with separate, named accessors for the comparison at a place,
   the type parameters of an instance, the final types of enumerators
   and the builtins, so that a new lookup cannot skip the record.
-- [Medium] `note_own` takes the scope of a declaration in a generic's
-  definition from the reader's `state.place`, which a block read for a
-  statement expression leaves at file scope: `type g(T) = struct { T v;
-  int a[sizeof(({ int k = 1; k; }))]; };` is refused as declaring `k`
-  around the text (TC0039), where the backend would refuse the
-  statement expression at file scope anyway. Let the parser, which
-  knows every scope, record in `Tree.declared` and `Declares` whether
-  the declaration's scope is file scope, and read that instead; generic
-  functions (package 2.2), which have bodies, need it right.
+- [Low] The reader still keeps its own model of file scope,
+  `state.place`, beside the parser's `Tree.scope_depth`: it drives
+  `note_nested_mention`, the `~at_file_scope` of every record and
+  enumeration declared, and the variable length array rule, and a
+  block of a statement expression outside a function leaves it at file
+  scope (`struct q` in `int a[sizeof(({ struct q { int z; } x; 1;
+  }))];` is a record of file scope). The backend refuses such a
+  statement expression anyway. Derive these from the scope that the
+  parser recorded and retire `At_file_scope` as a source of the fact.
+- [Low] The enumerators that a variant's constructors claim have no
+  `Tree.declared` in the tree: `declare_tag_enumerators` builds one in
+  the reader, with the variant's scope, and `Tree_dump` repeats the
+  rule. Record each constructor's declaration in the tree where the
+  parser claims it, and read it in both.
 - [Low] Design 3.5's example `type named(T) = struct { str name; T
   value; }; int str; named(int) n;` is valid, but the parser reads
   `str` as an ordinary identifier until package 3.4 gives it its

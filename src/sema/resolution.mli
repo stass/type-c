@@ -27,21 +27,22 @@ type declaration = Ordinary of Tree.reference | Tag of Tree.tag_id
     place. *)
 type name = { name : string; span : Tree.span; declaration : declaration }
 
-(** A name that the text declares. [implicit] holds for a tag that it
-    declares only because none of its name is visible (C11 6.7.2.3p8),
-    which a tag of the scope around the text would replace, and
-    [in_scope_after] where the scope of the declaration does not end
-    inside the text: the scope around it, as for a first mention of a
-    tag in a member of a structure. *)
-type own = { declared : name; implicit : bool; in_scope_after : bool }
+(** A name that the text declares, in the scope [scope], as the parser
+    recorded it. [implicit] holds for a tag that it declares only
+    because none of its name is visible (C11 6.7.2.3p8), which a tag of
+    the scope around the text would replace. *)
+type own = { declared : name; implicit : bool; scope : Tree.scope_depth }
 
-(** The moved text: its tokens, the view around it at its own place,
-    which is that in front of the declaration that holds it, and what its
-    reader found in it: each name that it uses, a use of a declaration
-    within the text, such as of a type parameter, included, and each
-    name that it declares. *)
+(** The moved text: its tokens, the scope that holds it, the view around
+    it at its own place, which is that in front of the declaration that
+    holds it, and what its reader found in it: each name that it uses, a
+    use of a declaration within the text, such as of a type parameter,
+    included, and each name that it declares. A name that the text
+    declares in [scope], as a first mention of a tag in a member of a
+    structure does, is in scope after the text ({!Tree.scope_depth}). *)
 type text = {
   span : Tree.span;
+  scope : Tree.scope_depth;
   own_place : Parser.View.t;
   uses : name list;
   declares : own list;
