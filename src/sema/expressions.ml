@@ -1609,12 +1609,27 @@ let address_kind context operand =
       Not_constant
   | Integer_expression _ | Unevaluable _ | Not_integer _ -> Backend_constant
 
-let unary_constant context span op operand =
+(* Applies [compute] to the integer type that typing gives an operation on
+   integer constant expressions. An operand of unknown type makes that
+   type unknown, and the value is then unevaluable at [span]. *)
+let with_result_type context span (typed : typed) compute =
+  match Ctype.as_arithmetic context.tags typed.expression_type with
+  | Answer (Some (Integer result)) -> compute result
+  | Depends_on unknown ->
+      let diagnostic = needing "the value of the operation" unknown in
+      Unevaluable { span; diagnostic }
+  | Answer (Some (Real _ | Complex _) | None) ->
+      invalid_arg "Expressions: integer constants typed as no integer"
+
+let unary_constant context span typed op operand =
   match part context Evaluated operand with
   | Part (value, flaw) ->
-      let value, failure = Integer_constant.unary context.target op value in
-      let flaw = first_flaw flaw (invalid span failure) in
-      Integer_expression { value; flaw }
+      with_result_type context span typed (fun result ->
+          let value, failure =
+            Integer_constant.unary context.target ~result op value
+          in
+          let flaw = first_flaw flaw (invalid span failure) in
+          Integer_expression { value; flaw })
   | Breaks broken ->
       broken_by broken (combined [ operand_kind context operand ])
 
@@ -1631,22 +1646,24 @@ let binary_kind context (op : Tree.binary_operator) left right =
   | _, Arithmetic_constant, Arithmetic_constant -> Arithmetic_constant
   | _, _, _ -> Backend_constant
 
-let binary_constant context span op left right =
+let binary_constant context span typed op left right =
   match (part context Evaluated left, part context Evaluated right) with
   | Part (left_value, left_flaw), Part (right_value, right_flaw) ->
-      let value, failure =
-        Integer_constant.binary context.target op left_value right_value
-      in
-      let operand_flaw = first_flaw left_flaw right_flaw in
-      Integer_expression
-        { value; flaw = first_flaw operand_flaw (invalid span failure) }
+      with_result_type context span typed (fun result ->
+          let value, failure =
+            Integer_constant.binary context.target ~result op left_value
+              right_value
+          in
+          let operand_flaw = first_flaw left_flaw right_flaw in
+          let flaw = first_flaw operand_flaw (invalid span failure) in
+          Integer_expression { value; flaw })
   | Breaks broken, _ | Part _, Breaks broken ->
       broken_by broken (binary_kind context op left right)
 
 (* 6.5.13p4, 6.5.14p4: the right operand is evaluated where the left one
    does not decide the value, which is true for [||] ([decisive]) and
    false for [&&]. Neither fails. *)
-let logical_constant context ~decisive op left right =
+let logical_constant context span typed ~decisive op left right =
   let kind right_role =
     combined
       [ operand_kind context left;
@@ -1663,14 +1680,17 @@ let logical_constant context ~decisive op left right =
       in
       match part context right_role right with
       | Part (right_value, right_flaw) ->
-          let value, _ =
-            Integer_constant.binary context.target op left_value right_value
-          in
-          Integer_expression { value; flaw = first_flaw left_flaw right_flaw }
+          with_result_type context span typed (fun result ->
+              let value, _ =
+                Integer_constant.binary context.target ~result op left_value
+                  right_value
+              in
+              let flaw = first_flaw left_flaw right_flaw in
+              Integer_expression { value; flaw })
       | Breaks broken -> broken_by broken (kind right_role))
 
 (* 6.5.15p4: the operand that the condition chooses is evaluated. *)
-let conditional_constant context condition second third =
+let conditional_constant context span typed condition second third =
   let kind (second_role, third_role) =
     combined
       [ operand_kind context condition;
@@ -1691,13 +1711,14 @@ let conditional_constant context condition second third =
         (part context second_role second, part context third_role third)
       with
       | Part (if_true, true_flaw), Part (if_false, false_flaw) ->
-          let value =
-            Integer_constant.conditional context.target condition_value
-              if_true if_false
-          in
-          let branch_flaw = first_flaw true_flaw false_flaw in
-          Integer_expression
-            { value; flaw = first_flaw condition_flaw branch_flaw }
+          with_result_type context span typed (fun result ->
+              let value =
+                Integer_constant.conditional context.target ~result
+                  condition_value if_true if_false
+              in
+              let branch_flaw = first_flaw true_flaw false_flaw in
+              let flaw = first_flaw condition_flaw branch_flaw in
+              Integer_expression { value; flaw })
       | Breaks broken, _ | Part _, Breaks broken ->
           broken_by broken (kind roles))
 
@@ -1848,7 +1869,7 @@ let classify_node context (whole : Tree.expression) typed =
   | Unary
       (((Unary_plus | Unary_minus | Bitwise_not | Logical_not) as op), operand)
     ->
-      unary_constant context span op operand
+      unary_constant context span typed op operand
   | Unary ((Real_part | Imaginary_part), operand) ->
       itself (combined [ operand_kind context operand ])
   | Post_increment _ | Post_decrement _ | Assignment _
@@ -1866,13 +1887,15 @@ let classify_node context (whole : Tree.expression) typed =
   | Cast { type_name; operand } ->
       cast_constant context span (context.type_name type_name) operand
   | Binary (Logical_and, left, right) ->
-      logical_constant context ~decisive:false Logical_and left right
+      logical_constant context span typed ~decisive:false Logical_and left
+        right
   | Binary (Logical_or, left, right) ->
-      logical_constant context ~decisive:true Logical_or left right
-  | Binary (op, left, right) -> binary_constant context span op left right
+      logical_constant context span typed ~decisive:true Logical_or left right
+  | Binary (op, left, right) ->
+      binary_constant context span typed op left right
   | Conditional { condition; if_true; if_false } ->
       let second = Option.value if_true ~default:condition in
-      conditional_constant context condition second if_false
+      conditional_constant context span typed condition second if_false
   | Comma (left, right) -> comma_constant context span left right
   | Label_address _ -> itself Address_constant
   | Call _ | Statement_expression _ | Va_arg _ | Block_literal _ ->

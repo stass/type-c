@@ -69,26 +69,20 @@ let arithmetic_result target integer x =
     Error Overflow
   else Ok (known target integer x)
 
-let of_truth truth =
-  let value = Exact_integer.of_int (Bool.to_int truth) in
-  { integer_type = Int; value = Known value }
+let of_truth target integer truth =
+  known target integer (Exact_integer.of_int (Bool.to_int truth))
 
-(* Conversions of operands *)
-
-let integer_of_arithmetic = function
-  | Arithmetic.Integer integer -> integer
-  | Arithmetic.Real _ | Arithmetic.Complex _ ->
-      invalid_arg "Integer_constant: an integer operand promotes to an integer"
-
-let promoted_type target constant =
-  integer_of_arithmetic
-    (Arithmetic.promote target (Integer constant.integer_type) :> Arithmetic.t)
-
-let common_type target a b =
-  integer_of_arithmetic
-    (Arithmetic.usual_arithmetic_conversions target
-       (Arithmetic.promote target (Integer a.integer_type))
-       (Arithmetic.promote target (Integer b.integer_type)))
+(* 6.5.8p3, 6.5.9p4: the operands of a comparison are compared in their
+   common type, which is no type of the comparison's value. *)
+let compared_type target a b =
+  match
+    Arithmetic.usual_arithmetic_conversions target
+      (Arithmetic.promote target (Integer a.integer_type))
+      (Arithmetic.promote target (Integer b.integer_type))
+  with
+  | Integer integer -> integer
+  | Real _ | Complex _ ->
+      invalid_arg "Integer_constant: integer operands convert to an integer"
 
 (* Applies [operation] to the values of the operands, or gives an opaque
    [integer] when one is opaque. *)
@@ -111,7 +105,7 @@ let settle integer = function
 (* Unary operators *)
 
 (* The operators below compute a value of the result type [integer] that
-   [unary] and [binary] decide. *)
+   typing decides. *)
 let unary_value target integer operator operand =
   match (operator : Tree.unary_operator) with
   | Unary_plus ->
@@ -131,7 +125,7 @@ let unary_value target integer operator operand =
         operand
   | Logical_not -> (
       match truth operand with
-      | Some truth -> Ok (of_truth (not truth))
+      | Some truth -> Ok (of_truth target integer (not truth))
       | None -> Ok (opaque integer))
   | Address | Indirection | Pre_increment | Pre_decrement | Real_part
   | Imaginary_part ->
@@ -156,8 +150,8 @@ let bitwise target integer operation x y =
   let representative v = Exact_integer.modulo_power_of_two v bits in
   Ok (known target integer (operation (representative x) (representative y)))
 
-(* 6.5.7: the type is that of the promoted left operand, whatever the type
-   of the count. *)
+(* 6.5.7: [integer] is the type of the promoted left operand, whatever the
+   type of the count. *)
 let shift target integer ~left_shift left right =
   let shifted x count =
     if left_shift then Exact_integer.mul x (Exact_integer.power_of_two count)
@@ -182,14 +176,14 @@ let compare_with operator order =
   | _ -> invalid_arg "Integer_constant.compare_with"
 
 (* A decisive left operand gives the value without the right one. *)
-let logical integer ~decisive left right =
+let logical target integer ~decisive left right =
   match (truth left, truth right) with
-  | Some l, _ when l = decisive -> Ok (of_truth decisive)
-  | Some _, Some r -> Ok (of_truth r)
+  | Some l, _ when l = decisive -> Ok (of_truth target integer decisive)
+  | Some _, Some r -> Ok (of_truth target integer r)
   | Some _, None | None, _ -> Ok (opaque integer)
 
 (* An operator of the usual arithmetic conversions on the values of its
-   operands converted to their common type [integer]. *)
+   operands converted to their common type [integer], its result type. *)
 let arithmetic_operation target integer operator x y =
   match (operator : Tree.binary_operator) with
   | Multiply -> arithmetic_result target integer (Exact_integer.mul x y)
@@ -206,49 +200,32 @@ let binary_value target integer operator left right =
   match (operator : Tree.binary_operator) with
   | Shift_left -> shift target integer ~left_shift:true left right
   | Shift_right -> shift target integer ~left_shift:false left right
-  | Logical_and -> logical integer ~decisive:false left right
-  | Logical_or -> logical integer ~decisive:true left right
-  (* The operands are compared in their common type. *)
+  | Logical_and -> logical target integer ~decisive:false left right
+  | Logical_or -> logical target integer ~decisive:true left right
   | Less_than | Greater_than | Less_or_equal | Greater_or_equal | Equal_to
   | Not_equal_to ->
-      let common = common_type target left right in
+      let compared = compared_type target left right in
+      let order x y = compare_with operator (Exact_integer.compare x y) in
       with_values integer
-        (fun x y ->
-          Ok (of_truth (compare_with operator (Exact_integer.compare x y))))
-        (convert target common left) (convert target common right)
+        (fun x y -> Ok (of_truth target integer (order x y)))
+        (convert target compared left) (convert target compared right)
   | Multiply | Divide | Remainder | Add | Subtract | Bitwise_and | Bitwise_xor
   | Bitwise_or ->
       with_values integer
         (arithmetic_operation target integer operator)
         (convert target integer left) (convert target integer right)
 
-let conditional target condition if_true if_false =
-  let integer = common_type target if_true if_false in
+let conditional target ~result condition if_true if_false =
   match truth condition with
-  | Some true -> convert target integer if_true
-  | Some false -> convert target integer if_false
-  | None -> opaque integer
+  | Some true -> convert target result if_true
+  | Some false -> convert target result if_false
+  | None -> opaque result
 
-let unary target operator operand =
-  let integer =
-    match (operator : Tree.unary_operator) with
-    | Logical_not -> Integer.Int
-    | _ -> promoted_type target operand
-  in
-  settle integer (unary_value target integer operator operand)
+let unary target ~result operator operand =
+  settle result (unary_value target result operator operand)
 
-let binary target operator left right =
-  let integer =
-    match (operator : Tree.binary_operator) with
-    | Shift_left | Shift_right -> promoted_type target left
-    | Logical_and | Logical_or | Less_than | Greater_than | Less_or_equal
-    | Greater_or_equal | Equal_to | Not_equal_to ->
-        Integer.Int
-    | Multiply | Divide | Remainder | Add | Subtract | Bitwise_and
-    | Bitwise_xor | Bitwise_or ->
-        common_type target left right
-  in
-  settle integer (binary_value target integer operator left right)
+let binary target ~result operator left right =
+  settle result (binary_value target result operator left right)
 
 (* Integer constants (6.4.4.1) *)
 

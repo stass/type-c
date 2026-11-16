@@ -519,6 +519,26 @@ let constant_expressions () =
   evaluates_int "0x80000000u - 0x80000001u == -1u" "1";
   evaluates_int "-1ull > 0" "1";
   evaluates_int "(1LL << 40) >> 39" "2";
+  (* Each operation computes in the type that typing gives it: a shift in
+     the promoted left operand's, whatever the count's; a comparison, a
+     logical operator and [!] in int; ?: in the branches' common type. *)
+  evaluates_int "(unsigned char)255 << 1" "510";
+  evaluates_int "-1 >> 1u" "-1";
+  rejects "enum { V = 1 << 40L };" "6.5.7p3";
+  evaluates_int "-(unsigned char)1 < 0" "1";
+  evaluates_int "~(unsigned short)0" "-1";
+  evaluates_int "(1u < 2u) - 2 < 0" "1";
+  evaluates_int "!0u - 2 < 0" "1";
+  evaluates_int "(1u && 1u) - 2 < 0" "1";
+  evaluates_int "(1 ? -1 : 0u) > 0" "1";
+  evaluates_int "(0 ? 0u : -1L) < 0" "1";
+  evaluates_int ~target:ilp32 "(0 ? 0u : -1L) < 0" "0";
+  (* Typing gives [-A] the unknown type of the enumeration (TODO.md), so
+     its value is unknown too. *)
+  let packed = "enum __attribute__((packed)) E : int; enum E : int { A, " in
+  let needs_packed = "the value of the operation depends on the attribute" in
+  rejects (packed ^ "B = -A };") needs_packed;
+  rejects (packed ^ "B = 1 ? A : 2 };") needs_packed;
   evaluates_int ~target:ilp32 "sizeof(int) - 5 > 0" "1";
   evaluates_int "sizeof(int) - 5 > 0" "1";
   rejects "enum { V = 2147483647 + 1 };" "6.6p4";

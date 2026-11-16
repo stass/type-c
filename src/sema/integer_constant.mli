@@ -84,8 +84,17 @@ val of_character_constant :
     significant and the excess first ones dropped, as both GCC and Clang
     evaluate them. *)
 
+(** {1 Operations}
+
+    Each operation computes its value in [result], the type that typing
+    gives the operation, and decides no result type of its own. *)
+
 val unary :
-  Target.t -> Typec_syntax.Tree.unary_operator -> t -> t * error option
+  Target.t ->
+  result:Integer.t ->
+  Typec_syntax.Tree.unary_operator ->
+  t ->
+  t * error option
 (** [+], [-], [~] and [!] (6.5.3.3); the other unary operators are not
     allowed in a constant expression and raise [Invalid_argument]. The
     result is the value and, where the operation fails, why: a failed
@@ -95,13 +104,15 @@ val unary :
 
 val binary :
   Target.t ->
+  result:Integer.t ->
   Typec_syntax.Tree.binary_operator ->
   t ->
   t ->
   t * error option
-(** The binary operators of 6.5.5 to 6.5.14, as {!unary}. A false left
-    operand of [&&] or a true one of [||] decides the value whatever the
-    right one is. *)
+(** The binary operators of 6.5.5 to 6.5.14, as {!unary}. A comparison
+    compares its operands in their common type (6.5.8p3, 6.5.9p4). A false
+    left operand of [&&] or a true one of [||] decides the value whatever
+    the right one is. *)
 
-val conditional : Target.t -> t -> t -> t -> t
-(** [conditional target condition if_true if_false] (6.5.15). *)
+val conditional : Target.t -> result:Integer.t -> t -> t -> t -> t
+(** [conditional target ~result condition if_true if_false] (6.5.15). *)

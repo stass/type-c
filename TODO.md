@@ -315,11 +315,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   union, which `Expressions` checks. A wrong scalar or pointer argument
   is then the backend's error on lowered code; check 6.5.16.1p1 in
   typec once typing models assignment conversions.
-- [Medium] The result type of each operator on integer constants is
-  decided twice, by `Expressions` and by `Integer_constant.unary`,
-  `binary` and `conditional`, which the classing of constants calls: the
-  conversions are shared, the mapping from operator to type is not. Let
-  the constant operations take the result type from typing.
+- [Medium] An integer constant expression carries its type twice: in
+  its `Integer_constant.t` and in its typed expression, and nothing makes
+  the two agree. The operations take their result type from typing; let
+  the leaves (constants, enumerators, `sizeof`) take theirs from it too,
+  or let `Integer_constant.t` hold no type.
 - [Medium] The rule that the initialiser of an object of static or
   thread storage duration is constant (6.7.9p4) reports only what both
   GCC and Clang refuse (`Expressions.Not_constant`). Each takes other
@@ -484,6 +484,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   Recording in the tags whether the type is fixed and whether the list
   was read would report them. `enum e : int x;`, a fixed type outside
   `enum e : int;` alone, which C23 and Clang refuse, is accepted.
+- [Medium] `fix_enum` keeps the unknown type of an enumeration whose
+  first declaration has an attribute outside the table, while a later
+  declaration with a fixed type gives its enumerators that type: in
+  `enum __attribute__((packed)) E : int; enum E : int { A, B = -A };`,
+  `A` is typed as the unknown enumerated type but has an `int` value, so
+  `-A` is unevaluable where the backend accepts it. Let `fix_enum`
+  record the stated fixed type in the tags, so that the type and value
+  of an enumerator agree, or refuse the fixed declaration.
 - [Medium] `__real__` and `__imag__` of an integer constant are integer
   constant expressions in GCC and Clang; the constant evaluator of
   `Declarations` calls them not constant.
