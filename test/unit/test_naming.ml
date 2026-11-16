@@ -445,10 +445,15 @@ let invented_source =
    }\n"
 
 let with_bracket reader (lowered : Typec_emit.Emitter.lowered) =
-  let bracketed : Typec_emit.Emitter.edit =
-    { range = Reader.range reader.Reader.tokens ~first:0 ~count:0;
-      location = { Location.file = "in.tc"; line = 1; flags = No_flags };
-      text = Bracketed "" }
+  let before =
+    match Typec_test_support.External_declarations.of_unit reader with
+    | first :: _ -> first
+    | [] -> failwith "with_bracket: no external declaration"
+  in
+  let location = reader.Reader.tokens.(0).location in
+  let bracketed =
+    Typec_emit.Emitter.bracketed reader ~before ~location
+      [ Typec_emit.Emitter.generated location "struct s { int i; };" ]
   in
   { lowered with edits = bracketed :: lowered.edits }
 
