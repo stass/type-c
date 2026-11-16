@@ -27,7 +27,7 @@ open Typec_syntax
 
 (** What initialisation asks of expression typing.
 
-    - [value] types an expression of the initialiser, in its one
+    - [value] types an expression of the initialiser, once, in its one
       position, and gives its type before the conversions of its
       context. The position is its target type (design 3.3): the type
       of the subobject where the walk meets it or, where that

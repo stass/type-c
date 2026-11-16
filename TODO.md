@@ -268,12 +268,19 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] `Expressions.answered` copies the answers that `selections` and
   `compatibilities` hold; recording only the spans answered would leave
   one copy.
-- [Medium] `Expressions.positioned` refuses a second typing of a node
-  in another position at run time, and some callers type a node twice in
-  the same position on purpose (`selected`, `statement_expression`,
-  `integer_constant` after `case_value`). Split the entry points: typing
-  a child asserts it is untyped, reading a typed one goes through
-  `operand_typed`; then the stored position and its check go.
+- [High] An expression initialiser whose braces the walk elides into
+  a zero-length array is never typed, so no Type-C rule sees it:
+  `struct z { int a[0]; int b; }; struct z s = { x + 1, 3 };` with `x`
+  of a distinct type is accepted and emitted unchanged.
+  `Initialiser.place_expression` returns `None` when `first_level`
+  finds no subobject without forcing the expression's type; force it
+  there (one line) and add a golden case.
+- [Low] `Expressions.selected`, `statement_value`, `case_value` and the
+  first argument of a moving builtin read a node through
+  `operand_typed`, correct because an earlier step typed it; a wrong
+  caller raises `Invalid_argument`. Storing the typed chosen operand
+  with its selection, and having `block_items` give the typed last
+  expression statement, would hand these readers the type by data flow.
 - [Medium] Design 3.3's target under elided braces is the first
   variant, because only a variant target changes a meaning today. `str`
   string literals (section 8, P13) and generic deduction (7.2) also take

@@ -237,10 +237,10 @@ type checked_pattern = {
    is restored on it. [selections] and [compatibilities] hold the answers
    to the constructs that ask whether types are compatible, by the span
    of the construct, and [answered] those that lowering replaces with
-   their answer. [types] keeps the position that each expression is
-   typed in, its one position. *)
+   their answer. [types] holds the type of each expression, which
+   [positioned] alone gives, once. *)
 type t = {
-  types : (Tree.span, position * typed) Hashtbl.t;
+  types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
   selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
@@ -264,7 +264,7 @@ let create () =
     enclosing = outside_functions }
 
 let find view (expression : Tree.expression) =
-  Option.map snd (Hashtbl.find_opt view.types expression.span)
+  Hashtbl.find_opt view.types expression.span
 
 let constant view (expression : Tree.expression) =
   Hashtbl.find_opt view.constants expression.span
@@ -1409,7 +1409,7 @@ let operand_constant context (operand : Tree.expression) =
 
 let operand_typed context (operand : Tree.expression) =
   match Hashtbl.find_opt context.typed.types operand.span with
-  | Some (_, typed) -> typed
+  | Some typed -> typed
   | None -> invalid_arg "Expressions: an operand typed after its operation"
 
 let is_integer_expression context operand =
@@ -2145,29 +2145,27 @@ let rec expression context (expression : Tree.expression) =
 and whole_value context (expression : Tree.expression) =
   positioned context Untargeted expression
 
-(* An expression is typed once, in its one position: a second position
-   would give it a second meaning, so asking in one is an internal
-   error. *)
+(* An expression is typed once, in its one position: a second typing
+   could give it a second meaning, so it is an internal error, and a use
+   of an expression typed before reads it through [operand_typed]. *)
 and positioned context position (expression : Tree.expression) =
-  match Hashtbl.find_opt context.typed.types expression.span with
-  | Some (typed_position, typed) when typed_position = position -> typed
-  | Some _ -> invalid_arg "Expressions: an expression typed in two positions"
-  | None ->
-      let typed =
-        nested context expression.span (fun () ->
-            match constructor_expression context position expression with
-            | Some (named, arguments) ->
-                construct context expression named arguments
-            | None -> expression_node context position expression)
-      in
-      (match position with
-      | Targeted target ->
-          refuse_distinct_conversion context expression.span target typed
-      | Untargeted -> ());
-      Hashtbl.replace context.typed.types expression.span (position, typed);
-      Hashtbl.replace context.typed.constants expression.span
-        (classify context expression typed);
-      typed
+  if Hashtbl.mem context.typed.types expression.span then
+    invalid_arg "Expressions: an expression typed twice";
+  let typed =
+    nested context expression.span (fun () ->
+        match constructor_expression context position expression with
+        | Some (named, arguments) ->
+            construct context expression named arguments
+        | None -> expression_node context position expression)
+  in
+  (match position with
+  | Targeted target ->
+      refuse_distinct_conversion context expression.span target typed
+  | Untargeted -> ());
+  Hashtbl.replace context.typed.types expression.span typed;
+  Hashtbl.replace context.typed.constants expression.span
+    (classify context expression typed);
+  typed
 
 and expression_node context position (whole : Tree.expression) =
   let span = whole.span in
@@ -2203,10 +2201,7 @@ and expression_node context position (whole : Tree.expression) =
   | Call { callee; arguments } ->
       refuse_parenthesized_constructor context callee;
       let callee_typed = typed callee in
-      let positions =
-        argument_positions context callee callee_typed arguments
-      in
-      let arguments = List.map2 (argument context) positions arguments in
+      let arguments = call_arguments context callee callee_typed arguments in
       call context span callee callee_typed arguments
   | Member { operand; member } ->
       direct_member context span (typed operand) member
@@ -2379,15 +2374,19 @@ and constructor_argument context named (field : Ctype.member) argument =
 (* The arguments of a call of a builtin that moves a value of the object
    that its first argument points to have the target types that the
    builtin states by that object; those of any other call have them by
-   its prototype. The first argument is typed here, in the one position
-   that [argument] gives it too. *)
-and argument_positions context callee (callee_typed : typed) arguments =
+   its prototype. The first argument of such a builtin is typed before
+   the rest, whose target types it gives. *)
+and call_arguments context callee (callee_typed : typed) arguments =
   match (builtin_rule context callee, arguments) with
   | Some (_, Moves_object { operands; _ }), first :: rest ->
-      let span = first.span in
-      let first = expression context first in
-      Untargeted :: moved_positions context span operands first rest
-  | _ -> prototype_positions context callee_typed arguments
+      let first_typed = expression context first in
+      let positions =
+        moved_positions context first.span operands first_typed rest
+      in
+      first_typed :: List.map2 (argument context) positions rest
+  | _ ->
+      let positions = prototype_positions context callee_typed arguments in
+      List.map2 (argument context) positions arguments
 
 (* Design 3.4: a value moves into or out of the object that [first]
    points to as it is assigned, so a value of a distinct type moves only
@@ -2453,7 +2452,7 @@ and unary context span (op : Tree.unary_operator) typed =
    bit-field where it is one, as GCC and Clang do. *)
 and selected context (selecting : Tree.expression) =
   match selection_of context selecting with
-  | Unknown.Answer chosen -> whole_value context chosen
+  | Unknown.Answer chosen -> operand_typed context chosen
   | Depends_on unknown ->
       value (Ctype.unknown { unknown with kind = Object_or_function })
 
@@ -2665,7 +2664,7 @@ and statement_expression context (block : Tree.block) =
 and statement_value context (statement : Tree.statement) =
   match statement.node with
   | Expression_statement value ->
-      Ctype.lvalue_conversion (whole_value context value).expression_type
+      Ctype.lvalue_conversion (operand_typed context value).expression_type
   | Labeled { label = { node = Named_label _; _ }; statement = labeled } ->
       statement_value context labeled
   | Labeled
@@ -2719,6 +2718,10 @@ and designator context (designator : Tree.designator) =
 
 and integer_constant context candidate =
   ignore (expression context candidate);
+  constant_value context candidate
+
+(* The value of an integer constant expression typed before. *)
+and constant_value context candidate =
   match operand_constant context candidate with
   | Integer_expression { value; flaw = None } -> Ok value
   | Integer_expression { flaw = Some (Comma_operator span); _ } -> Error span
@@ -2913,7 +2916,7 @@ and label_of context (label : Tree.label) =
 and case_value context value =
   match operand context (expression context value) with
   | Arithmetic_operand { arithmetic = Integer _; _ } -> (
-      match integer_constant context value with
+      match constant_value context value with
       | Ok _ -> ()
       | Error _ ->
           context.fail value.span

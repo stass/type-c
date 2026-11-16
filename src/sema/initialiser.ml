@@ -231,10 +231,9 @@ let string_for typing element form : bool Unknown.answer =
 (* The literal initialises an array of [element]: a character type from a
    literal of characters, without a prefix or with [u8], another from a
    literal of its own code unit. The length of the literal's type is the
-   one it gives an array of unknown size (6.7.9p22). [target] is the
-   literal's target type, as for any initialiser. *)
-let string_initialiser typing ~target element literal =
-  let literal_type = typing.value (Some target) literal in
+   one it gives an array of unknown size (6.7.9p22). [literal_type] is
+   the type that [value] gives the literal. *)
+let string_initialiser typing element literal (literal_type : Ctype.t) =
   typing.initialises literal;
   match literal_type.shape with
   | Array { element = unit; length } ->
@@ -447,25 +446,27 @@ let scalar_target ~zeroes (t : Ctype.t) =
 let target_at typing (t : Ctype.t) =
   Option.value (first_variant typing t) ~default:t
 
-let reach_of typing ~zeroes ~target (t : Ctype.t) expression =
+(* How far an expression initialiser reaches into a subobject of type
+   [t]. [expression_type] types the expression the first time it is
+   forced, so no level of the walk types it a second time. *)
+let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
   match t.shape with
   | Array { element; _ } -> (
       let form = form typing expression in
       match (string_for typing element form, form) with
       | Answer true, _ ->
-          ignore (string_initialiser typing ~target element expression);
+          ignore
+            (string_initialiser typing element expression
+               (Lazy.force expression_type));
           Whole
       (* GCC takes a compound literal of an array type for a subarray, which
          Clang refuses. *)
       | Depends_on _, _ | Answer false, Compound_form ->
-          ignore (typing.value (Some target) expression);
+          ignore (Lazy.force expression_type);
           Unknown_reach
       | Answer false, (String_form | Other_form | Unknown_form _) -> Elided)
   | Record _ -> (
-      let value_type =
-        Ctype.lvalue_conversion
-          (typing.value (Some target) expression)
-      in
+      let value_type = Ctype.lvalue_conversion (Lazy.force expression_type) in
       match compatible typing t value_type with
       | Answer true ->
           typing.initialises expression;
@@ -473,7 +474,7 @@ let reach_of typing ~zeroes ~target (t : Ctype.t) expression =
       | Answer false -> Elided
       | Depends_on _ -> Unknown_reach)
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Function _ ->
-      ignore (typing.value (scalar_target ~zeroes target) expression);
+      ignore (Lazy.force expression_type);
       (* Where braces around the scalar are elided, the target is the
          aggregate around it, so the conversion to the scalar is
          checked here. *)
@@ -483,41 +484,47 @@ let reach_of typing ~zeroes ~target (t : Ctype.t) expression =
       typing.initialises expression;
       Whole
   | Va_list | Unknown_type _ ->
-      ignore (typing.value (Some target) expression);
+      ignore (Lazy.force expression_type);
       Unknown_reach
 
 (* Initialises the subobject at [level], within [outer], with
-   [initialiser], entering it where its braces are elided; gives the
-   levels of the subobject that it initialised, or [None] where that
-   depends on what typec does not know. [elided] is the target type of
-   an expression initialiser for which the walk has elided the braces of
-   the subobjects around [level], [None] where it has elided none. [depth] counts the
-   levels. *)
-let rec place typing ~zeroes ~elided ~depth (level, outer)
+   [initialiser]; gives the levels of the subobject that it initialised,
+   or [None] where that depends on what typec does not know. [depth]
+   counts the levels. An expression keeps the target of the subobject
+   where the walk meets it as the walk elides braces. [scalar_target]
+   gives that target, as it is no distinct type unless the subobject is
+   that distinct scalar, which [reach_of] meets first. *)
+let rec place typing ~zeroes ~depth (level, outer)
     (initialiser : Tree.initialiser) =
   let t = subobject_type typing level in
   match initialiser with
   | Braced list ->
       ignore (braced typing t list);
       Some (level, outer)
-  | Expression_initialiser expression -> (
-      let target =
-        match elided with
-        | Some target -> target
-        | None -> target_at typing t
-      in
-      match reach_of typing ~zeroes ~target t expression with
-      | Whole ->
-          if Option.is_none elided then typing.initialises_whole t expression;
-          Some (level, outer)
-      | Unknown_reach -> None
-      | Elided -> (
-          check_depth typing expression.span (depth + 1);
-          match first_level typing ~zeroes expression.span t with
-          | Some inner ->
-              place typing ~zeroes ~elided:(Some target) ~depth:(depth + 1)
-                (inner, level :: outer) initialiser
-          | None -> None))
+  | Expression_initialiser expression ->
+      let target = scalar_target ~zeroes (target_at typing t) in
+      let expression_type = lazy (typing.value target expression) in
+      place_expression typing ~zeroes ~elided:false ~depth (level, outer)
+        expression expression_type
+
+(* Places [expression], entering the subobject at [level] where its
+   braces are elided; [elided] says that the walk has elided the braces
+   of the subobjects around [level]. *)
+and place_expression typing ~zeroes ~elided ~depth (level, outer) expression
+    expression_type =
+  let t = subobject_type typing level in
+  match reach_of typing ~zeroes t expression expression_type with
+  | Whole ->
+      if not elided then typing.initialises_whole t expression;
+      Some (level, outer)
+  | Unknown_reach -> None
+  | Elided -> (
+      check_depth typing expression.span (depth + 1);
+      match first_level typing ~zeroes expression.span t with
+      | Some inner ->
+          place_expression typing ~zeroes ~elided:true ~depth:(depth + 1)
+            (inner, level :: outer) expression expression_type
+      | None -> None)
 
 (* The braced list for an object of type [t], its current object; gives
    the type of the object, completed as for {!initialise}. *)
@@ -530,7 +537,10 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
         _ }
       :: excess )
     when string_for typing element (form typing literal) = Answer true ->
-      let length = string_initialiser typing ~target:t element literal in
+      let length =
+        string_initialiser typing element literal
+          (typing.value (Some t) literal)
+      in
       List.iter (untargeted_element typing) excess;
       completed typing t length
   | (Array _ | Record _), _ -> aggregate typing t list
@@ -592,7 +602,7 @@ and place_element typing ~zeroes t walk
       let extent = widen walk.extent (outermost level outer) in
       let depth = 1 + List.length outer in
       match
-        place typing ~zeroes ~elided:None ~depth (level, outer) initialiser
+        place typing ~zeroes ~depth (level, outer) initialiser
       with
       | Some (level, outer) ->
           { cursor = advance typing (level :: outer); extent }
@@ -657,7 +667,10 @@ let array_from typing t expression =
 let array_initialiser typing t element expression =
   match string_for typing element (form typing expression) with
   | Answer true ->
-      let length = string_initialiser typing ~target:t element expression in
+      let length =
+        string_initialiser typing element expression
+          (typing.value (Some t) expression)
+      in
       completed typing t length
   | Depends_on _ ->
       ignore (typing.value (Some t) expression);

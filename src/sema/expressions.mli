@@ -292,17 +292,18 @@ val max_depth : int
     deeper one is an error. *)
 
 val whole_value : context -> Tree.expression -> typed
-(** Types an expression and every expression in it, or gives the type
-    found for it before, for a use that takes its value whole, as GNU
-    [typeof] does: a value of a distinct type is not refused (design
-    3.4). *)
+(** Types an expression and every expression in it, for a use that
+    takes its value whole, as GNU [typeof] does: a value of a distinct
+    type is not refused (design 3.4). An expression typed before raises
+    [Invalid_argument]: it is typed once. *)
 
 val integer_constant :
   context -> Tree.expression -> (Integer_constant.t, Tree.span) result
 (** Types an expression where an integer constant expression is needed
     (6.6p6), and gives its value, or the span of the first operand or
     operator that keeps it from being one. One that typec cannot evaluate
-    or whose evaluation fails is an error. *)
+    or whose evaluation fails is an error. An expression typed before
+    raises [Invalid_argument]. *)
 
 val initialiser :
   context -> constant:bool -> Ctype.t -> Tree.initialiser -> Ctype.t
