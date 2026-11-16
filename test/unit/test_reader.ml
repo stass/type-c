@@ -30,13 +30,15 @@ let show_kind _text result token =
   kind_name token.Token.kind ^ " " ^ Reader.spelling result token
 
 (* "spelling owner presumed-file:line" for each token, where "!" after the
-   owner's name marks a system header. *)
+   owner's name marks a system header, and the flags 3 and 4 in effect
+   follow. *)
 let show_place _text result (token : Token.t) =
-  Printf.sprintf "%s %s%s %s:%d"
+  Printf.sprintf "%s %s%s %s:%d%s"
     (Reader.spelling result token)
     token.owner.name
     (if token.owner.system_header then "!" else "")
     token.location.file token.location.line
+    (Location.flag_spelling token.location.flags)
 
 let outcome show case =
   match Reader.read ~name:"in.i" case.text with
@@ -210,13 +212,13 @@ let place_cases =
        c\n\
        # 3 \"t.c\" 2\n\
        d"
-      "bi <built-in> <built-in>:1 | a t.c t.c:1 \
-       | b /usr/include/s.h! /usr/include/s.h:1 \
-       | c /usr/include/s.h! /usr/include/s.h:5 | d t.c t.c:3";
+      "bi <built-in> <built-in>:1 3 | a t.c t.c:1 \
+       | b /usr/include/s.h! /usr/include/s.h:1 3 4 \
+       | c /usr/include/s.h! /usr/include/s.h:5 3 4 | d t.c t.c:3";
     case "GCC's prologue"
       "# 0 \"t.c\"\n# 0 \"<built-in>\"\n# 0 \"<command-line>\"\n\
        # 1 \"t.c\"\na\n# 1 \"h.h\" 1 3\nb\n# 2 \"t.c\" 2\nc"
-      "a t.c t.c:1 | b h.h! h.h:1 | c t.c t.c:2";
+      "a t.c t.c:1 | b h.h! h.h:1 3 | c t.c t.c:2";
     case "a marker without flags renames only"
       "# 1 \"t.c\"\na\n# 10 \"other.c\"\nb\n# 1 \"h.h\" 1\nc\n\
        # 11 \"other.c\" 2\nd"
@@ -230,10 +232,18 @@ let place_cases =
     case "only the marker that opens a file says it is a system header"
       "# 1 \"t.c\"\n# 1 \"s.h\" 1 3\n#line 9 \"x.h\"\na\n# 4 \"s.h\"\nb\n\
        # 1 \"h.h\" 1\nc\n# 3 \"h.h\" 3\nd"
-      "a s.h! x.h:9 | b s.h! s.h:4 | c h.h h.h:1 | d h.h h.h:3";
+      "a s.h! x.h:9 3 | b s.h! s.h:4 | c h.h h.h:1 | d h.h h.h:3 3";
     case "GCC's system flag around a macro expansion keeps the owner"
-      "# 1 \"t.c\"\na\n# 1 \"t.c\" 3\nb\n# 1 \"t.c\"\nc"
-      "a t.c t.c:1 | b t.c t.c:1 | c t.c t.c:1";
+      "# 1 \"t.c\"\na\n# 1 \"t.c\" 3 4\nb\n# 1 \"t.c\"\nc"
+      "a t.c t.c:1 | b t.c t.c:1 3 4 | c t.c t.c:1";
+    case "the marker for #pragma GCC system_header keeps the owner"
+      "# 1 \"t.c\"\n# 1 \"h.h\" 1\na\n# 3 \"h.h\" 3\nb\n# 2 \"t.c\" 2\nc"
+      "a h.h h.h:1 | b h.h h.h:3 3 | c t.c t.c:2";
+    case "#line and a marker without a file name keep the flags"
+      "# 1 \"t.c\"\n# 1 \"h.h\" 1 3 4\na\n#line 7 \"r.h\"\nb\n# 20\nc\n\
+       # 2 \"t.c\" 2\nd"
+      "a h.h! h.h:1 3 4 | b h.h! r.h:7 3 4 | c h.h! r.h:20 3 4 \
+       | d t.c t.c:2";
     case "nested includes"
       "# 1 \"t.c\"\n# 1 \"a.h\" 1\n# 1 \"b.h\" 1\nb\n# 2 \"a.h\" 2\na\n\
        # 2 \"t.c\" 2\nt"
@@ -244,7 +254,7 @@ let place_cases =
       "# 1 \"t.c\" 1\na" "a t.c t.c:1";
     case "a pragma belongs to its file"
       "# 1 \"t.c\"\n# 1 \"h.h\" 1 3\n#pragma typec x\n"
-      "#pragma typec x h.h! h.h:1";
+      "#pragma typec x h.h! h.h:1 3";
     case "line counting across carriage returns"
       "# 5 \"t.c\"\r\n\r\na" "a t.c t.c:6";
     case "GCC's line 0" "# 0 \"t.c\"\na" "a t.c t.c:0";

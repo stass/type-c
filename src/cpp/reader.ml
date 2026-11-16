@@ -338,8 +338,8 @@ let end_directive state =
 
 (* The line after the directive is [next_line] of [file]; the newline
    that ends the directive counts as one line. *)
-let set_presumed state file next_line =
-  state.presumed <- { Location.file; line = next_line - 1 }
+let set_presumed state file next_line flags =
+  state.presumed <- { Location.file; line = next_line - 1; flags }
 
 let read_word state =
   let start = state.pos in
@@ -386,8 +386,9 @@ let read_flags state =
     | rest -> (Stay, rest)
   in
   match system_flags with
-  | [] -> (motion, false)
-  | [ "3" ] | [ "3"; "4" ] -> (motion, true)
+  | [] -> (motion, Location.No_flags)
+  | [ "3" ] -> (motion, Location.System)
+  | [ "3"; "4" ] -> (motion, Location.Extern_c_system)
   | _ -> fail state "invalid line marker flags"
 
 (* The stack of files being read after a line marker with a file name.
@@ -395,7 +396,12 @@ let read_flags state =
    GCC also puts the system flag on markers without the enter flag around
    the tokens of a macro that a system header defines, and those tokens
    belong to the file of the expansion. *)
-let stack_after_marker state motion name system_header =
+let stack_after_marker state motion name (flags : Location.flags) =
+  let system_header =
+    match flags with
+    | No_flags -> false
+    | System | Extern_c_system -> true
+  in
   match (motion, state.include_stack) with
   | Enter, stack -> owner state ~main:false name system_header :: stack
   | Stay, [] -> [ owner state ~main:true name system_header ]
@@ -408,14 +414,13 @@ let read_line_marker state =
   let next_line = read_line_number state in
   match read_optional_file_name state with
   | Some name ->
-      let motion, system_header = read_flags state in
+      let motion, flags = read_flags state in
       end_directive state;
-      state.include_stack <-
-        stack_after_marker state motion name system_header;
-      set_presumed state name next_line
+      state.include_stack <- stack_after_marker state motion name flags;
+      set_presumed state name next_line flags
   | None ->
       end_directive state;
-      set_presumed state state.presumed.file next_line
+      set_presumed state state.presumed.file next_line state.presumed.flags
 
 (* #line N "file", and #line N. *)
 let read_line_directive state =
@@ -423,7 +428,9 @@ let read_line_directive state =
   let next_line = read_line_number state in
   let name = read_optional_file_name state in
   end_directive state;
-  set_presumed state (Option.value name ~default:state.presumed.file) next_line
+  set_presumed state
+    (Option.value name ~default:state.presumed.file)
+    next_line state.presumed.flags
 
 (* The whole line is the token, so that it can be passed through. *)
 let read_pragma state hash =
@@ -471,7 +478,7 @@ let read ~name text =
       text;
       input_name = name;
       pos = 0;
-      presumed = { Location.file = name; line = 1 };
+      presumed = { Location.file = name; line = 1; flags = No_flags };
       include_stack = [];
       owners = Owners.empty;
       tokens = [];

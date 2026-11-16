@@ -68,7 +68,8 @@ let token_at (tokens : Token.t array) offset =
 
 let location unit offset =
   let tokens = unit.text.tokens in
-  if Array.length tokens = 0 then { Location.file = ""; line = 0 }
+  if Array.length tokens = 0 then
+    { Location.file = ""; line = 0; flags = No_flags }
   else tokens.(token_at tokens offset).location
 
 let category (typed : Expressions.typed) =

@@ -27,7 +27,7 @@ let source =
    int z;\n"
 
 let unit = read source
-let at line : Location.t = { file = "a.tc"; line }
+let at line : Location.t = { file = "a.tc"; line; flags = No_flags }
 
 let edit (unit : Reader.t) ~first ~count location text : Emitter.edit =
   { range = Reader.range unit.tokens ~first ~count; location; text }
@@ -73,7 +73,7 @@ let () =
 (* y becomes w in the system header h.h, which stays one for the
    backend's warnings. *)
 let () =
-  let in_header : Location.t = { file = "h.h"; line = 1 } in
+  let in_header = unit.tokens.(6).location in
   let edit = edit unit ~first:6 ~count:1 in_header "w" in
   let owner (token : Token.t) = (token.owner.name, token.owner.system_header) in
   let owners text = Array.to_list (Array.map owner (read text).tokens) in
@@ -91,6 +91,70 @@ let () =
        ;\n\
        # 2 \"a.tc\" 2\n\
        int z;\n")
+
+(* y becomes w after the marker that #pragma GCC system_header gives:
+   the markers repeat its flag, though the owner p.h is no system header,
+   and read back keep the owners. *)
+let () =
+  let source =
+    "# 1 \"a.tc\"\n\
+     # 1 \"p.h\" 1\n\
+     # 2 \"p.h\" 3\n\
+     int y;\n\
+     # 2 \"a.tc\" 2\n\
+     int z;\n"
+  in
+  let unit = read source in
+  let edit = edit unit ~first:1 ~count:1 unit.tokens.(1).location "w" in
+  let owner (token : Token.t) = token.owner in
+  let owners text = Array.to_list (Array.map owner (read text).tokens) in
+  check "read back, an edit after the pragma keeps the owners"
+    (owners (Emitter.emit unit [ edit ]) = owners source);
+  check "an edit after the marker of the pragma"
+    (Emitter.emit unit [ edit ]
+    = "# 1 \"a.tc\"\n\
+       # 1 \"p.h\" 1\n\
+       # 2 \"p.h\" 3\n\
+       int \n\
+       # 2 \"p.h\" 3\n\
+       w\n\
+       # 2 \"p.h\" 3\n\
+       ;\n\
+       # 2 \"a.tc\" 2\n\
+       int z;\n")
+
+(* In the expansion of a macro that a system header defines, which GCC
+   marks with flags 3 and 4, lowered text takes the flags of the
+   construct it lowers, and the marker after it restores those of the
+   token where the replaced range ends. *)
+let () =
+  let unit =
+    read
+      "# 1 \"a.tc\"\n\
+       int\n\
+       # 1 \"a.tc\" 3 4\n\
+       m\n\
+       # 1 \"a.tc\"\n\
+       ;\n"
+  in
+  let inside = edit unit ~first:1 ~count:1 unit.tokens.(1).location "n" in
+  let before = edit unit ~first:0 ~count:1 unit.tokens.(0).location "long" in
+  check "edits in and before a system macro region"
+    (Emitter.emit unit [ before; inside ]
+    = "# 1 \"a.tc\"\n\
+       \n\
+       # 1 \"a.tc\"\n\
+       long\n\
+       # 1 \"a.tc\"\n\
+       \n\
+       # 1 \"a.tc\" 3 4\n\
+       \n\
+       # 1 \"a.tc\" 3 4\n\
+       n\n\
+       # 1 \"a.tc\" 3 4\n\
+       \n\
+       # 1 \"a.tc\"\n\
+       ;\n")
 
 (* What the backend sees of a token: its bytes, where it is and the file
    it belongs to. *)

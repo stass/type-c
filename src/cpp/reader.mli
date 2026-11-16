@@ -21,18 +21,19 @@
     presumed location ({!Location.t}). The enter (1) and return (2) flags
     of the line markers keep a stack of the files being read, and the
     owner of a token is the top of that stack. A file is a system header
-    when the marker that opened it carries flag 3. Flag 4, which only C++
-    uses, is accepted and has no effect. Any other line marker and
-    [#line] change the presumed location only. The main file is opened by
-    the first token or the first line marker with a file name, whichever
-    comes first: a marker opens it under the marker's name and flags, and
-    a token under the input's name, not a system header.
+    when the marker that opened it carries flag 3. Any other line marker
+    and [#line] change the presumed location only. The main file is
+    opened by the first token or the first line marker with a file name,
+    whichever comes first: a marker opens it under the marker's name and
+    flags, and a token under the input's name, not a system header.
 
     GCC and Clang also write a marker with flag 3 and without flag 1 or 2
     for [#pragma GCC system_header], and GCC writes one around the tokens
     of a macro that a system header defines. Neither changes the owner,
     so the text after that pragma belongs to a file that is not a system
-    header.
+    header. The presumed location records the flags 3 and 4 in effect
+    ({!Location.flags}), which decide what the backend exempts from
+    warnings, whatever the owner.
 
     Reading takes time and memory linear in the size of the text and
     never recurses on it. *)

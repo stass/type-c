@@ -6,16 +6,18 @@ open Typec_cpp
 type edit = { range : Reader.range; location : Location.t; text : string }
 
 (* The newline in front starts the marker on a line of its own wherever
-   the edit stands in a line. In a system header the marker carries flag
-   3 and no enter or return flag, so the backend keeps exempting the
-   header from warnings (design 13.4). *)
-let marker (owner : File.t) (location : Location.t) =
-  let system_flag = if owner.system_header then " 3" else "" in
-  Printf.sprintf "\n# %d \"%s\"%s\n" location.line location.file system_flag
+   the edit stands in a line. The marker repeats the flags in effect at
+   [location] and no enter or return flag, so the backend keeps or ends
+   the exemption of a system header from warnings as the marker in effect
+   there did (design 13.4). *)
+let marker (location : Location.t) =
+  Printf.sprintf "\n# %d \"%s\"%s\n" location.line location.file
+    (Location.flag_spelling location.flags)
 
 (* The presumed location of the line where the replaced bytes end: no
-   token of cc -E output spans lines, so it is the line of the last token
-   replaced, or of the token an insertion precedes. *)
+   token of cc -E output spans lines and markers stand on lines of their
+   own, so it is the location of the last token replaced, or of the token
+   an insertion precedes, and the rest of that line is in its state. *)
 let end_location (tokens : Token.t array) range =
   tokens.(Reader.end_token range).location
 
@@ -36,10 +38,9 @@ let check_one_file tokens edit =
 (* The edit as the backend reads it: between markers that give its
    location and then the location where the replaced tokens end. *)
 let replacement (tokens : Token.t array) edit : Reader.replacement =
-  let owner = tokens.(edit.range.first).owner in
   let text =
-    marker owner edit.location ^ edit.text
-    ^ marker owner (end_location tokens edit.range)
+    marker edit.location ^ edit.text
+    ^ marker (end_location tokens edit.range)
   in
   { range = edit.range; text }
 

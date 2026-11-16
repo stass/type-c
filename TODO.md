@@ -89,15 +89,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   within the text: the text the reader keeps is its input by
   construction. Check instead that each identifier's written bytes,
   read alone, give one identifier of the name its token carries.
-- [Medium] The emitter gives its markers flag 3 when the edited tokens'
-  owner is a system header (`src/emit/emitter.ml`, `marker`), but the
-  backend's exemption follows the last marker in effect: a header made
-  one by `#pragma GCC system_header` (reached by `-I`), or a GCC
-  `# N "f" 3 4` system-macro region, loses the exemption after an edit
-  until the next marker with flag 3 (design 13.4; reproduced on Apple
-  clang 21 with `int a[0];` after the edit). Record per token whether
-  the marker in effect carries flag 3 and derive the flag from it,
-  deciding whether lowered text inside a system-macro region is exempt.
 
 - [Medium] `Number.classify` finds no constant in a number with a
   floating suffix of the `_Float` types (`f16`, `f32`, `f64`, `f128`,
@@ -124,14 +115,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   options inside `-Wp,` and `-Xpreprocessor` with the same table, or
   make the reader refuse output without a line marker before its first
   token.
-- [Medium] Tokens record the owner but not the flags of the last line
-  marker, so a file after `#pragma GCC system_header` is not a system
-  header to typec. The markers that the emitter writes around an edit
-  carry no flags, and both GCC and Clang turn the system header state
-  off at a marker without flag 3, so lowered text in a system header (a
-  `.tci` found through `-isystem`) ends that state for the rest of the
-  header. Add the flags in effect to `Location.t` and repeat them in
-  those markers when Stage 1 lowers such text.
 - [Low] Diagnostics of later stages print names and spellings from the
   text, and file names from line markers (`Expressions.needing`), where
   a crafted name can hold control bytes or a fake `[TC0018]`; route them

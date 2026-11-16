@@ -44,7 +44,8 @@ let float_type = get (Ctype.arithmetic lp64 (Real Float))
 let double_type = get (Ctype.arithmetic lp64 (Real Double))
 let pointer t = get (Ctype.pointer_to t)
 let tags = Ctype.create_tags ()
-let location = { Typec_cpp.Location.file = "in.c"; line = 1 }
+let location =
+  { Typec_cpp.Location.file = "in.c"; line = 1; flags = No_flags }
 let array t length = get (Ctype.array_of tags t length)
 let func return parameters = get (Ctype.function_returning return parameters)
 let prototype types = Ctype.Prototype { types; variadic = false }

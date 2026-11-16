@@ -1985,7 +1985,8 @@ let read_external state (external_declaration : Tree.external_declaration) =
 
 (* The location that GCC gives a name declared before the first token,
    which a diagnostic that depends on a builtin type cites. *)
-let predeclared : Typec_cpp.Location.t = { file = "<built-in>"; line = 0 }
+let predeclared : Typec_cpp.Location.t =
+  { file = "<built-in>"; line = 0; flags = No_flags }
 
 (* An Arm vector type is unknown: a Neon vector is an object type of 8 or
    16 bytes, and an SVE type an object type without a size, whose size
