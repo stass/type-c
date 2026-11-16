@@ -867,18 +867,19 @@ against a tag, a union and a `switch`; `shapes` runs a `match` with
 bindings in a hot loop; `ids` passes ids of a distinct type through
 calls against a `typedef`; `nodes` passes constructors by value to the
 function that stores them, as a parser builds its tree (design 13.5).
-`tools/measure/gate4.sh [OUT]` builds each pair at `-O2` with both
+`tools/measure/gate4.sh OUT` builds each pair at `-O2` with both
 backends, checks that the two print the same, and writes the bytes of
-machine code of each object and the run times to `OUT/results.md` (by
-default `/Volumes/Optaine/typec-gate4`), with the objects, the lowered C
-and the hyperfine exports under `OUT/work`. It
-runs on macOS, FreeBSD and Linux and needs hyperfine and jq; the code
-size is read with `size -m` from Mach-O objects (the `__text*`
-sections) and with `size -A` from ELF objects (the `.text*` sections),
-and `size` must be installed. Off the macOS development host, name `OUT` and the backends (`TYPEC_TEST_CLANG`,
-`TYPEC_TEST_GCC`). `results.md` states how the verdicts are drawn.
+machine code of each object, and the instructions and core cycles each
+program takes, to `OUT/results.md`, with the objects, the lowered C and
+the raw counts under `OUT/work`. It runs on FreeBSD, where `pmcstat`
+counts the events of one process (the `hwpmc` module must be loaded),
+and reads the code size of the ELF objects (the `.text*` sections) with
+`size -A`. Name the backends (`TYPEC_TEST_CLANG`, `TYPEC_TEST_GCC`),
+and on a copy of the tree without its git directory the revision
+(`REVISION`, as `tools/corpus/revision.sh` prints it where the copy was
+made). `results.md` states how the verdicts are drawn.
 
 ```sh
-brew install hyperfine jq
-tools/measure/gate4.sh
+TYPEC_TEST_CLANG=/usr/local/bin/clang21 TYPEC_TEST_GCC=/usr/local/bin/gcc14 \
+  tools/measure/gate4.sh ~/typec-gate4-out
 ```

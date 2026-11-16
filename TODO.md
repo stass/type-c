@@ -919,10 +919,19 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   counter beside the pointer, while a twin without the `default` (and
   so without the guarantee of design 4.5) does not. Reproduce by
   dropping the `default` from `tools/measure/gate4/shapes.c` and
-  running `gate4.sh`. The twins carry the same `default`, so the gate
-  does not see it. Is the lowering of the default (design 13.5) worth
-  changing, for example to one trap block shared by the `match` sites
-  of a function, without weakening design 4.5?
+  comparing the loops of the two builds at `-O2 -S` with GCC 16. The
+  twins carry the same `default`, so the gate does not see it. Is the
+  lowering of the default (design 13.5) worth changing, for example to
+  one trap block shared by the `match` sites of a function, without
+  weakening design 4.5?
+- [Low] `tools/measure/gate4.sh` counts instructions and cycles in
+  user and kernel mode alike, so the interrupts taken while a program
+  runs move its count (spreads up to a few parts in ten thousand on
+  p620). The libpmc installed on p620 ignores the `usr` and `os`
+  qualifiers of a pmu event (`instructions,usr` and `instructions,os`
+  give the same count); the `pmu_parse_qualifiers` of its `/usr/src`
+  honors them, but the installed library is older. Once p620's libpmc
+  honors them, count `instructions,usr` and `unhalted-cycles,usr`.
 - [Low] No host sets `TYPEC_TEST_REQUIRE_M32`, which makes `dune test`
   fail when the backends cannot compile `<limits.h>` with `-m32`. The
   Dockerfiles install no 32-bit headers; `tools/hosts/freebsd.sh` probably

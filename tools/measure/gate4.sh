@@ -5,43 +5,59 @@
 # Stage 1 exit gate 4, size and speed: builds each Type-C program in
 # tools/measure/gate4 and its hand-written C twin at -O2 with each
 # backend, checks that the two print the same, and writes the code size
-# and the run time of both to OUT/results.md.
+# of both and the instructions and cycles each run takes to
+# OUT/results.md.
 #
-# Usage: tools/measure/gate4.sh [OUT]
+# Usage: tools/measure/gate4.sh OUT
 #
-# OUT defaults to /Volumes/Optaine/typec-gate4 and holds the objects,
-# the lowered C and the timings beside the results; it is outside the
-# repository because they are raw data. TYPEC names the compiler (by
-# default the one dune builds in this tree), TYPEC_TEST_CLANG and
-# TYPEC_TEST_GCC the backends as for the tests, RUNS the timed runs of
-# each batch (default 30). The script runs on macOS, FreeBSD and Linux
-# and needs hyperfine, jq and size; off the macOS development host,
-# name OUT, TYPEC_TEST_CLANG and TYPEC_TEST_GCC. The code size is the
-# bytes of machine code in an object, read by the tool of the object
-# format of the clang backend: size -m for Mach-O, size -A for ELF (GNU
-# and LLVM size print the same table).
+# OUT holds the objects, the lowered C and the counts beside the
+# results; it is outside the repository because they are raw data.
+# TYPEC names the compiler (by default the one dune builds in this
+# tree), TYPEC_TEST_CLANG and TYPEC_TEST_GCC the backends as for the
+# tests, RUNS the counted runs of each program (default 5, at least 3),
+# REVISION the revision of the tree (by default what
+# tools/corpus/revision.sh prints for it; a copy of the tree without its
+# git directory names it, as that script prints it where the copy was
+# made). The
+# script runs on FreeBSD, whose hwpmc counts the instructions and
+# cycles of one process (pmcstat), and needs size; the code size is the
+# bytes of the .text* sections of each ELF object.
 
 set -eu
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 sources=$root/tools/measure/gate4
-out=${1:-/Volumes/Optaine/typec-gate4}
-runs=${RUNS:-30}
+[ $# -eq 1 ] || { echo "usage: $0 OUT" >&2; exit 2; }
+out=$1
+runs=${RUNS:-5}
 # Both sides of a pair are built as C11, the dialect typec gives a .tc
 # input, rather than in each backend's own default.
 flags="-std=gnu11 -O2 -Wall -Wextra -Werror"
-# Above this share of the reference time the noise is too large for a
-# verdict: the host is too busy to tell a difference of that size.
-inconclusive_percent=5
+# Above this share of the count of the C twin the spread of the
+# instruction counts is too large for a verdict: the counter is seeing
+# more than the program.
+inconclusive_percent=1
 
 fail() {
   echo "gate4.sh: $*" >&2
   exit 1
 }
 
-command -v hyperfine > /dev/null || fail "needs hyperfine"
-command -v jq > /dev/null || fail "needs jq"
+# A spread needs a few runs to estimate the noise from.
+case $runs in
+'' | *[!0-9]*) fail "RUNS is not a number: $runs" ;;
+esac
+[ "$runs" -ge 3 ] || fail "RUNS is $runs, and a spread needs at least 3"
+
+command -v pmcstat > /dev/null || fail "needs pmcstat (FreeBSD hwpmc)"
 command -v size > /dev/null || fail "needs size"
+
+if [ -n "${REVISION:-}" ]; then
+  revision=$REVISION
+else
+  revision=$("$root/tools/corpus/revision.sh" "$root") ||
+    fail "cannot tell the revision of $root; name it in REVISION"
+fi
 
 . "$root/test/run/backends.sh"
 
@@ -51,7 +67,7 @@ if [ -z "${TYPEC:-}" ]; then
 fi
 
 # The command-line arguments of each program, sized for a run of a few
-# tenths of a second on the development host, and the last one a seed.
+# tenths of a second, and the last one a seed.
 arguments_of() {
   case $1 in
   tree) echo "65536 400 1" ;;
@@ -62,31 +78,15 @@ arguments_of() {
   esac
 }
 
-# The object format of both backends, told by the target of clang: Mach-O
-# for an Apple target, ELF for any other. The bytes of machine code are
-# the sum of the code sections of the object, which GCC splits into
-# several (Mach-O __text, __text_startup and __text_cold; ELF .text,
-# .text.startup and .text.unlikely). Strings and unwind tables are left
-# out; the padding that aligns each function is counted. Each format
-# names the flag of size that lists the sections and the awk rule that
-# prints the size of each code section from that list.
-case $("$clang" -dumpmachine) in
-*-apple-*)
-  code_description="bytes of the __text* sections of the object (size -m)"
-  size_flag=-m
-  code_section_sizes='/Section \(__TEXT, __text/ { print $NF }'
-  ;;
-*)
-  code_description="bytes of the .text* sections of the object (size -A)"
-  size_flag=-A
-  code_section_sizes='$1 ~ /^\.text(\..*)?$/ { print $2 }'
-  ;;
-esac
-
+# The bytes of machine code in an object: the sum of its code sections,
+# which GCC splits into several (.text, .text.startup, .text.unlikely),
+# from the table of sections that size -A prints (elftoolchain, GNU and
+# LLVM size print the same). Strings and unwind tables are left out;
+# the padding that aligns each function is counted.
 code_bytes() {
-  sections=$(size $size_flag "$1") || fail "cannot size $1"
-  printf '%s\n' "$sections" | awk "$code_section_sizes" |
-    awk '{ sum += $1; found = 1 }
+  sections=$(size -A "$1") || fail "cannot size $1"
+  printf '%s\n' "$sections" |
+    awk '$1 ~ /^\.text(\..*)?$/ { sum += $2; found = 1 }
       END { if (!found) exit 1; print sum }' ||
     fail "no code section in $1"
 }
@@ -106,48 +106,72 @@ build() {
   code_bytes "$3.o" > "$3.size"
 }
 
-# The median and the interquartile range of one batch of a hyperfine
-# export, in milliseconds. The median and the quartiles, unlike the mean
-# and the standard deviation, are not dragged by the few runs that other
-# load on the host slows. A quantile is the sorted run at its rank,
-# rounded down, so the median of an even count is the upper middle run.
-timing() {
-  jq -r --arg batch "$2" '
-    def at(q): .[length * q | floor];
-    .results[] | select(.command == $batch) | .times | sort |
-    [at(0.5), at(0.75) - at(0.25)] | map(. * 1000) | join(" ")' "$1"
+# Runs a program once under pmcstat in process mode and appends the
+# instructions it retired and the core cycles it took, in that order, to
+# a file of counts. The two events are the hwpmc aliases of the CPU's
+# own, and pmcstat prints their counts in the order they are given, under
+# a line that names them. $1 is the program, $2 the file of counts, the
+# rest the arguments of the program.
+count() {
+  counted=$1 counts=$2
+  shift 2
+  # Without this, a pmcstat that wrote nothing would leave the counts of
+  # the run before for awk to read.
+  rm -f "$counts.run"
+  pmcstat -o "$counts.run" -p instructions -p unhalted-cycles \
+    "$counted" "$@" > /dev/null
+  awk 'NR == 1 && !/p\/instructions +p\/unhalted-cycles/ { exit 1 }
+    NR == 2 && NF == 2 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
+      print $1, $2; found = 1
+    }
+    END { if (!found) exit 1 }' "$counts.run" >> "$counts" ||
+    fail "pmcstat printed no counts for $counted in $counts.run"
 }
 
-# Checks that the twins print the same, then times the C twin, the
-# Type-C program and the C twin again; the second batch of the C twin
-# measures the drift between batches.
+# Checks that the twins print the same, then counts RUNS runs of each,
+# alternating the twins so that a change of load during the batch moves
+# the cycles of both alike.
 measure() {
   arguments=$(arguments_of "$2")
   "$1-tc" $arguments > "$1-tc.out"
   "$1-c" $arguments > "$1-c.out"
   cmp -s "$1-tc.out" "$1-c.out" || fail "$1: the twins differ in output"
-  hyperfine -N --style none --warmup 3 --runs "$runs" \
-    --export-json "$1.json" \
-    -n c "$1-c $arguments" -n tc "$1-tc $arguments" \
-    -n c-again "$1-c $arguments" > /dev/null
+  rm -f "$1-c.counts" "$1-tc.counts"
+  run=0
+  while [ "$run" -lt "$runs" ]; do
+    count "$1-c" "$1-c.counts" $arguments
+    count "$1-tc" "$1-tc.counts" $arguments
+    run=$((run + 1))
+  done
 }
 
-# One row of the table: sizes, times and both verdicts, drawn as the
+# The median of one column of a file of counts and its spread, the
+# largest count less the smallest. The median of an even number of runs
+# is the upper middle one. $1 is the file, $2 the column.
+statistics() {
+  awk -v column="$2" '{ print $column }' "$1" | sort -n |
+    awk '{ value[NR] = $1 }
+      END { if (NR > 0) print value[int(NR / 2) + 1], value[NR] - value[1] }'
+}
+
+# One row of the table: sizes, counts and both verdicts, drawn as the
 # header of results.md defines them.
 row() {
   size_tc=$(cat "$1-tc.size")
   size_c=$(cat "$1-c.size")
-  c1=$(timing "$1.json" c)
-  c2=$(timing "$1.json" c-again)
-  tc=$(timing "$1.json" tc)
-  [ -n "$c1" ] && [ -n "$c2" ] && [ -n "$tc" ] ||
-    fail "$1.json lacks a batch"
+  instructions_tc=$(statistics "$1-tc.counts" 1)
+  instructions_c=$(statistics "$1-c.counts" 1)
+  cycles_tc=$(statistics "$1-tc.counts" 2)
+  cycles_c=$(statistics "$1-c.counts" 2)
+  [ -n "$instructions_tc" ] && [ -n "$instructions_c" ] ||
+    fail "$1 has no counts"
   awk -v program="$2" -v backend="$3" -v size_tc="$size_tc" \
-    -v size_c="$size_c" -v c1="$c1" -v c2="$c2" -v tc="$tc" \
-    -v inconclusive_percent="$inconclusive_percent" '
+    -v size_c="$size_c" -v instructions_tc="$instructions_tc" \
+    -v instructions_c="$instructions_c" -v cycles_tc="$cycles_tc" \
+    -v cycles_c="$cycles_c" -v inconclusive_percent="$inconclusive_percent" '
     function abs(x) { return x < 0 ? -x : x }
     function max(a, b) { return a > b ? a : b }
-    function judge_time() {
+    function judge_speed() {
       if (100 * noise > inconclusive_percent * reference)
         return "inconclusive"
       if (abs(delta) <= noise)
@@ -155,28 +179,23 @@ row() {
       return "outside"
     }
     BEGIN {
-      split(c1, first); split(c2, again); split(tc, typec)
-      reference = (first[1] + again[1]) / 2
-      noise = max(max(first[2], again[2]), abs(first[1] - again[1]))
+      split(instructions_tc, typec); split(instructions_c, twin)
+      split(cycles_tc, typec_cycles); split(cycles_c, twin_cycles)
+      reference = twin[1]
+      noise = max(typec[2], twin[2])
       delta = typec[1] - reference
+      cycles_delta = typec_cycles[1] - twin_cycles[1]
       size_verdict = size_tc == size_c ? "equal" : "differs"
-      time_verdict = judge_time()
-      printf "| %s | %s | %d | %d | %+d | %s | %.1f (%.1f) |" \
-        " %.1f (%.1f) | %+.1f (%+.1f%%) | %.1f | %s |\n", \
-        program, backend, size_tc, size_c, size_tc - size_c, size_verdict, \
-        typec[1], typec[2], reference, max(first[2], again[2]), \
-        delta, 100 * delta / reference, noise, time_verdict
+      speed_verdict = judge_speed()
+      printf "| %s | %s | %d | %d | %+d | %s |", \
+        program, backend, size_tc, size_c, size_tc - size_c, size_verdict
+      printf " %.0f (%.0f) | %.0f (%.0f) | %+.0f (%+.3f%%) | %.0f | %s |", \
+        typec[1], typec[2], twin[1], twin[2], \
+        delta, 100 * delta / reference, noise, speed_verdict
+      printf " %.0f (%.0f) | %.0f (%.0f) | %+.1f%% |\n", \
+        typec_cycles[1], typec_cycles[2], twin_cycles[1], twin_cycles[2], \
+        100 * cycles_delta / twin_cycles[1]
     }'
-}
-
-# The model of the CPU of the host, from the place each system keeps it.
-cpu_model() {
-  case $(uname -s) in
-  Darwin) sysctl -n machdep.cpu.brand_string 2>/dev/null ;;
-  FreeBSD) sysctl -n hw.model 2>/dev/null ;;
-  Linux) sed -n 's/^model name[[:space:]]*: *//p' /proc/cpuinfo 2>/dev/null |
-    head -n 1 ;;
-  esac | grep . || echo "unknown CPU"
 }
 
 header() {
@@ -184,32 +203,43 @@ header() {
 # Stage 1 exit gate 4: size and speed against hand-written C
 
 Written by tools/measure/gate4.sh at
-$(git -C "$root" describe --always --dirty) on $(date -u +%Y-%m-%dT%H:%MZ),
+$revision on $(date -u +%Y-%m-%dT%H:%MZ),
 $(uname -m),
-$(cpu_model).
+$(sysctl -n hw.model | sed "s/ *$//").
 
 * clang: $("$clang" --version | head -n 1)
 * gcc: $("$gcc" --version | head -n 1)
 * flags: $flags
-* timing: hyperfine, 3 warm-up runs and $runs timed runs per batch, in
-  the order C twin, Type-C, C twin again
-* code: $code_description
+* counting: pmcstat in process mode, the hwpmc events instructions and
+  unhalted-cycles, $runs runs of each program, alternating the C twin
+  and the Type-C program
+* code: bytes of the .text* sections of the object (size -A)
 
-Code size has no noise, so it is within noise only when equal. The
-Type-C time is its median with its interquartile range in parentheses;
-the C time is the reference, the mean of the medians of its two
-batches, with the larger interquartile range of the two. The noise is
-the larger of that range and the drift between the two C medians. A
-time is within noise when it differs from the reference by at most the
-noise, and the verdict is inconclusive when the noise exceeds
-$inconclusive_percent% of the reference.
+Code size has no noise, so it is within noise only when equal. Speed
+is judged on the instructions a program retires, which the load of the
+host hardly moves. Each count is the median of its runs, with the
+spread, the largest count less the smallest, in parentheses. The
+counters count in user and kernel mode alike, so a count includes the
+page faults and system calls of the program and the interrupts taken
+while it runs; the spread shows how much these move it. The noise is
+the larger spread of the two twins. The instruction count is within
+noise when it differs from that of the C twin by at most the noise,
+and the verdict is inconclusive when the noise exceeds
+$inconclusive_percent% of the count of the C twin.
+
+The unhalted core cycles stand beside the instructions and judge
+nothing: they move with the load of the host, which shares caches and
+memory with the program. They show what the instruction count cannot,
+the stalls on memory, which bound the walk of ids.
+
 $(uptime | sed "s/.*load/Load/") when the run began.
 
 EOF
   printf '| %s ' program backend 'code tc' 'code c' diff size \
-    'time tc ms' 'time c ms' 'diff ms' 'noise ms' time
+    'instr tc' 'instr c' 'diff' 'noise' speed \
+    'cycles tc' 'cycles c' 'cycles diff'
   echo '|'
-  printf '| %s ' --- --- --- --- --- --- --- --- --- --- ---
+  printf '| %s ' --- --- --- --- --- --- --- --- --- --- --- --- --- ---
   echo '|'
 }
 
