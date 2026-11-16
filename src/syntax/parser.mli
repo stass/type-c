@@ -56,7 +56,13 @@ val parse :
 (** [parse ~keywords text] parses [text] with [keywords], those that
     the backend reads it with ([Typec_sema.Target.keywords]). File scope
     holds the typedef names that GCC and Clang declare before the first
-    token for a backend with [keywords] ({!Builtin_typedef.declared}). *)
+    token for a backend with [keywords] ({!Builtin_typedef.declared}).
+
+    Where [text] holds the universe text in front of the unit's own
+    ({!Reader.read_with_universe}), its declarations are the first of
+    the tree ({!Tree.in_universe}) and are declared in the universe
+    scope (design 2.3), which encloses file scope: a declaration of the
+    same name in any scope hides one and is no redeclaration of it. *)
 
 (** What file scope declares at the end of a unit (C11 6.2.1p4), sorted
     by name: each ordinary identifier and each tag with its last
@@ -101,7 +107,8 @@ type own_name = Own_type_parameter | Own_generic | Own_universe_name
 val own_name : ordinary option -> string -> own_name option
 (** [own_name found name] is what the identifier [name] denotes, if it is
     an [own_name], where a scope finds [found] under it: a name that no
-    scope declares may be a universe name. *)
+    scope declares may be a universe name, and a generic that has one is
+    the universe's. *)
 
 val own_name_kind : own_name -> string
 (** The kind of name, as a message says it: ["a generic"]. *)
@@ -156,7 +163,8 @@ type scopes = {
   file_scope : file_scope;
   declarations : (Tree.external_declaration Tree.item * View.t) list;
       (** the external declarations of the unit in order, each with the
-          view in front of it, which is file scope there *)
+          view in front of it, which is file scope there, or for one of
+          the universe text the universe's declarations before it *)
   views : views;
 }
 

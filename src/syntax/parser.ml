@@ -88,9 +88,9 @@ type tag_entry = { tag : tag_id; claimed : bool }
 
 (* The scopes open at a point, in the two name spaces that scopes hold
    (6.2.3): ordinary identifiers, and tags. The universe scope (design
-   2.3), which encloses file scope, holds names that no declaration
-   makes, so it is not among them: a name that no scope declares is
-   looked up in {!Universe}. *)
+   2.3), which encloses file scope, is not among them: it holds the
+   generics that the universe text declares, which [visible_in] finds
+   where no scope declares the name, and {!Universe} names the rest. *)
 type scope = (ordinary, tag_entry) Scope.t
 
 (* Values by the index of a token in [Reader.t.tokens]. *)
@@ -129,6 +129,10 @@ type label_entry = { identity : label_id; mutable defined : bool }
 
 module Names = Map.Make (String)
 
+(* The ordinary identifiers that the universe scope declares, by
+   name. *)
+type universe = ordinary Names.t
+
 (* The labels of the function body or block literal being read, which is
    their scope (C11 6.2.1p3): the function's by name, the GNU local
    labels visible at the cursor by name, and the label of each goto and
@@ -156,6 +160,8 @@ type state = {
   mutable open_brackets : opening list;
       (** read and not yet closed, innermost first *)
   mutable scope : scope;
+  mutable universe : universe;
+      (** the declarations of the universe text, once it is read *)
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
   mutable labels : body_labels option;  (** [None] outside every body *)
@@ -420,6 +426,11 @@ let quoted spelling =
 (* Whether the token [index] of [Reader.t.tokens] is Type-C text. *)
 let is_type_c_text_at state index =
   File.is_type_c_text state.reader.tokens.(index).owner
+
+(* Whether the token [index] of [Reader.t.tokens] is of the universe text
+   (design 13.3), which no line marker can open. *)
+let is_universe_text_at state index =
+  File.is_universe state.reader.tokens.(index).owner
 
 (* Whether the token [index] of [Reader.t.tokens] is C text of a system
    header, the one text that is written for its own compiler. *)
@@ -732,9 +743,21 @@ let type_parameters_of = function
 
 let is_generic kind = type_parameters_of kind > 0
 
+(* The declaration of the ordinary identifier [name] that is visible in
+   [scope]: that of the innermost scope that declares it, or else that of
+   the universe scope (design 2.3). Every lookup of an ordinary
+   identifier is made here, so a declaration in any scope hides a
+   universe name, and declaring one is no redeclaration. *)
+let visible_in state scope name =
+  match Scope.find scope name with
+  | Some _ as found -> found
+  | None -> Names.find_opt name state.universe
+
+let visible state name = visible_in state state.scope name
+
 (* The visible declaration of [name] where it is a typedef name. *)
 let typedef_declaration state name =
-  match Scope.find state.scope name with
+  match visible state name with
   | Some ordinary when names_type ordinary.kind -> Some ordinary
   | Some _ | None -> None
 
@@ -760,7 +783,7 @@ let fail_claimed state (name : identifier) what text =
    the variant wherever it is in scope. As no declaration hides a
    claimed name, the visible declaration of the name is the claim. *)
 let claims_enumerator state name =
-  match Scope.find state.scope name with
+  match visible state name with
   | Some { kind = Derived_enumerator; _ } -> true
   | Some _ | None -> false
 
@@ -809,8 +832,9 @@ let end_definition state (name : identifier) (declared : declared)
         kind = declared_type ~parameters Defined;
       }
 
-(* A name that no scope declares may be one of the universe scope,
-   which no work package has given a meaning yet. *)
+(* A name that no scope declares may be one of the universe scope that
+   typec does not implement yet, or a universe generic in text read
+   without the universe text. *)
 let refuse_universe_name state name =
   match Universe.find name with
   | Some { section; package; _ } ->
@@ -858,7 +882,7 @@ let refuse_derived_enumerator state name =
 
 (* At the identifier [name], which the cursor has not passed. *)
 let resolve state name =
-  match Scope.find state.scope name with
+  match visible state name with
   | Some { declaration; kind = Derived_enumerator } ->
       refuse_derived_enumerator state name;
       Resolved declaration
@@ -1441,13 +1465,19 @@ let skip_balanced state expected =
    under the spelling of the source; parser.mli says more. *)
 type own_name = Own_type_parameter | Own_generic | Own_universe_name
 
+(* No generic of a unit has a universe name (design 3.6), so a generic
+   that has one is the universe's. *)
 let own_name (found : ordinary option) name =
+  let universe_name = Option.is_some (Universe.find name) in
   match found with
   | Some { kind = Type_parameter; _ } -> Some Own_type_parameter
+  | Some { kind = Declared_type { parameters; _ }; _ }
+    when parameters > 0 && universe_name ->
+      Some Own_universe_name
   | Some { kind = Declared_type { parameters; _ }; _ } when parameters > 0 ->
       Some Own_generic
   | Some _ -> None
-  | None when Option.is_some (Universe.find name) -> Some Own_universe_name
+  | None when universe_name -> Some Own_universe_name
   | None -> None
 
 let own_name_kind = function
@@ -1461,7 +1491,7 @@ let own_name_kind = function
    a generic, whatever its text (design 3.5 rule 4), and a generic or a
    universe name in Type-C text. *)
 let refuse_own_name state scope index name =
-  match own_name (Scope.find scope name) name with
+  match own_name (visible_in state scope name) name with
   | Some Own_type_parameter ->
       fail_at_token state index
         (Rule.message Generic_definition
@@ -1813,19 +1843,35 @@ let is_unary_expression expression =
    declares, a type name does not, and a parameter may do either. *)
 type declarator_form = Named | Abstract | Named_or_abstract
 
+(* Whether the token at [offset] is a name whose visible declaration is
+   one of the universe text. *)
+let names_universe_declaration state offset =
+  match peek_at state offset with
+  | Identifier_token name -> (
+      match visible state name with
+      | Some { declaration = In_tree (Ordinary_at token); _ } ->
+          is_universe_text_at state token
+      | Some { declaration = Builtin _; _ } | None -> false)
+  | _ -> false
+
 (* In a declarator, [(] begins a parameter list rather than a nested
    declarator where the declarator may be abstract and the [(] is
    followed by [)] or a declaration specifier, a typedef name included
-   (6.7.6.3p11). GNU attributes may begin either, so GCC decides at the
-   token after them, and so does the parser. *)
+   (6.7.6.3p11), except that in a parameter a universe name there is the
+   name that the parameter declares, as in C (design 2.3). GNU
+   attributes may begin either, so GCC decides at the token after them,
+   and so does the parser. *)
 let opens_nested_declarator state form =
+  let next = past_attributes state 1 in
+  let begins_parameters () =
+    peek_at state next = Punctuator_token P.Right_paren
+    || starts_declaration state next
+  in
   match form with
   | Named -> true
-  | Abstract | Named_or_abstract ->
-      let next = past_attributes state 1 in
-      not
-        (peek_at state next = Punctuator_token P.Right_paren
-        || starts_declaration state next)
+  | Abstract -> not (begins_parameters ())
+  | Named_or_abstract ->
+      names_universe_declaration state next || not (begins_parameters ())
 
 (* Whether a declarator is its name, in parentheses or not: a derivation
    around it applies to the name. *)
@@ -2053,7 +2099,7 @@ let type_parameter_among state (specifiers : specifiers) =
   let use (specifier : declaration_specifier spanned) =
     match specifier.node with
     | Type_specifier (Typedef_name { name; declaration }) -> (
-        match Scope.find state.scope name with
+        match visible state name with
         | Some { kind = Type_parameter; declaration = visible }
           when visible = declaration ->
             Some { parameter = name; at = specifier.span.first }
@@ -2163,8 +2209,8 @@ let declare_type_parameter state (name : identifier) : parameter_name =
 
 (* At the [(] after the name of a generic type, which is declared at file
    scope only, where its instances are emitted (design 3.1), and has no
-   universe name (3.6): its type parameters, which a scope of their own
-   declares. *)
+   universe name (3.6) unless the universe text declares it: its type
+   parameters, which a scope of their own declares. *)
 let generic_head state (checked : Spelling.type_name spanned) =
   let name = (checked :> identifier) in
   if not (Scope.is_file state.scope) then
@@ -2174,7 +2220,10 @@ let generic_head state (checked : Spelling.type_name spanned) =
             "the generic type %s is declared in a block; a generic type is \
              declared at file scope only"
             (quoted name.node)));
-  if Universe.find name.node <> None then
+  if
+    Universe.find name.node <> None
+    && not (is_universe_text_at state (token_of name))
+  then
     fail_at_token state (token_of name)
       (Rule.message Generic_universe_name
          (quoted name.node ^ " is a universe name, which no generic type has"));
@@ -2307,7 +2356,7 @@ and type_arguments state name ~at ~parameters =
    be a type that typec does not implement yet, which the error says. *)
 and refuse_declaration state =
   (match peek state with
-  | Identifier_token name when Scope.find state.scope name = None ->
+  | Identifier_token name when visible state name = None ->
       refuse_universe_name state name
   | Identifier_token _ | Keyword_token _ | Punctuator_token _ | Number_token
   | Character_token _ | String_token _ | End_of_input ->
@@ -4001,6 +4050,12 @@ let c_external_declaration state =
       | declaration_start ->
           External_declaration (declaration_of_start state declaration_start))
 
+(* Whether the cursor is at the universe text, which stands in front of
+   the unit's own text where the reader holds it (design 13.3). *)
+let at_universe_text state =
+  peek state <> End_of_input
+  && is_universe_text_at state (first_token state state.position)
+
 (* An external declaration and the scope in front of it, which is
    persistent, so keeping it copies nothing (design 13.5). *)
 let external_declaration state =
@@ -4011,10 +4066,24 @@ let external_declaration state =
       (fun scope_end -> (Type_declaration { declaration; scope_end }, view))
   else Complete (c_external_declaration state, view)
 
-(* The external declarations, each with the scope in front of it. File
-   scope closes with the text, whose last tokens may be pragma tokens,
-   which stand in it. *)
-let translation_unit state =
+(* The declarations of the universe text, latest first, each with the
+   scope in front of it. They are read in a scope of their own, which
+   becomes the universe scope; then [file_scope] opens. *)
+let universe_declarations state ~file_scope =
+  let rec loop read =
+    if at_universe_text state then loop (external_declaration state :: read)
+    else read
+  in
+  let read = loop [] in
+  state.universe <- Names.of_list (Scope.declared_in_innermost state.scope);
+  state.scope <- file_scope;
+  read
+
+(* The external declarations, each with the scope in front of it: those
+   of the universe text, then the unit's own in [file_scope]. Both scopes
+   close with the text, whose last tokens may be pragma tokens, which
+   stand in file scope. *)
+let translation_unit state ~file_scope =
   let rec loop read =
     if peek state = End_of_input then begin
       let tokens = Array.length state.reader.tokens in
@@ -4023,7 +4092,7 @@ let translation_unit state =
     end
     else loop (external_declaration state :: read)
   in
-  loop []
+  loop (universe_declarations state ~file_scope)
 
 type file_scope = {
   ordinary : (string * reference) list;
@@ -4082,7 +4151,8 @@ let parse_with_scopes ~keywords reader =
       grammar = grammar_tokens keywords reader;
       position = 0;
       open_brackets = [];
-      scope = initial_scope keywords;
+      scope = Scope.file;
+      universe = Names.empty;
       jumps = Function_body;
       arm = None;
       labels = None;
@@ -4095,7 +4165,7 @@ let parse_with_scopes ~keywords reader =
   match
     refuse_generated_names state;
     refuse_pragmas_without_tokens state;
-    translation_unit state
+    translation_unit state ~file_scope:(initial_scope keywords)
   with
   | declarations ->
       (* Every scope the unit opens is closed, so [state.scope] is file

@@ -29,7 +29,9 @@ type t = { name : string; system_header : bool; origin : origin }
 (** The Type-C text of the generic types of the universe scope, the two
     lines of design 3.6, which the reader puts in front of a unit's own
     text ({!Reader.read_with_universe}). It ends with a newline, so the
-    unit's text starts a line. *)
+    unit's text starts a line. It declares one generic a line, as
+    [type name(...)], which is how [Typec_syntax.Universe] reads the
+    names. *)
 let universe_text =
   "type option(T)    = | None | Some(T value);\n\
    type result(T, E) = | Err(E error) | Ok(T value);\n"
@@ -38,6 +40,9 @@ let universe_text =
     [<universe>] opens a file of another origin, so source text cannot
     pass for the universe. *)
 let universe = { name = "<universe>"; system_header = false; origin = Universe }
+
+(** Whether [file] is {!universe}, which owns the universe text alone. *)
+let is_universe file = file == universe
 
 (** The suffix of a Type-C source file and of a Type-C interface (design
     2.1). *)

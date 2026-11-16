@@ -145,6 +145,25 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Parser
 
+- [High] Before the driver reads units with the universe text (package
+  2.3 part 3b): the parser declares the universe generics in a frame
+  outside `Scope`, so `Parser.View.find`, which sema's resolution checks
+  use, does not see them, and a use that the parser resolved to
+  `option` may read as not visible where lowering writes it; decide
+  whether views hold the universe (a `Scope` constructor for file scope
+  around the universe would give it to every lookup and view at once).
+  The universe items are the first of `Tree.translation_unit`, and
+  `Lowering.edits` edits their `type` declarations, which
+  `Reader.rewrite` refuses for every unit: keep them out of lowering by
+  construction (a field or item type of their own rather than each
+  consumer filtering by `Tree.in_universe`), and anchor instances of a
+  universe generic away from universe tokens.
+- [Medium] Owner decision: the universe frame applies to all text, so an
+  old-style definition with a parameter named `option` or `result` in C
+  text (`int f(result) int result; {...}` in a header a `.tc` includes)
+  is refused (TC0035), while design 2.2 limits that caveat to Type-C
+  text. Either reword 2.2 to "its text" or keep the frame out of C
+  text's identifier lists.
 - [Low] Design 2.3 refuses an identifier that begins with `__tc_`
   anywhere in the text, C text included; the parser checks the grammar
   tokens only, not the identifiers of a `#pragma` line
@@ -1134,12 +1153,13 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
-- [Medium] When package 3.4 makes universe names typedef names to the
-  parser, it implements design 2.3's exception to C11 6.7.6.3p11 (a
-  universe name in a parenthesised parameter declarator is the parameter)
-  and 2.2's old-style case (an error), each with a test; until then
-  `Universe` leaves every universe name an ordinary identifier to the
-  grammar.
+- [Medium] When package 3.4 makes its universe names typedef names to
+  the parser, each gets design 2.3's exception to C11 6.7.6.3p11 (a
+  universe name in a parenthesised parameter declarator is the
+  parameter) and 2.2's old-style case (an error) with a test, as the
+  universe generics have them where the parser declares them from the
+  universe text; until then `Universe` leaves those names ordinary
+  identifiers to the grammar.
 - [Medium] Distinct types, owner decision taken by default (design
   3.4): Type-C or C text is decided by the first token of the
   operation, for an implicit conversion by that of the converted

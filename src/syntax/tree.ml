@@ -820,8 +820,10 @@ type anchor = Anchor.t = private { before : int }
     parser makes one of a declaration that it read at file scope. *)
 type 'a item = 'a Anchor.item = private { declaration : 'a }
 
-(** The external declarations in order. It has no span: it is every token
-    of the text, and may have none. *)
+(** The external declarations in order: those of the universe generics
+    first where the reader holds the universe text (design 13.3), then
+    the unit's own. It has no span: it is every token of the text, and
+    may have none. *)
 type translation_unit = external_declaration item list
 
 (** The external declarations of [unit] in order, without their
@@ -836,6 +838,13 @@ let first_token = function
   | Function_definition definition -> definition.span.first
   | Top_level_asm assembler -> assembler.span.first
   | Empty_declaration span -> span.first
+
+(** Whether [item], of a unit whose tokens are [tokens], is a declaration
+    of the universe generics, whose tokens {!Typec_cpp.File.universe}
+    owns, rather than one of the unit's own. *)
+let in_universe (tokens : Typec_cpp.Token.t array)
+    (item : external_declaration item) =
+  Typec_cpp.File.is_universe tokens.(first_token item.declaration).owner
 
 (** The anchor in front of an external declaration. *)
 let anchor (item : external_declaration item) =

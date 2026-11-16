@@ -25,8 +25,10 @@ let case name text expected = { name; text; expected }
 (* Type-C text is that of a file named [*.tc] (design 2.1). *)
 let type_c_file = "in.tc"
 
-let outcome ?(file = "in.i") ~parse ~spans text =
-  match Reader.read ~name:file (Preprocessed.text ~name:file text) with
+(* [read] is {!Reader.read}, or {!Reader.read_with_universe} for a text
+   that the universe generics stand in front of (design 13.3). *)
+let outcome ?(file = "in.i") ?(read = Reader.read) ~parse ~spans text =
+  match read ~name:file (Preprocessed.text ~name:file text) with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match parse reader with
@@ -2033,9 +2035,9 @@ let type_c_error_cases =
       "error: in.tc:1: `__tc_f` begins with `__tc_`, which is reserved for \
        the names that typec generates (design 2.3) [TC0001]";
     case "a universe name in an expression"
-      "int f(void) { return result; }"
-      "error: in.tc:1: `result` is a universe name that typec does not \
-       implement yet (design 3.6; work package 2.3) [TC0023]";
+      "int f(void) { return slice; }"
+      "error: in.tc:1: `slice` is a universe name that typec does not \
+       implement yet (design 8; work package 3.4) [TC0023]";
     case "a universe name where a declaration begins" "str s;"
       "error: in.tc:1: `str` is a universe name that typec does not implement \
        yet (design 8; work package 3.4) [TC0023]";
@@ -2289,6 +2291,110 @@ let type_c_resolution_cases =
       "t#1 f#1 t#2 t->#2 x#1 t->#1 y#1";
   ]
 
+(* Type-C text read with the universe generics in front of it (design
+   3.6, 13.3), which the parser declares in the universe scope: any
+   declaration of the same name hides one, and no generic of the unit
+   takes the name (design 2.3). *)
+let universe_cases =
+  [
+    case "the universe generics are generic types"
+      "option(int) o; result(int, long) r;"
+      "(declaration ((option (type int))) o) | (declaration ((result (type \
+       int) (type long))) r)";
+    case "a declaration in a block hides a universe name there only"
+      "void f(void) { int result = 1; result = 2; } result(int, int) r;"
+      "(define (void) (function f (void)) (block (declaration (int) (init \
+       result 1)) (expr (= result 2)))) | (declaration ((result (type int) \
+       (type int))) r)";
+    case "a typedef name hides a universe name, which it does not redeclare"
+      "typedef int option; option x;"
+      "(declaration (typedef int) option) | (declaration (option) x)";
+    case "an object at file scope hides a universe name"
+      "int result = 1; int g(void) { return result; }"
+      "(declaration (int) (init result 1)) | (define (int) (function g \
+       (void)) (block (return result)))";
+    case "a tag does not hide the ordinary name"
+      "struct option { int has_arg; }; struct option o; option(int) p;"
+      "(declaration ((struct option (member (int) has_arg)))) | (declaration \
+       ((struct option)) o) | (declaration ((option (type int))) p)";
+    case "a universe generic alone in an expression"
+      "int f(void) { return result; }"
+      "error: in.tc:1: the generic type `result` names a type only in a type \
+       application, `result(...)` (design 3.5 rule 1) [TC0035]";
+    case "a generic type with a universe name"
+      "type option(T) = | None | Some(T value);"
+      "error: in.tc:1: `option` is a universe name, which no generic type has \
+       (design 3.6) [TC0034]";
+    case "a generic type with a universe name that a declaration hides"
+      "int result; type result(T, E) = | Err(E error) | Ok(T value);"
+      "error: in.tc:1: `result` is a universe name, which no generic type has \
+       (design 3.6) [TC0034]";
+    case "text that a line marker names <universe> is not the universe"
+      "# 1 \"<universe>\" 1\ntype option(T) = | None | Some(T value);\n"
+      "error: <universe>:1: `option` is a universe name, which no generic \
+       type has (design 3.6) [TC0034]";
+    case "a universe generic in the arguments of an attribute"
+      "int y __attribute__((aligned(_Alignof(option(int)))));"
+      "error: in.tc:1: `option` in the arguments of an attribute denotes a \
+       universe name, which lowering writes under a name of its own, but it \
+       leaves the arguments as written (design 13.5) [TC0046]";
+    case "a universe name in parentheses is the parameter it declares"
+      "int f(int (option));"
+      "(declaration (int) (function f (int (paren option))))";
+    case "a universe name in parentheses names a function parameter"
+      "int f(int (option(int)));"
+      "(declaration (int) (function f (int (paren (function option \
+       (int))))))";
+    case "a typedef name that hides a universe name in parentheses"
+      "typedef int option; int f(int (option));"
+      "(declaration (typedef int) option) | (declaration (int) (function f \
+       (int (function (option)))))";
+    case "a universe name as an old-style parameter"
+      "int f(result) int result; { return result; }"
+      "error: in.tc:1: the generic type `result` names a type only in a type \
+       application, `result(...)` (design 3.5 rule 1) [TC0035]";
+    case "a universe name that typec does not implement yet" "str s;"
+      "error: in.tc:1: `str` is a universe name that typec does not implement \
+       yet (design 8; work package 3.4) [TC0023]";
+  ]
+
+(* The universe scope is outside file scope: what file scope declares
+   and the view in front of a declaration hold no universe generic, and
+   the tree holds the universe's declarations first, by their owner. *)
+let failed_universe_scope () =
+  let text = Preprocessed.text ~name:type_c_file "int a;" in
+  match Reader.read_with_universe ~name:type_c_file text with
+  | Error error -> [ ("universe scope", Reader.error_message error) ]
+  | Ok reader -> (
+      match Parser.parse_with_scopes ~keywords:gnu_keywords reader with
+      | Error error -> [ ("universe scope", Parser.error_message error) ]
+      | Ok (unit, scopes) ->
+          let in_universe = List.map (Tree.in_universe reader.tokens) unit in
+          let own_view =
+            List.find_map
+              (fun ((item, view) : _ * Parser.View.t) ->
+                if Tree.in_universe reader.tokens item then None
+                else Some view)
+              scopes.declarations
+          in
+          let declares_universe_name =
+            List.exists
+              (fun (name, _) -> name = "option" || name = "result")
+              scopes.file_scope.ordinary
+          in
+          List.filter_map
+            (fun (name, holds) -> if holds then None else Some (name, "no"))
+            [
+              ( "the universe declarations come first",
+                in_universe = [ true; true; false ] );
+              ("file scope declares no universe name",
+                not declares_universe_name);
+              ( "a view holds no universe name",
+                match own_view with
+                | Some view -> Parser.View.find view "option" = None
+                | None -> false );
+            ])
+
 (* Design 4.1: [match] begins a match only at the start of a statement,
    before a parenthesised group and a [{]; elsewhere it is an
    identifier, as in C (design 2.2, 2.3). *)
@@ -2372,9 +2478,9 @@ let failures () =
         if actual = case.expected then None else Some (case, actual))
       cases
   in
-  let failed_cases ?file ?(parse = Parser.parse ~keywords:gnu_keywords)
+  let failed_cases ?file ?read ?(parse = Parser.parse ~keywords:gnu_keywords)
       ~spans cases =
-    failed_with (outcome ?file ~parse ~spans) cases
+    failed_with (outcome ?file ?read ~parse ~spans) cases
   in
   let parse_with ?(int128 = true) dialect optional_floats =
     Parser.parse
@@ -2417,12 +2523,16 @@ let failures () =
     @ failed_with (resolutions ~file:type_c_file) type_c_resolution_cases
     @ failed_cases ~file:type_c_file ~spans:false match_cases
     @ failed_with (resolutions ~file:type_c_file) match_resolution_cases
+    @ failed_cases ~file:type_c_file ~read:Reader.read_with_universe
+        ~spans:false universe_cases
     @ failed_with scope_ends scope_end_cases
     @ failed_with jump_targets jump_target_cases
     @ failed_with (jump_targets ~file:"in.i") c_text_jump_target_cases
     @ failed_with jump_targets tail_break_cases
   in
-  (failed, failed_nesting_cases () @ failed_chain_cases ())
+  ( failed,
+    failed_nesting_cases () @ failed_chain_cases () @ failed_universe_scope ()
+  )
 
 let () =
   let failed, failed_limits = Small_stack.run failures in
