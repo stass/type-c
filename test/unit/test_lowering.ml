@@ -15,7 +15,8 @@ open Typec_test_support
 
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
-let emitted source =
+(* The text that [source] is read to, its tree and its edits. *)
+let lowered source =
   let text =
     let preprocessed = Preprocessed.text ~name:"in.tc" source in
     match Reader.read ~name:"in.tc" preprocessed with
@@ -36,8 +37,12 @@ let emitted source =
           (Declarations.matchings declarations)
           (Declarations.answered declarations)
       in
-      Emitter.emit text { edits; assertions = [] }
+      (text, unit, edits)
   | Error error -> failwith (Reader.error_message error)
+
+let emitted source =
+  let text, _, edits = lowered source in
+  Emitter.emit text { edits; assertions = [] }
 
 let is_marker line = String.starts_with ~prefix:"# " line
 
@@ -51,13 +56,15 @@ let words text =
 
 let failures = ref 0
 
-let lowers name source expected =
-  let actual = words (emitted source) in
+let compares name actual expected =
   if actual <> expected then begin
     incr failures;
     Printf.eprintf "FAIL: %s\n  expected: %s\n  actual:   %s\n" name expected
       actual
   end
+
+let lowers name source expected =
+  compares name (words (emitted source)) expected
 
 (* Design 13.5: a compound literal, or in an initialiser the braced list
    alone; the arguments keep their tokens. *)
@@ -101,6 +108,75 @@ let constructors () =
       p_tag tag; union { struct { e first ; e second ; } P; } u; }; p \
       f(void) { return ((struct p){ .tag = p_P, .u.P = { { .tag = e_B, \
       .u.B = { 1, 2 } } , { .tag = e_A } } }) ; }")
+
+(* The lines of [text] before the line marker of typec's own text that
+   ends a unit with a bracket, which holds the packing probe. *)
+let before_typec_text text =
+  let rec take = function
+    | [] -> []
+    | line :: _ when line = "# 1 \"<typec>\" 3" -> []
+    | line :: rest -> line :: take rest
+  in
+  String.concat "\n" (take (String.split_on_char '\n' text))
+
+(* Design 10.3: the instances that a variant or a record alias uses
+   stand directly after its forward declaration, inside the text that
+   lowering writes for it; [source] is emitted with a bracket at the
+   anchor there of its last type declaration that has one. *)
+let bracketed_after_forward source =
+  let text, unit, edits = lowered source in
+  let at =
+    match List.rev (List.filter_map Tree.after_forward_declaration unit) with
+    | at :: _ -> at
+    | [] -> failwith "bracketed_after_forward: no anchor"
+  in
+  let location = text.tokens.(0).location in
+  let bracket =
+    Emitter.bracketed text ~at ~location
+      [ Emitter.generated location "struct s { int i; };" ]
+  in
+  let edits =
+    List.stable_sort
+      (fun (a : Emitter.edit) (b : Emitter.edit) ->
+        compare (a.range.first, a.range.count) (b.range.first, b.range.count))
+      (bracket :: edits)
+  in
+  words (before_typec_text (Emitter.emit text { edits; assertions = [] }))
+
+let bracket =
+  "#pragma pack(push) #pragma pack() struct s { int i; }; #pragma pack(pop)"
+
+let anchors () =
+  compares "a bracket after the forward declaration of a variant"
+    (bracketed_after_forward "type e = | A | B(int x);")
+    ("struct e; typedef struct e e; " ^ bracket
+   ^ " enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union { struct { \
+      int x ; } B; } u; };");
+  (* The declaration that a variant completes wrote the forward
+     declaration (design 10.1 rule 7), so the bracket begins the text of
+     the variant. *)
+  compares "a bracket after the forward declaration of a completed variant"
+    (bracketed_after_forward "type list; type list = | Nil;")
+    ("struct list; typedef struct list list; " ^ bracket
+   ^ " enum list_tag { list_Nil }; struct list { enum list_tag tag; };");
+  compares "a bracket after the forward declaration of a record alias"
+    (bracketed_after_forward "type pair = struct { pair *next; };")
+    ("struct pair; typedef struct pair pair; " ^ bracket
+   ^ " struct pair { pair *next; };");
+  (* Only a type declaration at file scope that lowering writes with a
+     forward declaration of its own has the anchor: an alias, a distinct
+     type, an incomplete variant and a generic have none, nor has a
+     variant in a block, which is no external declaration. *)
+  let _, unit, _ =
+    lowered
+      "type a = int; type d = distinct int; type n; type n = | N;\n\
+       type g(T) = | G(T x);\n\
+       void f(void) { type b = | B; }"
+  in
+  let anchored = List.filter_map Tree.after_forward_declaration unit in
+  compares "the anchors after forward declarations"
+    (string_of_int (List.length anchored))
+    "1"
 
 let () =
   lowers "a variant without fields" "type e = | A | B;"
@@ -155,4 +231,5 @@ let () =
     "void f(void) { type a = typeof(({ type b = int; (b)1; })) *; }"
     "void f(void) { typedef typeof(({ typedef int b ; (b)1; })) * a ; }";
   constructors ();
+  anchors ();
   if !failures > 0 then exit 1

@@ -169,6 +169,10 @@ typedef.
   
   
   # 2 "variant.tc"
+  
+  # 2 "variant.tc"
+   
+  # 2 "variant.tc"
   enum expr_tag { expr_Number, expr_Nil, expr_Add }; struct expr { enum expr_tag tag; union {
   # 2 "variant.tc"
   
@@ -390,7 +394,11 @@ structure that a variant lowers to (design 10.6).
   # 1 "header.tc"
   
   # 1 "header.tc"
-  struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  struct e; typedef struct e e;
+  # 1 "header.tc"
+   
+  # 1 "header.tc"
+  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
   # 1 "header.tc"
    
   # 1 "header.tc"

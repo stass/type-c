@@ -113,15 +113,22 @@ let alias tokens ~location ~head name (type_name : Tree.type_name) =
   replace tokens ~location "typedef" (head @ [ equals ])
   @ [ insert tokens ~before:name_before name ]
 
+(* For a variant or a record alias [declaration]: the grammar tokens
+   that its forward declaration replaces, and the first token after
+   them, where {!Tree.after_forward_declaration} anchors. *)
+let forward_declaration tokens (declaration : Tree.type_declaration) =
+  let forward_end = Option.get (Tree.forward_declaration_end declaration) in
+  (grammar_tokens tokens declaration.span.first (forward_end - 1), forward_end)
+
 (* A specifier without a tag of its own takes [name], before its body. *)
-let record_alias tokens ~location ~head name
+let record_alias tokens ~location (declaration : Tree.type_declaration)
     (specifier : Tree.record_specifier Tree.spanned) =
-  let equals = grammar_token_before tokens specifier.span.first in
+  let name = (declaration.node.name :> Tree.identifier).node in
   let { Tree.kind; tag; members; _ } = specifier.node in
   let replace_head ~tag =
     replace tokens ~location
       (record_declarations kind ~tag name)
-      (head @ [ equals ])
+      (fst (forward_declaration tokens declaration))
   in
   let insert_tag (body : _ Tree.spanned) =
     insert tokens ~before:body.span.first name
@@ -139,22 +146,25 @@ let has_payload constructors =
     (fun (constructor : Tree.constructor) -> constructor.node.fields <> [])
     constructors
 
-(* What comes before the constructors: the structure and typedef, which
-   the incomplete variant declares already where the variant [completes]
-   one; the enumeration of the tags, numbered from 0 in order (rule 1);
-   and the structure up to its union where it has one (rule 3). *)
-let variant_head ~completes variant constructors =
+(* The forward declaration of a variant: the structure and typedef,
+   which the incomplete variant declares already where the variant
+   [completes] one (design 10.1 rule 7). *)
+let variant_forward ~completes variant =
+  let name = (variant : Spelling.type_name :> string) in
+  if completes then "" else record_declarations Struct ~tag:name name
+
+(* What comes between the forward declaration and the constructors: the
+   enumeration of the tags, numbered from 0 in order (rule 1), and the
+   structure up to its union where it has one (rule 3). *)
+let variant_head variant constructors =
   let name = (variant : Spelling.type_name :> string) in
   let c_name = Spelling.declared variant in
   let enumerator (constructor : Tree.constructor) =
     Tree.enumerator_name ~variant:c_name constructor.node.name.node
   in
   let tag_enum = "enum " ^ Tree.enum_tag_name c_name in
-  let forward =
-    if completes then "" else record_declarations Struct ~tag:name name ^ " "
-  in
   let union = if has_payload constructors then " union {" else "" in
-  Printf.sprintf "%s%s { %s }; struct %s { %s %s;%s" forward tag_enum
+  Printf.sprintf "%s { %s }; struct %s { %s %s;%s" tag_enum
     (String.concat ", " (List.map enumerator constructors))
     name tag_enum Tree.tag_member union
 
@@ -189,16 +199,18 @@ let constructor_edits tokens (constructor : Tree.constructor) =
       replace_at tokens ~first:bar "struct {" [ name.span.first; open_paren ]
       @ List.concat_map field_end fields
 
-(* [type N = ... ;]: the head replaces [type N =], and [private] where
-   it follows, and the tail the [;]. *)
-let variant tokens ~location ~head (declaration : Tree.type_declaration)
+(* [type N = ... ;]: the forward declaration replaces [type], the head
+   [N =] and [private] where it follows, and the tail the [;]. *)
+let variant tokens ~location (declaration : Tree.type_declaration)
     constructors =
   let { Tree.name; declared; _ } = declaration.node in
   let completes = declared.earlier <> None in
   let first_bar = (List.hd constructors : Tree.constructor).span.first in
-  replace tokens ~location
-    (variant_head ~completes name.node constructors)
-    (head @ grammar_tokens tokens (name.span.first + 1) (first_bar - 1))
+  let forward_tokens, forward_end = forward_declaration tokens declaration in
+  replace tokens ~location (variant_forward ~completes name.node) forward_tokens
+  @ replace tokens ~location
+      (variant_head name.node constructors)
+      (grammar_tokens tokens forward_end (first_bar - 1))
   @ List.concat_map (constructor_edits tokens) constructors
   @ replace_at tokens ~first:declaration.span.last (variant_tail constructors)
       []
@@ -226,9 +238,9 @@ let type_declaration (tokens : Token.t array)
       in
       alias tokens ~location ~head:(head @ definition_words) name.node
         representation
-  | Record_alias record -> record_alias tokens ~location ~head name.node record
+  | Record_alias record -> record_alias tokens ~location declaration record
   | Variant { constructors; _ } ->
-      variant tokens ~location ~head declaration constructors
+      variant tokens ~location declaration constructors
 
 (* Design 13.5: a constructor expression becomes the compound literal
    [((struct N){ .tag = N_C, .u.C = { a, b } })], or inside an

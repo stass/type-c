@@ -275,4 +275,5 @@ let external_declaration visit = function
   | Top_level_asm code -> assembler visit code.node
   | Empty_declaration _ -> ()
 
-let iter visit unit = List.iter (external_declaration visit) unit
+let iter visit unit =
+  List.iter (external_declaration visit) (external_declarations unit)

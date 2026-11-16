@@ -85,7 +85,8 @@ let scope_ends ?(file = type_c_file) text =
       match Parser.parse ~keywords:gnu_keywords reader with
       | Error error -> "error: " ^ Parser.error_message error
       | Ok unit ->
-          List.concat_map (external_declaration reader) unit
+          List.concat_map (external_declaration reader)
+            (Tree.external_declarations unit)
           |> String.concat " ")
 
 (* A type declaration is in scope to the end of its block, its arm or
@@ -172,7 +173,8 @@ let jump_targets ?(file = type_c_file) text =
       match Parser.parse ~keywords:gnu_keywords reader with
       | Error error -> "error: " ^ Parser.error_message error
       | Ok unit ->
-          List.concat_map (external_declaration reader) unit
+          List.concat_map (external_declaration reader)
+            (Tree.external_declarations unit)
           |> String.concat " ")
 
 (* A break leaves the innermost loop, switch or match around it, and a

@@ -4047,7 +4047,8 @@ let parse_with_scopes ~keywords reader =
          scope as the unit leaves it. *)
       let file_scope = file_scope_declarations state.scope in
       let scopes = { file_scope; declarations; views = state.views } in
-      Ok (List.map fst declarations, scopes)
+      let item (declaration, _) = Anchor.item declaration in
+      Ok (List.map item declarations, scopes)
   | exception Failed error -> Error error
 
 let parse ~keywords reader =

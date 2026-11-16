@@ -57,7 +57,7 @@ let rec read_with dialect target ~name text candidates refused =
       read_with dialect target ~name text candidates refused
 
 let appended_function (unit : Typec_unit.t) =
-  match List.rev unit.unit with
+  match List.rev (Tree.external_declarations unit.unit) with
   | Tree.Function_definition { node = { body = Parsed body; _ }; _ } :: _ ->
       body
   | _ -> failwith "the appended function is not the last declaration"

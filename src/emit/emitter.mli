@@ -65,13 +65,12 @@ val code : Typec_cpp.Reader.range -> location:Typec_cpp.Location.t ->
     {!generated} takes, so code never writes the pragmas of a bracket
     past the probe. *)
 
-val bracketed : Typec_cpp.Reader.t ->
-  before:Typec_syntax.Tree.external_declaration ->
+val bracketed : Typec_cpp.Reader.t -> at:Typec_syntax.Tree.anchor ->
   location:Typec_cpp.Location.t -> piece list -> edit
-(** [bracketed unit ~before ~location pieces] inserts [pieces] in a
-    packing bracket at [location] in front of [before], an external
-    declaration of [unit], so that the bracket, whose pragmas take lines
-    of their own, stands where a declaration may and never inside an
+(** [bracketed unit ~at ~location pieces] inserts [pieces] in a packing
+    bracket at [location] at the anchor [at] of [unit], which only the
+    parser names, so that the bracket, whose pragmas take lines of their
+    own, stands where a declaration may and never inside an
     expression. *)
 
 (** What lowering makes of a unit: its edits, and the declarations that

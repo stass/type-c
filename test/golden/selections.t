@@ -68,7 +68,9 @@ constructor in each association, and selections nested in both.
    int
   d
   ;
-  struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  struct e; typedef struct e e;
+   
+  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
    
    
   struct {

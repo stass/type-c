@@ -2077,7 +2077,10 @@ The rule reads the lowered C, in three respects.
   are declared, and defined where the body holds one by value, directly
   after its own forward declaration:
   `type expr = | Call(vector(expr *) args);` defines `vector__P4expr`
-  after `typedef struct expr expr;` and before `enum expr_tag`.
+  after `typedef struct expr expr;` and before `enum expr_tag`. A
+  variant that completes `type expr;` has the forward declaration that
+  `type expr;` became (10.1 rule 7), so its instances stand at the
+  start of its own text, before `enum expr_tag`.
 - What lowering declares counts as declared: another generated text,
   and the forward declaration of a tag, which is said next.
 - Several texts before one external declaration stand in the order of

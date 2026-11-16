@@ -82,11 +82,12 @@ let () =
           | Error error -> fail (Parser.error_message error)
           | Ok unit ->
               let dump = Tree_dump.translation_unit reader unit in
+              let declarations = Tree.external_declarations unit in
               let violation = Tree_dump.span_violation (Tree_dump.group dump) in
               Option.iter fail violation;
               Option.iter
                 (fun (index, _) ->
                   fail (Printf.sprintf "token %d is outside the tree" index))
-                (first_token_outside reader unit);
-              List.iter (fun d -> print_endline (describe d)) unit))
+                (first_token_outside reader declarations);
+              List.iter (fun d -> print_endline (describe d)) declarations))
   | _ -> fail "usage: parse_check MACROS FILE"

@@ -7,6 +7,7 @@
    probe of design 10.3, for a backend to compile. *)
 
 open Typec_cpp
+open Typec_syntax
 open Typec_emit
 
 let () =
@@ -17,14 +18,14 @@ let () =
     | Ok unit -> unit
     | Error error -> failwith (Reader.error_message error)
   in
-  let before =
+  let at =
     match Typec_test_support.External_declarations.of_unit unit with
-    | first :: _ -> first
+    | first :: _ -> Tree.anchor first
     | [] -> failwith "pack_probe: no external declaration"
   in
   let location = unit.tokens.(0).location in
   let instance =
-    Emitter.bracketed unit ~before ~location
+    Emitter.bracketed unit ~at ~location
       [ Emitter.generated location "struct instance { char c; int i; };" ]
   in
   print_string (Emitter.emit unit { edits = [ instance ]; assertions = [] })

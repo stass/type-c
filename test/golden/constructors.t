@@ -19,7 +19,9 @@ The arguments keep their tokens and lines.
   > }
   > EOF
   $ ./golden.exe construct.tc | grep -v '^# ' | grep .
-  struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  struct e; typedef struct e e;
+   
+  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
    
    
   struct {
@@ -28,7 +30,9 @@ The arguments keep their tokens and lines.
    e *next
   ; } B;
   } u; };
-  struct pair; typedef struct pair pair; enum pair_tag { pair_P }; struct pair { enum pair_tag tag; union {
+  struct pair; typedef struct pair pair;
+   
+  enum pair_tag { pair_P }; struct pair { enum pair_tag tag; union {
    
   struct {
   e first
@@ -167,7 +171,9 @@ too.
 
   $ printf 'type e = | A | B(int i);\nstruct s { e v; int n; } z = {0};\ne x = {0};\n' > zero.tc
   $ ./golden.exe zero.tc | grep -v '^# ' | grep .
-  struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  struct e; typedef struct e e;
+   
+  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
    
    
   struct {

@@ -78,7 +78,9 @@ let probed (unit : Tree.translation_unit) =
     | Block_statement { node = Expression_statement e; _ } :: _ -> Some e
     | _ -> None
   in
-  Option.bind (List.find_map body (List.rev unit)) last_expression
+  Option.bind
+    (List.find_map body (List.rev (Tree.external_declarations unit)))
+    last_expression
 
 let describe (typed : Expressions.typed) =
   String.concat ""

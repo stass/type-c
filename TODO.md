@@ -731,16 +731,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   in a definition, which `Emitter.token` drops as well: in an attribute
   argument, which the parser skips, dropping it would change the
   argument. Refuse it in part 9 too unless the design gives it a piece.
-- [Medium] `Emitter.bracketed` anchors a bracket only in front of an
-  external declaration of the tree, but design 10.3 also puts the
-  instances that a variant or a record alias uses directly after its
-  own forward declaration, inside the text that lowering writes for the
-  type declaration. Part 9 of package 2.1 needs an anchor for that place
-  too, made from the type declaration, so that no other position can be
-  named. The anchor can also be forged, as `Tree.Empty_declaration`
-  takes a public span and `Spanned.make` is public: an abstract anchor
-  that only the parser makes, one per external declaration, would make
-  a bracket inside an expression unwritable.
+- [Medium] The order of edits that `Emitter.emit` takes is made by the
+  sort at the end of `Lowering.edits`, and a test that adds a bracket
+  (`test_lowering.ml`, `bracketed_after_forward`) repeats it. A bracket
+  at the anchor after a variant's forward declaration is valid only as
+  an insertion that sorts before the head replacing the name, so part 9
+  of package 2.1, which merges brackets with the edits of lowering,
+  would repeat it again. Keep the order in one place: one function that
+  merges edits, or the sort in `Emitter.emit`.
 
 - [Medium] `Initialiser.first_variant` follows the first member of each
   nested structure or union down to a variant or a scalar, remembering

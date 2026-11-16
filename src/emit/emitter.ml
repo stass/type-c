@@ -44,15 +44,8 @@ let code range ~location text =
   check_own_text ~caller:"Emitter.code" text;
   { range; location; text = Code text }
 
-let first_token : Tree.external_declaration -> int = function
-  | External_declaration declaration -> declaration.span.first
-  | Type_declaration { declaration; _ } -> declaration.span.first
-  | Function_definition definition -> definition.span.first
-  | Top_level_asm assembler -> assembler.span.first
-  | Empty_declaration span -> span.first
-
-let bracketed (unit : Reader.t) ~before ~location pieces =
-  { range = Reader.range unit.tokens ~first:(first_token before) ~count:0;
+let bracketed (unit : Reader.t) ~(at : Tree.anchor) ~location pieces =
+  { range = Reader.range unit.tokens ~first:at.before ~count:0;
     location;
     text = Bracketed pieces }
 

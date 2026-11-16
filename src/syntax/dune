@@ -4,7 +4,7 @@
 (library
  (name typec_syntax)
  (libraries typec_cpp)
- (private_modules keyword scope spanned))
+ (private_modules anchor keyword scope spanned))
 
 ; Rule is a build output of the one table of rules.
 

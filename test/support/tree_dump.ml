@@ -766,7 +766,8 @@ let external_declaration reader = function
   | Top_level_asm { span; node = a } -> node span "asm" (assembler reader a)
   | Empty_declaration span -> node span ";" []
 
-let translation_unit reader unit = List.map (external_declaration reader) unit
+let translation_unit reader unit =
+  List.map (external_declaration reader) (Tree.external_declarations unit)
 
 (* The scope entries of a dump in source order: a declaration as [x#n],
    [n] counting the declarations of [x] in its name space in token order,

@@ -93,7 +93,7 @@ let insertions contents text result (unit : Tree.translation_unit) =
       | Tree.Function_definition { node = { body = Parsed block; _ }; _ } ->
           block_insertions contents text result block
       | _ -> [])
-    unit
+    (Tree.external_declarations unit)
 
 let print_with text inserted =
   let at = ref 0 in

@@ -809,6 +809,60 @@ type external_declaration =
   | Top_level_asm of assembler spanned  (** GNU [asm (...);] *)
   | Empty_declaration of span  (** a GNU [;] alone *)
 
+(** A place where emission may put a packing bracket (design 10.3): an
+    insertion in front of the token [before]. Private, so that only the
+    parser names one, at an {!item} ({!anchor},
+    {!after_forward_declaration}), and none stands inside an
+    expression. *)
+type anchor = Anchor.t = private { before : int }
+
+(** An external declaration of the unit. Private, so that only the
+    parser makes one of a declaration that it read at file scope. *)
+type 'a item = 'a Anchor.item = private { declaration : 'a }
+
 (** The external declarations in order. It has no span: it is every token
     of the text, and may have none. *)
-type translation_unit = external_declaration list
+type translation_unit = external_declaration item list
+
+(** The external declarations of [unit] in order, without their
+    anchors. *)
+let external_declarations (unit : translation_unit) =
+  List.map (fun (item : _ item) -> item.declaration) unit
+
+(** The token that an external declaration begins with. *)
+let first_token = function
+  | External_declaration declaration -> declaration.span.first
+  | Type_declaration { declaration; _ } -> declaration.span.first
+  | Function_definition definition -> definition.span.first
+  | Top_level_asm assembler -> assembler.span.first
+  | Empty_declaration span -> span.first
+
+(** The anchor in front of an external declaration. *)
+let anchor (item : external_declaration item) =
+  Anchor.before (first_token item.declaration)
+
+(** The token in front of which the forward declaration ends that
+    lowering writes for [declaration], where it writes one
+    (design 10.1, 10.2): it replaces the tokens of a variant before its
+    name, and those of a record alias before its specifier. A variant
+    that completes an incomplete one has that declaration's forward
+    declaration (design 10.1 rule 7), and lowering writes nothing in its
+    place. *)
+let forward_declaration_end (declaration : type_declaration) =
+  match declaration.node.definition with
+  | Variant _ -> Some declaration.node.name.span.first
+  | Record_alias specifier -> Some specifier.span.first
+  | Incomplete_variant | Alias _ | Distinct _ -> None
+
+(** The anchor directly after the forward declaration of a type
+    declaration at file scope, where the instances that its definition
+    uses stand (design 10.3): for a variant or a record alias that is
+    not generic, whose instances write their own text. *)
+let after_forward_declaration (item : external_declaration item) =
+  match item.declaration with
+  | Type_declaration { declaration; _ }
+    when declaration.node.type_parameters = [] ->
+      Option.map Anchor.before (forward_declaration_end declaration)
+  | Type_declaration _ | External_declaration _ | Function_definition _
+  | Top_level_asm _ | Empty_declaration _ ->
+      None

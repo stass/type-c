@@ -2,6 +2,7 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 open Typec_cpp
+open Typec_syntax
 open Typec_emit
 
 let failures = ref 0
@@ -301,9 +302,9 @@ let probe =
    (-fapple-pragma-pack or -fxl-pragma-pack?)\");\n"
 
 let () =
-  let before = List.nth (declarations unit) 2 in
+  let anchor = Tree.anchor (List.nth (declarations unit) 2) in
   let bracketed =
-    Emitter.bracketed unit ~before ~location:(at 2)
+    Emitter.bracketed unit ~at:anchor ~location:(at 2)
       [ Emitter.generated (at 2) "struct s { int n; };" ]
   in
   let text =
@@ -355,7 +356,7 @@ let own index = moving.tokens.(index).location
    bracket takes the line of the edit. *)
 let moved =
   Emitter.bracketed moving
-    ~before:(List.nth (declarations moving) 2)
+    ~at:(Tree.anchor (List.nth (declarations moving) 2))
     ~location:(own 12)
     (pieces moving ~first:8 ~count:4
     @ pieces moving ~first:0 ~count:1

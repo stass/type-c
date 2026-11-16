@@ -20,7 +20,8 @@ let read name =
 
 (* The tokens of a declaration; the probe moves and anchors at no other
    kind of external declaration. *)
-let span_of : Tree.external_declaration -> Tree.span = function
+let span_of (item : Tree.external_declaration Tree.item) =
+  match item.declaration with
   | External_declaration { span; _ } -> span
   | _ -> failwith "moved_probe: an external declaration that is no C one"
 
@@ -40,7 +41,7 @@ let () =
   in
   let application = unit.tokens.((span_of last).first).location in
   let moved =
-    Emitter.bracketed unit ~before:last ~location:application
+    Emitter.bracketed unit ~at:(Tree.anchor last) ~location:application
       (Emitter.generated application "typedef int __tc_arg__i;"
       :: List.map
            (fun offset -> Option.get (Emitter.token unit (start + offset)))

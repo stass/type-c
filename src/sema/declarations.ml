@@ -2749,10 +2749,9 @@ let read_function_definition state (definition : Tree.function_definition) =
   | Skipped _ -> ());
   Function_definition entity
 
-let read_external state index
-    (external_declaration : Tree.external_declaration) =
+let read_external state index (item : Tree.external_declaration Tree.item) =
   state.external_facts <- declaration_state state.tags index;
-  match external_declaration with
+  match item.declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
   | Type_declaration declaration -> (
