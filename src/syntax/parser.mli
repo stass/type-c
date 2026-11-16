@@ -135,10 +135,12 @@ module View : sig
   (** The tag of the name that is visible. *)
 end
 
-(** The views that the parser takes where unread text stands in a unit:
-    at the [(] of the arguments of each attribute, and at each pragma
-    token. The parser does not read that text, so a view says what each
-    identifier in it denotes where it stands. *)
+(** The views that the parser takes where unread text stands in a unit,
+    at the [(] of the arguments of each attribute and at each pragma
+    token, and at each [try], whose operand lowering moves (design 5.1
+    rule 3). Typing does not read unread text, so a view says what each
+    identifier in it denotes where it stands; a view at a [try] says it
+    for the operand at its place and where lowering writes it. *)
 type views
 
 val attribute_view : views -> Tree.attribute -> View.t option
@@ -158,6 +160,25 @@ val pragma_view : views -> int -> View.t option
     its view is the one in front of the grammar token after it, or file
     scope as the unit leaves it after the last grammar token. In a function body that the parser passes
     through unread, it is the view where the body starts. *)
+
+(** The two views at a [try] of Type-C text (design 5.1 rule 3), which
+    the resolution property of design 13.5 compares for its operand.
+    [place] is that of a statement or declaration of the positions of
+    rule 3 only where the [try] stands in one; a [try] anywhere else is
+    an error, and its [place] is in front of the innermost block item or
+    statement without a substatement. *)
+type try_views = {
+  place : View.t;
+      (** in front of the statement or declaration that holds the [try],
+          after the labels of a statement but not those of a [match]
+          arm, which are the arm's: where lowering writes the operand *)
+  own : View.t;  (** at the operand, where the source reads it *)
+}
+
+val try_views : views -> int -> try_views option
+(** [try_views views index] are the views at the token at [index] in
+    [Reader.t.tokens] of the unit that [views] were taken in, if it is
+    the word of a {!Tree.Try}, and [None] for any other token. *)
 
 (** What the parser records of the scopes of a unit beside its tree. *)
 type scopes = {

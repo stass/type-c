@@ -96,12 +96,17 @@ type scope = (ordinary, tag_entry) Scope.t
 (* Values by the index of a token in [Reader.t.tokens]. *)
 module Places = Map.Make (Int)
 
-(* The scopes that unread text stands in (design 13.5), by the index of
-   a token: at the [(] of the arguments of each attribute, and at each
-   pragma token, and for an attribute the span of its arguments. *)
+(* The scopes at a [try]; parser.mli says what they are. *)
+type try_views = { place : scope; own : scope }
+
+(* The scopes that unread and moved text stands in (design 13.5), by the
+   index of a token: at the [(] of the arguments of each attribute, and
+   for an attribute the span of its arguments, at each pragma token, and
+   at each [try]. *)
 type views = {
   attributes : (span * scope) Places.t;
   pragmas : scope Places.t;
+  tries : try_views Places.t;
 }
 
 (* The innermost statement around the cursor that a break or continue
@@ -157,6 +162,11 @@ type state = {
   mutable open_brackets : opening list;
       (** read and not yet closed, innermost first *)
   mutable scope : scope;
+  mutable place : scope;
+      (** in front of the innermost external declaration, block item,
+          or statement without a substatement after its labels, being
+          read: where lowering writes the operand of a [try] that the
+          statement or declaration holds (design 5.1 rule 3) *)
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
   mutable labels : body_labels option;  (** [None] outside every body *)
@@ -908,17 +918,43 @@ let type_c_word = function
   | "defer" -> Some Defer
   | _ -> None
 
-(* In Type-C text, [try] and [defer] where no declaration of the same
-   identifier hides them, as one hides a universe name (design 2.3), are
-   the operator and the statement of Type-C. *)
-let refuse_type_c_word state name =
-  if is_type_c_text_at state state.grammar.(state.position).index then
-    match type_c_word name with
-    | Some Try ->
-        fail_not_implemented state ~section:"5.1" ~package:"2.4"
-          "`try` is not implemented yet"
-    | Some Defer -> fail_defer state
-    | None -> ()
+(* Whether the word at the cursor is Type-C's [try]: in Type-C text,
+   where no declaration of the same identifier hides it, as one hides a
+   universe name (design 2.3). *)
+let begins_try state =
+  match peek state with
+  | Identifier_token name when type_c_word name = Some Try ->
+      is_type_c_text_at state state.grammar.(state.position).index
+      && Option.is_none (visible state name)
+  | _ -> false
+
+(* Runs [read] with [state.place] at the scope in front of what it
+   reads, and restores the place around it after. *)
+let in_place state read =
+  let around = state.place in
+  state.place <- state.scope;
+  let result = read state in
+  state.place <- around;
+  result
+
+(* At the [try] that [begins_try] recognises: records its views and
+   returns the node it makes of its operand. *)
+let try_prefix state =
+  let token = state.grammar.(state.position).index in
+  let views = { place = state.place; own = state.scope } in
+  state.views <-
+    { state.views with tries = Places.add token views state.views.tries };
+  let scope = scope_depth state in
+  advance state;
+  fun operand -> Tree.Try { operand; scope }
+
+(* In Type-C text, [defer] where no declaration of the same identifier
+   hides it is the statement of Type-C (design 2.3). *)
+let refuse_defer_word state name =
+  if
+    is_type_c_text_at state state.grammar.(state.position).index
+    && type_c_word name = Some Defer
+  then fail_defer state
 
 (* A variant declares its enumerators for C clients (design 10.1 rule
    6), so Type-C text cannot name them. *)
@@ -940,7 +976,10 @@ let resolve state name =
       Resolved declaration
   | Some { declaration; _ } -> Resolved declaration
   | None ->
-      refuse_type_c_word state name;
+      (* A cast-expression reads an unhidden [try] before it would read
+         a primary-expression, the one place that resolves a name. *)
+      if begins_try state then invalid_arg "Parser: a try read as a name";
+      refuse_defer_word state name;
       refuse_universe_name state name;
       Undeclared
 
@@ -1886,7 +1925,8 @@ let measure_operator = function
    other expression ends before the assignment operator. *)
 let is_unary_expression expression =
   match expression.node with
-  | Binary _ | Conditional _ | Cast _ | Assignment _ | Comma _ -> false
+  | Binary _ | Conditional _ | Cast _ | Assignment _ | Comma _ | Try _ ->
+      false
   | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
   | Generic _ | Compound_literal _ | Qualified_constructor _ | Subscript _
   | Call _ | Member _ | Pointer_member _ | Post_increment _
@@ -2904,28 +2944,35 @@ and expression state =
 
 and constant_expression state = conditional_expression state
 
-(* Assignment is right-associative: the targets are collected in a loop
-   and the nodes made from the right. *)
+(* Assignment is right-associative, and a [try] takes the
+   assignment-expression after it (design Appendix A): the targets and
+   the [try]s are collected in a loop as prefixes of the value after
+   them, and the nodes made from the right. *)
 and assignment_expression state =
-  let rec collect targets =
+  let rec collect prefixes =
     let start = state.position in
-    let operand = conditional_expression state in
-    match assignment_operator (peek state) with
-    | Some operator when is_unary_expression operand ->
-        advance state;
-        collect ((start, operator, operand) :: targets)
-    | Some _ ->
-        fail state
-          (Rule.c_text
-             (Printf.sprintf "the left operand of %s is not a unary expression"
-                (found state)))
-    | None -> (operand, targets)
+    if begins_try state then
+      let apply = try_prefix state in
+      collect ((start, apply) :: prefixes)
+    else
+      let operand = conditional_expression state in
+      match assignment_operator (peek state) with
+      | Some operator when is_unary_expression operand ->
+          advance state;
+          let assign right = Assignment (operator, operand, right) in
+          collect ((start, assign) :: prefixes)
+      | Some _ ->
+          fail state
+            (Rule.c_text
+               (Printf.sprintf
+                  "the left operand of %s is not a unary expression"
+                  (found state)))
+      | None -> (operand, prefixes)
   in
-  let value, targets = collect [] in
+  let value, prefixes = collect [] in
   List.fold_left
-    (fun right (start, operator, left) ->
-      finish state start (Assignment (operator, left, right)))
-    value targets
+    (fun right (start, prefix) -> finish state start (prefix right))
+    value prefixes
 
 (* Right-associative like assignment: [a ? b : c ? d : e] groups as
    [a ? b : (c ? d : e)]. GNU [a ?: b] omits the middle operand. *)
@@ -2971,7 +3018,10 @@ and binary_expression state minimum =
    prefix out. After [++], [--], [sizeof] and [_Alignof] comes a
    unary-expression, where [(] type-name [)] can only begin a compound
    literal; GNU [__extension__] makes no node and takes a
-   cast-expression. GNU [&&] label is a whole unary-expression. *)
+   cast-expression. GNU [&&] label is a whole unary-expression. A [try]
+   here is one that the grammar does not derive (design 5.1 rule 3): it
+   takes a cast-expression, as a unary operator does, so that typing
+   can refuse it where it stands. *)
 and cast_expression state =
   let rec collect prefixes ~cast_allowed =
     let start = state.position in
@@ -3000,6 +3050,9 @@ and cast_expression state =
         let name = identifier state "a label after `&&`" in
         let label = address_label state start name in
         (prefixes, finish state start (Label_address label))
+    | Identifier_token _ when begins_try state ->
+        let apply = try_prefix state in
+        collect ((start, apply) :: prefixes) ~cast_allowed:true
     | lexeme -> (
         match (unary_operator lexeme, measure_operator lexeme) with
         | Some operator, _ ->
@@ -3752,8 +3805,10 @@ and attribute_statement state start =
   expect state P.Semicolon "`;` after the attributes of a statement";
   finish state start (Attribute_statement attributes)
 
-(* A statement without a substatement. *)
-and simple_statement state =
+(* A statement without a substatement, after its labels. *)
+and simple_statement state = in_place state read_simple_statement
+
+and read_simple_statement state =
   let start = state.position in
   match peek state with
   | Punctuator_token P.Left_brace ->
@@ -3993,9 +4048,11 @@ and block_items state =
   in
   loop []
 
+and block_item state = in_place state read_block_item
+
 (* A label comes first: [T:] begins one where [T] is a typedef name. Then
    attributes before a [;], which begin a declaration elsewhere. *)
-and block_item state =
+and read_block_item state =
   if begins_label state || begins_attribute_statement state then
     Complete (Block_statement (statement state))
   else if begins_type_declaration state then
@@ -4171,7 +4228,7 @@ let translation_unit state ~keywords =
   state.scope <- initial_scope keywords ~universe:state.scope;
   let rec loop read =
     if peek state = End_of_input then read
-    else loop (external_declaration state :: read)
+    else loop (in_place state external_declaration :: read)
   in
   let own = loop [] in
   let tokens = Array.length state.reader.tokens in
@@ -4229,6 +4286,7 @@ let attributes_within (views : views) (span : span) =
   |> Seq.map snd |> List.of_seq
 
 let pragma_view (views : views) token = Places.find_opt token views.pragmas
+let try_views (views : views) token = Places.find_opt token views.tries
 
 let parse_with_scopes ~keywords reader =
   let state =
@@ -4238,12 +4296,18 @@ let parse_with_scopes ~keywords reader =
       position = 0;
       open_brackets = [];
       scope = Scope.file;
+      place = Scope.file;
       jumps = Function_body;
       arm = None;
       labels = None;
       generic = None;
       in_type_argument = false;
-      views = { attributes = Places.empty; pragmas = Places.empty };
+      views =
+        {
+          attributes = Places.empty;
+          pragmas = Places.empty;
+          tries = Places.empty;
+        };
       generics = Name_set.empty;
       counter = Spanned.counter ~max_depth;
     }

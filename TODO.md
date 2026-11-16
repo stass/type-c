@@ -165,9 +165,21 @@ is [type-c-language-design.md](type-c-language-design.md).
   say that a declaration hides the word or where it is. A hidden
   universe name gets no such note either. Add a note naming the
   declaration if the pilot shows the error confusing. Until work
-  packages 2.4 and 2.5, a bare unhidden word in operand position
-  (`x + defer`, `sizeof try`) says the construct is not implemented
-  rather than that it is a syntax error.
+  package 2.5, a bare unhidden `defer` in operand position (`x +
+  defer`) says the construct is not implemented rather than that it is
+  a syntax error.
+- [Low] An unhidden `try` in an attribute argument or a `#pragma`
+  line of Type-C text (`__attribute__((aligned(sizeof(try f()))))`,
+  `#pragma omp parallel if(try f())`) is unread text, which reaches
+  the backend as written, where it is an undeclared identifier or an
+  ignored pragma. Refuse it in the one scan of unread tokens of the
+  [Medium] item on `_Defer` below, with the position error of design
+  5.1 rule 3.
+- [Low] GNU `__extension__` makes no node, so `__extension__ try f();`
+  has the tree of `try f();`, and the position rule of design 5.1 rule
+  3 would take a `try` that Appendix A does not derive there. Decide in
+  the design whether a `try` after `__extension__` is in a position, or
+  give `__extension__` a node.
 - [Low] A type name as the controlling operand of `_Generic` (C2y,
   `_Generic(const int, const int: 1, int: 2)`), which GCC 16 and Clang
   accept in gnu11, is a syntax error. Read it, with its type unconverted,

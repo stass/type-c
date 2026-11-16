@@ -350,14 +350,16 @@ and asm_flow walk (assembler : Tree.assembler) =
         (operands.outputs @ operands.inputs)
 
 (* An expression completes unless it is a call to a function that does
-   not return; a statement expression is the block it holds. The body
-   of a block literal is a function of its own, which typing does not
-   read. *)
+   not return; a statement expression is the block it holds. A [try]
+   completes in any form (design 4.4). The body of a block literal is a
+   function of its own, which typing does not read. *)
 and expression walk (value : Tree.expression) =
   let operands = all (expression walk) in
   match value.node with
   | Statement_expression b -> block (entering walk b) b
   | Parenthesized inner -> expression walk inner
+  | Try { operand; scope = _ } ->
+      { (expression walk operand) with completes = true }
   | Call { callee; arguments } ->
       { (operands (callee :: arguments)) with
         completes = not (walk.facts.noreturn callee) }

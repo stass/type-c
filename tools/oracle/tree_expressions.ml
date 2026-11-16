@@ -18,7 +18,8 @@ let rec expression visit (e : Tree.expression) =
   | Post_decrement operand
   | Unary (_, operand)
   | Sizeof_expression operand
-  | Alignof_expression operand ->
+  | Alignof_expression operand
+  | Try { operand; scope = _ } ->
       expression visit operand
   | Generic { controlling; associations } ->
       expression visit controlling;

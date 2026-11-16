@@ -243,6 +243,64 @@ let pragma_cases =
       "weak=- a=- | weak=- b=-";
   ]
 
+(* The views of each [try] token of the unit in order, separated by
+   " | ", each as the place view and then the view at the operand, or a
+   mismatch where an unhidden [try] has none or another token has
+   one. *)
+let try_names reader views names index (token : Token.t) =
+  match (token.kind, Parser.try_views views index) with
+  | Token.Identifier "try", Some { place; own } ->
+      Some (show_view reader names place ^ " / " ^ show_view reader names own)
+  | Token.Identifier "try", None -> Some "no view"
+  | _, Some _ -> Some "a view at a token that is no try"
+  | _, None -> None
+
+let try_views reader _unit (scopes : Parser.scopes) names =
+  Array.to_list
+    (Array.mapi (try_names reader scopes.views names) reader.tokens)
+  |> List.filter_map Fun.id |> String.concat " | "
+
+(* Design 5.1 rule 3: the place of a [try] is in front of the statement
+   or declaration that holds it, after its labels, where lowering writes
+   the operand, which is read where it stands. *)
+let try_cases =
+  [
+    case "the operand of a try sees the declarator, its place does not"
+      "int rd(int *p);\nvoid f(void) {\nint n = 0;\n{\n\
+       int n = try rd(&n);\n}\n}"
+      [ "n" ] "n=object@3 / n=object@5";
+    case "the place of a try is in front of the left operand"
+      "int g(int k);\nvoid f(int *a) {\n\
+       a[sizeof(enum { K = 5 })] = try g(K);\n}"
+      [ "K" ] "K=- / K=object@3";
+    case "the place of a try in a substatement is in the substatement"
+      "type e = | A(int v);\nint g(void);\nvoid f(e v) {\n\
+       if (case A(n) = v)\nL: n = try g();\n}"
+      [ "n" ] "n=object@4 / n=object@4";
+    case "the place of a try that begins an arm is after the arm's labels"
+      "type e = | A(int v);\nint g(void);\nvoid f(e v) {\n\
+       match (v) {\ncase A(n): n = try g();\n}\n}"
+      [ "n" ] "n=object@5 / n=object@5";
+    case "a try after a statement expression has the place of its own"
+      "int g(int k);\nvoid f(int x) {\nint k = 2;\n\
+       x = ({ int k = 3; k; }) + try g(k);\n}"
+      [ "k" ] "k=object@3 / k=object@3";
+    case "the place of a try in an else branch is in the branch"
+      "type e = | A(int v);\nint g(void);\nvoid f(e v, int x) {\n\
+       if (case A(n) = v)\n;\nelse\nx = try g();\n}"
+      [ "n" ] "n=- / n=-";
+    case "the place of a try in a statement expression is its block item"
+      "int g(void);\nvoid f(int x) {\nx = ({ int k = 1;\n\
+       k = try g(); k; });\n}"
+      [ "k" ] "k=object@3 / k=object@3";
+    case "the place of a declaration is in front of its specifiers"
+      "int g(int k);\nvoid f(void) {\n\
+       struct S { int a; } s = try g(sizeof(struct S));\n}"
+      [ "S"; "s" ] "S=- s=- / tag S@3 s=object@3";
+    case "a hidden try has no view"
+      "void f(int try) { try = 1; }" [ "try" ] "no view | no view";
+  ]
+
 (* The depth that the tree records of the scope of each declaration
    ({!Tree.scope_depth}), in source order. *)
 let scope_depths reader unit _scopes _names =
@@ -259,6 +317,11 @@ let depth_cases =
       [] "g:1 T:2 k:2 tag n:1";
   ]
 
+(* C text, where [try] is an identifier. *)
+let c_text_try_cases =
+  [ case "a try in C text has no view" "int try;\nint f(void) { return try; }"
+      [] "no view | no view" ]
+
 let () =
   let failed_with see ?file cases =
     List.filter_map
@@ -273,6 +336,8 @@ let () =
     @ failed_with attribute_views ~file:"in.tc" attribute_cases
     @ failed_with pragma_views ~file:"in.tc" pragma_cases
     @ failed_with scope_depths ~file:"in.tc" depth_cases
+    @ failed_with try_views ~file:"in.tc" try_cases
+    @ failed_with try_views c_text_try_cases
   in
   List.iter
     (fun (case, actual) ->

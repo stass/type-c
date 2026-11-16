@@ -2017,6 +2017,9 @@ let classify_node context (whole : Tree.expression) typed =
   | Label_address _ -> itself Address_constant
   | Call _ | Statement_expression _ | Va_arg _ | Block_literal _ ->
       itself Backend_constant
+  (* Lowering reads the value of a [try] from an automatic temporary
+     (design 13.5). *)
+  | Try _ -> itself Not_constant
 
 (* The class of an expression that has been typed. A constructor makes a
    structure, constant where its arguments are. *)
@@ -2422,6 +2425,11 @@ and expression_node context position (whole : Tree.expression) =
   | Block_literal _ ->
       context.block_literal ();
       value (unknown context span "a block literal" Unknown_object)
+  (* Every [try] is refused, so that none reaches lowering. *)
+  | Try _ ->
+      context.fail span
+        (Rule.message Not_implemented
+           "`try` is not implemented yet (design 5.1; work package 2.4)")
 
 (* Design 3.3: the value of the variant that the constructor makes from
    its arguments, one for each field, each converted to the type of its

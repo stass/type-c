@@ -90,6 +90,27 @@ let nesting_chains links =
           ^ repeat links "if (a) break; else " ^ "break; } }";
         lowers = true;
       };
+      (* Typing refuses a try, which the parser reads in the loop of an
+         assignment-expression and, in an operand, in that of a
+         cast-expression. *)
+      {
+        name = "tries";
+        file = "in.tc";
+        text = in_body (repeat links "try " ^ "a;");
+        lowers = false;
+      };
+      {
+        name = "tries and assignments";
+        file = "in.tc";
+        text = in_body (repeat (links / 2) "a = try " ^ "a;");
+        lowers = false;
+      };
+      {
+        name = "tries among unary operators";
+        file = "in.tc";
+        text = in_body (repeat (links / 2) "- try " ^ "a;");
+        lowers = false;
+      };
     ]
   in
   c_chains @ type_c_chains

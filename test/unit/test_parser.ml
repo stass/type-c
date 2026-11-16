@@ -1997,16 +1997,72 @@ let type_declaration_cases =
        (int defer)) (block (expr (call try defer))))";
   ]
 
+(* Design 5.1 and Appendix A: a [try] where no declaration hides it
+   takes the assignment-expression after it, and where the grammar puts
+   no [try], as in an operand, it takes a cast-expression, as a unary
+   operator does, so that typing can refuse it there. Each records the
+   depth of the scope that holds it. *)
+let try_cases =
+  [
+    case "a try in each of its three positions"
+      "int f(void); void g(int x) { try f(); x = try f(); int y = try f(); }"
+      "(declaration (int) (function f (void))) | (define (void) (function g \
+       (int x)) (block (expr (try:2 (call f))) (expr (= x (try:2 (call f)))) \
+       (declaration (int) (init y (try:2 (call f))))))";
+    case "the operand of a try is an assignment expression"
+      "int f(void); void g(int a, int b) { a = try b = f() + 1; }"
+      "(declaration (int) (function f (void))) | (define (void) (function g \
+       (int a) (int b)) (block (expr (= a (try:2 (= b (+ (call f) 1)))))))";
+    case "a try of a try" "void g(int a) { try try a; }"
+      "(define (void) (function g (int a)) (block (expr (try:2 (try:2 \
+       a)))))";
+    case "a comma ends the operand of a try"
+      "int f(void); void g(int x) { x = try f(), x; }"
+      "(declaration (int) (function f (void))) | (define (void) (function g \
+       (int x)) (block (expr (, (= x (try:2 (call f))) x))))";
+    case "a try in an operand takes a cast expression"
+      "int f(void); void g(int a) { a = a + try f() * 2; a = -try f(); a = \
+       sizeof try f(); }"
+      "(declaration (int) (function f (void))) | (define (void) (function g \
+       (int a)) (block (expr (= a (+ a (* (try:2 (call f)) 2)))) (expr (= a \
+       (- (try:2 (call f))))) (expr (= a (sizeof (try:2 (call f)))))))";
+    case "a try in a return statement"
+      "int f(void) { return try f(); }"
+      "(define (int) (function f (void)) (block (return (try:2 (call f)))))";
+    case "a try records the depth of the scope that holds it"
+      "int f(void); void g(void) { { int n = try f(); } }"
+      "(declaration (int) (function f (void))) | (define (void) (function g \
+       (void)) (block (block (declaration (int) (init n (try:3 (call \
+       f)))))))";
+    case "a try in a substatement records the depth of its scope"
+      "int f(void); void g(int x) { if (x) x = try f(); }"
+      "(declaration (int) (function f (void))) | (define (void) (function g \
+       (int x)) (block (if x (expr (= x (try:4 (call f)))) _)))";
+    case "a declaration hides try in an operand"
+      "void g(int try) { try = try + 1; }"
+      "(define (void) (function g (int try)) (block (expr (= try (+ try \
+       1)))))";
+  ]
+
+(* A [try] spans its word and its operand, in either loop; the tokens
+   of Type-C text begin after those of the universe text. *)
+let try_span_cases =
+  [
+    case "spans of try" "void g(int a) { a = try a + 1; a = -try a; }"
+      "(define@36-56 (void@36-36) (function@37-41 g@37-37 (@39-40 int@39-39 \
+       a@40-40)) (block@42-56 (expr@43-49 (=@43-48 a@43-43 (try:2@45-48 \
+       (+@46-48 a@46-46 1@48-48)))) (expr@50-55 (=@50-54 a@50-50 (-@52-54 \
+       (try:2@53-54 a@54-54))))))";
+  ]
+
 let type_c_error_cases =
   [
     case "a pragma line of no tokens in Type-C text"
       "int x;\n#pragma mark - Don't edit\nint y;"
       "error: in.tc:2: a `#pragma` line whose text is no sequence of \
        preprocessing tokens: unterminated literal (design 13.5) [TC0040]";
-    case "a try expression is not implemented"
-      "int f(void) { return try f(); }"
-      "error: in.tc:1: `try` is not implemented yet (design 5.1; work package \
-       2.4) [TC0023]";
+    case "a try without an operand" "void f(void) { try; }"
+      "error: in.tc:1: expected an expression, found `;`";
     case "a block literal in Type-C text"
       "void f(void) {\n(void)\n^{ };\n}"
       "error: in.tc:3: a block literal is C text only, so Type-C text cannot \
@@ -2524,7 +2580,8 @@ let failures () =
         ~spans:false without_int128_cases
     @ failed_with resolutions resolution_cases
     @ failed_cases ~file:type_c_file ~spans:false
-        (type_declaration_cases @ type_c_error_cases)
+        (type_declaration_cases @ try_cases @ type_c_error_cases)
+    @ failed_cases ~file:type_c_file ~spans:true try_span_cases
     @ failed_cases ~spans:false c_text_word_cases
     @ failed_with (resolutions ~file:type_c_file) type_c_resolution_cases
     @ failed_cases ~file:type_c_file ~spans:false match_cases

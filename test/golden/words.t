@@ -78,6 +78,28 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   defer.tc:1: `defer` is not implemented yet (design 6; work package 2.5) [TC0023]
   [1]
 
+The parser reads a `try` wherever it stands, in an operand as well,
+and typing refuses each one. A `try` takes an operand.
+
+  $ cat > operand.tc <<'EOF'
+  > int f(void);
+  > int g(void) { int n = 1; n = n + try f(); return n; }
+  > EOF
+  $ ./golden.exe operand.tc
+  operand.tc:2: `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
+  [1]
+  $ cat > measured.tc <<'EOF'
+  > int f(void);
+  > unsigned long g(void) { return sizeof try f(); }
+  > EOF
+  $ ./golden.exe measured.tc
+  measured.tc:2: `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
+  [1]
+  $ printf 'void f(void) { try; }\n' > bare.tc
+  $ ./golden.exe bare.tc
+  bare.tc:1: expected an expression, found `;`
+  [1]
+
 `_Defer` is a keyword in all text, where `defer` is hidden as well.
 
   $ printf 'void f(void) { int defer = 0; _Defer f(); }\n' > spelling.tc
