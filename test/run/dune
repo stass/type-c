@@ -11,6 +11,19 @@
   (env_var TYPEC_TEST_CLANG)
   (env_var TYPEC_TEST_GCC)))
 
+; The cram tests cannot print a note without changing their output, so
+; this rule reports a target that backends.sh dropped, and fails when the
+; host declared that it has it. The universe dependency makes every run
+; report, not only the first of unchanged inputs.
+
+(rule
+ (alias runtest)
+ (deps
+  backends.sh
+  (universe))
+ (action
+  (run sh -c ". ./backends.sh && backends_report")))
+
 ; read.t runs the reader on the output of both backends.
 
 (executable

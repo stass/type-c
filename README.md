@@ -127,8 +127,14 @@ backend's system headers hold.
 `target.t` expects the model of x86-64 or of arm64, both Linux, and
 `types.t`, `declarations.t` and `expressions.t` compile for the host's target and
 for a second one, `-m32` on x86-64 and the other signedness of plain
-char elsewhere (`second_target` in `test/run/backends.sh`). There are
-no other dependencies.
+char elsewhere (`second_target` in `test/run/backends.sh`). A host
+without the C headers of i386 runs the tests that include the C headers
+(`abi.t`) with the other signedness of plain char instead of `-m32`, and
+`dune test` prints a line saying so. A host that has them sets
+`TYPEC_TEST_REQUIRE_M32` to a non-empty value, and `dune test` then
+fails when the backends do not both compile `<limits.h>` with `-m32`;
+the check is a rule of `test/run/dune`, so a run of one test alone
+(`dune test test/run/abi.t`) skips it. There are no other dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec

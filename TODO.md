@@ -816,12 +816,12 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   does not see it. Is the lowering of the default (design 13.5) worth
   changing, for example to one trap block shared by the `match` sites
   of a function, without weakening design 4.5?
-- [Medium] `test/run/backends.sh` drops `-m32` from
-  `hosted_second_target` when the host lacks the C headers of i386,
-  and nothing reports it: a host that loses its 32-bit headers runs
-  `test/run/abi.t` on one target with every test passing. Let a host
-  declare the targets it must have, for example through a
-  `TYPEC_TEST_*` variable, and fail when one is missing.
+- [Low] No host sets `TYPEC_TEST_REQUIRE_M32`, which makes `dune test`
+  fail when the backends cannot compile `<limits.h>` with `-m32`. The
+  Dockerfiles install no 32-bit headers; `tools/hosts/freebsd.sh` probably
+  has them but passes only `TYPEC_TEST_CLANG` and `TYPEC_TEST_GCC` to the
+  remote `dune test`. Once a p620 run prints no `-m32` note, pass the
+  variable there.
 - [Low] `test/run/abi.t` does not carry `compound` from Type-C to C or
   through a callback, nor a distinct type as a variant field.
 - [Low] `tools/oracle/oracle.t` has its own default of

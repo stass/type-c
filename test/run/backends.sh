@@ -4,7 +4,8 @@
 # The backends that the cram tests run, sourced by each test that runs
 # one. TYPEC_TEST_CLANG and TYPEC_TEST_GCC name them; unset, they are
 # those of the macOS development host. A host that lacks a backend fails
-# the tests that run it.
+# the tests that run it. TYPEC_TEST_REQUIRE_M32, when set and not empty,
+# declares that the host must compile the C headers with -m32.
 
 clang=${TYPEC_TEST_CLANG:-/usr/bin/clang}
 gcc=${TYPEC_TEST_GCC:-/usr/local/bin/gcc-16}
@@ -45,3 +46,23 @@ else
 fi
 unset -f backends_fit
 unset fit_cc other_char
+
+# Prints a line when -m32 was dropped from hosted_second_target, and
+# fails instead when TYPEC_TEST_REQUIRE_M32 is set.
+backends_report() {
+  case " $hosted_second_target " in
+  *" -m32 "*) return 0 ;;
+  esac
+  if [ -n "${TYPEC_TEST_REQUIRE_M32:-}" ]; then
+    echo "backends.sh: TYPEC_TEST_REQUIRE_M32 is set, but the backends" \
+      "do not both compile <limits.h> with -m32 for x86-64" >&2
+    return 1
+  fi
+  case " $second_target " in
+  *" -m32 "*)
+    echo "backends.sh: the backends do not both compile <limits.h>" \
+      "with -m32; the tests that include the C headers run" \
+      "$hosted_second_target instead"
+    ;;
+  esac
+}
