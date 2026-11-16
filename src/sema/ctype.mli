@@ -494,6 +494,15 @@ val holds_variant : tags -> t -> bool
     answer is found when a structure or union is defined, so asking costs
     no walk. *)
 
+val first_variant : tags -> t -> t option
+(** The first variant among the type and the subobjects that eliding its
+    braces, then theirs, would put an initialiser in (C11 6.7.9p20): the
+    first element of an array of a length other than 0, and the first
+    member with a position of a structure or union (see {!member_at}). An
+    incomplete structure or union has none. The answer for a structure or
+    union is found when it is defined, so asking walks only the array
+    types around one. *)
+
 (** A member found by name. [path] is where: the position of the member
     that holds it (see {!member_at}), then its position in each anonymous
     member down to it. [anonymous_qualifiers] are the [const] and

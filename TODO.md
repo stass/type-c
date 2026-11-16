@@ -300,9 +300,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   string literals (section 8, P13) and generic deduction (7.2) also take
   meaning from the target: before they land, state the rule as the first
   subobject on the elision chain whose type gives the target a meaning.
-- [Low] `Initialiser.first_variant` follows the elision chain that
-  `first_level` encodes too. Split a pure first-subobject step that both
-  use, keeping the rule 6 refusal at the callers that open a record.
+- [Low] `Ctype.first_variant` follows the elision chain that
+  `Initialiser.first_level` encodes too. Split a pure first-subobject
+  step that both use, keeping the rule 6 refusal at the callers that open
+  a record.
 - [Low] Under `{0}` rule 7, a constant that is no valid 0 (`{0i}`, an
   integer too large) is refused as reaching into the variant rather
   than with the constant's own error.
@@ -728,14 +729,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   would repeat it again. Keep the order in one place: one function that
   merges edits, or the sort in `Emitter.emit`.
 
-- [Medium] `Initialiser.first_variant` follows the first member of each
-  nested structure or union down to a variant or a scalar, remembering
-  nothing, once for each expression initialiser of a braced list, so the
-  time is the nesting depth times the length of the list: a 294 KB
-  source of 8000 levels and 8000 elements takes 5.5 s. Find the first
-  variant along the first members once, when a record is defined, beside
-  `Ctype.holds_variant`, or bound the walk at the brace elision limit
-  `max_levels`, past which no initialiser reaches.
 - [Medium] The needs of a type complete (design 10.3) are calls of
   `Declarations.needs_complete` at each construct of the list, so a
   construct that typing reads and the list misses leaves an instance

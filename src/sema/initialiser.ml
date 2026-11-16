@@ -395,39 +395,23 @@ and untargeted_element typing (element : Tree.designated_initialiser) =
    or, its braces elided, its first subobject (6.7.9p13, p14, p20). *)
 type reach = Whole | Elided | Unknown_reach
 
-(* The first variant among [t] and the subobjects that its braces, then
-   theirs, elided would put an initialiser in. *)
-let rec first_variant typing (t : Ctype.t) =
-  match (Ctype.as_variant t, t.shape) with
-  | Some _, _ -> Some t
-  | None, Array { length = Constant 0; _ } -> None
-  | None, Array { element; _ } -> first_variant typing element
-  | None, Record tag -> (
-      match Ctype.member_at typing.tags tag 0 with
-      | Some first -> first_variant typing first.member_type
-      | None -> None)
-  | ( None,
-      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
-      | Function _
-      | Unknown_type _ ) ) ->
-      None
-
-(* The target type (design 3.3) of an expression initialiser that the
-   walk meets at a subobject of type [t]: the first variant inside [t]
-   where its braces may be elided, else [t]. A constructor initialises
-   that variant whole, as no initialiser in Type-C text enters a variant
-   but the zero initialiser (3.2 rule 7); and a target that is no
-   variant selects no constructor, so an expression that initialises an aggregate around
-   the variant means there what it means with the variant as its target.
-   The target stays the expression's as the walk elides braces. *)
 (* Design 3.4: [{0}] gives an object of a distinct type the zero value of
    its representation, so its 0 converts to no type there; [zeroes] says
    that the 0 is that of [{0}]. *)
 let scalar_target ~zeroes (t : Ctype.t) =
   if zeroes && Option.is_some (Ctype.as_distinct t) then None else Some t
 
+(* The target type (design 3.3) of an expression initialiser that the
+   walk meets at a subobject of type [t]: the first variant inside [t]
+   where its braces may be elided, else [t]. A constructor initialises
+   that variant whole, as no initialiser in Type-C text enters a variant
+   but the zero initialiser (3.2 rule 7); and a target that is no
+   variant selects no constructor, so an expression that initialises an
+   aggregate around the variant means there what it means with the
+   variant as its target. The target stays the expression's as the walk
+   elides braces. *)
 let target_at typing (t : Ctype.t) =
-  Option.value (first_variant typing t) ~default:t
+  Option.value (Ctype.first_variant typing.tags t) ~default:t
 
 (* How far an expression initialiser reaches into a subobject of type
    [t]. [expression_type] types the expression the first time it is

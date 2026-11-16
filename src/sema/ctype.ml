@@ -86,16 +86,18 @@ type held = Const_member | Flexible_array_member
 (* The members in order; those with a position, which are those that an
    initialiser reaches; every member by name, those of anonymous members
    included; the first member, at any depth, of a kind that [held]
-   names; and whether it holds a variant at any depth. The last two are
-   found from the answers stored for the records among the members, so
-   that no question walks the members of a record again and a record
-   held twice costs once. *)
+   names; whether it holds a variant at any depth; and the first variant
+   on the chain of its first subobjects (see [first_variant]). The last
+   three are found from the answers stored for the records among the
+   members, so that no question walks the members of a record again and
+   a record held twice costs once. *)
 type record_definition = {
   members : member list;
   positions : member array;
   by_name : found_member Names.t;
   holds : held option Unknown.answer;
   holds_variant : bool;
+  first_variant : t option;
 }
 
 type constructor = {
@@ -442,7 +444,7 @@ let declare_opaque tags name =
   let record = new_record tags Struct (Opaque_name name) ~at_file_scope:true in
   add_record_definition tags record.record_id
     { members = []; positions = [||]; by_name = Names.empty;
-      holds = Answer None; holds_variant = false };
+      holds = Answer None; holds_variant = false; first_variant = None };
   record
 
 let trial tags read =
@@ -745,6 +747,27 @@ let holds_variant tags t =
 let members_hold_variant tags members =
   List.exists (fun member -> holds_variant tags member.member_type) members
 
+(* A definition is final, so its [first_variant] never goes stale. *)
+let rec first_variant tags t =
+  match (as_variant t, t.shape) with
+  | Some _, _ -> Some t
+  | None, Array { length = Constant 0; _ } -> None
+  | None, Array { element; _ } -> first_variant tags element
+  | None, Record tag -> (
+      match record_definition tags tag with
+      | Some definition -> definition.first_variant
+      | None -> None)
+  | ( None,
+      ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+      | Function _ | Unknown_type _ ) ) ->
+      None
+
+(* The first member with a position is the one that an initialiser
+   reaches first (see [member_at]). *)
+let first_member_variant tags = function
+  | first :: _ -> first_variant tags first.member_type
+  | [] -> None
+
 let rec is_complete tags t =
   match t.shape with
   | Void | Function _ | Unknown_type { kind = Unknown_function; _ } ->
@@ -977,7 +1000,8 @@ let definition_of target tags tag members =
   List.iteri
     (fun index member -> check_member target tags ~last:(index = last) member)
     members;
-  let positions = Array.of_list (List.filter has_position members) in
+  let with_position = List.filter has_position members in
+  let positions = Array.of_list with_position in
   let indexed =
     List.mapi (fun index member -> (index, member)) (Array.to_list positions)
   in
@@ -986,7 +1010,8 @@ let definition_of target tags tag members =
     positions;
     by_name;
     holds = first_held tags members;
-    holds_variant = members_hold_variant tags members }
+    holds_variant = members_hold_variant tags members;
+    first_variant = first_member_variant tags with_position }
 
 let define_record target tags tag members =
   match definition_of target tags tag members with

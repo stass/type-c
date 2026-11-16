@@ -1741,6 +1741,31 @@ let constructors () =
     (variant
    ^ "e m[2][2] = { A, A, A, A }; struct w { struct t { e v; int n; } t; } \
       q = { A, 1 };");
+  (* Under elided braces an anonymous member and the first element of an
+     array are first subobjects, an unnamed bit-field none (6.7.9p9). *)
+  accepts ~file
+    (variant
+   ^ "struct a { struct { e v; }; int n; } q[1] = { A, 1 }; \
+      struct b { int : 3; e v; } r[1] = { A }; \
+      struct c { struct d { e v; int n; } d[2]; int n; } u[1] = { A };");
+  (* The first variant along the first members of a record is found once
+     per record, so the time is linear in the text, not the nesting depth
+     times the length of the list. *)
+  let depth = 8000 in
+  let nested =
+    "struct n0 { e v; };"
+    ^ String.concat ""
+        (List.init depth (fun n ->
+             Printf.sprintf " struct n%d { struct n%d a; };" (n + 1) n))
+    ^ Printf.sprintf
+        " void g(struct n%d y) { struct n%d x[] = { %s }; (void)x; }" depth
+        depth
+        (String.concat ", " (List.init depth (fun _ -> "y")))
+  in
+  let started = Sys.time () in
+  accepts ~file (variant ^ nested);
+  if Sys.time () -. started > 2.0 then
+    fail_case "nested structures 8000" "took over 2 s";
   accepts ~file (variant ^ "typedef e alias; e x = alias.A;");
   (* A qualified constructor is an expression wherever one may stand,
      also after a parenthesis that could open a type name. *)
