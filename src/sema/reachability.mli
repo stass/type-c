@@ -6,10 +6,11 @@
     every arm is unreachable (rule 1), and a label inside an arm is the
     target only of a goto in the same arm (rule 3). The analysis is
     syntactic: it reads the tree and the two facts of typing below, and
-    evaluates no condition other than a constant. Label scopes are
-    resolved here until the tree resolves labels (TODO.md), and with
-    them the rules of C and GNU C on labels (C11 6.8.1p3, 6.8.6.1p1),
-    the only refusals that C code without a match can gain. *)
+    evaluates no condition other than a constant. The parser resolves
+    every label, and with it the rules of C and GNU C on defining and
+    naming one (C11 6.8.1p3, 6.8.6.1p1); the jumps into a statement
+    expression that GNU C forbids are checked here with rule 3, being
+    rules on entering a statement. *)
 
 open Typec_syntax
 
@@ -34,12 +35,9 @@ val arm_refusal : facts -> Tree.arm -> refusal option
     reached. Typing asks it of every match it reads. *)
 
 val label_refusal : facts -> Tree.block -> refusal option
-(** In the body of a function, the first local label, in source order,
-    that a block declares twice (GCC manual, "Local Labels"), or else the
-    first label defined a second time in its scope (C11 6.8.1p3), or
-    else the first jump that names a label not defined in its scope
-    (6.8.6.1p1), enters a statement expression from outside it (GCC
-    manual, "Statement Exprs") or breaches design 4.3 rule 3, if any.
+(** In the body of a function, the first jump, in source order, that
+    enters a statement expression from outside it (GCC manual,
+    "Statement Exprs") or breaches design 4.3 rule 3, if any.
     The walk reads every expression of the body, those in types
     included, but the arguments of attributes and the parameters and
     body of a block literal, which is a function of its own. *)

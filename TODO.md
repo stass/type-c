@@ -155,9 +155,9 @@ is [type-c-language-design.md](type-c-language-design.md).
   which refuses it: the parser keeps the arguments of an attribute as
   tokens, and both backends compile `&&b` where `b` is defined in a
   statement expression in `__attribute__ ((aligned (sizeof ({ b: 0;
-  }))))` once optimization drops the address. Refuse it in
-  `Reachability.refuse_undefined` once the parser reads attribute
-  arguments as expressions, if a consumer needs that.
+  }))))` once optimization drops the address. Refuse it where the
+  parser resolves labels once it reads attribute arguments as
+  expressions, if a consumer needs that.
 - [Low] Two GNU rules that both backends enforce are left to them: a
   case or default label inside a statement expression for a switch
   outside it (GCC manual, "Statement Exprs"), and `&&a` in the
@@ -175,18 +175,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   parse the arguments of the attributes whose grammar is known (an
   expression for `aligned` and `vector_size`, an identifier for
   `cleanup`) through the parser's scope.
-- [Medium] Labels are names only in the tree: a label statement, `goto`,
-  `&&label` and the labels of `asm goto` record no declaration or
-  resolution. A label's scope is its function (6.2.1p3), so a `goto`
-  before its label resolves only at the end of the body, and a GNU
-  `__label__` declares a label with block scope that a label statement
-  in that block defines. Resolve them per function body, and per block
-  literal body, once it is parsed (a pure step of the parser), into the
-  tree, for the label checks. Until then `Reachability.resolve` in
-  `src/sema/reachability.ml` resolves a label by its name and the
-  `__label__` declarations around it, for design 4.3 rule 3 and C's
-  rules on duplicate and undefined labels (6.8.1p3, 6.8.6.1p1); it goes
-  when the tree resolves labels, where those become failures to resolve.
+- [Low] `Reachability.label_refusal` checks the jumps into a statement
+  expression and into a guarded statement (design 4.3 rule 3) in a
+  second walk, which must visit every node where the parser reads a
+  labelled statement: a goto whose label that walk misses passes
+  unchecked. Make both checks where the parser resolves labels, which
+  knows the statement expressions and the arm around each label and
+  jump, and delete the walk's queues of definitions and jumps.
 - [Medium] GNU forms that common code uses and the profile leaves out,
   each an error that names its first token: attributes before a
   statement that no named label precedes (`__attribute__((musttail))

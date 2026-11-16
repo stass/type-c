@@ -917,6 +917,23 @@ let resolution_cases =
     case "tags and ordinary identifiers are apart"
       "struct s { int s; } s; int t = sizeof s;"
       "tag s#1 s#1 t#1 s->#1";
+    case "a goto before its label names the label"
+      "void f(void) { goto a; a: ; goto a; }"
+      "f#1 label a->#1 label a->#1 label a->#1";
+    case "a GNU local label is its block's"
+      "void f(void) { { __label__ a; goto a; a: ; } goto a; a: ; }"
+      "f#1 label a->#1 label a->#1 label a->#1 label a->#2 label a->#2";
+    case "an inner block may declare a local label again"
+      "void f(void) { __label__ a; { __label__ a; a: ; } a: ; }"
+      "f#1 label a->#1 label a->#2 label a->#2 label a->#1";
+    case "an address and an asm goto name the function's label"
+      "void f(void) { void *p = &&b; asm goto (\"\" : : : : b); b: ; }"
+      "f#1 p#1 label b->#1 label b->#1 label b->#1";
+    case "the address of a label that is not defined"
+      "void f(void) { void *p = &&c; }" "f#1 p#1 label c->#1";
+    case "a block literal's labels are its own"
+      "void f(void) { a: (void)^{ goto a; a: ; }; goto a; }"
+      "f#1 label a->#1 label a->#2 label a->#2 label a->#1";
   ]
 
 (* Old-style definitions and bodies that system headers define. *)
@@ -968,10 +985,10 @@ let span_cases =
        (block@5-20 (if@6-19 a@8-8 (expr@10-11 b@10-10) (label@14-19 L@14-15 \
        (label@16-19 (case@16-18 1@17-17) ;@19-19)))))";
     case "spans of loops and jumps"
-      "void f(void) { do ; while (a); for (;;) goto L; }"
-      "(define@0-21 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
-       (block@5-21 (do@6-12 ;@7-7 a@10-10) (for@13-20 _ _ _ (goto@18-20 \
-       L@19-19))))";
+      "void f(void) { do ; while (a); for (;;) goto L; L: ; }"
+      "(define@0-24 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
+       (block@5-24 (do@6-12 ;@7-7 a@10-10) (for@13-20 _ _ _ (goto@18-20 \
+       L@19-19)) (label@21-23 L@21-22 ;@23-23)))";
     case "spans of while and switch"
       "void f(void) { while (a) switch (b) break; }"
       "(define@0-16 (void@0-0) (function@1-4 f@1-1 (@3-3 void@3-3)) \
@@ -1322,9 +1339,9 @@ let assembler_cases =
        (* p))) (inputs (operand [src] (\"r\") (+ s 1))) (clobbers (\"cc\")) \
        labels)";
     statement_case "asm goto"
-      "asm goto(\"jmp %l0\" :::: done, out); done: ;"
+      "asm goto(\"jmp %l0\" :::: done, out); done: ; out: ;"
       "(asm goto (\"jmp %l0\") outputs inputs clobbers (labels done out)) \
-       (label done ;)";
+       (label done ;) (label out ;)";
     statement_case "asm inline volatile" "asm inline volatile (\"\");"
       "(asm inline volatile (\"\"))";
   ]
@@ -1437,7 +1454,8 @@ let gnu_error_cases =
        function) is outside the GNU profile (design 13.3) [TC0031]";
     case "a label address of a constant" "void *p = && 1;"
       "error: in.i:1: expected a label after `&&`, found `1`";
-    case "a label address takes no postfix" "void *p = &&a[0];"
+    case "a label address takes no postfix"
+      "void f(void) { void *p = &&a[0]; }"
       "error: in.i:1: expected `;` after a declaration, found `[`";
     case "a computed goto without a target" "void f(void) { goto *; }"
       "error: in.i:1: expected an expression, found `;`";
@@ -1611,6 +1629,48 @@ let error_cases =
       "error: in.i:1: expected an expression, found `}`";
     case "goto without a label" "void f(void) { goto 1; }"
       "error: in.i:1: expected a label after `goto`, found `1`";
+    case "a goto to a label that its function does not define"
+      "void f(void) {\ngoto a;\n{ __label__ b; goto b; }\nb: ;\n}"
+      "error: in.i:2: a goto to a label that is not defined in its scope \
+       (C11 6.8.6.1p1)";
+    case "a goto to a local label that its block does not define"
+      "void f(void) {\n{ __label__ b; goto b; }\nb: ;\n}"
+      "error: in.i:2: a goto to a label that is not defined in its scope \
+       (C11 6.8.6.1p1)";
+    case "an asm goto to a label that is not defined"
+      "void f(void) {\nasm goto (\"\" : : : : c);\n}"
+      "error: in.i:2: a goto to a label that is not defined in its scope \
+       (C11 6.8.6.1p1)";
+    case "a goto in a block literal to its function's label"
+      "void f(void) {\na: (void)^{\ngoto a;\n};\n}"
+      "error: in.i:3: a goto to a label that is not defined in its scope \
+       (C11 6.8.6.1p1)";
+    case "a label defined twice" "void f(void) {\na: ;\n{ a: ; }\n}"
+      "error: in.i:3: a second definition of a label in its scope (C11 \
+       6.8.1p3)";
+    case "a local label declared twice in its block"
+      "void f(void) { __label__ a,\na; a: ; }"
+      "error: in.i:2: a local label declared twice in its block (GCC \
+       manual, \"Local Labels\")";
+    case "the address of a label outside a function body"
+      "void *p =\n&&a;"
+      "error: in.i:2: the address of a label outside a function body (GCC \
+       manual, \"Labels as Values\")";
+    case "the address of a label in the parameters of a definition"
+      "void f(int (*p)[sizeof (&&a)]) { a: ; }"
+      "error: in.i:1: the address of a label outside a function body (GCC \
+       manual, \"Labels as Values\")";
+    case "a label outside a function body"
+      "int n = sizeof (({\na: 0; }));"
+      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
+    case "a goto outside a function body"
+      "int n = sizeof (({\ngoto a; 0; }));"
+      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
+    case "a local label outside a function body"
+      "int n = sizeof (({\n__label__ a; 0; }));"
+      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
+    case "the labels of a file-scope asm" "asm goto (\"\" : : : :\na);"
+      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
     case "an empty file" "" "";
     case "only pragmas" "#pragma once\n#pragma typec checked\n" "";
   ]
@@ -1724,7 +1784,10 @@ let listing_chain_texts length =
     ("nullability qualifiers", "int *" ^ repeat length "_Nonnull " ^ "p;");
     ("statement expressions in a row", in_body (repeat length "({ a; }); "));
     ("__extension__", "int x = " ^ repeat length "__extension__ " ^ "a;");
-    ("local label declarations", in_body (repeat length "__label__ a; "));
+    ( "local label declarations",
+      in_body
+        (String.concat "" (List.init length (Printf.sprintf "__label__ a%d; ")))
+    );
     ( "range designators",
       "int a[] = {" ^ repeat length "[0 ... 1] = 1, " ^ "};" );
     ( "offsetof designators",

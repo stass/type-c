@@ -12,7 +12,8 @@ let lp64_clang = Canned_targets.(target (as_clang lp64_macros))
 let aarch64_gcc = Canned_targets.(target (as_gcc aarch64_macros))
 let aarch64_clang = Canned_targets.(target (as_clang aarch64_macros))
 
-(* [file] is "in.c", C text, unless a case reads Type-C text. *)
+(* [file] is "in.c", C text, unless a case reads Type-C text. A parse
+   error is the case's error as a typing error is. *)
 let read ?(file = "in.c") target source =
   let text =
     match Reader.read ~name:file (Preprocessed.text ~name:file source) with
@@ -25,7 +26,7 @@ let read ?(file = "in.c") target source =
       Result.map
         (fun result -> (file_scope, result))
         (Declarations.read target text unit)
-  | Error error -> failwith (Parser.error_message error)
+  | Error error -> Error error
 
 (* What [name] denotes at file scope at the end of what [read] read. *)
 let file_scope_entity ((file_scope : Parser.file_scope), result) name =

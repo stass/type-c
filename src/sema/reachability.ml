@@ -75,12 +75,6 @@ let breaks_to target flow = Targets.mem target flow.breaks
 let all flow_of parts =
   List.fold_left (fun flow part -> both flow (flow_of part)) completes parts
 
-(* Where a label is declared: in its function (C11 6.2.1p3), or by a GNU
-   [__label__] in the block of the span. *)
-type label_scope = Function_label | Local_label of Tree.span
-
-type label = { name : string; scope : label_scope }
-
 (* A goto, including an [asm goto], jumps to its label; the address of a
    label lets a computed goto anywhere in the function jump to it. *)
 type jump_kind = Goto | Address
@@ -98,13 +92,11 @@ type expression_context =
   | Backends_differ
 
 type jump = {
-  target : label;
+  target : Tree.label_id;
   site : Tree.span;
   kind : jump_kind;
   jump_context : expression_context;
 }
-
-module Names = Map.Make (String)
 
 (* A statement that a jump enters only from inside it (design 4.3 rule
    3): a match arm, or the statement of a single-pattern test, which
@@ -114,55 +106,33 @@ type guarded = Arm of Tree.span | Tested of Tree.span
 (* A labelled statement: its label, the innermost guarded statement
    around it, [None] outside every one, and its context. *)
 type definition = {
-  label : label;
+  label : Tree.label_id;
   site : Tree.span;
   guard : guarded option;
   label_context : expression_context;
 }
 
-(* One walk of a body. [guard] and [context] say where the walk is, and
-   [local_labels] gives the block of each GNU local label in scope;
-   [redeclared], [definitions] and [jumps] hold the local labels that a
-   block declares a second time, the labelled statements and the jumps
+(* One walk of a body. [guard] and [context] say where the walk is;
+   [definitions] and [jumps] hold the labelled statements and the jumps
    in the order of the walk, which is not source order: a loop's body is
    walked before its condition. *)
 type walk = {
   facts : facts;
   guard : guarded option;
   context : expression_context;
-  local_labels : Tree.span Names.t;
-  redeclared : Tree.span Queue.t;
   definitions : definition Queue.t;
   jumps : jump Queue.t;
 }
 
-let resolve walk name =
-  match Names.find_opt name walk.local_labels with
-  | Some block -> { name; scope = Local_label block }
-  | None -> { name; scope = Function_label }
-
-let record_jump walk kind (label : Tree.identifier) =
+let record_jump walk kind ({ name; label } : Tree.label_name) =
   Queue.add
-    { target = resolve walk label.node; site = label.span; kind;
-      jump_context = walk.context }
+    { target = label; site = name.span; kind; jump_context = walk.context }
     walk.jumps
 
 (* A jump may enter a statement at a label it carries or contains. *)
 let enterable flow = flow.has_named_label || flow.has_case_label
 
-let rec block walk (b : Tree.block) =
-  let declare labels (name : Tree.identifier) =
-    if Names.find_opt name.node labels = Some b.span then
-      Queue.add name.span walk.redeclared;
-    Names.add name.node b.span labels
-  in
-  let local_labels =
-    List.fold_left
-      (fun labels (declaration : Tree.local_label_declaration) ->
-        List.fold_left declare labels declaration.node)
-      walk.local_labels b.node.local_labels
-  in
-  sequence { walk with local_labels } b.node.items
+let rec block walk (b : Tree.block) = sequence walk b.node.items
 
 (* An item is reachable if it is first, if it follows a reachable item
    that can complete, or if a jump may enter it; a sequence completes if
@@ -260,9 +230,9 @@ and statement_flow walk (statement : Tree.statement) =
 
 and labelled_flow walk (label : Tree.label) labelled =
   match label.node with
-  | Named_label { name; _ } ->
+  | Named_label { label = id; _ } ->
       Queue.add
-        { label = resolve walk name; site = label.span; guard = walk.guard;
+        { label = id; site = label.span; guard = walk.guard;
           label_context = walk.context }
         walk.definitions;
       { (statement_flow walk labelled) with has_named_label = true }
@@ -564,43 +534,15 @@ let in_source_order site queue =
     (fun a b -> Int.compare (site a).Tree.first (site b).Tree.first)
     (List.of_seq (Queue.to_seq queue))
 
-(* GCC manual, "Local Labels": a block declares a local label once. *)
-let refuse_redeclaration redeclared =
-  match in_source_order Fun.id redeclared with
-  | second :: _ ->
-      refuse second
-        (Rule.c_text
-           "a local label declared twice in its block (GCC manual, \"Local \
-            Labels\")")
-  | [] -> ()
-
-(* 6.8.1p3: a label is defined once in its scope. Defines each label,
-   refusing the second definition of one. *)
-let define_labels definitions =
+(* The labelled statement of each label, which the parser defines once in
+   its scope. *)
+let by_label definitions =
   let defined = Hashtbl.create 16 in
-  let define (definition : definition) =
-    if Hashtbl.mem defined definition.label then
-      refuse definition.site
-        (Rule.c_text
-           "a second definition of a label in its scope (C11 6.8.1p3)");
-    Hashtbl.add defined definition.label definition
-  in
-  let site (definition : definition) = definition.site in
-  List.iter define (in_source_order site definitions);
+  Queue.iter
+    (fun (definition : definition) ->
+      Hashtbl.replace defined definition.label definition)
+    definitions;
   defined
-
-(* 6.8.6.1p1. The address of a label that the walk does not find may be
-   that of one in the arguments of an attribute, which the parser keeps
-   as tokens: both backends compile [&&b] where [b] is defined in a
-   statement expression in [aligned (sizeof (...))] if optimization
-   drops the address, so it is left to them. *)
-let refuse_undefined jump =
-  match jump.kind with
-  | Goto ->
-      refuse jump.site
-        (Rule.c_text
-           "a goto to a label that is not defined in its scope (C11 6.8.6.1p1)")
-  | Address -> ()
 
 (* GCC manual, "Statement Exprs". The address of a label inside one is
    allowed, and a computed goto to it is left to the backends: GCC
@@ -638,16 +580,21 @@ let refuse_guarded_entry (definition : definition) jump =
                 (fst (guarded_names guard))))
   | None, (Goto | Address) -> ()
 
+(* The parser resolves every goto to a label defined in its scope. The
+   address of one that no statement in the walk defines may be that of
+   one in the arguments of an attribute, which the parser keeps as
+   tokens: both backends compile [&&b] where [b] is defined in a
+   statement expression in [aligned (sizeof (...))] if optimization
+   drops the address, so it is left to them. *)
 let check_jump definitions jump =
   match Hashtbl.find_opt definitions jump.target with
   | Some definition ->
       refuse_statement_expression_entry definition jump;
       refuse_guarded_entry definition jump
-  | None -> refuse_undefined jump
+  | None -> ()
 
 let start facts =
   { facts; guard = None; context = Outside_statement_expressions;
-    local_labels = Names.empty; redeclared = Queue.create ();
     definitions = Queue.create (); jumps = Queue.create () }
 
 (* Design 4.3 rule 1. *)
@@ -663,8 +610,7 @@ let label_refusal facts body =
   let walk = start facts in
   ignore (block walk body);
   match
-    refuse_redeclaration walk.redeclared;
-    let definitions = define_labels walk.definitions in
+    let definitions = by_label walk.definitions in
     let site (jump : jump) = jump.site in
     let jumps = in_source_order site walk.jumps in
     List.iter (check_jump definitions) jumps

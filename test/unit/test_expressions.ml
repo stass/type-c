@@ -50,6 +50,8 @@ let prelude =
    int g(int, ...); int h(); int (*fp)(int); _Complex double z; \
    _Complex float zf; enum { A } e; int half __attribute__((vector_size(16))); "
 
+(* A parse error is the case's error as a typing error is: the parser
+   refuses some constraints, those on labels among them. *)
 let read target source =
   let text =
     match Reader.read ~name:"in.c" (Preprocessed.text ~name:"in.c" source) with
@@ -61,7 +63,7 @@ let read target source =
       Result.map
         (fun result -> (unit, result))
         (Declarations.read target text unit)
-  | Error error -> failwith (Parser.error_message error)
+  | Error error -> Error error
 
 (* The last expression statement of the body of the last function
    definition, which [in_function] puts last. *)

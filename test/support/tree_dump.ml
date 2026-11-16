@@ -10,7 +10,7 @@ open Typec_cpp
 open Typec_syntax
 open Tree
 
-type name_space = Ordinary | Tag
+type name_space = Ordinary | Tag | Label
 
 (* What an entry names: the token of a declaration in the tree, or a
    typedef name that GCC and Clang declare, in either name space. *)
@@ -123,6 +123,13 @@ let spelling (reader : Reader.t) index =
   Reader.spelling reader reader.tokens.(index)
 
 let identifier (name : identifier) = node name.span name.node []
+
+(* A label resolves to the token of its first mention in its scope. *)
+let label_entry name (Label_at token) =
+  Use_entry { space = Label; name; target = Some (Token token) }
+
+let label_name ({ name; label } : label_name) =
+  noted (label_entry name.node label) (identifier name)
 
 let storage_class_label = function
   | Typedef -> "typedef"
@@ -282,7 +289,7 @@ let rec expression reader (e : expression) =
       here (assignment_label operator) [ sub left; sub right ]
   | Comma (left, right) -> here "," [ sub left; sub right ]
   | Statement_expression body -> here "({})" [ block reader body ]
-  | Label_address label -> here "label-address" [ identifier label ]
+  | Label_address label -> here "label-address" [ label_name label ]
   | Va_arg { list; type_name = t } ->
       here "va_arg" [ sub list; type_name reader t ]
   | Offsetof { type_name = t; member; designators } ->
@@ -526,8 +533,9 @@ and declaration reader (d : declaration) =
 
 and label reader (l : label) =
   match l.node with
-  | Named_label { name; attributes } ->
-      node l.span name (attribute_group reader attributes)
+  | Named_label { name; label; attributes } ->
+      noted (label_entry name label)
+        (node l.span name (attribute_group reader attributes))
   | Case_label value -> node l.span "case" [ expression reader value ]
   | Case_range { low; high } ->
       node l.span "case-range"
@@ -566,7 +574,7 @@ and statement reader (s : statement) =
           optional value step;
           sub body;
         ]
-  | Goto target -> here "goto" [ identifier target ]
+  | Goto target -> here "goto" [ label_name target ]
   | Computed_goto target -> here "goto*" [ value target ]
   | Continue _ -> here "continue" []
   | Break _ -> here "break" []
@@ -612,7 +620,7 @@ and block reader (b : block) =
     @ List.map (block_item reader) b.node.items)
 
 and local_labels (d : local_label_declaration) =
-  node d.span "__label__" (List.map identifier d.node)
+  node d.span "__label__" (List.map label_name d.node)
 
 and block_item reader = function
   | Block_declaration d -> declaration reader d
@@ -704,7 +712,7 @@ and assembler reader (a : assembler) =
           section "inputs" (List.map operand inputs);
           section "clobbers"
             (List.map (fun c -> group (string_literal reader c)) clobbers);
-          section "labels" (List.map identifier labels);
+          section "labels" (List.map label_name labels);
         ]
   in
   List.map qualifier a.qualifiers
@@ -737,7 +745,9 @@ let translation_unit reader unit = List.map (external_declaration reader) unit
    with [<#m] after it where it redeclares [x#m]; a use as [x->#n], or
    [x->?] where it resolves to no declaration and [x->builtin] where it
    resolves to a typedef name that GCC and Clang declare. A tag's entry
-   begins with [tag]. *)
+   begins with [tag]. A label has no declaration in the tree: each
+   mention of one is a use [label a->#n], [n] counting the labels named
+   [a] by the token of their first mention. *)
 let resolutions dump =
   let rec entries sexp =
     Option.to_list sexp.entry @ List.concat_map entries sexp.parts
@@ -749,9 +759,12 @@ let resolutions dump =
         | Declaration_entry entry when entry.space = space && entry.name = name
           ->
             Some entry.token
+        | Use_entry { space = Label; name = used; target = Some (Token token) }
+          when space = Label && used = name ->
+            Some token
         | Declaration_entry _ | Use_entry _ -> None)
       all
-    |> List.sort compare
+    |> List.sort_uniq compare
   in
   let reference space name = function
     | Builtin_target -> "builtin"
@@ -765,7 +778,7 @@ let resolutions dump =
         | Some index -> "#" ^ string_of_int index
         | None -> "#unknown")
   in
-  let prefix = function Ordinary -> "" | Tag -> "tag " in
+  let prefix = function Ordinary -> "" | Tag -> "tag " | Label -> "label " in
   let show = function
     | Declaration_entry { space; name; token; earlier } ->
         let earlier =

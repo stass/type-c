@@ -18,10 +18,11 @@
     declaration of an ordinary identifier or a tag carries its
     {!declared}, and every use of one the declaration it resolves to.
     It is also the one implementation of what a break or continue leaves,
-    which each records as its {!jump_targets}. Members, which belong to
-    their structure, and labels, which belong to their function, are
-    names only, and so are the identifiers in the arguments of an
-    attribute, which the parser does not read. *)
+    which each records as its {!jump_targets}, and of the scope of a
+    label (6.2.1p3), which every mention of one records as its
+    {!label_id}. Members, which belong to their structure, are names
+    only, and so are the identifiers in the arguments of an attribute,
+    which the parser does not read. *)
 
 open Typec_cpp
 
@@ -57,6 +58,19 @@ type jump_target = Statement_at of int
 type jump_targets =
   | Only of jump_target
   | Either of { loop : jump_target; around : jump_target }
+
+(** The identity of a label in its scope, its function or the block of a
+    GNU local label: the token of the first mention that resolves to it,
+    which for a local label is its name in [__label__]. A goto may come
+    before the label it names (C11 6.2.1p3), so the first mention may be
+    a goto, an [asm goto] or an address. The parser resolves every goto
+    and [asm goto] to a label that a statement in its scope defines; an
+    address may name a label that none defines. *)
+type label_id = Label_at of int
+
+(** A mention of a label other than its definition, and the label it
+    resolves to. *)
+type label_name = { name : identifier; label : label_id }
 
 (** What a use of an ordinary identifier can refer to: a declaration in
     the tree, or a typedef name that GCC and Clang declare before the
@@ -229,7 +243,7 @@ and expression_node =
   | Assignment of assignment_operator * expression * expression
   | Comma of expression * expression
   | Statement_expression of block  (** GNU [(] compound-statement [)] *)
-  | Label_address of identifier
+  | Label_address of label_name
       (** GNU [&&] label: the label's address, a [void *] *)
   | Va_arg of { list : expression; type_name : type_name }
       (** [__builtin_va_arg], which [va_arg] expands to *)
@@ -501,7 +515,7 @@ and statement_node =
       step : expression option;
       body : statement;
     }
-  | Goto of identifier
+  | Goto of label_name
   | Computed_goto of expression  (** GNU [goto *] expression [;] *)
   | Continue of { loop : jump_targets }
       (** the innermost loop around it (C11 6.8.6.2p1), which may be
@@ -534,8 +548,11 @@ and condition =
 and label = label_node spanned
 
 and label_node =
-  | Named_label of { name : string; attributes : attribute list }
-      (** the GNU attributes after the [:] apply to the label *)
+  | Named_label of {
+      name : string;
+      label : label_id;
+      attributes : attribute list;
+    }  (** the GNU attributes after the [:] apply to the label *)
   | Case_label of expression
   | Case_range of { low : expression; high : expression }
       (** GNU [case low ... high] *)
@@ -580,7 +597,7 @@ and block_node = {
 
 (** GNU [__label__ a, b;]: at least one label whose scope is the block,
     not the function. The span runs from [__label__] to the [;]. *)
-and local_label_declaration = identifier list spanned
+and local_label_declaration = label_name list spanned
 
 (** Declarations and statements in any order. *)
 and block_item =
@@ -674,7 +691,7 @@ and asm_operands = {
   outputs : asm_operand list;
   inputs : asm_operand list;
   clobbers : string_literal list;
-  labels : identifier list;  (** of [asm goto] *)
+  labels : label_name list;  (** of [asm goto] *)
 }
 
 and asm_operand = asm_operand_node spanned

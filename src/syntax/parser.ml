@@ -107,13 +107,32 @@ type jump_scope =
    judges them where the arm ends. *)
 type arm_breaks = { matched : jump_target; mutable leaving : int list }
 
+(* A label of the body being read, and whether a statement has defined
+   it so far. *)
+type label_entry = { identity : label_id; mutable defined : bool }
+
+module Names = Map.Make (String)
+
+(* The labels of the function body or block literal being read, which is
+   their scope (C11 6.2.1p3): the function's by name, the GNU local
+   labels visible at the cursor by name, and the label of each goto and
+   [asm goto] read so far, by the token of its name, latest first, which
+   the end of the body checks for a definition (6.8.6.1p1). *)
+type body_labels = {
+  mutable function_labels : label_entry Names.t;
+  mutable local_labels : label_entry Names.t;
+  mutable gotos : (int * label_entry) list;
+}
+
 (* A constructor's name that the lookahead read and checked, at the token
    [at]. *)
 type constructor_ahead = { at : int; checked : Spelling.constructor }
 
 (* The cursor. [scope] is persistent, so leaving a scope restores the
    value saved on entering it, and so is [jumps]; leaving an arm restores
-   [arm]. An error abandons the state, so it needs no restoring on one. *)
+   [arm], leaving a body [labels] and leaving a block the local labels of
+   [labels]. An error abandons the state, so it needs no restoring on
+   one. *)
 type state = {
   reader : Reader.t;
   grammar : grammar_token array;
@@ -123,6 +142,7 @@ type state = {
   mutable scope : scope;
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
+  mutable labels : body_labels option;  (** [None] outside every body *)
   counter : Spanned.counter;  (** of the nodes made so far *)
 }
 
@@ -260,6 +280,118 @@ let fail_disputed_jump state start keyword =
           "a %s in the condition of a loop or the step of a for, which \
            Clang takes to leave the loop and GCC the statement around it"
           keyword))
+
+(* Labels. *)
+
+let label_outside_body =
+  Rule.c_text "a label outside a function body (C11 6.2.1p3)"
+
+(* The labels of the body around the cursor. Outside every body, in a GNU
+   statement expression or the labels of a file-scope [asm], no label
+   has scope. *)
+let body_labels state (name : identifier) =
+  match state.labels with
+  | Some labels -> labels
+  | None -> fail_at_token state name.span.first label_outside_body
+
+(* The function's label [name], which the first mention that resolves
+   to it declares. *)
+let function_label labels (name : identifier) =
+  match Names.find_opt name.node labels.function_labels with
+  | Some entry -> entry
+  | None ->
+      let entry = { identity = Label_at name.span.first; defined = false } in
+      labels.function_labels <-
+        Names.add name.node entry labels.function_labels;
+      entry
+
+(* The label that [name] names at the cursor: the innermost GNU local
+   label of its name, or else the function's. *)
+let label_named labels (name : identifier) =
+  match Names.find_opt name.node labels.local_labels with
+  | Some entry -> entry
+  | None -> function_label labels name
+
+(* The label of a goto or an [asm goto], which the end of the body
+   checks. *)
+let jump_label state name : label_name =
+  let labels = body_labels state name in
+  let entry = label_named labels name in
+  labels.gotos <- (name.span.first, entry) :: labels.gotos;
+  { name; label = entry.identity }
+
+(* The label of the [&&] at [start]. GNU C takes the address of a label
+   in a function body only. *)
+let address_label state start name : label_name =
+  match state.labels with
+  | Some labels -> { name; label = (label_named labels name).identity }
+  | None ->
+      fail_at_token state (first_token state start)
+        (Rule.c_text
+           "the address of a label outside a function body (GCC manual, \
+            \"Labels as Values\")")
+
+(* The label that a labelled statement defines, once in its scope
+   (6.8.1p3). *)
+let define_label state name =
+  let entry = label_named (body_labels state name) name in
+  if entry.defined then
+    fail_at_token state name.span.first
+      (Rule.c_text "a second definition of a label in its scope (C11 6.8.1p3)");
+  entry.defined <- true;
+  entry.identity
+
+(* GNU [__label__]: [name] declares a local label of the block, which
+   declares each of its [declared] names once (GCC manual, "Local
+   Labels"). *)
+let declare_local_label state declared name : label_name =
+  let labels = body_labels state name in
+  if Hashtbl.mem declared name.node then
+    fail_at_token state name.span.first
+      (Rule.c_text
+         "a local label declared twice in its block (GCC manual, \"Local \
+          Labels\")");
+  Hashtbl.add declared name.node ();
+  let entry = { identity = Label_at name.span.first; defined = false } in
+  labels.local_labels <- Names.add name.node entry labels.local_labels;
+  { name; label = entry.identity }
+
+(* Runs [parse], a block, which is the scope of the GNU local labels that
+   it declares. *)
+let in_local_label_scope state parse =
+  match state.labels with
+  | None -> parse ()
+  | Some labels ->
+      let saved = labels.local_labels in
+      let result = parse () in
+      labels.local_labels <- saved;
+      result
+
+(* 6.8.6.1p1: the first goto, in source order, to a label that its scope
+   does not define. *)
+let refuse_undefined_jump state labels =
+  let undefined (_, entry) = not entry.defined in
+  match List.find_opt undefined (List.rev labels.gotos) with
+  | Some (token, _) ->
+      fail_at_token state token
+        (Rule.c_text
+           "a goto to a label that is not defined in its scope (C11 \
+            6.8.6.1p1)")
+  | None -> ()
+
+(* Runs [parse], a function body or a block literal: a function of its
+   own, whose labels are its own and which no break or continue in it
+   leaves. *)
+let as_function state parse =
+  let saved = state.labels in
+  let labels =
+    { function_labels = Names.empty; local_labels = Names.empty; gotos = [] }
+  in
+  state.labels <- Some labels;
+  let result = with_jumps state Function_body parse in
+  refuse_undefined_jump state labels;
+  state.labels <- saved;
+  result
 
 let quoted spelling =
   if String.length spelling <= max_quoted_spelling then "`" ^ spelling ^ "`"
@@ -2264,7 +2396,8 @@ and cast_expression state =
         collect ((start, decrement) :: prefixes) ~cast_allowed:false
     | Punctuator_token P.Ampersand_ampersand ->
         advance state;
-        let label = identifier state "a label after `&&`" in
+        let name = identifier state "a label after `&&`" in
+        let label = address_label state start name in
         (prefixes, finish state start (Label_address label))
     | lexeme -> (
         match (unary_operator lexeme, measure_operator lexeme) with
@@ -2495,11 +2628,9 @@ and choose state start =
 (* After the [^]: the body, after the parameters if it has them. The
    body continues their scope, as a function's does (6.2.1p4). *)
 and block_literal state start =
-  (* The literal is a function of its own, which no break or continue in
-     its parameters or body leaves. *)
-  let literal =
-    with_jumps state Function_body (fun () -> literal_after_caret state start)
-  in
+  (* The literal is a function of its own, from its parameters to the end
+     of its body. *)
+  let literal = as_function state (fun () -> literal_after_caret state start) in
   refuse_type_c_text_in_block state start;
   literal
 
@@ -2835,8 +2966,9 @@ and label state =
     else begin
       let name = identifier state "a label" in
       expect state P.Colon "`:` after a label";
+      let label = define_label state name in
       let attributes = attributes state in
-      Named_label { name = name.node; attributes }
+      Named_label { name = name.node; label; attributes }
     end
   in
   finish state start node
@@ -3005,7 +3137,8 @@ and simple_statement state =
         finish state start (Computed_goto target)
       end
       else
-        let target = identifier state "a label after `goto`" in
+        let name = identifier state "a label after `goto`" in
+        let target = jump_label state name in
         expect state P.Semicolon "`;` after `goto`";
         finish state start (Goto target)
   | Keyword_token Keyword.Continue ->
@@ -3160,7 +3293,8 @@ and asm_operands state =
   let clobbers = section (fun () -> comma_separated state string_literal) in
   let labels =
     section (fun () ->
-        comma_separated state (fun state -> identifier state "a label"))
+        comma_separated state (fun state ->
+            jump_label state (identifier state "a label")))
   in
   { outputs; inputs; clobbers; labels }
 
@@ -3190,17 +3324,20 @@ and block state =
 and compound_statement state =
   let start = state.position in
   expect state P.Left_brace "`{`";
-  let local_labels = local_label_declarations state in
-  let items = block_items state in
-  finish state start { local_labels; items }
+  in_local_label_scope state (fun () ->
+      let local_labels = local_label_declarations state in
+      let items = block_items state in
+      finish state start { local_labels; items })
 
 and local_label_declarations state =
+  let declared = Hashtbl.create 1 in
+  let local_label state =
+    declare_local_label state declared (identifier state "a label name")
+  in
   let rec loop declarations =
     let start = state.position in
     if accept_keyword state Keyword.Label then
-      let labels =
-        one_or_more state (fun state -> identifier state "a label name")
-      in
+      let labels = one_or_more state local_label in
       expect state P.Semicolon "`;` after the labels of `__label__`";
       loop (finish state start labels :: declarations)
     else List.rev declarations
@@ -3255,7 +3392,7 @@ and block_declaration state =
 let function_body state =
   if (token_at state state.position).owner.system_header then
     Skipped (skip_balanced state "`}` to end the function body")
-  else Parsed (compound_statement state)
+  else Parsed (as_function state (fun () -> compound_statement state))
 
 (* The declaration list of an old-style definition, up to the [{]. GCC
    and Clang take no C23 attributes before a declaration there. *)
@@ -3381,6 +3518,7 @@ let parse_with_file_scope ~keywords reader =
       scope = initial_scope keywords;
       jumps = Function_body;
       arm = None;
+      labels = None;
       counter = Spanned.counter ~max_depth;
     }
   in
