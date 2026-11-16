@@ -59,10 +59,11 @@ val parse :
     token for a backend with [keywords] ({!Builtin_typedef.declared}).
 
     Where [text] holds the universe text in front of the unit's own
-    ({!Reader.read_with_universe}), its declarations are the first of
-    the tree ({!Tree.in_universe}) and are declared in the universe
-    scope (design 2.3), which encloses file scope: a declaration of the
-    same name in any scope hides one and is no redeclaration of it. *)
+    ({!Reader.read_with_universe}), its generics are declared in the
+    universe scope (design 2.3), which encloses file scope: a declaration
+    of the same name in any scope hides one and is no redeclaration of
+    it. They are not in the tree, which holds the unit's own text alone,
+    but in {!scopes}. *)
 
 (** What file scope declares at the end of a unit (C11 6.2.1p4), sorted
     by name: each ordinary identifier and each tag with its last
@@ -117,9 +118,9 @@ val own_name_kind : own_name -> string
     parser resolved names there: what the resolution property of design
     13.5 compares between the place of moved text and a place where
     lowering writes it. A view holds what is declared in front of its
-    place and nothing that is declared after it. The universe scope
-    (design 2.3) is not in it: a name that no scope declares may be a
-    name of {!Universe}. *)
+    place and nothing that is declared after it, and the generics of the
+    universe scope (design 2.3) where the unit has the universe text; a
+    name that no scope declares may be another name of {!Universe}. *)
 module View : sig
   type t
 
@@ -161,10 +162,13 @@ val pragma_view : views -> int -> View.t option
 (** What the parser records of the scopes of a unit beside its tree. *)
 type scopes = {
   file_scope : file_scope;
+  universe : (Tree.scoped_type_declaration Tree.item * View.t) list;
+      (** the generics of the universe text in order, each with the
+          view in front of it, the universe's generics before it; none
+          where the unit has no universe text *)
   declarations : (Tree.external_declaration Tree.item * View.t) list;
-      (** the external declarations of the unit in order, each with the
-          view in front of it, which is file scope there, or for one of
-          the universe text the universe's declarations before it *)
+      (** the unit's own external declarations in order, each with the
+          view in front of it, which is file scope there *)
   views : views;
 }
 

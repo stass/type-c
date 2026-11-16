@@ -23,7 +23,7 @@ let () =
   let source = In_channel.with_open_bin path In_channel.input_all in
   let lowered =
     Result.bind
-      (Reader.read ~name:path (preprocessed path source))
+      (Reader.read_with_universe ~name:path (preprocessed path source))
       (fun text ->
         Result.map
           (fun (lowered : Typec_emit.Emitter.lowered) ->

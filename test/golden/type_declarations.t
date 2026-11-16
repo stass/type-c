@@ -429,9 +429,9 @@ implements them.
   $ ./golden.exe defer.tc
   defer.tc:1: `defer` is not implemented yet (design 6; work package 2.5) [TC0023]
   [1]
-  $ printf 'int f(void) { return result; }\n' > universe.tc
+  $ printf 'str s;\n' > universe.tc
   $ ./golden.exe universe.tc
-  universe.tc:1: `result` is a universe name that typec does not implement yet (design 3.6; work package 2.3) [TC0023]
+  universe.tc:1: `str` is a universe name that typec does not implement yet (design 8; work package 3.4) [TC0023]
   [1]
 
 A distinct type lowers to the typedef of its representation (design

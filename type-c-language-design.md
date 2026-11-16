@@ -151,7 +151,9 @@ name or as the parameter it declares, a universe name is the parameter:
 `int f(int (str));` declares an `int` parameter named `str`, as in C, so
 a header shared with C means the same in both. A parameter whose type is
 a universe type and that has no name is written without parentheses,
-`size_t len(str);`, where no other reading exists.
+`size_t len(str);`, where no other reading exists. In C text, a universe
+name in the identifier list of an old-style definition is the parameter
+it names, as in C, so C text keeps its meaning there too (2.2).
 
 **Generated names.** Identifiers that begin with `__tc_` are reserved for the
 compiler in a Type-C translation unit; one in its text, C text included, is
@@ -2721,6 +2723,9 @@ that a token index gives (a declaration's id, a span, moved text) covers
 them with no second source of the declarations. Their tokens belong to
 a file `<universe>` that no line marker opens: a marker that names
 `<universe>` opens an ordinary file of that name, which is C text.
+Their lines carry flag 3, as typec's own assertions do (13.4), so the
+instances written from them are exempt from the warnings that judge the
+user's code.
 Emission writes the unit's own text alone and refuses an edit of the
 universe text.
 

@@ -19,6 +19,13 @@ type ('ordinary, 'tag) t
 val file : ('ordinary, 'tag) t
 (** File scope with no declarations. *)
 
+val file_within : ('ordinary, 'tag) t -> ('ordinary, 'tag) t
+(** [file_within universe] is file scope with no declarations of its own
+    inside the innermost scope of [universe], the universe scope that
+    encloses file scope (design 2.3): every lookup finds what [universe]
+    declares unless a scope declares the same name, and nothing that
+    [universe] declares is a declaration of file scope. *)
+
 val enter : ('ordinary, 'tag) t -> ('ordinary, 'tag) t
 (** A block or function prototype scope inside the innermost one. *)
 

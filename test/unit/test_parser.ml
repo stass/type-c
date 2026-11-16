@@ -2358,9 +2358,9 @@ let universe_cases =
        yet (design 8; work package 3.4) [TC0023]";
   ]
 
-(* The universe scope is outside file scope: what file scope declares
-   and the view in front of a declaration hold no universe generic, and
-   the tree holds the universe's declarations first, by their owner. *)
+(* File scope opens inside the universe scope: the tree and what file
+   scope declares hold no universe generic, the scopes hold the two
+   generics apart, and the view in front of a declaration finds them. *)
 let failed_universe_scope () =
   let text = Preprocessed.text ~name:type_c_file "int a;" in
   match Reader.read_with_universe ~name:type_c_file text with
@@ -2369,30 +2369,27 @@ let failed_universe_scope () =
       match Parser.parse_with_scopes ~keywords:gnu_keywords reader with
       | Error error -> [ ("universe scope", Parser.error_message error) ]
       | Ok (unit, scopes) ->
-          let in_universe = List.map (Tree.in_universe reader.tokens) unit in
-          let own_view =
-            List.find_map
-              (fun ((item, view) : _ * Parser.View.t) ->
-                if Tree.in_universe reader.tokens item then None
-                else Some view)
-              scopes.declarations
-          in
           let declares_universe_name =
             List.exists
               (fun (name, _) -> name = "option" || name = "result")
               scopes.file_scope.ordinary
           in
+          let view_finds name =
+            match scopes.declarations with
+            | [ (_, view) ] -> Parser.View.find view name <> None
+            | _ -> false
+          in
           List.filter_map
             (fun (name, holds) -> if holds then None else Some (name, "no"))
             [
-              ( "the universe declarations come first",
-                in_universe = [ true; true; false ] );
-              ("file scope declares no universe name",
-                not declares_universe_name);
-              ( "a view holds no universe name",
-                match own_view with
-                | Some view -> Parser.View.find view "option" = None
-                | None -> false );
+              ( "the tree holds the unit's own text",
+                List.length unit = 1 );
+              ( "the scopes hold the two generics",
+                List.length scopes.universe = 2 );
+              ( "file scope declares no universe name",
+                not declares_universe_name );
+              ( "a view finds the universe generics",
+                view_finds "option" && view_finds "result" );
             ])
 
 (* Design 4.1: [match] begins a match only at the start of a statement,

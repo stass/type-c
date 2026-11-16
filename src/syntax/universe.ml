@@ -9,12 +9,19 @@
 
     The generics of the universe scope are the declarations of
     {!Typec_cpp.File.universe_text} (design 3.6), which the parser
-    declares in the universe scope where the reader holds that text.
-    Each other name gets its meaning in work [package] of the plan,
-    after design [section]; until then a use of one is an error, as is
-    a use of a generic in text read without the universe text. *)
+    declares in the universe scope where the reader holds that text, as
+    it does for every Type-C unit. Each other name gets its meaning in a
+    later work package of the plan; until then a use of one is an
+    error. *)
 
-type t = { name : string; section : string; package : string }
+(** What typec makes of a universe name. *)
+type meaning =
+  | Generic  (** declared by the universe text *)
+  | Not_implemented of { section : string; package : string }
+      (** to get its meaning in work [package] of the plan, after design
+          [section] *)
+
+type t = { name : string; meaning : meaning }
 
 (* The universe text declares one generic a line, as [type name(...)],
    so the names come from the text and no list repeats them. *)
@@ -23,16 +30,14 @@ let generic_names =
   |> List.filter (fun line -> line <> "")
   |> List.map (fun line -> Scanf.sscanf line "type %[a-z_](" Fun.id)
 
-let generic name = { name; section = "3.6"; package = "2.3" }
+let generic name = { name; meaning = Generic }
+
+let slice_name name =
+  { name; meaning = Not_implemented { section = "8"; package = "3.4" } }
 
 let names =
   List.map generic generic_names
-  @ [
-      { name = "slice"; section = "8"; package = "3.4" };
-      { name = "str"; section = "8"; package = "3.4" };
-      { name = "slice_from_array"; section = "8"; package = "3.4" };
-      { name = "slice_sub"; section = "8"; package = "3.4" };
-      { name = "slice_unchecked"; section = "8"; package = "3.4" };
-    ]
+  @ List.map slice_name
+      [ "slice"; "str"; "slice_from_array"; "slice_sub"; "slice_unchecked" ]
 
 let find name = List.find_opt (fun universe -> universe.name = name) names

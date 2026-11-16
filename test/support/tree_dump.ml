@@ -766,12 +766,8 @@ let external_declaration reader = function
   | Top_level_asm { span; node = a } -> node span "asm" (assembler reader a)
   | Empty_declaration span -> node span ";" []
 
-(* The unit's own declarations: the universe generics in front of them
-   are the same text in every unit. *)
 let translation_unit (reader : Reader.t) unit =
-  List.filter (fun item -> not (Tree.in_universe reader.tokens item)) unit
-  |> Tree.external_declarations
-  |> List.map (external_declaration reader)
+  List.map (external_declaration reader) (Tree.external_declarations unit)
 
 (* The scope entries of a dump in source order: a declaration as [x#n],
    [n] counting the declarations of [x] in its name space in token order,

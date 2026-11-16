@@ -455,7 +455,8 @@ let () =
         text never does")
 
 (* A token of the universe text (design 3.6) is a piece at its own place
-   in the universe, and emission writes the unit's own text alone.
+   in the universe, under flag 3 as typec's own text (design 13.4), and
+   emission writes the unit's own text alone.
    Tokens: the universe text, line 2 from its 16th | int a ; *)
 let () =
   let own_text = "# 1 \"a.tc\"\nint a;\n" in
@@ -466,7 +467,7 @@ let () =
   in
   let a = Array.length unit.tokens - 2 in
   let universe_at line : Location.t =
-    { file = "<universe>"; line; flags = No_flags }
+    { file = "<universe>"; line; flags = System }
   in
   (* A piece is the text and its location, as typec's own text is. *)
   let is_piece index location text =

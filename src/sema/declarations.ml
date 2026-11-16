@@ -3235,6 +3235,16 @@ let read_external state ((item : Tree.external_declaration Tree.item), view) =
       | None -> Generic_declaration)
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
+(* A generic of the universe text (design 3.6), which the emitted C does
+   not hold: it is no type declaration that lowering replaces. Only its
+   definition check, a trial that discards its texts, places a text at
+   its anchor, so every text of an instance stands in the unit's own. *)
+let read_universe_generic state
+    ((item : Tree.scoped_type_declaration Tree.item), view) =
+  let anchor = Some (Tree.universe_anchor item) in
+  state.external_facts <- declaration_state state.tags anchor view;
+  read_generic state item.declaration
+
 (* The location that GCC gives a name declared before the first token,
    which a diagnostic that depends on a builtin type cites. *)
 let predeclared : Typec_cpp.Location.t =
@@ -3310,7 +3320,10 @@ let read target text (scopes : Parser.scopes) =
     }
   in
   declare_builtin_typedefs state;
-  let read_all () = List.map (read_external state) scopes.declarations in
+  let read_all () =
+    List.iter (read_universe_generic state) scopes.universe;
+    List.map (read_external state) scopes.declarations
+  in
   let end_deferral () = Ctype.end_deferral state.tags in
   match Fun.protect ~finally:end_deferral read_all with
   | items ->

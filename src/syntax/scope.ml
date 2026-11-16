@@ -30,6 +30,11 @@ let innermost = function
   | level :: _ -> level
   | [] -> invalid_arg "Scope.innermost"
 
+(* Only what the universe makes visible stays: its levels are not
+   scopes of the unit, so file scope is still the outermost one. *)
+let file_within universe =
+  [ { declared = empty_frame; visible = (innermost universe).visible } ]
+
 let enter scopes =
   { declared = empty_frame; visible = (innermost scopes).visible } :: scopes
 

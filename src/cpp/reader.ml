@@ -533,10 +533,17 @@ let read_next state =
 
 let first_line name = { Location.file = name; line = 1; flags = No_flags }
 
+(* The universe text is typec's own, so the flag 3 of its lines exempts
+   the instances that lowering writes from it from the warnings that
+   judge the user's code, as it exempts typec's assertions (design
+   13.4). *)
+let universe_first_line =
+  { Location.file = File.universe.name; line = 1; flags = System }
+
 (* Reads the text from the cursor up to [stop], which ends a line, from
-   the first line of [name] and with [include_stack] in place. *)
-let read_part state ~stop ~name ~include_stack =
-  state.presumed <- first_line name;
+   the line [first] and with [include_stack] in place. *)
+let read_part state ~stop ~first ~include_stack =
+  state.presumed <- first;
   state.include_stack <- include_stack;
   while state.pos < stop do
     read_next state
@@ -559,9 +566,10 @@ let read_after ~universe ~name text =
     }
   in
   match
-    read_part state ~stop:own_start ~name:File.universe.name
+    read_part state ~stop:own_start ~first:universe_first_line
       ~include_stack:[ File.universe ];
-    read_part state ~stop:(String.length bytes) ~name ~include_stack:[]
+    read_part state ~stop:(String.length bytes) ~first:(first_line name)
+      ~include_stack:[]
   with
   | () ->
       let tokens = Array.of_list (List.rev state.tokens) in

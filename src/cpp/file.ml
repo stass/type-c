@@ -7,7 +7,9 @@
 
     [name] is spelled as in the line marker that opened the file, between
     the quotes and with its escape sequences not decoded. [system_header]
-    is whether that marker carried the system header flag (3).
+    is whether that marker carried the system header flag (3); the lines
+    of {!universe}, which no marker opens, carry it in their locations
+    alone, as typec's own text.
 
     The reader makes one value per name, flags and origin, and the
     universe has the one value {!universe}, so owners compare with [==]
