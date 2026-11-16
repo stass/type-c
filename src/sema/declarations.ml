@@ -17,8 +17,15 @@ type item =
   | Type_declaration of entity
   | Generic_declaration
 
+type argument_typedef = {
+  name : string;
+  argument : Ctype.t;
+  tag_lines : Type_name.tag_line list;
+}
+
 type step =
-  | Declared of { generic : Tree.type_declaration; arguments : Ctype.t list }
+  | Typedefs of argument_typedef list
+  | Declared of { generic : Tree.type_declaration }
   | Defined
 
 type placement = {
@@ -34,19 +41,24 @@ type instance_text = {
   typed : Expressions.t;
 }
 
-(* The instances used so far, the texts of instances met so far, latest
+module Encodings = Set.Make (String)
+
+(* The instances used so far, the encodings of the arguments whose
+   typedefs a text declares, the texts of instances met so far, latest
    first, the names that lowering writes for the applications of the
    unit's own text, and the reading of each instance's definition, as
    one value that a trial restores. *)
 type placements = {
   used : unit Ctype.Instances.t;
+  typedefs : Encodings.t;
   texts : placement list;
   names : (Tree.span * string) list;
   readings : instance_text Ctype.Instances.t;
 }
 
 let no_placements =
-  { used = Ctype.Instances.empty; texts = []; names = [];
+  { used = Ctype.Instances.empty; typedefs = Encodings.empty; texts = [];
+    names = [];
     readings = Ctype.Instances.empty }
 
 type t = {
@@ -2439,7 +2451,7 @@ and applied_type state span name reference arguments =
   let applied_type = instance_type state declaration instance applied in
   if first_use then
     note_text state instance ~application:span
-      (Declared { generic = declaration; arguments = types });
+      (Declared { generic = declaration });
   note_name state span (Encoding.instance_name instance);
   applied_type
 
@@ -2469,10 +2481,10 @@ and note_application state instance arguments span =
   let first_use = not (Ctype.Instances.mem instance placements.used) in
   if first_use then (
     List.iter (refuse_undeclared_argument state) arguments;
-    List.iter (note_tag_lines state) arguments;
     state.placements <-
       { placements with
-        used = Ctype.Instances.add instance () placements.used });
+        used = Ctype.Instances.add instance () placements.used };
+    note_argument_typedefs state instance arguments ~application:span);
   first_use
 
 (* The name that lowering writes for the text at [span] (design 10.3):
@@ -2497,28 +2509,38 @@ and note_parameter_use state span reference =
       | None -> ())
   | None -> ()
 
-(* Design 10.3: before the typedef of an argument, which stands with the
-   instance at its first use, lowering writes [struct T;] for each
-   structure or union tag [T] that the argument names, which declares
-   the tag of file scope where the instance's text stands (design
-   13.5). The tag of a variant or an alias is one that its declaration
-   claims, which the view there holds already, and that of an instance
-   is reserved (design 2.3). *)
-and note_tag_lines state (span, argument) =
-  let facts = state.external_facts in
-  let note = function
-    | Ctype.Named_record { record_name = Named name; _ } ->
-        let lowered = { Resolution.lowered_name = name; written_for = span } in
-        facts.texts_at <-
-          { facts.texts_at with tags = lowered :: facts.texts_at.tags }
-    | Named_record
-        { record_name =
-            Anonymous | Variant_name _ | Alias_name _ | Instance_name _
-            | Opaque_name _; _ }
-    | Named_enum _ ->
-        ()
+(* Design 10.3: the typedef of each argument that no earlier text
+   declares stands at the first use of the instance, before the texts
+   that the reading of its definition puts there. The tag of each line
+   before it is declared at file scope where the texts stand (13.5). *)
+and note_argument_typedefs state (instance : Ctype.instance) arguments
+    ~application =
+  let fresh typedefs encoding (span, argument) =
+    if Encodings.mem encoding state.placements.typedefs then typedefs
+    else note_typedef state encoding span argument :: typedefs
   in
-  List.iter note (Ctype.named_tags argument)
+  match List.fold_left2 fresh [] instance.arguments arguments with
+  | [] -> ()
+  | typedefs ->
+      note_text state instance (Typedefs (List.rev typedefs)) ~application
+
+(* The typedef of an argument that no earlier text declares, now
+   declared, with its tag lines noted at the place of the texts. *)
+and note_typedef state encoding span argument =
+  let placements = state.placements in
+  state.placements <-
+    { placements with typedefs = Encodings.add encoding placements.typedefs };
+  let tag_lines = Type_name.tag_lines argument in
+  List.iter (note_tag_line state span) tag_lines;
+  { name = Encoding.argument_name encoding; argument; tag_lines }
+
+and note_tag_line state span (tag_line : Type_name.tag_line) =
+  let facts = state.external_facts in
+  let lowered =
+    { Resolution.lowered_name = tag_line.tag; written_for = span }
+  in
+  facts.texts_at <-
+    { facts.texts_at with tags = lowered :: facts.texts_at.tags }
 
 (* Design 10.3: an enumeration, and an untagged type that a typedef
    names, have no forward declaration that lowering could write, so the

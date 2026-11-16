@@ -671,33 +671,25 @@ let instance_definition (text : Reader.t) instance ~first
   in
   moved_text text edits ~first ~last:reading.generic.span.last
 
-(* What the texts of the placements are written from: the unit, what
-   its reading found, and the encodings whose typedefs stand already. *)
+(* What the texts of the placements are written from: the unit and what
+   its reading found. *)
 type instance_context = {
   unit : Reader.t;
   declarations : Typec_sema.Declarations.t;
-  typedefs : (string, unit) Hashtbl.t;
 }
 
-(* Design 10.3: the typedef of each argument that no earlier instance
-   takes, after the forward declaration of each structure or union tag
-   that it names. *)
-let argument_typedefs context location (instance : Typec_sema.Ctype.instance)
-    arguments =
+(* Design 10.3: each typedef after the lines that declare its tags. *)
+let argument_typedefs context location typedefs =
   let tags = Typec_sema.Declarations.tags context.declarations in
-  let typedef encoding argument =
-    if Hashtbl.mem context.typedefs encoding then []
-    else (
-      Hashtbl.add context.typedefs encoding ();
-      let name = Typec_sema.Encoding.argument_name encoding in
-      List.filter_map Typec_sema.Type_name.forward_declaration
-        (Typec_sema.Ctype.named_tags argument)
-      @ [ "typedef "
-          ^ Typec_sema.Type_name.lowered_declaration tags argument name
-          ^ ";" ])
+  let lines (typedef : Typec_sema.Declarations.argument_typedef) =
+    let { Typec_sema.Declarations.name; argument; tag_lines } = typedef in
+    List.map (fun (tag_line : Typec_sema.Type_name.tag_line) -> tag_line.line)
+      tag_lines
+    @ [ "typedef "
+        ^ Typec_sema.Type_name.lowered_declaration tags argument name
+        ^ ";" ]
   in
-  List.concat (List.map2 typedef instance.arguments arguments)
-  |> List.map (Emitter.generated location)
+  List.concat_map lines typedefs |> List.map (Emitter.generated location)
 
 let reading context instance =
   match Typec_sema.Declarations.instance_text context.declarations instance with
@@ -731,9 +723,9 @@ let instance_rest context instance =
 let placement_text context (placement : Typec_sema.Declarations.placement) =
   let location = context.unit.tokens.(placement.application.first).location in
   match placement.step with
-  | Declared { generic; arguments } ->
-      argument_typedefs context location placement.instance arguments
-      @ instance_declaration context location placement.instance generic
+  | Typedefs typedefs -> argument_typedefs context location typedefs
+  | Declared { generic } ->
+      instance_declaration context location placement.instance generic
   | Defined -> instance_rest context placement.instance
 
 (* The placements in runs that share an anchor, each run in order. *)
@@ -782,5 +774,5 @@ let unit_edits (text : Reader.t) declarations =
     (Typec_sema.Declarations.typed declarations)
 
 let edits (text : Reader.t) declarations =
-  let context = { unit = text; declarations; typedefs = Hashtbl.create 16 } in
+  let context = { unit = text; declarations } in
   instance_brackets context @ unit_edits text declarations

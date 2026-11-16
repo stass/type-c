@@ -17,10 +17,16 @@ val declaration : Ctype.t -> string -> string
 (** [declaration t name] declares [name] with type [t], such as
     ["int (*name)[3]"]. *)
 
-val forward_declaration : Ctype.named_tag -> string option
-(** [struct T;] or [union T;] for a structure or union whose tag in the
-    lowered C is [T] (design 10.3); [None] for an enumeration, which ISO
-    C does not declare so, and for an untagged type. *)
+type tag_line = { tag : string; line : string }
+(** The line [struct T;] or [union T;] that declares the tag [T] at file
+    scope (design 10.3), as [line]. *)
+
+val tag_lines : Ctype.t -> tag_line list
+(** The lines that stand before the typedef of an argument of type [t]
+    (design 10.3): one for each structure or union that [t] names by a
+    tag in the lowered C, that of a variant, an alias of 10.2 or an
+    instance included, and none for an enumeration, which ISO C does not
+    declare so, or for an untagged type. *)
 
 val lowered_declaration : Ctype.tags -> Ctype.t -> string -> string
 (** {!declaration} as lowered C writes it (design 10.3), of a type that

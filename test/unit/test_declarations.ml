@@ -2569,8 +2569,9 @@ let generic_placement () =
   accepts ~file (in_c ("struct X; " ^ probe))
 
 (* [source]'s texts of instances in the order they stand: each instance
-   name, whether the text is its declaration or its definition, and the
-   index of the external declaration whose anchor it stands at. *)
+   name, whether the text is the typedefs of its arguments, with the tag
+   lines before each, its declaration or its definition, and the index
+   of the external declaration whose anchor it stands at. *)
 let placements source =
   let file = "in.tc" in
   let text =
@@ -2595,8 +2596,15 @@ let placements source =
       []
   | Ok result ->
       let shown (placement : Declarations.placement) =
+        let typedef (typedef : Declarations.argument_typedef) =
+          List.map (fun (line : Type_name.tag_line) -> line.line)
+            typedef.tag_lines
+          @ [ typedef.name ]
+        in
         let step =
           match placement.step with
+          | Typedefs typedefs ->
+              String.concat " " (List.concat_map typedef typedefs)
           | Declared _ -> "declared"
           | Defined -> "defined"
         in
@@ -2613,26 +2621,50 @@ let placement_indexes () =
   expect
     (box ^ " struct s { int a; }; box(struct s) *p; \
             void f(void) { box(struct s) b; }")
-    [ ("box__T1s", "declared", 2); ("box__T1s", "defined", 3) ];
+    [ ("box__T1s", "struct s; __tc_arg__T1s", 2); ("box__T1s", "declared", 2);
+      ("box__T1s", "defined", 3) ];
   (* A nested use and need count where the definition that causes them
      stands, which follows the texts it needs. *)
   expect
     (box ^ " type wrap(T) = struct { box(T) b; }; int x; wrap(int) w;")
-    [ ("wrap__i", "declared", 3); ("box__i", "declared", 3);
-      ("box__i", "defined", 3); ("wrap__i", "defined", 3) ];
+    [ ("wrap__i", "__tc_arg__i", 3); ("wrap__i", "declared", 3);
+      ("box__i", "declared", 3); ("box__i", "defined", 3);
+      ("wrap__i", "defined", 3) ];
   (* The definition of an alias instance is its declaration, which
      follows the texts of the instances that it uses. *)
   expect
     (box ^ " type ref(T) = box(T) *; ref(int) r; box(int) b;")
-    [ ("box__i", "declared", 2); ("ref__i", "declared", 2);
-      ("box__i", "defined", 3) ];
+    [ ("ref__i", "__tc_arg__i", 2); ("box__i", "declared", 2);
+      ("ref__i", "declared", 2); ("box__i", "defined", 3) ];
   (* Texts stand after the forward declaration of a variant that is no
      generic, in its own external declaration. *)
   expect
     (box ^ " type e = | A(box(int) b);")
-    [ ("box__i", "declared", 1); ("box__i", "defined", 1) ];
+    [ ("box__i", "__tc_arg__i", 1); ("box__i", "declared", 1);
+      ("box__i", "defined", 1) ];
   (* A definition check places nothing. *)
-  expect (box ^ " type wrap(T) = struct { box(T) b; };") []
+  expect (box ^ " type wrap(T) = struct { box(T) b; };") [];
+  (* An argument's typedef stands once, at the first use of an instance
+     that takes it, before the texts that reading the definition puts
+     there; a tag line stands before it for every structure or union
+     tag that it names, that of a variant, an alias or an instance
+     included. *)
+  expect
+    (box ^ " type pair(T, U) = struct { box(T) t; U u; }; \
+            pair(struct s *, int) p;")
+    [ ("pair__PT1si", "struct s; __tc_arg__PT1s __tc_arg__i", 2);
+      ("pair__PT1si", "declared", 2); ("box__PT1s", "declared", 2);
+      ("box__PT1s", "defined", 2); ("pair__PT1si", "defined", 2) ];
+  expect
+    (box ^ " type e = | A; type a = struct { int x; }; \
+            box(e *) v; box(a *) r; box(box(int) *) i; box(e *) again;")
+    [ ("box__P1e", "struct e; __tc_arg__P1e", 3);
+      ("box__P1e", "declared", 3); ("box__P1e", "defined", 3);
+      ("box__P1a", "struct a; __tc_arg__P1a", 4);
+      ("box__P1a", "declared", 4); ("box__P1a", "defined", 4);
+      ("box__i", "__tc_arg__i", 5); ("box__i", "declared", 5);
+      ("box__PI3boxiE", "struct box__i; __tc_arg__PI3boxiE", 5);
+      ("box__PI3boxiE", "declared", 5); ("box__PI3boxiE", "defined", 5) ]
 
 let generic_definitions () =
   let file = "in.tc" in

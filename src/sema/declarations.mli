@@ -48,12 +48,22 @@ type item =
   | Generic_declaration
       (** a generic type (design 3.5), whose name alone is no type *)
 
-(** The text of an instance that a placement writes (design 10.3): its
-    declaration, at its first use, which names the [arguments] of its
-    application of [generic] through their typedefs, or its definition,
+(** The typedef [name] of an argument of type [argument] (design 10.3),
+    after the lines that declare the tags it names. *)
+type argument_typedef = {
+  name : string;
+  argument : Ctype.t;
+  tag_lines : Type_name.tag_line list;
+}
+
+(** A text of an instance that a placement writes (design 10.3): at its
+    first use, the typedefs of its arguments that no earlier text
+    declares, before the texts that the reading of its definition puts
+    there, and its declaration from [generic] after those; its definition
     at the first point that needs it complete. *)
 type step =
-  | Declared of { generic : Tree.type_declaration; arguments : Ctype.t list }
+  | Typedefs of argument_typedef list
+  | Declared of { generic : Tree.type_declaration }
   | Defined
 
 (** Where lowering places a text of an instance (design 10.3): at the

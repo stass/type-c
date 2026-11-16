@@ -712,14 +712,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   constructors, so `Parser.own_name` cannot say that an identifier is
   one. Add `Own_constructor` once the parser knows constructors by
   name.
-- [Medium] The forward declarations of tags before an argument's
-  typedef are decided twice: `note_tag_lines` in `Declarations` records
-  those of `Named` records for the resolution check, and `Lowering`
-  writes one for every tagged record (`Type_name.forward_declaration`),
-  variant, alias and instance tags too, which file scope declares
-  already. Let the `Declared` step carry the lines and the encodings
-  whose typedefs are new, so lowering writes what sema checked and
-  needs no table of written typedefs.
 - [Low] `external_facts.anchor` is an option only for the state before
   the first external declaration, and `note_text` takes it with
   `Option.get`. Build the facts at the first external declaration, or

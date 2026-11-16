@@ -68,12 +68,17 @@ let shown_name t =
   | Unknown_type _ ->
       invalid_arg "Type_name.shown_name"
 
-let forward_declaration = function
-  | Ctype.Named_record { kind; record_name; _ } ->
-      Option.map
-        (fun tag -> record_keyword kind ^ " " ^ tag ^ ";")
-        (record_tag_name record_name)
-  | Named_enum _ -> None
+type tag_line = { tag : string; line : string }
+
+let tag_lines t =
+  let tag_line = function
+    | Ctype.Named_record { kind; record_name; _ } ->
+        Option.map
+          (fun tag -> { tag; line = record_keyword kind ^ " " ^ tag ^ ";" })
+          (record_tag_name record_name)
+    | Named_enum _ -> None
+  in
+  List.filter_map tag_line (Ctype.named_tags t)
 
 (* How lowered C names one (design 10.3): a type with a tag in the
    lowered C, a variant or an alias of 10.2 included, by that tag; an
