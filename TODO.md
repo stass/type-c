@@ -983,7 +983,7 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 ## Corpus
 
 - [Low] The corpus reference compile takes its commands from
-  `Pipeline.plan` (eb0e656), so it shares typec's option routing: if
+  `Pipeline.plan`, so it shares typec's option routing: if
   `Pipeline` dropped a code-generation option from the compile step,
   both objects would lose it and the unit would still report
   identical. If that class of bug matters, give the reference one
