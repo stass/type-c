@@ -448,7 +448,8 @@ let target_at typing (t : Ctype.t) =
 
 (* How far an expression initialiser reaches into a subobject of type
    [t]. [expression_type] types the expression the first time it is
-   forced, so no level of the walk types it a second time. *)
+   forced, so no level of the walk types it a second time; a case forces
+   it only where it needs the type, and [place] forces it at the end. *)
 let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
   match t.shape with
   | Array { element; _ } -> (
@@ -461,9 +462,7 @@ let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
           Whole
       (* GCC takes a compound literal of an array type for a subarray, which
          Clang refuses. *)
-      | Depends_on _, _ | Answer false, Compound_form ->
-          ignore (Lazy.force expression_type);
-          Unknown_reach
+      | Depends_on _, _ | Answer false, Compound_form -> Unknown_reach
       | Answer false, (String_form | Other_form | Unknown_form _) -> Elided)
   | Record _ -> (
       let value_type = Ctype.lvalue_conversion (Lazy.force expression_type) in
@@ -483,9 +482,7 @@ let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
         (scalar_target ~zeroes t);
       typing.initialises expression;
       Whole
-  | Va_list | Unknown_type _ ->
-      ignore (Lazy.force expression_type);
-      Unknown_reach
+  | Va_list | Unknown_type _ -> Unknown_reach
 
 (* Initialises the subobject at [level], within [outer], with
    [initialiser]; gives the levels of the subobject that it initialised,
@@ -493,7 +490,12 @@ let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
    counts the levels. An expression keeps the target of the subobject
    where the walk meets it as the walk elides braces. [scalar_target]
    gives that target, as it is no distinct type unless the subobject is
-   that distinct scalar, which [reach_of] meets first. *)
+   that distinct scalar, which [reach_of] meets first. The expression is
+   typed however the walk ends, so that the rules of Type-C text see it
+   even where GCC drops it as excess, in an aggregate with no subobject,
+   and Clang refuses it; its target there, an aggregate that is no
+   variant, selects no constructor and takes no conversion check, as no
+   target would. *)
 let rec place typing ~zeroes ~depth (level, outer)
     (initialiser : Tree.initialiser) =
   let t = subobject_type typing level in
@@ -504,8 +506,12 @@ let rec place typing ~zeroes ~depth (level, outer)
   | Expression_initialiser expression ->
       let target = scalar_target ~zeroes (target_at typing t) in
       let expression_type = lazy (typing.value target expression) in
-      place_expression typing ~zeroes ~elided:false ~depth (level, outer)
-        expression expression_type
+      let placed =
+        place_expression typing ~zeroes ~elided:false ~depth (level, outer)
+          expression expression_type
+      in
+      ignore (Lazy.force expression_type);
+      placed
 
 (* Places [expression], entering the subobject at [level] where its
    braces are elided; [elided] says that the walk has elided the braces

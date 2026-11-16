@@ -268,13 +268,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] `Expressions.answered` copies the answers that `selections` and
   `compatibilities` hold; recording only the spans answered would leave
   one copy.
-- [High] An expression initialiser whose braces the walk elides into
-  a zero-length array is never typed, so no Type-C rule sees it:
-  `struct z { int a[0]; int b; }; struct z s = { x + 1, 3 };` with `x`
-  of a distinct type is accepted and emitted unchanged.
-  `Initialiser.place_expression` returns `None` when `first_level`
-  finds no subobject without forcing the expression's type; force it
-  there (one line) and add a golden case.
 - [Low] `Expressions.selected`, `statement_value`, `case_value` and the
   first argument of a moving builtin read a node through
   `operand_typed`, correct because an earlier step typed it; a wrong
