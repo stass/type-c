@@ -269,6 +269,30 @@ let void_fields () =
     "two__vl t = { .tag = two__vl_Two, .u.Two = { 1 } } , u = { .tag = \
      two__vl_One } ;"
 
+(* The edits inside the operand of a try are found by one search of the
+   unit's edits, and each temporary is numbered from the one before it,
+   so the time to lower a function is linear in its tries, not in their
+   square. *)
+let many_tries () =
+  let count = 16000 in
+  let source =
+    "result(int, int) f(void) {\n"
+    ^ String.concat ""
+        (List.init count (fun _ -> "  try result(int, int).Ok(1);\n"))
+    ^ "  return Ok(0);\n}\n"
+  in
+  let started = Sys.time () in
+  let text = emitted source in
+  let took = Sys.time () -. started in
+  let last = Printf.sprintf "struct result__ii __tc_t%d" (count - 1) in
+  compares "the temporary of the last of many tries"
+    (between (words text) ~first:last ~last:"=")
+    (last ^ " =");
+  if took > 2.0 then
+    compares "the time to lower many tries"
+      (Printf.sprintf "%.1f s" took)
+      "under 2 s"
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -326,4 +350,5 @@ let () =
   many_applications ();
   many_void_fields ();
   void_fields ();
+  many_tries ();
   if !failures > 0 then exit 1

@@ -2555,6 +2555,11 @@ let try_value context span (held : try_holder) ok_field =
            "the value of try is void, which only the statement try e; \
             discards")
 
+(* The tries of a function are numbered from 0 in the order they are
+   typed, so the next number is one past that of the newest of [tries]. *)
+let next_temporary (tries : try_site list) =
+  match tries with [] -> 0 | newest :: _ -> newest.temporary + 1
+
 (* The views that the parser took at the try at [span]. *)
 let try_views context (span : Tree.span) =
   match Parser.try_views context.views span.first with
@@ -2759,7 +2764,7 @@ and try_expression context (whole : Tree.expression) operand scope =
       holder = held.holder;
       form = held.form;
       place = views.place;
-      temporary = List.length view.function_tries;
+      temporary = next_temporary view.function_tries;
       operand_instance;
       return_instance;
       ok_field = Option.map field_name ok_field;

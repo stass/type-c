@@ -496,13 +496,34 @@ let matching (tokens : Token.t array)
   | Arms arms -> match_statement tokens matching arms
   | Test test -> single_pattern_test tokens matching test
 
-(* The tokens [first] to [last] of a text with [edits] applied, as moved
-   text: every token at its own location, and the text of each edit at
-   the edit's. *)
-let moved_text (text : Reader.t) edits ~first ~last =
-  let within (edit : Emitter.edit) =
-    first <= edit.range.first && edit.range.first <= last
+(* Edits in {!Emitter.in_order}, so that those that begin within a
+   stretch of tokens are found by a search, not a scan of all of them. *)
+type ordered_edits = Emitter.edit array
+
+let order_edits edits : ordered_edits = Array.of_list (Emitter.in_order edits)
+
+(* The edits of [ordered] that begin at token [first] to [last], in
+   order. *)
+let edits_within (ordered : ordered_edits) ~first ~last =
+  (* The number of edits that begin before token [index]: those below
+     [low] do, those from [high] on do not. *)
+  let rec begun_before index low high =
+    if low = high then low
+    else
+      let middle = (low + high) / 2 in
+      if ordered.(middle).range.first < index then
+        begun_before index (middle + 1) high
+      else begun_before index low middle
   in
+  let count = Array.length ordered in
+  let start = begun_before first 0 count in
+  let stop = begun_before (last + 1) start count in
+  Array.to_list (Array.sub ordered start (stop - start))
+
+(* The tokens [first] to [last] of a text with the edits of [ordered]
+   applied, as moved text: every token at its own location, and the text
+   of each edit at the edit's. *)
+let moved_text (text : Reader.t) ordered ~first ~last =
   let written (edit : Emitter.edit) =
     match edit.text with
     | Emitter.Code { code = ""; _ } -> []
@@ -524,7 +545,7 @@ let moved_text (text : Reader.t) edits ~first ~last =
         invalid_arg "Lowering.moved_text: overlapping edits"
     | _ -> from (index + 1) edits ([ token index ] :: pieces)
   in
-  from first (Emitter.in_order (List.filter within edits)) []
+  from first (edits_within ordered ~first ~last) []
 
 (* Design 13.5: a construct that typec answers, where the backend would
    answer for the representation of a distinct type, is steered to or
@@ -734,7 +755,7 @@ let no_cleanups = []
 (* The text in front of the holder: the null statement of its labels,
    the temporary initialised with the operand, which moves with the
    edits inside it, and the error path. *)
-let front (text : Reader.t) edits ~location
+let front (text : Reader.t) ordered ~location
     (site : Typec_sema.Expressions.try_site) =
   let variant =
     Typec_sema.Encoding.variant_name (Applied site.operand_instance)
@@ -749,7 +770,8 @@ let front (text : Reader.t) edits ~location
       (temporary_name site.temporary)
   in
   let operand =
-    moved_text text edits ~first:site.operand.first ~last:site.operand.last
+    moved_text text ordered ~first:site.operand.first
+      ~last:site.operand.last
   in
   null_statement
   @ [ try_piece location declaration ]
@@ -784,15 +806,15 @@ type try_lowering = {
   closing : Emitter.edit list;
 }
 
-let lower_try (text : Reader.t) edits (site : Typec_sema.Expressions.try_site)
-    =
+let lower_try (text : Reader.t) ordered
+    (site : Typec_sema.Expressions.try_site) =
   let tokens = text.tokens in
   let { Typec_sema.Expressions.statement; labels; standing } = site.holder in
   let location = tokens.(site.try_span.first).location in
   let in_front =
     Emitter.moved
       (Reader.range tokens ~first:statement.first ~count:0)
-      (front text edits ~location site)
+      (front text ordered ~location site)
   in
   let replaced = replaced_span site in
   let value =
@@ -816,7 +838,8 @@ let lower_try (text : Reader.t) edits (site : Typec_sema.Expressions.try_site)
    the tries go first and their openings last. *)
 let with_tries text edits tries =
   let replaced = cover (List.map replaced_span tries) in
-  let lowered = List.map (lower_try text edits) tries in
+  let ordered = order_edits edits in
+  let lowered = List.map (lower_try text ordered) tries in
   List.concat_map (fun lowered -> lowered.closing) lowered
   @ List.filter (fun edit -> not (goes_with replaced edit)) edits
   @ List.concat_map (fun lowered -> lowered.opening) lowered
@@ -890,7 +913,8 @@ let instance_definition (text : Reader.t) instance ~first
       ~replaced:(List.map named reading.names)
       reading.typed
   in
-  moved_text text edits ~first ~last:reading.generic.span.last
+  moved_text text (order_edits edits) ~first
+    ~last:reading.generic.span.last
 
 (* What the texts of the placements are written from: the unit and what
    its reading found. *)
