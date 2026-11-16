@@ -798,7 +798,7 @@ applies to them:
 | `int[n]`, the length as written | `int[*]` | the length becomes a parameter of the appended function |
 | `__builtin_va_list`, desugared `struct __va_list_tag[1]` on x86-64; a `va_list` parameter `struct __va_list_tag *` | `__builtin_va_list` | the parameter's type becomes `__builtin_va_list` |
 | a function type with `__attribute__((noreturn))` after it | no attribute | the attribute is dropped |
-| `<builtin fn type>`, the type of a builtin function | the builtin | unresolved |
+| `<builtin fn type>`, the type of a builtin function | its function type, or the builtin's name when `typec` states none | unresolved |
 | a string literal that initialises an array: a `prvalue` of the array's type | an lvalue of the literal's type | unresolved, the category too |
 | a spelling over several lines, such as `typeof (({...}))` of a statement expression, or with a backslash, a brace, a semicolon or unbalanced brackets | any type | unresolved: it is not one type name on one line |
 | `bool` under `-std=c23`, `_Bool` before | `_Bool` | none: `typec` takes C11 and C17 |
