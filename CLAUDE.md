@@ -165,6 +165,9 @@ the sections relevant to a task before proposing changes to the language.
 
 * Commit each solid piece of progress. History is linear: rebase and
   fast-forward, no merge commits.
+* The full suite to run once before a commit is `tools/gate.sh`
+  (README, "Building and testing"); `dune test` alone skips the typing
+  oracle's tests.
 * Before committing, launch a code-review subagent **first**, asking it to
   enumerate bugs, design issues, and security concerns (state the security
   pass explicitly) and to check readability with specific evidence. Address
