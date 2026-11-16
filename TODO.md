@@ -692,16 +692,12 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Medium] A distinct generic's instance has no form in
   `Ctype.distinct`, so it would be encoded by its name, not by the row
   `I length G args E` of design 10.3. Add one when instances are built.
-- [Medium] Design 10.3 names an untagged type by its one typedef name,
-  but a Type-C alias of an untagged type other than a bare struct or
-  union specifier names nothing: `type e = enum { A };` and
-  `type s = const struct { int x; };` have no row, where
-  `typedef enum { A } e;` is `1e` and `typedef const struct { int x; } s;`
-  is `K1s`. Nor do `_Atomic(struct {...})` and `__typeof__(struct {...})`
-  name their struct in a typedef. One rule decides for both: a
-  declaration names an untagged type when its specifier is untagged
-  and its declarator derives nothing. Write it into design 3.5 rule 2
-  and read Type-C aliases and C typedefs by it.
+- [Medium] `Declarations` reads only a C typedef by the rule of design
+  3.5 rule 2 that names an untagged type: a Type-C alias of an untagged
+  enum or of a qualified untagged struct or union names nothing, so
+  `type e = enum { A };` and `type s = const struct { int x; };` have
+  no row where the design gives `1e` and `K1s`. Read an alias by the
+  same rule as a typedef.
 - [Low] The enumeration of a variant's tags is declared with the tag
   `N_tag`, so it is encoded `T5N_tag`, a row of a tag of its own
   specifier that design 10.3 does not give a derived enumeration. Give

@@ -521,8 +521,8 @@ id(stmt) s;                             /* e = s is an error */
    table of 10.3. Every struct, union, enum, variant and distinct type
    in it, the argument itself or one under a pointer or in a function
    type, is declared at file scope, and a struct, union or enum among
-   them has a tag or exactly one typedef name declared with it, so that
-   every type in an argument has one name (10.3). A tag that an
+   them has a tag or exactly one name that a declaration gives it, so
+   that every type in an argument has one name (10.3). A tag that an
    argument is the first to mention is declared where C declares a tag
    first mentioned at that place (C11 6.7.2.3p8), in the smallest scope
    that holds the mention. That scope is file scope only for a mention
@@ -530,6 +530,17 @@ id(stmt) s;                             /* e = s is an error */
    of a tag in an argument that stands in a parameter list or in a
    block is an error; `struct s;` at file scope before it makes the
    argument valid.
+   One rule names an untagged struct, union or enum, for a C `typedef`
+   and a Type-C alias alike: a declaration names the type when the
+   untagged specifier is the type specifier of the declaration, or of
+   the alias's definition, and the declarator derives nothing. So
+   `type e = enum { A };` names its enumeration `e`, as
+   `typedef enum { A } e;` does, and
+   `type s = const struct { int x; };` names its struct `s`, as the
+   typedef of the same text does: a qualifier beside the specifier
+   derives no type, and `s` is the qualified struct (`K1s` in 10.3). A
+   specifier inside the type name of `_Atomic( )` or `__typeof__( )` is
+   not the declaration's own, and that declaration names nothing.
    `typedef struct { int x; } a, b;` gives its struct two names, so
    neither `a` nor `b` is an argument. A declarator that derives
    another type names that type and not the struct:
@@ -618,21 +629,35 @@ id(stmt) s;                             /* e = s is an error */
 7. A generic may refer to itself through a pointer (`list(T) *tail`). An
    instance is defined only where a complete type is needed (10.3), so an
    application under a pointer defines none, not even `g(g(T)) *` inside
-   `g`. A definition that needs its own instance complete, as
-   `type s(T) = struct { s(T) inner; };` does, is an error of an
-   incomplete type (3.1 rule 2), not of this rule. The definition of an
-   instance, of a generic type or of a generic function (section 7),
-   *causes* every other instance that it needs: a type instance that it
-   holds by value or otherwise needs complete and, in the body of a
-   function instance, every function instance that the body calls or
-   names. Instantiation *nests* along a chain of instances in which each
+   `g`, unless a point there needs it complete: the element type of an
+   array is needed complete under a pointer as well, so
+   `g(int) (*p)[2]` defines `g(int)`. A definition that needs its own
+   instance complete, as `type s(T) = struct { s(T) inner; };` does, is
+   an error of an incomplete type (3.1 rule 2), not of this rule. The
+   definition of an instance, of a generic type or of a generic function
+   (section 7), *causes* each instance that it needs and is the first to
+   define: a type instance that it holds by value or otherwise needs
+   complete and, in the body of a function instance, a function instance
+   that the body calls or names. An instance that is defined already, or
+   whose definition has begun, is caused by no later need of it. The
+   needs of a definition are visited in the order of its text, and what
+   one of them causes is defined whole, with all that it causes in turn,
+   before the next is visited.
+   Instantiation *nests* along a chain of instances in which each
    causes the next, and a chain holds at most 64 instances. The
    application or call that would cause a 65th is an error, reported at
    that application or call: the message names the instance that it
    would define and cites the application or call that began the chain.
-   The limit is exact, so that every `typec` accepts or refuses a source
-   alike. `generic(T) void f(T *p) { f(&p); }` reaches it, since every
-   instance calls one of a new type.
+   The limit is exact and the order of visiting is fixed, so a chain has
+   the same length for every `typec`, and each accepts or refuses a
+   source as the others do. `generic(T) void f(T *p) { f(&p); }` reaches
+   the limit, since every instance calls one of a new type. Generic
+   functions that call each other (7.3 rule 2) do not: where `even(T)`
+   calls `odd(T)` and `odd(T)` calls `even(T)`, the instance `even__i`
+   causes `odd__i`, whose call names `even__i` again and causes nothing,
+   so the first definition breaks the cycle. The error carries a code
+   (13.6): the limit is a rule of the language, which says whether a
+   source is valid, and not a translation limit of `typec`.
 8. *Provisional (P23).* The definition of a generic, type or function
    (section 7), is moved text: lowering writes it in each instance,
    where 10.3 places it, and the resolution property of 13.5 holds for
@@ -1868,7 +1893,7 @@ same name in every translation unit:
 | Array of *T*, under a pointer | `Y` *T* *n* `E` for *n* elements and `Y` *T* `E` for an unknown size. A size that the front end does not compute (13.3, P16) is an error in an argument. |
 | `_Atomic`, `restrict`, `volatile`, `const` qualified *T* | `A` *T*, `r` *T*, `V` *T*, `K` *T*; several are written in the order `A`, `r`, `V`, `K`. `_Atomic(`*T*`)` is the atomic-qualified *T*. The qualifiers of an array type are those of its element (C11 6.7.3p9) and are encoded there. |
 | Struct, union or enum whose own specifier has the tag *name* | `T` *length* *name* |
-| Variant, distinct type, alias of an untagged struct or union, or untagged type named by its typedef | *length* *name* |
+| Variant, distinct type, or untagged struct, union or enum under the one name that a typedef or an alias gives it (3.5 rule 2) | *length* *name* |
 | Application `G(args)` of a variant or distinct generic, or of an alias generic whose definition is a struct or union specifier with a body | `I` *length* `G` *args* `E` |
 | Function type, under a pointer | `F` *return* *parameters* `E`. The parameters are `v` for an empty prototype and `N` for no prototype; `z` marks a trailing ellipsis; a parameter of array or function type is encoded as the pointer type that C adjusts it to (C11 6.7.6.3p7 and p8); top-level qualifiers of parameters are dropped, as in C's type compatibility (C11 6.7.6.3p15), which GCC and Clang both apply. Qualifiers of the return type are encoded, as they are part of the type (3.5 rule 3). |
 
@@ -1904,7 +1929,10 @@ an untagged struct or union, is encoded by its Type-C name, also where C
 text writes `struct expr` for it: the tag that 10.1 or 10.2 gives it is
 not a tag of its own specifier. So `type n = struct { int x; };` is
 encoded `1n`, as `typedef struct { int x; } n;` is, and the encoding
-depends on the type alone, not on how the type lowers.
+depends on the type alone, not on how the type lowers. The one rule
+that names an untagged type (3.5 rule 2) reads an alias as it reads a
+typedef: `type e = enum { A };` is `1e`, as `typedef enum { A } e;`
+is, and `type s = const struct { int x; };` is `K1s`.
 
 Every encoding is self-delimiting and none begins with `_`. A *length*
 is the number of bytes of its *name*, in decimal; a character outside
@@ -1945,11 +1973,12 @@ the steps.
    definition of its generic precedes (7.3 rule 2). The type instances
    that a definition needs complete are defined before it.
 
-A point *needs a type complete* where C11 requires a complete object
-type of the construct that stands there, and a Type-C construct needs
-what the C that it lowers to needs (13.5). The rule is C11's, and the
-clauses that state it are cited here, not listed for `typec` to keep in
-step with:
+A point *needs a type complete* where typing requires a complete type
+of the construct that stands there, and a Type-C construct needs what
+the C that it lowers to needs (13.5). Typing types C as Clang does
+(13.3), so the requirements are C11's and those that Clang adds for the
+GNU profile and for `_Atomic`. They are cited here, not listed for
+`typec` to keep in step with:
 
 - the element type of an array declarator, wherever the declarator
   stands, under a pointer as well (6.7.6.2p1);
@@ -1963,37 +1992,48 @@ step with:
 - the return type of a called function and the type of each argument
   (6.5.2.2p1 and p4);
 - the structure or union whose member is accessed (6.5.2.3);
-- the operand of `sizeof` and of `_Alignof` (6.5.3.4p1);
+- the operand of `sizeof` and of `_Alignof` (6.5.3.4p1), and so the
+  type name of `_Alignas`, which is `_Alignas(_Alignof(`*type-name*`))`
+  (6.7.5p5);
 - the type pointed to in pointer arithmetic, in a subscript and under
   `++` and `--` (6.5.6p2 and p3, 6.5.16.2p1, 6.5.2.1p1, 6.5.2.4,
   6.5.3.1);
 - the type of an lvalue that is converted to its value or assigned to
   (6.3.2.1p1 and p2);
 - the type name of a compound literal (6.5.2.5p1) and of an association
-  of `_Generic` (6.5.1.1p2).
+  of `_Generic` (6.5.1.1p2);
+- the type operand of `__builtin_offsetof`, which `offsetof` expands
+  to, and of `__builtin_va_arg`, which `va_arg` expands to: Apple Clang
+  21 and GCC 16 refuse an incomplete type in both;
+- the type that `_Atomic` applies to, as a specifier and as a
+  qualifier: Apple Clang 21 refuses `_Atomic(struct s) *p;` and
+  `_Atomic struct s *p;` where `struct s` is incomplete. C11 does not
+  require it (6.7.2.4p3, 6.7.3p3) and GCC 16 accepts both.
 
 `typec` decides it in one place. Typing passes every type that a
 construct requires complete, with the place of the construct, to one
 function of the front end, and nothing else defines a type instance
 (3.5 rules 5 and 7) or tells the placement rule below what is needed
-complete; no construct instantiates on its own. A requirement that
-typing does not pass to it leaves an instance declared and not defined,
+complete; no construct instantiates on its own. A requirement of
+Clang's that typing misses leaves an instance declared and not defined,
 and the backend refuses the incomplete type: the failure is a refused
 build and not a wrong program. That is a `typec` bug in text that
 typing reads. In unread text (13.5) it is a limit: a `sizeof` of a
 typedef name of an instance in an attribute argument defines nothing,
 and a declaration before it that needs the type complete does.
 
-A tentative definition needs its type complete where it stands,
-whatever its linkage. C11 requires that there of internal linkage
-(6.9.2p3) and only by the end of the translation unit of external
-linkage (6.9.2p2); GCC 16 and Apple Clang 21 accept
+A tentative definition is such a point for instances alone, whatever
+its linkage: an instance that its type needs complete is defined before
+it. It asks nothing of another type. C11 requires the type there of
+internal linkage (6.9.2p3) and only by the end of the translation unit
+of external linkage (6.9.2p2); GCC 16 and Apple Clang 21 accept
 `struct s x; struct s { int a; };` and, the second with a warning, the
-same with `static`. Type-C takes the declaration for both. Only
-lowering completes an instance, at the place that this section
-chooses, so the source has nothing to write later that would complete
-it, and waiting for the end of the unit would add a place that stands
-before no external declaration. The cost is one refusal: with
+same with `static`, and both stay valid in Type-C. An instance cannot
+wait as `struct s` does: only lowering completes it, at the place that
+this section chooses, so the source has nothing to write later that
+would complete it, and waiting for the end of the unit would add a
+place that stands before no external declaration. The cost is one
+refusal, and only the placement of an instance can fail here: with
 `type box(T) = struct { T value; };`, the declaration
 `box(struct s) b;` at file scope is an error before `struct s` is
 completed, where C accepts a hand-written `struct box_s b;` whose
@@ -2049,7 +2089,9 @@ scope before it. The tag then denotes the type of file scope also where
 the instance stands before that type's own declaration, and where a
 prototype would otherwise declare a tag of its own (C11 6.2.1p4). An
 enumeration has no such declaration in ISO C, which lowered code keeps
-to (2.4), and an untagged type that a typedef names has none at all, so
+to (2.4), and an untagged type that a typedef names in the lowered C,
+as the struct of `type s = const struct { int x; };` is (10.2), has
+none at all, so
 the placement rule leaves both to the source: an argument that holds
 one is refused unless the source declares it before the external
 declaration of the first use.
@@ -2846,20 +2888,27 @@ A token of moved text (13.5) keeps its own file and line at every place
 where lowering writes it. The definition of an instance (10.3) spans the
 lines of its generic's definition, and each of those lines is written
 under a marker for its own file and line; a name that lowering writes
-for a token, as the typedef of an argument for a type parameter, takes
-the line of that token. Text of an instance that lowering writes from
-no token of the definition, as the typedef of an argument, the forward
-declaration of a tag and the packing bracket are, carries the line of
-the application or call that puts it there, the construct that it
-lowers. The marker after the text gives the place of the external
+for a token, as the name of an argument's typedef for a type parameter,
+takes the line of that token. Text of an instance that lowering writes
+from no token of the definition, as the declaration of an argument's
+typedef, the forward declaration of a tag and the packing bracket are,
+carries the line of the application or call that puts it there, the
+construct that it lowers. The marker after the text gives the place of
+the external
 declaration that follows. Every one of these markers takes the flags 3
 and 4 of its location by the rule above, and moved text has no rule of
 its own for them. An instance of a generic that a system header defines
 is therefore exempt from warnings as the header is, wherever its first
 use stands, and an instance of the user's generic is judged as the
-user's code, also where a system header is the first to use it. Apple
-Clang 21 and GCC 16 exempt the lines under such a marker inside a
-user's file and judge the lines after the marker that returns to it.
+user's code, also where a system header is the first to use it. The
+flags are those of the location and not of the owner (2.4): Apple Clang
+21 and GCC 16 write a marker with flag 3 in place of
+`#pragma GCC system_header`, so an instance of a generic defined after
+the pragma is exempt as the rest of that header is, and one of a
+generic defined before it in the same header is judged as the user's
+code. Apple Clang 21 and GCC 16 exempt the lines under such a marker
+inside a user's file and judge the lines after the marker that returns
+to it.
 
 The front end assumes three types that no predefined macro of the
 target model (13.3) states: a plain `int` bit-field is signed, an
@@ -3205,15 +3254,27 @@ each. A third clause covers the text around it.
   type, and neither does declaring an entity again with the type it has:
   a member that names a structure of file scope reads alike where the
   structure is completed between the text and the place of writing.
-  Where an entity that the text uses is declared again between the two
-  and whether its type stays the same depends on an unknown type (13.3,
-  P21), that declaration is an error, as one that changes the type is.
+  *Provisional (P21).* Where an entity that the text uses is declared
+  again between the two and whether its type stays the same depends on
+  an unknown type (13.3), that declaration is an error, as one that
+  changes the type is.
   The check is a point that needs the answer: the backend reads the
   lowered C alone and cannot compare it with the source, and taking the
   two types for one would guess that the unknown one adds nothing, which
   13.3 does not do for a composite type either. An entity of unknown
   type that is not declared again between the two has the type it had,
-  and the text uses it as any other.
+  and the text uses it as any other. The cost is the refusal of a
+  declaration that changes nothing: a function with a SIMD type,
+  `_Float16` or a block pointer in its signature that a generic uses
+  and that is declared again, as by its definition, between the
+  generic's definition and an instance. After
+  `static __m128 dot(__m128);` and a generic that calls `dot`, the
+  definition of `dot` makes the first use of each instance that follows
+  it an error. The measurement of P21 counts these refusals and settles the
+  rule; the refusal stays if it cannot. If the corpus shows the case to
+  be common, the alternative gives an unknown type an origin, so that
+  two unknown types of equal origin compare equal and such a
+  declaration is seen to keep the type.
 - Every other name that lowering writes there is its own: the name of
   what a type application, a universe name, a constructor or a type
   parameter denotes (10.1, 10.3), or a name that it invents. Each is
@@ -3269,7 +3330,12 @@ wherever a rule below looks at the identifiers of a pragma: in moved
 text and in Type-C text. Nothing says which names a backend takes from
 such a line (for `#pragma weak f '`, GCC 16 reports an error and Apple
 Clang 21 warns and ignores the pragma), so no reading of it would keep
-the property. In C text that does not move `typec` looks at the
+the property. The cost is the refusal of a line that both backends
+accept: `#pragma mark - Don't edit` in Type-C text is an error under
+GCC 16, whose `-E` keeps the line and warns of the `'`, and the mark
+has to be reworded. Apple Clang 21's `-E` drops a `#pragma mark` line,
+so `typec` does not read it there. In C text that does not move `typec`
+looks at the
 identifiers of no pragma and passes every line on whole: GCC keeps some
 pragmas verbatim in its `-E` output, the free text of a `#pragma mark`
 line among them. Three rules carry the property into unread text.
@@ -3400,8 +3466,11 @@ structures of the packing probe that ends one (10.3), one of each.
   catalogue of diagnostics; a code is never renumbered or reused.
 - A refusal of C text carries no code: it states no rule of this design,
   and C11, the GCC manual or the backend's own diagnostic names what is
-  wrong. A translation limit of `typec` (C11 5.2.4.1), such as a bound
-  on nesting, is such a refusal. A limit of the GNU profile, a construct
+  wrong. A translation limit of `typec` (C11 5.2.4.1), such as the
+  parser's bound on the nesting of brackets, is such a refusal. The
+  limit on nested instantiation is none: 3.5 rule 7 states it as a rule
+  of Type-C, so it carries a code. A limit of the GNU profile, a
+  construct
   outside the profile or one that needs what `typec` does not compute,
   is a refusal of the accepted dialect by this design rather than by C,
   so it carries a code. Every refusal of the front end is either coded
@@ -3471,7 +3540,7 @@ numbers refer to the implementation plan.
 | P18 | Lifetimes by homogeneous regions (11.3) | Stage 6: a formal model, then a prototype | No lifetime tier |
 | P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition | Own front end |
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
-| P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties | Unknown types stay |
+| P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties, the declarations that the resolution check of 13.5 refuses for one among them | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
 | P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, the refusals that 13.5 makes for an identifier in an attribute argument or a `#pragma` line of a definition among them. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
 | P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
