@@ -164,6 +164,12 @@ let rows =
          call that breaks the rule of a builtin, or one that needs a type, \
          a value or a declaration that typec does not compute; the text \
          names the clause." };
+    Live { name = "System_body_text"; code = 32;
+      clause = Some "design 13.3";
+      meaning =
+        "A token other than C text of a system header in a function \
+         body whose [{] is C text of a system header, which is passed \
+         through unread." };
   ]
 
 let () =

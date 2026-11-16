@@ -244,16 +244,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   the backend, so under GCC `[[clang::overloadable]]` makes an overload
   GCC ignores, as `__attribute__((overloadable))` already does. Ask the
   backend (`__has_c_attribute`) once, in `Target`, if this matters.
-- [Medium] `function_body` (`src/syntax/parser.ml`) skips a body where
-  `owner.system_header` holds and asks nothing else, so the bodies of a
-  `.tci` found through `-isystem` or a default system directory are
-  skipped too, and a `match` or a constructor there reaches the backend
-  unlowered. Skip a body only where its `{` is C text of a system
-  header, and refuse any other token in it (design 13.3): the reason
-  for the skip, that the body is written for its own compiler, holds
-  for that text alone. The Type-C constructs that C text itself
-  writes in a skipped body are the item on C text under "Design
-  questions without a gate yet".
 - [Medium] Design section 6 rule 1 refuses `_Defer` among the tokens
   that typing does not read, through one scan over every such token.
   No such scan exists: `skip_balanced` (`src/syntax/parser.ml`) passes
@@ -264,7 +254,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   build the one scan over the tokens that typing does not read (it
   also refuses the word `defer` in an attribute argument of Type-C
   text, design section 6 rule 1), with
-  no check of its own for any kind of such text.
+  no check of its own for any kind of such text. The scan also takes
+  over the text rules of a block literal (`refuse_type_c_text_in_block`)
+  and of a skipped function body (`skipped_body`), which run as checks of
+  their own (design 13.3).
 
 ## Expression typing
 

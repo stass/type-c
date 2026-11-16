@@ -401,16 +401,26 @@ let quoted spelling =
 let is_type_c_text_at state index =
   File.is_type_c_text state.reader.tokens.(index).owner
 
+(* Whether the token [index] of [Reader.t.tokens] is C text of a system
+   header, the one text that is written for its own compiler. *)
+let is_system_c_text_at state index =
+  let owner = state.reader.tokens.(index).owner in
+  owner.system_header && not (File.is_type_c_text owner)
+
+(* The first token in [span], an index of [Reader.t.tokens], for which
+   [holds] is true. Every token counts, a [#pragma] line's among them, as
+   unread text is emitted whole (design 13.3). *)
+let find_in_span (span : span) holds =
+  Seq.init (span.last - span.first + 1) (fun i -> span.first + i)
+  |> Seq.find holds
+
 (* Clang's blocks are C text only (design 13.3): typing does not read the
    body of a block literal, so a Type-C construct there would reach the
    backend unlowered. The literal that begins at [start] and ends at the
    last token read is refused at its first token of Type-C text, whether
    Type-C text writes it or an include puts Type-C text inside it. *)
 let refuse_type_c_text_in_block state start =
-  let read =
-    Seq.init (state.position - start) (fun i -> first_token state (start + i))
-  in
-  match Seq.find (is_type_c_text_at state) read with
+  match find_in_span (span_from state start) (is_type_c_text_at state) with
   | Some index ->
       fail_at_token state index
         (Rule.message Block_literal_text
@@ -3391,12 +3401,28 @@ and block_declaration state =
 
 (* External declarations (C11 6.9). *)
 
-(* At the [{]. A body that a system header holds is not parsed (design
-   13.3): it is written for its own compiler and may use any of its
-   extensions. *)
+(* At the [{] of a body that C text of a system header opens. The body is
+   passed through unread, so every token of it must be such text: the
+   reason for the skip holds for that text alone (design 13.3). *)
+let skipped_body state =
+  let body = skip_balanced state "`}` to end the function body" in
+  let is_other_text index = not (is_system_c_text_at state index) in
+  match find_in_span body is_other_text with
+  | Some index ->
+      fail_at_token state index
+        (Rule.message System_body_text
+           "a function body that C text of a system header opens is \
+            passed through unread, so it holds C text of system headers \
+            only")
+  | None -> Skipped body
+
+(* At the [{]. A body whose [{] is C text of a system header is not parsed
+   (design 13.3): it is written for its own compiler and may use any of
+   its extensions. Any other body is read, each token as the text it
+   is. *)
 let function_body state =
-  if (token_at state state.position).owner.system_header then
-    Skipped (skip_balanced state "`}` to end the function body")
+  if is_system_c_text_at state (first_token state state.position) then
+    skipped_body state
   else Parsed (as_function state (fun () -> compound_statement state))
 
 (* The declaration list of an old-style definition, up to the [{]. GCC
