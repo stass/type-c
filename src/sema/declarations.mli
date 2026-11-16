@@ -81,12 +81,14 @@ type placement = {
 (** The definition of an instance as lowering writes it (design 10.3):
     the declaration of the [generic] whose definition it is, the name
     that lowering writes for the tokens of each span in it, a use of a
-    type parameter or an application, and its constructs [typed] with
-    the instance's arguments. Spans may nest, as an application's
-    arguments do. *)
+    type parameter or an application, the spans of the fields that do
+    not exist in it because their type is void (design 3.5 rule 6), and
+    its constructs [typed] with the instance's arguments. Spans of names
+    may nest, as an application's arguments do. *)
 type instance_text = {
   generic : Tree.type_declaration;
   names : (Tree.span * string) list;
+  void_field_spans : Tree.span list;
   typed : Expressions.t;
 }
 

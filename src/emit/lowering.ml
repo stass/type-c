@@ -142,12 +142,16 @@ let record_alias tokens ~location ~name (declaration : Tree.type_declaration)
       replace_head ~tag:name @ Option.to_list (Option.map insert_tag members)
 
 (* Variants (design 10.1). The tokens of each field are kept, so the
-   struct of a constructor's fields keeps their lines. *)
+   struct of a constructor's fields keeps their lines. In an instance, a
+   field in [void_field_spans] does not exist (design 3.5 rule 6): its
+   tokens go as a range that lowering replaces whole (see
+   {!text_edits}), and the edits here leave it out of its struct. *)
 
-let has_payload constructors =
-  List.exists
-    (fun (constructor : Tree.constructor) -> constructor.node.fields <> [])
-    constructors
+let is_void_field void_field_spans (field : Tree.field) =
+  List.mem field.span void_field_spans
+
+let has_fields void_field_spans (constructor : Tree.constructor) =
+  not (List.for_all (is_void_field void_field_spans) constructor.node.fields)
 
 (* The forward declaration of a variant: the structure and typedef,
    which the incomplete variant declares already where the variant
@@ -159,20 +163,19 @@ let variant_forward ~completes (variant : Spelling.c_name) =
 (* What comes between the forward declaration and the constructors: the
    enumeration of the tags, numbered from 0 in order (rule 1), and the
    structure up to its union where it has one (rule 3). *)
-let variant_head (variant : Spelling.c_name) constructors =
+let variant_head (variant : Spelling.c_name) ~has_union constructors =
   let name = (variant :> string) in
   let enumerator (constructor : Tree.constructor) =
     Tree.enumerator_name ~variant constructor.node.name.node
   in
   let tag_enum = "enum " ^ Tree.enum_tag_name variant in
-  let union = if has_payload constructors then " union {" else "" in
+  let union = if has_union then " union {" else "" in
   Printf.sprintf "%s { %s }; struct %s { %s %s;%s" tag_enum
     (String.concat ", " (List.map enumerator constructors))
     name tag_enum Tree.tag_member union
 
-let variant_tail constructors =
-  if has_payload constructors then Printf.sprintf "} %s; };" Tree.union_member
-  else "};"
+let variant_tail ~has_union =
+  if has_union then Printf.sprintf "} %s; };" Tree.union_member else "};"
 
 (* The tokens at [indexes], the first of which is [first], replaced by
    [text] at the location of [first]. *)
@@ -181,45 +184,53 @@ let replace_at (tokens : Token.t array) ~first text indexes =
 
 (* A constructor with fields becomes the struct of them that the union
    holds, named after it; [| C (] opens it, the [,] after each field
-   ends that field, and the [)] closes the struct. One without fields
-   becomes nothing (rule 3). *)
-let constructor_edits tokens (constructor : Tree.constructor) =
+   ends that field, and the [)] closes the struct. The [,] or [)] after
+   a void field ends no field, so it becomes nothing or only the close.
+   A constructor without fields becomes nothing (rule 3), and so do its
+   parentheses and commas where every field is void. *)
+let constructor_edits tokens ~void_field_spans
+    (constructor : Tree.constructor) =
   let { Tree.name; fields } = constructor.node in
   let bar = constructor.span.first and close = constructor.span.last in
+  let has_fields = has_fields void_field_spans constructor in
   let field_end (field : Tree.field) =
     let after = grammar_token_after tokens field.span.last in
-    if after = close then
-      replace_at tokens ~first:after
-        (Printf.sprintf "; } %s;" (name.node :> string))
-        []
-    else replace_at tokens ~first:after ";" []
+    let ends = if is_void_field void_field_spans field then "" else ";" in
+    let closes =
+      if after = close && has_fields then
+        Printf.sprintf " } %s;" (name.node :> string)
+      else ""
+    in
+    replace_at tokens ~first:after (ends ^ closes) []
   in
   match fields with
   | [] -> replace_at tokens ~first:bar "" [ name.span.first ]
   | _ :: _ ->
       let open_paren = grammar_token_after tokens name.span.first in
-      replace_at tokens ~first:bar "struct {" [ name.span.first; open_paren ]
+      let opens = if has_fields then "struct {" else "" in
+      replace_at tokens ~first:bar opens [ name.span.first; open_paren ]
       @ List.concat_map field_end fields
 
 (* [type N = ... ;]: the forward declaration replaces [type], the head
    [N =] and [private] where it follows, and the tail the [;]. *)
-let variant tokens ~location ~lowered (declaration : Tree.type_declaration)
-    constructors =
+let variant tokens ~location ~lowered ~void_field_spans
+    (declaration : Tree.type_declaration) constructors =
   let completes = declaration.node.declared.earlier <> None in
+  let has_union = List.exists (has_fields void_field_spans) constructors in
   let first_bar = (List.hd constructors : Tree.constructor).span.first in
   let forward_tokens, forward_end = forward_declaration tokens declaration in
   replace tokens ~location (variant_forward ~completes lowered) forward_tokens
   @ replace tokens ~location
-      (variant_head lowered constructors)
+      (variant_head lowered ~has_union constructors)
       (grammar_tokens tokens forward_end (first_bar - 1))
-  @ List.concat_map (constructor_edits tokens) constructors
-  @ replace_at tokens ~first:declaration.span.last (variant_tail constructors)
+  @ List.concat_map (constructor_edits tokens ~void_field_spans) constructors
+  @ replace_at tokens ~first:declaration.span.last (variant_tail ~has_union)
       []
 
 (* The type declaration under the name [lowered], which is its own or,
    for the definition of a generic, that of an instance (design 10.3). *)
 let type_declaration (tokens : Token.t array) ~(lowered : Spelling.c_name)
-    (declaration : Tree.type_declaration) =
+    ~void_field_spans (declaration : Tree.type_declaration) =
   let name = (lowered :> string) in
   let location = tokens.(declaration.span.first).location in
   match declaration.node.definition with
@@ -234,7 +245,8 @@ let type_declaration (tokens : Token.t array) ~(lowered : Spelling.c_name)
   | Record_alias record ->
       record_alias tokens ~location ~name declaration record
   | Variant { constructors; _ } ->
-      variant tokens ~location ~lowered declaration constructors
+      variant tokens ~location ~lowered ~void_field_spans declaration
+        constructors
 
 (* Design 13.5: a constructor expression becomes the compound literal
    [((struct N){ .tag = N_C, .u.C = { a, b } })], or inside an
@@ -598,20 +610,25 @@ let dropped_edits tokens { span; text } =
    application by the name of its instance, unless the head of a
    construction replaces them; with those of [answered], the edits
    inside one go, and the range's own edits replace them. *)
-let text_edits tokens ~declarations ~replaced typed =
+let text_edits tokens ~declarations ~void_field_spans ~replaced typed =
   let answered = Typec_sema.Expressions.answered typed in
   let constructions = Typec_sema.Expressions.constructions typed in
   let heads = cover (List.map (construction_head tokens) constructions) in
   let in_head { span; _ } = covers heads ~first:span.first ~last:span.last in
+  (* An insertion before the first token of a void field would survive
+     its removal ({!goes_with}); none stands there, since a field begins
+     with a specifier, before which no lowering inserts. *)
+  let removed span = { span; text = "" } in
   let dropped =
     outermost
       (List.concat_map dropped_ranges answered
+      @ List.map removed void_field_spans
       @ List.filter (fun range -> not (in_head range)) replaced)
   in
   let dropped_spans = cover (List.map (fun range -> range.span) dropped) in
   let kept edit = not (goes_with dropped_spans edit) in
   let declaration (lowered, declaration) =
-    type_declaration tokens ~lowered declaration
+    type_declaration tokens ~lowered ~void_field_spans declaration
   in
   let lowered =
     List.concat_map declaration declarations
@@ -666,6 +683,7 @@ let instance_definition (text : Reader.t) instance ~first
   let edits =
     text_edits text.tokens
       ~declarations:[ (lowered, reading.generic) ]
+      ~void_field_spans:reading.void_field_spans
       ~replaced:(List.map named reading.names)
       reading.typed
   in
@@ -767,7 +785,7 @@ let unit_edits (text : Reader.t) declarations =
     List.partition_map split
       (Typec_sema.Declarations.type_declarations declarations)
   in
-  text_edits tokens ~declarations:own
+  text_edits tokens ~declarations:own ~void_field_spans:[]
     ~replaced:
       (generics
       @ List.map named (Typec_sema.Declarations.instance_names declarations))

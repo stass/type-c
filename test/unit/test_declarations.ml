@@ -2256,10 +2256,54 @@ let generic_instances () =
   accepts ~file (member 64);
   rejects ~file (member 65) "after a chain of 64";
   accepts ~file (box ^ " " ^ boxed 65 ^ " *deep;");
-  (* A field whose type becomes void is package 2.3. *)
-  rejects ~file "type opt(T) = | No | Yes(T v); struct w { opt(void) o; };"
-    "work package 2.3";
   accepts ~file "type ptr(T) = T *; ptr(void) v;"
+
+(* Design 3.5 rule 6: a field whose type becomes void in an instance,
+   by whatever route, does not exist there, so its constructor takes no
+   argument for it. *)
+let void_fields () =
+  let file = "in.tc" in
+  let opt = "type opt(T) = | No | Yes(T v); " in
+  let two = "type two(A, B) = | Two(A a, B b) | One(A only); " in
+  accepts ~file (opt ^ "struct w { opt(void) o; } w = { Yes };");
+  accepts ~file (opt ^ "opt(const void) c = opt(const void).Yes;");
+  accepts ~file (opt ^ "typedef void V; opt(V) o = Yes;");
+  accepts ~file (opt ^ "opt(volatile void) o = Yes;");
+  accepts ~file
+    (opt ^ "type w(T) = | W(opt(T) o, T t); w(void) v = W(Yes);");
+  accepts ~file
+    "type l(T) = | Nil | Cons(T head, l(T) *tail); l(void) n = Nil, \
+     c = Cons(&n);";
+  accepts ~file
+    (opt ^ "type h(T) = | H(opt(void) x, T t); h(int) a = H(Yes, 1); \
+            opt(void) b = Yes;");
+  accepts ~file (opt ^ "type id(T) = T; opt(id(void)) o = Yes;");
+  accepts ~file (two ^ "two(void, int) t = Two(1), u = One;");
+  accepts ~file (two ^ "two(int, void) t = Two(1), u = One(2);");
+  accepts ~file (two ^ "two(void, void) t = Two, u = One;");
+  rejects ~file (opt ^ "opt(void) o = Yes(1);") "the type void";
+  rejects ~file (two ^ "two(void, int) t = Two(1, 2);") "the type void";
+  rejects ~file (two ^ "two(void, int) t = Two;") "the type void";
+  rejects ~file
+    (two ^ "int f(two(void, int) t) { match (t) { case Two: return 0; \
+            case One: return 1; } }")
+    "the type void";
+  accepts ~file
+    (opt ^ "int f(opt(void) o) { match (o) { case No: return 0; \
+            case Yes: return 1; } }");
+  rejects ~file
+    (opt ^ "int f(opt(void) o) { match (o) { case No: return 0; \
+            case Yes(x): return 1; } }")
+    "the type void";
+  accepts ~file
+    (opt ^ "int f(opt(void) o) { if (case Yes = o) return 1; return 0; }");
+  (* Only the field's own type is removed: a pointer to void stays, an
+     array of void is an error, and void written in the definition is
+     refused when the definition is checked. *)
+  accepts ~file
+    "type p(T) = | P(T *p); p(void) v = P(0);";
+  rejects ~file "type a(T) = | A(T a[2]); a(void) v;" "array";
+  rejects ~file "type d(T) = | D(void x, T y);" "complete object type"
 
 (* An instance of a generic variant is a variant (design 3.5 rule 3):
    its constructors build it, qualified or against a target type, and
@@ -2853,6 +2897,7 @@ let () =
   static_initialisers ();
   generic_identity ();
   generic_instances ();
+  void_fields ();
   generic_placement ();
   placement_indexes ();
   generic_variants ();

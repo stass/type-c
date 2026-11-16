@@ -103,6 +103,7 @@ type record_definition = {
 type constructor = {
   constructor_name : Typec_syntax.Spelling.constructor;
   fields : member list;
+  void_fields : string list;
 }
 
 (* An enumeration with a fixed type is complete from the first

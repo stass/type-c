@@ -368,10 +368,13 @@ val mentions_opaque : t -> bool
     that [t] is. *)
 
 (** A constructor of a variant: its name and its fields in order, whose
-    position in the list of its variant is its tag (design 10.1 rule 1). *)
+    position in the list of its variant is its tag (design 10.1 rule 1).
+    In an instance, a field whose type is void does not exist (design 3.5
+    rule 6); [void_fields] names those, in order, for messages. *)
 type constructor = {
   constructor_name : Typec_syntax.Spelling.constructor;
   fields : member list;
+  void_fields : string list;
 }
 
 val declare_enum : tags -> string option -> at_file_scope:bool -> enum_tag

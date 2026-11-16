@@ -646,7 +646,21 @@ id(stmt) s;                             /* e = s is an error */
 6. *Provisional (P7).* `void` may be an argument. A variant field whose type
    becomes `void` does not exist: its constructor takes no argument for it
    and a pattern has no sub-pattern for it. This makes `result(void, E)` the
-   type of a fallible function that produces no value.
+   type of a fallible function that produces no value. The field's type
+   is what substitution makes of it, whatever route leads to `void`: the
+   parameter itself, a typedef of `void`, an alias generic or a qualified
+   `void`, since qualifiers do not change that the type is `void`. Only
+   the field's own type counts: `T *p` is a pointer to `void`. Only an
+   argument removes a field: `void` written as a field type in the
+   definition is refused when the definition is checked (rule 4), as it
+   is no value type (3.2 rule 4). A constructor whose fields are all
+   removed has no fields: it is written without parentheses (3.3), as
+   in `return Ok;` for `result(void, E)`, its pattern has no field list
+   (4.1 rule 3), and it has no member in the union of 10.1, so a
+   variant whose fields are all removed has no union (10.1 rule 3).
+   The struct of a constructor that keeps some fields holds those in
+   order. An error about the arguments or sub-patterns of a
+   constructor names the fields that `void` removed.
 7. A generic may refer to itself through a pointer (`list(T) *tail`). An
    instance is defined only where a complete type is needed (10.3), so an
    application under a pointer defines none, not even `g(g(T)) *` inside

@@ -188,6 +188,66 @@ let many_applications () =
       (Printf.sprintf "%.1f s" took)
       "under 2 s"
 
+(* The words of [text] from the first [first] to the [last] after it,
+   inclusive; empty where either is missing. *)
+let between text ~first ~last =
+  let find part from =
+    let length = String.length part in
+    let rec at index =
+      if index + length > String.length text then None
+      else if String.sub text index length = part then Some index
+      else at (index + 1)
+    in
+    at from
+  in
+  match find first 0 with
+  | None -> ""
+  | Some start -> (
+      match find last start with
+      | None -> ""
+      | Some stop -> String.sub text start (stop + String.length last - start))
+
+(* Design 3.5 rule 6: an instance leaves out the text of each field
+   whose type is void, with the comma after it; a constructor left
+   without fields has no payload, and a variant left without payloads
+   no union. [lowers_instance] compares the definition of the instance
+   [name] that [source] uses, from its enumeration of tags to its end. *)
+let lowers_instance case source name expected =
+  let text = words (emitted source) in
+  compares case
+    (between text ~first:("enum " ^ name ^ "_tag") ~last:"#pragma pack(pop)")
+    (expected ^ " #pragma pack(pop)")
+
+let void_fields () =
+  let two = "type two(A, B) = | Two(A a, B b) | One(A only);\n" in
+  lowers_instance "the first field void" (two ^ "two(void, long) t = One;")
+    "two__vl"
+    "enum two__vl_tag { two__vl_Two, two__vl_One }; struct two__vl { enum \
+     two__vl_tag tag; union { struct { __tc_arg__l b ; } Two; } u; };";
+  lowers_instance "the last field void" (two ^ "two(long, void) t = One(1);")
+    "two__lv"
+    "enum two__lv_tag { two__lv_Two, two__lv_One }; struct two__lv { enum \
+     two__lv_tag tag; union { struct { __tc_arg__l a ; } Two; struct { \
+     __tc_arg__l only ; } One; } u; };";
+  lowers_instance "every field void" (two ^ "two(void, void) t = Two;")
+    "two__vv"
+    "enum two__vv_tag { two__vv_Two, two__vv_One }; struct two__vv { enum \
+     two__vv_tag tag; };";
+  (* The name that an application in a removed field lowers to goes
+     with the field. *)
+  lowers_instance "the middle field void"
+    "type id(T) = T;\ntype three(A) = | Three(int a, id(A) b, long c);\n\
+     three(void) t = Three(1, 2);"
+    "three__v"
+    "enum three__v_tag { three__v_Three }; struct three__v { enum \
+     three__v_tag tag; union { struct { int a ; long c ; } Three; } u; };";
+  compares "constructors of an instance with void fields"
+    (between
+       (words (emitted (two ^ "two(void, long) t = Two(1), u = One;")))
+       ~first:"two__vl t =" ~last:"} ;")
+    "two__vl t = { .tag = two__vl_Two, .u.Two = { 1 } } , u = { .tag = \
+     two__vl_One } ;"
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -243,4 +303,5 @@ let () =
   constructors ();
   anchors ();
   many_applications ();
+  void_fields ();
   if !failures > 0 then exit 1

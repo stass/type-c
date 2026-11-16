@@ -38,6 +38,7 @@ type placement = {
 type instance_text = {
   generic : Tree.type_declaration;
   names : (Tree.span * string) list;
+  void_field_spans : Tree.span list;
   typed : Expressions.t;
 }
 
@@ -184,13 +185,16 @@ and nesting = { depth : int; began : Tree.span; defining : Ctype.instance }
    or an instance read within one. Where it does, [parameters] holds
    the name of the typedef of each type parameter's argument, by the
    parameter's reference, and [names] collects the name that lowering
-   writes for each use of a type parameter and each application. *)
+   writes for each use of a type parameter and each application.
+   [void_field_spans] are the fields that a void argument removes (design
+   3.5 rule 6). *)
 and moved = {
   mutable uses : Resolution.name list;
   mutable declares : Resolution.own list;
   written : bool;
   parameters : (Tree.reference * string) list;
   mutable names : (Tree.span * string) list;
+  mutable void_field_spans : Tree.span list;
 }
 
 (* What the placement of instances (design 10.3) asks of the external
@@ -2403,16 +2407,17 @@ and declare_tag_enumerators state span variant constructors =
 (* A constructor and its fields, with the span that a payload made of
    them is reported at. *)
 and read_constructor state (constructor : Tree.constructor) =
-  let fields =
-    List.map (read_field state constructor) constructor.node.fields
+  let fields, void_fields =
+    List.partition_map (read_field state constructor) constructor.node.fields
   in
-  ({ Ctype.constructor_name = constructor.node.name.node; fields },
+  ({ Ctype.constructor_name = constructor.node.name.node; fields;
+     void_fields },
    constructor.span)
 
 (* The member of the union for a constructor with fields: the struct of
    its fields in order, named after the constructor. *)
 and constructor_payload state
-    (({ constructor_name; fields } : Ctype.constructor), span) =
+    (({ constructor_name; fields; _ } : Ctype.constructor), span) =
   match fields with
   | [] -> None
   | _ :: _ ->
@@ -2420,32 +2425,55 @@ and constructor_payload state
       Some
         (variant_member (constructor_name :> string) (Ctype.record payload))
 
+(* A field is the member of its payload, or, where its type is void in
+   an instance, the name of a field that does not exist. *)
 and read_field state constructor (field : Tree.field) =
   let specified = read_specifiers state field.node.specifiers in
   let derived =
     declare_type state ~parameter:false specified (Some field.node.declarator)
   in
-  check_field_type state constructor field derived;
-  { Ctype.member_name = derived.name; member_type = derived.declared_type;
-    bit_field_width = None }
+  let name = Option.value derived.name ~default:"" in
+  let subject =
+    Printf.sprintf "the field %s of %s" (quote name)
+      (quote (constructor.node.name.node :> string))
+  in
+  if is_void_in_instance state field subject derived then begin
+    note_void_field state field.span;
+    Either.Right name
+  end
+  else begin
+    check_field_type state field subject derived;
+    Either.Left
+      { Ctype.member_name = derived.name; member_type = derived.declared_type;
+        bit_field_width = None }
+  end
+
+(* Design 3.5 rule 6: a field whose type is void does not exist in an
+   instance. The definition check refuses void written as a field type,
+   so here only a type argument makes one void. *)
+and is_void_in_instance state (field : Tree.field) subject (derived : derived)
+    =
+  in_instance_definition state
+  &&
+  match Ctype.is_void derived.declared_type with
+  | Answer is_void -> is_void
+  (* An argument that holds an unknown type is refused at its
+     application (rule 2), so only a change there reaches this. *)
+  | Depends_on unknown ->
+      fail_needing state field.span ("whether " ^ subject ^ " is void")
+        unknown
+
+(* Lowering leaves out the text of a field that does not exist. An
+   instance's definition is read only through {!read_definition}, which
+   sets [moved]. *)
+and note_void_field state span =
+  match state.moved with
+  | Some moved -> moved.void_field_spans <- span :: moved.void_field_spans
+  | None -> invalid_arg "Declarations.note_void_field: no reading"
 
 (* A field type is a value type (design 3.2 rule 4), so a variant holds
    itself only through a pointer (rule 5). *)
-and check_field_type state (constructor : Tree.constructor)
-    (field : Tree.field) (derived : derived) =
-  let subject =
-    Printf.sprintf "the field %s of %s"
-      (quote (Option.value derived.name ~default:""))
-      (quote (constructor.node.name.node :> string))
-  in
-  if in_instance_definition state
-     && Ctype.is_void derived.declared_type = Answer true
-  then
-    fail state field.span
-      (Rule.message Not_implemented
-         (subject
-         ^ " has the type void in an instance, which is not implemented \
-            yet (design 3.5 rule 6; work package 2.3)"));
+and check_field_type state (field : Tree.field) subject (derived : derived) =
   needs_complete state derived.declared_type;
   match Value_type.problem state.tags derived.declared_type with
   | Answer None -> ()
@@ -2884,7 +2912,8 @@ and read_definition :
   let outer = state.moved in
   let moved =
     { uses = []; declares = []; written = Option.is_some lowered;
-      parameters = argument_names declaration lowered; names = [] }
+      parameters = argument_names declaration lowered; names = [];
+      void_field_spans = [] }
   in
   state.moved <- Some moved;
   let read_and_check () =
@@ -2911,7 +2940,10 @@ and argument_names (declaration : Tree.type_declaration) lowered =
   | None -> []
 
 and note_instance_text state generic moved typed instance =
-  let text = { generic; names = moved.names; typed } in
+  let text =
+    { generic; names = moved.names;
+      void_field_spans = moved.void_field_spans; typed }
+  in
   let placements = state.placements in
   state.placements <-
     { placements with

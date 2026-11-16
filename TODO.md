@@ -802,6 +802,21 @@ is [type-c-language-design.md](type-c-language-design.md).
   a scope without a place of its own would mark a tag in its body as at
   file scope. Have the parser record the kind of scope in the tag's
   binding.
+- [Low] Which constructors have a payload and whether a variant has a
+  union (design 10.1 rule 3) is decided twice: sema reads it from
+  `Ctype.constructor.fields`, and lowering derives it again from the
+  tree's fields less an instance's void fields (`Lowering.has_fields`).
+  Have the reading record the decision once, for lowering to apply.
+- [Low] `_Atomic(void)` is accepted, as in `_Atomic(void) *p;` or the
+  argument of `ptr(_Atomic(void))` and `opt(_Atomic(void))`, and the
+  backend refuses the typedef that typec writes for it: Clang refuses
+  `_Atomic` of an incomplete type. Check what C11 6.7.2.4 and GCC
+  allow, and refuse the same where the type is built.
+- [Low] Names used only inside a field that void removes from an
+  instance (design 3.5 rule 6) still take part in the resolution check
+  (13.5) and still cause instances and argument typedefs, although
+  lowering writes none of that text. This refuses or writes more than
+  needed, never less.
 
 ## Matching
 

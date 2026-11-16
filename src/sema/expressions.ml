@@ -2158,6 +2158,18 @@ let find_constructor constructors name =
 
 let constructor_message text = Rule.message Constructor_expression text
 
+(* For each message about the fields of [constructor]: the fields that
+   a void type argument removed from it (design 3.5 rule 6), which the
+   source still spells. *)
+let void_fields_note (constructor : Ctype.constructor) =
+  match constructor.void_fields with
+  | [] -> ""
+  | names ->
+      Printf.sprintf
+        " (in this instance the type void removes the field(s) %s; design \
+         3.5 rule 6)"
+        (String.concat ", " (List.map quote names))
+
 (* The variant of [t] that names its constructors, unqualified. *)
 let named_in t constructors name =
   match (Ctype.as_variant t, find_constructor constructors name) with
@@ -2406,7 +2418,10 @@ and construct context (whole : Tree.expression) named arguments =
   refuse_private_creation context whole.span named.variant_type ~described;
   let name = quote (named.chosen.constructor_name :> string) in
   let fields = named.chosen.fields in
-  let refuse text = context.fail whole.span (constructor_message text) in
+  let refuse text =
+    context.fail whole.span
+      (constructor_message (text ^ void_fields_note named.chosen))
+  in
   (match (fields, arguments) with
   | [], None -> ()
   | [], Some _ ->
@@ -3203,22 +3218,24 @@ and sub_pattern_fields context ~site label (pattern : Tree.pattern)
     (constructor : Ctype.constructor) =
   let name = quote (constructor.constructor_name :> string) in
   let fields = List.length constructor.fields in
+  let refuse text =
+    context.fail label
+      (Rule.message Pattern (text ^ void_fields_note constructor))
+  in
   match (pattern.sub_patterns, site) with
   | None, Match_label when fields > 0 ->
-      context.fail label
-        (Rule.message Pattern
-           (Printf.sprintf
-              "the case label %s omits the field list of a constructor \
-               with %d field(s), which only a single-pattern test may"
-              name fields))
+      refuse
+        (Printf.sprintf
+           "the case label %s omits the field list of a constructor with \
+            %d field(s), which only a single-pattern test may"
+           name fields)
   | None, _ -> []
   | Some sub_patterns, _ when List.length sub_patterns <> fields ->
-      context.fail label
-        (Rule.message Pattern
-           (Printf.sprintf
-              "the pattern %s has %d sub-pattern(s), and the constructor \
-               has %d field(s)"
-              name (List.length sub_patterns) fields))
+      refuse
+        (Printf.sprintf
+           "the pattern %s has %d sub-pattern(s), and the constructor has \
+            %d field(s)"
+           name (List.length sub_patterns) fields)
   | Some sub_patterns, _ -> List.combine sub_patterns constructor.fields
 
 (* Each label of [arm] with its pattern checked against the constructor
