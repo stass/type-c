@@ -35,7 +35,7 @@ let rows =
          scope or named in Type-C text; or a name that begins with a \
          generic's name and `__`, which the generic claims for its \
          instances (design 10.3), declared where the generic is in \
-         scope." };
+         scope or spelled in unread text there (design 13.5)." };
     Live { name = "Duplicate_constructor"; code = 5;
       clause = Some "design 3.2 rule 2";
       meaning =
@@ -269,6 +269,13 @@ let rows =
          by a cast to [void]: as an expression statement, the left \
          operand of [,], or the first or third clause of [for]. An \
          assignment discards none, having stored it." };
+    Live { name = "Unread_word"; code = 49;
+      clause = Some "design 6 rule 13, 5.1 rule 3";
+      meaning =
+        "[_Defer] in unread text (design 13.5), or the word [defer] or \
+         [try] in the arguments of an attribute of Type-C text where no \
+         declaration hides it: typing does not read the text, so the \
+         construct would reach the backend as written." };
   ]
 
 let () =

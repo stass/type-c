@@ -1303,7 +1303,14 @@ result(uint32_t, parse_error) read_number(reader *r)
    not say which of the other operands have been evaluated. None
    stands inside a block literal either: a block literal holds no
    Type-C text (13.3, P24), and `try` is a word in Type-C text alone
-   (2.3).
+   (2.3). Nor does one stand in an attribute argument of Type-C text,
+   which typing does not read (13.5): the one scan of unread text
+   (section 6 rule 13) refuses the word there where no declaration hides
+   it, as it refuses `defer`. The scan looks for no word in a `#pragma`
+   line, so a `try` in one, as in `#pragma omp parallel if(try f())`, is a
+   word of the pragma: it reaches the backend as an identifier that the
+   lowered C does not declare, and what the pragma does with it is the
+   backend's to say.
 
    No `try` stands in a statement or declaration that holds or directly
    follows a pragma line. A `try` is an error where a `#pragma` line,
@@ -2523,7 +2530,17 @@ instance's name. As with a variant's names (10.1 rule 6), any other
 declaration of such a name where the generic is in scope, nested
 blocks and prototypes included and in C text as well, is an error, and
 so is one in the scope of the generic before it, whichever comes
-first. A
+first. In unread text (13.5) `typec` cannot tell a declaration from a
+use, and an enumerator that
+`__attribute__((aligned(sizeof(enum { option__i_Some = 0 }))))`
+declares is in scope in the block around the attribute, so every
+identifier of the space in an attribute argument, the body of a block
+literal or a function body that is passed through unread is an error
+where the generic is in scope; the one scan of unread text (section 6
+rule 13) refuses it. A `#pragma` line declares no ordinary identifier
+or tag, and the scan does not look into one. The
+cost is that unread text does not name an instance by its C name, as
+`sizeof(option__i)` in an attribute argument would. A
 block that declares `int max__i;` where `max` is a generic is refused,
 whether or not the unit uses `max(int)`, and so is one that declares
 `enum { option__i_Some };`, which would otherwise be what `Some` of an

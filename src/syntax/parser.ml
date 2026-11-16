@@ -157,6 +157,7 @@ type constructor_ahead = { at : int; checked : Spelling.constructor }
    one. *)
 type state = {
   reader : Reader.t;
+  keywords : Keyword_set.t;  (** which the grammar tokens are read with *)
   grammar : grammar_token array;
   mutable position : int;  (** in [grammar] *)
   mutable open_brackets : opening list;
@@ -446,27 +447,6 @@ let is_universe_text_at state index =
 let is_system_c_text_at state index =
   let owner = state.reader.tokens.(index).owner in
   owner.system_header && not (File.is_type_c_text owner)
-
-(* The first token in [span], an index of [Reader.t.tokens], for which
-   [holds] is true. Every token counts, a [#pragma] line's among them, as
-   unread text is emitted whole (design 13.3). *)
-let find_in_span (span : span) holds =
-  Seq.init (span.last - span.first + 1) (fun i -> span.first + i)
-  |> Seq.find holds
-
-(* Clang's blocks are C text only (design 13.3): typing does not read the
-   body of a block literal, so a Type-C construct there would reach the
-   backend unlowered. The literal that begins at [start] and ends at the
-   last token read is refused at its first token of Type-C text, whether
-   Type-C text writes it or an include puts Type-C text inside it. *)
-let refuse_type_c_text_in_block state start =
-  match find_in_span (span_from state start) (is_type_c_text_at state) with
-  | Some index ->
-      fail_at_token state index
-        (Rule.message Block_literal_text
-           "a block literal is C text only, so Type-C text cannot write one \
-            or be included in one")
-  | None -> ()
 
 (* The two readings of a disputed scope (design 4.4): Clang takes a jump
    there to leave the loop, and GCC reads the scope around the loop. *)
@@ -802,17 +782,17 @@ let instance_claim state name =
   | Some generic when Name_set.mem generic state.generics -> Some generic
   | Some _ | None -> None
 
-(* [what] is the name space of [name], and [use] what the source does
-   with it, as the message words them. *)
-let refuse_instance_name state (name : identifier) ~what ~use =
-  match instance_claim state name.node with
+(* The name [name] at the token [index]: [what] is its name space, and
+   [use] what the source does with it, as the message words them. *)
+let refuse_instance_name state index name ~what ~use =
+  match instance_claim state name with
   | Some generic ->
-      fail_at_token state (token_of name)
+      fail_at_token state index
         (Rule.message Claimed_name
            (Printf.sprintf
               "%s %s is %s, but the generic %s claims every name that \
                begins with its own name and `__` for its instances"
-              what (quoted name.node) use (quoted generic)))
+              what (quoted name) use (quoted generic)))
   | None -> ()
 
 (* The claim of the generic [name] also refuses a name of its space that
@@ -863,7 +843,8 @@ let declare state ~kind (name : identifier) =
   let id = Ordinary_at (token_of name) in
   if claims_enumerator state name.node then
     fail_claimed state name "enumerator" "is declared again";
-  refuse_instance_name state name ~what:"the name" ~use:"declared";
+  refuse_instance_name state (token_of name) name.node ~what:"the name"
+    ~use:"declared";
   let earlier = Scope.find_in_innermost state.scope name.node in
   refuse_second_definition state name kind earlier;
   if is_generic kind then claim_instance_space state name;
@@ -997,7 +978,7 @@ let declare_tag state (name : identifier) ~implicit =
   refuse_argument_tag state name;
   if claims_tag state name.node then
     fail_claimed state name "tag" "is declared again";
-  refuse_instance_name state name ~what:"the tag"
+  refuse_instance_name state (token_of name) name.node ~what:"the tag"
     ~use:(if implicit then "named" else "declared");
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
   state.scope <-
@@ -1529,24 +1510,6 @@ let comma_separated state read =
   | Punctuator_token (P.Colon | P.Right_paren) -> []
   | _ -> one_or_more state read
 
-(* Consumes the tokens from an opening bracket to the one that closes it,
-   unread, and returns their span; [expected] names the closer for the
-   end of input. The cursor matches every bracket, so the skip ends at
-   the right one, and the bound on nesting holds here too. *)
-let skip_balanced state expected =
-  let start = state.position in
-  let outside = List.length state.open_brackets in
-  advance state;
-  let rec loop () =
-    if List.length state.open_brackets > outside then begin
-      if peek state = End_of_input then fail_expected state expected;
-      advance state;
-      loop ()
-    end
-  in
-  loop ();
-  span_from state start
-
 (* Unread text (design 13.5). *)
 
 (* What lowering writes under a name of its own, which unread text keeps
@@ -1598,16 +1561,114 @@ let refuse_own_name state scope index name =
               (quoted name) (own_name_kind own)))
   | Some (Own_generic | Own_universe_name) | None -> ()
 
-(* Each identifier of the arguments [arguments], which [scope]
-   resolves. *)
-let refuse_own_names state scope (arguments : span) =
-  for index = arguments.first to arguments.last do
-    match state.reader.tokens.(index).kind with
-    | Token.Identifier name -> refuse_own_name state scope index name
-    | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
-      ->
-        ()
+(* The kinds of unread text that the scan holds to its rules. A
+   [#pragma] line, the other kind, is not scanned for words or names: it
+   holds no statement (design 6 rule 13), and C text that does not move
+   is the backend's to read (13.5). *)
+type unread =
+  | Unread_attribute of scope  (** the scope at their [(] *)
+  | Unread_block_literal
+  | Unread_body  (** a function body that C text of a system header opens *)
+
+let unread_place = function
+  | Unread_attribute _ -> "the arguments of an attribute"
+  | Unread_block_literal -> "a block literal"
+  | Unread_body -> "a function body that a system header opens"
+
+(* A block literal is C text only, and a body passed through unread C
+   text of system headers only, for which alone the reason to pass it
+   through holds (design 13.3). A [#pragma] line's token counts, as
+   unread text is emitted whole. *)
+let refuse_owner_text state unread index =
+  match unread with
+  | Unread_block_literal when is_type_c_text_at state index ->
+      fail_at_token state index
+        (Rule.message Block_literal_text
+           "a block literal is C text only, so Type-C text cannot write one \
+            or be included in one")
+  | Unread_body when not (is_system_c_text_at state index) ->
+      fail_at_token state index
+        (Rule.message System_body_text
+           "a function body that C text of a system header opens is \
+            passed through unread, so it holds C text of system headers \
+            only")
+  | Unread_attribute _ | Unread_block_literal | Unread_body -> ()
+
+(* The construct that the word at the token [index] begins would reach
+   the backend as written. *)
+let fail_unread_word state unread index =
+  fail_at_token state index
+    (Rule.message Unread_word
+       (Printf.sprintf
+          "%s in %s, which typing does not read, begins a construct of \
+           Type-C that would reach the backend as written"
+          (quoted (Reader.spelling state.reader state.reader.tokens.(index)))
+          (unread_place unread)))
+
+(* [defer] and [try] are words of Type-C text where no declaration that
+   [scope], at the attribute's [(], holds hides them (design 2.3). *)
+let refuse_type_c_word state scope index name =
+  if
+    is_type_c_text_at state index
+    && Option.is_some (type_c_word name)
+    && Option.is_none (Scope.find scope name)
+  then fail_unread_word state (Unread_attribute scope) index
+
+(* The rules of an identifier of unread text: a name that a generic
+   claims, as typec cannot tell whether the text declares it (design
+   10.3); and in an attribute argument a word of Type-C text and a name
+   that lowering writes as its own (13.5). *)
+let refuse_unread_identifier state unread index name =
+  refuse_instance_name state index name ~what:"the name"
+    ~use:("spelled in " ^ unread_place unread ^ ", which typing does not read");
+  match unread with
+  | Unread_attribute scope ->
+      refuse_type_c_word state scope index name;
+      refuse_own_name state scope index name
+  | Unread_block_literal | Unread_body -> ()
+
+(* Every rule that unread text is held to, applied to its token [index].
+   [_Defer] is a keyword in every text. *)
+let refuse_unread_token state unread index =
+  refuse_owner_text state unread index;
+  match lexeme_of state.keywords state.reader.tokens.(index) with
+  | Some (Keyword_token Keyword.Defer) -> fail_unread_word state unread index
+  | Some (Identifier_token name) ->
+      refuse_unread_identifier state unread index name
+  | Some
+      ( Keyword_token _ | Number_token | Character_token _ | String_token _
+      | Punctuator_token _ | End_of_input )
+  | None ->
+      ()
+
+(* The one scan of unread text: each token of [span] is held here to every
+   rule of unread text, so none is a check of its own that a kind of
+   unread text could miss (design 6 rule 13). *)
+let scan_unread state unread (span : span) =
+  for index = span.first to span.last do
+    refuse_unread_token state unread index
   done
+
+(* Consumes the tokens from an opening bracket to the one that closes it,
+   which are the [unread] text that the scan passes over, and returns
+   their span; [expected] names the closer for the end of input. The
+   cursor matches every bracket, so the skip ends at the right one, and
+   the bound on nesting holds here too. *)
+let skip_balanced state unread expected =
+  let start = state.position in
+  let outside = List.length state.open_brackets in
+  advance state;
+  let rec loop () =
+    if List.length state.open_brackets > outside then begin
+      if peek state = End_of_input then fail_expected state expected;
+      advance state;
+      loop ()
+    end
+  in
+  loop ();
+  let span = span_from state start in
+  scan_unread state unread span;
+  span
 
 (* Attributes, GNU (GCC manual 6.39) and C23. *)
 
@@ -1620,9 +1681,9 @@ let attribute_arguments state =
   if peek state = Punctuator_token P.Left_paren then begin
     let scope = state.scope in
     let arguments =
-      skip_balanced state "`)` to end the arguments of an attribute"
+      skip_balanced state (Unread_attribute scope)
+        "`)` to end the arguments of an attribute"
     in
-    refuse_own_names state scope arguments;
     state.views <-
       {
         state.views with
@@ -3279,7 +3340,7 @@ and block_literal state start =
   (* The literal is a function of its own, from its parameters to the end
      of its body. *)
   let literal = as_function state (fun () -> literal_after_caret state start) in
-  refuse_type_c_text_in_block state start;
+  scan_unread state Unread_block_literal (span_from state start);
   literal
 
 and literal_after_caret state start =
@@ -4072,28 +4133,13 @@ and block_declaration state =
 
 (* External declarations (C11 6.9). *)
 
-(* At the [{] of a body that C text of a system header opens. The body is
-   passed through unread, so every token of it must be such text: the
-   reason for the skip holds for that text alone (design 13.3). *)
-let skipped_body state =
-  let body = skip_balanced state "`}` to end the function body" in
-  let is_other_text index = not (is_system_c_text_at state index) in
-  match find_in_span body is_other_text with
-  | Some index ->
-      fail_at_token state index
-        (Rule.message System_body_text
-           "a function body that C text of a system header opens is \
-            passed through unread, so it holds C text of system headers \
-            only")
-  | None -> Skipped body
-
 (* At the [{]. A body whose [{] is C text of a system header is not parsed
    (design 13.3): it is written for its own compiler and may use any of
    its extensions. Any other body is read, each token as the text it
    is. *)
 let function_body state =
   if is_system_c_text_at state (first_token state state.position) then
-    skipped_body state
+    Skipped (skip_balanced state Unread_body "`}` to end the function body")
   else Parsed (as_function state (fun () -> compound_statement state))
 
 (* The declaration list of an old-style definition, up to the [{]. GCC
@@ -4284,6 +4330,7 @@ let parse_with_scopes ~keywords reader =
   let state =
     {
       reader;
+      keywords;
       grammar = grammar_tokens keywords reader;
       position = 0;
       open_brackets = [];

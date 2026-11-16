@@ -2067,6 +2067,37 @@ let type_c_error_cases =
       "void f(void) {\n(void)\n^{ };\n}"
       "error: in.tc:3: a block literal is C text only, so Type-C text cannot \
        write one or be included in one (design 13.3) [TC0030]";
+    case "_Defer in an attribute's arguments"
+      "int x __attribute__((aligned(_Defer)));"
+      "error: in.tc:1: `_Defer` in the arguments of an attribute, which \
+       typing does not read, begins a construct of Type-C that would reach \
+       the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+    case "defer in an attribute's arguments"
+      "void f(void) { [[gnu::cleanup(defer)]] int x; }"
+      "error: in.tc:1: `defer` in the arguments of an attribute, which \
+       typing does not read, begins a construct of Type-C that would reach \
+       the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+    case "try in an attribute's arguments"
+      "int f(void);\nint x __attribute__((aligned(sizeof(try f()))));"
+      "error: in.tc:2: `try` in the arguments of an attribute, which typing \
+       does not read, begins a construct of Type-C that would reach the \
+       backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+    case "a declaration hides try in an attribute's arguments"
+      "int try; int x __attribute__((aligned(sizeof(try))));"
+      "(declaration (int) try) | (declaration (int) (declarator x (attributes \
+       (aligned ( sizeof ( try ) )))))";
+    case "a claimed name in an attribute's arguments"
+      "int x __attribute__((aligned(sizeof(enum { option__i_Some }))));"
+      "error: in.tc:1: the name `option__i_Some` is spelled in the arguments \
+       of an attribute, which typing does not read, but the generic `option` \
+       claims every name that begins with its own name and `__` for its \
+       instances (design 10.1 rule 6) [TC0004]";
+    case "a claimed name in a body that a system header opens"
+      "# 1 \"in.tc\"\n# 1 \"sys.h\" 1 3\nint g(void) { return option__i; }\n"
+      "error: sys.h:1: the name `option__i` is spelled in a function body \
+       that a system header opens, which typing does not read, but the \
+       generic `option` claims every name that begins with its own name and \
+       `__` for its instances (design 10.1 rule 6) [TC0004]";
     case "a defer statement is not implemented"
       "void f(void) { defer f(); }"
       "error: in.tc:1: `defer` is not implemented yet (design 6; work package \
@@ -2319,6 +2350,21 @@ let c_text_word_cases =
        the names that typec generates (design 2.3) [TC0001]";
     case "type declarations in C text" "type t = int; t x;"
       "(type t (type int)) | (declaration (t) x)";
+    case "try and defer in an attribute's arguments in C text"
+      "int x __attribute__((aligned(sizeof(try + defer))));"
+      "(declaration (int) (declarator x (attributes (aligned ( sizeof ( try + \
+       defer ) )))))";
+    case "_Defer in an attribute's arguments in C text"
+      "int x __attribute__((aligned(_Defer)));"
+      "error: in.i:1: `_Defer` in the arguments of an attribute, which \
+       typing does not read, begins a construct of Type-C that would reach \
+       the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+    case "_Defer in a body that a system header opens"
+      "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nvoid g(void) { _Defer g(); }\n"
+      "error: sys.h:1: `_Defer` in a function body that a system header \
+       opens, which typing does not read, begins a construct of Type-C that \
+       would reach the backend as written (design 6 rule 13, 5.1 rule 3) \
+       [TC0049]";
   ]
 
 let type_c_resolution_cases =

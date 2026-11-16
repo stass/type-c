@@ -237,6 +237,32 @@ constructor Some of option(int) the tag of None on both backends.
   typec: hidden_tag.tc:2: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
   [80]
 
+An attribute argument that declares the enumerator would hide it the
+same way, and typec, which does not read the argument, refuses every
+name of the claimed space there (design 10.3, 13.5).
+
+  $ cat > unread_tag.tc <<'EOF'
+  > #include <stdio.h>
+  > option(int) f(void) {
+  >   int x __attribute__((aligned(sizeof(enum { option__i_Some = 0 }))));
+  >   (void)x;
+  >   return Some(123);
+  > }
+  > int main(void) {
+  >   match (f()) {
+  >   case Some(v): printf("Some %d\n", v); break;
+  >   case None: printf("None\n"); break;
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o unread_tag unread_tag.tc && ./unread_tag
+  > done
+  typec: unread_tag.tc:3: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  typec: unread_tag.tc:3: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  [80]
+
 The typedef of a type argument spells the one name of an untagged type
 that the argument names, and a declaration of that name with an
 attribute between the declaration that typec read and the place where

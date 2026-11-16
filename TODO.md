@@ -175,13 +175,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   package 2.5, a bare unhidden `defer` in operand position (`x +
   defer`) says the construct is not implemented rather than that it is
   a syntax error.
-- [Low] An unhidden `try` in an attribute argument or a `#pragma`
-  line of Type-C text (`__attribute__((aligned(sizeof(try f()))))`,
-  `#pragma omp parallel if(try f())`) is unread text, which reaches
-  the backend as written, where it is an undeclared identifier or an
-  ignored pragma. Refuse it in the one scan of unread tokens of the
-  [Medium] item on `_Defer` below, with the position error of design
-  5.1 rule 3.
 - [Low] GNU `__extension__` makes no node, so `__extension__ try f();`
   has the tree of `try f();`, and the position rule of design 5.1 rule
   3 would take a `try` that Appendix A does not derive there. Decide in
@@ -294,20 +287,32 @@ is [type-c-language-design.md](type-c-language-design.md).
   the backend, so under GCC `[[clang::overloadable]]` makes an overload
   GCC ignores, as `__attribute__((overloadable))` already does. Ask the
   backend (`__has_c_attribute`) once, in `Target`, if this matters.
-- [Medium] Design section 6 rule 13 refuses `_Defer` among the tokens
-  that typing does not read, through one scan over every such token.
-  No such scan exists: `skip_balanced` (`src/syntax/parser.ml`) passes
-  over attribute arguments and skipped function bodies without looking,
-  so `_Defer` there reaches the backend as written, and the body of a
-  block literal refuses it only because the parser refuses every
-  `defer` statement (`fail_defer`). When package 2.5 builds `defer`,
-  build the one scan over the tokens that typing does not read (it
-  also refuses the word `defer` in an attribute argument of Type-C
-  text, design section 6 rule 13), with
-  no check of its own for any kind of such text. The scan also takes
-  over the text rules of a block literal (`refuse_type_c_text_in_block`)
-  and of a skipped function body (`skipped_body`), which run as checks of
-  their own (design 13.3).
+- [Medium] The scan of unread text (design 6 rule 13) refuses the
+  words `defer` and `try` in an attribute argument of Type-C text, a
+  list of Type-C constructs that misses the others: `match` or `type`
+  in a statement expression there (`aligned(sizeof(({ match (y) {
+  default: break; } 1; })))`) reaches the backend as written, which
+  refuses it as C. The words are also refused as a member or tag name
+  (`sizeof(((struct s *)0)->defer)`), where they begin nothing.
+  Refusing the one thing that lets an attribute argument hold a
+  statement, a `({` in Type-C text, would cover every construct and
+  free the names; decide it in the design.
+- [Low] The parser parses the body of a block literal and scans it as
+  unread text because typing (`src/sema/expressions.ml`) does not read
+  it, a decision two modules keep apart; and a block literal inside an
+  attribute argument is not parsed, so design 13.3's text rule (TC0030)
+  does not reach it. Passing the body through `skip_balanced` would make
+  "unread" mean "not parsed", if the jump and label checks the parser
+  applies to the body can go.
+- [Low] The claim of a generic (design 10.3) refuses a name of its
+  space that the scope declares before it only where typec reads the
+  declaration: `int x __attribute__((aligned(sizeof(enum { max__i =
+  1 }))));` at file scope before a generic `max` is not refused, as the
+  scan of unread text finds no generic yet. The backend refuses the
+  redeclaration that an instance `max(int)` makes of a file-scope
+  name, but nothing says so in Type-C's terms. Keep the spellings of
+  the claimed form that unread text holds, and refuse them where a
+  generic is declared, if a pilot meets one.
 
 ## Expression typing
 
