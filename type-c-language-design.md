@@ -1291,12 +1291,13 @@ result(uint32_t, parse_error) read_number(reader *r)
    whatever holds it: as an operand of a unary or binary operator, in
    `-try f()` or `a + try f()`, where the grammar of Appendix A derives
    no `try`, as in an argument or a condition, where it does. The
-   error comes from one rule, which the parser applies once a `try`
-   and its operand are parsed: a `try` that is in none of the three
-   positions is this error. The token after the operand is part of the
-   answer: the `,` of `x = try f(), y;` makes the assignment an operand
-   of the comma operator. No place that holds an expression has a
-   check of its own, so none can be missing. The remedy is the same in
+   error comes from one rule, which typing applies to the tree, where
+   the statement or declaration that holds a `try` is known: a `try`
+   that is in none of the three positions is this error. The token
+   after the operand is part of the answer: the `,` of `x = try f(),
+   y;` makes the assignment an operand of the comma operator. No place
+   that holds an expression has a check of its own, so none can be
+   missing. The remedy is the same in
    each, a statement or declaration of its own for the `try`. No `try`
    stands inside a statement expression, whatever its position there:
    it would return from inside the expression around it, where C does

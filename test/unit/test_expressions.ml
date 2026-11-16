@@ -823,6 +823,170 @@ let dropped_results () =
   accepts_source ~file:"in.tc"
     (declarations ^ "\n# 1 \"c.h\" 1\nvoid t(void) { f(); r; }\n")
 
+(* Design 5.1: try, which typing accepts and the front end refuses until
+   lowering writes it. *)
+let tries () =
+  let declarations =
+    "int x, y, c; result(int, int) f(void); result(void, int) g(void); \
+     result(result(int, int), int) nested(void); int k(int); \
+     int half __attribute__((vector_size(16))); \
+     typedef result(int, int) checked; checked typed(void); \
+     const result(int, int) constant; "
+  in
+  let source ?(returns = "result(int, int)") body =
+    declarations ^ returns ^ " t(int n) { " ^ body ^ "; return Ok(0); }"
+  in
+  let refuses ?returns body code =
+    rejects_source ~file:"in.tc" (source ?returns body) ("[" ^ code ^ "]")
+  in
+  let accepts ?returns body =
+    accepts_source ~file:"in.tc" (source ?returns body)
+  in
+  let needs ?returns body need =
+    rejects_source ~file:"in.tc" (source ?returns body) (need ^ " depends on")
+  in
+  let position body = refuses body "TC0054" in
+  (* The three positions, each as a block item and a substatement. *)
+  accepts "try g()";
+  accepts "x = try f()";
+  accepts "int v = try f()";
+  accepts "register int v = try f()";
+  accepts "if (c) x = try f()";
+  accepts "if (c) try g(); else x = try f()";
+  accepts "do x = try f(); while (c)";
+  accepts "while (c) try g()";
+  accepts "{ int v = try f(); x = v; }";
+  accepts "x = try (f())";
+  accepts "x = try typed()";
+  accepts "x = try constant";
+  accepts ~returns:"const result(long, int)" "x = try f()";
+  accepts "again: case_label: x = try f()";
+  accepts "switch (c) { case 1: default: x = try f(); }";
+  accepts "result(int, int) r = f(); match (r) { case Ok(v): x = try f(); \
+           return Ok(x); default: return r; }";
+  (* Rule 1. *)
+  refuses "x = try x" "TC0051";
+  refuses "x = try &constant" "TC0051";
+  refuses ~returns:"int" "x = try f()" "TC0051";
+  refuses ~returns:"void" "try g()" "TC0051";
+  refuses ~returns:"result(int, long)" "x = try f()" "TC0052";
+  refuses ~returns:"result(int, const char *)"
+    "result(int, char *) e(void); x = try e()" "TC0052";
+  refuses ~returns:"result(int, int **)"
+    "result(int, int *const *) e(void); x = try e()" "TC0052";
+  needs "x = try half" "whether the operand of try is a result";
+  needs ~returns:"typeof(half)" "x = try f()"
+    "whether the function that holds try returns a result";
+  (* Rule 2. *)
+  refuses "x = try g()" "TC0053";
+  refuses "int v = try g()" "TC0053";
+  refuses "try nested()" "TC0048";
+  accepts "result(int, int) inner = try nested()";
+  (* Rule 3: anywhere else, one error. *)
+  position "x += try f()";
+  position "x = y = try f()";
+  position "x = (try f())";
+  position "(x = try f())";
+  position "(try g())";
+  position "x = try f(), y";
+  position "x, try g()";
+  position "x = -try f()";
+  position "x = x + try f()";
+  position "x = sizeof try f()";
+  position "x = k(try f())";
+  position "x = c ? try f() : 0";
+  position "try try nested()";
+  position "x = try k(try f())";
+  position "if (try f()) ;";
+  position "while (try f()) ;";
+  position "switch (try f()) ;";
+  position "for (int i = try f(); ; ) ;";
+  position "for (x = try f(); ; ) ;";
+  position "for (; ; x = try f()) ;";
+  position "return Ok(try f())";
+  position "match (try nested()) { default: ; }";
+  position "if (case Ok(v) = try nested()) ;";
+  position "({ try g(); })";
+  position "x = ({ int v = try f(); v; })";
+  position "x = ({ x = try f(); x; })";
+  position "typeof(try f()) v = 0";
+  position "int u = 0, v = try f()";
+  position "int a[1] = { try f() }";
+  position "int a[try f()]";
+  refuses "static int v = try f()" "TC0055";
+  refuses "_Thread_local static int v = try f()" "TC0055";
+  refuses "int (*p)[n] = try f()" "TC0055";
+  needs "typeof(half) v = try f()"
+    "whether a declaration that holds try declares a variably modified \
+     type";
+  rejects_source ~file:"in.tc"
+    (declarations ^ "int v = try f();")
+    "[TC0054]";
+  (* The pragma rule: a pragma line in the stretch from directly before
+     the statement, its C labels included, to its final ;. The labels of
+     an arm are the arm's. *)
+  let pragma = "\n#pragma GCC diagnostic push\n" in
+  refuses (pragma ^ "x = try f()") "TC0056";
+  refuses (pragma ^ "int v = try f()") "TC0056";
+  refuses ("x = try" ^ pragma ^ "f()") "TC0056";
+  refuses ("x = try f()" ^ pragma) "TC0056";
+  refuses (pragma ^ "again: x = try f()") "TC0056";
+  refuses ("switch (c) {" ^ pragma ^ "case 1: x = try f(); }") "TC0056";
+  refuses ("if (c)" ^ pragma ^ "x = try f()") "TC0056";
+  refuses ("{" ^ pragma ^ "x = try f(); }") "TC0056";
+  accepts (pragma ^ "; x = try f()");
+  accepts ("x = try f();" ^ pragma ^ ";");
+  accepts ("result(int, int) r = f(); match (r) {" ^ pragma
+           ^ "case Ok(v): x = try f(); return r; default: return r; }");
+  refuses ("result(int, int) r = f(); match (r) { case Ok(v):" ^ pragma
+           ^ "x = try f(); return r; default: return r; }")
+    "TC0056";
+  position "x = _Generic(0, int: try f(), default: 0)";
+  position "switch (c) { case sizeof(try f()): ; }";
+  position "_Static_assert(sizeof(try f()), \"\")";
+  position "int a[1]; a[({ a[0] = try f(); 0; })] = try f()";
+  accepts "a: x = ({ 1; }); typeof(({ int k = 0; k; })) v = try f()";
+  accepts "int a[1]; a[({ int k = 0; k; })] = try f()"
+
+(* The sites of the tries that typing accepts: each with its holder, a
+   temporary counted from 0 in each function, its instances and whether
+   Ok and Err have fields. *)
+let try_sites () =
+  let source =
+    "result(int, int) f(void); result(void, long) g(void); \
+     result(int, void) e(void); \
+     result(int, int) one(int c) { int v = try f(); if (c) l: v = try f(); \
+     return Ok(v); } \
+     result(char, long) two(void) { try g(); return Ok(0); } \
+     result(char, void) three(void) { int w = try e(); return Ok(w); }"
+  in
+  let standing : Expressions.standing -> string = function
+    | Block_item -> "item"
+    | Substatement -> "sub"
+  in
+  let describe (site : Expressions.try_site) =
+    Printf.sprintf "%d %s%s %s %s %b %b" site.temporary
+      (standing site.holder.standing)
+      (if Option.is_some site.holder.labels then " labelled" else "")
+      (String.concat "," site.operand_instance.arguments)
+      (String.concat "," site.return_instance.arguments)
+      site.ok_has_field site.err_has_field
+  in
+  match read ~file:"in.tc" lp64 source with
+  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Ok (_, result) ->
+      let actual =
+        List.map describe (Expressions.tries (Declarations.typed result))
+      in
+      let expected =
+        [ "0 item i,i i,i true true";
+          "1 sub labelled i,i i,i true true";
+          "0 item v,l c,l false true";
+          "0 item i,v c,v true false" ]
+      in
+      if actual <> expected then
+        fail_case source (String.concat "; " actual)
+
 (* 6.8.1p3, 6.8.6.1p1: a label is defined once in its scope, the
    function or the block of a GNU local label, and a goto or an asm goto
    names one defined there. *)
@@ -1096,6 +1260,8 @@ let () =
   atomic_returns ();
   statements ();
   dropped_results ();
+  tries ();
+  try_sites ();
   labels ();
   left_to_backend ();
   block_declarations ();

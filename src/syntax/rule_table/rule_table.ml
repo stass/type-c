@@ -280,6 +280,34 @@ let rows =
       meaning =
         "An initialiser in Type-C text that has no element or member \
          left to initialise (C11 6.7.9p2), other than the 0 of [{0}]." };
+    Live { name = "Try_operand"; code = 51; clause = Some "design 5.1 rule 1";
+      meaning =
+        "A [try] whose operand is not of a [result] type, or that stands \
+         in a function that does not return one." };
+    Live { name = "Try_error_type"; code = 52;
+      clause = Some "design 5.1 rule 1";
+      meaning =
+        "A [try] whose operand's error type is not the one that the \
+         function returns, qualifiers at every level of it included." };
+    Live { name = "Try_void"; code = 53; clause = Some "design 5.1 rule 2";
+      meaning =
+        "A [try] whose value is void other than as the statement \
+         [try e;]." };
+    Live { name = "Try_position"; code = 54; clause = Some "design 5.1 rule 3";
+      meaning =
+        "A [try] that is not the whole of an expression statement, the \
+         whole right operand of a simple assignment that is one, or the \
+         whole initialiser of the one declarator of a declaration that \
+         is a block item." };
+    Live { name = "Try_declaration"; code = 55;
+      clause = Some "design 5.1 rule 3";
+      meaning =
+        "A [try] that initialises an object of static or thread storage \
+         duration, or one of a variably modified type." };
+    Live { name = "Try_pragma"; code = 56; clause = Some "design 5.1 rule 3";
+      meaning =
+        "A [try] in a statement or declaration that holds a pragma line \
+         or directly follows one, its C labels included." };
   ]
 
 let () =

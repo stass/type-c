@@ -63,7 +63,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int g(void) { { int try = 0; try++; } return try f(); }
   > EOF
   $ ./golden.exe block.tc
-  block.tc:2: `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
+  block.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
   [1]
   $ cat > before.tc <<'EOF'
   > int f(void);
@@ -71,7 +71,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int try;
   > EOF
   $ ./golden.exe before.tc
-  before.tc:2: `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
+  before.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
   [1]
   $ printf 'void f(int try) { defer f(try); }\n' > defer.tc
   $ ./golden.exe defer.tc
@@ -79,21 +79,22 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   [1]
 
 The parser reads a `try` wherever it stands, in an operand as well,
-and typing refuses each one. A `try` takes an operand.
+and typing refuses each one outside its positions (design 5.1 rule 3).
+A `try` takes an operand.
 
   $ cat > operand.tc <<'EOF'
   > int f(void);
   > int g(void) { int n = 1; n = n + try f(); return n; }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:2: `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
+  operand.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
   [1]
   $ cat > measured.tc <<'EOF'
   > int f(void);
   > unsigned long g(void) { return sizeof try f(); }
   > EOF
   $ ./golden.exe measured.tc
-  measured.tc:2: `try` is not implemented yet (design 5.1; work package 2.4) [TC0023]
+  measured.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
   [1]
   $ printf 'void f(void) { try; }\n' > bare.tc
   $ ./golden.exe bare.tc

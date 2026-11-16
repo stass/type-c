@@ -3159,6 +3159,8 @@ and typing state : Expressions.context =
     binding = bind_binding state;
     needs_complete = needs_complete state;
     block_literal = (fun () -> note_block_literal state);
+    views = state.views;
+    moved_operand = (fun _ type_operand -> type_operand ());
   }
 
 and note_block_literal state =
@@ -3189,14 +3191,17 @@ let read_declaration state (declaration : Tree.declaration) =
       Declaration
         (List.map (read_init_declarator state File_scope specified) declarators)
 
-(* The return type of a defined function, where its type is known: a
-   typedef name of an unknown type may declare it (6.9.1p2). *)
-let return_type (function_type : Ctype.t) =
+(* The return type of a defined function, or the unknown type of the
+   function: a typedef name of an unknown type may declare it (6.9.1p2).
+   The declarator of a definition ends in a function derivation, so the
+   type is no other. *)
+let return_type (function_type : Ctype.t) : Ctype.t Unknown.answer =
   match function_type.shape with
-  | Function { return; _ } -> Some return
+  | Function { return; _ } -> Answer return
+  | Unknown_type unknown -> Depends_on unknown
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
-  | Array _ | Unknown_type _ ->
-      None
+  | Array _ ->
+      invalid_arg "Declarations: a function definition of no function type"
 
 (* 6.9.1. The body is typed where the definition stands, so that it sees
    the unit as of that point. *)
@@ -3233,12 +3238,15 @@ let read_function_definition state (definition : Tree.function_definition) =
          "the declarator of a function definition does not end in a function \
           derivation (C11 6.9.1p2)");
   let entity = declare_in state File_scope span specified declared derived in
-  Option.iter (needs_complete state) (return_type derived.declared_type);
+  let returned = return_type derived.declared_type in
+  (match returned with
+  | Answer t -> needs_complete state t
+  | Depends_on _ -> ());
   (match body with
   | Parsed block ->
       within state In_block (fun () ->
           Expressions.function_body (typing state) ~name:entity.name
-            ~return_type:(return_type derived.declared_type) block)
+            ~return_type:returned block)
   | Skipped _ -> ());
   Function_definition entity
 

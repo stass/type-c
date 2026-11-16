@@ -577,6 +577,11 @@ val as_result : t -> instance option
     qualified or not, whichever name a declaration gives it: what design
     5.1 and 5.2 call a result type. [None] where [t] is no result type. *)
 
+val result_ok : string
+val result_err : string
+(** The names of the constructors of the universe's [result], as its
+    text ({!Typec_cpp.File.universe_text}) declares them. *)
+
 val has_distinct : tags -> bool
 (** Whether a distinct type has been declared, so that a type that typec
     does not know may be one or have one inside it. *)

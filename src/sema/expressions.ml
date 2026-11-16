@@ -44,12 +44,59 @@ type constant =
    (design 4.3 rule 3, 4.6 rule 6). *)
 type label_owner = No_switch | Switch_body | Match_arm | Test_statement
 
-(* What encloses the statement being typed: the function, for __func__
-   and return, and the switch or match that case labels need. *)
+(* Where a statement stands: as a block item, or as the substatement of
+   another statement. *)
+type standing = Block_item | Substatement
+
+type holder = {
+  statement : Tree.span;
+  labels : Tree.span option;
+  standing : standing;
+}
+
+type try_site = {
+  try_span : Tree.span;
+  operand : Tree.span;
+  holder : holder;
+  place : Parser.View.t;
+  temporary : int;
+  operand_instance : Ctype.instance;
+  return_instance : Ctype.instance;
+  ok_has_field : bool;
+  err_has_field : bool;
+}
+
+(* The positions of design 5.1 rule 3: the whole of an expression
+   statement, the whole right operand of a simple assignment that is
+   one, and the whole initialiser of the one declarator of a block-item
+   declaration. *)
+type try_form = Whole_statement | Assigned | Initialiser
+
+(* The try at [held_span] that [holder], the statement or declaration
+   being typed, holds in the position [form]. *)
+type try_holder = { held_span : Tree.span; form : try_form; holder : holder }
+
+(* The try that the statement being typed gives a position, if any. A
+   declaration gives it only once the object it initialises is one that
+   the position allows, which the initialiser alone sees. *)
+type try_place =
+  | No_place
+  | Unchecked_declaration of try_holder
+  | Placed of try_holder
+
+(* Whether statements give a try the positions of design 5.1 rule 3,
+   which those of a function body do outside any statement expression,
+   and if so the try that the statement being typed gives one. *)
+type try_positions = No_positions | Positions of try_place
+
+(* What encloses the statement being typed: the function, for __func__,
+   return and try, the switch or match that case labels need, and the
+   positions of try. [return_type] is [None] outside functions. *)
 type enclosing = {
   function_name : string option;
-  return_type : Ctype.t option;
+  return_type : Ctype.t Unknown.answer option;
   case_labels : label_owner;
+  try_positions : try_positions;
 }
 
 type construction = {
@@ -253,10 +300,13 @@ type t = {
   answered : (Tree.span, answered) Hashtbl.t;
   sites : Sites.t;
   mutable enclosing : enclosing;
+  mutable tries : try_site list;
+  mutable function_tries : try_site list;
 }
 
 let outside_functions =
-  { function_name = None; return_type = None; case_labels = No_switch }
+  { function_name = None; return_type = None; case_labels = No_switch;
+    try_positions = No_positions }
 
 let create () =
   { types = Hashtbl.create 16;
@@ -265,7 +315,9 @@ let create () =
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
     sites = Sites.create ();
-    enclosing = outside_functions }
+    enclosing = outside_functions;
+    tries = [];
+    function_tries = [] }
 
 let find view (expression : Tree.expression) =
   Hashtbl.find_opt view.types expression.span
@@ -278,6 +330,7 @@ let selection view (expression : Tree.expression) =
 
 let constructions view = Sites.constructions view.sites
 let matchings view = Sites.matchings view.sites
+let tries view = List.rev view.tries
 
 let answered view =
   Hashtbl.to_seq_values view.answered
@@ -301,6 +354,8 @@ type context = {
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
   needs_complete : Ctype.t -> unit;
   block_literal : unit -> unit;
+  views : Parser.views;
+  moved_operand : Tree.span -> (unit -> typed) -> typed;
 }
 
 let needing need (unknown : Unknown.t) =
@@ -315,15 +370,16 @@ let needing need (unknown : Unknown.t) =
 
 let returns_void enclosing =
   match enclosing.return_type with
-  | Some t -> Ctype.is_void t = Answer true
-  | None -> false
+  | Some (Answer t) -> Ctype.is_void t = Answer true
+  | Some (Depends_on _) | None -> false
 
 let within context enclosing walk =
   let view = context.typed in
   let saved = view.enclosing in
   view.enclosing <- enclosing;
-  walk ();
-  view.enclosing <- saved
+  let walked = walk () in
+  view.enclosing <- saved;
+  walked
 
 (* Building results *)
 
@@ -2295,6 +2351,200 @@ let constructor_expression context position (whole : Tree.expression) =
       Some (qualified_constructor context variant constructor, Some arguments)
   | _ -> None
 
+(* Try (design 5.1) *)
+
+(* Rule 3: the try that an expression statement holds in a position,
+   with its form. Parentheses, a compound assignment and a chain of
+   assignments each leave the try out of the positions. *)
+let statement_try (value : Tree.expression) =
+  match value.node with
+  | Try _ -> Some (value.span, Whole_statement)
+  | Assignment (Assign, _, ({ node = Try _; _ } as right)) ->
+      Some (right.span, Assigned)
+  | _ -> None
+
+(* Rule 3: the try that a declaration holds as the whole initialiser of
+   its one declarator. *)
+let declaration_try (declaration : Tree.declaration) =
+  match declaration.node with
+  | Declaration
+      { declarators =
+          [ { node =
+                { initialiser =
+                    Some (Expression_initialiser ({ node = Try _; _ } as held));
+                  _ };
+              _ } ];
+        _ } ->
+      Some held.span
+  | Declaration _ | Static_assert _ -> None
+
+(* Types a statement or declaration that gives a try the position
+   [place], where its statements give positions at all. *)
+let holding context place type_holder =
+  let enclosing = context.typed.enclosing in
+  match enclosing.try_positions with
+  | Positions _ ->
+      within context
+        { enclosing with try_positions = Positions place }
+        type_holder
+  | No_positions -> type_holder ()
+
+(* Rule 3: the position that the statement being typed gives the try at
+   [span], which it takes; a try in any other place is this one error. *)
+let placed_try context span =
+  let view = context.typed in
+  match view.enclosing.try_positions with
+  | Positions (Placed held) when held.held_span = span ->
+      view.enclosing <-
+        { view.enclosing with try_positions = Positions No_place };
+      held
+  | Positions (Placed _ | Unchecked_declaration _ | No_place) | No_positions
+    ->
+      context.fail span
+        (Rule.message Try_position
+           "try stands in none of its positions: a whole expression \
+            statement, the whole right operand of a simple assignment that \
+            is one, or the whole initialiser of a declaration in a block; \
+            give it a statement or declaration of its own")
+
+(* Rules 3 and 5: a declaration that holds a try declares an automatic
+   object whose type is not variably modified, since C evaluates the
+   size expressions of a declaration before its initialiser and lowering
+   writes the operand before both. *)
+let refuse_try_object context span ~constant (t : Ctype.t) =
+  let refuse text = context.fail span (Rule.message Try_declaration text) in
+  if constant then
+    refuse
+      "a declaration that holds try declares an object of static or \
+       thread storage duration";
+  match Ctype.is_variably_modified t with
+  | Answer false -> ()
+  | Answer true ->
+      refuse
+        "a declaration that holds try declares an object of a variably \
+         modified type, whose size C evaluates before its initialiser"
+  | Depends_on unknown ->
+      context.fail span
+        (needing
+           "whether a declaration that holds try declares a variably \
+            modified type"
+           unknown)
+
+(* A declaration gives the try of its initialiser its position once the
+   object that it initialises, of type [t], is one that rule 3 allows. *)
+let place_declared_try context ~constant t (initialiser : Tree.initialiser) =
+  let view = context.typed in
+  match (view.enclosing.try_positions, initialiser) with
+  | Positions (Unchecked_declaration held), Expression_initialiser value
+    when value.span = held.held_span ->
+      refuse_try_object context held.held_span ~constant t;
+      view.enclosing <-
+        { view.enclosing with try_positions = Positions (Placed held) }
+  | ( (Positions (No_place | Unchecked_declaration _ | Placed _)
+      | No_positions),
+      (Expression_initialiser _ | Braced _) ) ->
+      ()
+
+let is_pragma (token : Token.t) =
+  match token.kind with
+  | Pragma _ | Typec_pragma -> true
+  | Identifier _ | Number | Character _ | String _ | Punctuator _ -> false
+
+(* Rule 3: no pragma line stands from directly before the statement or
+   declaration that holds a try, its C labels included, to its final
+   [;]; the token before the first is a pragma exactly where one stands
+   directly before it. *)
+let refuse_try_pragma context span (holder : holder) =
+  let first =
+    match holder.labels with
+    | Some labels -> labels.first
+    | None -> holder.statement.first
+  in
+  let tokens = context.text.tokens in
+  let rec pragma_from index =
+    index <= holder.statement.last
+    && (is_pragma tokens.(index) || pragma_from (index + 1))
+  in
+  if pragma_from (max 0 (first - 1)) then
+    context.fail span
+      (Rule.message Try_pragma
+         "a pragma line stands in or directly before the statement or \
+          declaration that holds try; give the pragma or the try a \
+          statement of its own")
+
+(* Rules 1 and 5: the instance of result that [t] is, if any, which no
+   type that typec does not know answers. *)
+let try_result context span ~need (t : Ctype.t) =
+  match t.shape with
+  | Unknown_type unknown -> context.fail span (needing need unknown)
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+  | Va_list | Array _ | Function _ ->
+      Ctype.as_result t
+
+let operand_result context span operand_type =
+  match
+    try_result context span ~need:"whether the operand of try is a result"
+      operand_type
+  with
+  | Some instance -> instance
+  | None ->
+      context.fail span
+        (Rule.message Try_operand "the operand of try is of no result type")
+
+let return_result context span =
+  let need = "whether the function that holds try returns a result" in
+  let returned =
+    match context.typed.enclosing.return_type with
+    | Some (Answer t) -> try_result context span ~need t
+    | Some (Depends_on unknown) -> context.fail span (needing need unknown)
+    | None -> invalid_arg "Expressions: a try placed outside a function"
+  in
+  match returned with
+  | Some instance -> instance
+  | None ->
+      context.fail span
+        (Rule.message Try_operand
+           "try stands in a function that returns no result type")
+
+(* The encoding of the error type of an instance of result, which says
+   whether two error types are one, qualifiers at every level included
+   (design 3.5 rule 3). *)
+let error_encoding (instance : Ctype.instance) =
+  match instance.arguments with
+  | [ _value; error ] -> error
+  | _ -> invalid_arg "Expressions: a result of other than two arguments"
+
+(* The type of the field of the constructor [name] of a complete result,
+   or [None] where it has none, its type being void (design 3.5 rule 6). *)
+let result_field context (result : Ctype.t) name =
+  match
+    Option.bind (Ctype.constructors context.tags result) (fun constructors ->
+        find_constructor constructors name)
+  with
+  | Some { fields = [ field ]; _ } -> Some field.member_type
+  | Some { fields = []; _ } -> None
+  | Some { fields = _ :: _ :: _; _ } | None ->
+      invalid_arg "Expressions: a result without its constructors"
+
+(* Rule 2: the type of the value of a try, that of the field of Ok, or
+   void, which only the statement try e; holds. *)
+let try_value context span (held : try_holder) ok_field =
+  match (ok_field, held.form) with
+  | Some (t : Ctype.t), _ -> Ctype.unqualified t
+  | None, Whole_statement -> Ctype.void
+  | None, (Assigned | Initialiser) ->
+      context.fail span
+        (Rule.message Try_void
+           "the value of try is void, which only the statement try e; \
+            discards")
+
+(* The view that the parser took in front of the statement or
+   declaration that holds the try at [span]. *)
+let operand_view context (span : Tree.span) =
+  match Parser.try_views context.views span.first with
+  | Some views -> views.place
+  | None -> invalid_arg "Expressions: a try without views"
+
 (* The first of [arguments] take [positions], those past them none. *)
 let rec zip_positions positions arguments =
   match (positions, arguments) with
@@ -2460,11 +2710,45 @@ and expression_node context position (whole : Tree.expression) =
   | Block_literal _ ->
       context.block_literal ();
       value (unknown context span "a block literal" Unknown_object)
-  (* Every [try] is refused, so that none reaches lowering. *)
-  | Try _ ->
-      context.fail span
-        (Rule.message Not_implemented
-           "`try` is not implemented yet (design 5.1; work package 2.4)")
+  | Try { operand; scope = _ } -> try_expression context whole operand
+
+(* Design 5.1: a try in the position that the statement being typed
+   gives it (rule 3). Its operand, which has no target type (3.3), is a
+   result whose error type is the one that the function returns (rule
+   1); the try has the value of its Ok, which is no lvalue (rule 2). *)
+and try_expression context (whole : Tree.expression) operand =
+  let span = whole.span in
+  let held = placed_try context span in
+  refuse_try_pragma context span held.holder;
+  let operand_type =
+    (context.moved_operand span (fun () -> whole_value context operand))
+      .expression_type
+  in
+  let operand_instance = operand_result context operand.span operand_type in
+  let return_instance = return_result context span in
+  if error_encoding operand_instance <> error_encoding return_instance then
+    context.fail operand.span
+      (Rule.message Try_error_type
+         "the error type of the operand of try is not the one that the \
+          function returns; no error type converts to another");
+  context.needs_complete operand_type;
+  let ok_field = result_field context operand_type Ctype.result_ok in
+  let value_type = try_value context span held ok_field in
+  let view = context.typed in
+  let site =
+    { try_span = span;
+      operand = operand.span;
+      holder = held.holder;
+      place = operand_view context span;
+      temporary = List.length view.function_tries;
+      operand_instance;
+      return_instance;
+      ok_has_field = Option.is_some ok_field;
+      err_has_field =
+        Option.is_some (result_field context operand_type Ctype.result_err) }
+  in
+  view.function_tries <- site :: view.function_tries;
+  value value_type
 
 (* Design 3.3: the value of the variant that the constructor makes from
    its arguments, one for each field, each converted to the type of its
@@ -2832,6 +3116,14 @@ and assignment context span (op : Tree.assignment_operator) left right =
 (* GNU: the value of the last block item, or void. That item gives its
    value rather than discarding it (design 5.2). *)
 and statement_expression context (block : Tree.block) =
+  let enclosing =
+    { context.typed.enclosing with try_positions = No_positions }
+  in
+  within context enclosing (fun () -> statement_expression_items context block)
+
+(* No try stands in a statement expression (design 5.1 rule 3), whose
+   statements [statement_expression] gives no positions. *)
+and statement_expression_items context (block : Tree.block) =
   match List.rev block.node.items with
   | Block_statement last :: before ->
       items context (List.rev before);
@@ -2987,18 +3279,43 @@ and initialiser context ~constant t initialiser =
     }
   in
   context.needs_complete t;
+  place_declared_try context ~constant t initialiser;
   Initialiser.initialise typing t initialiser
 
 and block_items context (block : Tree.block) = items context block.node.items
 
 and items context =
   List.iter (function
-    | Tree.Block_declaration declaration -> context.declaration declaration
+    | Tree.Block_declaration declaration ->
+        block_declaration context declaration
     | Block_type_declaration declaration ->
         context.type_declaration declaration
-    | Block_statement statement -> typed_statement context statement)
+    | Block_statement statement ->
+        standing_statement context Block_item None statement)
 
-and typed_statement context (statement : Tree.statement) =
+(* A block-item declaration gives a try the position of design 5.1 rule
+   3 that its initialiser confirms. *)
+and block_declaration context (declaration : Tree.declaration) =
+  let place =
+    match declaration_try declaration with
+    | Some held_span ->
+        Unchecked_declaration
+          { held_span;
+            form = Initialiser;
+            holder =
+              { statement = declaration.span; labels = None;
+                standing = Block_item } }
+    | None -> No_place
+  in
+  holding context place (fun () -> context.declaration declaration)
+
+and typed_statement context statement =
+  standing_statement context Substatement None statement
+
+(* A statement that stands as [standing], after the C labels [labels]
+   span, which are those of a statement that holds a try (design 5.1
+   rule 3). The labels of a match arm are no statement's. *)
+and standing_statement context standing labels (statement : Tree.statement) =
   let enclosing = context.typed.enclosing in
   let scalar ~clause condition =
     require_scalar context condition.Tree.span ~clause
@@ -3007,9 +3324,25 @@ and typed_statement context (statement : Tree.statement) =
   match statement.node with
   | Labeled { label; statement = labeled } ->
       label_of context label;
-      typed_statement context labeled
+      let first =
+        match labels with
+        | Some (labels : Tree.span) -> labels.first
+        | None -> label.span.first
+      in
+      standing_statement context standing
+        (Some { first; last = label.span.last })
+        labeled
+  | Expression_statement value ->
+      let place =
+        match statement_try value with
+        | Some (held_span, form) ->
+            Placed
+              { held_span; form;
+                holder = { statement = statement.span; labels; standing } }
+        | None -> No_place
+      in
+      holding context place (fun () -> discard context value)
   | Compound block -> block_items context block
-  | Expression_statement value -> discard context value
   | Computed_goto value -> ignore (expression context value)
   | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _ ->
       ()
@@ -3056,8 +3389,8 @@ and typed_statement context (statement : Tree.statement) =
   | Return value ->
       let position =
         match enclosing.return_type with
-        | Some t -> Targeted t
-        | None -> Untargeted
+        | Some (Answer t) -> Targeted t
+        | Some (Depends_on _) | None -> Untargeted
       in
       Option.iter
         (fun value -> ignore (positioned context position value))
@@ -3506,10 +3839,14 @@ and subscripted_addressable context (operand : Tree.expression) =
   | None -> false
 
 let function_body context ~name ~return_type block =
+  let view = context.typed in
   let enclosing =
-    { outside_functions with function_name = Some name; return_type }
+    { function_name = Some name; return_type = Some return_type;
+      case_labels = No_switch; try_positions = Positions No_place }
   in
+  view.function_tries <- [];
   within context enclosing (fun () -> block_items context block);
-  match Reachability.label_refusal (reachability_facts context) block with
+  (match Reachability.label_refusal (reachability_facts context) block with
   | Some { span; diagnostic } -> context.fail span diagnostic
-  | None -> ()
+  | None -> ());
+  view.tries <- view.function_tries @ view.tries

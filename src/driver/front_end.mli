@@ -16,5 +16,6 @@ val lower :
     types its expressions for [target], and gives the edits that lower
     its Type-C constructs with the assertions of the types of [target]
     that they assume ({!Typec_emit.Assumptions}), or the first error of
-    either stage. A text without Type-C constructs has no edits and no
-    assertions. It has no effects. *)
+    either stage. A unit that holds a [try], which lowering does not
+    write yet, is refused (TC0023). A text without Type-C constructs has
+    no edits and no assertions. It has no effects. *)

@@ -227,6 +227,42 @@ val matchings : t -> matching list
 (** The match statements and single-pattern tests typed, in source
     order. *)
 
+(** Where a statement stands: as a block item, or as the substatement of
+    another statement. *)
+type standing = Block_item | Substatement
+
+(** The expression statement or declaration that holds a [try] in a
+    position of design 5.1 rule 3: its span, without the C labels before
+    it; the span of those labels, from the first to the last, if it has
+    any; and where it stands. *)
+type holder = {
+  statement : Tree.span;
+  labels : Tree.span option;
+  standing : standing;
+}
+
+(** A [try] (design 5.1) that lowering replaces (13.5): its span and that
+    of its operand; its holder; the view that the parser took in front
+    of the holder, where lowering writes the operand; the number of its
+    temporary, counted from 0 in each function in source order; the
+    instance of [result] that the operand is, and that the function
+    returns; and whether the [Ok] and the [Err] of the operand's type
+    have a field, which a void argument does not (design 3.5 rule 6). *)
+type try_site = {
+  try_span : Tree.span;
+  operand : Tree.span;
+  holder : holder;
+  place : Parser.View.t;
+  temporary : int;
+  operand_instance : Ctype.instance;
+  return_instance : Ctype.instance;
+  ok_has_field : bool;
+  err_has_field : bool;
+}
+
+val tries : t -> try_site list
+(** The tries typed, in source order. *)
+
 (** How lowering answers a construct that asks whether types are
     compatible where Type-C text compares a distinct type with them
     (design 13.5), as the backend would answer for its representation:
@@ -284,7 +320,11 @@ val constant : t -> Tree.expression -> constant option
     [type_declaration] a type declaration there. [needs_complete] is
     the one function that every point that needs a type complete passes
     the type to (design 10.3), and [block_literal] is told of each block
-    literal, whose body typec does not read, where it stands. *)
+    literal, whose body typec does not read, where it stands.
+    [views] are those that the parser took in the unit, and
+    [moved_operand span type_operand] types the operand of the [try] at
+    [span] with [type_operand], where lowering moves it (design 5.1 rule
+    3). *)
 type context = {
   typed : t;
   target : Target.t;
@@ -300,6 +340,8 @@ type context = {
       (** declares a binding of a match as an object of the type *)
   needs_complete : Ctype.t -> unit;
   block_literal : unit -> unit;
+  views : Parser.views;
+  moved_operand : Tree.span -> (unit -> typed) -> typed;
 }
 
 val whole_value : context -> Tree.expression -> typed
@@ -324,13 +366,20 @@ val initialiser :
     gives the type of the object, which it completes where it is an array
     of unknown size. [constant] says that the object has static or thread
     storage duration, whose initialiser is constant (6.7.9p4): an
-    expression that is [Not_constant] is an error. *)
+    expression that is [Not_constant] is an error. Where the initialiser
+    is the [try] of a block-item declaration (design 5.1 rule 3), it is
+    the point that sees the object, and so decides whether the [try]
+    stands in a position. *)
 
 val function_body :
-  context -> name:string -> return_type:Ctype.t option -> Tree.block -> unit
+  context ->
+  name:string ->
+  return_type:Ctype.t Unknown.answer ->
+  Tree.block ->
+  unit
 (** Types the body of the function [name], whose [return] statements have
-    its return type as their target type (design 3.3); [None] where the
-    function's type is unknown. *)
+    its return type as their target type (design 3.3), or the unknown
+    type of the function where typec does not know it. *)
 
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)
