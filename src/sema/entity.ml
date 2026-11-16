@@ -42,12 +42,14 @@ type declared =
     }
   | Typedef of {
       typedef_type : Ctype.t;
-      with_attribute : bool;
-          (** Declared with an attribute at the depth of design 3.5 rule
-              2, so that the name spells no type argument: one stands
-              among the specifiers of its declaration, in its declarator
-              or after it, or a typedef name that the declaration writes
-              is declared with one. *)
+      inexact : bool;
+          (** Declared with an attribute or a [__typeof__] of an
+              expression at the depth of design 3.5 rule 2, so that the
+              backend's type of the name may hold an attribute that
+              [typedef_type] lacks and the name spells no type argument:
+              one stands among the specifiers of its declaration, in its
+              declarator or after it, or a typedef name that the
+              declaration writes is declared with one. *)
     }
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
       (** The type is [int] when every value of the enumeration fits it,

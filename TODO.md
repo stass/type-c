@@ -465,11 +465,12 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
-- [Medium] Whether the text of a type holds an attribute at the depth of
-  design 3.5 rule 2 is computed by a walk of the tree of its own
-  (`Declarations.specifiers_have_attribute` and the functions after
-  it), which must agree with the reader on what it visits. Have the
-  reader return the fact with the type that it reads.
+- [Medium] Whether the text of a type holds an attribute or a
+  `__typeof__` of an expression at the depth of design 3.5 rule 2 is
+  computed by a walk of the tree of its own
+  (`Declarations.specifiers_are_inexact` and the functions after it),
+  which must agree with the reader on what it visits. Have the reader
+  return the fact with the type that it reads.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it
@@ -785,16 +786,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   Make the encoding a type that only `Encoding` makes when instances are
   built.
 
-- [High] Design 3.5 rule 2 refuses an attribute only in the names that
-  spell an argument, so `box(__typeof__(w))`, with `wide w;` and `wide`
-  a typedef of `int` with `aligned(16)`, is valid and shares
-  `box__i` with `box(int)`, though GCC 16 and Apple Clang 21 both give
-  its member the alignment 16. The type of a `__typeof__` operand, a
-  member access or a dereference among them, carries the typedef that
-  declared it to both backends, and typec's types carry no attribute.
-  Decide the rule: refusing `__typeof__` of an expression in an
-  argument is the smallest answer, which also leaves no way to write
-  the unqualified form of a qualified untagged type (design 10.3).
 - [Medium] `Declarations` reads only a C typedef by the rule of design
   3.5 rule 2 that names an untagged type: a Type-C alias of an untagged
   enum or of a qualified untagged struct or union names nothing, so

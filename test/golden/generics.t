@@ -443,13 +443,13 @@ it from the argument without the attribute.
   >     > attributed.tc
   >   ./golden.exe attributed.tc
   > done
-  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'void (*)(int)' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'void (*)(int)' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
   [1]
 
 A typedef name redeclared keeps the attribute of either declaration, as
@@ -462,9 +462,38 @@ both backends do.
   >     'type box(T) = struct { T value; };' 'box(t) *b;' > redeclared.tc
   >   ./golden.exe redeclared.tc
   > done
-  redeclared.tc:4: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  redeclared.tc:4: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  redeclared.tc:4: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  redeclared.tc:4: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
   [1]
+
+An argument holds no `__typeof__` of an expression at the same depth,
+as the backend gives the expression the type of the typedef that
+declared it, attribute included (design 3.5 rule 2). `__typeof__` of a
+type name is valid.
+
+  $ for argument in '__typeof__(w)' '__typeof__(w) *' 'typeof(h.w)' \
+  >     '__typeof(*p)' W alias 'over(int)' '__typeof__(__typeof__(w))'; do
+  >   printf '%s\n' 'typedef int wide __attribute__((aligned(16)));' \
+  >     'extern wide w, *p;' 'extern struct { wide w; } h;' \
+  >     'typedef __typeof__(w) W;' 'type alias = __typeof__(w);' \
+  >     'type over(T) = __typeof__(w);' \
+  >     'type box(T) = struct { T value; };' "box($argument) *b;" \
+  >     > typeof.tc
+  >   ./golden.exe typeof.tc
+  > done
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  [1]
+  $ printf '%s\n' 'type box(T) = struct { T value; };' \
+  >   'box(__typeof__(int)) *b;' > typeof_type.tc
+  $ ./golden.exe typeof_type.tc | grep -c box__i
+  2
 
 A chain of instances that each define the next holds at most 64
 (design 3.5 rule 7); one under a pointer defines nothing.

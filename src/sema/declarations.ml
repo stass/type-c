@@ -406,7 +406,7 @@ let redeclared state span name prior next =
       | Answer true | Depends_on _ ->
           Typedef
             { same with
-              with_attribute = old.with_attribute || same.with_attribute }
+              inexact = old.inexact || same.inexact }
       | Answer false ->
           fail state span
             (Rule.c_text
@@ -555,9 +555,9 @@ type specified = {
       (** The type specifier is a structure, union or enumeration specifier
           without a tag, which a typedef declarator names (design 3.5 rule
           2). *)
-  with_attribute : bool;
-      (** An attribute at the depth of design 3.5 rule 2 stands among the
-          specifiers; [read_init_declarator] adds its declarator's. *)
+  inexact : bool;
+      (** The specifiers are inexact ([specifiers_are_inexact]);
+          [read_init_declarator] adds its declarator's. *)
 }
 
 (* The declaration specifiers of each kind, in order. *)
@@ -977,7 +977,7 @@ let declared_as state scope span specified name declared (derived : derived) =
       no_alignment state span specified "a typedef";
       Typedef
         { typedef_type = derived.declared_type;
-          with_attribute = specified.with_attribute }
+          inexact = specified.inexact }
   | Some (Auto | Register | Thread_local), File_scope ->
       fail state span (Rule.c_text "auto or register at file scope (C11 6.9p2)")
   | storage, _ -> (
@@ -1048,54 +1048,57 @@ let naming_name (init_declarator : Tree.init_declarator) =
   let declarator = init_declarator.node.declarator in
   if derives_nothing declarator then Tree.declared_name declarator else None
 
-(* Whether the text that spells a type holds an attribute at the depth
-   of design 3.5 rule 2, where a typedef name's entity records its own;
-   a [__typeof__] operand is not looked into (TODO.md). *)
-let rec specifiers_have_attribute state (specifiers : Tree.specifiers) =
+(* Whether the text that spells a type is inexact: it holds an attribute
+   or a [__typeof__] of an expression at the depth of design 3.5 rule 2,
+   where a typedef name's entity records its own. typec's types carry no
+   attribute, and the backend gives an expression the type of the
+   typedef that declared it, attribute included. *)
+let rec specifiers_are_inexact state (specifiers : Tree.specifiers) =
   List.exists
     (fun (specifier : Tree.declaration_specifier Tree.spanned) ->
-      specifier_has_attribute state specifier.node)
+      specifier_is_inexact state specifier.node)
     specifiers
 
-and specifier_has_attribute state : Tree.declaration_specifier -> bool =
+and specifier_is_inexact state : Tree.declaration_specifier -> bool =
   function
   | Attributes attributes -> attributes <> []
   | Type_qualifier qualifier -> is_nullability qualifier
-  | Type_specifier specifier -> type_specifier_has_attribute state specifier
+  | Type_specifier specifier -> type_specifier_is_inexact state specifier
   | Storage_class _ | Function_specifier _ | Alignment_specifier _ -> false
 
-and type_specifier_has_attribute state : Tree.type_specifier -> bool =
+and type_specifier_is_inexact state : Tree.type_specifier -> bool =
   function
   | Atomic_type type_name | Typeof_type type_name ->
-      type_name_has_attribute state type_name
+      type_name_is_inexact state type_name
   | Typedef_name { declaration; name = _ } -> (
       match Hashtbl.find_opt state.entities declaration with
-      | Some { declared = Typedef { with_attribute; _ }; _ } -> with_attribute
+      | Some { declared = Typedef { inexact; _ }; _ } -> inexact
       | Some _ | None -> false)
   | Application { generic; name = _; arguments = _ } ->
-      alias_has_attribute state generic
-  | Basic _ | Struct_or_union _ | Enum _ | Typeof_expression _ -> false
+      alias_is_inexact state generic
+  | Typeof_expression _ -> true
+  | Basic _ | Struct_or_union _ | Enum _ -> false
 
 (* Each generic read names only generics read before it, so the look
    through definitions ends; a type parameter in one adds nothing, as
    its argument is checked where the application is read. *)
-and alias_has_attribute state generic =
+and alias_is_inexact state generic =
   match Hashtbl.find_opt state.generics generic with
   | Some { node = { definition = Alias type_name; _ }; _ } ->
-      type_name_has_attribute state type_name
+      type_name_is_inexact state type_name
   | Some _ | None -> false
 
-and type_name_has_attribute state (type_name : Tree.type_name) =
+and type_name_is_inexact state (type_name : Tree.type_name) =
   let { Tree.specifier_qualifiers; abstract } = type_name.node in
-  specifiers_have_attribute state specifier_qualifiers
-  || optional_declarator_has_attribute state abstract
+  specifiers_are_inexact state specifier_qualifiers
+  || optional_declarator_is_inexact state abstract
 
-and optional_declarator_has_attribute state = function
-  | Some declarator -> declarator_has_attribute state declarator
+and optional_declarator_is_inexact state = function
+  | Some declarator -> declarator_is_inexact state declarator
   | None -> false
 
-and declarator_has_attribute state (declarator : Tree.declarator) =
-  let qualified_with_attribute qualifiers =
+and declarator_is_inexact state (declarator : Tree.declarator) =
+  let holds_nullability qualifiers =
     List.exists
       (fun (qualifier : Tree.type_qualifier Tree.spanned) ->
         is_nullability qualifier.node)
@@ -1104,25 +1107,25 @@ and declarator_has_attribute state (declarator : Tree.declarator) =
   match declarator.node with
   | Name _ -> false
   | Parenthesized_declarator { attributes; inner } ->
-      attributes <> [] || declarator_has_attribute state inner
+      attributes <> [] || declarator_is_inexact state inner
   | Pointer { qualifiers; attributes; inner }
   | Block_pointer { qualifiers; attributes; inner } ->
       attributes <> []
-      || qualified_with_attribute qualifiers
-      || optional_declarator_has_attribute state inner
+      || holds_nullability qualifiers
+      || optional_declarator_is_inexact state inner
   | Array { inner; qualifiers; size = _ } ->
-      qualified_with_attribute qualifiers
-      || optional_declarator_has_attribute state inner
+      holds_nullability qualifiers
+      || optional_declarator_is_inexact state inner
   | Function { inner; parameters } ->
-      optional_declarator_has_attribute state inner
-      || parameters_have_attribute state parameters
+      optional_declarator_is_inexact state inner
+      || parameters_are_inexact state parameters
 
-and parameters_have_attribute state : Tree.parameters -> bool = function
+and parameters_are_inexact state : Tree.parameters -> bool = function
   | Prototype { parameters; variadic = _ } ->
-      List.exists (parameter_has_attribute state) parameters
+      List.exists (parameter_is_inexact state) parameters
   | Identifier_list _ -> false
 
-and parameter_has_attribute state (parameter : Tree.parameter) =
+and parameter_is_inexact state (parameter : Tree.parameter) =
   let ({ specifiers; declarator; attributes } : Tree.parameter_node) =
     parameter.node
   in
@@ -1132,8 +1135,8 @@ and parameter_has_attribute state (parameter : Tree.parameter) =
     | Abstract_parameter declarator -> declarator
   in
   attributes <> []
-  || specifiers_have_attribute state specifiers
-  || optional_declarator_has_attribute state declarator
+  || specifiers_are_inexact state specifiers
+  || optional_declarator_is_inexact state declarator
 
 let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
@@ -1159,7 +1162,7 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
       | (first, _) :: _ -> Some first);
     attributed;
     untagged = is_untagged sorted.others;
-    with_attribute = specifiers_have_attribute state specifiers;
+    inexact = specifiers_are_inexact state specifiers;
   }
 
 and base_type state span sorted =
@@ -2136,9 +2139,9 @@ and read_init_declarator state scope specified
   let specified = for_declarator specified attributes in
   let specified =
     { specified with
-      with_attribute =
-        specified.with_attribute || attributes <> []
-        || declarator_has_attribute state declarator }
+      inexact =
+        specified.inexact || attributes <> []
+        || declarator_is_inexact state declarator }
   in
   (* The effects of attributes are recorded where design 13.3 places
      them: on a function declared at file scope, not on a typedef. *)
@@ -2240,12 +2243,12 @@ and read_named_type state
   let { Tree.name = checked; declared; definition; _ } = declaration.node in
   let name = (checked :> Tree.identifier) in
   (* The name as a typedef name of the type that it defines. *)
-  let bind_spelled ~with_attribute typedef_type =
+  let bind_spelled ~inexact typedef_type =
     record state name.node declared
       { name = name.node; entity = fresh_entity state;
-        declared = Typedef { typedef_type; with_attribute } }
+        declared = Typedef { typedef_type; inexact } }
   in
-  let bind = bind_spelled ~with_attribute:false in
+  let bind = bind_spelled ~inexact:false in
   match definition with
   | Incomplete_variant ->
       let record = variant_record state checked.node declared in
@@ -2257,7 +2260,7 @@ and read_named_type state
       read_variant state declaration privacy ~scope constructors bind
   | Alias type_name ->
       let t = read_type_name state type_name in
-      bind_spelled ~with_attribute:(type_name_has_attribute state type_name) t
+      bind_spelled ~inexact:(type_name_is_inexact state type_name) t
   | Distinct { is_private; representation } ->
       let privacy = privacy state declaration ~is_private in
       bind (distinct_type state name.node privacy representation)
@@ -2553,7 +2556,7 @@ and applied_type state span name reference written =
   in
   let arguments = List.map argument written in
   let instance = instance_of state declaration arguments in
-  List.iter2 (refuse_attributed state) written arguments;
+  List.iter2 (refuse_inexact state) written arguments;
   let first_use = note_application state instance arguments span in
   let types = List.map snd arguments in
   let applied =
@@ -2568,16 +2571,17 @@ and applied_type state span name reference written =
   note_name state span (Encoding.instance_name instance);
   applied_type
 
-(* Design 3.5 rule 2: an argument with an attribute, refused from its
-   text, as its type, which encodes it, holds none after typedef
-   expansion. *)
-and refuse_attributed state (written : Tree.type_name) (_, t) =
-  if type_name_has_attribute state written then
+(* Design 3.5 rule 2: an inexact argument, refused from its text, as
+   its type, which encodes it, holds no attribute, while the backend's
+   type of the same text may hold one. *)
+and refuse_inexact state (written : Tree.type_name) (_, t) =
+  if type_name_is_inexact state written then
     fail state written.span
       (Rule.message Type_argument
          (Printf.sprintf
-            "the type argument holds an attribute, or a typedef name or \
-             an alias declared with one, which no instance name encodes: \
+            "the type argument may carry an attribute that no instance \
+             name encodes, as it holds an attribute or `typeof` of an \
+             expression, or a typedef name or an alias declared with one: \
              it would share the instance of %s"
             (quote (Type_name.of_ctype t))))
 
@@ -2808,10 +2812,10 @@ and with_arguments :
     let reference = Tree.In_tree parameter.declared.id in
     let saved = Hashtbl.find_opt state.entities reference in
     Hashtbl.replace state.entities reference
-      (* [applied_type] has refused an argument with an attribute. *)
+      (* [applied_type] has refused an inexact argument. *)
       { name = parameter.name.node; entity = fresh_entity state;
         declared =
-          Typedef { typedef_type = argument; with_attribute = false } };
+          Typedef { typedef_type = argument; inexact = false } };
     (reference, saved)
   in
   let restore (reference, saved) =
@@ -3234,7 +3238,7 @@ let declare_builtin_typedefs state =
     | Ok t ->
         let entity =
           { name; entity = fresh_entity state;
-            declared = Typedef { typedef_type = t; with_attribute = false } }
+            declared = Typedef { typedef_type = t; inexact = false } }
         in
         Hashtbl.replace state.entities (Builtin name) entity
     | Error error -> invalid_arg (Ctype.error_message error)

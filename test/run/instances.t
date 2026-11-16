@@ -123,35 +123,28 @@ preprocessor makes a pragma line, is refused (design 10.3, P25).
   [80]
 
 An argument is spelled through the one name of an untagged type, which
-denotes the type with the qualifiers of its declaration; an argument
-without them, as the value of a conditional is, keeps none (design
-10.3). The address of each member converts to a pointer to the
-unqualified type, which a qualified member would refuse, and the
-argument with the qualifiers is the qualified type.
+denotes the type with the qualifiers of its declaration, and its own
+qualifiers are written beside the unqualified form of that name (design
+10.3). The address of each member is a pointer to the argument itself.
 
-  $ cat > unqualified.tc <<'EOF'
+  $ cat > qualified.tc <<'EOF'
   > typedef _Atomic struct { char a, b, c; } atomic_s;
   > typedef const struct { int x; } const_s;
   > typedef const enum { E0, E1 } const_e;
-  > extern atomic_s a;
-  > extern const_s c;
-  > extern const_e e;
   > type box(T) = struct { T v; };
-  > static box(__typeof__(1 ? a : a)) plain_a;
-  > static box(__typeof__(1 ? c : c)) plain_c;
-  > static box(__typeof__((0, e))) plain_e;
   > static box(atomic_s) atomic_a;
+  > static box(const_s) const_c = { { 2 } };
+  > static box(volatile const_e) volatile_e = { E1 };
   > int main(void) {
-  >   __typeof__(1 ? a : a) *to_a = &plain_a.v;
-  >   __typeof__(1 ? c : c) *to_c = &plain_c.v;
   >   atomic_s *to_atomic = &atomic_a.v;
-  >   plain_c.v.x = 2;
-  >   plain_e.v = E1;
-  >   return to_a == 0 || to_c->x != 2 || plain_e.v != E1 || to_atomic == 0;
+  >   int exact = _Generic(&atomic_a.v, atomic_s *: 1, default: 0)
+  >     && _Generic(&const_c.v, const_s *: 1, default: 0)
+  >     && _Generic(&volatile_e.v, volatile const_e *: 1, default: 0);
+  >   return !exact || !to_atomic || const_c.v.x != 2 || volatile_e.v != E1;
   > }
   > EOF
   $ for cc in $clang $gcc; do
-  >   typec --cc=$cc $flags -o unqualified unqualified.tc && ./unqualified ||
+  >   typec --cc=$cc $flags -o qualified qualified.tc && ./qualified ||
   >     echo "$cc"
   > done
 
@@ -177,5 +170,5 @@ declarator's alone.
   > box(wide) b;
   > EOF
   $ typec --cc=$clang $flags -fsyntax-only wide.tc
-  typec: wide.tc:3: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typec: wide.tc:3: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
   [80]

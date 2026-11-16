@@ -578,6 +578,21 @@ id(stmt) s;                             /* e = s is an error */
    and `int *` to be one type (Apple Clang 21), so the two arguments
    would share one name and one typedef of the argument (10.3), with the
    nullability of whichever is used first.
+   *Provisional (P26).* An argument holds no `__typeof__` of an
+   expression, in any of its spellings, at the same depth: none is
+   written in it, and no typedef name that it uses is declared with one.
+   C gives an expression the type of the typedef that declared it,
+   attribute included, through an object, a member access or a
+   dereference alike, and typec's types carry no attribute: with
+   `wide w;`, `vector(__typeof__(w))` would be read as `vector(int)`,
+   and its element would silently lose the alignment that C gives
+   `__typeof__(w)`. `__typeof__` of a type name is valid, as the
+   depth reaches through it. The rule refuses a macro that writes
+   `vector(__typeof__(x))`, and it leaves no way to write the unqualified
+   form of a qualified untagged type as an argument; deduction (7.2)
+   still reaches it (10.3). A count of the arguments that it refuses, in
+   Pilot B or the corpus, settles it; the refusal stays if that cannot
+   settle it.
 3. An application of a variant or distinct generic is a type of its
    own, as a variant or distinct type is. So is an application of an
    alias generic (3.1 rule 3) whose definition is a struct or union
@@ -1915,7 +1930,8 @@ same name in every translation unit:
 `result(uint32_t, parse_error)` is `result__j11parse_error` where
 `uint32_t` is `unsigned int`. Arguments are encoded after typedef
 expansion, so names depend on the target, like every other ABI fact; an
-argument holds no attribute for the expansion to lose (3.5 rule 2). An
+argument holds no attribute for the expansion to lose, nor a
+`__typeof__` of an expression whose type may carry one (3.5 rule 2). An
 application of an alias generic is expanded as a typedef name is, down
 to the structure or union it names where its definition is a specifier
 with a body (3.5 rule 3), which takes the application row:
@@ -2071,11 +2087,17 @@ the qualifiers of that name's declaration, and no qualifier written
 beside a typedef name takes one of them away. Where that declaration
 qualifies the type, the typedef writes `__typeof_unqual__(`*name*`)`
 with the argument's own qualifiers: with
-`typedef _Atomic struct { char a, b, c; } s;`, the argument
-`__typeof__(1 ? x : x)` for an `s x` is the unqualified struct, encoded
-`1s`, whose typedef is `typedef __typeof_unqual__(s) __tc_arg__1s;`;
+`typedef _Atomic struct { char a, b, c; } s;`, the argument `s` is the
+atomic struct, whose typedef writes `_Atomic __typeof_unqual__(s)`, and
+a generic function `f(T v)` called with an `s x` deduces `T` as the
+unqualified struct (7.2 rule 1, after lvalue conversion), encoded `1s`,
+whose typedef is `typedef __typeof_unqual__(s) __tc_arg__1s;`.
 `typedef s __tc_arg__1s;` would make it atomic again, which Apple
-Clang 21 lays out in 4 bytes and not 3. *Provisional:* GCC 16.2 and
+Clang 21 lays out in 4 bytes and not 3. Deduction is the only way to
+the unqualified form: no type name written in a program denotes it, as
+a type name that writes `s` keeps its qualifiers and an argument holds
+no `__typeof__` of an expression (3.5 rule 2, P26); only a type
+parameter bound by deduction does. *Provisional:* GCC 16.2 and
 Apple Clang 21 take `__typeof_unqual__` in every dialect of 2.4 under
 `-pedantic-errors` and remove `_Atomic` with the other qualifiers, as
 C23's `typeof_unqual` does; GCC 14 and Clang 20, the oldest releases
@@ -3646,6 +3668,7 @@ numbers refer to the implementation plan.
 | P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, the refusals that 13.5 makes for an identifier in an attribute argument of a definition among them. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
 | P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
 | P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
+| P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |
 
 ## 16. Non-goals
 
