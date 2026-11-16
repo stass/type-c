@@ -10,9 +10,9 @@ let assertions target = function
   | _ :: _ -> Typec_emit.Assumptions.assertions target
 
 (* Lowering of a defer is incomplete (the defer items of TODO.md: the
-   resolution check of design 6 rules 8 and 12, goto exits, the
-   cleanups of a try, the refusals of the form of a return), so a unit
-   that holds one stops before its text reaches the backend. *)
+   resolution check of design 6 rules 8 and 12, the cleanups of a try,
+   the refusals of the form of a return), so a unit that holds one stops
+   before its text reaches the backend. *)
 let refuse_defers (text : Typec_cpp.Reader.t) declarations =
   let typed = Typec_sema.Declarations.typed declarations in
   let sites (lowered : Typec_sema.Expressions.function_defers) =

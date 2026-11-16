@@ -129,6 +129,16 @@ type read_defer = {
   defer_exits : exit Queue.t;
 }
 
+(* A goto statement, after its labels, with the guarded statements and
+   scopes around it, the innermost first. It leaves the defer scopes
+   among them that do not hold its label; the label may come later in
+   the source, so this is decided once the walk has read every label. *)
+type goto = {
+  goto_statement : Tree.span;
+  goto_target : Tree.label_id;
+  goto_guards : guarded list;
+}
+
 (* A labelled statement: its label, the innermost guarded statement
    around it, [None] outside every one, and its context. *)
 type definition = {
@@ -140,18 +150,21 @@ type definition = {
 
 (* One walk of a body. [guards] and [context] say where the walk is:
    [guards] holds every guarded statement and scope around it, the
-   innermost first. [definitions] and [jumps] hold the labelled
-   statements and the jumps, and [breaches] the refusals of design 6
-   rule 10, in the order of the walk, which is not source order: a
-   loop's body is walked before its condition. *)
+   innermost first. The queues fill in the order of the walk, which is
+   not source order, as a loop's body is walked before its condition:
+   [definitions] and [jumps] hold the labelled statements and the
+   jumps, [gotos] the goto statements, [breaches] the refusals of
+   design 6 rule 10, and [defers] the defer statements whose scopes the
+   walk has read, with where each ends. *)
 type walk = {
   facts : facts;
   guards : guarded list;
   context : expression_context;
   definitions : definition Queue.t;
   jumps : jump Queue.t;
+  gotos : goto Queue.t;
   breaches : refusal Queue.t;
-  defers : defer_site Queue.t;
+  defers : (read_defer * ending) Queue.t;
 }
 
 (* The walk inside the guarded statement or scope [guard]. *)
@@ -199,15 +212,15 @@ let item_span : Tree.block_item -> Tree.span = function
   | Block_defer { keyword; statement } ->
       { first = keyword.first; last = statement.span.last }
 
-(* Records [exit] in the scopes of the defer statements around the walk
-   that it leaves, which [leaves] says of the first token of each. *)
-let record_exit walk exit ~leaves =
+(* Records [exit] in the scopes of the defer statements among [guards]
+   that it leaves, which [leaves] says of the span of each. *)
+let record_exit guards exit ~leaves =
   List.iter
     (function
-      | Defer_scope { scope; scope_exits } when leaves scope.Tree.first ->
+      | Defer_scope { scope; scope_exits } when leaves scope ->
           Queue.add exit scope_exits
       | Defer_scope _ | Arm _ | Tested _ -> ())
-    walk.guards
+    guards
 
 (* A break or continue leaves the scopes that begin after the keyword
    of the statement it leaves: that statement holds their blocks, as
@@ -215,8 +228,8 @@ let record_exit walk exit ~leaves =
    in a scope (design 6 rule 10). *)
 let record_leaving walk (statement : Tree.statement) = function
   | Tree.Only (Statement_at target) ->
-      record_exit walk (Jump statement.span) ~leaves:(fun first ->
-          target < first)
+      record_exit walk.guards (Jump statement.span) ~leaves:(fun scope ->
+          target < scope.Tree.first)
   | Either _ -> ()
 
 (* A return leaves every scope around it (design 6 rule 1). *)
@@ -227,19 +240,12 @@ let record_return walk (statement : Tree.statement) value =
         Value_return { statement = statement.span; operand = operand.span }
     | None -> Jump statement.span
   in
-  record_exit walk exit ~leaves:(fun _ -> true)
+  record_exit walk.guards exit ~leaves:(fun _ -> true)
 
-(* The sites of the defer statements [defers] of a sequence whose scopes
-   end in [ending], once the walk has read the sequence, so that every
-   exit of their scopes is recorded. *)
+(* The defer statements [defers] of a sequence whose scopes end in
+   [ending], once the walk has read the sequence. *)
 let record_defers walk defers ending =
-  List.iter
-    (fun read ->
-      Queue.add
-        { keyword = read.defer_keyword; deferred = read.defer_statement;
-          ending; exits = List.of_seq (Queue.to_seq read.defer_exits) }
-        walk.defers)
-    defers
+  List.iter (fun read -> Queue.add (read, ending) walk.defers) defers
 
 (* A jump may enter a statement at a label it carries or contains. *)
 let enterable flow = flow.has_named_label || flow.has_case_label
@@ -378,6 +384,10 @@ and statement_flow walk (statement : Tree.statement) =
       for_flow walk target clause condition step body
   | Goto label ->
       record_jump walk Goto label;
+      Queue.add
+        { goto_statement = statement.span; goto_target = label.label;
+          goto_guards = walk.guards }
+        walk.gotos;
       stops
   | Computed_goto target ->
       unknown_target_jump walk statement.span "a `goto *`";
@@ -783,7 +793,8 @@ let check_jump definitions jump =
 let start facts =
   { facts; guards = []; context = Outside_statement_expressions;
     definitions = Queue.create (); jumps = Queue.create ();
-    breaches = Queue.create (); defers = Queue.create () }
+    gotos = Queue.create (); breaches = Queue.create ();
+    defers = Queue.create () }
 
 (* Design 4.3 rule 1. *)
 let arm_refusal facts (matched : Tree.arm) =
@@ -824,8 +835,26 @@ let label_refusal body =
   | first :: _ -> Some first
   | [] -> None
 
+(* Records each goto in the scopes that it leaves, those around it that
+   do not hold its label (design 6 rule 1), once the walk has read every
+   label. The parser resolves every goto to a label that a statement in
+   its scope defines, and the walk reads every statement. *)
+let record_gotos walk =
+  let definitions = by_label walk.definitions in
+  let record goto =
+    let definition = Hashtbl.find definitions goto.goto_target in
+    record_exit goto.goto_guards (Jump goto.goto_statement)
+      ~leaves:(fun scope -> not (encloses scope definition.site))
+  in
+  Queue.iter record walk.gotos
+
+let defer_site ((read : read_defer), ending) =
+  { keyword = read.defer_keyword; deferred = read.defer_statement; ending;
+    exits = List.of_seq (Queue.to_seq read.defer_exits) }
+
 let defers facts body =
   let walk = start facts in
   ignore (block walk body);
-  let keyword site = site.keyword in
-  in_source_order keyword walk.defers
+  record_gotos walk;
+  let keyword ((read : read_defer), _) = read.defer_keyword in
+  List.map defer_site (in_source_order keyword walk.defers)

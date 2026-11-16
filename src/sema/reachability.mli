@@ -27,8 +27,8 @@ type facts = {
 type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
 
 (** An exit from the scope of a defer statement by a jump (design 6 rule
-    1): a [break], [continue] or [return;], the statement after its
-    labels; or a [return e;], with the span of [e]. *)
+    1): a [break], [continue], [goto] or [return;], the statement after
+    its labels; or a [return e;], with the span of [e]. *)
 type exit =
   | Jump of Tree.span
   | Value_return of { statement : Tree.span; operand : Tree.span }
@@ -40,8 +40,9 @@ type exit =
 type ending = Completes of int | Cannot_complete of int | Arm_end
 
 (** A defer statement: its keyword, its statement [S], where its scope
-    ends, and the jumps that leave the scope, in the order of the walk.
-    A [goto] that leaves it is not among them (TODO.md). *)
+    ends, and the jumps that leave the scope. A [goto] leaves it if its
+    label is outside the scope, including one before the defer
+    statement. *)
 type defer_site = {
   keyword : Tree.span;
   deferred : Tree.span;

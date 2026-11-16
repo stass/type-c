@@ -441,6 +441,56 @@ let defers () =
       ; } return ; } " ^ trap ^ " } case e_B: { return; " ^ trap
    ^ " } default: " ^ trap ^ " } } }")
 
+(* Design 6 rule 1: a goto leaves the scopes that hold it and not its
+   label, which a label before the defer is not in. *)
+let goto_defers () =
+  lowers "a goto out of the scope"
+    "void a(void); void f(int c) { { defer a(); if (c) goto L; a(); } L: ; }"
+    "void a(void); void f(int c) { { if (c) { { a ( ) ; } goto L ; } a(); { \
+     a ( ) ; } } L: ; }";
+  lowers "a goto out of two scopes, innermost first"
+    "void a(void); void b(void); void f(int c) { { defer a(); { defer b(); \
+     if (c) goto L; } } L: ; }"
+    "void a(void); void b(void); void f(int c) { { { if (c) { { b ( ) ; } { \
+     a ( ) ; } goto L ; } { b ( ) ; } } { a ( ) ; } } L: ; }";
+  lowers "a goto out of the inner of two scopes"
+    "void a(void); void b(void); void f(int c) { defer a(); { defer b(); if \
+     (c) goto M; } M: ; }"
+    "void a(void); void b(void); void f(int c) { { if (c) { { b ( ) ; } goto \
+     M ; } { b ( ) ; } } M: ; { a ( ) ; } }";
+  lowers "a goto within the scope runs nothing"
+    "void a(void); void f(int c) { defer a(); L: if (c) goto L; if (c) goto \
+     M; M: ; }"
+    "void a(void); void f(int c) { L: if (c) goto L; if (c) goto M; M: ; { a \
+     ( ) ; } }";
+  lowers "a goto back to before the defer"
+    "void a(void); void f(int c) { L: c--; defer a(); if (c) goto L; }"
+    "void a(void); void f(int c) { L: c--; if (c) { { a ( ) ; } goto L ; } { \
+     a ( ) ; } }";
+  lowers "a goto out of a loop body"
+    "void a(void); void f(int c) { while (c) { defer a(); if (c) goto out; \
+     c--; } out: ; }"
+    "void a(void); void f(int c) { while (c) { if (c) { { a ( ) ; } goto out \
+     ; } c--; { a ( ) ; } } out: ; }";
+  lowers "a labelled goto after its labels"
+    "void a(void); void f(void) { { defer a(); M: goto L; } L: ; }"
+    ("void a(void); void f(void) { { M: { { a ( ) ; } goto L ; } " ^ trap
+   ^ " } L: ; }");
+  lowers "a goto out of a statement expression in the scope"
+    "void a(void); int f(int c) { { defer a(); c = ({ if (c) goto L; c; }); \
+     } L: return c; }"
+    "void a(void); int f(int c) { { c = ({ if (c) { { a ( ) ; } goto L ; } \
+     c; }); { a ( ) ; } } L: return c; }";
+  lowers "a goto out of a match arm"
+    "type e = | A | B; void a(void); void f(e v, int c) { match (v) { case \
+     A: defer a(); if (c) goto L; return; case B: return; } L: ; }"
+    ("struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
+      e_tag tag; }; void a(void); void f(e v, int c) { { const struct e \
+      *const __tc_match = &( v ); switch (__tc_match->tag) { case e_A: { if \
+      (c) { { a ( ) ; } goto L ; } { { a ( ) ; } return ; } " ^ trap
+   ^ " } case e_B: { return; " ^ trap ^ " } default: " ^ trap
+   ^ " } } L: ; }")
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -501,4 +551,5 @@ let () =
   many_tries ();
   many_defers ();
   defers ();
+  goto_defers ();
   if !failures > 0 then exit 1

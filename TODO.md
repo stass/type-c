@@ -210,10 +210,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   leaves recording them to each caller (`block`, `arm`). Let `sequence`
   record its own, and derive the sentinel from the parse, which sees
   every `Block_defer`, while it stands.
-- [High] Lowering of a defer (package 2.5, D3b) runs no copies at a
-  `goto` that leaves the scope (design 6 rule 1, 13.5):
-  `Reachability.defers` records break, continue and return alone. The
-  front end refuses every defer (TC0023) until it does.
 - [High] Lowering of a try (package 2.5, D6) leaves the cleanups slot of
   the error path empty (`Lowering.no_cleanups`), so a try in the scope
   of a defer returns without running its copies. The front end refuses
