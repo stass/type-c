@@ -614,14 +614,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   return the fact with the type that it reads. `for_declarator` runs the
   walk for every declarator, members and nested parameters included,
   which nothing reads there and which costs depth times size.
-- [Low] The window of design 13.5 counts the events that a reading of
-  a generic's definition makes at the tokens of the definition, where
-  the lowered C holds none, and not where each instance's text stands:
-  a generic function whose body declares `extern int o
-  __attribute__((aligned(16)));` again, defined before another generic
-  that reads `o` and instantiated between that one and its instance,
-  changes `o` for GCC inside the window unseen. Record such an event at
-  the place of writing of each instance that holds it.
+- [Low] Moved text can hold C text through a line marker, as an
+  `#include` of a C header inside the operand of a `try`, and the
+  parser passes a block literal there unread, so `^{ extern int o
+  __attribute__((aligned(16))); }` declares an entity with linkage that
+  design 13.5 refuses in moved text, unseen. No backend is known to
+  carry such an attribute out of a block literal (Clang does not; GCC
+  has none). Refuse C text inside moved text, or hold the rule of
+  `Resolution.check_unread_declarations` in the parser's one scan of
+  unread text (`scan_unread`) for every unread kind in a moved span.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it

@@ -6,7 +6,12 @@ open Typec_syntax
 
 type declaration = Ordinary of Tree.reference | Tag of Tree.tag_id
 type name = { name : string; span : Tree.span; declaration : declaration }
-type own = { declared : name; implicit : bool; scope : Tree.scope_depth }
+type own = {
+  declared : name;
+  implicit : bool;
+  linked : bool;
+  scope : Tree.scope_depth;
+}
 
 type kind = Generic_definition | Try_operand
 
@@ -169,6 +174,58 @@ let check_scope text (own : own) =
           writes elsewhere, so the text after it would lose the \
           declaration; declare it before the text"
          named)
+
+(* The third clause on a declaration with linkage, in any scope of the
+   text: it declares an entity that the text around it sees, so what it
+   says reaches that text where lowering writes it, and the window
+   leaves out the text's own declarations. *)
+let check_linkage (own : own) =
+  if own.linked then
+    refuse own.declared.span Moved_declaration
+      (Printf.sprintf
+         "%s is declared with linkage in the text, which lowering writes \
+          elsewhere, so the declaration may change it for the text around \
+          it there; declare it outside the text"
+         (quote own.declared.name))
+
+let refuse_unread_declaration index what =
+  refuse { first = index; last = index } Moved_declaration
+    (Printf.sprintf
+       "%s in the arguments of an attribute, which typing does not read, \
+        may declare a name that the text around it sees, and lowering \
+        writes the text elsewhere"
+       what)
+
+let is_tag_keyword name = name = "struct" || name = "union" || name = "enum"
+
+(* Whether the tag keyword at [index] declares its tag: it names none, or
+   one that is not visible (C11 6.7.2.3p8). *)
+let declares_tag context (arguments : Tree.span) view index =
+  if index = arguments.last then true
+  else
+    match context.tokens.tokens.(index + 1).kind with
+    | Identifier name -> Option.is_none (Parser.View.find_tag view name)
+    | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
+      ->
+        true
+
+(* The same clauses where typing reads no declaration, in the arguments
+   of an attribute: the only tokens there that can declare are a brace,
+   which may open a block, and a tag keyword. Every brace is refused, as
+   typec cannot tell a block from an initialiser's braces. *)
+let check_unread_declarations context ((arguments : Tree.span), view) =
+  for index = arguments.first to arguments.last do
+    match context.tokens.tokens.(index).kind with
+    | Punctuator Punctuator.Left_brace ->
+        refuse_unread_declaration index "a brace"
+    | Identifier name
+      when is_tag_keyword name && declares_tag context arguments view index ->
+        refuse_unread_declaration index
+          "a tag keyword that names no visible tag"
+    | Identifier _ | Number | Character _ | String _ | Punctuator _
+    | Pragma _ | Typec_pragma ->
+        ()
+  done
 
 (* The entity that the use denotes where the text is written has the
    type that it has at the text's own place. Completing a structure
@@ -468,6 +525,10 @@ let check_reading context text place =
 let check context text ~at =
   checking (kind_rule text.kind) (fun () ->
       List.iter (check_scope text) text.declares;
+      List.iter check_linkage text.declares;
+      List.iter
+        (check_unread_declarations context)
+        (Parser.attributes_within context.views text.span);
       Option.iter (check_reading context text) at)
 
 (* A name that lowering spells in a text of its own has no own place

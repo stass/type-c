@@ -1278,7 +1278,8 @@ result(uint32_t, parse_error) read_number(reader *r)
    })] = try g(K);` the source names the `K` of the left operand, and
    the lowered code writes the operand where no `K` is declared yet, or
    an outer one is. And the operand declares no name that is in scope
-   after it, which is the third clause of the property on the operand.
+   after it and no object or function with linkage, which is the third
+   clause of the property on the operand.
    In `a[K] = try g(sizeof(enum { K = 5 }));` the source reads the `K`
    of `a[K]` where the operand has not yet declared one, and the lowered
    code would read the operand's, and store to `a[5]`.
@@ -3790,17 +3791,28 @@ each. A third clause covers the text around it.
   whose scope ends inside the text, in a parameter list or in a block,
   is no such name. The kinds of moved text meet the clause each in its
   own way. A deferred statement is a block (section 6 rule 8), so the
-  clause holds for it by construction. The operand of a `try` declares
-  no tag and no enumeration constant in the scope around it (5.1 rule
-  3). The definition of a generic declares its generic, and that of a
-  generic variant its constructors, which lowering writes under the
-  names of the instances (10.1, 10.3), and nothing else: it is not the
-  first mention of a tag in file scope, and the head of a generic
-  function declares no type at all (3.5 rule 8). The one name of an
-  untagged type declares nothing, and the typedef around it only its
-  reserved name (2.3). The clause holds as
-  well for the operand of a `return` that lowering writes as a block,
-  though that text does not move (section 6 rule 12).
+  clause's first sentence holds for it by construction. The operand of
+  a `try` declares no tag and no enumeration constant in the scope
+  around it (5.1 rule 3). The definition of a generic declares its
+  generic, and that of a generic variant its constructors, which
+  lowering writes under the names of the instances (10.1, 10.3), and
+  nothing else: it is not the first mention of a tag in file scope, and
+  the head of a generic function declares no type at all (3.5 rule 8).
+  The one name of an untagged type declares nothing, and the typedef
+  around it only its reserved name (2.3). The clause holds as well for
+  the operand of a `return` that lowering writes as a block, though
+  that text does not move (section 6 rule 12). Text that moves, of
+  every kind, also declares no object or function with linkage, even in
+  a block of its own, as an `extern` declaration or a function
+  declaration there: that entity is one the text around it sees, so
+  what the declaration says reaches that text at each place of writing,
+  unseen by the window above, which leaves out the text's own
+  declarations; GCC reads `__alignof__(o)` in the holder of a `try` as
+  16 where the operand declares `extern int o
+  __attribute__((aligned(16)));`. Typing reads no declaration in the
+  arguments of an attribute, so there text that moves holds none: no
+  `{`, which may open a block, and no `struct`, `union` or `enum` of a
+  tag that is not visible there.
 
 The property is stated here alone and checked in one place. Every move
 goes through one check of the three clauses, and so does the block that

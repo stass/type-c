@@ -62,3 +62,7 @@ type t = {
           names a type of its own, which no argument shares, and is
           exact. *)
 }
+
+let linkage_of = function
+  | Object { linkage; _ } | Function { linkage; _ } -> linkage
+  | Typedef _ | Enumerator _ -> No_linkage

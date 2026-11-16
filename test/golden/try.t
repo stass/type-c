@@ -1490,6 +1490,92 @@ operand on GCC, which changes the object in place.
   redeclared_in_block.tc:6: the declaration of 'o' at redeclared_in_block.tc:5, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 5.1 rule 3, 13.5) [TC0061]
   [1]
 
+An operand that declares an object or a function with linkage, in a
+block of its own, declares an entity that the text around it sees:
+written before the holder, an attribute there changes the object for
+the holder on GCC, so the operand declares none (design 13.5).
+
+  $ cat > declares_linked.tc <<'EOF'
+  > extern int o;
+  > result(int, int) h(result(int, int) r) {
+  >   int a[32] = { 0 };
+  >   a[__alignof__(o)] =
+  >     try ({ extern int o __attribute__((aligned(16))); (void)o; r; });
+  >   return Ok(a[4]);
+  > }
+  > EOF
+  $ ./golden.exe declares_linked.tc
+  declares_linked.tc:5: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+  $ cat > declares_function.tc <<'EOF'
+  > result(int, int) h(result(int, int) r) {
+  >   int x = try ({ int f(void); r; });
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe declares_function.tc
+  declares_function.tc:2: 'f' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+So does one of internal linkage, while a block-scope static object has
+no linkage and is the operand's own.
+
+  $ cat > declares_internal.tc <<'EOF'
+  > static int o;
+  > result(int, int) h(result(int, int) r) {
+  >   int x = try ({ extern int o; o = 1; r; });
+  >   return Ok(x + o);
+  > }
+  > EOF
+  $ ./golden.exe declares_internal.tc
+  declares_internal.tc:3: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+  $ cat > declares_static.tc <<'EOF'
+  > result(int, int) h(result(int, int) r) {
+  >   int x = try ({ static int n; n++; r; });
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe declares_static.tc > /dev/null
+
+Typing reads no declaration in the arguments of an attribute, so the
+operand holds no brace there, which could open one: here a statement
+expression that GCC reads as declaring o aligned to 16 for the holder.
+
+  $ cat > declares_unread.tc <<'EOF'
+  > extern int o;
+  > result(int, int) h(result(int, int) r) {
+  >   int a[32] = { 0 };
+  >   a[__alignof__(o)] =
+  >     try ({ int z __attribute__((aligned(sizeof(({ extern int o
+  >       __attribute__((aligned(16))); 1; }))))); (void)z; r; });
+  >   return Ok(a[4]);
+  > }
+  > EOF
+  $ ./golden.exe declares_unread.tc
+  declares_unread.tc:5: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
+Nor a tag keyword there of a tag that is not visible, which would
+declare the tag in front of the holder: here the two mentions of
+struct q in the holder would name one type.
+
+  $ cat > declares_unread_tag.tc <<'EOF'
+  > result(int, int) g(int);
+  > result(int, int) h(void) {
+  >   int a[4] = { 0 };
+  >   a[_Generic((void (*)(struct q *))0,
+  >       void (*)(struct q *): 1, default: 2)] =
+  >     try g(sizeof(int __attribute__((aligned(sizeof(struct q *))))));
+  >   return Ok(a[2]);
+  > }
+  > EOF
+  $ ./golden.exe declares_unread_tag.tc
+  declares_unread_tag.tc:6: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 5.1 rule 3, 13.5) [TC0061]
+  [1]
+
 A tag that the holder declares anew, in a block of its own, is none
 that the place declares, so completing it there changes nothing for the
 operand.

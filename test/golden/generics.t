@@ -407,6 +407,46 @@ own, and a tag declared before the definition is named by it.
   first_mention_field.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0039]
   [1]
 
+Nor does it declare an object or a function with linkage, even in a
+block of its own, which declares an entity that file scope sees.
+
+  $ cat > linked.tc <<'EOF'
+  > type g(T) = struct { T t; int a[sizeof(({ extern int o; o; }))]; };
+  > EOF
+  $ ./golden.exe linked.tc
+  linked.tc:1: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 13.5) [TC0039]
+  [1]
+
+Nor does it hold, in the arguments of an attribute, which typing does
+not read, a brace, which could open a block, or a tag keyword of a tag
+that is not visible there, which declares it at file scope; one that
+is visible is named.
+
+  $ cat > unread_brace.tc <<'EOF'
+  > type g(T) = struct {
+  >   T v __attribute__((aligned(sizeof((int []){ 1, 2 }))));
+  > };
+  > EOF
+  $ ./golden.exe unread_brace.tc
+  unread_brace.tc:2: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0039]
+  [1]
+  $ cat > unread_tag.tc <<'EOF'
+  > type g(T) = struct {
+  >   T v __attribute__((aligned(sizeof(struct q *))));
+  > };
+  > EOF
+  $ ./golden.exe unread_tag.tc
+  unread_tag.tc:2: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0039]
+  [1]
+  $ cat > unread_visible_tag.tc <<'EOF'
+  > struct q;
+  > type g(T) = struct {
+  >   T v __attribute__((aligned(sizeof(struct q *))));
+  > };
+  > g(int) x;
+  > EOF
+  $ ./golden.exe unread_visible_tag.tc > /dev/null
+
 Typing reads the definition again for each instance, with the
 arguments bound. An instance is defined where a point first needs it
 complete, and an error of its definition is reported at the

@@ -30,8 +30,14 @@ type name = { name : string; span : Tree.span; declaration : declaration }
 (** A name that the text declares, in the scope [scope], as the parser
     recorded it. [implicit] holds for a tag that it declares only
     because none of its name is visible (C11 6.7.2.3p8), which a tag of
-    the scope around the text would replace. *)
-type own = { declared : name; implicit : bool; scope : Tree.scope_depth }
+    the scope around the text would replace. [linked] holds for an
+    object or a function with linkage. *)
+type own = {
+  declared : name;
+  implicit : bool;
+  linked : bool;
+  scope : Tree.scope_depth;
+}
 
 (** The kinds of moved text that {!check} reads: the definition of a
     generic (design 3.5 rule 8) and the operand of a [try] (5.1 rule 3).

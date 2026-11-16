@@ -151,10 +151,11 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    13.5). [moved] collects what the reading of a generic's definition
    finds in it, none outside one, and [found] the names that each moved
    text being read uses and declares, innermost first. [redeclared_at]
-   and [completed_at] are the events of the window of 13.5 that every reading so
-   far has made ({!Resolution.context}), the readings of generics'
-   definitions included, at the tokens of the definition rather than
-   where each instance's text stands (TODO.md). *)
+   and [completed_at] are the events of the window of 13.5 that every
+   reading so far has made ({!Resolution.context}). Those of a reading
+   of a generic's definition stand at its tokens, not where its
+   instances do, which is sound as they are of the text's own entities:
+   moved text declares no entity with linkage (13.5). *)
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -377,11 +378,10 @@ let note_use state span name declaration =
   in
   List.iter note (holding state span)
 
-let note_own state span name declaration ~scope ~implicit =
+let note_own state span name declaration ~scope ~implicit ~linked =
   let declared = { Resolution.name; span; declaration } in
-  let note found =
-    found.declares <- { Resolution.declared; implicit; scope } :: found.declares
-  in
+  let own = { Resolution.declared; implicit; linked; scope } in
+  let note found = found.declares <- own :: found.declares in
   List.iter note (holding state span)
 
 (* [read] of the moved text at [text_span], with what it finds. *)
@@ -416,10 +416,6 @@ let earlier_entity state span name (declared : Tree.declared) =
       | None -> Some (referenced state span name earlier))
 
 (* Ordinary identifiers (6.2.2, 6.7p3, p4) *)
-
-let linkage_of = function
-  | Object { linkage; _ } | Function { linkage; _ } -> linkage
-  | Typedef _ | Enumerator _ -> No_linkage
 
 let is_overload = function
   | Function { overload; _ } -> overload
@@ -496,7 +492,8 @@ let bind_entity state name (declared : Tree.declared) entity =
   let reference = Tree.In_tree declared.id in
   let (Ordinary_at token) = declared.id in
   note_own state { first = token; last = token } name
-    (Resolution.Ordinary reference) ~scope:declared.scope ~implicit:false;
+    (Resolution.Ordinary reference) ~scope:declared.scope ~implicit:false
+    ~linked:(linkage_of entity.declared <> No_linkage);
   Hashtbl.replace state.entities reference entity
 
 (* An overload (design 13.3) is a new entity, which is not linked under
@@ -1384,7 +1381,7 @@ and bind_tag state (tag : Tree.tag) found =
   match tag.binding with
   | Declares { id; scope; implicit; earlier = _ } ->
       note_own state tag.name.span tag.name.node (Resolution.Tag id) ~scope
-        ~implicit;
+        ~implicit ~linked:false;
       Hashtbl.replace state.tag_types id found
   | Names _ -> ()
 

@@ -213,7 +213,10 @@ let rows =
         "A declaration in moved text of a name that is in scope after \
          the text, such as a tag that the definition of a generic type \
          is the first to mention in the scope around its structure, \
-         which is file scope (design 3.5 rule 8)." };
+         which is file scope (design 3.5 rule 8), or of an object or a \
+         function with linkage, in any scope of the text; or, in the \
+         arguments of an attribute there, a brace or a tag keyword of a \
+         tag that is not visible." };
     Live { name = "Pragma_tokens"; code = 40; clause = Some "design 13.5";
       meaning =
         "A [#pragma] line whose text after [pragma] is no sequence of \
@@ -352,7 +355,9 @@ let rows =
          any clause of the resolution property: a name that it uses \
          reads otherwise in front of the statement or declaration that \
          holds the [try], as one that the holder declares does, or it \
-         declares a name that is in scope after it." };
+         declares a name that is in scope after it or an object or a \
+         function with linkage, or holds a brace or a tag keyword of a \
+         tag that is not visible in the arguments of an attribute." };
     Live { name = "Defer_scope_jump"; code = 62;
       clause = Some "design 6 rule 10";
       meaning =
