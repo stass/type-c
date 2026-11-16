@@ -253,7 +253,16 @@ let typedefs () =
   declares "typedef int F(void); F f;" "f" "function int (void) external";
   rejects "typedef int f(void) {}" "6.9.1p4";
   rejects "register int f(void) {}" "6.9.1p4";
-  declares "static int f(int x) { }" "f" "function int (int) internal"
+  declares "static int f(int x) { }" "f" "function int (int) internal";
+  (* The typedef names of an untagged type are kept once each in time
+     near linear in their number, not in its square. *)
+  let names = List.init 128000 (Printf.sprintf "n%d") in
+  let started = Sys.time () in
+  accepts ("typedef struct { int x; } " ^ String.concat ", " names ^ ";");
+  let took = Sys.time () -. started in
+  if took > 2.0 then
+    fail_case "128000 typedef names of one type"
+      (Printf.sprintf "took %.1f s, over 2 s" took)
 
 let tags () =
   declares "struct s { int a; }; struct s x;" "x"

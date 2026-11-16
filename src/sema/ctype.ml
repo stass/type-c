@@ -576,15 +576,19 @@ let untagged_id t =
 
 (* A name repeated in one declaration, as in [typedef struct {...} n, n;],
    is one name, given by its first declarator: a later one may add an
-   attribute, which the type that typec reads lacks. *)
+   attribute, which the type that typec reads lacks. A stable sort keeps
+   the declarators of one name in their order, so the first of each run
+   is the first declarator, and one pass keeps it. *)
 let first_of_each_name names =
-  let add kept (named : typedef_name) =
-    if List.exists (fun (k : typedef_name) -> k.name = named.name) kept then
-      kept
-    else named :: kept
+  let by_name (a : typedef_name) (b : typedef_name) =
+    String.compare a.name b.name
   in
-  List.fold_left add [] names
-  |> List.sort (fun (a : typedef_name) b -> String.compare a.name b.name)
+  let add kept (named : typedef_name) =
+    match kept with
+    | (last : typedef_name) :: _ when last.name = named.name -> kept
+    | _ -> named :: kept
+  in
+  List.stable_sort by_name names |> List.fold_left add [] |> List.rev
 
 let name_untagged tags t names =
   match untagged_id t with
