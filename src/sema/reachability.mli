@@ -37,8 +37,9 @@ val arm_refusal : facts -> Tree.arm -> refusal option
 val label_refusal : Tree.block -> refusal option
 (** In the body of a function, the first jump, in source order, that
     enters a statement expression from outside it (GCC manual,
-    "Statement Exprs") or breaches design 4.3 rule 3 or 6 rule 5, if
-    any. It reads the tree alone, so typing may ask it first.
+    "Statement Exprs"), breaches design 4.3 rule 3 or 6 rule 5, or stands
+    in the scope of a defer statement against 6 rule 10, if any. It
+    reads the tree alone, so typing may ask it first.
     The walk reads every expression of the body, those in types
     included, but the arguments of attributes and the parameters and
     body of a block literal, which is a function of its own. *)

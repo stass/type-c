@@ -140,7 +140,8 @@ let rows =
          condition of a loop or the step of a [for], outside every loop, \
          [switch] and match within it, which GCC and Clang take to leave \
          different statements: in Type-C text, and in a deferred \
-         statement in any text (design 6 rule 10)." };
+         statement or the scope of a defer statement in any text \
+         (design 6 rule 10)." };
     Live { name = "Break_outside"; code = 27;
       clause = Some "C11 6.8.6.3p1, design 4.3 rule 2";
       meaning =
@@ -352,6 +353,13 @@ let rows =
          reads otherwise in front of the statement or declaration that \
          holds the [try], as one that the holder declares does, or it \
          declares a name that is in scope after it." };
+    Live { name = "Defer_scope_jump"; code = 62;
+      clause = Some "design 6 rule 10";
+      meaning =
+        "A GNU computed [goto *] or an [asm goto] in the scope of a \
+         defer statement, in any text, which no deferred statement can \
+         precede; a disputed [break] or [continue] there is refused as \
+         [Disputed_jump]." };
   ]
 
 let () =

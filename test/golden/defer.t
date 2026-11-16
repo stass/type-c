@@ -446,3 +446,162 @@ a defer may be taken.
   $ ./golden.exe entry_allowed.tc
   entry_allowed.tc:4: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
   [1]
+
+In the scope of a defer statement there is no computed goto, no asm goto
+and no disputed break or continue, in any text and in any statement
+nested in the scope (design 6 rule 10).
+
+  $ cat > scope_computed_goto.tc <<'EOF'
+  > void g(void);
+  > void f(void *p) {
+  >   defer g();
+  >   goto *p;
+  > }
+  > EOF
+  $ ./golden.exe scope_computed_goto.tc
+  scope_computed_goto.tc:4: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  [1]
+
+  $ cat > scope_asm_goto.tc <<'EOF'
+  > void g(void);
+  > void f(void) {
+  > out:;
+  >   defer g();
+  >   asm goto ("" : : : : out);
+  > }
+  > EOF
+  $ ./golden.exe scope_asm_goto.tc
+  scope_asm_goto.tc:5: an `asm goto` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  [1]
+
+  $ cat > scope_disputed.tc <<'EOF'
+  > # 1 "scope_disputed.tc"
+  > void g(void);
+  > void f(int c) {
+  >   defer g();
+  > # 1 "c.h" 1
+  >   while (c) for (;; ({ break; })) ;
+  > # 5 "scope_disputed.tc" 2
+  > }
+  > EOF
+  $ ./golden.exe scope_disputed.tc
+  c.h:1: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
+  [1]
+
+  $ cat > scope_c_text.tc <<'EOF'
+  > # 1 "scope_c_text.tc"
+  > # 1 "c.h" 1
+  > void g(void);
+  > void f(int c) {
+  >   _Defer g();
+  >   while (c) for (;; ({ continue; })) ;
+  > }
+  > # 2 "scope_c_text.tc" 2
+  > EOF
+  $ ./golden.exe scope_c_text.tc
+  c.h:4: a continue in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
+  [1]
+
+The scope holds every statement nested in it: a block, a statement
+expression and a match arm, which a jump enters only from inside.
+
+  $ cat > scope_nested.tc <<'EOF'
+  > void g(void);
+  > void f(int c, void *p) {
+  >   defer g();
+  >   if (c) {
+  >     int x = ({ goto *p; 0; });
+  >     (void)x;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe scope_nested.tc
+  scope_nested.tc:5: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  [1]
+
+  $ cat > scope_arm.tc <<'EOF'
+  > type e = | A | B(int i);
+  > void g(void);
+  > void f(e v, void *p) {
+  >   defer g();
+  >   match (v) {
+  >   case A:
+  >     goto *p;
+  >   case B(_):
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe scope_arm.tc
+  scope_arm.tc:7: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  [1]
+
+  $ cat > arm_scope.tc <<'EOF'
+  > type e = | A | B(int i);
+  > void g(void);
+  > void f(e v, void *p) {
+  >   match (v) {
+  >   case A:
+  >     defer g();
+  >     goto *p;
+  >   case B(_):
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe arm_scope.tc
+  arm_scope.tc:7: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  [1]
+
+  $ cat > scope_tested.tc <<'EOF'
+  > type list = | Nil | Cons(long head, list *tail);
+  > void g(void);
+  > void f(const list *l, void *p) {
+  >   defer g();
+  >   if (case Cons(_, _) = *l)
+  >     goto *p;
+  > }
+  > EOF
+  $ ./golden.exe scope_tested.tc
+  scope_tested.tc:6: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  [1]
+
+The first refusal in source order is named, of rule 10 or of an entry.
+
+  $ cat > scope_order.tc <<'EOF'
+  > void g(void);
+  > void f(int c, void *p) {
+  >   if (c)
+  >     goto in;
+  >   defer g();
+  > in:
+  >   goto *p;
+  > }
+  > EOF
+  $ ./golden.exe scope_order.tc
+  scope_order.tc:4: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  [1]
+
+Before the defer and after its block ends, the jumps are no concern of
+the rule.
+
+  $ cat > scope_ended.tc <<'EOF'
+  > # 1 "scope_ended.tc"
+  > void g(void);
+  > void f(int c, void *p) {
+  >   if (c)
+  >     goto *p;
+  >   {
+  >     defer g();
+  >   }
+  >   goto *p;
+  > back:
+  >   asm goto ("" : : : : back);
+  > # 1 "c.h" 1
+  >   while (c) for (;; ({ break; })) ;
+  > # 12 "scope_ended.tc" 2
+  > }
+  > EOF
+  $ ./golden.exe scope_ended.tc
+  scope_ended.tc:6: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  [1]

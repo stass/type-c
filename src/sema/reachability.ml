@@ -113,17 +113,53 @@ type definition = {
   label_context : expression_context;
 }
 
-(* One walk of a body. [guard] and [context] say where the walk is;
-   [definitions] and [jumps] hold the labelled statements and the jumps
-   in the order of the walk, which is not source order: a loop's body is
-   walked before its condition. *)
+(* One walk of a body. [guards] and [context] say where the walk is:
+   [guards] holds every guarded statement and scope around it, the
+   innermost first. [definitions] and [jumps] hold the labelled
+   statements and the jumps, and [breaches] the refusals of design 6
+   rule 10, in the order of the walk, which is not source order: a
+   loop's body is walked before its condition. *)
 type walk = {
   facts : facts;
-  guard : guarded option;
+  guards : guarded list;
   context : expression_context;
   definitions : definition Queue.t;
   jumps : jump Queue.t;
+  breaches : refusal Queue.t;
 }
+
+(* The walk inside the guarded statement or scope [guard]. *)
+let guarded_by guard walk = { walk with guards = guard :: walk.guards }
+
+let innermost_guard walk =
+  match walk.guards with guard :: _ -> Some guard | [] -> None
+
+let in_defer_scope walk =
+  List.exists
+    (function Defer_scope _ -> true | Arm _ | Tested _ -> false)
+    walk.guards
+
+(* Records the refusal of a jump that design 6 rule 10 forbids, if the
+   walk is in the scope of a defer statement: lowering could not tell
+   which scopes the jump leaves, so which deferred statements to run. *)
+let breach walk span diagnostic =
+  if in_defer_scope walk then Queue.add { span; diagnostic } walk.breaches
+
+(* A [goto *] chooses its target when it runs, and an [asm goto] jumps
+   from inside the assembly. *)
+let unknown_target_jump walk span what =
+  breach walk span
+    (Rule.message Defer_scope_jump
+       (what
+      ^ " in the scope of a defer statement, which may leave the scope \
+         where lowering cannot run the deferred statement first"))
+
+(* A break or continue that the parser resolved to two statements, one
+   on each backend's reading (design 4.4). *)
+let disputed_jump walk span keyword = function
+  | Tree.Only _ -> ()
+  | Either { loop = _; around = _ } ->
+      breach walk span (Parser.disputed_jump keyword)
 
 let record_jump walk kind ({ name; label } : Tree.label_name) =
   Queue.add
@@ -168,7 +204,7 @@ and after_item walk item rest ~scope_end =
   match (item, rest) with
   | Tree.Block_defer _, first :: _ ->
       let scope = { Tree.first = (item_span first).first; last = scope_end } in
-      { walk with guard = Some (Defer_scope scope) }
+      guarded_by (Defer_scope scope) walk
   | Block_defer _, [] -> walk
   | (Block_declaration _ | Block_type_declaration _ | Block_statement _), _ ->
       walk
@@ -255,9 +291,15 @@ and statement_flow walk (statement : Tree.statement) =
   | Goto label ->
       record_jump walk Goto label;
       stops
-  | Computed_goto target -> { (expression walk target) with completes = false }
-  | Continue { loop } -> { stops with continues = targets loop }
-  | Break { leaves } -> { stops with breaks = targets leaves }
+  | Computed_goto target ->
+      unknown_target_jump walk statement.span "a `goto *`";
+      { (expression walk target) with completes = false }
+  | Continue { loop } ->
+      disputed_jump walk statement.span "continue" loop;
+      { stops with continues = targets loop }
+  | Break { leaves } ->
+      disputed_jump walk statement.span "break" leaves;
+      { stops with breaks = targets leaves }
   | Return value ->
       { (all (expression walk) (Option.to_list value)) with completes = false }
   | Asm assembler -> asm_flow walk assembler
@@ -267,7 +309,7 @@ and labelled_flow walk (label : Tree.label) labelled =
   match label.node with
   | Named_label { label = id; _ } ->
       Queue.add
-        { label = id; site = label.span; guard = walk.guard;
+        { label = id; site = label.span; guard = innermost_guard walk;
           label_context = walk.context }
         walk.definitions;
       { (statement_flow walk labelled) with has_named_label = true }
@@ -361,7 +403,7 @@ and match_flow walk target scrutinee arms =
     continues = Targets.union outside.continues arms.continues }
 
 and arm walk (arm : Tree.arm) =
-  sequence { walk with guard = Some (Arm arm.span) } arm.node.items
+  sequence (guarded_by (Arm arm.span) walk) arm.node.items
 
 (* Design 4.6 rules 5 and 6: the statement of a single-pattern test may
    complete and leave what is around it, as C's does, but a jump enters
@@ -369,13 +411,19 @@ and arm walk (arm : Tree.arm) =
    statements around it. *)
 and tested walk (statement : Tree.statement) =
   let flow =
-    statement_flow { walk with guard = Some (Tested statement.span) } statement
+    statement_flow (guarded_by (Tested statement.span) walk) statement
   in
   { flow with has_named_label = false; has_case_label = false;
     default = false }
 
 (* An [asm goto] may jump to each of its labels or complete. *)
 and asm_flow walk (assembler : Tree.assembler) =
+  let asm_goto (qualifier : Tree.asm_qualifier Tree.spanned) =
+    match qualifier.node with
+    | Asm_goto -> unknown_target_jump walk qualifier.span "an `asm goto`"
+    | Asm_volatile | Asm_inline -> ()
+  in
+  List.iter asm_goto assembler.qualifiers;
   match assembler.operands with
   | None -> completes
   | Some operands ->
@@ -638,8 +686,9 @@ let check_jump definitions jump =
   | None -> ()
 
 let start facts =
-  { facts; guard = None; context = Outside_statement_expressions;
-    definitions = Queue.create (); jumps = Queue.create () }
+  { facts; guards = []; context = Outside_statement_expressions;
+    definitions = Queue.create (); jumps = Queue.create ();
+    breaches = Queue.create () }
 
 (* Design 4.3 rule 1. *)
 let arm_refusal facts (matched : Tree.arm) =
@@ -656,9 +705,9 @@ let arm_refusal facts (matched : Tree.arm) =
    has read it. *)
 let no_facts = { noreturn = (fun _ -> false); non_zero = (fun _ -> false) }
 
-let label_refusal body =
-  let walk = start no_facts in
-  ignore (block walk body);
+(* The first jump of the walk, in source order, that enters what it may
+   not. *)
+let entry_refusal walk =
   match
     let definitions = by_label walk.definitions in
     let site (jump : jump) = jump.site in
@@ -667,3 +716,15 @@ let label_refusal body =
   with
   | () -> None
   | exception Refused refusal -> Some refusal
+
+(* The first refusal in source order, of an entry or of design 6 rule
+   10, as GCC and Clang name the first error. *)
+let label_refusal body =
+  let walk = start no_facts in
+  ignore (block walk body);
+  let refusals = Queue.copy walk.breaches in
+  Option.iter (fun entry -> Queue.add entry refusals) (entry_refusal walk);
+  let span (refusal : refusal) = refusal.span in
+  match in_source_order span refusals with
+  | first :: _ -> Some first
+  | [] -> None

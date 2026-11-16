@@ -180,13 +180,19 @@ is [type-c-language-design.md](type-c-language-design.md).
   say that a declaration hides the word or where it is. A hidden
   universe name gets no such note either. Add a note naming the
   declaration if the pilot shows the error confusing.
-- [High] Design 6 rule 10 is checked only in the statement of a defer:
-  a GNU `goto *e`, an `asm goto` or a disputed break or continue in the
-  scope of a defer (`defer g(); goto *p;`) is not refused. Refuse them
-  before lowering of package 2.5 accepts any defer, which typing refuses
-  until then; reachability's guard for the scope (6 rule 5) knows only
-  the innermost guarded statement, so the check needs to know whether
-  any scope of a defer is around the jump.
+- [Low] A disputed break or continue in C text that GCC refuses, as
+  having no statement around the loop to leave (design 4.4), is kept
+  in the tree as a jump to the loop alone (`Tree.Only`), so design 6
+  rule 10 does not refuse one in the scope of a defer
+  (`_Defer g(); while (({ break; 1; })) ;` at the top of a body). No
+  backend disagrees on what it runs, as GCC refuses it; refuse it if
+  the tree comes to mark every disputed jump.
+- [Low] The parser keeps the arguments of an attribute as tokens, so a
+  `goto *` or `asm goto` in a statement expression there
+  (`defer g(); __attribute__((assume(({ goto *p; 1; }))));`) passes
+  design 6 rule 10, as a jump there passes rule 5. No backend is known
+  to evaluate an attribute argument at run time; say so in the design,
+  or read the arguments, if one does.
 - [Medium] Lowering of a defer (package 2.5) copies the pragma lines of
   its statement; a `#pragma typec` line of C text there is ignored and
   must not be copied (design 13.5), and one of Type-C text stands
