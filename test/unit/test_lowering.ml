@@ -491,6 +491,50 @@ let goto_defers () =
    ^ " } case e_B: { return; " ^ trap ^ " } default: " ^ trap
    ^ " } } L: ; }")
 
+(* Design 13.5, the [try] row: the error path of a try runs the copies
+   of the scopes it stands in, innermost first, before its return. *)
+let try_defers () =
+  (* The error path of the try in [body], the text of [f], from its trap
+     of a tag that is not Err to its return. *)
+  let error_path body =
+    let text =
+      words
+        (emitted
+           ("type r = result(int, int); type o = | A(int x) | B; r g(int); \
+             void a(void); void b(void); void k(int); r f(o p, int c) { "
+           ^ body ^ " }"))
+    in
+    between text ~first:trap ~last:"return ("
+  in
+  let runs copies = trap ^ copies ^ " return (" in
+  compares "a try in the scope of a defer"
+    (error_path "defer a(); try g(c); return Ok(0);")
+    (runs " { a ( ) ; }");
+  compares "a try in two scopes"
+    (error_path "defer a(); { defer b(); try g(c); } return Ok(0);")
+    (runs " { b ( ) ; } { a ( ) ; }");
+  compares "a try after two defers of one block"
+    (error_path "defer a(); defer b(); try g(c); return Ok(0);")
+    (runs " { b ( ) ; } { a ( ) ; }");
+  compares "a try before the defer runs nothing"
+    (error_path "try g(c); defer a(); return Ok(0);")
+    (runs "");
+  compares "a try in a loop body with a defer"
+    (error_path
+       "defer b(); while (c) { defer a(); int x = try g(c); c = x; } return \
+        Ok(0);")
+    (runs " { a ( ) ; } { b ( ) ; }");
+  (* The copy is the text of S with its own edits, which lowering the
+     defer moves out of the text. *)
+  compares "a try in the scope of a defer whose statement is lowered"
+    (error_path "defer if (case A(v) = p) k(v); try g(c); return Ok(0);")
+    (runs
+       " { { const struct o *const __tc_match = &( p ); const \
+        __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag \
+        == o_A) { const __typeof__(__tc_match->u.A.x) v = \
+        __tc_match->u.A.x; k ( v ) ; } else { switch (__tc_tag) { case o_A: \
+        case o_B: break; default: __builtin_trap(); } } } }")
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -552,4 +596,5 @@ let () =
   many_defers ();
   defers ();
   goto_defers ();
+  try_defers ();
   if !failures > 0 then exit 1

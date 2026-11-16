@@ -13,6 +13,7 @@ type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
 type exit =
   | Jump of Tree.span
   | Value_return of { statement : Tree.span; operand : Tree.span }
+  | Error_path of Tree.span
 
 type ending = Completes of int | Cannot_complete of int | Arm_end
 
@@ -241,6 +242,11 @@ let record_return walk (statement : Tree.statement) value =
     | None -> Jump statement.span
   in
   record_exit walk.guards exit ~leaves:(fun _ -> true)
+
+(* The error path of a try returns, so it leaves every scope around it
+   (design 6 rule 1). *)
+let record_try walk (value : Tree.expression) =
+  record_exit walk.guards (Error_path value.span) ~leaves:(fun _ -> true)
 
 (* The defer statements [defers] of a sequence whose scopes end in
    [ending], once the walk has read the sequence. *)
@@ -547,6 +553,7 @@ and expression walk (value : Tree.expression) =
   | Statement_expression b -> block (entering walk b) b
   | Parenthesized inner -> expression walk inner
   | Try { operand; scope = _ } ->
+      record_try walk value;
       { (expression walk operand) with completes = true }
   | Call { callee; arguments } ->
       { (operands (callee :: arguments)) with

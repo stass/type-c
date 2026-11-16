@@ -765,15 +765,10 @@ let error_path ~location ~variant (site : Typec_sema.Expressions.try_site)
   @ cleanups
   @ [ try_piece location return ]
 
-(* The error path of a try runs no copies of the deferred statements
-   active at it (TODO.md); the front end refuses every defer (TC0023),
-   so none reaches the backend. *)
-let no_cleanups = []
-
 (* The text in front of the holder: the null statement of its labels,
    the temporary initialised with the operand, which moves with the
-   edits inside it, and the error path. *)
-let front (text : Reader.t) ordered ~location
+   edits inside it, and the error path, which runs [cleanups]. *)
+let front (text : Reader.t) ordered ~location ~cleanups
     (site : Typec_sema.Expressions.try_site) =
   let variant =
     Typec_sema.Encoding.variant_name (Applied site.operand_instance)
@@ -795,7 +790,7 @@ let front (text : Reader.t) ordered ~location
   @ [ try_piece location declaration ]
   @ List.map (fun piece -> Emitter.Piece piece) operand
   @ [ try_piece location ";" ]
-  @ error_path ~location ~variant site ~cleanups:no_cleanups
+  @ error_path ~location ~variant site ~cleanups
 
 (* The tokens that the try's value replaces: the try, or for [try e;]
    the whole statement, so that no read of the Ok field is left as a
@@ -824,7 +819,7 @@ type try_lowering = {
   closing : Emitter.edit list;
 }
 
-let lower_try (text : Reader.t) ordered
+let lower_try (text : Reader.t) ordered ~cleanups_of
     (site : Typec_sema.Expressions.try_site) =
   let tokens = text.tokens in
   let { Typec_sema.Expressions.statement; labels; standing } = site.holder in
@@ -832,7 +827,7 @@ let lower_try (text : Reader.t) ordered
   let in_front =
     Emitter.moved
       (Reader.range tokens ~first:statement.first ~count:0)
-      (front text ordered ~location site)
+      (front text ordered ~location ~cleanups:(cleanups_of site) site)
   in
   let replaced = replaced_span site in
   let value =
@@ -853,11 +848,12 @@ let lower_try (text : Reader.t) ordered
    where a try's holder begins or ends, the two nest: one that ends
    where the holder begins closes before the try's opening, and one
    around the holder closes after the try's block. So the closings of
-   the tries go first and their openings last. *)
-let with_tries text edits tries =
+   the tries go first and their openings last. [cleanups_of] gives the
+   cleanups of the error path of a try. *)
+let with_tries text edits tries ~cleanups_of =
   let replaced = cover (List.map replaced_span tries) in
   let ordered = order_edits edits in
-  let lowered = List.map (lower_try text ordered) tries in
+  let lowered = List.map (lower_try text ordered ~cleanups_of) tries in
   List.concat_map (fun lowered -> lowered.closing) lowered
   @ List.filter (fun edit -> not (goes_with replaced edit)) edits
   @ List.concat_map (fun lowered -> lowered.opening) lowered
@@ -871,8 +867,10 @@ let with_tries text edits tries =
    them and then the jump, [{ copies jump; }], after the labels of its
    statement; a [return e;] holds [e] first, in the temporary [__tc_r]
    of the type [__tc_ret], or in a function that returns void as an
-   expression statement. A copy of [S] is the text of [S] with the edits
-   that its tokens own; [S] holds no defer (design 6 rule 11). *)
+   expression statement. The error path of a try gets its copies where
+   the try is lowered ({!with_tries}). A copy of [S] is the text of [S]
+   with the edits that its tokens own; [S] holds no defer (design 6 rule
+   11). *)
 
 module Reachability = Typec_sema.Reachability
 
@@ -975,6 +973,7 @@ let place_edits (text : Reader.t) base returns (place, leaving) =
         Emitter.moved (token statement.last)
           ((defer_piece (at statement.last) form.value_closing :: copies)
           @ [ defer_piece (at statement.last) form.returned ]) ]
+  | Left_by (Error_path _) -> []
 
 let rec names_directly (declarator : Tree.declarator) =
   match declarator.node with
@@ -1056,10 +1055,11 @@ let place_token = function
   | Block_end closing -> closing
   | Left_by (Jump jump) -> jump.first
   | Left_by (Value_return { statement; operand = _ }) -> statement.first
+  | Left_by (Error_path try_span) -> try_span.first
 
 let is_value_return = function
   | Left_by (Value_return _) -> true
-  | Block_end _ | Left_by (Jump _) -> false
+  | Block_end _ | Left_by (Jump _ | Error_path _) -> false
 
 (* The edits of a function with its defers lowered: the copies at each
    exit, the traps, and [__tc_ret] where a [return e;] that runs copies
@@ -1094,10 +1094,27 @@ let function_edits (text : Reader.t) base ~dropped
   @ List.concat_map removal kept_sites
   @ return_type
 
+(* The cleanups of the error path of each try (13.5, the [try] row):
+   the copies of the scopes of [functions] that it leaves, the latest
+   first, from the edits [base] of the text. *)
+let error_path_cleanups (text : Reader.t) base
+    (functions : Typec_sema.Expressions.function_defers list) =
+  let leaving =
+    List.concat_map
+      (fun (defers : Typec_sema.Expressions.function_defers) ->
+        places defers.sites)
+      functions
+  in
+  fun (site : Typec_sema.Expressions.try_site) ->
+    match List.assoc_opt (Left_by (Error_path site.try_span)) leaving with
+    | Some sites -> List.concat_map (copy text base) sites
+    | None -> []
+
 (* The edits of a text with the defers of its functions lowered. The
    statements go, and the edits that their tokens own go with them, to
-   their copies. [dropped] is the text that lowering drops. *)
-let with_defers (text : Reader.t) edits ~dropped
+   their copies, which [base], the ordered [edits], gives. [dropped] is
+   the text that lowering drops. *)
+let with_defers (text : Reader.t) edits ~base ~dropped
     (functions : Typec_sema.Expressions.function_defers list) =
   let sites =
     List.concat_map
@@ -1105,7 +1122,6 @@ let with_defers (text : Reader.t) edits ~dropped
       functions
   in
   let removed = cover (List.map defer_span sites) in
-  let base = order_edits edits in
   List.filter (fun edit -> not (goes_with removed edit)) edits
   @ List.concat_map (function_edits text base ~dropped) functions
 
@@ -1155,16 +1171,22 @@ let text_edits (text : Reader.t) ~declarations ~void_field_spans ~replaced
         (List.rev (Typec_sema.Expressions.matchings typed))
     @ List.concat_map (steered_controlling tokens) answered
   in
+  let undeferred =
+    List.concat_map (dropped_edits tokens) dropped @ List.filter kept lowered
+  in
+  let functions = Typec_sema.Expressions.defers typed in
+  (* The copies of a deferred statement, at its exits and on the error
+     path of a try, are its text with the edits that its tokens own,
+     which lowering the defers moves out of the text. *)
+  let base = order_edits undeferred in
   (* The defers go before the tries, so that a jump in the operand of a
      try runs its copies wherever the operand moves. *)
   let deferred =
-    with_defers text
-      (List.concat_map (dropped_edits tokens) dropped
-      @ List.filter kept lowered)
-      ~dropped:dropped_spans
-      (Typec_sema.Expressions.defers typed)
+    with_defers text undeferred ~base ~dropped:dropped_spans functions
   in
-  with_tries text deferred (Typec_sema.Expressions.tries typed)
+  with_tries text deferred
+    (Typec_sema.Expressions.tries typed)
+    ~cleanups_of:(error_path_cleanups text base functions)
 
 let named (span, name) = { span; text = name }
 
