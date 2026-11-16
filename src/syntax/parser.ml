@@ -898,7 +898,7 @@ let refuse_argument_tag state (name : identifier) =
 
 (* A C declaration of a tag that a type declaration claims is an error
    (design 10.1 rule 6). *)
-let declare_tag state (name : identifier) =
+let declare_tag state (name : identifier) ~implicit =
   let id = Tag_at (token_of name) in
   refuse_generic_tag state name;
   refuse_argument_tag state name;
@@ -907,7 +907,8 @@ let declare_tag state (name : identifier) =
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
   state.scope <-
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
-  Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
+  Declares
+    { id; earlier = Option.map (fun entry -> entry.tag) earlier; implicit }
 
 (* The name of a type declaration, which its spelling lets derive names
    for C (design 3.1 rules 6 and 7). [name] is the node made last, which
@@ -1032,11 +1033,11 @@ let named_tag state (name : identifier) entry =
    declares one where none is visible (p8). *)
 let bound_tag state (name : identifier) ~declares =
   let binding =
-    if declares then declare_tag state name
+    if declares then declare_tag state name ~implicit:false
     else
       match Scope.find_tag state.scope name.node with
       | Some entry -> named_tag state name entry
-      | None -> declare_tag state name
+      | None -> declare_tag state name ~implicit:true
   in
   { name; binding }
 

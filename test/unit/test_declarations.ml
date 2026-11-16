@@ -2415,6 +2415,144 @@ let generic_checks () =
      struct w { wrap(struct s) x; };"
     "in the instance 'wrap__T1s'"
 
+(* Design 10.3: every point that needs a type complete defines the
+   instances that it needs, and where an instance's texts would stand
+   before an external declaration that cannot hold them, the
+   application is an error. *)
+let generic_placement () =
+  let file = "in.tc" in
+  (* A block object (C11 6.7p7) and a tentative definition need their
+     instances complete; a declaration with [extern] does not. *)
+  rejects ~file (box ^ " struct s; void f(void) { box(struct s) b; }")
+    "in the instance 'box__T1s'";
+  rejects ~file (box ^ " struct s; box(struct s) b;")
+    "in the instance 'box__T1s'";
+  rejects ~file (box ^ " struct s; static box(struct s) b;")
+    "in the instance 'box__T1s'";
+  accepts ~file (box ^ " struct s; extern box(struct s) b;");
+  accepts ~file (box ^ " struct s; extern box(struct s) b; \
+                        struct s { int a; }; box(struct s) b;");
+  accepts ~file "struct s x; struct s { int a; };";
+  (* Each point of design 10.3 that typing reads is a need. *)
+  let needs point =
+    box ^ " struct s; box(struct s) *p; " ^ point
+  in
+  List.iter
+    (fun point -> rejects ~file (needs point) "in the instance 'box__T1s'")
+    [ "int n = sizeof(box(struct s));";
+      "int n = _Alignof(box(struct s));";
+      "_Alignas(box(struct s)) char c;";
+      "void f(void) { *p = *p; }";
+      "void g(); void f(void) { g(*p); }";
+      "void g(box(struct s)); void f(void) { g(*p); }";
+      "void f(int c) { (void)(c ? *p : *p); }";
+      "void f(void) { (void)(0, *p); }";
+      "void f(void) { *p; }";
+      "void f(void) { (void)*p; }";
+      "void f(void) { (void)(p + 1); }";
+      "void f(void) { (void)p[1]; }";
+      "void f(void) { p++; }";
+      "void f(void) { (void)p->value; }";
+      "void f(box(struct s) b) { }";
+      "box(struct s) g(void) { return *p; }";
+      "box(struct s) h(void); void f(void) { h(); }";
+      "void f(void) { (void)(box(struct s)){ 0 }; }";
+      "void f(void) { (void)__builtin_offsetof(box(struct s), value); }";
+      "void f(__builtin_va_list a) \
+       { (void)__builtin_va_arg(a, box(struct s)); }";
+      "_Atomic(box(struct s)) *a;";
+      "_Atomic box(struct s) *a;";
+      "box(struct s) (*a)[2];" ];
+  (* Rule 5: a typedef instance needs what its definition needs complete
+     before the external declaration of its first use. *)
+  let a2 = "type a2(T) = T[2];" in
+  rejects ~file (a2 ^ " struct s { int a; } *f(a2(struct s) *p);")
+    "needs 'struct s' complete";
+  accepts ~file (a2 ^ " struct s { int a; }; struct s *f(a2(struct s) *p);");
+  rejects ~file (box ^ " struct s { int a; } x = { sizeof(box(struct s)) };")
+    "needs 'struct s' complete";
+  rejects ~file
+    (box ^ " enum e; struct t { enum e { A } k; box(enum e) b; };")
+    "needs 'enum e' complete";
+  (* The constructors of a variant instance are known once it is needed
+     complete, as a constructor or a scrutinee needs it. *)
+  let list = "type list(T) = | Nil | Cons(T head, list(T) *tail);" in
+  List.iter
+    (fun use -> accepts ~file (list ^ " " ^ use))
+    [ "list(int) *p; int f(void) { return sizeof(list(int).Nil); }";
+      "void g(list(int)); void f(void) { g(Nil); }";
+      "void f(list(int) *p) { *p = Nil; }";
+      "int f(list(int) *p) { match (*p) { case Nil: return 0; \
+       case Cons(h, t): return h; } }" ];
+  (* An enumeration, and an untagged type that a typedef names, are
+     declared by the source before the declaration of the first use. *)
+  rejects ~file (box ^ " enum e { A } f(box(enum e) *p);")
+    "is declared in the external declaration";
+  accepts ~file (box ^ " enum e { A }; enum e f(box(enum e) *p);");
+  rejects ~file (box ^ " typedef struct { int x; } n, g(box(n) *p);")
+    "is declared in the external declaration";
+  accepts ~file (box ^ " typedef struct { int x; } n; n g(box(n) *p);");
+  (* C11 6.7.2.3p8: the forward declaration of a tag that an argument
+     names would change an earlier mention that declares it in a nested
+     scope. *)
+  let vec = "type vec(T) = struct { T *data; };" in
+  let h =
+    "struct H { int (*call)(struct X *); \
+     struct X { vec(struct X *) v; } x; };"
+  in
+  rejects ~file (vec ^ " " ^ h) "declares the tag in a nested scope";
+  rejects ~file
+    (vec ^ " struct H { int (*call)(enum X *); vec(struct X *) v; };")
+    "declares the tag in a nested scope";
+  accepts ~file (vec ^ " struct X; " ^ h);
+  accepts ~file
+    (vec ^ " struct H { struct X *p; int (*call)(struct X *); \
+            struct X { vec(struct X *) v; } x; };");
+  accepts ~file
+    "type opt(T) = | No | Yes(T v); struct node { opt(struct node *) next; };";
+  (* A block literal before the application hides such mentions. *)
+  let ptr = "type ptr(T) = T *;" in
+  let probe =
+    "int (^probe)(void) = ^{ return 0; }, size = sizeof(ptr(struct X *));"
+  in
+  let in_c text = ptr ^ "\n# 1 \"b.h\" 1\n" ^ text in
+  rejects ~file (in_c probe) "a block literal";
+  accepts ~file (in_c ("struct X; " ^ probe))
+
+(* [source]'s first uses and definitions of instances: each instance name
+   with the index of its external declaration and the instance whose
+   definition holds the use or the need. *)
+let placements source =
+  match read ~file:"in.tc" lp64 source with
+  | Error error -> fail_case source ("error: " ^ Reader.error_message error);
+      ([], [])
+  | Ok (_, result) ->
+      let shown (placement : Declarations.placement) =
+        ( Encoding.instance_name placement.instance,
+          placement.external_declaration,
+          Option.map Encoding.instance_name placement.within )
+      in
+      ( List.map shown (Declarations.instances result),
+        List.map shown (Declarations.definitions result) )
+
+let placement_indexes () =
+  let expect source expected =
+    if placements source <> expected then fail_case source "placements"
+  in
+  (* A use under a pointer defines nothing; the block object does. *)
+  expect
+    (box ^ " struct s { int a; }; box(struct s) *p; \
+            void f(void) { box(struct s) b; }")
+    ([ ("box__T1s", 2, None) ], [ ("box__T1s", 3, None) ]);
+  (* A nested use and need count where the definition that causes them
+     stands, which follows the definitions it needs. *)
+  expect
+    (box ^ " type wrap(T) = struct { box(T) b; }; int x; wrap(int) w;")
+    ( [ ("wrap__i", 3, None); ("box__i", 3, Some "wrap__i") ],
+      [ ("box__i", 3, Some "wrap__i"); ("wrap__i", 3, None) ] );
+  (* A definition check places nothing. *)
+  expect (box ^ " type wrap(T) = struct { box(T) b; };") ([], [])
+
 let generic_definitions () =
   let file = "in.tc" in
   (* Rule 4 on the expanded type, and 7.1 rule 4. *)
@@ -2476,6 +2614,8 @@ let () =
   static_initialisers ();
   generic_identity ();
   generic_instances ();
+  generic_placement ();
+  placement_indexes ();
   generic_variants ();
   generic_arguments ();
   generic_definitions ();

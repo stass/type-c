@@ -223,6 +223,12 @@ let rows =
       meaning =
         "An application that would cause the 65th instance of a chain \
          in which each instance causes the next." };
+    Live { name = "Instance_placement"; code = 43; clause = Some "design 10.3";
+      meaning =
+        "An application whose instance texts cannot stand before the \
+         external declaration that holds it: a type that they name or \
+         need complete is not ready there, or the forward declaration of \
+         a tag that they write would change a mention before it." };
   ]
 
 let () =

@@ -97,14 +97,15 @@ type resolution = Resolved of reference | Undeclared
 type tag = { name : identifier; binding : tag_binding }
 
 and tag_binding =
-  | Declares of { id : tag_id; earlier : tag_id option }
+  | Declares of { id : tag_id; earlier : tag_id option; implicit : bool }
       (** declares the tag in the current scope: before a body or an
           enumerator list (p6), alone in a declaration (p7, and C23's
           [enum e : T;]), or where no tag of its name is visible (p8; for
           an enumeration a GNU forward reference, against p3). [earlier]
           is the tag of its name that the scope declares already, which
           it redeclares: the same tag (p4), or an error where it is
-          another kind of tag (p2). *)
+          another kind of tag (p2). [implicit] where it declares the tag
+          only because none of its name is visible (p8). *)
   | Names of tag_id  (** the visible tag, which it does not redeclare (p9) *)
 
 (** A GNU attribute, or a C23 one read as the GNU attribute it means: its

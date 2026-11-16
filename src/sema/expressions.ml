@@ -257,8 +257,8 @@ let outside_functions =
   { function_name = None; return_type = None; case_labels = No_switch }
 
 let create () =
-  { types = Hashtbl.create 4096;
-    constants = Hashtbl.create 4096;
+  { types = Hashtbl.create 16;
+    constants = Hashtbl.create 16;
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
@@ -297,6 +297,8 @@ type context = {
   declaration : Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
+  needs_complete : Ctype.t -> unit;
+  block_literal : unit -> unit;
 }
 
 let needing need (unknown : Unknown.t) =
@@ -459,6 +461,7 @@ let distinct_name (distinct : Ctype.distinct) = quote distinct.distinct_name
 let refuse_private_creation context (span : Tree.span) ~described
     (t : Ctype.t) =
   let file = context.text.tokens.(span.first).owner in
+  context.needs_complete t;
   match Ctype.privacy context.tags t with
   | Private declaring
     when File.is_type_c_text file && not (File.owns ~declaring file) ->
@@ -499,6 +502,7 @@ let refuse_distinct context span (distinct : Ctype.distinct) =
    [reads] says whether the table lets the operation read a value of a
    distinct type. *)
 let read_operand context span ~reads (typed : typed) =
+  context.needs_complete typed.expression_type;
   let typed = as_seen context span typed in
   match Ctype.as_distinct typed.expression_type with
   | Some distinct when not reads -> refuse_distinct context span distinct
@@ -952,6 +956,7 @@ let member_category = function
    _Atomic, whose members are not accessed (p5). *)
 let member_of context tag (qualifiers : Qualifiers.t)
     (name : Tree.identifier) ~category =
+  context.needs_complete (Ctype.record tag);
   if Ctype.record_members context.tags tag = None then
     context.fail name.span
       (Rule.c_text
@@ -1032,6 +1037,7 @@ let subscript context span array index =
       Arithmetic_operand { arithmetic = Integer _; _ } )
   | ( Arithmetic_operand { arithmetic = Integer _; _ },
       Pointer_operand { referenced; _ } ) ->
+      context.needs_complete referenced;
       lvalue referenced
   | Unknown_operand unknown, _ | _, Unknown_operand unknown ->
       lvalue (unknown_value unknown)
@@ -1068,6 +1074,7 @@ let call_type context span (callee : typed) count =
   | Pointer_operand
       { referenced = { shape = Function { return; parameters }; _ }; _ } ->
       check_arity context span parameters count;
+      context.needs_complete return;
       call_or_cast_type context span return
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
@@ -1084,7 +1091,10 @@ let call_type context span (callee : typed) count =
 let increment context span ~clause (typed : typed) =
   require_modifiable context span ~clause typed;
   match operand context typed with
-  | Arithmetic_operand _ | Pointer_operand _ -> value (value_type typed)
+  | Pointer_operand { referenced; _ } ->
+      context.needs_complete referenced;
+      value (value_type typed)
+  | Arithmetic_operand _ -> value (value_type typed)
   | Unknown_operand unknown -> value (unknown_value unknown)
   | Distinct_operand _ | Other_operand _ -> fail_operands context span clause
 
@@ -1196,10 +1206,11 @@ let arithmetic_binary context span ~integer ~clause left right =
 (* 6.5.6p2, p8: GNU C takes a pointer to void or to a function too. *)
 let addition context span left right =
   match (left, right) with
-  | ( Pointer_operand { pointer; _ },
+  | ( Pointer_operand { pointer; referenced },
       Arithmetic_operand { arithmetic = Integer _; _ } )
   | ( Arithmetic_operand { arithmetic = Integer _; _ },
-      Pointer_operand { pointer; _ } ) ->
+      Pointer_operand { pointer; referenced } ) ->
+      context.needs_complete referenced;
       pointer
   | _ ->
       arithmetic_binary context span ~integer:false ~clause:"6.5.6p2" left
@@ -1208,10 +1219,12 @@ let addition context span left right =
 (* 6.5.6p3, p8, p9. *)
 let subtraction context span left right =
   match (left, right) with
-  | Pointer_operand _, Pointer_operand _ ->
+  | Pointer_operand { referenced; _ }, Pointer_operand _ ->
+      context.needs_complete referenced;
       integer_type context span context.target.ptrdiff_type
-  | ( Pointer_operand { pointer; _ },
+  | ( Pointer_operand { pointer; referenced },
       Arithmetic_operand { arithmetic = Integer _; _ } ) ->
+      context.needs_complete referenced;
       pointer
   | _ ->
       arithmetic_binary context span ~integer:false ~clause:"6.5.6p3" left
@@ -2159,6 +2172,7 @@ let named_in t constructors name =
 let unqualified_constructor context position (span : Tree.span) name =
   match position with
   | Targeted t when is_type_c_text context span ->
+      context.needs_complete t;
       Option.bind (Ctype.constructors context.tags t) (fun constructors ->
           named_in t constructors name)
   | Targeted _ | Untargeted -> None
@@ -2168,6 +2182,7 @@ let qualified_constructor context (variant : Tree.type_name)
     (constructor : Tree.identifier) =
   let t = context.type_name variant in
   let described = quote (spelling context variant.span) in
+  context.needs_complete t;
   match (Ctype.constructors context.tags t, Ctype.as_variant t) with
   | Some constructors, _ -> (
       match named_in t constructors constructor.node with
@@ -2246,6 +2261,8 @@ and positioned context position (expression : Tree.expression) =
   in
   (match position with
   | Targeted target ->
+      (* 6.5.16.1p2, 6.5.2.2p7: converted as if by assignment. *)
+      context.needs_complete typed.expression_type;
       refuse_distinct_conversion context expression.span target typed
   | Untargeted -> ());
   Hashtbl.replace context.typed.types expression.span typed;
@@ -2299,14 +2316,16 @@ and expression_node context position (whole : Tree.expression) =
   | Unary ((Address as op), operand) -> unary context span op (as_whole operand)
   | Unary (op, operand) -> unary context span op (typed operand)
   | Sizeof_expression operand ->
-      if designates_bit_field (as_whole operand) then
+      let whole = as_whole operand in
+      if designates_bit_field whole then
         context.fail span (Rule.c_text "sizeof of a bit-field (C11 6.5.3.4p1)");
+      context.needs_complete whole.expression_type;
       value (size_type context span)
   | Sizeof_type type_name | Alignof type_name ->
-      ignore (context.type_name type_name);
+      context.needs_complete (context.type_name type_name);
       value (size_type context span)
   | Alignof_expression operand ->
-      ignore (as_whole operand);
+      context.needs_complete (as_whole operand).expression_type;
       value (size_type context span)
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
@@ -2316,7 +2335,10 @@ and expression_node context position (whole : Tree.expression) =
           refuse_private_creation context span cast_type
             ~described:("the distinct type " ^ distinct_name distinct))
         (Ctype.as_distinct cast_type);
-      ignore (if discards cast_type then as_whole operand else typed operand);
+      let cast_operand =
+        if discards cast_type then as_whole operand else typed operand
+      in
+      context.needs_complete cast_operand.expression_type;
       value (call_or_cast_type context span cast_type)
   | Binary (op, left, right) ->
       let left = typed left in
@@ -2335,12 +2357,15 @@ and expression_node context position (whole : Tree.expression) =
   | Comma (left, right) ->
       ignore (as_whole left);
       let right = as_enclosing right in
+      context.needs_complete right.expression_type;
       { (value (value_type right)) with bit_field = value_of right.bit_field }
   | Statement_expression block -> value (statement_expression context block)
   | Label_address _ -> value (void_pointer context span)
   | Va_arg { list; type_name } ->
       ignore (typed list);
-      value (Ctype.unqualified (context.type_name type_name))
+      let t = context.type_name type_name in
+      context.needs_complete t;
+      value (Ctype.unqualified t)
   | Offsetof { type_name; member; designators } ->
       List.iter (designator context) designators;
       let path =
@@ -2362,6 +2387,7 @@ and expression_node context position (whole : Tree.expression) =
   (* Clang's block, whose type typec does not model; its body is not
      typed. *)
   | Block_literal _ ->
+      context.block_literal ();
       value (unknown context span "a block literal" Unknown_object)
 
 (* Design 3.3: the value of the variant that the constructor makes from
@@ -2595,8 +2621,9 @@ and generic_association context span
   let association_type, result =
     match association.node with
     | Association (type_name, result) ->
-        (Some (type_as_seen context span (context.type_name type_name)),
-         result)
+        let t = context.type_name type_name in
+        context.needs_complete t;
+        (Some (type_as_seen context span t), result)
     | Default_association result -> (None, result)
   in
   ignore (whole_value context result);
@@ -2622,6 +2649,7 @@ and conditional context span position condition if_true if_false =
   in
   let third = { branch = if_false; branch_typed = branch_typed if_false } in
   let branch_operand branch =
+    context.needs_complete branch.branch_typed.expression_type;
     operand context (as_seen context span branch.branch_typed)
   in
   let second_operand = branch_operand second
@@ -2710,6 +2738,7 @@ and zero_constant context candidate =
    operator takes (6.5.16.2). *)
 and assignment context span (op : Tree.assignment_operator) left right =
   require_modifiable context span ~clause:"6.5.16p2" left;
+  context.needs_complete left.expression_type;
   (match op with
   | Assign -> ()
   | Compound_assign op -> ignore (binary_type context span op left right));
@@ -2760,6 +2789,7 @@ and offsetof_path context span (reached : Ctype.t) path =
 and offsetof_step context (reached : Ctype.t) (step : Tree.designator_node) =
   match (step, reached.shape) with
   | Member_designator name, Record tag ->
+      context.needs_complete reached;
       Option.map
         (fun (found : Ctype.found_member) -> found.member.member_type)
         (Ctype.find_member context.tags tag name.node)
@@ -2846,6 +2876,7 @@ and initialiser context ~constant t initialiser =
       index = integer_constant context;
     }
   in
+  context.needs_complete t;
   Initialiser.initialise typing t initialiser
 
 and block_items context (block : Tree.block) = items context block.node.items
@@ -2868,7 +2899,9 @@ and typed_statement context (statement : Tree.statement) =
       label_of context label;
       typed_statement context labeled
   | Compound block -> block_items context block
-  | Expression_statement value -> ignore (whole_value context value)
+  | Expression_statement value ->
+      (* 6.3.2.1p2: an lvalue statement is converted to its value. *)
+      context.needs_complete (whole_value context value).expression_type
   | Computed_goto value -> ignore (expression context value)
   | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _ ->
       ()
@@ -3125,6 +3158,7 @@ and refuse_open_arm context arm =
    complete here, so that its constructors are known. [what] names the
    expression: a scrutinee, or the operand of a test (4.6 rule 2). *)
 and scrutinee_variant context ~what span t =
+  context.needs_complete t;
   match (Ctype.as_variant t, Ctype.constructors context.tags t) with
   | Some variant, Some constructors -> (variant, constructors)
   | Some variant, None ->

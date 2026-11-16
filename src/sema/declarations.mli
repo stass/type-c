@@ -48,10 +48,31 @@ type item =
   | Generic_declaration
       (** a generic type (design 3.5), whose name alone is no type *)
 
+(** Where lowering places a text of an instance (design 10.3): directly
+    before the external declaration of this index in the unit, the
+    index of its {!item}, and, [within] the definition of an instance,
+    before that definition, as the use or need there counts where that
+    definition stands. *)
+type placement = {
+  instance : Ctype.instance;
+  external_declaration : int;
+  within : Ctype.instance option;
+}
+
 type t
 
 val tags : t -> Ctype.tags
 val items : t -> item list
+
+val instances : t -> placement list
+(** The first use of each instance (design 10.3), where its declaration
+    stands, in the order of the first uses. *)
+
+val definitions : t -> placement list
+(** The first need of each structure, union or variant instance that a
+    point needs complete, where its definition stands, in the order in
+    which the definitions complete: one stands after the instances that
+    it needs complete. A typedef instance is whole at its declaration. *)
 
 val entity : t -> Tree.reference -> entity option
 (** What a declaration that the reader has read declares, as of that

@@ -17,9 +17,27 @@ type item =
   | Type_declaration of entity
   | Generic_declaration
 
+type placement = {
+  instance : Ctype.instance;
+  external_declaration : int;
+  within : Ctype.instance option;
+}
+
+(* The first use of each instance and the definitions of instances met
+   so far, each list latest first, as one value that a trial restores. *)
+type placements = {
+  used : unit Ctype.Instances.t;
+  uses : placement list;
+  definitions : placement list;
+}
+
+let no_placements =
+  { used = Ctype.Instances.empty; uses = []; definitions = [] }
+
 type t = {
   tags : Ctype.tags;
   items : item list;
+  placements : placements;
   entities : (Tree.reference, entity) Hashtbl.t;
   tag_types : (Tree.tag_id, tag) Hashtbl.t;
   linked : (string, entity) Hashtbl.t;
@@ -29,6 +47,8 @@ type t = {
 
 let tags result = result.tags
 let items result = result.items
+let instances result = List.rev result.placements.uses
+let definitions result = List.rev result.placements.definitions
 
 let type_declarations result =
   Hashtbl.to_seq_values result.type_declarations
@@ -88,7 +108,9 @@ type place = At_file_scope | In_prototype | In_definition | In_block
    whose definitions are being read (rule 7), none outside one.
    [instance_tokens] counts the tokens of the definitions read for
    instances so far, those of definition checks included, which a trial
-   does not undo. *)
+   does not undo. [external_facts] are those of the external declaration
+   being read, and [placements] where the texts of the instances stand
+   (design 10.3). *)
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -108,13 +130,33 @@ type state = {
   mutable applied_at : Tree.span Ctype.Instances.t;
   mutable nesting : nesting option;
   mutable instance_tokens : int;
+  mutable external_facts : external_facts;
+  mutable placements : placements;
   mutable place : place;
   mutable next_entity : int;
 }
 
 (* A chain of instances that each cause the next (design 3.5 rule 7):
-   how many, and the application that caused the first. *)
-and nesting = { depth : int; began : Tree.span }
+   how many, the application that caused the first, and the instance
+   whose definition is being read, the last. *)
+and nesting = { depth : int; began : Tree.span; defining : Ctype.instance }
+
+(* What the placement of instances (design 10.3) asks of the external
+   declaration being read: its index in the unit, the moment it began,
+   the tags that its own text completes, with where, the tags that a
+   mention in a nested scope of it declares only because none is
+   visible (C11 6.7.2.3p8), and the moment of its first block literal.
+   The sets are tables, as one declaration can hold many of each. A
+   definition check adds to them and no trial removes that: a generic
+   is a declaration of its own at file scope, which holds nothing else
+   that the facts are asked about. *)
+and external_facts = {
+  index : int;
+  start : Ctype.moment;
+  completed : (Ctype.named_tag, Location.t) Hashtbl.t;
+  nested_tags : (string, unit) Hashtbl.t;
+  mutable block_literal : Ctype.moment option;
+}
 
 (* How the definition of an instance is read: [read declaration f] runs
    [f] with the type parameters of [declaration] bound to the instance's
@@ -142,10 +184,15 @@ let max_nesting = 64
    third of it. *)
 let max_instance_tokens = 524288
 
-let next_link nesting application =
+let next_link nesting application defining =
   match nesting with
-  | None -> { depth = 1; began = application }
-  | Some { depth; began } -> { depth = depth + 1; began }
+  | None -> { depth = 1; began = application; defining }
+  | Some { depth; began; defining = _ } ->
+      { depth = depth + 1; began; defining }
+
+let declaration_state tags index =
+  { index; start = Ctype.now tags; completed = Hashtbl.create 16;
+    nested_tags = Hashtbl.create 16; block_literal = None }
 
 (* An instance name is at most [Encoding.max_length] bytes; a message
    shows at most this many of them, cut at a character. *)
@@ -900,8 +947,9 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
   let storage = storage_class state span sorted.storage_classes in
   let base = base_type state span sorted in
   let qualifiers = qualifiers_of sorted.qualifiers in
-  if qualifiers.atomic then
+  if qualifiers.atomic then (
     refuse_opaque state span base "the type qualified by `_Atomic`";
+    needs_complete state base);
   let base_type = checked state span (Ctype.qualify qualifiers base) in
   List.iter (fun (_, a) -> alignment state a) sorted.alignments;
   {
@@ -978,6 +1026,7 @@ and other_type state span (specifier : Tree.type_specifier) =
   | Atomic_type type_name ->
       let t = read_type_name state type_name in
       refuse_opaque state type_name.span t "the type name of `_Atomic( )`";
+      needs_complete state t;
       checked state span (Ctype.atomic t)
   | Struct_or_union { kind; tag; members; attributes } ->
       let record = record_type state span (record_kind kind) tag members in
@@ -1010,7 +1059,8 @@ and typeof_expression state expression =
 (* 6.7.5p3: the value is the backend's to check, as layout is. *)
 and alignment state (alignment : Tree.alignment) =
   match alignment with
-  | Alignas_type type_name -> ignore (read_type_name state type_name)
+  | Alignas_type type_name ->
+      needs_complete state (read_type_name state type_name)
   | Alignas_expression expression -> (
       match constant_expression state expression with
       | Constant _ -> ()
@@ -1032,13 +1082,24 @@ and prior_tag state (tag : Tree.tag) =
     | None -> not_read state tag.name.span tag.name.node
   in
   match tag.binding with
-  | Declares { earlier; id = _ } -> Option.map known earlier
+  | Declares { earlier; id = _; implicit = _ } -> Option.map known earlier
   | Names id -> Some (known id)
+
+(* A mention that declares its tag in a parameter list or a block only
+   because none is visible (C11 6.7.2.3p8), which the placement of an
+   instance (design 10.3) must not change. *)
+and note_nested_mention state (tag : Tree.tag) =
+  match tag.binding with
+  | Declares { implicit = true; _ }
+    when (not (at_file_scope state)) && not (in_instance_definition state) ->
+      Hashtbl.replace state.external_facts.nested_tags tag.name.node ()
+  | Declares _ | Names _ -> ()
 
 (* [tag] is a declaration of [found] where it declares one. *)
 and bind_tag state (tag : Tree.tag) found =
   match tag.binding with
-  | Declares { id; earlier = _ } -> Hashtbl.replace state.tag_types id found
+  | Declares { id; earlier = _; implicit = _ } ->
+      Hashtbl.replace state.tag_types id found
   | Names _ -> ()
 
 and record_type state span kind (tag : Tree.tag option) members =
@@ -1057,6 +1118,7 @@ and record_type state span kind (tag : Tree.tag option) members =
                 ~at_file_scope:(at_file_scope state)
         in
         bind_tag state tag (Record_tag record);
+        note_nested_mention state tag;
         record
   in
   Option.iter (define_record state span record) members;
@@ -1067,7 +1129,14 @@ and define_record state span record
     (members : Tree.member_declaration list Tree.spanned) =
   let members = List.concat_map (read_member state) members.node in
   checked state span
-    (Ctype.define_record state.target state.tags record members)
+    (Ctype.define_record state.target state.tags record members);
+  note_completed state span (Ctype.Named_record record)
+
+(* A tag that the source completes, which no instance read in the same
+   external declaration may need (design 10.3). *)
+and note_completed state span tag =
+  if not (in_instance_definition state) then
+    Hashtbl.replace state.external_facts.completed tag (location_of state span)
 
 (* [fixed] is the fixed type of the specifier (C23 6.7.2.2), [attribute]
    its first attribute that typec does not know. *)
@@ -1089,6 +1158,7 @@ and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
                 ~at_file_scope:(at_file_scope state)
         in
         bind_tag state tag (Enum_tag enum);
+        note_nested_mention state tag;
         enum
   in
   (match (fixed, enumerators) with
@@ -1184,7 +1254,7 @@ and read_member_declarator state specified
       let derived =
         declare_type state ~parameter:false specified (Some field)
       in
-      need_complete state derived.declared_type;
+      needs_complete state derived.declared_type;
       { Ctype.member_name = derived.name; member_type = derived.declared_type;
         bit_field_width = None }
   | Bit_field { declarator = field; width; attributes } ->
@@ -1202,10 +1272,51 @@ and read_member_declarator state specified
       { Ctype.member_name = derived.name; member_type = derived.declared_type;
         bit_field_width }
 
-(* A member needs its type complete (6.7.2.1p3) where it is read, so that
-   the instances that members need are defined in the order of the text
-   (design 3.5 rule 7); [Ctype.define_record] reports one incomplete. *)
-and need_complete state t = ignore (Ctype.is_complete state.tags t)
+(* Design 10.3: every point that needs a type complete passes it here,
+   the one place that defines an instance, where the point stands: a
+   member as it is read, so that the instances that members need are
+   defined in the order of the text (design 3.5 rule 7). What a reading
+   of an instance needs complete must be so before the external
+   declaration that its text stands before. The point reports a type
+   that stays incomplete, or leaves it to the backend. *)
+and needs_complete state t =
+  (match Ctype.define_instance state.tags t with
+  | Some instance -> note_definition state instance
+  | None -> ());
+  let completed_here tag =
+    Hashtbl.find_opt state.external_facts.completed tag
+  in
+  match (state.nesting, Option.bind (Ctype.needed_tag t) completed_here) with
+  | Some nesting, Some completed ->
+      fail_completed_here state nesting t completed
+  | (Some _ | None), _ -> ()
+
+and placement_here state instance =
+  { instance; external_declaration = state.external_facts.index;
+    within = Option.map (fun nesting -> nesting.defining) state.nesting }
+
+and note_definition state instance =
+  let placements = state.placements in
+  state.placements <-
+    { placements with
+      definitions = placement_here state instance :: placements.definitions }
+
+(* The text of the instance being read stands before this external
+   declaration, which completes [t] only after it, at [completed]. *)
+and fail_completed_here state nesting t (completed : Location.t) =
+  let message =
+    Printf.sprintf
+      "the instance %s needs %s complete where its text stands, before \
+       the external declaration that completes it at %s:%d; complete it \
+       in an earlier one"
+      (quote (shown_instance nesting.defining))
+      (quote (Type_name.of_ctype t))
+      completed.file completed.line
+  in
+  raise
+    (Instance_failed
+       { location = location_of state nesting.began;
+         message = Rule.text (Rule.message Instance_placement message) })
 
 and bit_field_width state width =
   match constant_expression state width with
@@ -1264,6 +1375,7 @@ and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
     attributed_integer state attribute (Answer (enum_integer state span values))
   in
   checked state span (Ctype.define_enum state.tags enum integer);
+  note_completed state span (Ctype.Named_enum enum);
   (* At the closing brace every enumerator takes its final type (C23
      6.7.2.2): int when all values fit, else the enumerated type. *)
   let all_int = List.for_all (Integer_constant.fits state.target Int) values in
@@ -1534,6 +1646,7 @@ and read_derivation state ~parameter ~definition ~nearest
               outermost of a parameter (C11 6.7.6.2p1)");
       let length = array_length state span size in
       fun derived ->
+        needs_complete state derived.declared_type;
         let declared_type =
           checked state span
             (Ctype.array_of state.tags derived.declared_type length)
@@ -1662,6 +1775,7 @@ and parameter_specifiers state span specifiers =
 (* Records the parameter and returns its type. *)
 and declare_parameter state span specified derived name declared =
   let object_type = adjusted_parameter state span derived in
+  if state.place = In_definition then needs_complete state object_type;
   let register = specified.storage = Some Tree.Register in
   let parameter =
     Object
@@ -1819,6 +1933,15 @@ and read_init_declarator state scope specified
   let entity =
     declare_in state scope init_declarator.span specified declared derived
   in
+  (* An object that the declaration defines needs its type complete: one
+     that a block defines (6.7p7), one with an initialiser (6.7.9p3) and
+     a tentative definition, which needs only instances complete (design
+     10.3), as every need does here. *)
+  (match entity.declared with
+  | Object { object_type; _ }
+    when specified.storage <> Some Extern || Option.is_some initialiser ->
+      needs_complete state object_type
+  | Object _ | Function _ | Typedef _ | Enumerator _ -> ());
   match initialiser with
   | None -> entity
   | Some initialiser ->
@@ -2096,6 +2219,7 @@ and check_field_type state (constructor : Tree.constructor)
          (subject
          ^ " has the type void in an instance, which is not implemented \
             yet (design 3.5 rule 6; work package 2.3)"));
+  needs_complete state derived.declared_type;
   match Value_type.problem state.tags derived.declared_type with
   | Answer None -> ()
   | Answer (Some problem) ->
@@ -2163,8 +2287,7 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
   in
   in_trial state (fun () ->
       let instance = instance_of state declaration parameters in
-      let t = instance_type state declaration instance check in
-      ignore (Ctype.is_complete state.tags t))
+      needs_complete state (instance_type state declaration instance check))
 
 (* [read ()] as a trial, after which the tags and the latest application
    of each instance are as they were before it. The entities and tags
@@ -2172,10 +2295,12 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
    declares them again, and rule 4 lets no body in it complete a tag
    declared outside. *)
 and in_trial state read =
-  let applied_at = state.applied_at in
-  Fun.protect
-    ~finally:(fun () -> state.applied_at <- applied_at)
-    (fun () -> Ctype.trial state.tags read)
+  let applied_at = state.applied_at and placements = state.placements in
+  let restore () =
+    state.applied_at <- applied_at;
+    state.placements <- placements
+  in
+  Fun.protect ~finally:restore (fun () -> Ctype.trial state.tags read)
 
 (* A type application: its arguments, then the type that the generic's
    definition makes of them (rule 3). *)
@@ -2186,7 +2311,7 @@ and applied_type state span name reference arguments =
   in
   let arguments = List.map argument arguments in
   let instance = instance_of state declaration arguments in
-  note_application state instance span;
+  note_application state instance arguments span;
   let applied =
     { read =
         (fun declaration read ->
@@ -2203,10 +2328,81 @@ and generic_declaration state span name reference =
   | None -> not_read state span name
 
 (* The latest application of each instance, where an error of its
-   definition is reported (rule 5); a check forgets its own
-   ([in_trial]). *)
-and note_application state instance span =
-  state.applied_at <- Ctype.Instances.add instance span state.applied_at
+   definition is reported (rule 5), and its first use, where its texts
+   stand (10.3); a check forgets its own ([in_trial]). A mention that
+   the forward declaration of a tag would change is refused at every
+   application, as the tag line of an argument stands at the first use
+   of its typedef, not of the instance; a later use in another external
+   declaration finds the tag at file scope, where no mention is
+   implicit. *)
+and note_application state instance arguments span =
+  state.applied_at <- Ctype.Instances.add instance span state.applied_at;
+  List.iter (refuse_changed_mention state) arguments;
+  let placements = state.placements in
+  if not (Ctype.Instances.mem instance placements.used) then (
+    List.iter (refuse_undeclared_argument state) arguments;
+    state.placements <-
+      { placements with
+        used = Ctype.Instances.add instance () placements.used;
+        uses = placement_here state instance :: placements.uses })
+
+(* Design 10.3: an enumeration, and an untagged type that a typedef
+   names, have no forward declaration that lowering could write, so the
+   source declares them before the external declaration of the first
+   use. *)
+and refuse_undeclared_argument state (span, argument) =
+  let start = state.external_facts.start in
+  let undeclared = function
+    | Ctype.Named_enum tag -> not (Ctype.enum_declared_before tag start)
+    | Named_record ({ record_name = Anonymous; _ } as tag) ->
+        not (Ctype.record_declared_before tag start)
+    | Named_record _ -> false
+  in
+  match List.find_opt undeclared (Ctype.named_tags argument) with
+  | None -> ()
+  | Some named ->
+      fail state span
+        (Rule.message Instance_placement
+           (Printf.sprintf
+              "the type argument names %s, which is declared in the \
+               external declaration of the instance's first use; declare \
+               it in an earlier one"
+              (quote (Type_name.of_ctype (Ctype.named_type named)))))
+
+(* Design 10.3: the forward declaration [struct X;] that lowering writes
+   before this external declaration for a tag that an argument names
+   would change a mention of [X] before the application that declares
+   the tag in a nested scope only because none is visible there (C11
+   6.7.2.3p8), and one in the body of a block literal, which typec does
+   not read, unless the tag is declared before the literal. *)
+and refuse_changed_mention state (span, argument) =
+  let refuse tag why =
+    let named = quote (Type_name.of_ctype (Ctype.record tag)) in
+    fail state span
+      (Rule.message Instance_placement
+         (Printf.sprintf
+            "the type argument names %s, and %s; declare the tag at file \
+             scope before it"
+            named why))
+  in
+  let facts = state.external_facts in
+  let check = function
+    | Ctype.Named_record ({ record_name = Named name; _ } as tag) -> (
+        if Hashtbl.mem facts.nested_tags name then
+          refuse tag
+            "a mention before it in this external declaration declares the \
+             tag in a nested scope (C11 6.7.2.3p8), which the forward \
+             declaration of the instance would change";
+        match facts.block_literal with
+        | Some literal when not (Ctype.record_declared_before tag literal) ->
+            refuse tag
+              "a block literal stands before it in this external \
+               declaration, whose body the forward declaration of the \
+               instance could change"
+        | Some _ | None -> ())
+    | Named_record _ | Named_enum _ -> ()
+  in
+  List.iter check (Ctype.named_tags argument)
 
 (* Design 3.5 rule 2: every type in an argument has a row in the table of
    10.3, which also makes it an object type, no array and not variably
@@ -2320,7 +2516,7 @@ and in_instance :
  fun state declaration instance arguments read ->
   let application = Ctype.Instances.find instance state.applied_at in
   let outer = state.nesting in
-  let link = next_link outer application in
+  let link = next_link outer application instance in
   if link.depth > max_nesting then
     fail_nesting state application instance link.began;
   let span = declaration.span in
@@ -2468,7 +2664,14 @@ and typing state : Expressions.context =
     type_declaration =
       (fun declaration -> ignore (read_type_declaration state declaration));
     binding = bind_binding state;
+    needs_complete = needs_complete state;
+    block_literal = (fun () -> note_block_literal state);
   }
+
+and note_block_literal state =
+  let facts = state.external_facts in
+  if Option.is_none facts.block_literal && not (in_instance_definition state)
+  then facts.block_literal <- Some (Ctype.now state.tags)
 
 (* A binding of a match (design 4.1 rule 4): an object without linkage
    in the block scope of its arm. *)
@@ -2537,6 +2740,7 @@ let read_function_definition state (definition : Tree.function_definition) =
          "the declarator of a function definition does not end in a function \
           derivation (C11 6.9.1p2)");
   let entity = declare_in state File_scope span specified declared derived in
+  Option.iter (needs_complete state) (return_type derived.declared_type);
   (match body with
   | Parsed block ->
       within state In_block (fun () ->
@@ -2545,7 +2749,9 @@ let read_function_definition state (definition : Tree.function_definition) =
   | Skipped _ -> ());
   Function_definition entity
 
-let read_external state (external_declaration : Tree.external_declaration) =
+let read_external state index
+    (external_declaration : Tree.external_declaration) =
+  state.external_facts <- declaration_state state.tags index;
   match external_declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
@@ -2599,11 +2805,12 @@ let declare_builtin_typedefs state =
   |> List.iter declare
 
 let read target text unit =
+  let tags = Ctype.create_tags () in
   let state =
     {
       target;
       text;
-      tags = Ctype.create_tags ();
+      tags;
       entities = Hashtbl.create 1024;
       tag_types = Hashtbl.create 256;
       linked = Hashtbl.create 1024;
@@ -2618,17 +2825,21 @@ let read target text unit =
       applied_at = Ctype.Instances.empty;
       instance_tokens = 0;
       nesting = None;
+      external_facts = declaration_state tags 0;
+      placements = no_placements;
       place = At_file_scope;
       next_entity = 0;
     }
   in
   declare_builtin_typedefs state;
-  let read_all () = List.map (read_external state) unit in
+  let read_all () = List.mapi (read_external state) unit in
   let end_deferral () = Ctype.end_deferral state.tags in
   match Fun.protect ~finally:end_deferral read_all with
   | items ->
-      let { tags; entities; tag_types; linked; typed; type_declarations; _ } =
+      let { tags; entities; tag_types; linked; typed; type_declarations;
+            placements; _ } =
         state
       in
-      Ok { tags; items; entities; tag_types; linked; typed; type_declarations }
+      Ok { tags; items; placements; entities; tag_types; linked; typed;
+           type_declarations }
   | exception (Failed error | Instance_failed error) -> Error error

@@ -297,11 +297,11 @@ val declare_instance :
   record_tag
 (** The structure or union of an instance, which stands at file scope
     (design 10.3): the same tag for the same instance. The first
-    declaration defers [define] of the record to the first question that
-    needs it complete (design 10.3): {!is_complete} and every question
-    about its members. [define] completes the record or raises; a need
-    of the record from within [define] finds it incomplete. A [define]
-    that leaves it incomplete, as one of a generic variant that is not
+    declaration defers [define] of the record to the first need of it
+    complete, which {!define_instance} meets; until then it is
+    incomplete. [define] completes the record or raises; a need of the
+    record from within [define] finds it incomplete. A [define] that
+    leaves it incomplete, as one of a generic variant that is not
     complete yet does, runs again at the next need. *)
 
 val declare_variant_instance :
@@ -319,9 +319,40 @@ val trial : tags -> (unit -> 'a) -> 'a
     from the ids that it used: a generic's definition check defines no
     instance (design 3.5 rule 7). *)
 
+val define_instance : tags -> t -> instance option
+(** A need of [t] complete (design 10.3): runs the deferred definition of
+    the instance that [t] is, or is an array of, and gives the instance
+    where this call completed it. Only the one function of the front end
+    that every need passes through calls it, so that nothing else
+    defines an instance. *)
+
 val end_deferral : tags -> unit
 (** Drops every definition deferred still, when reading ends: no later
     question defines an instance. *)
+
+(** A point in the order in which a unit declares its tags. *)
+type moment
+
+val now : tags -> moment
+val record_declared_before : record_tag -> moment -> bool
+(** Whether the tag was first declared before the moment. *)
+
+val enum_declared_before : enum_tag -> moment -> bool
+(** Whether the tag was first declared before the moment. *)
+
+type named_tag = Named_record of record_tag | Named_enum of enum_tag
+
+val named_tags : t -> named_tag list
+(** The structures, unions and enumerations that [t] names as a type
+    argument names them (design 10.3): those it is, points to, is an
+    array of, returns or takes, not the members of one. *)
+
+val named_type : named_tag -> t
+(** The structure, union or enumerated type of the tag. *)
+
+val needed_tag : t -> named_tag option
+(** The structure, union or enumeration that a need of [t] complete asks
+    for: [t] itself, or the element of an array. *)
 
 val declare_opaque : tags -> string -> record_tag
 (** A new type parameter of the definition check of a generic, named as

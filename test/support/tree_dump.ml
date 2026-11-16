@@ -379,7 +379,7 @@ and tag_part (tag : tag) =
   let name = tag.name.node in
   let entry =
     match tag.binding with
-    | Declares { id = Tag_at token; earlier } ->
+    | Declares { id = Tag_at token; earlier; implicit = _ } ->
         Declaration_entry
           { space = Tag; name; token; earlier = Option.map tag_target earlier }
     | Names id ->

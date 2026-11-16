@@ -730,17 +730,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   that only the parser makes, one per external declaration, would make
   a bracket inside an expression unwritable.
 
-- [High] An instance is defined at a point that needs it complete only
-  where typing asks for completeness (`Ctype.is_complete` and the
-  questions about members); the needs that the reader leaves to the
-  backend, such as an object that a block defines (C11 6.7p7), define
-  none, so lowering (part 9 of package 2.1) would not write a
-  definition there, and an error of the definition would reach the
-  backend instead of being reported at the application (design 3.5 rule
-  5). Ask for completeness at each need that design 10.3 lists. The
-  exactness of the nesting limit (design 3.5 rule 7) depends on it too:
-  a chain through a need that typing does not ask about is shorter than
-  the rule counts, so `typec` may accept a source that the rule refuses.
 - [High] `Initialiser.holds_variant` walks every member of every nested
   structure or union and remembers nothing, so a type holding two copies
   of the structure below it, n levels deep, costs 2^n, once for each
@@ -749,13 +738,23 @@ is [type-c-language-design.md](type-c-language-design.md).
   code, not reproduced yet). Find whether a record
   holds a variant once, when it is defined, beside the `holds` of its
   definition in `Ctype` (`Ctype.holds`), and ask that fact instead.
-- [Medium] Each instance reading makes typed views with
-  `Expressions.create`, whose two tables start at 4096 buckets, which is
-  most of the 47 us that an instance of a small definition costs, so a
-  doubling chain of small generics takes 2 s to reach
-  `Declarations.max_instance_tokens`; tables of 16 make a reading eight
-  times faster (measured on that chain). Make smaller views for an
-  instance reading.
+- [Medium] The needs of a type complete (design 10.3) are calls of
+  `Declarations.needs_complete` at each construct of the list, so a
+  construct that typing reads and the list misses leaves an instance
+  declared and not defined, which the backend refuses. The lvalue
+  conversion (C11 6.3.2.1p2) is the open end: it is met where each
+  operation takes its operand (`read_operand`, a targeted position,
+  the branches of `?:`, a comma, a cast, an expression statement), not
+  in one place. Make the conversion one function of `Expressions`,
+  whose result an operand can only be read through, and give it the
+  need; `Ctype.define_instance` is likewise reachable from any module
+  that its comment does not bind.
+- [Low] A function definition needs its parameter types complete as
+  its declarator is read and its return type after, the reverse of the
+  text, while design 3.5 rule 7 fixes the order in which the needs of
+  a definition are visited; which application a nesting error cites,
+  and the order of `Declarations.definitions`, can differ from the
+  rule's.
 - [Medium] A constant expression may depend on a type parameter
   through an untagged structure body in it (`char k[2 - sizeof(struct
   { T q; })]` in a generic's definition is accepted), as

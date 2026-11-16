@@ -206,6 +206,16 @@ A chain of instances that each define the next holds at most 64
   deep.tc:2: the application would define the instance 'box__i' after a chain of 64 instances that each define the next, which the application at deep.tc:2 began; a chain holds at most 64 (design 3.5 rule 7) [TC0042]
   [1]
 
+The texts of an instance stand before the external declaration of its
+first use, so what they need complete is complete before it (design
+10.3).
+
+  $ printf 'type a2(T) = T[2];\nstruct s { int a; } *f(a2(struct s) *p);\n' \
+  >   > early.tc
+  $ ./golden.exe early.tc
+  early.tc:2: the instance 'a2__T1s' needs 'struct s' complete where its text stands, before the external declaration that completes it at early.tc:2; complete it in an earlier one (design 10.3) [TC0043]
+  [1]
+
 The definition is checked once with each type parameter an opaque value
 type, so a use that the parser cannot see, through a transparent alias
 or in a constant expression, is refused there (design 3.5 rule 4).

@@ -449,20 +449,43 @@ let trial tags read =
 
 let set_deferred tags deferred = tags.facts <- { tags.facts with deferred }
 
+(* The instance that a record is, whose definition may be deferred. *)
+let instance_of_record (tag : record_tag) =
+  match tag.record_name with
+  | Instance_name instance | Variant_name (Applied instance) -> Some instance
+  | Anonymous | Named _ | Variant_name (Declared _) | Alias_name _
+  | Opaque_name _ ->
+      None
+
+(* The record that a need of [t] complete asks for: an array needs its
+   element complete. *)
+let rec needed_record t =
+  match t.shape with
+  | Record tag -> Some tag
+  | Array { element; _ } -> needed_record element
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Function _ | Distinct _
+  | Va_list | Unknown_type _ ->
+      None
+
 (* The definition runs when the record is first needed complete (design
    10.3); it is removed first, so that a need of the record from within
    its own definition finds it incomplete (design 3.5 rule 7). One that
    leaves the record incomplete, of a generic not complete yet, stays
    deferred. *)
-let run_deferred tags (tag : record_tag) =
-  let id = tag.record_id in
-  match Ids.find_opt id tags.facts.deferred with
-  | None -> ()
-  | Some define ->
-      set_deferred tags (Ids.remove id tags.facts.deferred);
-      define ();
-      if not (Ids.mem id tags.facts.records) then
-        set_deferred tags (Ids.add id define tags.facts.deferred)
+let define_instance tags t =
+  match needed_record t with
+  | None -> None
+  | Some tag -> (
+      let id = tag.record_id in
+      match Ids.find_opt id tags.facts.deferred with
+      | None -> None
+      | Some define ->
+          set_deferred tags (Ids.remove id tags.facts.deferred);
+          define ();
+          if Ids.mem id tags.facts.records then instance_of_record tag
+          else (
+            set_deferred tags (Ids.add id define tags.facts.deferred);
+            None))
 
 let read_instance tags instance ~read =
   match Instances.find_opt instance tags.facts.readings with
@@ -474,6 +497,38 @@ let read_instance tags instance ~read =
       t
 
 let end_deferral tags = set_deferred tags Ids.empty
+
+(* Ids grow in the order of declaration, enumerations included. *)
+type moment = int
+
+let now tags = tags.next_id
+let record_declared_before (tag : record_tag) moment = tag.record_id < moment
+let enum_declared_before tag moment = tag.enum_id < moment
+
+type named_tag = Named_record of record_tag | Named_enum of enum_tag
+
+let rec named_tags t =
+  match t.shape with
+  | Pointer referenced | Array { element = referenced; _ } ->
+      named_tags referenced
+  | Function { return; parameters } ->
+      List.concat_map named_tags (return :: parameter_types parameters)
+  | Record tag -> [ Named_record tag ]
+  | Enum tag -> [ Named_enum tag ]
+  | Void | Arithmetic _ | Distinct _ | Va_list | Unknown_type _ -> []
+
+let named_type = function
+  | Named_record tag -> record tag
+  | Named_enum tag -> enum tag
+
+let rec needed_tag t =
+  match t.shape with
+  | Record tag -> Some (Named_record tag)
+  | Enum tag -> Some (Named_enum tag)
+  | Array { element; _ } -> needed_tag element
+  | Void | Arithmetic _ | Pointer _ | Function _ | Distinct _ | Va_list
+  | Unknown_type _ ->
+      None
 
 let declare_enum tags enum_name ~at_file_scope =
   { enum_id = fresh_id tags; enum_name; enum_at_file_scope = at_file_scope }
@@ -614,12 +669,9 @@ let enum_integer tags tag =
   | Some (Unfixed integer) -> Some integer
   | None -> None
 
-(* Every question about the members or completeness of a record comes
-   here, which defines a deferred instance first: the one place where a
-   need of an instance complete is met. *)
-let record_definition tags tag =
-  run_deferred tags tag;
-  Ids.find_opt tag.record_id tags.facts.records
+(* A record is complete once defined; only [define_instance] defines a
+   deferred instance (design 10.3). *)
+let record_definition tags tag = Ids.find_opt tag.record_id tags.facts.records
 
 let record_members tags tag =
   Option.map (fun definition -> definition.members) (record_definition tags tag)
@@ -944,8 +996,8 @@ let define_variant_instance target tags tag privacy constructors members =
   | Anonymous | Named _ | Alias_name _ | Instance_name _ | Opaque_name _ ->
       invalid_arg "Ctype: a variant instance of no instance tag"
 
-(* An instance is defined at its first need of its constructors, as at
-   any need of it complete. *)
+(* An instance has constructors once a need of it complete has defined
+   it ([define_instance]). *)
 let variant_definition tags t =
   match t.shape with
   | Record ({ record_name = Variant_name _; _ } as tag) ->

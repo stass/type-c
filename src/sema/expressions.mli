@@ -281,7 +281,10 @@ val constant : t -> Tree.expression -> constant option
     a Clang overload set (design 13.3); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
     block, binding its identifiers and typing its initialisers, and
-    [type_declaration] a type declaration there. *)
+    [type_declaration] a type declaration there. [needs_complete] is
+    the one function that every point that needs a type complete passes
+    the type to (design 10.3), and [block_literal] is told of each block
+    literal, whose body typec does not read, where it stands. *)
 type context = {
   typed : t;
   target : Target.t;
@@ -295,6 +298,8 @@ type context = {
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
+  needs_complete : Ctype.t -> unit;
+  block_literal : unit -> unit;
 }
 
 val whole_value : context -> Tree.expression -> typed
