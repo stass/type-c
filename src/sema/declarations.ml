@@ -101,14 +101,15 @@ exception Failed of error
 let location_of state (span : Tree.span) =
   state.text.tokens.(span.first).location
 
-let fail state span message =
-  raise (Failed { location = location_of state span; message })
+let fail state span diagnostic =
+  let location = location_of state span in
+  raise (Failed { location; message = Rule.text diagnostic })
 
 let quote = Expressions.quote
 
 let checked state span = function
   | Ok t -> t
-  | Error error -> fail state span (Ctype.error_message error)
+  | Error error -> fail state span (Rule.c_text (Ctype.error_message error))
 
 let integer_type state span integer =
   checked state span (Ctype.integer state.target integer)
@@ -145,9 +146,10 @@ let within state place read =
    of a Clang block literal. *)
 let not_read state span name =
   fail state span
-    (quote name
-   ^ " is declared where typec does not read declarations yet (design \
-      13.3)")
+    (Rule.message Profile
+       (quote name
+      ^ " is declared where typec does not read declarations yet (design \
+         13.3)"))
 
 (* The entity that [reference] denotes at the use of [name] at [span]. *)
 let referenced state span name reference =
@@ -179,11 +181,13 @@ let is_overload = function
 let check_linkage state span name prior next =
   if linkage_of prior = No_linkage || linkage_of next = No_linkage then
     fail state span
-      (quote name
-     ^ " is declared twice in one scope without linkage (C11 6.7p3)");
+      (Rule.c_text
+         (quote name
+        ^ " is declared twice in one scope without linkage (C11 6.7p3)"));
   if linkage_of prior <> linkage_of next then
     fail state span
-      (quote name ^ " has both internal and external linkage (C11 6.2.2p7)")
+      (Rule.c_text
+         (quote name ^ " has both internal and external linkage (C11 6.2.2p7)"))
 
 let composite state span name prior next =
   let location = location_of state span in
@@ -191,8 +195,10 @@ let composite state span name prior next =
   | Ok composite -> composite
   | Error Ctype.Incompatible ->
       fail state span
-        (quote name ^ " is redeclared with an incompatible type (C11 6.7p4)")
-  | Error error -> fail state span (Ctype.error_message error)
+        (Rule.c_text
+           (quote name
+          ^ " is redeclared with an incompatible type (C11 6.7p4)"))
+  | Error error -> fail state span (Rule.c_text (Ctype.error_message error))
 
 (* A declaration of [name] where [prior] is in the same scope. *)
 let redeclared state span name prior next =
@@ -202,14 +208,15 @@ let redeclared state span name prior next =
       | Answer true | Depends_on _ -> next
       | Answer false ->
           fail state span
-            (quote name
-           ^ " is redefined as a typedef of another type (C11 6.7p3)"))
+            (Rule.c_text
+               (quote name
+              ^ " is redefined as a typedef of another type (C11 6.7p3)")))
   | Object old, Object next ->
       check_linkage state span name prior (Object next);
       if old.storage <> next.storage then
         fail state span
-          (quote name
-         ^ " is declared both with and without _Thread_local (C11 6.7.1p3)");
+          (Rule.c_text (quote name
+         ^ " is declared both with and without _Thread_local (C11 6.7.1p3)"));
       let object_type =
         composite state span name old.object_type next.object_type
       in
@@ -229,8 +236,9 @@ let redeclared state span name prior next =
         }
   | (Object _ | Function _ | Typedef _ | Enumerator _), _ ->
       fail state span
-        (quote name ^ " is redeclared as a different kind of identifier \
-                       (C11 6.7p3)")
+        (Rule.c_text
+           (quote name ^ " is redeclared as a different kind of identifier \
+                          (C11 6.7p3)"))
 
 (* An overload (design 13.3) is a new entity, which is not linked under
    its name, and stands beside what a declaration in its place would
@@ -383,7 +391,9 @@ let storage_class state span classes =
   | [ _ ], [ ((Static | Extern) as storage) ] -> Some storage
   | _ ->
       fail state span
-        "a declaration has storage classes that do not combine (C11 6.7.1p2)"
+        (Rule.c_text
+           "a declaration has storage classes that do not combine (C11 \
+            6.7.1p2)")
 
 (* The arithmetic types that type specifiers name (6.7.2p2): the integer
    ones, then the floating ones, each multiset sorted in the order of
@@ -428,8 +438,9 @@ let record_kind : Tree.struct_or_union -> Ctype.record_kind = function
 
 let wrong_kind_of_tag state (name : Tree.identifier) =
   fail state name.span
-    (quote name.node
-   ^ " is declared as a different kind of tag (C11 6.7.2.3p2)")
+    (Rule.c_text
+       (quote name.node
+      ^ " is declared as a different kind of tag (C11 6.7.2.3p2)"))
 
 (* Constant expressions (6.6) *)
 
@@ -574,12 +585,14 @@ let for_declarator specified attributes =
 let no_function_specifiers state span specified =
   if specified.inline || specified.noreturn then
     fail state span
-      "a function specifier in the declaration of an identifier that is \
-       not a function (C11 6.7.4p1)"
+      (Rule.c_text
+         "a function specifier in the declaration of an identifier that is not \
+          a function (C11 6.7.4p1)")
 
 let no_alignment state span specified what =
   if specified.aligned <> None then
-    fail state span ("an alignment specifier for " ^ what ^ " (C11 6.7.5p2)")
+    fail state span
+      (Rule.c_text ("an alignment specifier for " ^ what ^ " (C11 6.7.5p2)"))
 
 (* 6.2.2p3-p5, 6.7.1p7: the linkage of a function. [storage] is not
    [typedef], and at file scope neither [auto] nor [register]. *)
@@ -589,8 +602,9 @@ let function_linkage state scope span name declared storage =
   | (None | Some Extern), _ -> prior_linkage state scope span name declared
   | Some (Static | Auto | Register | Typedef | Thread_local), Block_scope ->
       fail state span
-        "a function declared in a block has a storage class other than \
-         extern (C11 6.7.1p7)"
+        (Rule.c_text
+           "a function declared in a block has a storage class other than \
+            extern (C11 6.7.1p7)")
   | Some (Auto | Register | Typedef | Thread_local), File_scope ->
       invalid_arg "Declarations: a storage class refused at file scope"
 
@@ -614,7 +628,8 @@ let function_declared state scope span specified name declared
         (attribute_unknown state attribute Unknown_function))
     derived.inner_effect;
   if specified.thread_local then
-    fail state span "a function declared _Thread_local (C11 6.7.1p4)";
+    fail state span
+      (Rule.c_text "a function declared _Thread_local (C11 6.7.1p4)");
   no_alignment state span specified "a function";
   (* An overload redeclares nothing, so it has no visible declaration to
      take a linkage from. *)
@@ -654,8 +669,9 @@ let object_declared state scope span specified name declared
     | (None | Some (Auto | Register)), Block_scope ->
         if specified.thread_local then
           fail state span
-            "_Thread_local in a block without static or extern (C11 \
-             6.7.1p3)";
+            (Rule.c_text
+               "_Thread_local in a block without static or extern (C11 \
+                6.7.1p3)");
         (No_linkage, Automatic_storage)
     | Some (Auto | Register | Typedef | Thread_local), File_scope
     | Some (Typedef | Thread_local), Block_scope ->
@@ -672,7 +688,7 @@ let declared_as state scope span specified name declared (derived : derived) =
       no_alignment state span specified "a typedef";
       Typedef derived.declared_type
   | Some (Auto | Register | Thread_local), File_scope ->
-      fail state span "auto or register at file scope (C11 6.9p2)"
+      fail state span (Rule.c_text "auto or register at file scope (C11 6.9p2)")
   | storage, _ -> (
       match Ctype.is_function derived.declared_type with
       | Answer true ->
@@ -746,7 +762,8 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
 and base_type state span sorted =
   match (sorted.basic, sorted.others) with
   | [], [] ->
-      fail state span "a declaration has no type specifier (C11 6.7.2p2)"
+      fail state span
+        (Rule.c_text "a declaration has no type specifier (C11 6.7.2p2)")
   | [ Void ], [] -> Ctype.void
   | basic, [] when List.exists is_optional_float basic ->
       optional_float_type state span basic
@@ -756,7 +773,9 @@ and base_type state span sorted =
           checked state span (Ctype.arithmetic state.target arithmetic)
       | None -> complex_integer_type state span basic)
   | [], [ other ] -> other_type state span other
-  | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
+  | _ ->
+      fail state span
+        (Rule.c_text "type specifiers that do not combine (C11 6.7.2p2)")
 
 (* An optional floating type, such as [_Float16], real or complex, for
    which the target model has no size. The specifiers are sorted in the
@@ -769,7 +788,9 @@ and optional_float_type state span basic =
   | [ Complex; Optional_float optional ] ->
       let name = "_Complex " ^ Optional_float.spelling optional in
       unknown_type state span (quote name) Unknown_object
-  | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
+  | _ ->
+      fail state span
+        (Rule.c_text "type specifiers that do not combine (C11 6.7.2p2)")
 
 (* GNU's complex integer types, such as [_Complex int], which typec does
    not type: one for each standard integer type, which GCC and Clang
@@ -782,7 +803,9 @@ and complex_integer_type state span basic =
   | [ _ ], Some integer when not (List.mem integer excluded) ->
       let name = "_Complex " ^ Integer.name integer in
       unknown_type state span (quote name) Unknown_object
-  | _ -> fail state span "type specifiers that do not combine (C11 6.7.2p2)"
+  | _ ->
+      fail state span
+        (Rule.c_text "type specifiers that do not combine (C11 6.7.2p2)")
 
 (* An attribute of a structure, union or enumeration specifier that typec
    does not know makes the type it gives unknown. The tag is declared and
@@ -810,7 +833,7 @@ and other_type state span (specifier : Tree.type_specifier) =
       match Hashtbl.find_opt state.entities declaration with
       | Some { declared = Typedef t; _ } -> t
       | Some _ | None ->
-          fail state span (quote name ^ " is not a typedef name"))
+          fail state span (Rule.c_text (quote name ^ " is not a typedef name")))
 
 (* GNU [typeof] of an expression is its type, unconverted. *)
 and typeof_expression state expression =
@@ -825,7 +848,9 @@ and alignment state (alignment : Tree.alignment Tree.spanned) =
       | Constant _ -> ()
       | Not_constant span ->
           fail state span
-            "an alignment is not an integer constant expression (C11 6.7.5p3)")
+            (Rule.c_text
+               "an alignment is not an integer constant expression (C11 \
+                6.7.5p3)"))
 
 (* Tags (6.7.2.3) *)
 
@@ -897,7 +922,7 @@ and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
       fix_enum state span enum integer;
       Option.iter (define_fixed_enum state span enum integer) enumerators
   | None, Some _ when Ctype.enum_integer state.tags enum <> None ->
-      fail state span (Ctype.error_message Ctype.Redefinition)
+      fail state span (Rule.c_text (Ctype.error_message Ctype.Redefinition))
   | None, Some enumerators -> define_enum state span ~attribute enum enumerators
   | None, None -> ());
   enum
@@ -922,7 +947,9 @@ and fixed_type state span specifiers : Integer.t Unknown.answer =
   | Void | Arithmetic (Real _ | Complex _) | Enum _ | Pointer _ | Record _
   | Distinct _ | Va_list | Array _ | Function _ ->
       fail state span
-        "the fixed type of an enumeration is not an integer type (C23 6.7.2.2)"
+        (Rule.c_text
+           "the fixed type of an enumeration is not an integer type (C23 \
+            6.7.2.2)")
 
 (* An enumeration with a fixed type is complete from its type on, and each
    of its declarations repeats the type (C23 6.7.2.2). *)
@@ -931,7 +958,8 @@ and fix_enum state span enum integer =
   | None, _ -> checked state span (Ctype.define_enum state.tags enum integer)
   | Some (Answer before), Answer fixed when before <> fixed ->
       fail state span
-        "an enumeration is declared with another fixed type (C23 6.7.2.2)"
+        (Rule.c_text
+           "an enumeration is declared with another fixed type (C23 6.7.2.2)")
   | Some (Answer _ | Depends_on _), (Answer _ | Depends_on _) -> ()
 
 (* Members (6.7.2.1) *)
@@ -980,7 +1008,8 @@ and read_member_declarator state specified
       Option.iter
         (fun span ->
           fail state span
-            "a bit-field has an alignment specifier (C11 6.7.5p2)")
+            (Rule.c_text
+               "a bit-field has an alignment specifier (C11 6.7.5p2)"))
         specified.aligned;
       let derived = declare_type state ~parameter:false specified field in
       let bit_field_width = Some (bit_field_width state width) in
@@ -993,15 +1022,18 @@ and bit_field_width state width =
       match Exact_integer.to_int width_value with
       | Some bits -> bits
       | None ->
-          fail state width.span (Ctype.error_message Ctype.Invalid_bit_field))
+          fail state width.span
+            (Rule.c_text (Ctype.error_message Ctype.Invalid_bit_field)))
   | Constant { value = Opaque; _ } ->
       fail state width.span
-        "the width of a bit-field is one that typec does not evaluate \
-         (design P16)"
+        (Rule.message Profile
+           "the width of a bit-field is one that typec does not evaluate \
+            (design P16)")
   | Not_constant span ->
       fail state span
-        "the width of a bit-field is not an integer constant expression \
-         (C11 6.7.2.1p4)"
+        (Rule.c_text
+           "the width of a bit-field is not an integer constant expression \
+            (C11 6.7.2.1p4)")
 
 (* Enumerations (6.7.2.2) *)
 
@@ -1088,8 +1120,9 @@ and fixed_enumerator_value state integer previous span
   let held span value =
     if not (Integer_constant.fits target integer value) then
       fail state span
-        "an enumerator value is not representable in the fixed type of its \
-         enumeration (C23 6.7.2.2)";
+        (Rule.c_text
+           "an enumerator value is not representable in the fixed type of its \
+            enumeration (C23 6.7.2.2)");
     Integer_constant.known target integer value
   in
   match (value, previous) with
@@ -1097,8 +1130,9 @@ and fixed_enumerator_value state integer previous span
       match constant_expression state expression with
       | Not_constant span ->
           fail state span
-            "an enumerator value is not an integer constant expression \
-             (C11 6.7.2.2p2)"
+            (Rule.c_text
+               "an enumerator value is not an integer constant expression (C11 \
+                6.7.2.2p2)")
       | Constant { value = Opaque; _ } -> Integer_constant.opaque integer
       | Constant { value = Known value; _ } -> held expression.span value)
   | None, None -> held span Exact_integer.zero
@@ -1117,12 +1151,14 @@ and enumerator_value state previous span (value : Tree.expression option) =
       match constant_expression state expression with
       | Not_constant span ->
           fail state span
-            "an enumerator value is not an integer constant expression \
-             (C11 6.7.2.2p2)"
+            (Rule.c_text
+               "an enumerator value is not an integer constant expression (C11 \
+                6.7.2.2p2)")
       | Constant { value = Opaque; _ } ->
           fail state expression.span
-            "an enumerator value is one that typec does not evaluate \
-             (design P16)"
+            (Rule.message Profile
+               "an enumerator value is one that typec does not evaluate \
+                (design P16)")
       | Constant { value = Known value; _ }
         when Integer_constant.fits target Int value ->
           (Integer.Int, value)
@@ -1152,8 +1188,9 @@ and successor state span (previous_type, previous) =
   | Some integer -> (integer, next)
   | None ->
       fail state span
-        "an enumerator value is too large for every integer type \
-         (C11 6.7.2.2p2)"
+        (Rule.c_text
+           "an enumerator value is too large for every integer type (C11 \
+            6.7.2.2p2)")
 
 (* The narrowest range of two's complement integers that holds the
    values. *)
@@ -1175,7 +1212,9 @@ and enum_integer state span values =
   | Some integer -> integer
   | None ->
       fail state span
-        "no integer type holds the values of the enumeration (C11 6.7.2.2p4)"
+        (Rule.c_text
+           "no integer type holds the values of the enumeration (C11 \
+            6.7.2.2p4)")
 
 (* Static assertions (6.7.10) *)
 
@@ -1183,14 +1222,16 @@ and static_assert state ({ condition; message } : Tree.static_assertion) =
   match constant_expression state condition with
   | Not_constant span ->
       fail state span
-        "the condition of a static assertion is not an integer constant \
-         expression (C11 6.7.10p2)"
+        (Rule.c_text
+           "the condition of a static assertion is not an integer constant \
+            expression (C11 6.7.10p2)")
   | Constant constant -> (
       match Integer_constant.truth constant with
       | Some false ->
           let first = (List.hd message).span in
           fail state condition.span
-            ("static assertion failed: " ^ quote (spelling state first))
+            (Rule.c_text
+               ("static assertion failed: " ^ quote (spelling state first)))
       | Some true | None -> ())
 
 (* Declarators (6.7.6) *)
@@ -1298,8 +1339,9 @@ and read_derivation state ~parameter ~definition ~nearest
       let is_static = match size with Static_sized _ -> true | _ -> false in
       if (qualified || is_static) && not adjusted then
         fail state span
-          "qualifiers or static in an array derivation that is not the \
-           outermost of a parameter (C11 6.7.6.2p1)";
+          (Rule.c_text
+             "qualifiers or static in an array derivation that is not the \
+              outermost of a parameter (C11 6.7.6.2p1)");
       let length = array_length state span size in
       fun derived ->
         let declared_type =
@@ -1331,20 +1373,23 @@ and array_length state span (size : Tree.array_size) : Ctype.length =
   | Unspecified_variable when state.place = In_prototype -> Variable
   | Unspecified_variable ->
       fail state span
-        "[*] outside function prototype scope (C11 6.7.6.2p4)"
+        (Rule.c_text "[*] outside function prototype scope (C11 6.7.6.2p4)")
   | Sized expression | Static_sized expression -> (
       match constant_expression state expression with
       | Constant { value = Known length; _ } -> (
           match Exact_integer.to_int length with
           | Some length -> Constant length
-          | None -> fail state expression.span "an array is too large")
+          | None ->
+              fail state expression.span
+                (Rule.c_text "an array is too large"))
       | Constant { value = Opaque; _ } -> Opaque
       | Not_constant _ when state.place <> At_file_scope -> Variable
       | Not_constant span ->
           fail state span
-            "an array length that is not an integer constant expression \
-             gives a variable length array, which cannot have file scope \
-             (C11 6.7.6.2p2)")
+            (Rule.c_text
+               "an array length that is not an integer constant expression \
+                gives a variable length array, which cannot have file scope \
+                (C11 6.7.6.2p2)"))
 
 (* Parameters (6.7.6.3) *)
 
@@ -1354,8 +1399,9 @@ and read_parameters state ~definition (parameters : Tree.parameters) =
   | Identifier_list [], None -> Ctype.Unspecified
   | Identifier_list (first :: _), None ->
       fail state first.name.span
-        "an identifier list in a function declarator that is not a \
-         definition (C11 6.7.6.3p3)"
+        (Rule.c_text
+           "an identifier list in a function declarator that is not a \
+            definition (C11 6.7.6.3p3)")
   | Identifier_list names, Some declarations ->
       old_style_parameters state names declarations
   | Prototype { parameters; variadic }, _ ->
@@ -1412,11 +1458,15 @@ and parameter_specifiers state span specifiers =
   | (None | Some Register), false -> ()
   | _ ->
       fail state span
-        "a parameter has a storage class other than register (C11 6.7.6.3p2)");
+        (Rule.c_text
+           "a parameter has a storage class other than register (C11 \
+            6.7.6.3p2)"));
   if specified.inline || specified.noreturn then
-    fail state span "a parameter has a function specifier (C11 6.7.4p1)";
+    fail state span
+      (Rule.c_text "a parameter has a function specifier (C11 6.7.4p1)");
   if specified.aligned <> None then
-    fail state span "a parameter has an alignment specifier (C11 6.7.5p2)";
+    fail state span
+      (Rule.c_text "a parameter has an alignment specifier (C11 6.7.5p2)");
   specified
 
 (* Records the parameter and returns its type. *)
@@ -1467,8 +1517,9 @@ and read_old_style_declaration state types
   | Static_assert assertion -> static_assert state assertion
   | Declaration { declarators = []; specifiers = _ } ->
       fail state span
-        "a declaration before a function body declares no parameter \
-         (C11 6.9.1p6)"
+        (Rule.c_text
+           "a declaration before a function body declares no parameter (C11 \
+            6.9.1p6)")
   | Declaration { specifiers; declarators } ->
       let specified = parameter_specifiers state span specifiers in
       List.iter (read_old_style_declarator state types specified) declarators
@@ -1481,8 +1532,9 @@ and read_old_style_declarator state types specified
   in
   if initialiser <> None then
     fail state span
-      "a declaration before a function body has an initializer \
-       (C11 6.9.1p6)";
+      (Rule.c_text
+         "a declaration before a function body has an initializer (C11 \
+          6.9.1p6)");
   let specified = for_declarator specified attributes in
   let derived =
     declare_type state ~parameter:true specified (Some declarator)
@@ -1500,16 +1552,18 @@ and read_old_style_declarator state types specified
       ignore (declare_parameter state span specified derived name declared)
   | Some _, None | None, _ ->
       fail state span
-        "a declaration before a function body declares a name that is not \
-         in its identifier list (C11 6.9.1p6)"
+        (Rule.c_text
+           "a declaration before a function body declares a name that is not \
+            in its identifier list (C11 6.9.1p6)")
 
 and old_style_parameter_type state types (name : Tree.parameter_name) =
   match Hashtbl.find_opt types name.declared.id with
   | Some (Some object_type) -> object_type
   | Some None | None ->
       fail state name.name.span
-        (quote name.name.node
-       ^ " in the identifier list is not declared (C11 6.9.1p6)")
+        (Rule.c_text
+           (quote name.name.node
+          ^ " in the identifier list is not declared (C11 6.9.1p6)"))
 
 (* The type a parameter has in its function (6.7.6.3p7, p8). *)
 and adjusted_parameter state span derived =
@@ -1536,7 +1590,8 @@ and read_new_type_name state (type_name : Tree.type_name) =
     read_specifiers state type_name.node.specifier_qualifiers
   in
   if specified.aligned <> None then
-    fail state span "a type name has an alignment specifier (C11 6.7.5p2)";
+    fail state span
+      (Rule.c_text "a type name has an alignment specifier (C11 6.7.5p2)");
   let derived =
     declare_type state ~parameter:false specified type_name.node.abstract
   in
@@ -1588,8 +1643,9 @@ and initialised state scope span declared (entity : entity) initialiser =
   | Object ({ object_type; linkage; storage; _ } as declared_object) -> (
       if scope = Block_scope && linkage <> No_linkage then
         fail state span
-          "a declaration in a block of an identifier with linkage has an \
-           initialiser (C11 6.7.9p5)";
+          (Rule.c_text
+             "a declaration in a block of an identifier with linkage has an \
+              initialiser (C11 6.7.9p5)");
       let constant = storage <> Automatic_storage in
       let completed =
         Expressions.initialiser (typing state) ~constant object_type
@@ -1608,7 +1664,8 @@ and initialised state scope span declared (entity : entity) initialiser =
           entity
       | _ -> entity)
   | Function _ | Typedef _ | Enumerator _ ->
-      fail state span "an initialiser for what is not an object (C11 6.7.9p3)"
+      fail state span
+        (Rule.c_text "an initialiser for what is not an object (C11 6.7.9p3)")
 
 and read_block_declaration state (declaration : Tree.declaration) =
   match declaration.node with
@@ -1673,7 +1730,9 @@ and distinct_type state (name : Tree.identifier) privacy type_name =
               "the distinct type '%s' is not over an unqualified arithmetic \
                or pointer type"
               name.node))
-  | Error error -> fail state type_name.span (Ctype.error_message error)
+  | Error error ->
+      fail state type_name.span
+        (Rule.c_text (Ctype.error_message error))
 
 (* A variant is the structure that it lowers to (design 10.1): that of
    the incomplete variant it completes, or a new one under the tag that
@@ -1831,7 +1890,7 @@ and typing state : Expressions.context =
     target = state.target;
     text = state.text;
     tags = state.tags;
-    fail = (fun span message -> fail state span message);
+    fail = (fun span diagnostic -> fail state span diagnostic);
     entity = referenced state;
     overloaded = Hashtbl.mem state.overloaded;
     type_name = read_type_name state;
@@ -1895,16 +1954,18 @@ let read_function_definition state (definition : Tree.function_definition) =
   | (None | Some (Extern | Static)), false -> ()
   | _ ->
       fail state span
-        "a function definition has a storage class other than extern or \
-         static (C11 6.9.1p4)");
+        (Rule.c_text
+           "a function definition has a storage class other than extern or \
+            static (C11 6.9.1p4)"));
   let derived =
     declare_type state ~definition:declarations ~records_effects:true
       ~parameter:false specified (Some declarator)
   in
   if not derived.defines then
     fail state span
-      "the declarator of a function definition does not end in a function \
-       derivation (C11 6.9.1p2)";
+      (Rule.c_text
+         "the declarator of a function definition does not end in a function \
+          derivation (C11 6.9.1p2)");
   let entity = declare_in state File_scope span specified declared derived in
   (match body with
   | Parsed block ->

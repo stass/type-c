@@ -323,5 +323,5 @@ is outside the profile.
 
   $ printf '# 1 "t.c"\nint x;\nvoid f(void) { int g(void) { } }\n' > bad.i
   $ ./parse_check.exe clang.macros bad.i
-  parse_check: t.c:2: a function definition in a block (a GNU nested function) is outside the GNU profile (design 13.3)
+  parse_check: t.c:2: a function definition in a block (a GNU nested function) is outside the GNU profile (design 13.3) [TC0031]
   [1]

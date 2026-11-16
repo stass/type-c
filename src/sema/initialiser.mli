@@ -58,7 +58,7 @@ open Typec_syntax
 type typing = {
   target : Target.t;
   tags : Ctype.tags;
-  fail : 'a. Tree.span -> string -> 'a;
+  fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   value : Ctype.t option -> Tree.expression -> Ctype.t;
   converts : Ctype.t -> Tree.expression -> unit;
   initialises : Tree.expression -> unit;

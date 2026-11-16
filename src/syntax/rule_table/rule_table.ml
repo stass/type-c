@@ -157,6 +157,13 @@ let rows =
       meaning =
         "A Clang block literal that Type-C text writes, or that holds \
          Type-C text an include puts inside it." };
+    Live { name = "Profile"; code = 31; clause = None;
+      meaning =
+        "A construct that the front end does not take (design 13.3): \
+         outside the GNU profile, a builtin that the backend lacks or a \
+         call that breaks the rule of a builtin, or one that needs a type, \
+         a value or a declaration that typec does not compute; the text \
+         names the clause." };
   ]
 
 let () =

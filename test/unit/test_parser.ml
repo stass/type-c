@@ -1432,7 +1432,7 @@ let gnu_error_cases =
     case "a nested function definition"
       "void f(void) { int g(int x) { return x; } }"
       "error: in.i:1: a function definition in a block (a GNU nested \
-       function) is outside the GNU profile (design 13.3)";
+       function) is outside the GNU profile (design 13.3) [TC0031]";
     case "a label address of a constant" "void *p = && 1;"
       "error: in.i:1: expected a label after `&&`, found `1`";
     case "a label address takes no postfix" "void *p = &&a[0];"

@@ -16,7 +16,7 @@ type typed = { expression_type : Ctype.t; lvalue : bool; bit_field : bit_field }
 
 type flaw =
   | Comma_operator of Tree.span
-  | Invalid of { span : Tree.span; message : string }
+  | Invalid of { span : Tree.span; diagnostic : Rule.diagnostic }
 
 type designation = { static_storage : bool; named : bool }
 
@@ -30,7 +30,7 @@ type kind =
 type constant =
   | Integer_expression of { value : Integer_constant.t; flaw : flaw option }
   | Not_integer of { kind : kind; first : Tree.span }
-  | Unevaluable of { span : Tree.span; message : string }
+  | Unevaluable of { span : Tree.span; diagnostic : Rule.diagnostic }
 
 (* What a case or default label in the statement being typed belongs
    to: no switch, the innermost switch, or a match arm or the statement
@@ -130,7 +130,7 @@ module Sites : sig
   val record :
     t ->
     Ctype.tags ->
-    fail:(Tree.span -> string -> unit) ->
+    fail:(Tree.span -> Rule.diagnostic -> unit) ->
     variant_type:Ctype.t ->
     site ->
     unit
@@ -288,7 +288,7 @@ type context = {
   target : Target.t;
   text : Reader.t;
   tags : Ctype.tags;
-  fail : 'a. Tree.span -> string -> 'a;
+  fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
@@ -308,14 +308,16 @@ let needing need (unknown : Unknown.t) =
     | Not_typed -> "which typec does not type yet"
     | Typed_differently -> "which GCC types otherwise than Clang"
   in
-  Printf.sprintf "%s depends on %s at %s:%d, %s (design 13.3)" need
-    unknown.construct unknown.location.file unknown.location.line why
+  Rule.message Profile
+    (Printf.sprintf "%s depends on %s at %s:%d, %s (design 13.3)" need
+       unknown.construct unknown.location.file unknown.location.line why)
 
 (* [walk] one level deeper. *)
 let nested context span walk =
   let view = context.typed in
   if view.depth >= max_depth then
-    context.fail span "an expression or statement is nested too deeply";
+    context.fail span
+      (Rule.c_text "an expression or statement is nested too deeply");
   view.depth <- view.depth + 1;
   let result = walk () in
   view.depth <- view.depth - 1;
@@ -332,7 +334,7 @@ let within context enclosing walk =
 
 let checked context span = function
   | Ok t -> t
-  | Error error -> context.fail span (Ctype.error_message error)
+  | Error error -> context.fail span (Rule.c_text (Ctype.error_message error))
 
 let value expression_type =
   { expression_type; lvalue = false; bit_field = Not_bit_field }
@@ -409,8 +411,9 @@ let backend_type context location difference (t : Ctype.t) =
 
 let fail_operands context span clause =
   context.fail span
-    ("the operands have types that the operator does not take (C11 " ^ clause
-   ^ ")")
+    (Rule.c_text
+       ("the operands have types that the operator does not take (C11 " ^ clause
+      ^ ")"))
 
 (* Design 3.2 rule 6: Type-C text reaches the tag and fields of a
    variant only through constructors and matching, so an operation at [span]
@@ -569,8 +572,9 @@ let record_answer context span types ~lowered answer =
   | Depends_on unknown
     when is_type_c_text context span && Ctype.has_distinct context.tags ->
       context.fail span
-        (needing "the answer to a comparison of types, which may have a \
-                  distinct type in them,"
+        (needing
+           "the answer to a comparison of types, which may have a distinct \
+            type in them,"
            unknown)
   | Answer _ | Depends_on _ -> ()
 
@@ -673,10 +677,12 @@ let require_modifiable context span ~clause (typed : typed) =
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Array _ | Function _ ->
       if not typed.lvalue then
-        context.fail span ("the operand is not an lvalue (C11 " ^ clause ^ ")");
+        context.fail span
+          (Rule.c_text ("the operand is not an lvalue (C11 " ^ clause ^ ")"));
       if t.qualifiers.const || Ctype.is_array t = Answer true then
         context.fail span
-          ("the operand is not a modifiable lvalue (C11 " ^ clause ^ ")")
+          (Rule.c_text
+             ("the operand is not a modifiable lvalue (C11 " ^ clause ^ ")"))
 
 let require_scalar context span ~clause typed =
   match operand context typed with
@@ -685,7 +691,7 @@ let require_scalar context span ~clause typed =
       ()
   | Other_operand _ ->
       context.fail span
-        ("the operand is not of scalar type (C11 " ^ clause ^ ")")
+        (Rule.c_text ("the operand is not of scalar type (C11 " ^ clause ^ ")"))
 
 (* Constants (6.4.4, 6.4.5) *)
 
@@ -703,7 +709,8 @@ let constant_type context span (number : Number.t) =
       | Error Imaginary ->
           unknown context span "an imaginary integer constant" Unknown_object
       | Error error ->
-          context.fail span (Integer_constant.error_message error))
+          context.fail span
+            (Rule.c_text (Integer_constant.error_message error)))
   | Floating { suffix = { floating_type; imaginary } } ->
       let floating : Arithmetic.floating =
         match floating_type with
@@ -721,7 +728,9 @@ let character_type context span encoding =
       (spelling context span)
   with
   | Ok constant -> integer_type context span constant.integer_type
-  | Error error -> context.fail span (Integer_constant.error_message error)
+  | Error error ->
+      context.fail span
+        (Rule.c_text (Integer_constant.error_message error))
 
 (* 6.4.5p5, p2: joined literals have the prefix that one of them has. *)
 let joined_encoding context (literal : Tree.string_literal) =
@@ -736,8 +745,9 @@ let joined_encoding context (literal : Tree.string_literal) =
   | [ encoding ] -> encoding
   | _ :: _ :: _ ->
       context.fail (List.hd literal).span
-        "string literals with different encoding prefixes are joined (C11 \
-         6.4.5p2)"
+        (Rule.c_text
+           "string literals with different encoding prefixes are joined (C11 \
+            6.4.5p2)")
 
 (* 6.4.5p6: the code unit of a string literal of [encoding]; that of [u8]
    is [char8_t] from C23 on. *)
@@ -775,7 +785,9 @@ let code_units context unit_width (piece : Token.encoding Tree.spanned) =
   let max_code_unit = (1 lsl unit_width) - 1 in
   match Escape.decode ~max_code_unit text with
   | Ok elements -> List.fold_left (fun total e -> total + units e) 0 elements
-  | Error error -> context.fail piece.span (Escape.error_message error)
+  | Error error ->
+      context.fail piece.span
+        (Rule.c_text (Escape.error_message error))
 
 (* 6.4.5p6: an array of code units with room for the terminating null,
    an lvalue (6.5.1p4). *)
@@ -810,18 +822,21 @@ let builtin context span name =
                Unknown_function)
   | Of_other_compiler ->
       context.fail span
-        (quote name ^ " is not a builtin of "
-        ^ Target.compiler_name target.backend.compiler
-        ^ ", the backend (design 13.3)")
+        (Rule.message Profile
+           (quote name ^ " is not a builtin of "
+           ^ Target.compiler_name target.backend.compiler
+           ^ ", the backend (design 13.3)"))
   | Of_other_architectures ->
       context.fail span
-        (quote name ^ " is not a builtin of "
-        ^ Target.compiler_name target.backend.compiler
-        ^ ", the backend, on this target's architecture ("
-        ^ Target.architecture_name target.architecture
-        ^ ") (design 13.3)")
+        (Rule.message Profile
+           (quote name ^ " is not a builtin of "
+           ^ Target.compiler_name target.backend.compiler
+           ^ ", the backend, on this target's architecture ("
+           ^ Target.architecture_name target.architecture
+           ^ ") (design 13.3)"))
   | Not_builtin ->
-      context.fail span (quote name ^ " is not declared (C11 6.5.1p2)")
+      context.fail span
+        (Rule.c_text (quote name ^ " is not declared (C11 6.5.1p2)"))
 
 let const_char context span =
   let const = { Qualifiers.none with const = true } in
@@ -904,7 +919,8 @@ let identifier context span name (resolution : Tree.resolution) =
          none, it is no expression. *)
       | Typedef _ ->
           context.fail span
-            ("expected an expression, found the type name " ^ quote name))
+            (Rule.c_text
+               ("expected an expression, found the type name " ^ quote name)))
 
 (* Members (6.5.2.3) *)
 
@@ -925,12 +941,14 @@ let member_of context tag (qualifiers : Qualifiers.t)
     (name : Tree.identifier) ~lvalue =
   if Ctype.record_members context.tags tag = None then
     context.fail name.span
-      "a member of an incomplete structure or union (C11 6.5.2.3p1)";
+      (Rule.c_text
+         "a member of an incomplete structure or union (C11 6.5.2.3p1)");
   match Ctype.find_member context.tags tag name.node with
   | None ->
       context.fail name.span
-        (quote name.node ^ " is not a member of the structure or union (C11 \
-                            6.5.2.3p1)")
+        (Rule.c_text
+           (quote name.node ^ " is not a member of the structure or union (C11 \
+                               6.5.2.3p1)"))
   | Some { member; anonymous_qualifiers; _ } -> (
       let location = location_of context name.span in
       let qualifiers = { qualifiers with atomic = false; restrict = false } in
@@ -967,7 +985,8 @@ let direct_member context span (record : typed) name =
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ ->
       context.fail span
-        "the operand of '.' is not a structure or union (C11 6.5.2.3p1)"
+        (Rule.c_text
+           "the operand of '.' is not a structure or union (C11 6.5.2.3p1)")
 
 (* [p->m] reaches into [*p], which may not be a variant (design 3.2 rule
    6). *)
@@ -984,8 +1003,9 @@ let pointer_member context span (pointer : typed) name =
   | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
   | Other_operand _ ->
       context.fail span
-        "the operand of '->' is not a pointer to a structure or union (C11 \
-         6.5.2.3p2)"
+        (Rule.c_text
+           "the operand of '->' is not a pointer to a structure or union (C11 \
+            6.5.2.3p2)")
 
 (* Postfix and unary operators (6.5.2, 6.5.3) *)
 
@@ -1012,8 +1032,9 @@ let check_arity context span (parameters : Ctype.parameters) count =
       let expected = List.length types in
       if count < expected || (count > expected && not variadic) then
         context.fail span
-          "a call has a number of arguments that its prototype does not take \
-           (C11 6.5.2.2p2)"
+          (Rule.c_text
+             "a call has a number of arguments that its prototype does not \
+              take (C11 6.5.2.2p2)")
   | Unspecified | Old_style _ -> ()
 
 (* 6.5.2.2p1, p5: the callee is a pointer to a function, after the
@@ -1030,8 +1051,9 @@ let call_type context span (callee : typed) count =
   | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
   | Other_operand _ ->
       context.fail span
-        "the called expression is not a function or a pointer to one (C11 \
-         6.5.2.2p1)"
+        (Rule.c_text
+           "the called expression is not a function or a pointer to one (C11 \
+            6.5.2.2p1)")
 
 (* 6.5.2.4p1, p2 and 6.5.3.1p1, p2: a modifiable lvalue of real or
    pointer type, whose value the result is; GNU C takes a complex one. *)
@@ -1048,9 +1070,11 @@ let increment context span ~clause (typed : typed) =
 let address context span (typed : typed) =
   let t = typed.expression_type in
   if designates_bit_field typed then
-    context.fail span "the address of a bit-field (C11 6.5.3.2p1)";
+    context.fail span
+      (Rule.c_text "the address of a bit-field (C11 6.5.3.2p1)");
   if (not typed.lvalue) && Ctype.is_function t = Answer false then
-    context.fail span "the address of what is not an lvalue (C11 6.5.3.2p1)";
+    context.fail span
+      (Rule.c_text "the address of what is not an lvalue (C11 6.5.3.2p1)");
   value (checked context span (Ctype.pointer_to t))
 
 (* 6.5.3.2p2, p4: an lvalue, or a function designator. *)
@@ -1063,7 +1087,8 @@ let indirection context span typed =
       lvalue (Ctype.unknown { unknown with kind = Object_or_function })
   | Arithmetic_operand _ | Distinct_operand _ | Other_operand _ ->
       context.fail span
-        "the operand of unary '*' is not a pointer (C11 6.5.3.2p2)"
+        (Rule.c_text
+           "the operand of unary '*' is not a pointer (C11 6.5.3.2p2)")
 
 let is_real_floating (arithmetic : Arithmetic.t) =
   match arithmetic with
@@ -1113,7 +1138,7 @@ let other_part context span ~imaginary (typed : typed) =
       { typed with expression_type = unknown_value unknown }
   | Pointer_operand _ | Distinct_operand _ | Other_operand _ ->
       context.fail span
-        "the operand of __real__ or __imag__ is not arithmetic"
+        (Rule.c_text "the operand of __real__ or __imag__ is not arithmetic")
 
 let complex_part context span ~imaginary typed =
   if is_bit_field typed then bit_field_part context span ~imaginary typed
@@ -1264,7 +1289,7 @@ let composite_pointer context span (a : Ctype.t) (b : Ctype.t) =
       in
       checked context span (Ctype.pointer_to referenced)
   | Error Incompatible -> void_pointer context span
-  | Error error -> context.fail span (Ctype.error_message error)
+  | Error error -> context.fail span (Rule.c_text (Ctype.error_message error))
 
 (* The second and third operands of a conditional: the expression, for
    whether it is a null pointer constant, with its type. *)
@@ -1309,8 +1334,9 @@ let check_distinct context associations =
         if List.exists (fun u -> compatible context t u = Answer true) earlier
         then
           context.fail association.association_span
-            "the type of a generic association is compatible with that of \
-             another (C11 6.5.1.1p2)";
+            (Rule.c_text
+               "the type of a generic association is compatible with that of \
+                another (C11 6.5.1.1p2)");
         t :: earlier
   in
   ignore (List.fold_left check [] associations)
@@ -1323,7 +1349,7 @@ let default_association context associations =
   | [ default ] -> Some default.result
   | _ :: second :: _ ->
       context.fail second.association_span
-        "a second default generic association (C11 6.5.1.1p2)"
+        (Rule.c_text "a second default generic association (C11 6.5.1.1p2)")
 
 (* 6.5.1.1p2, p3: the result of the one association whose type is
    compatible with the controlling type, else that of the default; the
@@ -1349,12 +1375,14 @@ let select context span controlling_type associations default =
   | None, [], Some default -> Answer default
   | None, [], None ->
       context.fail span
-        "the controlling expression is compatible with no generic \
-         association (C11 6.5.1.1p2)"
+        (Rule.c_text
+           "the controlling expression is compatible with no generic \
+            association (C11 6.5.1.1p2)")
   | None, _ :: _ :: _, _ ->
       context.fail span
-        "the controlling expression is compatible with more than one \
-         generic association"
+        (Rule.c_text
+           "the controlling expression is compatible with more than one \
+            generic association")
 
 (* GCC and Clang compare the types without their top-level qualifiers,
    which for Clang do not include [_Atomic]. *)
@@ -1458,7 +1486,9 @@ let first_flaw first second =
 let invalid span (failure : Integer_constant.error option) =
   Option.map
     (fun error ->
-      Invalid { span; message = Integer_constant.error_message error })
+      Invalid
+        { span;
+          diagnostic = Rule.c_text (Integer_constant.error_message error) })
     failure
 
 let integer value = Integer_expression { value; flaw = None }
@@ -1524,8 +1554,9 @@ let size_constant context span t =
       Unevaluable
         {
           span;
-          message =
-            "sizeof is applied to an incomplete type (C11 6.5.3.4p1)";
+          diagnostic =
+            Rule.c_text
+              "sizeof is applied to an incomplete type (C11 6.5.3.4p1)";
         }
 
 let identifier_constant context span name (resolution : Tree.resolution)
@@ -1749,7 +1780,8 @@ let representation_cast_constant context span (cast_type : Ctype.t) operand
       else itself (refused_or_backend [ operand_kind ])
   | Answer None -> itself (refused_or_backend [ operand_kind ])
   | Depends_on unknown ->
-      Unevaluable { span; message = needing "the value of a cast" unknown }
+      Unevaluable
+        { span; diagnostic = needing "the value of a cast" unknown }
 
 (* Design 3.4: in Type-C text a cast to a distinct type is a constant
    where the cast to its representation is, but no integer constant
@@ -1773,8 +1805,8 @@ let selected_constant context span construct =
   match Hashtbl.find_opt context.typed.selections span with
   | Some (Answer chosen) -> operand_constant context chosen
   | Some (Depends_on unknown) ->
-      let message = needing ("the value of " ^ construct) unknown in
-      Unevaluable { span; message }
+      let diagnostic = needing ("the value of " ^ construct) unknown in
+      Unevaluable { span; diagnostic }
   | None -> invalid_arg "Expressions: an untyped selection"
 
 (* The class of an expression that has been typed, from those of its
@@ -1783,7 +1815,8 @@ let classify_node context (whole : Tree.expression) typed =
   let span = whole.span and target = context.target in
   let itself kind = Not_integer { kind; first = span } in
   let unevaluable error =
-    Unevaluable { span; message = Integer_constant.error_message error }
+    Unevaluable
+      { span; diagnostic = Rule.c_text (Integer_constant.error_message error) }
   in
   match whole.node with
   | Identifier { name; resolution } ->
@@ -1877,8 +1910,9 @@ let classify context (whole : Tree.expression) typed =
 let require_constant context (expression : Tree.expression) =
   if operand_kind context expression = Not_constant then
     context.fail expression.span
-      "an initialiser of an object with static or thread storage duration \
-       is not a constant expression (C11 6.7.9p4)"
+      (Rule.c_text
+         "an initialiser of an object with static or thread storage duration \
+          is not a constant expression (C11 6.7.9p4)")
 
 (* The rule that types a call of [callee], where it names a builtin that
    a rule types. *)
@@ -1895,8 +1929,9 @@ let rec builtin_rule context (callee : Tree.expression) =
 
 let fail_builtin_argument context span name requirement =
   context.fail span
-    (Printf.sprintf "the first argument of %s is not %s (design 13.3)"
-       (quote name) requirement)
+    (Rule.message Profile
+       (Printf.sprintf "the first argument of %s is not %s (design 13.3)"
+          (quote name) requirement))
 
 (* The type of the object that [first] points to, as the result of
    [name]. A distinct type gives itself whatever its qualifiers: the
@@ -1960,16 +1995,17 @@ let choice context span condition first second =
   | Integer_expression { flaw = Some (Comma_operator _); _ }
   | Not_integer { kind = Backend_constant; _ } ->
       undecided ()
-  | Integer_expression { flaw = Some (Invalid { span; message }); _ }
-  | Unevaluable { span; message } ->
-      context.fail span message
+  | Integer_expression { flaw = Some (Invalid { span; diagnostic }); _ }
+  | Unevaluable { span; diagnostic } ->
+      context.fail span diagnostic
   | Not_integer
       { kind = Arithmetic_constant | Address_constant | Designator _
              | Not_constant;
         first } ->
       context.fail first
-        "the condition of '__builtin_choose_expr' is not an integer \
-         constant expression (design 13.3)"
+        (Rule.message Profile
+           "the condition of '__builtin_choose_expr' is not an integer \
+            constant expression (design 13.3)")
 
 (* A call of a builtin that a rule types, with the types of its
    arguments. *)
@@ -1989,7 +2025,8 @@ let rule_call context span name (rule : Builtin_function.rule) arguments =
       | Moves_object { result = Moved_object; _ }),
       [] ) ->
       context.fail span
-        (quote name ^ " takes at least one argument (design 13.3)")
+        (Rule.message Profile
+           (quote name ^ " takes at least one argument (design 13.3)"))
 
 (* 6.5.2.2p5, or the rule of the builtin that [callee] names. *)
 let call context span callee (callee_typed : typed) arguments =
@@ -2182,7 +2219,7 @@ and expression_node context position (whole : Tree.expression) =
   | Unary (op, operand) -> unary context span op (typed operand)
   | Sizeof_expression operand ->
       if designates_bit_field (as_whole operand) then
-        context.fail span "sizeof of a bit-field (C11 6.5.3.4p1)";
+        context.fail span (Rule.c_text "sizeof of a bit-field (C11 6.5.3.4p1)");
       value (size_type context span)
   | Sizeof_type type_name | Alignof type_name ->
       ignore (context.type_name type_name);
@@ -2611,8 +2648,9 @@ and assignment context span (op : Tree.assignment_operator) left right =
 and label_address context span =
   if context.typed.enclosing.function_name = None then
     context.fail span
-      "the address of a label outside a function body (GCC manual, \
-       \"Labels as Values\")"
+      (Rule.c_text
+         "the address of a label outside a function body (GCC manual, \"Labels \
+          as Values\")")
 
 (* GNU: the value of the last statement of the block, or void. *)
 and statement_expression context (block : Tree.block) =
@@ -2684,9 +2722,9 @@ and integer_constant context candidate =
   match operand_constant context candidate with
   | Integer_expression { value; flaw = None } -> Ok value
   | Integer_expression { flaw = Some (Comma_operator span); _ } -> Error span
-  | Integer_expression { flaw = Some (Invalid { span; message }); _ }
-  | Unevaluable { span; message } ->
-      context.fail span message
+  | Integer_expression { flaw = Some (Invalid { span; diagnostic }); _ }
+  | Unevaluable { span; diagnostic } ->
+      context.fail span diagnostic
   | Not_integer { first; _ } -> Error first
 
 (* Design 13.5: a constructor that initialises a whole object of its
@@ -2837,8 +2875,9 @@ and switch_controlling context controlling =
   | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
   | Other_operand _ ->
       context.fail controlling.span
-        "the controlling expression of a switch is not an integer (C11 \
-         6.8.4.2p1)"
+        (Rule.c_text
+           "the controlling expression of a switch is not an integer (C11 \
+            6.8.4.2p1)")
 
 (* 6.8.1p2: case and default labels only in a switch. *)
 and label_of context (label : Tree.label) =
@@ -2857,7 +2896,7 @@ and label_of context (label : Tree.label) =
               single-pattern test, which only a successful test enters")
     | No_switch ->
         context.fail label.span
-          "a case or default label outside a switch (C11 6.8.1p2)"
+          (Rule.c_text "a case or default label outside a switch (C11 6.8.1p2)")
   in
   match label.node with
   | Named_label _ -> ()
@@ -2878,12 +2917,14 @@ and case_value context value =
       | Ok _ -> ()
       | Error _ ->
           context.fail value.span
-            "a case label is not an integer constant expression (C11 \
-             6.8.4.2p3)")
+            (Rule.c_text
+               "a case label is not an integer constant expression (C11 \
+                6.8.4.2p3)"))
   | Unknown_operand _ -> ()
   | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
   | Other_operand _ ->
-      context.fail value.span "a case label is not an integer (C11 6.8.4.2p3)"
+      context.fail value.span
+        (Rule.c_text "a case label is not an integer (C11 6.8.4.2p3)")
 
 (* Matching (design 4) *)
 
@@ -3020,7 +3061,7 @@ and reachability_facts context =
    parser's bound on nested brackets. *)
 and refuse_open_arm context arm =
   match Reachability.arm_refusal (reachability_facts context) arm with
-  | Some { span; message } -> context.fail span message
+  | Some { span; diagnostic } -> context.fail span diagnostic
   | None -> ()
 
 (* 4.1 rule 1, 4.2 rule 4: a variant, whose qualifiers are ignored, and
@@ -3267,5 +3308,5 @@ let function_body context ~name ~return_type block =
   in
   within context enclosing (fun () -> block_items context block);
   match Reachability.label_refusal (reachability_facts context) block with
-  | Some { span; message } -> context.fail span message
+  | Some { span; diagnostic } -> context.fail span diagnostic
   | None -> ()

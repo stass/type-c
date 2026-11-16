@@ -2183,14 +2183,22 @@ apart.
   code. Stable codes let tests and editors refer to a diagnostic without
   matching its text.
 - A stable code is `TC` and four digits. It names a rule of this design
-  that Type-C text breaks, or a construct that a later work package
+  that Type-C text breaks, a limit of the GNU profile (13.3) that C
+  text or Type-C text meets, or a construct that a later work package
   implements, and ends the diagnostic in brackets after the clause that
   states the rule, as GCC and Clang end a warning with its option:
   `file:line: text (design 4.2 rule 1) [TC0018]`. Each rule's code is
   written beside it in the one table of rules, which generates the
   catalogue of diagnostics; a code is never renumbered or reused.
-- A refusal of C text carries no code: it states no rule of Type-C, and
-  the C standard or the backend's own diagnostic names what is wrong.
+- A refusal of C text carries no code: it states no rule of this design,
+  and C11, the GCC manual or the backend's own diagnostic names what is
+  wrong. A translation limit of `typec` (C11 5.2.4.1), such as a bound
+  on nesting, is such a refusal. A limit of the GNU profile, a construct
+  outside the profile or one that needs what `typec` does not compute,
+  is a refusal of the accepted dialect by this design rather than by C,
+  so it carries a code. Every refusal of the front end is either coded
+  or a refusal of C text, and only the function that appends a rule's
+  code makes a coded one.
 - Debuggers step through the original lines. Bindings are C locals under
   their source names. A variant value appears as its lowered struct, with
   the tag printed by name. Generic instances appear under their instance

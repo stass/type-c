@@ -8,15 +8,11 @@ type facts = {
   non_zero : Tree.expression -> bool;
 }
 
-type refusal = { span : Tree.span; message : string }
+type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
 
 exception Refused of refusal
 
-let refuse span rule text =
-  raise (Refused { span; message = Rule.message rule text })
-
-(* A breach of C, which states no rule of Type-C (design 13.6). *)
-let refuse_constraint span text = raise (Refused { span; message = text })
+let refuse span diagnostic = raise (Refused { span; diagnostic })
 
 module Targets = Set.Make (struct
   type t = Tree.jump_target
@@ -571,9 +567,10 @@ let in_source_order site queue =
 let refuse_redeclaration redeclared =
   match in_source_order Fun.id redeclared with
   | second :: _ ->
-      refuse_constraint second
-        "a local label declared twice in its block (GCC manual, \"Local \
-         Labels\")"
+      refuse second
+        (Rule.c_text
+           "a local label declared twice in its block (GCC manual, \"Local \
+            Labels\")")
   | [] -> ()
 
 (* 6.8.1p3: a label is defined once in its scope. Defines each label,
@@ -582,8 +579,9 @@ let define_labels definitions =
   let defined = Hashtbl.create 16 in
   let define (definition : definition) =
     if Hashtbl.mem defined definition.label then
-      refuse_constraint definition.site
-        "a second definition of a label in its scope (C11 6.8.1p3)";
+      refuse definition.site
+        (Rule.c_text
+           "a second definition of a label in its scope (C11 6.8.1p3)");
     Hashtbl.add defined definition.label definition
   in
   let site (definition : definition) = definition.site in
@@ -598,8 +596,9 @@ let define_labels definitions =
 let refuse_undefined jump =
   match jump.kind with
   | Goto ->
-      refuse_constraint jump.site
-        "a goto to a label that is not defined in its scope (C11 6.8.6.1p1)"
+      refuse jump.site
+        (Rule.c_text
+           "a goto to a label that is not defined in its scope (C11 6.8.6.1p1)")
   | Address -> ()
 
 (* GCC manual, "Statement Exprs". The address of a label inside one is
@@ -611,9 +610,10 @@ let refuse_statement_expression_entry (definition : definition) jump =
   | _, _, Address | _, Backends_differ, Goto -> ()
   | Inside_statement_expression block, _, Goto ->
       if not (encloses block jump.site) then
-        refuse_constraint jump.site
-          "a goto into a statement expression from outside it (GCC manual, \
-           \"Statement Exprs\")"
+        refuse jump.site
+          (Rule.c_text
+             "a goto into a statement expression from outside it (GCC manual, \
+              \"Statement Exprs\")")
   | (Outside_statement_expressions | Backends_differ), _, Goto -> ()
 
 (* Design 4.3 rule 3, 4.6 rule 6. A computed goto may jump to any label
@@ -623,16 +623,18 @@ let refuse_guarded_entry (definition : definition) jump =
   match (definition.guard, jump.kind) with
   | Some guard, Address ->
       let inside, again = guarded_names guard in
-      refuse jump.site Arm_entry
-        (Printf.sprintf
-           "the address of a label inside %s, which a computed goto could \
-            jump to from outside %s"
-           inside again)
+      refuse jump.site
+        (Rule.message Arm_entry
+           (Printf.sprintf
+              "the address of a label inside %s, which a computed goto \
+               could jump to from outside %s"
+              inside again))
   | Some guard, Goto ->
       if not (encloses (guarded_span guard) jump.site) then
-        refuse jump.site Arm_entry
-          (Printf.sprintf "a jump into %s from outside it"
-             (fst (guarded_names guard)))
+        refuse jump.site
+          (Rule.message Arm_entry
+             (Printf.sprintf "a jump into %s from outside it"
+                (fst (guarded_names guard))))
   | None, (Goto | Address) -> ()
 
 let check_jump definitions jump =
@@ -652,7 +654,7 @@ let arm_refusal facts (matched : Tree.arm) =
   if (arm (start facts) matched).completes then
     Some
       { span = matched.span;
-        message =
+        diagnostic =
           Rule.message Arm_end "the end of the match arm can be reached" }
   else None
 

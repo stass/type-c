@@ -204,5 +204,5 @@ be one.
 
   $ printf 'type d = distinct int;\nd x; int n;\nint f(void) { return _Generic(__builtin_choose_expr(__builtin_constant_p(n), x, x), int: 1, default: 2); }\n' > unknown.tc
   $ ./golden.exe unknown.tc
-  unknown.tc:3: the answer to a comparison of types, which may have a distinct type in them, depends on the condition of __builtin_choose_expr at unknown.tc:3, which typec does not type yet (design 13.3)
+  unknown.tc:3: the answer to a comparison of types, which may have a distinct type in them, depends on the condition of __builtin_choose_expr at unknown.tc:3, which typec does not type yet (design 13.3) [TC0031]
   [1]

@@ -133,20 +133,28 @@ is [type-c-language-design.md](type-c-language-design.md).
   header. Add the flags in effect to `Location.t` and repeat them in
   those markers when Stage 1 lowers such text.
 - [Low] Diagnostics of later stages print names and spellings from the
-  text; route them through the escaping of `Reader.error_message`, and
+  text, and file names from line markers (`Expressions.needing`), where
+  a crafted name can hold control bytes or a fake `[TC0018]`; route them
+  through the escaping of `Reader.error_message`, and
   cut a quoted spelling, such as a number that is no constant, to a
   bounded length so that a huge token cannot make a huge message.
+- [Medium] `Rule.c_text` takes free text, so a site can still write a
+  Type-C refusal without its code as a refusal of C text, and whether
+  each of its sites cites C11 or the GCC manual rests on review. Give it
+  a structured citation (C11 clause, GCC manual section, translation
+  limit) that renders the parenthesised clause, so that no design
+  citation can be written there; about 15 sites cite nothing yet.
+- [Low] `Rule.diagnostic`, `message`, `c_text` and `text` are OCaml in a
+  string of `rule_codegen.ml`, sealed by an `include (struct ... end :
+  sig ... end)`; move them to a hand-written `diagnostic.ml` and `.mli`
+  over the generated `Rule.code` and `Rule.clause`, so the generator
+  emits only what the table derives.
+- [Low] The rule `Profile` has no clause, so each of its ten sites
+  writes "(design 13.3)" or "(design P16)" by hand, and only two tests
+  assert its code. Give it the clause (the P16 sites keep P16 in their
+  prose) and assert `[TC0031]` at each site.
 - [Low] A diagnostic gives the file and the line but not the source line
   that design 13.6 says it carries; print the line of text under it.
-- [Medium] Whether a refusal carries a stable code rests on its site
-  calling `Rule.message`: the failure functions of the parser and the
-  declarations take a plain string. Some refusals cite the design and
-  carry no code: the profile limits of design 13.3 (`expressions.ml`,
-  the GNU nested function in `parser.ml`). Decide whether these are rules
-  with codes (a `Profile` rule, like `Not_implemented`), then make the
-  failure functions take a diagnostic of two cases, a rule of Type-C
-  made only by `Rule.message` and a refusal of C text, so that each
-  site chooses visibly; state the boundary in design 13.6.
 - [Low] `#ident` and `#sccs`, which `cc -E` passes through, are refused
   as unsupported directives. Pass them through like a pragma if a corpus
   uses them.

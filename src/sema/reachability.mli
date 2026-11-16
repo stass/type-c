@@ -23,7 +23,7 @@ type facts = {
           whose value is not zero *)
 }
 
-type refusal = { span : Tree.span; message : string }
+type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
 
 (** Both walk a tree that typing has read, whose nesting it has bounded:
     that of expressions and statements by {!Expressions.max_depth}, and

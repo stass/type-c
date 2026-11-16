@@ -72,7 +72,7 @@ val designates_bit_field : typed -> bool
     operand of a [&&] whose left operand is false. *)
 type flaw =
   | Comma_operator of Tree.span
-  | Invalid of { span : Tree.span; message : string }
+  | Invalid of { span : Tree.span; diagnostic : Rule.diagnostic }
       (** An operation that fails (6.6p4): an overflow, a division by
           zero, a shift out of range. Its value is opaque. *)
 
@@ -113,7 +113,7 @@ type constant =
   | Not_integer of { kind : kind; first : Tree.span }
       (** [first] is the first operand or operator that 6.6p6 does not
           allow. *)
-  | Unevaluable of { span : Tree.span; message : string }
+  | Unevaluable of { span : Tree.span; diagnostic : Rule.diagnostic }
       (** An integer expression of constants that typec does not evaluate,
           or that breaks a constraint: [sizeof] of an incomplete type, a
           cast to a type that typec does not compute, a [_Generic] whose
@@ -277,7 +277,7 @@ type context = {
   target : Target.t;
   text : Typec_cpp.Reader.t;
   tags : Ctype.tags;
-  fail : 'a. Tree.span -> string -> 'a;
+  fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
@@ -321,5 +321,5 @@ val function_body :
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)
 
-val needing : string -> Unknown.t -> string
-(** The message where [need] depends on an unknown type. *)
+val needing : string -> Unknown.t -> Rule.diagnostic
+(** The refusal where [need] depends on an unknown type. *)

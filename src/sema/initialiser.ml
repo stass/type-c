@@ -6,7 +6,7 @@ open Typec_syntax
 type typing = {
   target : Target.t;
   tags : Ctype.tags;
-  fail : 'a. Tree.span -> string -> 'a;
+  fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   value : Ctype.t option -> Tree.expression -> Ctype.t;
   converts : Ctype.t -> Tree.expression -> unit;
   initialises : Tree.expression -> unit;
@@ -162,9 +162,10 @@ let widen extent level =
 let check_depth typing span depth =
   if depth > max_levels then
     typing.fail span
-      (Printf.sprintf
-         "an initialiser reaches a subobject more than %d levels deep"
-         max_levels)
+      (Rule.c_text
+         (Printf.sprintf
+            "an initialiser reaches a subobject more than %d levels deep"
+            max_levels))
 
 (* String literals (6.7.9p14, p15) *)
 
@@ -244,8 +245,9 @@ let string_initialiser typing ~target element literal =
       in
       if not fits then
         typing.fail literal.span
-          "a string literal initialises an array of another character type \
-           (C11 6.7.9p14, p15)";
+          (Rule.c_text
+             "a string literal initialises an array of another character type \
+              (C11 6.7.9p14, p15)");
       length
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Record _ | Va_list
   | Function _ | Unknown_type _ ->
@@ -272,23 +274,27 @@ let array_index typing (length : Ctype.length) expression =
   match typing.index expression with
   | Error span ->
       typing.fail span
-        "an array designator is not an integer constant expression (C11 \
-         6.7.9p6)"
+        (Rule.c_text
+           "an array designator is not an integer constant expression (C11 \
+            6.7.9p6)")
   | Ok { value = Opaque; _ } -> Opaque_index
   | Ok { value = Known value; _ } -> (
       if Exact_integer.is_negative value then
         typing.fail expression.span
-          "an array designator is negative (C11 6.7.9p6)";
+          (Rule.c_text "an array designator is negative (C11 6.7.9p6)");
       match Exact_integer.to_int value with
       (* The index after it must have a value too. *)
       | Some index when index < max_int -> (
           match length with
           | Constant length when index >= length ->
               typing.fail expression.span
-                "an array designator is past the end of the array (C11 \
-                 6.7.9p6)"
+                (Rule.c_text
+                   "an array designator is past the end of the array (C11 \
+                    6.7.9p6)")
           | Constant _ | Opaque | Unknown | Variable -> Index index)
-      | Some _ | None -> typing.fail expression.span "an array is too large")
+      | Some _ | None ->
+          typing.fail expression.span
+            (Rule.c_text "an array is too large"))
 
 (* The index of an array designator, or of the last element of a GNU
    range, from which initialisation continues. *)
@@ -299,7 +305,8 @@ let designated_index typing length (designator : Tree.designator) =
       let first = array_index typing length low in
       match (first, array_index typing length high) with
       | Index first, Index last when first > last ->
-          typing.fail designator.span "a range designator is empty (GNU C)"
+          typing.fail designator.span
+            (Rule.c_text "a range designator is empty (GNU C)")
       | _, last -> last)
   | Member_designator _ -> invalid_arg "Initialiser: a member as an index"
 
@@ -346,8 +353,9 @@ let designate typing t designators =
                 enter member_type levels rest
             | None ->
                 typing.fail name.span
-                  "a member designator names no member of the structure or \
-                   union (C11 6.7.9p7)")
+                  (Rule.c_text
+                     "a member designator names no member of the structure or \
+                      union (C11 6.7.9p7)"))
         | (Index _ | Index_range _), Array { element; length } ->
             let index = designated_index typing length designator in
             enter element (Array_level { element; length; index } :: levels)
@@ -357,12 +365,14 @@ let designate typing t designators =
             Lost
         | Member_designator _, _ ->
             typing.fail designator.span
-              "a member designator for an object that is not a structure or \
-               union (C11 6.7.9p7)"
+              (Rule.c_text
+                 "a member designator for an object that is not a structure or \
+                  union (C11 6.7.9p7)")
         | (Index _ | Index_range _), _ ->
             typing.fail designator.span
-              "an array designator for an object that is not an array (C11 \
-               6.7.9p6)")
+              (Rule.c_text
+                 "an array designator for an object that is not an array (C11 \
+                  6.7.9p6)"))
   in
   enter t [] designators
 
@@ -603,7 +613,8 @@ and scalar typing ~zeroes t elements =
       (match first.node.designators with
       | designator :: _ ->
           typing.fail designator.span
-            "a designator in the initialiser of a scalar (C11 6.7.9p6, p7)"
+            (Rule.c_text
+               "a designator in the initialiser of a scalar (C11 6.7.9p6, p7)")
       | [] -> ());
       (match first.node.initialiser with
       | Expression_initialiser expression ->
@@ -619,8 +630,9 @@ let check_object typing span (t : Ctype.t) =
   match (t.shape, Ctype.is_complete typing.tags t) with
   | Array { length = Unknown; _ }, _ | _, (Answer true | Depends_on _) -> ()
   | _, Answer false ->
-      typing.fail span "an object of incomplete type is initialised (C11 \
-                        6.7.9p3)"
+      typing.fail span
+        (Rule.c_text
+           "an object of incomplete type is initialised (C11 6.7.9p3)")
 
 (* 6.7.9p16: an array takes a braced list or a string literal; GCC and
    Clang take a compound literal of an array type too, whose length an
@@ -629,16 +641,18 @@ let check_object typing span (t : Ctype.t) =
 let array_from typing t expression =
   if form typing expression <> Compound_form then
     typing.fail expression.span
-      "an array is initialised by an expression that is not a string \
-       literal (C11 6.7.9p16)";
+      (Rule.c_text
+         "an array is initialised by an expression that is not a string \
+          literal (C11 6.7.9p16)");
   match (typing.value (Some t) expression).shape with
   | Array { length; _ } -> completed typing t length
   | Unknown_type _ -> completed typing t Opaque
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Record _ | Va_list
   | Function _ ->
       typing.fail expression.span
-        "an array is initialised by a compound literal that is not an \
-         array (C11 6.7.9p16)"
+        (Rule.c_text
+           "an array is initialised by a compound literal that is not an array \
+            (C11 6.7.9p16)")
 
 let array_initialiser typing t element expression =
   match string_for typing element (form typing expression) with

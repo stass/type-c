@@ -201,17 +201,20 @@ let error_location state =
   let last = Array.length state.grammar - 1 in
   (token_at state (min state.position last)).location
 
-let fail state message =
-  raise (Failed { location = error_location state; message })
+let fail state diagnostic =
+  raise
+    (Failed
+       { location = error_location state; message = Rule.text diagnostic })
 
 (* An error at the token [index] of [Reader.t.tokens], which the cursor
    has passed. *)
-let fail_at_token state index message =
-  raise (Failed { location = state.reader.tokens.(index).location; message })
+let fail_at_token state index diagnostic =
+  let location = state.reader.tokens.(index).location in
+  raise (Failed { location; message = Rule.text diagnostic })
 
 (* The refusal of the break or continue at [start]. *)
-let fail_jump state start message =
-  fail_at_token state (first_token state start) message
+let fail_jump state start diagnostic =
+  fail_at_token state (first_token state start) diagnostic
 
 let fail_disputed_jump state start keyword =
   fail_jump state start
@@ -355,7 +358,7 @@ let refuse_early_breaks state breaks items =
 (* What the continue at [start] leaves. *)
 let continue_target state start =
   jump_targets state start "continue" continue_leaves
-    ~no_target:"continue outside a loop (C11 6.8.6.2p1)"
+    ~no_target:(Rule.c_text "continue outside a loop (C11 6.8.6.2p1)")
 
 (* The names that typec generates begin with this (design 13.5). *)
 let generated_prefix = "__tc_"
@@ -398,13 +401,16 @@ let found state =
       quoted (next_spelling state)
 
 let fail_expected state expected =
-  fail state (Printf.sprintf "expected %s, found %s" expected (found state))
+  fail state
+    (Rule.c_text
+       (Printf.sprintf "expected %s, found %s" expected (found state)))
 
 let open_one state opening =
   if List.length state.open_brackets = max_nesting then
     fail state
-      (Printf.sprintf "more than %d nested brackets or conditionals"
-         max_nesting);
+      (Rule.c_text
+         (Printf.sprintf "more than %d nested brackets or conditionals"
+            max_nesting));
   state.open_brackets <- opening :: state.open_brackets
 
 let closer_of = function
@@ -969,8 +975,9 @@ let is_identifier = function
 
 let fail_type_name state expected name =
   fail state
-    (Printf.sprintf "expected %s, found the type name %s" expected
-       (quoted name))
+    (Rule.c_text
+       (Printf.sprintf "expected %s, found the type name %s" expected
+          (quoted name)))
 
 (* A type declaration names its type only inside a structure or union
    specifier of its definition (design 3.1 rule 2). *)
@@ -2138,8 +2145,9 @@ and assignment_expression state =
         collect ((start, operator, operand) :: targets)
     | Some _ ->
         fail state
-          (Printf.sprintf "the left operand of %s is not a unary expression"
-             (found state))
+          (Rule.c_text
+             (Printf.sprintf "the left operand of %s is not a unary expression"
+                (found state)))
     | None -> (operand, targets)
   in
   let value, targets = collect [] in
@@ -2360,9 +2368,10 @@ and primary_expression state =
       match Number.classify (next_spelling state) with
       | Number.Not_a_constant ->
           fail state
-            (Printf.sprintf
-               "expected a constant, found the preprocessing number %s"
-               (found state))
+            (Rule.c_text
+               (Printf.sprintf
+                  "expected a constant, found the preprocessing number %s"
+                  (found state)))
       | constant ->
           advance state;
           finish state start (Constant constant))
@@ -3195,8 +3204,9 @@ and block_declaration state =
   | First_declarator { first = { named_function = Some _; _ }; _ }
     when peek state = Punctuator_token P.Left_brace ->
       fail state
-        "a function definition in a block (a GNU nested function) is outside \
-         the GNU profile (design 13.3)"
+        (Rule.message Profile
+           "a function definition in a block (a GNU nested function) is \
+            outside the GNU profile (design 13.3)")
   | start -> declaration_of_start state start
 
 (* External declarations (C11 6.9). *)
