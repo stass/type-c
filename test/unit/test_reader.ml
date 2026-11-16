@@ -59,6 +59,10 @@ let comment_message =
   "comment in preprocessed text, as when an option such as -C keeps the \
    comments"
 
+let stray_message spelling =
+  Printf.sprintf
+    "stray '%s' outside a directive, as when a macro expands to it" spelling
+
 let no_marker_message =
   "token before the first line marker, as when an option such as -P removes \
    the line markers"
@@ -72,16 +76,18 @@ let kind_cases =
   [
     case "a declaration" "int x = 42;"
       "id int | id x | punct = | number 42 | punct ;";
-    case "digraphs" "<: :> <% %> %: %:%: %:% <::"
-      "punct <: | punct :> | punct <% | punct %> | punct %: | punct %:%: \
-       | punct %: | punct % | punct <: | punct :";
+    case "digraphs" "<: :> <% %> %> <::"
+      "punct <: | punct :> | punct <% | punct %> | punct %> | punct <: \
+       | punct :";
+    case "the longest digraph" "x %:%:% %:%"
+      ("error: in.i:1: " ^ stray_message "%:%:");
     case "longest punctuators" "-> ++ -- << >> <= >= == != && || ... <<= >>="
       "punct -> | punct ++ | punct -- | punct << | punct >> | punct <= \
        | punct >= | punct == | punct != | punct && | punct || | punct ... \
        | punct <<= | punct >>=";
-    case "assignments" "*= /= %= += -= &= ^= |= ## #"
+    case "assignments" "*= /= %= += -= &= ^= |="
       "punct *= | punct /= | punct %= | punct += | punct -= | punct &= \
-       | punct ^= | punct |= | punct ## | punct #";
+       | punct ^= | punct |=";
     case "maximal munch" "x+++++y..z"
       "id x | punct ++ | punct ++ | punct + | id y | punct . | punct . | id z";
     case "member access is no number" "a.b .5 a.5"
@@ -116,11 +122,24 @@ let kind_cases =
       "pragma #pragma once | typec-pragma #pragma typec checked \
        | typec-pragma #  pragma  typec | pragma #pragma typecx \
        | pragma #pragma | id x";
-    case "a # inside a line is a punctuator" "a # b ## c\n%: d"
-      "id a | punct # | id b | punct ## | id c | punct %: | id d";
-    case "a # after a blank is a punctuator" " # 1 \"f.h\" 1\n\t#pragma x"
-      "punct # | number 1 | str \"f.h\" | number 1 | punct # | id pragma \
-       | id x";
+    case "a # inside a line" "a # b" ("error: in.i:1: " ^ stray_message "#");
+    case "a ## inside a line" "a\nb ## c"
+      ("error: in.i:2: " ^ stray_message "##");
+    case "a %: inside a line" "a %: b" ("error: in.i:1: " ^ stray_message "%:");
+    case "a %:%: at the start of a line" "%:%: b"
+      ("error: in.i:1: " ^ stray_message "%:%:");
+    case "a pragma after a blank" "a\n # pragma pack(1)"
+      ("error: in.i:2: " ^ stray_message "#");
+    case "a line marker after a tab" "\t# 1 \"f.h\" 1"
+      ("error: in.i:1: " ^ stray_message "#");
+    case "a # after a vertical tab and a form feed" "\011\012#pragma x"
+      ("error: in.i:1: " ^ stray_message "#");
+    case "a # after a carriage return that no newline follows"
+      "a\r#pragma x" ("error: in.i:1: " ^ stray_message "#");
+    case "a %: that begins a line" "%:pragma x"
+      ("error: in.i:1: " ^ stray_message "%:");
+    case "a %: after a blank" " %: 1 \"f.h\""
+      ("error: in.i:1: " ^ stray_message "%:");
     case "white space" "\t a \011\012\r\n b " "id a | id b";
     case "empty" "" "";
     case "unexpected character" "a @ b"
@@ -506,16 +525,20 @@ let punctuator_cases =
       ("%:", Hash); ("%:%:", Hash_hash);
     ]
 
-(* The spellings that do not read as their punctuator alone. Each is read
-   after a blank, where "#" starts no directive. *)
+(* The spellings that do not read as their punctuator alone, or, for
+   those of '#' and '##', that are not refused. Each is read after a
+   blank, where "#" starts no directive. *)
 let failed_punctuator_cases () =
   List.filter
     (fun (spelling, punctuator) ->
       let text = Preprocessed.text ~name:"in.i" (" " ^ spelling) in
-      match Reader.read ~name:"in.i" text with
-      | Ok { tokens = [| token |]; _ } ->
+      match (punctuator, Reader.read ~name:"in.i" text) with
+      | Punctuator.(Hash | Hash_hash), Error { message; _ } ->
+          message <> stray_message spelling
+      | Punctuator.(Hash | Hash_hash), Ok _ -> true
+      | _, Ok { tokens = [| token |]; _ } ->
           token.kind <> Token.Punctuator punctuator
-      | Ok _ | Error _ -> true)
+      | _, (Ok _ | Error _) -> true)
     punctuator_cases
 
 (* Each owner is one value, so tokens of one owner share it. *)

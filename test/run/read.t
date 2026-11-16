@@ -48,3 +48,34 @@ Output that is not cc -E output is refused with its presumed location.
   $ ./read_check.exe bad.i
   read_check: t.c:2: unexpected character '@'
   [1]
+
+Both backends write a '#' or '%:' that a macro expands to after a blank,
+and Clang reads the line that it begins as a directive. Preprocessed C
+holds no such punctuator outside a directive, so typec refuses it rather
+than let the backend apply a line marker or a pragma that typec has not
+read: here, inside the arguments of an attribute, which typec keeps as
+tokens, a marker that would make Clang read the rest of the file as a
+system header and so drop the warning about 'unused'.
+
+  $ cat > hash.tc <<'EOF'
+  > #define H #
+  > int x __attribute__((aligned(4
+  > H 7 "other.h" 1 3
+  > )));
+  > static int unused(void) { return 0; }
+  > EOF
+  $ cat > digraph.tc <<'EOF'
+  > #define D %:
+  > int x __attribute__((aligned(4
+  > D pragma GCC system_header
+  > )));
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc -Wall -Werror -c hash.tc -o hash.o
+  >   typec --cc=$cc -c digraph.tc -o digraph.o
+  > done
+  typec: hash.tc:3: stray '#' outside a directive, as when a macro expands to it
+  typec: digraph.tc:3: stray '%:' outside a directive, as when a macro expands to it
+  typec: hash.tc:3: stray '#' outside a directive, as when a macro expands to it
+  typec: digraph.tc:3: stray '%:' outside a directive, as when a macro expands to it
+  [80]

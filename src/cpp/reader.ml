@@ -498,10 +498,27 @@ let read_directive state =
 
 (* The text. *)
 
-(* GCC reads a directive in preprocessed text only where '#' is the first
-   byte of a line; both compilers write a '#' that a macro produced
-   after a blank, so that it stays a punctuator. *)
+(* The reader reads a directive only where '#' is the first byte of a
+   line, as GCC does. *)
 let starts_line state = state.pos = 0 || state.text.[state.pos - 1] = '\n'
+
+(* Preprocessed C holds no '#' or '##' outside a directive, and Clang
+   reads a line as a directive wherever '#' or '%:' is its first token,
+   blanks before it or not; refusing every such punctuator keeps the
+   backend from applying a pragma or a line marker that typec has not
+   read, whatever the backend takes for the start of a line. *)
+let refuse_stray_hash state start =
+  let spelling = String.sub state.text start (state.pos - start) in
+  fail state
+    (Printf.sprintf
+       "stray '%s' outside a directive, as when a macro expands to it"
+       spelling)
+
+let read_token state =
+  let start = state.pos in
+  match scan_token state with
+  | Token.Punctuator (Hash | Hash_hash) -> refuse_stray_hash state start
+  | kind -> add_token state kind start
 
 let read_next state =
   match state.text.[state.pos] with
@@ -510,10 +527,7 @@ let read_next state =
       start_next_line state
   | c when is_blank c -> advance state 1
   | '#' when starts_line state -> read_directive state
-  | _ ->
-      let start = state.pos in
-      let kind = scan_token state in
-      add_token state kind start
+  | _ -> read_token state
 
 let read ~name text =
   let state =

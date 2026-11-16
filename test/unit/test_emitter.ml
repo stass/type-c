@@ -413,23 +413,21 @@ let () =
     (take 2 (drop 12 read_back) = [ own 12; { (own 12) with line = 3 } ]
     && take 4 (drop 26 read_back) = List.map own [ 12; 12; 13; 14 ])
 
-(* A piece holds no pragma line: the token of one is none, nor is a #,
-   which Clang reads as the start of a directive where it begins a line
-   of preprocessed text, and typec's own text that would write one is
-   refused. Tokens: two pragma lines | int a # b %: c ; *)
+(* A piece holds no pragma line: the token of one is none, and typec's
+   own text that would write one is refused. The reader refuses a #
+   outside a directive. Tokens: two pragma lines | int a ; *)
 let () =
   let unit =
     read
       "# 1 \"a.tc\"\n\
        #pragma pack(1)\n\
        #pragma typec checked\n\
-       int a # b %: c;\n"
+       int a;\n"
   in
   let piece index = Option.is_some (Emitter.token unit index) in
   check "no piece of a pragma line" (not (piece 0));
   check "no piece of a pragma typec line" (not (piece 1));
-  check "no piece of a #" ((not (piece 4)) && not (piece 6));
-  check "a piece of any other token" (piece 2 && piece 3 && piece 8);
+  check "a piece of any other token" (piece 2 && piece 3 && piece 4);
   let refused text =
     raises
       (fun () -> Emitter.generated (at 1) text)

@@ -19,6 +19,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
+- [High] Under `-std=c11` or `-std=c17`, which typec passes to every
+  step, Clang 21 reads trigraphs in its `-x cpp-output` compile, which
+  the reader does not: `#define Q ?` then `Q?=pragma pack(1)` makes
+  `clang -E` write `??=pragma pack(1)`, and the compile packs what
+  follows while typec reads `? ? =` and no pragma (a system header's
+  body, which typec passes through unread, gets it to the backend).
+  `??/` splices a line the same way. GCC 16 reads no trigraph there.
+  Pass `-fno-trigraphs` to Clang's compile step, so that the backend
+  reads the text as the reader does.
 - [Low] `Target_query.query` starts and waits for the backend itself,
   so in a compilation it hands the backend `typec`'s stdin, not
   `/dev/null`, and does not pass on a caught signal as `Process.wait`
@@ -132,13 +141,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   prose) and assert `[TC0031]` at each site.
 - [Low] A diagnostic gives the file and the line but not the source line
   that design 13.6 says it carries; print the line of text under it.
-- [Medium] A `#` that follows a blank is a punctuator to the reader, as
-  in `cc -E` output of an object-like macro that expands to `#`
-  (`#define H #` then `H pragma pack(1)` gives ` # pragma pack(1)`), but
-  Apple Clang 21 reads that line of preprocessed input as a directive
-  and packs what follows, while GCC 16 reports a stray `#`. typec reads
-  no pragma there. Refuse a `#` or `%:` punctuator that is the first
-  token of its line, which no valid C needs.
+- [Low] A carriage return that no newline follows is a blank to the
+  reader, but Clang 21 and GCC 16 end a line of `-x cpp-output` input
+  there: the backend counts one more line, and a pragma line that holds
+  `\r#pragma pack(1)` is two directives to it but one to typec. `cc -E`
+  writes one only in a line marker of GCC's for a file name that holds
+  it, and GCC then refuses its own output. Refuse such a carriage
+  return, so that the lines of the reader are always the backend's.
+- [Low] The reader refuses a `#` or `%:` outside a directive, so the
+  `Punctuator Hash` arm of `Emitter.token` and the sentence of
+  `emitter.mli` on it are dead; delete them.
 - [Low] `#ident` and `#sccs`, which `cc -E` passes through, are refused
   as unsupported directives. Pass them through like a pragma if a corpus
   uses them.
