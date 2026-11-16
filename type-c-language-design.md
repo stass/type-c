@@ -1289,9 +1289,11 @@ result(uint32_t, parse_error) read_number(reader *r)
    whatever holds it: as an operand of a unary or binary operator, in
    `-try f()` or `a + try f()`, where the grammar of Appendix A derives
    no `try`, as in an argument or a condition, where it does. The
-   error comes from one rule, which the parser applies wherever it
-   meets the word `try`: a `try` that is in none of the three
-   positions is this error. No place that holds an expression has a
+   error comes from one rule, which the parser applies once a `try`
+   and its operand are parsed: a `try` that is in none of the three
+   positions is this error. The token after the operand is part of the
+   answer: the `,` of `x = try f(), y;` makes the assignment an operand
+   of the comma operator. No place that holds an expression has a
    check of its own, so none can be missing. The remedy is the same in
    each, a statement or declaration of its own for the `try`. No `try`
    stands inside a statement expression, whatever its position there:
@@ -1301,17 +1303,34 @@ result(uint32_t, parse_error) read_number(reader *r)
    Type-C text (13.3, P24), and `try` is a word in Type-C text alone
    (2.3).
 
-   No `try` stands in a statement or declaration that holds a pragma.
-   A `try` is an error where a `#pragma` line, which is also how a
-   `_Pragma` operator reaches `typec`, stands anywhere from directly
-   before the statement or declaration that holds the `try`, its
-   labels included, to its final `;`, the operand of the `try`
-   included. 13.5 gives the reason with the rule. The cost is a macro
-   whose expansion holds a `_Pragma`: one that wraps its argument in
-   `_Pragma("GCC diagnostic ...")`, to silence a warning in it, cannot
-   be used in a statement or declaration that holds a `try`, and its
-   use takes a statement or declaration of its own. The measurement of
-   P8 counts these refusals, in Pilot B.
+   No `try` stands in a statement or declaration that holds or directly
+   follows a pragma line. A `try` is an error where a `#pragma` line,
+   which is also how a `_Pragma` operator reaches `typec`, stands
+   anywhere from directly before the statement or declaration that
+   holds the `try`, its labels included, to its final `;`, the operand
+   of the `try` included. The statement or declaration is the
+   expression statement or declaration whose position (above) holds
+   the `try`, and no statement around it: in `do x = try f(); while
+   (c);` it is `x = try f();`. Its labels are C's: an identifier
+   label, and a `case` or `default` label of a C `switch`. The labels
+   of a `match` arm (4.1 rule 2) are the arm's, so the stretch of a
+   statement that begins an arm starts after them. 13.5 gives the
+   reason with the rule.
+
+   The cost falls on three common forms. A macro whose expansion holds
+   a `_Pragma`, such as one that wraps its argument in `_Pragma("GCC
+   diagnostic ...")` to silence a warning in it, cannot be used in a
+   statement or declaration that holds a `try`, and its use takes a
+   statement or declaration of its own. A bracket of pragmas around
+   statements, `DIAG_PUSH ... DIAG_POP` or the `#pragma GCC
+   diagnostic` lines that such macros stand for, puts a pragma
+   directly before the first statement of the bracket and before the
+   statement after it. And `#pragma STDC FENV_ACCESS ON` at the start
+   of a compound statement or of an arm stands directly before its
+   first block item. A `try` in such a statement or declaration is an
+   error. A null statement, `;`, after the pragma takes the next
+   statement out of the stretch, so `DIAG_PUSH; ... DIAG_POP;` refuses
+   nothing. The measurement of P8 counts these refusals, in Pilot B.
 4. `try` cannot appear in a deferred statement.
 5. *Provisional (P21).* A `try` is an error where one of these rules
    asks something of an unknown type (13.3): whether the type of the
@@ -1355,12 +1374,13 @@ is evaluated: `sizeof(f(), 1)` is an error where `f` returns a
 evaluates, which for `sizeof` depends on a variably modified type, and
 a result dropped there is no more meant than one dropped elsewhere.
 
-The last expression statement of a statement expression of the GNU
-profile does not discard its value, which is the value of the statement
-expression. The statement expression is judged where it stands:
-`({ g(); f(); });` is an error where `f` returns a `result`, and
-`x = ({ g(); f(); });` is none. Every other expression statement in it
-discards its value, as `g();` does.
+The last block item of a statement expression of the GNU profile,
+labelled or not, when it is an expression statement, does not discard
+its value, which is the value of the statement expression. The
+statement expression is judged where it stands: `({ g(); f(); });` is
+an error where `f` returns a `result`, and `x = ({ g(); f(); });` is
+none. Every other expression statement in it discards its value, as
+`g();` does, and as `f();` does in `({ f(); int y = 0; })`.
 
 The rule binds Type-C text (2.1), judged by the first token of the
 expression: some one token has to decide, and the tokens of an
@@ -2460,15 +2480,19 @@ answer.
 
 1. `#pragma typec checked`, at file scope in Type-C text, makes the rest of
    that file *checked text*; `#pragma typec unchecked` ends it. The state
-   does not carry into an included file or out of one. A `#pragma typec`
-   line stands outside every external declaration, in Type-C text, and
-   is an error anywhere else: inside an external declaration, which is
-   in a function body and also in a structure body or a parameter list
-   at file scope, and anywhere in C text. The line sets the state of
-   the text after it, so an external declaration is checked text as a
-   whole or not at all. Every kind of moved text (13.5) stands inside
-   an external declaration, so no moved text holds the line: the rule
-   names no kind of moved text and can miss none.
+   does not carry into an included file or out of one. In Type-C text
+   a `#pragma typec` line stands outside every external declaration
+   and is an error inside one, which is in a function body and also in
+   a structure body or a parameter list at file scope. In C text the
+   line is ignored, as C11 6.10.6p1 ignores a pragma that the
+   implementation does not recognise, so C text keeps the meaning C
+   gives it (2.2). The line sets the state of the text of its file
+   after it. Text that an `#include` line inside an external
+   declaration brings in keeps the state of its own file, and 11.2
+   applies to the text that is checked. Every kind of moved text
+   (13.5) stands inside an external declaration, so no moved text
+   holds a line that sets the state: the rule names no kind of moved
+   text and can miss none.
 2. A function defined in checked text is a *checked function*, and its body
    obeys 11.2.
 3. A function declared in checked text is a *trusted contract*: its author
@@ -3230,6 +3254,12 @@ labels stay inside the substatement: `if (c) L: x = try f();` becomes
 `if (c) { L: ; /* temporary, test */ x = /* the Ok field */; }`, with
 `L` under the `if`.
 
+The labels of a statement are C's: an identifier label, and a `case`
+or `default` label of a C `switch`. The labels of a `match` arm (4.1
+rule 2) are the arm's and no statement's. The statement that begins an
+arm is a block item of the arm's block (the `match` row above), and the
+temporary and the test stand before it there, with no null statement.
+
 Where the `try` is the whole statement, `try e;`, the temporary and the
 test are all that lowering writes, and no statement follows the test.
 A statement that only read the `Ok` field, `__tc_t0.u.Ok.value;`, would
@@ -3243,7 +3273,9 @@ excepted, and writes nothing between the test and the statement. A
 `try` is therefore an error where a pragma stands anywhere from
 directly before the statement or declaration that holds it, its labels
 included, to its final `;`, the operand included: a `#pragma` line,
-which is also how a `_Pragma` operator reaches `typec`. `typec` sees
+which is also how a `_Pragma` operator reaches `typec`. The labels are
+those of the null statement, so the stretch of a statement that begins
+a `match` arm starts after the arm's labels. `typec` sees
 the line as tokens and applies the rule without reading them, whatever
 the pragma. No pragma then stands between the place where the operand
 is written and its place in the source, so the operand is written
@@ -3615,13 +3647,14 @@ line among them.
 Of the kinds of moved text, only a deferred statement can hold a
 `#pragma` line. The definition of a generic holds none, since a generic
 whose definition holds one is an error (10.3), and the operand of a
-`try` holds none, since a `try` is an error where a pragma stands in
-the statement or declaration that holds it (5.1 rule 3). What the rules
+`try` holds none, since a `try` is an error where a pragma line
+stands in or directly before the statement or declaration that holds
+it (5.1 rule 3). What the rules
 below say of a `#pragma` line of moved text they say of a deferred
 statement. The line moves with the statement: lowering writes it on a
 line of its own, at its place among the tokens of each copy. A `#pragma
-typec` line stands outside every external declaration (11.1 rule 1),
-so no moved text holds one.
+typec` line of Type-C text stands outside every external declaration,
+and one of C text is ignored (11.1 rule 1), so lowering moves none.
 
 Three rules carry the property into unread text.
 
@@ -3833,7 +3866,7 @@ numbers refer to the implementation plan.
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
-| P8 | `try` is limited to three positions, in a statement or declaration that holds no pragma (5.1) | Stage 2, Pilot B: rewrites the limit forced, and statements refused for a pragma | As specified |
+| P8 | `try` is limited to three positions, in a statement or declaration that neither holds nor directly follows a pragma line (5.1) | Stage 2, Pilot B: rewrites the limit forced, and statements refused for a pragma | As specified |
 | P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6, and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; among those of rule 8, the refusals that 13.5 makes for an identifier in an attribute argument or a `#pragma` line of a deferred statement; how often each refusal of the form (13.5) rejects a function or a `return`; the returns where the plain form reports a diagnostic of the list of 13.5 that the form loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |

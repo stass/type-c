@@ -229,11 +229,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Not_a_constant`. Have `Number.classify` return an option, so that the
   tree cannot represent the case.
 - [Medium] Design 11.1 rule 1 makes a `#pragma typec` line an error
-  everywhere but outside the external declarations of Type-C text. The
-  parser passes over `Token.Typec_pragma` like any other pragma,
-  wherever it stands (`lexeme_of` in `src/syntax/parser.ml`). Refuse
-  the line inside an external declaration and in C text, with a rule
-  code of its own.
+  inside an external declaration of Type-C text and ignores it in C
+  text. The parser passes over `Token.Typec_pragma` like any other
+  pragma, wherever it stands (`lexeme_of` in `src/syntax/parser.ml`).
+  Refuse the line inside an external declaration of Type-C text, with
+  a rule code of its own.
 - [Low] A `#pragma typec` line stays inside the spans of the nodes
   around it, so emission copies it to the backend. Stage 5, which gives
   the line a meaning, decides what emission does with it.

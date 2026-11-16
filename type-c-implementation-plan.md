@@ -251,7 +251,8 @@ condition, with a field list optional in a test (design 4.2, 4.6).
 | 2.6 | Pilot B: a binary reader or a parser with a single error path. |
 
 Pilot B records the statements rewritten to fit the `try` positions
-(P8), the uses of `void` type arguments (P7), the code size and the
+and the statements refused for a pragma (P8), the uses of `void` type
+arguments (P7), the code size and the
 refusal and diagnostic counts that the P9 row of design section 15
 lists, which is the one list of them, how often rule 5 of section 6 and
 design 4.3 refused a label address `&&L` that no `goto *` is given
