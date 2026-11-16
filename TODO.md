@@ -227,17 +227,23 @@ is [type-c-language-design.md](type-c-language-design.md).
   enumerator, where typec's error does not name the construct. Read
   both forms through one funnel at each attribute slot that both
   backends accept, which removes the list of sites.
-- [Medium] `standard_attribute_name` (`src/syntax/parser.ml`) reads
-  every `[[gnu::x]]` as the GNU attribute `x` and keeps `clang::x` as a
-  name of its own, so `[[clang::overloadable]]` misses its entry in
-  `attribute_effects`: the type is unknown and the return-form mark of
-  design 13.3 is not seen. Record the spellings of each attribute in
-  the table of effects (the GNU spelling, `gnu::x`, and Clang's
-  `clang::x` where Clang defines that spelling) and have the one
-  function that names an attribute read them from it, with no uniform
-  mapping: Apple Clang 21 accepts `[[clang::overloadable]]` and ignores
-  `[[clang::diagnose_if(...)]]` and `[[clang::noreturn]]` with a
-  warning.
+- [Medium] `[[gnu::x]]` is read as the GNU attribute `x` even where
+  Clang has no `gnu::` spelling of it: Apple Clang 21 gives
+  `__has_c_attribute(gnu::x)` 0 for `overloadable`, `availability`,
+  `unavailable`, `cpu_dispatch`, `cpu_specific`, `diagnose_if`,
+  `noescape`, `flag_enum` and others, so `[[gnu::overloadable]]` is
+  ignored by Clang and read as an overload by `typec`. Record the
+  `gnu::` spelling per entry of `attribute_effects`, as the `clang::`
+  spelling is, after measuring GCC's spellings too.
+- [Low] An attribute's vendor prefix travels as a string that the
+  parser joins and `declarations.ml` splits, and `attribute_name`
+  strips `__` from any prefix, so `[[__clang__::x]]` reads as
+  `clang::x` where Clang normalises only `__gnu__` and `_Clang`. Give
+  `Tree.attribute_node` a structured vendor field with one scope rule.
+- [Low] The `clang::` spellings of `attribute_effects` apply whatever
+  the backend, so under GCC `[[clang::overloadable]]` makes an overload
+  GCC ignores, as `__attribute__((overloadable))` already does. Ask the
+  backend (`__has_c_attribute`) once, in `Target`, if this matters.
 - [Medium] `function_body` (`src/syntax/parser.ml`) skips a body where
   `owner.system_header` holds and asks nothing else, so the bodies of a
   `.tci` found through `-isystem` or a default system directory are
@@ -450,12 +456,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   empty `no_attributes`); a set of effects would leave the table and the
   one consumer. The table checks no attribute's arguments
   (`noreturn(1)` is accepted).
-- [Medium] `attribute_effects` (`src/sema/declarations.ml`) has no
-  entry for `target`, `target_clones`, `target_version`,
-  `cpu_dispatch`, `cpu_specific` or `diagnose_if`, so a declaration
-  that carries one has an unknown type. Add them, with the return-form
-  marks of design 13.3, and mark `unavailable` and `availability`,
-  which are in the table without one.
+- [Medium] The return-form marks of design 13.3 are not in
+  `attribute_effects`: mark `overloadable`, `unavailable`,
+  `availability`, `diagnose_if`, `cpu_dispatch`, `cpu_specific`,
+  `target_clones` and `target_version` when package 2.5 builds the
+  return form.
 - [Medium] Unknown types (design 13.3, P21) for 0.7b to replace by
   types where a point needs them: block pointers, `_Float16`, the
   builtins that the table of builtin functions leaves unknown (those of
