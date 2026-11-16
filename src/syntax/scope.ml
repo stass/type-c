@@ -62,6 +62,9 @@ let find scopes name = Names.find_opt name (innermost scopes).visible.ordinary
 let find_in_innermost scopes name =
   Names.find_opt name (innermost scopes).declared.ordinary
 
+let declared_in_innermost scopes =
+  Names.bindings (innermost scopes).declared.ordinary
+
 let add_ordinary name binding frame =
   { frame with ordinary = Names.add name binding frame.ordinary }
 
@@ -77,6 +80,9 @@ let find_tag scopes name = Names.find_opt name (innermost scopes).visible.tags
 
 let find_tag_in_innermost scopes name =
   Names.find_opt name (innermost scopes).declared.tags
+
+let tags_declared_in_innermost scopes =
+  Names.bindings (innermost scopes).declared.tags
 
 let add_tag name binding frame =
   { frame with tags = Names.add name binding frame.tags }

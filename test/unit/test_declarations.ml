@@ -19,21 +19,22 @@ let read ?(file = "in.c") target source =
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in
-  match Parser.parse ~keywords:(Target.keywords target Gnu) text with
-  | Ok unit ->
+  let keywords = Target.keywords target Gnu in
+  match Parser.parse_with_file_scope ~keywords text with
+  | Ok (unit, file_scope) ->
       Result.map
-        (fun result -> (File_scope_names.of_unit unit, result))
+        (fun result -> (file_scope, result))
         (Declarations.read target text unit)
   | Error error -> failwith (Parser.error_message error)
 
 (* What [name] denotes at file scope at the end of what [read] read. *)
-let file_scope_entity (names, result) name =
+let file_scope_entity ((file_scope : Parser.file_scope), result) name =
   Option.bind
-    (File_scope_names.ordinary names name)
+    (List.assoc_opt name file_scope.ordinary)
     (Declarations.entity result)
 
-let file_scope_tag (names, result) name =
-  Option.bind (File_scope_names.tag names name) (Declarations.tag result)
+let file_scope_tag ((file_scope : Parser.file_scope), result) name =
+  Option.bind (List.assoc_opt name file_scope.tags) (Declarations.tag result)
 
 let linkage_name : Entity.linkage -> string = function
   | External -> "external"
@@ -616,6 +617,10 @@ let enumerations () =
     "enumerator enum e = 1";
   declares "enum e { A = 0xffffffffffffffff };" "A"
     "enumerator enum e = 18446744073709551615";
+  (* An enumeration among members or in an array length declares its
+     enumerators in the scope around it, here file scope (6.2.1p4). *)
+  declares "struct s { enum { C } m; };" "C" "enumerator int = 0";
+  declares "int a[sizeof (enum { A, B })];" "B" "enumerator int = 1";
   rejects "enum e { A = 0xffffffffffffffff, B };" "6.7.2.2p2";
   rejects "enum e { A = 0x8000000000000000, B = -1 };" "6.7.2.2p4";
   rejects "struct s { int a; }; enum e { A = sizeof(struct s), B };" "P16";

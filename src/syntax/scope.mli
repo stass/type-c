@@ -44,6 +44,14 @@ val declare : ('ordinary, 'tag) t -> string -> 'ordinary -> ('ordinary, 'tag) t
 (** Declares an ordinary identifier in the innermost scope, in place of
     any declaration of it there. *)
 
+val declared_in_innermost : ('ordinary, 'tag) t -> (string * 'ordinary) list
+(** The ordinary identifiers that the innermost scope declares, sorted by
+    name, each with its declaration there. *)
+
 val find_tag : ('ordinary, 'tag) t -> string -> 'tag option
 val find_tag_in_innermost : ('ordinary, 'tag) t -> string -> 'tag option
 val declare_tag : ('ordinary, 'tag) t -> string -> 'tag -> ('ordinary, 'tag) t
+
+val tags_declared_in_innermost : ('ordinary, 'tag) t -> (string * 'tag) list
+(** The tags that the innermost scope declares, as
+    {!declared_in_innermost}. *)

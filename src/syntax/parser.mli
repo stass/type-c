@@ -48,5 +48,22 @@ val parse :
     holds the typedef names that GCC and Clang declare before the first
     token for a backend with [keywords] ({!Builtin_typedef.declared}). *)
 
+(** What file scope declares at the end of a unit (C11 6.2.1p4), sorted
+    by name: each ordinary identifier and each tag with its last
+    declaration there, wherever in the unit it is declared, including the
+    tags and enumerators that a type declaration claims (design 10.1 rule
+    6) and the builtin typedef names that {!parse} declares there. *)
+type file_scope = {
+  ordinary : (string * Tree.reference) list;
+  tags : (string * Tree.tag_id) list;
+}
+
+val parse_with_file_scope :
+  keywords:Keyword_set.t ->
+  Reader.t ->
+  (Tree.translation_unit * file_scope, error) result
+(** {!parse}, and what file scope declares where the unit ends, for a
+    test that names what a unit declares there. *)
+
 val error_message : error -> string
 (** ["file:line: message"], as {!Reader.error_message}. *)

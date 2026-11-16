@@ -46,7 +46,7 @@
 
 (executable
  (name declaration_probe)
- (libraries typec_cpp typec_syntax typec_sema typec_test_support))
+ (libraries typec_cpp typec_syntax typec_sema))
 
 (cram
  (applies_to declarations)

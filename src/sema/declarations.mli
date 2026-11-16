@@ -55,8 +55,7 @@ val entity : t -> Tree.reference -> entity option
 (** What a declaration that the reader has read declares, as of that
     declaration and its initialiser: a later one of the same entity may
     complete its type. [None] for one in a place that the reader does not
-    read, the body of a Clang block literal, and for a builtin typedef name
-    that the target lacks. *)
+    read, the body of a Clang block literal. *)
 
 val tag : t -> Tree.tag_id -> tag option
 (** The tag that a tag declaration declares, [None] as for {!entity}. *)

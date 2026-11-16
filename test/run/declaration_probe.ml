@@ -12,7 +12,6 @@
 open Typec_cpp
 open Typec_syntax
 open Typec_sema
-open Typec_test_support
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
@@ -81,12 +80,14 @@ let print_declared result name (declared : Entity.declared) =
       assert_selects name (Some enumerator_type);
       print_value name value
 
-(* A builtin typedef name that the target lacks declares nothing. *)
+(* The reader reads every declaration at file scope, so a name without
+   an entity is a typec bug that the backends would not see. *)
 let print_identifier result (name, reference) =
-  Option.iter
-    (fun (entity : Declarations.entity) ->
-      print_declared result name entity.declared)
-    (Declarations.entity result reference)
+  match Declarations.entity result reference with
+  | Some entity -> print_declared result name entity.declared
+  | None ->
+      prerr_endline ("no entity for " ^ name ^ " at file scope");
+      exit 1
 
 let () =
   match Sys.argv with
@@ -100,15 +101,15 @@ let () =
         or_exit Reader.error_message (Reader.read ~name:source contents)
       in
       let keywords = Target.keywords target Gnu in
-      let unit =
-        or_exit Parser.error_message (Parser.parse ~keywords text)
+      let unit, file_scope =
+        or_exit Parser.error_message
+          (Parser.parse_with_file_scope ~keywords text)
       in
       let result =
         or_exit Reader.error_message (Declarations.read target text unit)
       in
       print_string contents;
-      List.iter (print_identifier result)
-        (File_scope_names.all_ordinary (File_scope_names.of_unit unit))
+      List.iter (print_identifier result) file_scope.ordinary
   | _ ->
       prerr_endline "usage: declaration_probe MACRO-DUMP PREPROCESSED-C";
       exit 2

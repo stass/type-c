@@ -60,6 +60,10 @@ enum mixed { M0 = -1, M1 = 0x80000000 };
 enum wide { W0 = 0xffffffffffffffff };
 enum after_max { X0 = 2147483647, X1, X2 = X1 - X1 - 1 < 0 };
 enum unsigned_after { U0 = 4294967295u, U1, U2 = U1 - U1 - 1 < 0 };
+/* An enumeration among members or in an array length declares its
+   enumerators at file scope. */
+struct enum_member { enum { D0 = 7, D1 } member; };
+int enum_length[sizeof (enum { L0 = -3, L1 = 0x80000000 })];
 typedef enum small small_type;
 typedef enum negative negative_type;
 typedef enum big big_type;

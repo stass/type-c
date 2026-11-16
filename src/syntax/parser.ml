@@ -476,7 +476,7 @@ let expect state punctuator expected =
 
 (* File scope before the first token, which holds the typedef names that
    GCC and Clang declare there for a backend with [keywords]. *)
-let file_scope keywords =
+let initial_scope keywords =
   List.fold_left
     (fun scope (name, builtin) ->
       if Builtin_typedef.declared keywords builtin then
@@ -3315,14 +3315,31 @@ let translation_unit state =
   in
   loop []
 
-let parse ~keywords reader =
+type file_scope = {
+  ordinary : (string * reference) list;
+  tags : (string * tag_id) list;
+}
+
+let file_scope_declarations scope =
+  {
+    ordinary =
+      List.map
+        (fun (name, (entry : ordinary)) -> (name, entry.declaration))
+        (Scope.declared_in_innermost scope);
+    tags =
+      List.map
+        (fun (name, entry) -> (name, entry.tag))
+        (Scope.tags_declared_in_innermost scope);
+  }
+
+let parse_with_file_scope ~keywords reader =
   let state =
     {
       reader;
       grammar = grammar_tokens keywords reader;
       position = 0;
       open_brackets = [];
-      scope = file_scope keywords;
+      scope = initial_scope keywords;
       jumps = Function_body;
       arm = None;
     }
@@ -3331,7 +3348,13 @@ let parse ~keywords reader =
     refuse_generated_names state;
     translation_unit state
   with
-  | translation_unit -> Ok translation_unit
+  | translation_unit ->
+      (* Every scope the unit opens is closed, so [state.scope] is file
+         scope as the unit leaves it. *)
+      Ok (translation_unit, file_scope_declarations state.scope)
   | exception Failed error -> Error error
+
+let parse ~keywords reader =
+  Result.map fst (parse_with_file_scope ~keywords reader)
 
 let error_message = Reader.error_message

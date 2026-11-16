@@ -180,13 +180,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   outside it (GCC manual, "Statement Exprs"), and `&&a` in the
   parameters of a block literal, which typing does not read. Check the
   first with the case labels in `Expressions`.
-- [Medium] `test/support/file_scope_names.ml` finds what a unit declares
-  at file scope from its external declarations alone, so
-  `declaration_probe` and `test_declarations` miss file-scope names
-  declared deeper: an enumerator among members (`struct s { enum { C }
-  m; };`) or in an array length (`int a[sizeof (enum { B })];`). Let
-  the parser, the one implementation of the scope rules, give the
-  declarations visible at the end of the unit, and drop the helper.
 - [Low] A use of a name of an identifier list before the declaration
   list declares it (`int f(b, n) int b[n]; int n; {}`) is reported as
   declared where typec does not read declarations, where Clang says
