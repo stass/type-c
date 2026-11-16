@@ -1,10 +1,10 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(** Where Clang's records differ from C's types other than by spelling
-    them as Clang does (README, "Typing oracle"): the rewrites that make
-    Clang's spelling a type name typec reads, the spellings that name a
-    type no type name can, and the records whose type is not C's. *)
+(** Where Clang's records differ from C's types other than by spelling them as
+    Clang does (docs/development.md, "Typing oracle"): the rewrites that make
+    Clang's spelling a type name typec reads, the spellings that name a type no
+    type name can, and the records whose type is not C's. *)
 
 val variable_length : string
 (** The name that a rewritten spelling gives the length of a variable

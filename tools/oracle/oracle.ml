@@ -1,9 +1,9 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* The Clang half of the typing oracle (README, "Typing oracle"): runs
-   Clang's JSON AST dump on a preprocessed file and writes a record of
-   each expression in it.
+(* The Clang half of the typing oracle (docs/development.md, "Typing oracle"):
+   runs Clang's JSON AST dump on a preprocessed file and writes a record of each
+   expression in it.
 
      oracle CC INPUT OUTPUT [OPTION...]
 

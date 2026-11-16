@@ -1,11 +1,11 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* The corpus runner (README, "Running the corpus"): for each program and
-   backend it builds the program from its recipe, compares the object of
-   every unit compiled as Type-C with the object of the same preprocessed
-   text compiled without typec (plan 0.11, gate 2), links the Type-C
-   objects and runs the program's tests (gate 1), and writes a run record
+(* The corpus runner (docs/development.md, "Running the corpus"): for each
+   program and backend it builds the program from its recipe, compares the
+   object of every unit compiled as Type-C with the object of the same
+   preprocessed text compiled without typec (plan 0.11, gate 2), links the
+   Type-C objects and runs the program's tests (gate 1), and writes a run record
    into the corpus repository. *)
 
 let usage =
@@ -323,9 +323,9 @@ let reference_step context ~temp_dir arguments =
    refuses is reported as its failure. The reference is the backend
    preprocessing the .tc copy as typec does and compiling the text as
    typec compiles its C. The text stays in U.ref.i, which the oracle
-   reads (README), and the compiles read its copy where typec's plan puts
-   the C; both goals name the same file, as the plan names it by the
-   input only. *)
+   reads (docs/development.md, "Typing oracle"), and the compiles read its
+   copy where typec's plan puts the C; both goals name the same file, as
+   the plan names it by the input only. *)
 let compile_unit context unit =
   let tc = type_c_copy unit in
   let temp_dir = Filename.concat (reference_dir context) tc in

@@ -19,8 +19,8 @@
 #   TYPEC_FREEBSD_CORPUS  the programs of the corpus to run after the
 #                         suite, as plain names separated by spaces;
 #                         unset or empty, none.
-#   TYPEC_CORPUS          the corpus repository (README, "Running the
-#                         corpus"), by default
+#   TYPEC_CORPUS          the corpus repository (docs/development.md,
+#                         "Running the corpus"), by default
 #                         /Volumes/Optaine/type-c-corpus.
 #   TYPEC_CORPUS_CACHE    its cache, as fetch.sh fills it, by default
 #                         /Volumes/Optaine/type-c-corpus-cache.
@@ -414,7 +414,7 @@ if [ -n "$programs" ]; then
     || fail "the records do not copy"
   take_records "$stage/records.tar"
   # The runner's status 3 is a run in which nothing failed but some
-  # tests are substitutes (README, "Running the corpus").
+  # tests are substitutes (docs/development.md, "Running the corpus").
   case $status in
     0) say "the corpus runner passes" ;;
     3) say "the corpus runner passes, with substitute tests (status 3)" ;;

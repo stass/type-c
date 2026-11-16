@@ -16,10 +16,10 @@
 # run with LOG. Either kind writes to LOG, by default
 # ${TMPDIR:-/tmp}/typec-host-HOST.log, outside the repository.
 #
-# --corpus runs the corpus runner (README, "Running the corpus") on the
-# named programs in a container of a Linux host, with the host's Clang
-# and GCC as backends, and copies the records it writes into the corpus
-# repository and its logs into the cache. The environment names both:
+# --corpus runs the corpus runner (docs/development.md, "Running the corpus") on
+# the named programs in a container of a Linux host, with the host's Clang and
+# GCC as backends, and copies the records it writes into the corpus repository
+# and its logs into the cache. The environment names both:
 #
 #   TYPEC_CORPUS        the corpus repository, by default
 #                       /Volumes/Optaine/type-c-corpus.
@@ -245,7 +245,7 @@ run_corpus() {
   copy_results "$stage"
 
   # The runner's status 3 is a run in which nothing failed but some
-  # tests are substitutes (README, "Running the corpus").
+  # tests are substitutes (docs/development.md, "Running the corpus").
   case $status in
     0) echo "$host: the corpus runner passes" ;;
     3) echo "$host: the corpus runner passes, with substitute tests" ;;

@@ -1,8 +1,8 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* The comparison of the typing oracle (README, "Typing oracle"): checks
-   the type and the value category typec gives each expression of a
+(* The comparison of the typing oracle (docs/development.md, "Typing oracle"):
+   checks the type and the value category typec gives each expression of a
    preprocessed file against the oracle's records of Clang's.
 
      compare [--show N] CC INPUT RECORDS ALLOW-LIST [OPTION...]

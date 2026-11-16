@@ -2,7 +2,7 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 (** How to build and test one corpus program, read from its [recipe]
-    file (README, "Running the corpus").
+    file (docs/development.md, "Running the corpus").
 
     A recipe is a list of lines, each a keyword and its words, separated
     by blanks; [#] starts a comment line. A recipe has at least one

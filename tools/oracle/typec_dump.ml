@@ -1,8 +1,8 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* The typec half of the typing oracle (README, "Typing oracle"): the
-   type typec gives each expression of a preprocessed file, keyed by its
+(* The typec half of the typing oracle (docs/development.md, "Typing oracle"):
+   the type typec gives each expression of a preprocessed file, keyed by its
    byte range as the oracle's records are.
 
      typec_dump CC INPUT [OPTION...]

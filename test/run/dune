@@ -115,3 +115,9 @@
 (cram
  (applies_to moved_pragmas)
  (deps moved_pragma_probe.exe))
+
+; readme.t checks the examples of README.md with readme.sh.
+
+(cram
+ (applies_to readme)
+ (deps readme.sh ../../README.md))

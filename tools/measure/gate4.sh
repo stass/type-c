@@ -150,7 +150,7 @@ check_user_mode() {
       $1 > 0 && 2 * $1 < $2 { found = 1 }
     END { if (!found) exit 1 }' "$probe" ||
     fail "pmcstat counts kernel mode under the usr qualifier, or" \
-      "printed no counts in $probe; README.md, \"Measuring against" \
+      "printed no counts in $probe; docs/development.md, \"Measuring against" \
       "hand-written C\", says how to get a libpmc that honors it"
 }
 

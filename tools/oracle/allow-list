@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 #
-# The reviewed disagreements of the typing oracle (README, "Typing
-# oracle"): each line is a pattern over a disagreement as compare.exe
+# The reviewed disagreements of the typing oracle (docs/development.md,
+# "Typing oracle"): each line is a pattern over a disagreement as compare.exe
 # prints it and the reason it is accepted, separated by a tab.

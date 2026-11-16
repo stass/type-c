@@ -45,8 +45,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] The steps of the pipeline get `-Wno-unused-command-line-argument`
   so that Clang does not warn about the options of the whole command
   line that a step does not use; GCC ignores it, but adds a note that
-  names it to any diagnostic of that step. Pass it to Clang only once
-  the driver knows the backend's family.
+  names it to any diagnostic of that step, as it does for the
+  `-Wno-gnu-line-marker` of the compile step. Pass them to Clang only
+  once the driver knows the backend's family.
+- [Low] A backend's diagnostic on a line that holds a lowered construct
+  quotes a fragment of the emitted text, not the source line: for a
+  call that passes a `list(double)` where a `list(int)` is wanted,
+  Clang 21 quotes ` l) {` for `int sum(list(int) l) {`: the emitted C
+  puts the instance name and the rest of the line on physical lines of
+  their own, each after a line marker of the source line, and Clang
+  quotes the physical line. GCC 16 quotes the source line, which it
+  reads from the `.tc` file.
 - [Low] With Clang the debug information names the compilation unit
   after the emitted file, an absolute path in the random temporary
   directory (GCC names it after the `.tc` input), so a Clang build with
@@ -888,13 +897,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   (`tools/fuzz/patches/ocaml-5.5.2-afl.patch`). AFL++ on macOS hands the
   coverage map over only as a POSIX shared memory descriptor
   (`__AFL_SHM_FD`), and the runtime of OCaml (`runtime/afl.c`, 5.5.2 and
-  trunk) attaches only a SysV segment and speaks only the old fork-server
-  handshake, so the fuzz build needs a patched compiler (README,
-  "Fuzzing"). Raise there too that the map size is defined twice, as
-  `INITIAL_AFL_AREA_SIZE` in `afl.c` and `afl_map_size` in
-  `asmcomp/afl_instrument.ml`, and the runtime reports the former. Once
-  OCaml takes both changes, drop the patch and pin the release that has
-  them.
+  trunk) attaches only a SysV segment and speaks only the old
+  fork-server handshake, so the fuzz build needs a patched compiler
+  (docs/development.md, "Fuzzing"). Raise there too that the map size is
+  defined twice, as `INITIAL_AFL_AREA_SIZE` in `afl.c` and
+  `afl_map_size` in `asmcomp/afl_instrument.ml`, and the runtime reports
+  the former. Once OCaml takes both changes, drop the patch and pin the
+  release that has them.
 
 ## Test hosts
 
@@ -997,11 +1006,12 @@ types (design 13.3).
   macOS records of c-testsuite, chibicc, lua and zlib are rewritten but
   uncommitted, and the Linux records of musl and zlib name a corpus
   revision that was `-dirty`. A Linux record comes from
-  `tools/hosts/run.sh --corpus` (README, "Linux test hosts").
+  `tools/hosts/run.sh --corpus` (docs/development.md, "Linux test
+  hosts").
 - [Low] The runner's command line and the meaning of its status 3 are
   written out in `tools/hosts/corpus-in-container.sh`,
-  `tools/hosts/freebsd.sh` and the README's example; `run.sh` and
-  `freebsd.sh` could share one script that runs it.
+  `tools/hosts/freebsd.sh` and the example in `docs/development.md`;
+  `run.sh` and `freebsd.sh` could share one script that runs it.
 - [Low] `debian-amd64` and `alpine-amd64` write their corpus records to
   the same `runs/linux-x86_64/` and their logs to the same
   `CACHE/build/linux-x86_64/`, since the runner names a host by

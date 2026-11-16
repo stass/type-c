@@ -5,7 +5,7 @@
 # The gate to run before a commit: builds typec, runs the default test
 # suite, then builds the typing oracle and runs its tests, which compare
 # typec's types with Clang's and build only in the oracle context
-# (README, "Typing oracle").
+# (docs/development.md, "Typing oracle").
 #
 # Usage: tools/gate.sh
 #
@@ -39,7 +39,7 @@ require_tools_switch() {
 	command -v opam >/dev/null 2>&1 || die "opam is not installed"
 	opam switch list --short 2>/dev/null | grep -qx tools ||
 		die "no opam switch tools in OPAMROOT=$OPAMROOT; create it \
-there as README.md, section \"Typing oracle\", says"
+there as docs/development.md, section \"Typing oracle\", says"
 }
 
 # Runs one step with its output appended to the log; on failure prints

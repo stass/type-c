@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 # Builds the fuzz harness with an AFL-instrumented OCaml and runs AFL++
-# on it (README, "Fuzzing").
+# on it (docs/development.md, "Fuzzing").
 #
 #   fuzz.sh build                build the instrumented harness and its
 #                                dictionary
@@ -36,11 +36,10 @@ built=$work/_build/default/tools/fuzz
 harness=$built/fuzz.exe
 dictionary=$built/fuzz.dict
 
-# The limits of one execution; the README says why these values. AFL++
-# runs an input that times out again with AFL_HANG_TMOUT and saves it as
-# a hang only if that run times out too. Twice the limit spares a run
-# that a busy host made late, where AFL++'s default second would drop
-# a step ten times too slow.
+# The limits of one execution; docs/development.md says why these values. AFL++
+# runs an input that times out again with AFL_HANG_TMOUT and saves it as a hang
+# only if that run times out too. Twice the limit spares a run that a busy host
+# made late, where AFL++'s default second would drop a step ten times too slow.
 timeout_ms=300
 # No AFL++ memory limit, spelled none because afl-tmin 5.03c refuses -m 0.
 memory_limit=none

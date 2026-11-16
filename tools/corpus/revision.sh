@@ -2,12 +2,11 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-# Prints the revision of the git working tree DIR in the form the corpus
-# runner takes for --typec-revision and --corpus-revision (README,
-# "Running the corpus"): the commit in at least twelve hex digits, then
-# -dirty when the tree differs from it. A file git does not track but
-# does not ignore counts as a difference, since dune builds it and the
-# test hosts are sent it.
+# Prints the revision of the git working tree DIR in the form the corpus runner
+# takes for --typec-revision and --corpus-revision (docs/development.md,
+# "Running the corpus"): the commit in at least twelve hex digits, then -dirty
+# when the tree differs from it. A file git does not track but does not ignore
+# counts as a difference, since dune builds it and the test hosts are sent it.
 #
 # usage: tools/corpus/revision.sh DIR
 
