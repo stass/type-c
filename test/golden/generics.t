@@ -634,3 +634,65 @@ backend's to read.
   
   # 1 "c.h" 1
   enum __attribute__((enum_extensibility(open))) k { K };
+
+A generic claims every name that begins with its own name and `__`, as
+an ordinary identifier and as a tag, in every scope and in C text as
+well, whichever comes first (design 10.3): the names of its instances
+are among them, and lowering writes them wherever an instance is used.
+An enumerator of a block would otherwise be what the constructor of
+option(int) lowers to.
+
+  $ cat > claim_enumerator.tc <<'EOF'
+  > option(int) f(void) { enum { option__i_Some = 0 }; return Some(123); }
+  > EOF
+  $ ./golden.exe claim_enumerator.tc
+  claim_enumerator.tc:1: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  [1]
+  $ cat > claim_typedef.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > void g(void) { typedef int box__i; }
+  > EOF
+  $ ./golden.exe claim_typedef.tc
+  claim_typedef.tc:2: the name `box__i` is declared, but the generic `box` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  [1]
+  $ cat > claim_tag.i <<'EOF'
+  > # 1 "claim_tag.tc"
+  > # 1 "claim_tag.h" 1
+  > void g(struct option__i_tag *p);
+  > EOF
+  $ ./golden.exe claim_tag.i
+  claim_tag.h:1: the tag `option__i_tag` is named, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  [1]
+  $ cat > claim_before.tc <<'EOF'
+  > int box__i;
+  > type box(T) = struct { T v; };
+  > EOF
+  $ ./golden.exe claim_before.tc
+  claim_before.tc:2: the generic `box` claims every name that begins with its own name and `__` for its instances, and this scope declares `box__i` already (design 10.1 rule 6) [TC0004]
+  [1]
+
+A name whose part before its first `__` is no generic is no claimed
+name.
+
+  $ cat > claim_other.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > int boxes__i, box_i, __box__i;
+  > EOF
+  $ ./golden.exe claim_other.tc
+  # 1 "claim_other.tc"
+  
+  # 1 "claim_other.tc"
+  
+  # 1 "claim_other.tc"
+  
+  int boxes__i, box_i, __box__i;
+
+A declaration of the generic's name in a block does not end the claim:
+the constructor of the return type is still written there.
+
+  $ cat > claim_hidden.tc <<'EOF'
+  > option(int) f(void) { int option; enum { option__i_None = 1 }; return None; }
+  > EOF
+  $ ./golden.exe claim_hidden.tc
+  claim_hidden.tc:1: the name `option__i_None` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  [1]

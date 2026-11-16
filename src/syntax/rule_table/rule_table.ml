@@ -32,7 +32,10 @@ let rows =
       meaning =
         "A tag or enumerator that a type declaration claims for the C \
          it lowers to (also design 10.2), declared otherwise in its \
-         scope or named in Type-C text." };
+         scope or named in Type-C text; or a name that begins with a \
+         generic's name and `__`, which the generic claims for its \
+         instances (design 10.3), declared where the generic is in \
+         scope." };
     Live { name = "Duplicate_constructor"; code = 5;
       clause = Some "design 3.2 rule 2";
       meaning =

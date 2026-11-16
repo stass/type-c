@@ -1237,16 +1237,11 @@ types (design 13.3).
   record's members, as `Initialiser` checks it, deciding the text by the
   member's token rather than the first token of the operation (a line
   marker inside an expression makes them differ).
-- [Medium] The instance names of design 10.3 claim nothing yet: when
-  generic types and functions are built (Stage 2), claim each instance
-  name through the claim functions of the parser, the one funnel that
-  refuses a derived name claimed twice, and check a generic function's
-  name as a file-scope type name (design 7.1 rule 1). A constructor of
-  an instance is in scope everywhere (`Ctype.define_variant_instance`)
-  only once its derived names are claimed: until then C text in a block
-  may declare `int list__i_Nil;`, which the lowered `list(int) l = Nil;`
-  would name. Typing does not declare those names either, so C text
-  that names `struct list__i_tag` gets a tag of its own.
+- [Medium] When generic functions are built (Stage 2), check a generic
+  function's name as a file-scope type name (design 7.1 rule 1) and
+  have its declaration claim the names of its instances as a generic
+  type's does (`claim_instance_space` in `src/syntax/parser.ml`, design
+  10.3), which only a declaration of a generic type reaches.
 - [Low] A type argument that carries a nullability qualifier of Clang
   or a keyword of an address space is refused (design 3.5 rule 2),
   because the encodings of design 10.3 have no row for either. If a

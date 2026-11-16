@@ -128,6 +128,7 @@ type arm_breaks = { matched : jump_target; mutable leaving : int list }
 type label_entry = { identity : label_id; mutable defined : bool }
 
 module Names = Map.Make (String)
+module Name_set = Set.Make (String)
 
 (* The labels of the function body or block literal being read, which is
    their scope (C11 6.2.1p3): the function's by name, the GNU local
@@ -163,6 +164,10 @@ type state = {
       (** [None] outside the definition of a generic type *)
   mutable in_type_argument : bool;  (** design 3.5 rule 2 *)
   mutable views : views;  (** taken so far *)
+  mutable generics : Name_set.t;
+      (** the names of the generic types declared so far, those of the
+          universe text included, whose instances claim names (design
+          10.3) *)
   counter : Spanned.counter;  (** of the nodes made so far *)
 }
 
@@ -779,6 +784,51 @@ let claims_tag state name =
   | Some { claimed; _ } -> claimed
   | None -> false
 
+(* The generic that claims [name] for its instances (design 10.3). The
+   set of generics only grows, as hiding a generic's name ends no claim:
+   an instance of it may still be used in the scope that hides it. *)
+let instance_claim state name =
+  match Spelling.instance_space name with
+  | Some generic when Name_set.mem generic state.generics -> Some generic
+  | Some _ | None -> None
+
+(* [what] is the name space of [name], and [use] what the source does
+   with it, as the message words them. *)
+let refuse_instance_name state (name : identifier) ~what ~use =
+  match instance_claim state name.node with
+  | Some generic ->
+      fail_at_token state (token_of name)
+        (Rule.message Claimed_name
+           (Printf.sprintf
+              "%s %s is %s, but the generic %s claims every name that \
+               begins with its own name and `__` for its instances"
+              what (quoted name.node) use (quoted generic)))
+  | None -> ()
+
+(* The claim of the generic [name] also refuses a name of its space that
+   its scope declares before it. A generic is declared at file scope or
+   in the universe scope only, and no scope that ended before it can hold
+   a use of it. *)
+let claim_instance_space state (name : identifier) =
+  let in_space entries =
+    List.filter
+      (fun declared -> Spelling.instance_space declared = Some name.node)
+      (List.map fst entries)
+  in
+  match
+    in_space (Scope.declared_in_innermost state.scope)
+    @ in_space (Scope.tags_declared_in_innermost state.scope)
+  with
+  | taken :: _ ->
+      fail_at_token state (token_of name)
+        (Rule.message Claimed_name
+           (Printf.sprintf
+              "the generic %s claims every name that begins with its own \
+               name and `__` for its instances, and this scope declares %s \
+               already"
+              (quoted name.node) (quoted taken)))
+  | [] -> state.generics <- Name_set.add name.node state.generics
+
 (* A type declaration is the only declaration of its name in its scope
    (design 3.1 rule 5): unlike [typedef], it is not repeated. *)
 let refuse_second_definition state (name : identifier) kind earlier =
@@ -811,8 +861,10 @@ let declare state ~kind (name : identifier) =
   let id = Ordinary_at (token_of name) in
   if claims_enumerator state name.node then
     fail_claimed state name "enumerator" "is declared again";
+  refuse_instance_name state name ~what:"the name" ~use:"declared";
   let earlier = Scope.find_in_innermost state.scope name.node in
   refuse_second_definition state name kind earlier;
+  if is_generic kind then claim_instance_space state name;
   state.scope <-
     Scope.declare state.scope name.node { declaration = In_tree id; kind };
   declared_here state id
@@ -914,6 +966,8 @@ let declare_tag state (name : identifier) ~implicit =
   refuse_argument_tag state name;
   if claims_tag state name.node then
     fail_claimed state name "tag" "is declared again";
+  refuse_instance_name state name ~what:"the tag"
+    ~use:(if implicit then "named" else "declared");
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
   state.scope <-
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
@@ -1006,7 +1060,8 @@ let refuse_completion state (name : identifier) ~parameters ~awaited =
    many and claims the tag of the name already (design 3.1 rule 4);
    elsewhere it declares the name and claims the tag. Either claims the
    enumeration tag of its constructors (10.1 rule 6). A generic variant
-   claims nothing: its instances claim their names (10.3). *)
+   claims none of these, but the names of its instances
+   ({!claim_instance_space}, 10.3). *)
 let declare_variant state (checked : Spelling.type_name spanned)
     ~type_keyword ~parameters =
   let name = (checked :> identifier) in
@@ -3342,8 +3397,8 @@ and incomplete_variant state checked head =
 
 (* After the [=]: the declaration of [checked], which is in scope from
    the end of its identifier, and the definition, which the type
-   parameters of [head] are visible in. A generic type claims no name
-   (design 10.3). *)
+   parameters of [head] are visible in. A generic type claims no
+   derived name of its own, but those of its instances (design 10.3). *)
 and type_definition state checked head ~type_keyword =
   let name = (checked :> identifier) in
   let parameters = type_parameter_count head in
@@ -4189,6 +4244,7 @@ let parse_with_scopes ~keywords reader =
       generic = None;
       in_type_argument = false;
       views = { attributes = Places.empty; pragmas = Places.empty };
+      generics = Name_set.empty;
       counter = Spanned.counter ~max_depth;
     }
   in

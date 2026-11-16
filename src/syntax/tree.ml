@@ -648,8 +648,9 @@ and type_declaration_node = {
   name : Spelling.type_name spanned;
   type_parameters : parameter_name list;
       (** in order, with distinct names; none unless the declaration is
-          of a generic type (design 3.5), which stands at file scope and
-          claims no name: its instances claim theirs (design 10.3) *)
+          of a generic type (design 3.5), which stands at file scope.
+          It claims no name that a variant derives, but every name
+          that begins with its name and [__] (design 10.3) *)
   declared : declared;
       (** never a redeclaration (design 3.1 rule 5), except a [Variant]
           that completes the [Incomplete_variant] of its name in its

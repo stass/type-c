@@ -41,6 +41,13 @@ val instance : type_name -> string list -> c_name
     encodings are trusted to be those of [Encoding.encode], which no
     type here checks. *)
 
+val instance_space : string -> string option
+(** [Some generic] where the identifier begins with [generic] and [__],
+    as the name of every instance of a generic of that name does and as
+    every name that the instance derives does (design 10.3): the part
+    before the identifier's first [__], where that part is not empty.
+    Whether a generic of that name is declared is the caller's to ask. *)
+
 val is_reserved_for_any_use : string -> bool
 (** Whether C reserves the identifier for any use (C11 7.1.3p1): it
     begins with two underscores or with one and an uppercase letter. *)

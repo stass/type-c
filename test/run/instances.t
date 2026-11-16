@@ -214,3 +214,25 @@ so the argument is exact on both backends.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -fsyntax-only early.tc || echo "$cc"
   > done
+
+A declaration in a block cannot hide a name of an instance that
+lowering writes there (design 10.3): the enumerator would make the
+constructor Some of option(int) the tag of None on both backends.
+
+  $ cat > hidden_tag.tc <<'EOF'
+  > #include <stdio.h>
+  > option(int) f(void) { enum { option__i_Some = 0 }; return Some(123); }
+  > int main(void) {
+  >   match (f()) {
+  >   case Some(v): printf("Some %d\n", v); break;
+  >   case None: printf("None\n"); break;
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o hidden_tag hidden_tag.tc && ./hidden_tag
+  > done
+  typec: hidden_tag.tc:2: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  typec: hidden_tag.tc:2: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  [80]

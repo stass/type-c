@@ -1628,9 +1628,10 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
 Because of rules 2 to 4, an instance of a checked generic function is
 valid C for every value type. Instantiation fails only where a chain of
 instances exceeds the nesting limit (3.5 rule 7), where a declaration
-changes what the definition names (3.5 rule 8), where another
-declaration takes a name that an instance claims (10.3), or where 10.3
-or rule 2 of 7.3 refuses the instance's placement.
+changes what the definition names (3.5 rule 8), or where 10.3 or rule 2
+of 7.3 refuses the instance's placement. A declaration of a name that
+an instance would take is refused whether or not the instance is used
+(10.3).
 
 Rationale for no constraints. Resolving `hash(K)` statically for an
 arbitrary `K` needs overloading, or named instances that the compiler
@@ -1922,8 +1923,9 @@ Whether a Type-C unit may include one, as it does when it shares a C
 header that includes one, is open. The guards are macros and do not
 survive preprocessing, so what reaches the unit is the header's text
 without them: names that begin with `__tc_`, which are errors in a
-Type-C unit (2.3), and definitions of instances that lowering would
-write again. Package 4.1 of the plan settles it, either by keeping the
+Type-C unit (2.3), names of instances, which their generics claim
+(10.3), and definitions of instances that lowering would write again.
+Package 4.1 of the plan settles it, either by keeping the
 refusal, so that a Type-C unit includes the `.tci`, or by having
 lowering take an instance that the header's text defines as defined.
 The default is the refusal of 2.3.
@@ -2419,20 +2421,25 @@ if that cannot settle it.
 What a definition names means in the instance what it means in the
 generic (3.5 rule 8).
 
-At the external declaration of its first use an instance claims, at file
-scope, every name it declares there: a type instance its typedef name
-and its tag and, where it is a variant, the enum tag and the enumerators
-of 10.1; a function instance its name. All go through the one check
-that claims a variant's names (10.1 rule 6): any other declaration of
-one of them in the file scope or in a scope nested in it, in C text as
-well, is an error, whichever comes first. A block that declares
-`int max__i;` where `max__i` is claimed is refused. The claim begins at
-that external declaration, in the lowered C: a block that ends before
-it there holds no use of the instance and may have declared one of the
-names. A block in the body of a generic function stands in the lowered
-C where the instances of that function do, not where the generic is
-defined, so it is refused when it declares a name that is claimed
-before one of those instances.
+A generic claims every name that begins with its own name and `__`, as
+an ordinary identifier and as a tag, from its first declaration, and a
+universe generic from the start of the unit. Every name of its
+instances is one: a type instance's typedef name and tag and, where it
+is a variant, the enum tag and the enumerators of 10.1; a function
+instance's name. As with a variant's names (10.1 rule 6), any other
+declaration of such a name where the generic is in scope, nested
+blocks and prototypes included and in C text as well, is an error, and
+so is one in the scope of the generic before it, whichever comes
+first. A
+block that declares `int max__i;` where `max` is a generic is refused,
+whether or not the unit uses `max(int)`, and so is one that declares
+`enum { option__i_Some };`, which would otherwise be what `Some` of an
+`option(int)` lowers to there. A declaration of the generic's own name
+in a block does not end the claim, as an instance of the generic may be
+used there all the same. Claiming the whole space, rather than the
+names of the instances that a unit uses, needs no list of those
+instances and no point where each claim would begin; it costs the C
+names of that form, which no rule needs a declaration of.
 
 Rationale. The typedef name of a variant is not claimed, because only
 the source names it. The names of an instance are written by the
@@ -3849,7 +3856,7 @@ a crash.
 | A `match` handles every constructor | Every `match` | Nothing; an invalid tag traps |
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
-| A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), another declaration of a name that an instance claims (10.3) and a placement that 10.3 or 7.3 rule 2 refuses are compile errors | Nothing |
+| A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 refuses are compile errors | Nothing |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | A deferred statement at each exit, a generic's definition in each instance and the operand of a `try` (13.5). Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. An instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), an instance first used inside its region in one translation unit and outside it in another has one name and two layouts, and a function instance is compiled under the target, optimisation, attribute and section pragmas in force at its first use (13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for` | Explicit casts to `void` |
