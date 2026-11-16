@@ -13,6 +13,10 @@ type instance = {
   mentions_parameter : bool;
 }
 
+type variant_name =
+  | Declared of Typec_syntax.Spelling.type_name
+  | Applied of instance
+
 type record_tag = {
   record_id : int;
   kind : record_kind;
@@ -23,7 +27,7 @@ type record_tag = {
 and record_name =
   | Anonymous
   | Named of string
-  | Variant_name of Typec_syntax.Spelling.type_name
+  | Variant_name of variant_name
   | Alias_name of string
   | Instance_name of instance
   | Opaque_name of string
@@ -102,7 +106,8 @@ type enum_definition =
 (* What the definition of a variant adds to its structure. *)
 type variant_definition = {
   privacy : privacy;
-  scope : Typec_syntax.Tree.span;
+  scope : Typec_syntax.Tree.span option;
+      (* none for an instance (design 10.3) *)
   constructors : constructor list;
 }
 
@@ -387,20 +392,18 @@ let declare_record tags kind name ~at_file_scope =
   new_record tags kind record_name ~at_file_scope
 
 let declare_variant tags name ~at_file_scope =
-  new_record tags Struct (Variant_name name) ~at_file_scope
+  new_record tags Struct (Variant_name (Declared name)) ~at_file_scope
 
 let declare_alias_record tags kind name ~at_file_scope =
   new_record tags kind (Alias_name name) ~at_file_scope
 
 (* Design 3.5 rule 3: one application is one type, wherever it is
    written. Design 10.3: an instance is emitted at file scope. *)
-let declare_instance tags kind instance ~define =
+let new_instance tags kind record_name instance ~define =
   match Record_instances.find_opt (kind, instance) tags.facts.instances with
   | Some record -> record
   | None ->
-      let record =
-        new_record tags kind (Instance_name instance) ~at_file_scope:true
-      in
+      let record = new_record tags kind record_name ~at_file_scope:true in
       let deferred () = define record in
       let facts = tags.facts in
       tags.facts <-
@@ -409,6 +412,12 @@ let declare_instance tags kind instance ~define =
             Record_instances.add (kind, instance) record facts.instances;
           deferred = Ids.add record.record_id deferred facts.deferred };
       record
+
+let declare_instance tags kind instance ~define =
+  new_instance tags kind (Instance_name instance) instance ~define
+
+let declare_variant_instance tags instance ~define =
+  new_instance tags Struct (Variant_name (Applied instance)) instance ~define
 
 let add_record_definition tags id definition =
   tags.facts <-
@@ -544,12 +553,16 @@ let rec mentions_opaque t =
       mentions_opaque referenced
   | Function { return; parameters } ->
       List.exists mentions_opaque (return :: parameter_types parameters)
-  | Record { record_name = Instance_name instance; _ }
+  | Record
+      { record_name = Instance_name instance | Variant_name (Applied instance);
+        _ }
   | Distinct { distinct_instance = Some instance; _ } ->
       instance.mentions_parameter
   | Record { record_name = Opaque_name _; _ } -> true
   | Record
-      { record_name = Anonymous | Named _ | Variant_name _ | Alias_name _; _ }
+      { record_name =
+          Anonymous | Named _ | Variant_name (Declared _) | Alias_name _;
+        _ }
   | Distinct { distinct_instance = None; _ }
   | Void | Arithmetic _ | Enum _ | Va_list | Unknown_type _ ->
       false
@@ -860,11 +873,9 @@ let define_record target tags tag members =
       Ok ()
   | exception Invalid error -> Error error
 
-let define_variant target tags tag privacy ~scope constructors members =
-  (match tag.record_name with
-  | Variant_name _ -> ()
-  | Anonymous | Named _ | Alias_name _ | Instance_name _ | Opaque_name _ ->
-      invalid_arg "Ctype: a variant of no variant tag");
+(* The scope is that of a declared variant and none of an instance, as
+   its record name says, so no caller chooses it. *)
+let set_variant target tags tag privacy scope constructors members =
   Result.map
     (fun () ->
       let variant = { privacy; scope; constructors } in
@@ -873,10 +884,29 @@ let define_variant target tags tag privacy ~scope constructors members =
           variants = Ids.add tag.record_id variant tags.facts.variants })
     (define_record target tags tag members)
 
+let define_variant target tags tag privacy ~scope constructors members =
+  match tag.record_name with
+  | Variant_name (Declared _) ->
+      set_variant target tags tag privacy (Some scope) constructors members
+  | Variant_name (Applied _)
+  | Anonymous | Named _ | Alias_name _ | Instance_name _ | Opaque_name _ ->
+      invalid_arg "Ctype: a declared variant of no declared variant tag"
+
+let define_variant_instance target tags tag privacy constructors members =
+  match tag.record_name with
+  | Variant_name (Applied _) ->
+      set_variant target tags tag privacy None constructors members
+  | Variant_name (Declared _)
+  | Anonymous | Named _ | Alias_name _ | Instance_name _ | Opaque_name _ ->
+      invalid_arg "Ctype: a variant instance of no instance tag"
+
+(* An instance is defined at its first need of its constructors, as at
+   any need of it complete. *)
 let variant_definition tags t =
   match t.shape with
   | Record ({ record_name = Variant_name _; _ } as tag) ->
-      Ids.find_opt tag.record_id tags.facts.variants
+      Option.bind (record_definition tags tag) (fun _ ->
+          Ids.find_opt tag.record_id tags.facts.variants)
   | Record
       { record_name =
           ( Anonymous | Named _ | Alias_name _ | Instance_name _
@@ -892,9 +922,8 @@ let constructors tags t =
     (variant_definition tags t)
 
 let variant_scope tags t =
-  Option.map
-    (fun (variant : variant_definition) -> variant.scope)
-    (variant_definition tags t)
+  Option.bind (variant_definition tags t) (fun (variant : variant_definition) ->
+      variant.scope)
 
 let privacy tags t =
   match (as_distinct t, variant_definition tags t) with

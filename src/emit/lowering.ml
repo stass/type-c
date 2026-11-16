@@ -151,10 +151,11 @@ let has_payload constructors =
    and the structure up to its union where it has one (rule 3). *)
 let variant_head ~completes variant constructors =
   let name = (variant : Spelling.type_name :> string) in
+  let c_name = Spelling.declared variant in
   let enumerator (constructor : Tree.constructor) =
-    Tree.enumerator_name ~variant constructor.node.name.node
+    Tree.enumerator_name ~variant:c_name constructor.node.name.node
   in
-  let tag_enum = "enum " ^ Tree.enum_tag_name variant in
+  let tag_enum = "enum " ^ Tree.enum_tag_name c_name in
   let forward =
     if completes then "" else record_declarations Struct ~tag:name name ^ " "
   in
@@ -248,6 +249,7 @@ let construction (tokens : Token.t array)
     construction
   in
   let location = tokens.(span.first).location in
+  let variant = Typec_sema.Encoding.variant_name variant in
   let enumerator = Tree.enumerator_name ~variant constructor in
   let opening =
     if braced then "{ "
@@ -291,7 +293,8 @@ let scrutinee_copy = "__tc_copy"
    the operand of a test: the opening of the block, and the declaration
    of the pointer around the scrutinee. *)
 let scrutinee_holder (matching : _ Typec_sema.Expressions.matching_of) =
-  let record = "struct " ^ (matching.variant :> string) in
+  let variant = Typec_sema.Encoding.variant_name matching.variant in
+  let record = "struct " ^ (variant :> string) in
   match matching.access with
   | Through_pointer ->
       ( Printf.sprintf "{ const %s *const %s = &(" record scrutinee_pointer,
@@ -347,6 +350,7 @@ let match_statement (tokens : Token.t array) matching arms =
   let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
     matching
   in
+  let variant = Typec_sema.Encoding.variant_name variant in
   let match_token = statement.first in
   let open_paren = grammar_token_after tokens match_token in
   let close_paren = grammar_token_after tokens scrutinee.last in
@@ -417,6 +421,7 @@ let single_pattern_test (tokens : Token.t array) matching
   let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
     matching
   in
+  let variant = Typec_sema.Encoding.variant_name variant in
   let equals = grammar_token_before tokens scrutinee.first in
   let close_paren = grammar_token_after tokens scrutinee.last in
   let opening, held = scrutinee_holder matching in

@@ -18,6 +18,49 @@ type is refused once its typing has passed (design 10.3; work package
   list.tc:1: lowering generic types is not implemented yet (design 10.3; work package 2.1) [TC0023]
   [1]
 
+An instance of a generic variant is a variant (design 3.5 rule 3): its
+constructors build it, qualified or against a target type, and matching
+opens it (design 3.3, 4). Typing passes here, and lowering refuses the
+unit.
+
+  $ cat > construct.tc <<'EOF'
+  > type list(T) = | Nil | Cons(T head, list(T) *tail);
+  > int sum(list(int) l) {
+  >   list(int) rest = Nil, first = list(int).Cons(1, &rest);
+  >   (void)first;
+  >   match (l) {
+  >   case Nil: return 0;
+  >   case Cons(head, tail): return head + (tail ? sum(*tail) : 0);
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe construct.tc
+  construct.tc:1: lowering generic types is not implemented yet (design 10.3; work package 2.1) [TC0023]
+  [1]
+
+A match on an instance covers each of its constructors (design 4.2 rule
+1), and only constructors and matching open it (design 3.2 rule 6). Its
+messages name it by its instance name (design 10.3).
+
+  $ cat > uncovered.tc <<'EOF'
+  > type list(T) = | Nil | Cons(T head, list(T) *tail);
+  > int first(list(int) l) {
+  >   match (l) {
+  >   case Nil: return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe uncovered.tc
+  uncovered.tc:3: the match does not cover the constructor 'Cons' of the variant 'list__i' (design 4.2 rule 1) [TC0018]
+  [1]
+  $ cat > opened.tc <<'EOF'
+  > type list(T) = | Nil | Cons(T head, list(T) *tail);
+  > int tag(list(int) l) { return l.tag; }
+  > EOF
+  $ ./golden.exe opened.tc
+  opened.tc:2: the variant 'list__i' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  [1]
+
 A generic type is declared at file scope only (design 3.1).
 
   $ printf 'void f(void) { type box(T) = struct { T value; }; }\n' > block.tc

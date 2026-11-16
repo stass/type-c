@@ -757,14 +757,16 @@ let condition_value = function
     its name, which is the token of [id]. *)
 let claimed_tag (Ordinary_at token) = Tag_at token
 
-(** The names that a variant [N] derives for C (design 10.1 rule 6),
-    besides the structure tag {!claimed_tag}: the enumeration tag
-    [N_tag], declared at the token [type], and an enumerator [N_C] for
-    each constructor [C], declared at the constructor's name. No other
-    declaration is made at either token. *)
-let enum_tag_name (variant : Spelling.type_name) = (variant :> string) ^ "_tag"
+(** The names that a variant that lowers to the structure [N] derives
+    for C (design 10.1 rule 6), besides the structure tag
+    {!claimed_tag}: the enumeration tag [N_tag], declared at the token
+    [type], and an enumerator [N_C] for each constructor [C], declared
+    at the constructor's name. No other declaration is made at either
+    token. An instance of a variant generic derives both from its
+    instance name, at no token of the tree. *)
+let enum_tag_name (variant : Spelling.c_name) = (variant :> string) ^ "_tag"
 
-let enumerator_name ~(variant : Spelling.type_name)
+let enumerator_name ~(variant : Spelling.c_name)
     (constructor : Spelling.constructor) =
   (variant :> string) ^ "_" ^ (constructor :> string)
 

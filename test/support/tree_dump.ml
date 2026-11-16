@@ -677,7 +677,9 @@ and type_declaration reader (d : type_declaration) =
         let enum_claim =
           noted
             (Declaration_entry
-               { space = Tag; name = enum_tag_name checked.node; token;
+               { space = Tag;
+                 name = enum_tag_name (Spelling.declared checked.node);
+                 token;
                  earlier = None })
             (leaf "claims")
         in
@@ -706,7 +708,10 @@ and constructor reader variant ~generic (c : constructor) =
     noted
       (Declaration_entry
          { space = Ordinary;
-           name = enumerator_name ~variant:variant.node name.node; token;
+           name =
+             enumerator_name ~variant:(Spelling.declared variant.node)
+               name.node;
+           token;
            earlier = None })
       dumped
 

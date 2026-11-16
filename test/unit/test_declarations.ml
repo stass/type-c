@@ -2184,6 +2184,83 @@ let generic_instances () =
     "work package 2.3";
   accepts ~file "type ptr(T) = T *; ptr(void) v;"
 
+(* An instance of a generic variant is a variant (design 3.5 rule 3):
+   its constructors build it, qualified or against a target type, and
+   matching opens it, as for a variant that is not generic (3.2, 3.3,
+   4). The names it derives come from its instance name (10.3). *)
+let generic_variants () =
+  let file = "in.tc" in
+  let list = "type list(T) = | Nil | Cons(T head, list(T) *tail); " in
+  let in_function body =
+    list
+    ^ "void take(list(int)); long f(list(int) v, list(int) *p) { " ^ body
+    ^ " return 0; }"
+  in
+  accepts ~file
+    (in_function
+       "list(int) x = Nil, y = list(int).Cons(1, &x); x = Cons(2, &y); \
+        take(Nil); take(list(int).Nil); x = (1 ? Nil : Cons(3, p)); \
+        (void)sizeof list(int).Nil; list(int) z = {0}; (void)z;");
+  accepts ~file (list ^ "list(int) n = Nil, c = list(int).Cons(1, &n);");
+  accepts ~file
+    (list ^ "struct w { list(int) l; int k; } q = { Cons(1, 0), 2 };");
+  accepts ~file
+    (in_function
+       "long r = 0; match (v) { case Nil: break; case Cons(h, t): \
+        { int *q = &h; list(int) *m = t; r = *q + (m != 0); } break; } \
+        match (*p) { case Cons(_, _): break; default: break; } \
+        if (case Cons(h, _) = v) { r += h; } (void)r;");
+  (* Each instance has the field types of its own arguments. *)
+  accepts ~file
+    (in_function
+       "list(char *) s = Cons(\"a\", 0); match (s) { case Cons(h, _): \
+        { char **q = &h; (void)q; } break; default: break; }");
+  let field_type instance field_type =
+    in_function
+      (Printf.sprintf
+         "%s w = Cons(1, 0); match (w) { case Cons(h, _): \
+          _Static_assert(__builtin_types_compatible_p(__typeof__(h), %s), \
+          \"\"); break; default: break; }"
+         instance field_type)
+  in
+  accepts ~file (field_type "list(long)" "long");
+  rejects ~file (field_type "list(long)" "int") "static assertion";
+  (* Exhaustiveness (4.2 rule 1). *)
+  rejects ~file (in_function "match (v) { case Nil: break; }")
+    "the match does not cover the constructor 'Cons' of the variant \
+     'list__i' (design 4.2 rule 1) [TC0018]";
+  rejects ~file
+    (in_function
+       "match (v) { case Nil: break; case Cons(_, _): break; \
+        default: break; }")
+    "the `default` of a match covers no constructor (design 4.2 rule 2)";
+  rejects ~file (in_function "list(int) x = list(int).None; (void)x;")
+    "has no constructor 'None' (design 3.3) [TC0009]";
+  (* An unqualified constructor needs a variant target type. *)
+  rejects ~file (in_function "int k = Nil; (void)k;") "'Nil'";
+  (* A definition check that needs an instance leaves it to later uses;
+     an instance of a variant completed after its application has the
+     constructors of the completion. *)
+  accepts ~file
+    (list
+   ^ "type box(T) = struct { list(T) l; }; list(int) a = Nil; \
+      box(int) b = { Cons(1, &a) };");
+  accepts ~file
+    "type lst(T); lst(int) *p; type lst(T) = | No | Cons(T h, lst(T) *t); \
+     int g(lst(int) x) { x = Cons(1, p); match (x) { case No: return 0; \
+     case Cons(h, _): return h; } }";
+  (* Design 3.2 rule 6: only constructors and matching open it. *)
+  let refused = "the variant 'list__i' takes no such operation" in
+  rejects ~file (in_function "(void)v.tag;") refused;
+  rejects ~file (in_function "(void)p->u;") refused;
+  rejects ~file (in_function "(void)(v == v);") refused;
+  rejects ~file (in_function "list(int) x = { 1 }; (void)x;")
+    "an initialiser reaches into the variant 'list__i'";
+  (* An instance of a variant not complete yet has no constructors. *)
+  rejects ~file
+    "type lst(T); void g(lst(int) *p) { match (*p) { default: break; } }"
+    "the scrutinee of a match is of the incomplete variant 'lst__i'"
+
 let generic_arguments () =
   let file = "in.tc" in
   (* Rule 2. *)
@@ -2371,6 +2448,7 @@ let () =
   static_initialisers ();
   generic_identity ();
   generic_instances ();
+  generic_variants ();
   generic_arguments ();
   generic_definitions ();
   generic_checks ();

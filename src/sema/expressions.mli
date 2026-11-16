@@ -154,7 +154,7 @@ val create : unit -> t
     lowers to the braced list alone. *)
 type construction = {
   span : Tree.span;
-  variant : Spelling.type_name;
+  variant : Ctype.variant_name;
   constructor : Spelling.constructor;
   callee : Tree.span option;
   arguments : Tree.expression list;
@@ -216,7 +216,7 @@ type selection = Arms of matched_arm list | Test of test
 type 'selects matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
-  variant : Spelling.type_name;
+  variant : Ctype.variant_name;
   access : access;
   selects : 'selects;
 }

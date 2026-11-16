@@ -57,6 +57,13 @@ type instance = {
     the map that it began with. *)
 module Instances : Map.S with type key = instance
 
+(** The name that a variant lowers to (design 10.1) and from which the
+    names that it derives are made: that of its declaration, or that of
+    an instance of a variant generic (10.3). *)
+type variant_name =
+  | Declared of Typec_syntax.Spelling.type_name
+  | Applied of instance
+
 type record_tag = private {
   record_id : int;
   kind : record_kind;
@@ -70,17 +77,18 @@ type record_tag = private {
 and record_name =
   | Anonymous
   | Named of string  (** The tag of its own specifier. *)
-  | Variant_name of Typec_syntax.Spelling.type_name
+  | Variant_name of variant_name
       (** The structure that the variant of this name lowers to (design
           10.1), which only C text may treat as a structure (3.2 rule 6,
-          10.6); only {!declare_variant} makes a tag of one. *)
+          10.6); only {!declare_variant} and {!declare_variant_instance}
+          make a tag of one. *)
   | Alias_name of string
       (** The untagged structure or union that an alias of this name
           defines, whose tag the declaration claims (design 10.2); only
           {!declare_alias_record} makes one. *)
   | Instance_name of instance
-      (** The structure or union of an instance (design 10.3); only
-          {!declare_instance} makes one. *)
+      (** The structure or union of an instance of an alias generic
+          (design 10.3); only {!declare_instance} makes one. *)
   | Opaque_name of string
       (** A type parameter of the definition check of a generic (design
           3.5 rule 4, 7.1 rule 2), an opaque value type. Only
@@ -296,6 +304,12 @@ val declare_instance :
     that leaves it incomplete, as one of a generic variant that is not
     complete yet does, runs again at the next need. *)
 
+val declare_variant_instance :
+  tags -> instance -> define:(record_tag -> unit) -> record_tag
+(** The structure of an instance of a variant generic, as
+    {!declare_instance} declares one of an alias generic; [define]
+    completes it with {!define_variant_instance}. *)
+
 val read_instance : tags -> instance -> read:(unit -> t) -> t
 (** The type of an instance of a transparent alias or distinct generic:
     [read ()] at its first reading, the same type after. *)
@@ -369,9 +383,22 @@ val define_variant :
   constructor list ->
   member list ->
   (unit, error) result
-(** Completes the structure of a variant, as {!define_record} does, and
-    gives the variant its privacy, the tokens where its declaration is in
-    scope, and its constructors. *)
+(** Completes the structure of a declared variant, as {!define_record}
+    does, and gives the variant its privacy, the tokens where its
+    declaration is in scope, and its constructors. *)
+
+val define_variant_instance :
+  Target.t ->
+  tags ->
+  record_tag ->
+  privacy ->
+  constructor list ->
+  member list ->
+  (unit, error) result
+(** Completes the structure of an instance of a variant generic, as
+    {!define_variant} does a declared variant, with no scope: its names
+    stand at file scope before the first use of its application (design
+    10.3), so every use is in their scope. *)
 
 val constructors : tags -> t -> constructor list option
 (** The constructors of a variant, qualified or not, in order; [None]
@@ -380,8 +407,9 @@ val constructors : tags -> t -> constructor list option
 val variant_scope : tags -> t -> Typec_syntax.Tree.span option
 (** The tokens from the declaration of a variant, qualified or not, to
     the end of the scope that holds it, where the names that it derives
-    denote it (design 10.1 rule 6); [None] for any other type and for an
-    incomplete variant. A variant stays complete after its scope ends, so
+    denote it (design 10.1 rule 6); [None] for any other type, for an
+    incomplete variant and for an instance, whose names stand before
+    every use (10.3). A variant stays complete after its scope ends, so
     the caller checks that a use lies within; at file scope the end is
     the last token, which may be a pragma token. *)
 
@@ -467,7 +495,7 @@ val is_complete : tags -> t -> bool Unknown.answer
 val is_variably_modified : t -> bool Unknown.answer
 (** A variable length array, or derived from one (6.7.6p3). *)
 
-val as_variant : t -> Typec_syntax.Spelling.type_name option
+val as_variant : t -> variant_name option
 (** The name of the variant whose structure [t] is, qualified or not, or
     [None] where [t] is no variant. *)
 

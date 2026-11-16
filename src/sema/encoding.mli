@@ -59,3 +59,8 @@ val instance :
 val instance_name : Ctype.instance -> string
 (** The name that an instance lowers to: its generic, [__] and the
     encoding of each argument (design 10.3). *)
+
+val variant_name : Ctype.variant_name -> Typec_syntax.Spelling.c_name
+(** The name that a variant lowers to, which begins each name that it
+    derives (design 10.1 rule 6): its declared name, or its instance
+    name. *)

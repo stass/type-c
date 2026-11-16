@@ -83,8 +83,15 @@ let instance_code (instance : Ctype.instance) =
   ^ String.concat "" instance.arguments
   ^ "E"
 
-let instance_name (instance : Ctype.instance) =
-  (instance.generic :> string) ^ "__" ^ String.concat "" instance.arguments
+let instance_c_name (instance : Ctype.instance) =
+  Typec_syntax.Spelling.instance instance.generic instance.arguments
+
+let instance_name instance = (instance_c_name instance :> string)
+
+let variant_name : Ctype.variant_name -> Typec_syntax.Spelling.c_name =
+  function
+  | Declared name -> Typec_syntax.Spelling.declared name
+  | Applied instance -> instance_c_name instance
 
 (* Design 3.5 rule 2: only a declaration at file scope gives a type the
    one name that it has in every translation unit. *)
@@ -110,7 +117,8 @@ let add_record code tags part (tag : Ctype.record_tag) =
   | Named name ->
       add code "T";
       add_length_prefixed code name
-  | Variant_name name -> add_length_prefixed code (name :> string)
+  | Variant_name (Declared name) -> add_length_prefixed code (name :> string)
+  | Variant_name (Applied instance) -> add code (instance_code instance)
   | Alias_name name -> add_length_prefixed code name
   | Instance_name instance -> add code (instance_code instance)
   | Opaque_name _ -> add code ("_" ^ string_of_int tag.record_id ^ "_")

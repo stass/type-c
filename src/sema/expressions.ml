@@ -54,7 +54,7 @@ type enclosing = {
 
 type construction = {
   span : Tree.span;
-  variant : Spelling.type_name;
+  variant : Ctype.variant_name;
   constructor : Spelling.constructor;
   callee : Tree.span option;
   arguments : Tree.expression list;
@@ -90,7 +90,7 @@ type selection = Arms of matched_arm list | Test of test
 type 'selects matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
-  variant : Spelling.type_name;
+  variant : Ctype.variant_name;
   access : access;
   selects : 'selects;
 }
@@ -111,6 +111,8 @@ let max_quoted = 64
 let quote text =
   if String.length text <= max_quoted then "'" ^ text ^ "'"
   else "'" ^ String.sub text 0 max_quoted ^ "...'"
+
+let quoted_variant name = quote (Encoding.variant_name name :> string)
 
 (* The sites that lowering replaces with the names that their variant
    derives (design 3.3, 4.1 rule 1). Those names denote the variant only
@@ -166,12 +168,12 @@ end = struct
     | None -> true
 
   (* The diagnostic for a site that [what] names, which [rule] codes. *)
-  let outside_scope rule ~what ~(variant : Spelling.type_name) =
+  let outside_scope rule ~what ~variant =
     Rule.message rule
       (Printf.sprintf
          "%s is outside the scope of the declaration of the variant %s, \
           where the names that it lowers to do not denote the variant"
-         what (quote (variant :> string)))
+         what (quoted_variant variant))
 
   (* A matching that [what] names, with what it selects typed by
      [selects] once it is known to be in scope. *)
@@ -433,7 +435,7 @@ let refuse_variant context (span : Tree.span) (t : Ctype.t) =
            (Printf.sprintf
               "the variant %s takes no such operation; Type-C text reaches \
                its tag and fields only through constructors and matching"
-              (quote (name :> string))))
+              (quoted_variant name)))
   | Some _ | None -> ()
 
 (* Distinct types (design 3.4, 10.2) *)
@@ -2131,7 +2133,7 @@ let discards cast_type = Ctype.is_void cast_type = Answer true
    type and name, and the constructor. *)
 type chosen_constructor = {
   variant_type : Ctype.t;
-  variant_name : Spelling.type_name;
+  variant_name : Ctype.variant_name;
   chosen : Ctype.constructor;
 }
 
@@ -2374,7 +2376,7 @@ and construct context (whole : Tree.expression) named arguments =
          callee = called_name whole;
          arguments = Option.value arguments ~default:[];
          braced = false });
-  let described = "the variant " ^ quote (named.variant_name :> string) in
+  let described = "the variant " ^ quoted_variant named.variant_name in
   refuse_private_creation context whole.span named.variant_type ~described;
   let name = quote (named.chosen.constructor_name :> string) in
   let fields = named.chosen.fields in
@@ -3131,7 +3133,7 @@ and scrutinee_variant context ~what span t =
            (Printf.sprintf
               "%s is of the incomplete variant %s, whose constructors are \
                unknown here"
-              what (quote (variant :> string))))
+              what (quoted_variant variant)))
   | None, _ ->
       context.fail span
         (Rule.message Match_scrutinee
@@ -3154,7 +3156,7 @@ and pattern_constructor context ~site variant constructors
       context.fail label
         (Rule.message Pattern
            (Printf.sprintf "%s names no constructor of the variant %s"
-              (quote name) (quote (variant :> string))))
+              (quote name) (quoted_variant variant)))
   | Some constructor ->
       { constructor;
         sub_fields = sub_pattern_fields context ~site label pattern constructor
@@ -3229,7 +3231,7 @@ and coverage context ~statement variant constructors labelled =
         (Rule.message Exhaustiveness
            (Printf.sprintf "the match does not cover %s of the variant %s"
               (constructor_list (List.map constructor_name missing))
-              (quote (variant :> string))))
+              (quoted_variant variant)))
   | (default : Tree.arm_label) :: _, [] ->
       context.fail default.span
         (Rule.message Default_arm

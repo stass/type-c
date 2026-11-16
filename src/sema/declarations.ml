@@ -2007,7 +2007,8 @@ and defined_record state span kind members =
    enumerator that int holds. *)
 and variant_tag_enum state (declaration : Tree.type_declaration)
     constructors =
-  let span = declaration.span and variant = declaration.node.name.node in
+  let span = declaration.span in
+  let variant = Spelling.declared declaration.node.name.node in
   let enum =
     defined_tag_enum state span (Some (Tree.enum_tag_name variant))
       constructors
@@ -2249,27 +2250,32 @@ and instance_type state (declaration : Tree.type_declaration) instance
   | Variant _ | Incomplete_variant ->
       let generic = Tree.In_tree declaration.node.declared.id in
       let define = variant_instance state generic instance reading in
-      Ctype.record (Ctype.declare_instance state.tags Struct instance ~define)
+      Ctype.record (Ctype.declare_variant_instance state.tags instance ~define)
 
 (* The definition of a variant instance, by the generic's latest
    declaration: one that completes an incomplete variant after the
    application defines it. While none does, the instance stays
    incomplete, and its definition deferred. The parser completes an
-   incomplete variant only with a variant (design 3.1 rule 4). *)
+   incomplete variant only with a variant (design 3.1 rule 4). The
+   instance derives its names from its instance name (design 10.3);
+   typing declares none of them, as Type-C text names none. *)
 and variant_instance state generic instance reading record =
   let declaration = Hashtbl.find state.generics generic in
-  let define constructors () =
+  let define privacy constructors () =
     let span = declaration.span in
-    let tag = Encoding.instance_name instance ^ "_tag" in
-    let tag_enum = defined_tag_enum state span (Some tag) constructors in
-    let _, members = variant_members state span tag_enum constructors in
+    let variant = Encoding.variant_name (Applied instance) in
+    let tag = Some (Tree.enum_tag_name variant) in
+    let tag_enum = defined_tag_enum state span tag constructors in
+    let read, members = variant_members state span tag_enum constructors in
     checked state span
-      (Ctype.define_record state.target state.tags record members)
+      (Ctype.define_variant_instance state.target state.tags record privacy
+         (List.map fst read) members)
   in
   match declaration.node.definition with
   | Incomplete_variant -> ()
-  | Variant { constructors; _ } ->
-      reading.read declaration (define constructors)
+  | Variant { is_private; constructors } ->
+      let privacy = privacy state declaration ~is_private in
+      reading.read declaration (define privacy constructors)
   | Alias _ | Distinct _ | Record_alias _ ->
       invalid_arg "Declarations.variant_instance"
 

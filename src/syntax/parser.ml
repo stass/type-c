@@ -953,7 +953,9 @@ let claim_own_tag state (name : identifier) =
    claims a tag. *)
 let claim_enumerator state ~(variant : Spelling.type_name spanned) ~at
     constructor =
-  let enumerator = enumerator_name ~variant:variant.node constructor in
+  let enumerator =
+    enumerator_name ~variant:(Spelling.declared variant.node) constructor
+  in
   let declared_here = Scope.find_in_innermost state.scope enumerator <> None in
   if declared_here || claims_enumerator state enumerator then
     fail_at_token state at
@@ -1013,7 +1015,7 @@ let declare_variant state (checked : Spelling.type_name spanned)
         declared
   in
   if not generic then
-    claim_tag state name ~tag:(enum_tag_name checked.node)
+    claim_tag state name ~tag:(enum_tag_name (Spelling.declared checked.node))
       (derived_enum_tag ~type_keyword);
   declared
 

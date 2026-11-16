@@ -3,6 +3,7 @@
 
 type type_name = string
 type constructor = string
+type c_name = string
 
 let begins_with_underscore_and_uppercase spelling =
   String.length spelling >= 2
@@ -41,3 +42,7 @@ let constructor spelling =
   if String.starts_with ~prefix:"_" spelling then Error "it begins with `_`"
   else if has_double_underscore spelling then Error "it contains `__`"
   else Ok spelling
+
+let declared type_name = type_name
+
+let instance generic arguments = generic ^ "__" ^ String.concat "" arguments

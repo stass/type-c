@@ -437,6 +437,23 @@ is [type-c-language-design.md](type-c-language-design.md).
   would settle both.
 - [Low] Clang refuses `aip += 1` with `int *_Atomic aip` and GCC accepts
   it; typec accepts it with both.
+- [Low] The diagnostics of a qualified constructor `T.C` quote only the
+  first token of `T`, so `list(int).None` reports that "the variant
+  'list'" has no constructor `None`. Quote the whole type name.
+- [Low] Names in diagnostics are cut in two ways: `Expressions.quote`
+  at 64 bytes, which may split a UTF-8 sequence, and
+  `Declarations.shown_instance` at 200 bytes on a character boundary;
+  the variant message of `Initialiser.refuse_opening` cuts none, and an
+  instance name may be thousands of bytes long. Use one cut, on a
+  character boundary, everywhere a name is quoted.
+- [Medium] Two guarantees of the names derived from an instance rest on
+  callers, not on types: `Spelling.instance` takes the encodings of the
+  arguments as plain strings, and `Ctype.instance` is a public record,
+  so a name that no encoding made can become a `Spelling.c_name`; and
+  `Ctype.define_variant` and `define_variant_instance` refuse the other
+  kind of tag only at run time. Give encodings a private type that only
+  the encoder makes, and hand the `define` of
+  `Ctype.declare_variant_instance` a definer bound to its tag.
 
 ## Declarations
 
@@ -697,12 +714,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   also compile an instance's error through the pipeline to confirm it
   is reported at its own line.
 
-- [High] An instance of a generic variant is a structure to typing:
-  `Ctype.as_variant` answers `None` for its `Instance_name` record, so
-  its constructors, its patterns and the operations that design 3.2
-  rule 6 refuses on a variant are not read. Give the instance's record
-  the variant's facts when constructor expressions and matches on
-  instances are built.
 - [High] An instance is defined at a point that needs it complete only
   where typing asks for completeness (`Ctype.is_complete` and the
   questions about members); the needs that the reader leaves to the
@@ -1105,7 +1116,12 @@ types (design 13.3).
   generic types and functions are built (Stage 2), claim each instance
   name through the claim functions of the parser, the one funnel that
   refuses a derived name claimed twice, and check a generic function's
-  name as a file-scope type name (design 7.1 rule 1).
+  name as a file-scope type name (design 7.1 rule 1). A constructor of
+  an instance is in scope everywhere (`Ctype.define_variant_instance`)
+  only once its derived names are claimed: until then C text in a block
+  may declare `int list__i_Nil;`, which the lowered `list(int) l = Nil;`
+  would name. Typing does not declare those names either, so C text
+  that names `struct list__i_tag` gets a tag of its own.
 - [Low] A type argument that carries a nullability qualifier of Clang
   or a keyword of an address space is refused (design 3.5 rule 2),
   because the encodings of design 10.3 have no row for either. If a

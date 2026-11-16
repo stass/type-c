@@ -21,7 +21,7 @@ let record_keyword = function Struct -> "struct" | Union -> "union"
 let record_tag_name = function
   | Anonymous -> None
   | Named name -> Some name
-  | Variant_name name -> Some (name :> string)
+  | Variant_name name -> Some (Encoding.variant_name name :> string)
   | Alias_name name -> Some name
   | Instance_name instance -> Some (Encoding.instance_name instance)
   | Opaque_name name -> Some name
