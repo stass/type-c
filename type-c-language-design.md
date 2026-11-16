@@ -405,6 +405,12 @@ An expression has a target type in these positions and in no others:
 | Argument of a constructor | The field type |
 | Parenthesised expression; second and third operand of `?:`; right operand of `,` | The target type of the enclosing expression |
 
+The operand of `try` is not among them: `try` reads `T` and `E` from the
+type of its operand (5.1), so no type is expected of it, and
+`x = try Ok(1);` is an error where `x = try result(int, e).Ok(1);` is
+none. The target type of a position that holds a `try` ends at the
+`try`, whose value of type `T` converts to it as if by assignment.
+
 Where a braced list elides braces (C11 6.7.9p20), which subobject an
 initialiser initialises depends on its type, so its target type cannot
 come from that subobject. It is the first variant that eliding the braces
@@ -1209,7 +1215,15 @@ result(uint32_t, parse_error) read_number(reader *r)
    returns `result(U, E)` with the identical `E`. Both are the `result` of
    the universe scope (3.6), also where a declaration hides that name.
    Anything else is an error; there is no implicit conversion between
-   error types.
+   error types. The two `E` are identical where their encodings are
+   equal (10.3), the one comparison that says whether two instances are
+   one type (3.5 rule 3): a qualifier inside `E` counts, and an operand
+   of type `result(int, const char *)` is an error in a function that
+   returns `result(int, char *)`. A top-level qualifier of the
+   operand's type or of the return type does not count, since `try`
+   reads a value and returns one. A typedef name or an alias (3.1) of such a type is that
+   type, and no distinct type is over one (3.4). The operand has no
+   target type (3.3).
 2. `try` evaluates its operand once and abbreviates a `match` on the
    value (section 4). In the arm of `Err(x)` the function returns
    `Err(x)` exactly as a `return` statement would, running the deferred
@@ -1219,9 +1233,13 @@ result(uint32_t, parse_error) read_number(reader *r)
    temporary after they have run. No deferred statement can name the
    temporary, so the error path needs no temporary of a `return` (13.5).
    From the arm of `Ok(v)` the `try` expression has the value `v` and
-   the type `T`; when `T` is `void` it is a void expression. As in every
-   match (4.5), a value whose tag is no constructor's, here neither `Ok`
-   nor `Err`, traps (10.5) and does not take the error path.
+   the type `T`; when `T` is `void` it is a void expression, which of
+   the positions of rule 3 only the statement `try e;` holds, since an
+   assignment and an initialiser take no void expression, as in C. When
+   `E` is `void`, `Err` has no field (3.5 rule 6): no error is read, and
+   the function returns `Err`. As in every match (4.5), a value whose
+   tag is no constructor's, here neither `Ok` nor `Err`, traps (10.5)
+   and does not take the error path.
 3. *Provisional (P8).* A `try` expression stands in one of three positions
    and nowhere else:
    * a whole expression statement, `try e;`;
@@ -1255,16 +1273,35 @@ result(uint32_t, parse_error) read_number(reader *r)
 
    A declaration in the first clause of a `for` is not a block item. The
    operand of `return`, the scrutinee of a `match` and the operand of a
-   single-pattern test (4.6) are not among the positions. No `try` stands
-   inside a statement expression, whatever its position there: it would
-   return from inside the expression around it, where C does not say
-   which of the other operands have been evaluated. None stands inside a
+   single-pattern test (4.6) are not among the positions. Parentheses
+   around a `try` take it out of them: in `x = (try f());` the right
+   operand is a parenthesised expression, and the `try` is not the
+   whole of it. The operand of a `try` may be parenthesised, so nothing
+   needs the form. A `try` in any other place is one error, with one
+   message whatever holds it: as an operand of a unary or binary
+   operator, in `-try f()` or `a + try f()`, where the grammar of
+   Appendix A derives no `try`, as in an argument or a condition, where
+   it does. The remedy is the same in each, a statement or declaration
+   of its own for the `try`. No `try` stands inside a statement
+   expression, whatever its position there: it would return from
+   inside the expression around it, where C does not say which of the
+   other operands have been evaluated. None stands inside a
    block literal either: a block literal holds no Type-C text (13.3,
    P24), and `try` is a word in Type-C text alone (2.3). And none
    stands in a statement or declaration that has a pragma directly
    before it or before any of its labels, for the reason that 13.5
    gives with the rule.
 4. `try` cannot appear in a deferred statement.
+5. *Provisional (P21).* A `try` is an error where one of these rules
+   asks something of an unknown type (13.3): whether the type of the
+   operand or the return type of the function is a `result`, and of
+   which arguments, or whether the type that a declaration holding the
+   `try` declares is variably modified, which no unknown type says.
+   Each is a point that needs the answer. Taking the type for one that
+   passes would guess it, and the backend cannot make the check
+   instead: it reads the lowered C, where the operand already stands
+   before the size expressions of the declaration. The measurement of
+   P21 counts these refusals.
 
 Rationale for the positions. C leaves the evaluation order of operands and
 arguments unspecified and sequences `&&`, `||`, `?:` and `,`. Hoisting a
@@ -1281,6 +1318,27 @@ An expression of a `result` type whose value is discarded is an error: as
 an expression statement, as the left operand of `,`, and as the first or
 third clause of `for`. Handle the value with `try` or `match`, store it, or
 discard it on purpose with a cast to `void`.
+
+A `result` type is what rule 1 of 5.1 asks of an operand: an instance
+of the `result` of the universe scope, under a typedef name or an alias
+as well, with top-level qualifiers or without.
+
+The value of a `try` is discarded as any other is. `try e;` where `T`
+is itself a `result` type tests the outer result and drops the inner
+one, and is an error; a declaration holds the `try` instead, and the
+inner result is handled from the object it declares.
+
+The rule goes by the position of the expression and not by whether it
+is evaluated: `sizeof(f(), 1)` is an error where `f` returns a
+`result`. A rule by evaluation would have to say which operands C
+evaluates, which for `sizeof` depends on a variably modified type, and
+a result dropped there is no more meant than one dropped elsewhere.
+
+The rule binds Type-C text (2.1), judged by the first token of the
+expression. C text keeps C's meaning (2.2): C drops a structure value
+without a word, and a header that C compiles as well means the same in
+both. Only a Type-C declaration makes a value of a `result` type, so C
+text holds one only where it is written against such a declaration.
 
 ### 5.3 Other error conventions
 
@@ -2371,7 +2429,12 @@ answer.
 
 1. `#pragma typec checked`, at file scope in Type-C text, makes the rest of
    that file *checked text*; `#pragma typec unchecked` ends it. The state
-   does not carry into an included file or out of one.
+   does not carry into an included file or out of one. A `#pragma typec`
+   line in moved text (13.5) is an error: the line sets the state of the
+   place where it stands, and lowering writes moved text at other
+   places. The operand of a `try` and a deferred statement are the
+   moved text that could hold one; the definition of a generic holds no
+   pragma at all (10.3).
 2. A function defined in checked text is a *checked function*, and its body
    obeys 11.2.
 3. A function declared in checked text is a *trusted contract*: its author
@@ -3083,7 +3146,7 @@ Two properties follow by construction:
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
-| `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. Where `T` is `void`, `Ok` has no field (3.5 rule 6) and nothing is read after the test. |
+| `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. A statement `try e;` reads no field: nothing is written after its test, as said below the table. It is the one position of a `try` whose `T` is `void` (5.1 rule 2), where `Ok` has no field (3.5 rule 6). Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
 | `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. A `return e;` in the scope becomes a block, as said below the table. |
 | Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes, named as said below the table. |
 | Checked-mode checks | Inline tests that trap. |
@@ -3115,9 +3178,14 @@ under their own names (4.1).
 in the same block, so the operand is moved text. The temporary is named
 `__tc_t` and a number, which counts the `try` expressions of the
 function from 0 in the order of the source: the temporaries of one block
-share a scope, so each needs a name of its own. The labels of the
-statement stay in place on a null statement, `L: ;`, and the temporary,
-the test and the statement follow it. No block is then made around a
+share a scope, so each needs a name of its own. A temporary is
+declared as `const struct R __tc_t0 = e;`, where `struct R` names the
+instance of the operand's type by its claimed tag (10.3) and `e` is the
+operand, as the copy that a `match` holds of its scrutinee is declared:
+no declaration hides a claimed name (10.1 rule 6), and nothing writes
+to the temporary after its initialiser. The labels of the statement
+stay in place on a null statement, `L: ;`, and the temporary, the test
+and the statement follow it. No block is then made around a
 labelled statement, and a tag that the statement declares keeps the
 scope it has in the source. Where the statement is not a block item once
 its labels are set aside, it is the substatement of another statement,
@@ -3126,6 +3194,12 @@ made around the null statement of the labels and the three, so the
 labels stay inside the substatement: `if (c) L: x = try f();` becomes
 `if (c) { L: ; /* temporary, test */ x = /* the Ok field */; }`, with
 `L` under the `if`.
+
+Where the `try` is the whole statement, `try e;`, the temporary and the
+test are all that lowering writes, and no statement follows the test.
+A statement that only read the `Ok` field, `__tc_t0.u.Ok.value;`, would
+do nothing, and Apple Clang 21 and GCC 16 report it under `-Wall`
+(`-Wunused-value`).
 
 Nothing stands between the test and the statement, so a pragma before
 the statement or before one of its labels would come to stand before
@@ -3475,7 +3549,12 @@ Of the kinds of moved text, a deferred statement and the operand of a
 `try` can hold a `#pragma` line. The definition of a generic holds
 none, since a generic whose definition holds one is an error (10.3).
 What the rules below say of a `#pragma` line of moved text they say of
-those two kinds.
+those two kinds. The line moves with the text: lowering writes it on a
+line of its own at its place among the tokens of the text, which for
+the operand of a `try` is in the initialiser of the temporary, before
+the statement or declaration that holds the `try`. A `#pragma typec`
+line is no such line: its state is that of its place in the file, and
+it is an error in moved text (11.1).
 
 Three rules carry the property into unread text.
 
@@ -3787,7 +3866,8 @@ unsafe-block:          "unsafe" compound-statement
 A type declaration with type parameters is an external declaration only.
 A `defer` statement is a block item and not a statement, so it is not the
 substatement of another statement (section 6 rule 11). `try` is written
-only in the positions of 5.1.
+only in the positions of 5.1, which gives a `try` in any other place one
+error, whether this grammar derives it there or not.
 An unqualified constructor is an ordinary identifier or call in the
 grammar; 3.3 decides its meaning. Slice indexing uses C's subscript
 syntax.
