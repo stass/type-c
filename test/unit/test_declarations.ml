@@ -1036,7 +1036,37 @@ let attributes () =
   declares "void (* __attribute__((mode(DI))) *pp)(void);" "pp"
     "object <the attribute 'mode'> * external static";
   declares "int (^ __attribute__((mode(DI))) b)(void);" "b"
-    "object <the attribute 'mode'> external static"
+    "object <the attribute 'mode'> external static";
+  (* Those that choose the code of a function for a processor, and
+     Clang's diagnose_if, leave its type alone. *)
+  List.iter
+    (fun attribute ->
+      declares
+        ("__attribute__((" ^ attribute ^ ")) int f(void);")
+        "f" "function int (void) external")
+    [ "target(\"avx2\")"; "target_clones(\"avx2\", \"default\")";
+      "target_version(\"default\")"; "cpu_dispatch(generic)";
+      "cpu_specific(generic)"; "diagnose_if(1, \"x\", \"warning\")" ]
+
+(* In a C23 specifier, Clang's own spelling [clang::x], or [_Clang::x], of
+   an attribute that has one is the GNU attribute [x]; Clang ignores it
+   for any other [x], so typec does not know it. Apple Clang 21 gives
+   none to noreturn. *)
+let clang_spellings () =
+  List.iter
+    (fun prefix ->
+      declares
+        ("int f(int); [[" ^ prefix ^ "::overloadable]] int f(long);")
+        "f" "function int (long) external overload")
+    [ "clang"; "_Clang" ];
+  declares "[[clang::availability(macos, introduced=10.0)]] int f(void);"
+    "f" "function int (void) external";
+  declares "[[clang::cpu_specific(generic)]] int f(void);" "f"
+    "function int (void) external";
+  declares "[[clang::noreturn]] void f(void);" "f"
+    "function <the attribute 'clang::noreturn'> external";
+  declares "[[clang::target(\"avx2\")]] int f(void);" "f"
+    "function <the attribute 'clang::target'> external"
 
 (* Clang's [overloadable] makes a function one of an overload set of its
    name: an entity of its own, which redeclares nothing, is not linked and
@@ -2086,6 +2116,7 @@ let () =
   unknown_types ();
   fixed_enumerations ();
   attributes ();
+  clang_spellings ();
   overloads ();
   specifier_combinations ();
   storage_classes ();

@@ -485,30 +485,94 @@ type attribute_effect =
   | Sets_gnu_inline
   | Makes_overload
 
+(* An attribute that the declarations accept. [clang_spelling] says that
+   Clang also accepts it as [[clang::name]] in a C23 specifier; for any
+   other name Clang ignores that spelling, as it does [clang::noreturn]. *)
+type attribute_entry = {
+  gnu_name : string;
+  attribute_effect : attribute_effect;
+  clang_spelling : bool;
+}
+
 (* The GNU attributes that the declarations accept, each with its effect.
    [aligned] is neutral because typec leaves [_Alignof] and the sizes of
    records and arrays to the backend (design P16) and the attribute does
    not change the size of a scalar; it leaves this table once typec
    computes a layout. The rest shape diagnostics or code. Any other
    attribute may change a type, as [mode] and [vector_size] do, so the
-   type it applies to is unknown (design 13.3). *)
+   type it applies to is unknown (design 13.3). The entries with Clang's
+   spelling are those for which Apple Clang 21 gives a nonzero
+   [__has_c_attribute(clang::name)]. *)
 let attribute_effects =
-  [ ("alloc_align", Neutral); ("alloc_size", Neutral); ("aligned", Neutral);
-    ("always_inline", Neutral); ("availability", Neutral); ("cold", Neutral);
-    ("const", Neutral); ("constructor", Neutral); ("deprecated", Neutral);
-    ("destructor", Neutral); ("disable_tail_calls", Neutral);
-    ("enum_extensibility", Neutral); ("flag_enum", Neutral);
-    ("format", Neutral); ("format_arg", Neutral);
-    ("gnu_inline", Sets_gnu_inline); ("hot", Neutral);
-    ("leaf", Neutral); ("malloc", Neutral); ("noescape", Neutral);
-    ("noinline", Neutral); ("nonnull", Neutral); ("noreturn", Sets_noreturn);
-    ("not_tail_called", Neutral); ("nothrow", Neutral);
-    ("overloadable", Makes_overload); ("pure", Neutral);
-    ("returns_nonnull", Neutral); ("section", Neutral); ("sentinel", Neutral);
-    ("swift_attr", Neutral); ("swift_name", Neutral);
-    ("unavailable", Neutral); ("unused", Neutral);
-    ("used", Neutral); ("visibility", Neutral);
-    ("warn_unused_result", Neutral); ("weak", Neutral) ]
+  let gnu_only gnu_name attribute_effect =
+    { gnu_name; attribute_effect; clang_spelling = false }
+  in
+  let also_clang gnu_name attribute_effect =
+    { gnu_name; attribute_effect; clang_spelling = true }
+  in
+  [
+    gnu_only "alloc_align" Neutral;
+    gnu_only "alloc_size" Neutral;
+    gnu_only "aligned" Neutral;
+    also_clang "always_inline" Neutral;
+    also_clang "availability" Neutral;
+    gnu_only "cold" Neutral;
+    gnu_only "const" Neutral;
+    gnu_only "constructor" Neutral;
+    also_clang "cpu_dispatch" Neutral;
+    also_clang "cpu_specific" Neutral;
+    gnu_only "deprecated" Neutral;
+    gnu_only "destructor" Neutral;
+    gnu_only "diagnose_if" Neutral;
+    also_clang "disable_tail_calls" Neutral;
+    also_clang "enum_extensibility" Neutral;
+    also_clang "flag_enum" Neutral;
+    gnu_only "format" Neutral;
+    gnu_only "format_arg" Neutral;
+    gnu_only "gnu_inline" Sets_gnu_inline;
+    gnu_only "hot" Neutral;
+    gnu_only "leaf" Neutral;
+    gnu_only "malloc" Neutral;
+    also_clang "noescape" Neutral;
+    also_clang "noinline" Neutral;
+    gnu_only "nonnull" Neutral;
+    gnu_only "noreturn" Sets_noreturn;
+    also_clang "not_tail_called" Neutral;
+    gnu_only "nothrow" Neutral;
+    also_clang "overloadable" Makes_overload;
+    gnu_only "pure" Neutral;
+    gnu_only "returns_nonnull" Neutral;
+    gnu_only "section" Neutral;
+    gnu_only "sentinel" Neutral;
+    gnu_only "swift_attr" Neutral;
+    gnu_only "swift_name" Neutral;
+    gnu_only "target" Neutral;
+    gnu_only "target_clones" Neutral;
+    gnu_only "target_version" Neutral;
+    also_clang "unavailable" Neutral;
+    gnu_only "unused" Neutral;
+    gnu_only "used" Neutral;
+    gnu_only "visibility" Neutral;
+    gnu_only "warn_unused_result" Neutral;
+    gnu_only "weak" Neutral;
+  ]
+
+(* The prefix that the parser keeps on Clang's spelling of an attribute
+   (Tree.attribute). *)
+let clang_prefix = "clang::"
+
+(* The entry of the attribute that the parser names [name]: its GNU name,
+   or Clang's spelling of one that has it. *)
+let find_attribute_entry name =
+  if String.starts_with ~prefix:clang_prefix name then
+    let prefix_length = String.length clang_prefix in
+    let gnu_name =
+      String.sub name prefix_length (String.length name - prefix_length)
+    in
+    List.find_opt
+      (fun entry -> entry.clang_spelling && entry.gnu_name = gnu_name)
+      attribute_effects
+  else List.find_opt (fun entry -> entry.gnu_name = name) attribute_effects
 
 let no_attributes =
   { gnu_noreturn = false; gnu_inline = false; overloadable = false;
@@ -522,13 +586,13 @@ let read_attributes ~onto (attributes : Tree.attribute list) =
       effect_attribute = first attributed.effect_attribute attribute }
   in
   let apply attributed (attribute : Tree.attribute) =
-    match List.assoc_opt attribute.node.name.node attribute_effects with
-    | Some Neutral -> attributed
-    | Some Sets_noreturn ->
+    match find_attribute_entry attribute.node.name.node with
+    | Some { attribute_effect = Neutral; _ } -> attributed
+    | Some { attribute_effect = Sets_noreturn; _ } ->
         with_effect { attributed with gnu_noreturn = true } attribute
-    | Some Sets_gnu_inline ->
+    | Some { attribute_effect = Sets_gnu_inline; _ } ->
         with_effect { attributed with gnu_inline = true } attribute
-    | Some Makes_overload ->
+    | Some { attribute_effect = Makes_overload; _ } ->
         with_effect { attributed with overloadable = true } attribute
     | None ->
         { attributed with

@@ -1308,8 +1308,9 @@ let attributes state =
    attribute is read as the GNU attribute it means, so that one table of
    effects serves both forms: [gnu::name] is the GNU attribute [name], a
    standard attribute is the GNU attribute of the same meaning, and
-   another vendor's keeps its prefix, which no GNU attribute has. An
-   attribute without a prefix that C23 does not define is left out, as
+   Clang's or another vendor's keeps its prefix, as only the table of
+   effects knows which GNU attributes Clang also spells [clang::name].
+   An attribute without a prefix that C23 does not define is left out, as
    GCC and Clang ignore it. *)
 
 (* The C23 attributes and the GNU attributes they mean; [unsequenced] and
@@ -1322,6 +1323,10 @@ let standard_attribute_meanings =
     ("noreturn", "noreturn"); ("_Noreturn", "noreturn");
     ("unsequenced", "unsequenced"); ("reproducible", "reproducible") ]
 
+(* The prefix of a vendor as Clang reads it, which takes [_Clang] for
+   [clang]. *)
+let vendor_prefix prefix = if prefix = "_Clang" then "clang" else prefix
+
 (* The name that a C23 attribute has as a GNU attribute, if any; the
    prefix and its [::], two [:] tokens in C11, are read here. *)
 let standard_attribute_name state =
@@ -1332,7 +1337,7 @@ let standard_attribute_name state =
       expect state P.Colon "`::` in an attribute name";
       let name = attribute_name state in
       if first.node = "gnu" then Some name.node
-      else Some (first.node ^ "::" ^ name.node)
+      else Some (vendor_prefix first.node ^ "::" ^ name.node)
     end
     else List.assoc_opt first.node standard_attribute_meanings
   in
