@@ -107,8 +107,22 @@ type t =
           [int (void)], and Clang refuses [typeof(&f) p = cf;], a later
           [int cf(void);] and
           [typedef const int F(void); typedef int F(void);], which GCC
-          accepts. Both keep [_Atomic], and both give [cf()] the type
-          [int]. GCC 16 and Clang 21 (Apple) give these answers. *)
+          accepts. Both keep [_Atomic] in the function type. GCC 16 and
+          Clang 21 (Apple) give these answers. *)
+  | Value_qualifiers of Qualifiers.t
+      (** The value of a call of a function whose return type has these
+          qualifiers, or of a cast to a type with them. Both compilers
+          drop [const], [volatile] and [restrict]. GCC drops [_Atomic]
+          too, and Clang keeps it and converts the value no further.
+          With [_Atomic int af(void);], [__typeof__(af())] and
+          [__typeof__((_Atomic int)x)] are [_Atomic int] in Clang and
+          [int] in GCC, and [_Generic(af(), int: 1, _Atomic int: 2)] is 2
+          and 1. Clang takes such a value only whole and as the left
+          operand of [*], [/], [%], [+], [-], [&], [^] and [|] with an
+          arithmetic right one: it accepts [af() + 1], of type [int], and
+          refuses [x + af()], [af() << 1], [af() == 0], [x = af()] and
+          [if (af())], which GCC accepts. GCC 16 and Clang 21 (Apple)
+          give these answers. *)
 
 val answer :
   Target.t -> t -> Typec_cpp.Location.t -> 'a -> 'a Unknown.answer

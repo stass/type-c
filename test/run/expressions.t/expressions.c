@@ -22,6 +22,9 @@ int h();
 double vd(void);
 const int cf(void);
 _Atomic int af(void);
+const _Atomic int caf(void);
+_Atomic struct s asf(void);
+struct atomic_member { _Atomic int a; } amf(void);
 int (*ifp)(void);
 struct s sf(void);
 int (*fp)(int);
@@ -163,6 +166,13 @@ void differences(int x, struct bits v, struct qualified q,
 	__builtin_types_compatible_p(__typeof__(cf), const int (void));
 	__builtin_types_compatible_p(__typeof__(cf), long (void));
 	x ? &cf : ifp; x ? &cf : &cf;
+	af(); caf(); asf(); (0, af()); x ? af() : af(); sizeof af();
+	_Generic(af(), _Atomic int: 1L, default: 2);
+	_Generic((0, af()), _Atomic int: 1L, default: 2);
+	_Generic(x ? af() : af(), _Atomic int: 1L, default: 2);
+	amf().a; amf().a + 0; _Generic(amf().a, int: 1L, default: 2);
+	af() + 1; af() + 1.0f; (_Atomic int)x; x ? (_Atomic int)x : af();
+	_Generic((_Atomic int)x, _Atomic int: 1L, default: 2);
 }
 
 void blocks(int n)

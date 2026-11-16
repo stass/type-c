@@ -449,7 +449,10 @@ let return_qualifiers () =
   declares "const int cf(void);" "cf" "function const int (void) external";
   rejects ~target:lp64_clang "const int cf(void); int cf(void);" "6.7p4";
   declares "const int cf(void); int cf(void);" "cf"
-    ("function " ^ qualifiers ^ " external");
+    ("function " ^ qualifiers ^ " (void) external");
+  (* Only the return type is unknown, so a call's arguments are counted. *)
+  rejects "const int cf(void); int cf(void); void t(void) { cf(1); }"
+    "6.5.2.2p2";
   declares "const int cf(void); const int cf(void);" "cf"
     "function const int (void) external";
   rejects "_Atomic int af(void); int af(void);" "6.7p4";

@@ -74,4 +74,4 @@ let location unit offset =
   else tokens.(token_at tokens offset).location
 
 let category (typed : Expressions.typed) =
-  if typed.lvalue then "lvalue" else "rvalue"
+  if typed.category = Lvalue then "lvalue" else "rvalue"

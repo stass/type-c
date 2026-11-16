@@ -676,7 +676,7 @@ let return_qualifiers () =
   let compatible target a b = Ctype.compatible target tags location a b
   and composite target a b = Ctype.composite target tags location a b
   and same_type target a b = Ctype.same_type target tags location a b in
-  let unknown_function = Ctype.unknown (unknown Unknown_function) in
+  let unknown_return = returning (Ctype.unknown (unknown Unknown_object)) in
   check "const int (void), int (void) with Clang"
     (compatible lp64_clang const_int plain_int) (Answer false)
   && check "const int (void), int (void) with GCC"
@@ -694,10 +694,10 @@ let return_qualifiers () =
   && check "composite of const int (void), int (void) with Clang"
        (composite lp64_clang const_int plain_int) (Error Incompatible)
   && check "composite of const int (void), int (void) with GCC"
-       (composite lp64 const_int plain_int) (Ok unknown_function)
+       (composite lp64 const_int plain_int) (Ok unknown_return)
   && check "composite of const int (*)(void), int (*)(void) with GCC"
        (composite lp64 (pointer const_int) (pointer plain_int))
-       (Ok (pointer unknown_function))
+       (Ok (pointer unknown_return))
   && check "composite of const int (void), long (void) with GCC"
        (composite lp64 const_int plain_long) (Error Incompatible)
   && check "same type const int (void), int (void) with Clang"

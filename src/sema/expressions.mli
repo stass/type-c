@@ -50,14 +50,31 @@ type field = {
     and a comma whose right operand is one. *)
 type bit_field = Not_bit_field | Bit_field of field | Bit_field_value of field
 
+(** Whether an expression is an lvalue, and whether lvalue conversion
+    (6.3.2.1p2) applies to it as it does to one. *)
+type category =
+  | Lvalue
+  | Value
+      (** No lvalue. Clang converts it as an lvalue: a member of a
+          structure that is no lvalue has the qualifiers of the member,
+          and its value has none. *)
+  | Atomic_value
+      (** The value of an [_Atomic] type that Clang gives the call of a
+          function returning one, a cast to one, and a comma or
+          conditional expression of such values. Clang converts no such
+          value, so it keeps [_Atomic], and takes one only whole and as
+          the left operand of [*], [/], [%], [+], [-], [&], [^] and [|]
+          with an arithmetic right one, whose usual arithmetic
+          conversions drop [_Atomic]. *)
+
 (** What typing gives an expression. [expression_type] is the type that
     Clang gives the expression itself, before the conversions of its
     context: an lvalue keeps its qualifiers, an array and a function
-    their own types (6.3.2.1); {!Ctype.lvalue_conversion} gives the type
-    of its value. *)
+    their own types (6.3.2.1); its value has the type that
+    {!Ctype.lvalue_conversion} gives, unless it is an [Atomic_value]. *)
 type typed = {
   expression_type : Ctype.t;
-  lvalue : bool;
+  category : category;
   bit_field : bit_field;
 }
 

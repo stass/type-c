@@ -845,20 +845,18 @@ and enum_integer_composite comparison integer_type =
   | Depends_on unknown -> make integer_type.qualifiers (Unknown_type unknown)
 
 (* 6.7.6.3p15: the return types [a] and [b] are compatible. Where the
-   backend decides whether their qualifiers are, the composite is an
-   unknown function type, and the returns are compared as if equally
-   qualified, so that a difference elsewhere still decides. *)
+   backend decides whether their qualifiers are, the composite returns an
+   unknown type, and the returns are compared as if equally qualified,
+   so that a difference elsewhere still decides. *)
 and merge_function comparison a b parameters =
   match return_qualifiers_differ comparison a b with
   | Answer false ->
       of_shape (Function { return = merge comparison a b; parameters })
   | Answer true -> raise Not_compatible
-  (* The verdict's unknown stays an object, as the value of a construct
-     that compares; the composite is a function type. *)
   | Depends_on backend ->
       passed_over comparison.dependence backend;
       ignore (merge comparison (qualified_as b a) b);
-      unknown { backend with kind = Unknown_function }
+      of_shape (Function { return = unknown backend; parameters })
 
 (* 6.7.6.3p15 and 6.2.7p3: a prototype gives the composite its parameter
    types; without one the parameters are not compared, except that an

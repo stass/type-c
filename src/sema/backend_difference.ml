@@ -16,6 +16,7 @@ type t =
       composite_prototype : bool;
     }
   | Return_qualifiers of Qualifiers.t * Qualifiers.t
+  | Value_qualifiers of Qualifiers.t
 
 let construct = function
   | Narrow_bit_field _ -> "the value of a bit-field narrower than its type"
@@ -27,6 +28,7 @@ let construct = function
   | Enum_integer_composite ->
       "the composite of an enumerated type and its integer type"
   | Return_qualifiers _ -> "the qualifiers of a function's return type"
+  | Value_qualifiers _ -> "the _Atomic type of a call or cast"
 
 (* GCC leaves a bit-field of a type ranked above int and at least as wide
    as int unpromoted, where Clang promotes:
@@ -63,6 +65,7 @@ let differs_in_gcc target = function
      _Atomic differs. *)
   | Return_qualifiers (first, second) ->
       first <> second && first.atomic = second.atomic
+  | Value_qualifiers qualifiers -> qualifiers.atomic
 
 let answer (target : Target.t) difference location clang : _ Unknown.answer =
   let differs =

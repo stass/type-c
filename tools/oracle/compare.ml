@@ -179,7 +179,7 @@ let check report allow_list unit resolve (record : Record.t)
   let line = disagreement unit record typed in
   match Normalisation.retyped record with
   | Some why -> unresolved report unit record why
-  | None when clang_lvalue record <> typed.lvalue ->
+  | None when clang_lvalue record <> (typed.category = Lvalue) ->
       disagree report allow_list line
   | None ->
       compare_types report allow_list unit record typed line

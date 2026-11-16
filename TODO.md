@@ -414,16 +414,27 @@ is [type-c-language-design.md](type-c-language-design.md).
   selection in pairs: 20000 of them take 26 s, where GCC and Clang, as
   quadratic, take 4 s.
 
+- [Low] `Initialiser.reach_of` converts the raw type of an initialiser
+  itself, which drops the `_Atomic` of a call or cast
+  (`Expressions.value_type` keeps it), so with
+  `_Atomic struct s as(void);` typec reads `struct w { struct s a; } v =
+  { as() };` as initialising `a` whole, where Clang elides its braces
+  and refuses the initialiser. Clang lets an `_Atomic` subobject take
+  `T` and `_Atomic T` whole, and a plain one only `T`; the typing
+  callback could give the value type beside the raw one.
+- [Low] An integer constant expression of an `_Atomic` type, as
+  `(_Atomic int)1`, is decided from its type in an enumerator, an array
+  length and `_Static_assert` and through `operand` in a case label, so
+  with Clang typec accepts the first three, which Clang refuses, and
+  refuses the last; with GCC, which accepts all four, the unknown type of
+  the cast makes typec refuse an enumerator and a file-scope array
+  length. One path for whether a constant expression has integer type
+  would settle both.
+- [Low] Clang refuses `aip += 1` with `int *_Atomic aip` and GCC accepts
+  it; typec accepts it with both.
+
 ## Declarations
 
-- [Medium] Clang types a call of `_Atomic int af(void)` as
-  `_Atomic(int)`, GCC as `int`, and typec as `int`, so `x + af()`
-  passes typec and Clang refuses it; add a `Backend_difference` entry
-  for the call type of an `_Atomic` return (design 13.3).
-- [Low] With GCC as the backend, a redeclaration that turns on return
-  qualifiers makes the function's whole type unknown, so typec no
-  longer checks its calls' argument counts (GCC still does); make only
-  the return type unknown.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it

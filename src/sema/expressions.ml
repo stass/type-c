@@ -12,7 +12,13 @@ type field = {
 
 type bit_field = Not_bit_field | Bit_field of field | Bit_field_value of field
 
-type typed = { expression_type : Ctype.t; lvalue : bool; bit_field : bit_field }
+type category = Lvalue | Value | Atomic_value
+
+type typed = {
+  expression_type : Ctype.t;
+  category : category;
+  bit_field : bit_field;
+}
 
 type flaw =
   | Comma_operator of Tree.span
@@ -314,11 +320,25 @@ let checked context span = function
   | Ok t -> t
   | Error error -> context.fail span (Rule.c_text (Ctype.error_message error))
 
-let value expression_type =
-  { expression_type; lvalue = false; bit_field = Not_bit_field }
+(* Clang gives a value an _Atomic type only where it converts none
+   ([value_type]), so a value built with one is an [Atomic_value]; a
+   member, which Clang converts, has its category from [member_category]
+   instead. *)
+let value (expression_type : Ctype.t) =
+  let category =
+    if expression_type.qualifiers.atomic then Atomic_value else Value
+  in
+  { expression_type; category; bit_field = Not_bit_field }
 
 let lvalue expression_type =
-  { expression_type; lvalue = true; bit_field = Not_bit_field }
+  { expression_type; category = Lvalue; bit_field = Not_bit_field }
+
+(* 6.3.2.1p2-4: the type of the value of a typed expression. Clang
+   converts a value as it does an lvalue, but for an _Atomic one. *)
+let value_type typed =
+  match typed.category with
+  | Atomic_value -> typed.expression_type
+  | Lvalue | Value -> Ctype.lvalue_conversion typed.expression_type
 
 (* What the value of an expression of [bit_field] is: Clang promotes the
    value of an assignment to a bit-field, of a prefix [++] of one and of a
@@ -522,7 +542,7 @@ let pointers_differ context span (a : Ctype.t) (b : Ctype.t) =
    the value, or the backend refuses it. *)
 let refuse_distinct_conversion context span target (typed : typed) =
   let target = Ctype.unqualified target in
-  let source = Ctype.lvalue_conversion typed.expression_type in
+  let source = value_type typed in
   let crosses =
     match (target.shape, source.shape) with
     | Pointer t, Pointer s -> pointers_differ context span t s
@@ -574,12 +594,16 @@ type operand =
   | Distinct_operand of Ctype.t
       (** A scalar that takes only the operations of design 3.4. *)
   | Other_operand of Ctype.t
-      (** void, a structure or union, [va_list], an incomplete enumeration *)
+      (** void, a structure or union, [va_list], an incomplete
+          enumeration, an [Atomic_value] *)
 
 let value_operand context (t : Ctype.t) =
   match t.shape with
-  | Pointer referenced -> Pointer_operand { pointer = t; referenced }
   | Unknown_type unknown -> Unknown_operand unknown
+  (* Only an [Atomic_value] has an _Atomic value type, and Clang takes
+     it for no arithmetic or pointer value but in [arithmetic_binary]. *)
+  | _ when t.qualifiers.atomic -> Other_operand t
+  | Pointer referenced -> Pointer_operand { pointer = t; referenced }
   | Distinct _ -> Distinct_operand t
   | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _ | Function _
     -> (
@@ -615,7 +639,7 @@ let operand context (typed : typed) =
   | None, (Bit_field field | Bit_field_value field) ->
       bit_field_operand context field
   | None, Not_bit_field ->
-      value_operand context (Ctype.lvalue_conversion typed.expression_type)
+      value_operand context (value_type typed)
 
 (* Refuses an operation at [span] in Type-C text on two pointers that
    [pointers_differ] keeps apart. *)
@@ -657,7 +681,7 @@ let require_modifiable context span ~clause (typed : typed) =
   | Unknown_type _ -> ()
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Array _ | Function _ ->
-      if not typed.lvalue then
+      if typed.category <> Lvalue then
         context.fail span
           (Rule.c_text ("the operand is not an lvalue (C11 " ^ clause ^ ")"));
       if t.qualifiers.const || Ctype.is_array t = Answer true then
@@ -916,10 +940,16 @@ let bit_field_integer context (member : Ctype.member) : Integer.t Unknown.answer
   | Answer (Some (Real _ | Complex _) | None) ->
       invalid_arg "Expressions: a bit-field of no integer type"
 
+(* 6.5.2.3p3, p4: a member of an lvalue is one, and Clang converts a
+   member of a value as it does an lvalue. *)
+let member_category = function
+  | Lvalue -> Lvalue
+  | Value | Atomic_value -> Value
+
 (* 6.5.2.3p3, p4: the member, qualified as the structure is but for
    _Atomic, whose members are not accessed (p5). *)
 let member_of context tag (qualifiers : Qualifiers.t)
-    (name : Tree.identifier) ~lvalue =
+    (name : Tree.identifier) ~category =
   if Ctype.record_members context.tags tag = None then
     context.fail name.span
       (Rule.c_text
@@ -944,7 +974,7 @@ let member_of context tag (qualifiers : Qualifiers.t)
           qualified
       in
       match member.bit_field_width with
-      | None -> { expression_type; lvalue; bit_field = Not_bit_field }
+      | None -> { expression_type; category; bit_field = Not_bit_field }
       | Some width ->
           let integer = bit_field_integer context member in
           let narrow = Backend_difference.Narrow_bit_field { integer; width } in
@@ -954,15 +984,18 @@ let member_of context tag (qualifiers : Qualifiers.t)
             else backend_type context location narrow expression_type
           in
           { expression_type = value_type;
-            lvalue;
+            category;
             bit_field = Bit_field { width; integer; location } })
 
 let direct_member context span (record : typed) name =
   let t = record.expression_type in
   match t.shape with
-  | Record tag -> member_of context tag t.qualifiers name ~lvalue:record.lvalue
+  | Record tag ->
+      member_of context tag t.qualifiers name
+        ~category:(member_category record.category)
   | Unknown_type unknown ->
-      { (value (unknown_value unknown)) with lvalue = record.lvalue }
+      { (value (unknown_value unknown)) with
+        category = member_category record.category }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ ->
       context.fail span
@@ -977,7 +1010,7 @@ let pointer_member context span (pointer : typed) name =
       { referenced = { shape = Record tag; qualifiers; _ } as referenced; _ }
     ->
       refuse_variant context span referenced;
-      member_of context tag qualifiers name ~lvalue:true
+      member_of context tag qualifiers name ~category:Lvalue
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
       lvalue (unknown_value unknown)
@@ -1018,15 +1051,22 @@ let check_arity context span (parameters : Ctype.parameters) count =
               take (C11 6.5.2.2p2)")
   | Unspecified | Old_style _ -> ()
 
-(* 6.5.2.2p1, p5: the callee is a pointer to a function, after the
-   conversion of a function designator; the call has its return type,
-   unqualified as a value is. *)
+(* 6.5.2.2p5 and 6.5.4p5: the value of a call or a cast has the type
+   [t], unqualified as a value is but for _Atomic, which Clang keeps. *)
+let call_or_cast_type context span (t : Ctype.t) =
+  let kept = { Qualifiers.none with atomic = t.qualifiers.atomic } in
+  let clang = checked context span (Ctype.qualify kept (Ctype.unqualified t)) in
+  backend_type context (location_of context span)
+    (Value_qualifiers t.qualifiers) clang
+
+(* 6.5.2.2p1: the callee is a pointer to a function, after the
+   conversion of a function designator. *)
 let call_type context span (callee : typed) count =
   match operand context callee with
   | Pointer_operand
       { referenced = { shape = Function { return; parameters }; _ }; _ } ->
       check_arity context span parameters count;
-      Ctype.unqualified return
+      call_or_cast_type context span return
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
       unknown_value unknown
@@ -1042,8 +1082,7 @@ let call_type context span (callee : typed) count =
 let increment context span ~clause (typed : typed) =
   require_modifiable context span ~clause typed;
   match operand context typed with
-  | Arithmetic_operand _ | Pointer_operand _ ->
-      value (Ctype.lvalue_conversion typed.expression_type)
+  | Arithmetic_operand _ | Pointer_operand _ -> value (value_type typed)
   | Unknown_operand unknown -> value (unknown_value unknown)
   | Distinct_operand _ | Other_operand _ -> fail_operands context span clause
 
@@ -1054,7 +1093,7 @@ let address context span (typed : typed) =
   if designates_bit_field typed then
     context.fail span
       (Rule.c_text "the address of a bit-field (C11 6.5.3.2p1)");
-  if (not typed.lvalue) && Ctype.is_function t = Answer false then
+  if typed.category <> Lvalue && Ctype.is_function t = Answer false then
     context.fail span
       (Rule.c_text "the address of what is not an lvalue (C11 6.5.3.2p1)");
   value (checked context span (Ctype.pointer_to t))
@@ -1063,8 +1102,8 @@ let address context span (typed : typed) =
 let indirection context span typed =
   match operand context typed with
   | Pointer_operand { referenced; _ } ->
-      { (value referenced) with
-        lvalue = Ctype.is_function referenced <> Answer true }
+      if Ctype.is_function referenced = Answer true then value referenced
+      else lvalue referenced
   | Unknown_operand unknown ->
       lvalue (Ctype.unknown { unknown with kind = Object_or_function })
   | Arithmetic_operand _ | Distinct_operand _ | Other_operand _ ->
@@ -1092,7 +1131,7 @@ let arithmetic_unary context span ~integer typed =
 (* Clang takes either part of a bit-field as its value; GCC's real part
    of one is the bit-field itself. *)
 let bit_field_part context span ~imaginary (typed : typed) =
-  let part = value (Ctype.lvalue_conversion typed.expression_type) in
+  let part = value (value_type typed) in
   if imaginary then part
   else
     match
@@ -1114,7 +1153,7 @@ let other_part context span ~imaginary (typed : typed) =
       let part = arithmetic_type context span (Real floating) in
       let part = checked context span (Ctype.qualify t.qualifiers part) in
       { typed with expression_type = part; bit_field = Not_bit_field }
-  | Arithmetic_operand _ when imaginary -> value (Ctype.lvalue_conversion t)
+  | Arithmetic_operand _ when imaginary -> value (value_type typed)
   | Arithmetic_operand _ -> typed
   | Unknown_operand unknown ->
       { typed with expression_type = unknown_value unknown }
@@ -1128,10 +1167,19 @@ let complex_part context span ~imaginary typed =
 
 (* Binary operators (6.5.5 to 6.5.14) *)
 
+(* Clang's usual arithmetic conversions for [*], [/], [%], [+], [-],
+   [&], [^] and [|] take the left operand without _Atomic, for a compound
+   assignment, and so an [Atomic_value] there; those of a comparison or a
+   conditional do not. *)
+let without_atomic context = function
+  | Other_operand t when t.qualifiers.atomic ->
+      value_operand context (Ctype.unqualified t)
+  | operand -> operand
+
 (* The usual arithmetic conversions of two arithmetic operands, each of
    an integer type where [integer] says so. *)
 let arithmetic_binary context span ~integer ~clause left right =
-  match (left, right) with
+  match (without_atomic context left, right) with
   | Arithmetic_operand a, Arithmetic_operand b
     when (not integer) || (is_integer a.arithmetic && is_integer b.arithmetic)
     ->
@@ -1570,7 +1618,7 @@ let identifier_constant context span name (resolution : Tree.resolution)
   match resolution with
   (* [__func__] and its kin are static arrays, a builtin the backend's. *)
   | Undeclared ->
-      if typed.lvalue then
+      if typed.category = Lvalue then
         itself (Designator { static_storage = true; named = false })
       else itself Backend_constant
   | Resolved reference -> (
@@ -1588,9 +1636,8 @@ let identifier_constant context span name (resolution : Tree.resolution)
 (* 6.5.2.1p2: [e1[e2]] is [*(e1 + e2)]. An element of an array that a
    designator designates is part of that object. *)
 let subscript_kind context operand index =
-  let operand_type = (operand_typed context operand).expression_type in
   let pointer, offset =
-    match (Ctype.lvalue_conversion operand_type).shape with
+    match (value_type (operand_typed context operand)).shape with
     | Pointer _ -> (operand, index)
     | _ -> (index, operand)
   in
@@ -2259,7 +2306,6 @@ and expression_node context position (whole : Tree.expression) =
   | Alignof_expression operand ->
       ignore (as_whole operand);
       value (size_type context span)
-  (* 6.5.4p5: the value of a cast has the unqualified type. *)
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
       refuse_variant context span cast_type;
@@ -2269,7 +2315,7 @@ and expression_node context position (whole : Tree.expression) =
             ~described:("the distinct type " ^ distinct_name distinct))
         (Ctype.as_distinct cast_type);
       ignore (if discards cast_type then as_whole operand else typed operand);
-      value (Ctype.unqualified cast_type)
+      value (call_or_cast_type context span cast_type)
   | Binary (op, left, right) ->
       let left = typed left in
       value (binary_type context span op left (typed right))
@@ -2287,9 +2333,7 @@ and expression_node context position (whole : Tree.expression) =
   | Comma (left, right) ->
       ignore (as_whole left);
       let right = as_enclosing right in
-      { expression_type = Ctype.lvalue_conversion right.expression_type;
-        lvalue = false;
-        bit_field = value_of right.bit_field }
+      { (value (value_type right)) with bit_field = value_of right.bit_field }
   | Statement_expression block -> value (statement_expression context block)
   | Label_address _ -> value (void_pointer context span)
   | Va_arg { list; type_name } ->
@@ -2388,8 +2432,7 @@ and called_name (whole : Tree.expression) =
 and constructor_argument context named (field : Ctype.member) argument =
   let field_type = field.member_type in
   let argument_type =
-    Ctype.lvalue_conversion
-      (positioned context (Targeted field_type) argument).expression_type
+    value_type (positioned context (Targeted field_type) argument)
   in
   initialises_whole context field_type argument;
   let is_record t = Ctype.is_record t = Answer true in
@@ -2522,8 +2565,7 @@ and generic context span controlling associations =
   check_distinct context associations_typed;
   let default = default_association context associations_typed in
   let controlling_type =
-    Ctype.lvalue_conversion
-      (as_seen context span controlling_typed).expression_type
+    value_type (as_seen context span controlling_typed)
   in
   let types =
     controlling_type
@@ -2615,9 +2657,7 @@ and conditional context span position condition if_true if_false =
    pointer to void makes the result one. Whether an operand of a value
    that the backend computes is null is unknown, and so is the type. *)
 and pointer_conditional context span (second, a) (third, b) =
-  let pointer_type branch =
-    Ctype.lvalue_conversion branch.branch_typed.expression_type
-  in
+  let pointer_type branch = value_type branch.branch_typed in
   let is_void t = Ctype.is_void t = Answer true in
   let null branch referenced =
     if is_void referenced then null_pointer_constant context branch.branch
@@ -2671,9 +2711,7 @@ and assignment context span (op : Tree.assignment_operator) left right =
   (match op with
   | Assign -> ()
   | Compound_assign op -> ignore (binary_type context span op left right));
-  { expression_type = Ctype.lvalue_conversion left.expression_type;
-    lvalue = false;
-    bit_field = value_of left.bit_field }
+  { (value (value_type left)) with bit_field = value_of left.bit_field }
 
 (* GNU: the value of the last statement of the block, or void. *)
 and statement_expression context (block : Tree.block) =
@@ -2684,11 +2722,12 @@ and statement_expression context (block : Tree.block) =
 
 (* The value of an expression statement past the named labels before
    it, as Clang reads it; void for any other statement. The value is no
-   bit-field in Clang. *)
+   bit-field in Clang, and has no _Atomic type, as Clang refuses an
+   [Atomic_value] there. *)
 and statement_value context (statement : Tree.statement) =
   match statement.node with
   | Expression_statement value ->
-      Ctype.lvalue_conversion (operand_typed context value).expression_type
+      Ctype.unqualified (value_type (operand_typed context value))
   | Labeled { label = { node = Named_label _; _ }; statement = labeled } ->
       statement_value context labeled
   | Labeled

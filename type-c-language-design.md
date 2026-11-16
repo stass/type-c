@@ -2763,8 +2763,13 @@ holds the two incompatible: with `const int cf(void);`, `int
 (*p)(void) = cf;` is an error to Clang and none to GCC. GCC keeps
 `_Atomic` in the function type, as Clang does, and both refuse
 `_Atomic int af(void); int af(void);`, so the entry covers the three
-qualifiers and not `_Atomic`. With GCC as the backend each of these
-has an unknown type
+qualifiers and not `_Atomic`. GCC does drop `_Atomic` from the value of
+a call of such a function, and of a cast to an `_Atomic` type, which
+Clang keeps and converts no further, so that Clang takes the value
+only whole and as the left operand of `*`, `/`, `%`, `+`, `-`, `&`, `^`
+and `|`: `_Generic(af(), int: 1, default: 2)` is 1 in GCC and 2 in
+Clang. With
+GCC as the backend each of these has an unknown type
 (P21) wherever GCC's type differs from Clang's, and the real part of a
 bit-field, which differs in being an lvalue, has one too: the front end
 neither guesses GCC's type nor refuses what GCC accepts, and the error
@@ -2777,11 +2782,11 @@ and is left to GCC with GCC. One table, `Backend_difference`, holds the
 constructs, what GCC does and a probe of each, and decides for every
 place that types one. GCC 14 to 16 and Clang 20 to 22 confirm every
 entry but the old-style definition and the composite, which GCC 16 and
-Clang 21 to 23 confirm, and the return type, which is measured on GCC
-16.2 and Apple Clang 21 only. One rule for the class replaces a policy
-per
-construct: the front end models one compiler's typing, and the other
-costs an unknown type where it differs, not a second model.
+Clang 21 to 23 confirm, and the return type and the call or cast, which
+are measured on GCC 16.2 and Apple Clang 21 only. One rule for the class
+replaces a policy per construct: the front end models one compiler's
+typing, and the other costs an unknown type where it differs, not a
+second model.
 *Provisional:* the table holds the differences that probes have found;
 a construct that the typing oracle or the corpus shows GCC typing
 otherwise joins it, and without one the table stays.

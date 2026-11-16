@@ -83,7 +83,7 @@ let probed (unit : Tree.translation_unit) =
 let describe (typed : Expressions.typed) =
   String.concat ""
     [ Type_name.of_ctype typed.expression_type;
-      (if typed.lvalue then " lvalue" else "");
+      (if typed.category = Lvalue then " lvalue" else "");
       (match typed.bit_field with
       | Bit_field field -> Printf.sprintf " :%d" field.width
       | Bit_field_value field -> Printf.sprintf " value:%d" field.width
@@ -682,12 +682,74 @@ let return_qualifiers () =
     ~clang:"long" ~gcc:"long";
   both ~declarations "_Generic(&af, int (*)(void): 1L, default: 2)"
     ~clang:"int" ~gcc:"int";
-  both ~declarations "x ? &cf : fp" ~clang:"void *" ~gcc:(qualifiers ^ " *");
+  both ~declarations "x ? &cf : fp" ~clang:"void *"
+    ~gcc:(qualifiers ^ " (*)(void)");
   both ~declarations "x ? &cf : &cf" ~clang:"const int (*)(void)"
     ~gcc:"const int (*)(void)";
   accepts_source "const int g(void) { return 1; }";
   accepts_source
     "struct s { int m; }; const struct s g(struct s v) { return v; }"
+
+(* Clang gives the call of a function that returns an _Atomic type, and
+   a cast to one, that type, which no lvalue conversion removes; only
+   those of * / % + - & ^ | with it on the left drop _Atomic.
+   GCC gives the unqualified type, so with GCC the value is unknown. A
+   member of a structure that a call gives converts as an lvalue does. *)
+let atomic_returns () =
+  let declarations =
+    "struct s { int m; }; _Atomic int af(void); const _Atomic int caf(void); \
+     _Atomic struct s as(void); struct t { _Atomic int a; } tf(void); \
+     _Atomic char acf(void); int *_Atomic apf(void); \
+     _Atomic int ax; int x; int *ip; "
+  in
+  let call = "<the _Atomic type of a call or cast>" in
+  both ~declarations "af()" ~clang:"_Atomic int" ~gcc:call;
+  both ~declarations "caf()" ~clang:"_Atomic int" ~gcc:call;
+  both ~declarations "as()" ~clang:"_Atomic struct s" ~gcc:call;
+  both ~declarations "_Generic(af(), int: 1L, default: 2)" ~clang:"int"
+    ~gcc:call;
+  both ~declarations "_Generic(af(), _Atomic int: 1L, default: 2)"
+    ~clang:"long" ~gcc:call;
+  both ~declarations "(0, af())" ~clang:"_Atomic int" ~gcc:call;
+  both ~declarations "_Generic((0, af()), _Atomic int: 1L, default: 2)"
+    ~clang:"long" ~gcc:call;
+  both ~declarations "x ? af() : af()" ~clang:"_Atomic int" ~gcc:call;
+  both ~declarations "_Generic(x ? af() : af(), _Atomic int: 1L, default: 2)"
+    ~clang:"long" ~gcc:call;
+  both ~declarations "sizeof af()" ~clang:"unsigned long"
+    ~gcc:"unsigned long";
+  both ~declarations "tf().a" ~clang:"_Atomic int" ~gcc:"_Atomic int";
+  both ~declarations "tf().a + 0" ~clang:"int" ~gcc:"int";
+  both ~declarations "_Generic(tf().a, int: 1L, default: 2)" ~clang:"long"
+    ~gcc:"long";
+  accepts ~declarations "(void)af(); af(); ax = af()";
+  accepts ~declarations "_Atomic int y = af()";
+  let operands = "the operands have types that the operator does not take" in
+  rejects ~declarations "x + af()" operands;
+  rejects ~declarations "-af()" operands;
+  rejects ~declarations "ax += af()" operands;
+  rejects ~declarations "x ? af() : 1" operands;
+  rejects ~declarations "x ? af() : ax" operands;
+  rejects ~declarations "if (af()) x" "scalar";
+  types ~target:lp64_gcc ~declarations "x + af()" call;
+  both ~declarations "af() + 1" ~clang:"int" ~gcc:call;
+  both ~declarations "af() + 1.0f" ~clang:"float" ~gcc:call;
+  both ~declarations "acf() + 1" ~clang:"int" ~gcc:call;
+  both ~declarations "af() & 1L" ~clang:"long" ~gcc:call;
+  rejects ~declarations "af() + af()" operands;
+  rejects ~declarations "af() + ip" operands;
+  rejects ~declarations "apf() + 1" operands;
+  rejects ~declarations "af() << 1" operands;
+  rejects ~declarations "af() == 0" operands;
+  both ~declarations "(_Atomic int)x" ~clang:"_Atomic int" ~gcc:call;
+  both ~declarations "(const int)x" ~clang:"int" ~gcc:"int";
+  both ~declarations "_Generic((_Atomic int)x, _Atomic int: 1L, default: 2)"
+    ~clang:"long" ~gcc:call;
+  both ~declarations "x ? (_Atomic int)x : af()" ~clang:"_Atomic int"
+    ~gcc:call;
+  rejects ~declarations "x + (_Atomic int)x" operands;
+  (* Clang refuses the statement expression, whose type it makes int. *)
+  both ~declarations "({ af(); })" ~clang:"int" ~gcc:call
 
 (* 6.8: the constraints that typing checks. *)
 let statements () =
@@ -980,6 +1042,7 @@ let () =
   old_style_definitions ();
   enum_integer_composites ();
   return_qualifiers ();
+  atomic_returns ();
   statements ();
   labels ();
   left_to_backend ();

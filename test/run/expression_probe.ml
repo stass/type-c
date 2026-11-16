@@ -51,7 +51,8 @@ let assertions contents text result (typed : Expressions.typed) expression =
     | Some _ | None -> []
   in
   let lvalue_check =
-    if typed.lvalue && not (Expressions.designates_bit_field typed) then
+    if typed.category = Lvalue && not (Expressions.designates_bit_field typed)
+    then
       [ Printf.sprintf "(void)sizeof &(%s);" written ]
     else []
   in
