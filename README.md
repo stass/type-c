@@ -884,14 +884,7 @@ TYPEC_TEST_CLANG=/usr/local/bin/clang21 TYPEC_TEST_GCC=/usr/local/bin/gcc14 \
 ```
 
 The `hwpmc` module must be loaded, and libpmc must honor the `usr`
-qualifier of a pmu event (`pmu_parse_qualifiers` in
-`lib/libpmc/libpmc.c`), which the script checks; an older libpmc
-counts kernel mode too. A libpmc built from newer sources serves
-without being installed, through `LD_LIBRARY_PATH`, with `DIR` a
-private directory of the account:
-
-```sh
-MAKEOBJDIRPREFIX=DIR make -C /usr/src/lib/libpmc/pmu-events obj all
-MAKEOBJDIRPREFIX=DIR make -C /usr/src/lib/libpmc obj all
-export LD_LIBRARY_PATH=DIR/usr/src/amd64.amd64/lib/libpmc
-```
+qualifier of a pmu event, which the script checks: FreeBSD's libpmc
+drops the qualifiers of pmu-events names and counts kernel mode too
+until a fix (`pmu_parse_qualifiers` in `lib/libpmc/libpmc.c`) reaches
+it. p620 runs a libpmc and an `hwpmc` module built with that fix.
