@@ -143,15 +143,26 @@ let record_alias tokens ~location ~name (declaration : Tree.type_declaration)
 
 (* Variants (design 10.1). The tokens of each field are kept, so the
    struct of a constructor's fields keeps their lines. In an instance, a
-   field in [void_field_spans] does not exist (design 3.5 rule 6): its
+   field in [void_fields] does not exist (design 3.5 rule 6): its
    tokens go as a range that lowering replaces whole (see
-   {!text_edits}), and the edits here leave it out of its struct. *)
+   {!text_edits}), and the edits here leave it out of its struct. The
+   void fields are a set, since lowering looks up every field of the
+   instance. *)
 
-let is_void_field void_field_spans (field : Tree.field) =
-  List.mem field.span void_field_spans
+module Spans = Set.Make (struct
+  type t = Tree.span
 
-let has_fields void_field_spans (constructor : Tree.constructor) =
-  not (List.for_all (is_void_field void_field_spans) constructor.node.fields)
+  let compare (a : Tree.span) (b : Tree.span) =
+    match Int.compare a.first b.first with
+    | 0 -> Int.compare a.last b.last
+    | by_first -> by_first
+end)
+
+let is_void_field void_fields (field : Tree.field) =
+  Spans.mem field.span void_fields
+
+let has_fields void_fields (constructor : Tree.constructor) =
+  not (List.for_all (is_void_field void_fields) constructor.node.fields)
 
 (* The forward declaration of a variant: the structure and typedef,
    which the incomplete variant declares already where the variant
@@ -188,14 +199,13 @@ let replace_at (tokens : Token.t array) ~first text indexes =
    a void field ends no field, so it becomes nothing or only the close.
    A constructor without fields becomes nothing (rule 3), and so do its
    parentheses and commas where every field is void. *)
-let constructor_edits tokens ~void_field_spans
-    (constructor : Tree.constructor) =
+let constructor_edits tokens ~void_fields (constructor : Tree.constructor) =
   let { Tree.name; fields } = constructor.node in
   let bar = constructor.span.first and close = constructor.span.last in
-  let has_fields = has_fields void_field_spans constructor in
+  let has_fields = has_fields void_fields constructor in
   let field_end (field : Tree.field) =
     let after = grammar_token_after tokens field.span.last in
-    let ends = if is_void_field void_field_spans field then "" else ";" in
+    let ends = if is_void_field void_fields field then "" else ";" in
     let closes =
       if after = close && has_fields then
         Printf.sprintf " } %s;" (name.node :> string)
@@ -213,24 +223,24 @@ let constructor_edits tokens ~void_field_spans
 
 (* [type N = ... ;]: the forward declaration replaces [type], the head
    [N =] and [private] where it follows, and the tail the [;]. *)
-let variant tokens ~location ~lowered ~void_field_spans
+let variant tokens ~location ~lowered ~void_fields
     (declaration : Tree.type_declaration) constructors =
   let completes = declaration.node.declared.earlier <> None in
-  let has_union = List.exists (has_fields void_field_spans) constructors in
+  let has_union = List.exists (has_fields void_fields) constructors in
   let first_bar = (List.hd constructors : Tree.constructor).span.first in
   let forward_tokens, forward_end = forward_declaration tokens declaration in
   replace tokens ~location (variant_forward ~completes lowered) forward_tokens
   @ replace tokens ~location
       (variant_head lowered ~has_union constructors)
       (grammar_tokens tokens forward_end (first_bar - 1))
-  @ List.concat_map (constructor_edits tokens ~void_field_spans) constructors
+  @ List.concat_map (constructor_edits tokens ~void_fields) constructors
   @ replace_at tokens ~first:declaration.span.last (variant_tail ~has_union)
       []
 
 (* The type declaration under the name [lowered], which is its own or,
    for the definition of a generic, that of an instance (design 10.3). *)
 let type_declaration (tokens : Token.t array) ~(lowered : Spelling.c_name)
-    ~void_field_spans (declaration : Tree.type_declaration) =
+    ~void_fields (declaration : Tree.type_declaration) =
   let name = (lowered :> string) in
   let location = tokens.(declaration.span.first).location in
   match declaration.node.definition with
@@ -245,7 +255,7 @@ let type_declaration (tokens : Token.t array) ~(lowered : Spelling.c_name)
   | Record_alias record ->
       record_alias tokens ~location ~name declaration record
   | Variant { constructors; _ } ->
-      variant tokens ~location ~lowered ~void_field_spans declaration
+      variant tokens ~location ~lowered ~void_fields declaration
         constructors
 
 (* Design 13.5: a constructor expression becomes the compound literal
@@ -627,8 +637,9 @@ let text_edits tokens ~declarations ~void_field_spans ~replaced typed =
   in
   let dropped_spans = cover (List.map (fun range -> range.span) dropped) in
   let kept edit = not (goes_with dropped_spans edit) in
+  let void_fields = Spans.of_list void_field_spans in
   let declaration (lowered, declaration) =
-    type_declaration tokens ~lowered ~void_field_spans declaration
+    type_declaration tokens ~lowered ~void_fields declaration
   in
   let lowered =
     List.concat_map declaration declarations

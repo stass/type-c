@@ -218,6 +218,27 @@ let lowers_instance case source name expected =
     (between text ~first:("enum " ^ name ^ "_tag") ~last:"#pragma pack(pop)")
     (expected ^ " #pragma pack(pop)")
 
+(* Each field of an instance is looked up among its void fields in a
+   set, so the time to lower a variant is linear in its fields, not in
+   their square. *)
+let many_void_fields () =
+  let count = 32000 in
+  let fields = List.init count (fun index -> Printf.sprintf "T x%d" index) in
+  let source =
+    "type many(T) = | A(" ^ String.concat ", " fields ^ ");\nmany(void) m;\n"
+  in
+  let started = Sys.time () in
+  let text = emitted source in
+  let took = Sys.time () -. started in
+  compares "the instance without its many void fields"
+    (between (words text) ~first:"enum many__v_tag" ~last:"#pragma pack(pop)")
+    "enum many__v_tag { many__v_A }; struct many__v { enum many__v_tag tag; \
+     }; #pragma pack(pop)";
+  if took > 2.0 then
+    compares "the time to lower many void fields"
+      (Printf.sprintf "%.1f s" took)
+      "under 2 s"
+
 let void_fields () =
   let two = "type two(A, B) = | Two(A a, B b) | One(A only);\n" in
   lowers_instance "the first field void" (two ^ "two(void, long) t = One;")
@@ -303,5 +324,6 @@ let () =
   constructors ();
   anchors ();
   many_applications ();
+  many_void_fields ();
   void_fields ();
   if !failures > 0 then exit 1
