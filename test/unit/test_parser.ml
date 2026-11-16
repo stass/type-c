@@ -1507,8 +1507,12 @@ let gnu_error_cases =
       "error: in.i:1: expected `(` after the constraint of an operand, found \
        `x`";
     case "too many assembler sections"
-      "void f(void) { asm(\"\" : : : : l : x); }"
+      "void f(void) { asm goto(\"\" : : : : l : x); }"
       "error: in.i:1: expected `:` or `)` in `asm`, found `:`";
+    case "assembler labels without goto"
+      "void f(void) { l: asm(\"\" : : : : l); }"
+      "error: in.i:1: labels after the clobbers of an `asm` without `goto` \
+       (GCC manual, \"Extended Asm\")";
     case "typeof without parentheses" "typeof int x;"
       "error: in.i:1: expected `(` after `typeof`, found `int`";
     case "an unterminated statement expression" "int x = ({ 1; );"

@@ -172,9 +172,6 @@ type state = {
           read: where lowering writes the operand of a [try] that the
           statement or declaration holds (design 5.1 rule 3) *)
   mutable jumps : jump_scope;
-  mutable in_deferred : bool;
-      (** inside the statement of a defer, which lowering copies to each
-          exit of its scope (design 6 rules 4 and 9) *)
   mutable arm : arm_breaks option;
   mutable labels : body_labels option;  (** [None] outside every body *)
   mutable generic : generic_place option;
@@ -315,13 +312,16 @@ let finish state start node = spanned state (span_from state start) node
 let fail_jump state start diagnostic =
   fail_at_token state (first_token state start) diagnostic
 
+(* The refusal of a disputed break or continue (design 4.4). *)
+let disputed_jump keyword =
+  Rule.message Disputed_jump
+    (Printf.sprintf
+       "a %s in the condition of a loop or the step of a for, which Clang \
+        takes to leave the loop and GCC the statement around it"
+       keyword)
+
 let fail_disputed_jump state start keyword =
-  fail_jump state start
-    (Rule.message Disputed_jump
-       (Printf.sprintf
-          "a %s in the condition of a loop or the step of a for, which \
-           Clang takes to leave the loop and GCC the statement around it"
-          keyword))
+  fail_jump state start (disputed_jump keyword)
 
 (* Labels. *)
 
@@ -423,12 +423,7 @@ let refuse_undefined_jump state labels =
 
 (* Runs [parse], the statement of a defer, which no break or continue
    leaves (design 6 rule 4). *)
-let as_deferred state parse =
-  let around = state.in_deferred in
-  state.in_deferred <- true;
-  let result = with_jumps state Deferred_statement parse in
-  state.in_deferred <- around;
-  result
+let as_deferred state parse = with_jumps state Deferred_statement parse
 
 (* Runs [parse], a function body or a block literal: a function of its
    own, whose labels are its own and which no break or continue in it
@@ -439,10 +434,7 @@ let as_function state parse =
     { function_labels = Names.empty; local_labels = Names.empty; gotos = [] }
   in
   state.labels <- Some labels;
-  let around = state.in_deferred in
-  state.in_deferred <- false;
   let result = with_jumps state Function_body parse in
-  state.in_deferred <- around;
   refuse_undefined_jump state labels;
   state.labels <- saved;
   result
@@ -496,11 +488,18 @@ let rec continue_leaves reading = function
   | Deferred_statement -> Leaves_deferred
   | Function_body -> Leaves_nothing
 
+let refuse_type_c_dispute state start keyword =
+  if is_type_c_text_at state (first_token state start) then
+    fail_disputed_jump state start keyword
+
 (* What the [keyword] at [start] leaves, by [leaves]. The two readings
    differ only where the jump is in a disputed scope, which Type-C text
-   and a deferred statement refuse and other C text leaves to the
-   backend; where Clang finds nothing or the deferred statement, GCC
-   does too, as no disputed scope is in the way. *)
+   refuses and other C text leaves to the backend; where Clang finds
+   nothing or the deferred statement, GCC does too, as no disputed scope
+   is in the way. A deferred statement refuses a disputed jump in any
+   text (design 6 rule 10): here one that GCC takes to leave it, and in
+   [Deferred] one that stays in it on both readings, which its tree
+   holds. *)
 let jump_targets state start keyword leaves ~no_target =
   match (leaves Clang_reading state.jumps, leaves Gcc_reading state.jumps) with
   | Leaves_nothing, _ -> fail_jump state start no_target
@@ -510,14 +509,13 @@ let jump_targets state start keyword leaves ~no_target =
            (Printf.sprintf "a `%s` that leaves the statement of a defer"
               keyword))
   | Leaves clang, Leaves gcc when clang = gcc -> Only clang
-  | Leaves loop, gcc -> (
-      if is_type_c_text_at state (first_token state start) || state.in_deferred
-      then fail_disputed_jump state start keyword;
-      match gcc with
-      (* GCC refuses it, and none leaves a deferred statement here, as
-         one in it was refused above. *)
-      | Leaves_nothing | Leaves_deferred -> Only loop
-      | Leaves around -> Either { loop; around })
+  | Leaves _, Leaves_deferred -> fail_disputed_jump state start keyword
+  | Leaves loop, Leaves_nothing ->
+      refuse_type_c_dispute state start keyword;
+      Only loop (* GCC refuses it *)
+  | Leaves loop, Leaves around ->
+      refuse_type_c_dispute state start keyword;
+      Either { loop; around }
 
 (* Notes the break at [start], which leaves [leaves], for design 4.3
    rule 5 if it is Type-C text that leaves the match of the arm around
@@ -920,18 +918,6 @@ let refuse_universe_name state name =
         (quoted name ^ " is a universe name that typec does not implement yet")
   | Some { meaning = Generic; _ } | None -> ()
 
-(* Lowering copies the statement of a defer to each exit of its scope
-   (design 6 rules 4 and 9), so a jump out of it would skip the rest of
-   the exit, and a definition in it would be made once for each copy.
-   [what] at the token [at] is one such. *)
-let refuse_deferred_exit state ~at what =
-  if state.in_deferred then
-    fail_at_token state at
-      (Rule.message Deferred_exit
-         (what
-        ^ " in the statement of a defer, which control leaves only at its \
-           end"))
-
 (* At a defer statement that stands in [where], which is no block item of
    a compound statement or a match arm in a function body. *)
 let fail_defer_position state where =
@@ -940,13 +926,346 @@ let fail_defer_position state where =
        ("a `defer` statement is a block item of a compound statement or a \
          match arm in a function body, not " ^ where))
 
-let refuse_deferred_definition state ~at what =
-  if state.in_deferred then
-    fail_at_token state at
-      (Rule.message Deferred_declaration
-         (what
-        ^ " in the statement of a defer, which lowering copies to each exit \
-           of its scope, where each copy would define it again"))
+(* The statement of a defer, which lowering copies to each exit of its
+   scope (design 6 rules 4, 9 and 10, 13.5): a jump out of it would skip
+   the rest of the exit, a definition in it would be made once for each
+   copy, and a disputed jump would leave it on one backend's reading.
+   One walk over its tree, once the parser has read it, refuses the
+   first such construct in the order of the source; an error of the
+   parser in the statement, or in a defer inside it, which the parser
+   walks first, comes before it. It matches every node and every field, with
+   no wildcard, so that a node added to the tree fails to compile here
+   until it is classified. It stops at a construct it refuses, such as a
+   block literal or the body of a structure, so what those hold needs no
+   class. A break or continue that leaves the statement is no node: the
+   [Deferred_statement] scope of its jumps refuses it as it is read. *)
+module Deferred = struct
+  exception Refused of int * Rule.diagnostic
+
+  let refuse_exit ~at what =
+    raise
+      (Refused
+         ( at,
+           Rule.message Deferred_exit
+             (what
+            ^ " in the statement of a defer, which control leaves only at \
+               its end") ))
+
+  let refuse_definition ~at what =
+    raise
+      (Refused
+         ( at,
+           Rule.message Deferred_declaration
+             (what
+            ^ " in the statement of a defer, which lowering copies to each \
+               exit of its scope, where each copy would define it again") ))
+
+  (* A jump that the parser resolved to a statement in the walk, or, on
+     two readings, to two (rule 10). *)
+  let jump ~at keyword = function
+    | Only _ -> ()
+    | Either { loop = _; around = _ } ->
+        raise (Refused (at, disputed_jump keyword))
+
+  (* A declaration with [extern] defines no object (rule 9). *)
+  let storage (specifiers : specifiers) =
+    let is_extern (specifier : declaration_specifier spanned) =
+      specifier.node = Storage_class Extern
+    in
+    let is_static (specifier : declaration_specifier spanned) =
+      specifier.node = Storage_class Static
+      || specifier.node = Storage_class Thread_local
+    in
+    match List.find_opt is_static specifiers with
+    | Some specifier when not (List.exists is_extern specifiers) ->
+        refuse_definition ~at:specifier.span.first
+          "a declaration with static or thread storage duration and no \
+           `extern`"
+    | Some _ | None -> ()
+
+  let tag { name; binding } =
+    match binding with
+    | Declares { id = _; scope = _; earlier = _; implicit = _ } ->
+        refuse_definition ~at:name.span.first
+          ("the declaration of the tag " ^ quoted name.node)
+    | Names _ -> ()
+
+  let rec statement (read : statement) =
+    let at = read.span.first in
+    match read.node with
+    | Labeled { label = labelling; statement = labelled } ->
+        label labelling;
+        statement labelled
+    | Compound body -> block body
+    | Expression_statement value -> expression value
+    | Null_statement | Attribute_statement _ -> ()
+    | If { condition = test; then_branch; else_branch } ->
+        condition test;
+        statement then_branch;
+        Option.iter statement else_branch
+    | Switch { controlling; body } ->
+        expression controlling;
+        statement body
+    | While { condition = test; body } ->
+        condition test;
+        statement body
+    | Do { body; condition = test } ->
+        statement body;
+        expression test
+    | For { clause; condition = test; step; body } ->
+        Option.iter for_clause clause;
+        Option.iter expression test;
+        Option.iter expression step;
+        statement body
+    | Goto _ -> refuse_exit ~at "`goto`"
+    | Computed_goto _ -> refuse_exit ~at "`goto *`"
+    | Continue { loop } -> jump ~at "continue" loop
+    | Break { leaves } -> jump ~at "break" leaves
+    | Return _ -> refuse_exit ~at "`return`"
+    | Asm read -> assembler read
+    | Match { scrutinee; arms } ->
+        expression scrutinee;
+        List.iter arm arms
+
+  and label (read : label) =
+    match read.node with
+    | Named_label { name; label = _; attributes = _ } ->
+        refuse_definition ~at:read.span.first ("the label " ^ quoted name)
+    | Case_label value -> expression value
+    | Case_range { low; high } ->
+        expression low;
+        expression high
+    | Default_label -> ()
+
+  and condition = function
+    | Controlling value -> expression value
+    | Pattern_test { pattern_span = _; pattern = _; operand } ->
+        expression operand
+
+  and for_clause = function
+    | Clause_declaration read -> declaration read
+    | Clause_expression value -> expression value
+
+  and assembler { qualifiers; template = _; operands } =
+    List.iter asm_qualifier qualifiers;
+    Option.iter asm_operands operands
+
+  and asm_qualifier (qualifier : asm_qualifier spanned) =
+    match qualifier.node with
+    | Asm_goto -> refuse_exit ~at:qualifier.span.first "`asm goto`"
+    | Asm_volatile | Asm_inline -> ()
+
+  and asm_operands { outputs; inputs; clobbers = _; labels = _ } =
+    List.iter asm_operand outputs;
+    List.iter asm_operand inputs
+
+  and asm_operand (operand : asm_operand) =
+    let { symbolic_name = _; constraint_ = _; value } = operand.node in
+    expression value
+
+  and arm (read : arm) =
+    let { labels = _; items } = read.node in
+    List.iter block_item items
+
+  and block (read : block) =
+    let { local_labels; items } = read.node in
+    (match local_labels with
+    | first :: _ -> refuse_definition ~at:first.span.first "`__label__`"
+    | [] -> ());
+    List.iter block_item items
+
+  and block_item = function
+    | Block_declaration read -> declaration read
+    | Block_type_declaration { declaration = declared; scope_end = _ } ->
+        refuse_definition ~at:declared.span.first "a type declaration"
+    | Block_statement read -> statement read
+    | Block_defer { keyword = _; statement = deferred } -> statement deferred
+
+  and declaration (read : declaration) =
+    match read.node with
+    | Declaration { specifiers = specified; declarators } ->
+        specifiers specified;
+        List.iter init_declarator declarators
+    | Static_assert assertion -> static_assertion assertion
+
+  and static_assertion { condition = test; message = _ } = expression test
+
+  and init_declarator (read : init_declarator) =
+    let { declarator = declared; declared = _; asm_label = _; attributes = _;
+          initialiser = value } =
+      read.node
+    in
+    declarator declared;
+    Option.iter initialiser value
+
+  (* The storage class counts once the specifiers are read, as the parser
+     reads a structure among them first. *)
+  and specifiers (read : specifiers) =
+    List.iter declaration_specifier read;
+    storage read
+
+  and declaration_specifier (specifier : declaration_specifier spanned) =
+    match specifier.node with
+    | Storage_class _ | Type_qualifier _ | Function_specifier _
+    | Attributes _ ->
+        ()
+    | Type_specifier read -> type_specifier ~at:specifier.span.first read
+    | Alignment_specifier (Alignas_type name) -> type_name name
+    | Alignment_specifier (Alignas_expression value) -> expression value
+
+  (* The tree keeps no span of an enumerator list, so its refusal is at
+     the specifier, [at]. *)
+  and type_specifier ~at = function
+    | Basic _ | Typedef_name { name = _; declaration = _ } -> ()
+    | Atomic_type name | Typeof_type name -> type_name name
+    | Typeof_expression value -> expression value
+    | Application { name = _; generic = _; arguments } ->
+        List.iter type_name arguments
+    | Struct_or_union { kind = _; attributes = _; tag = named; members } ->
+        (match members with
+        | Some body ->
+            refuse_definition ~at:body.span.first
+              "a structure or union with a body"
+        | None -> ());
+        Option.iter tag named
+    | Enum { attributes = _; tag = named; underlying; enumerators } ->
+        Option.iter specifiers underlying;
+        (match enumerators with
+        | Some _ -> refuse_definition ~at "an enumeration with a body"
+        | None -> ());
+        Option.iter tag named
+
+  and type_name (name : type_name) =
+    let { specifier_qualifiers; abstract } = name.node in
+    specifiers specifier_qualifiers;
+    Option.iter declarator abstract
+
+  (* The parts of a derived declarator after its [inner] follow it in the
+     source. *)
+  and declarator (read : declarator) =
+    match read.node with
+    | Name _ -> ()
+    | Parenthesized_declarator { attributes = _; inner } -> declarator inner
+    | Pointer { qualifiers = _; attributes = _; inner }
+    | Block_pointer { qualifiers = _; attributes = _; inner } ->
+        Option.iter declarator inner
+    | Array { inner; qualifiers = _; size } ->
+        Option.iter declarator inner;
+        array_size size
+    | Function { inner; parameters = declared } ->
+        Option.iter declarator inner;
+        parameters declared
+
+  and array_size = function
+    | Unsized | Unspecified_variable -> ()
+    | Sized value | Static_sized value -> expression value
+
+  and parameters = function
+    | Prototype { parameters = declared; variadic = _ } ->
+        List.iter parameter declared
+    | Identifier_list _ -> ()
+
+  and parameter (read : parameter) =
+    let ({ specifiers = specified; declarator = declared; attributes = _ }
+          : parameter_node) =
+      read.node
+    in
+    specifiers specified;
+    match declared with
+    | Named_parameter { declarator = named; declared = _ } -> declarator named
+    | Abstract_parameter abstract -> Option.iter declarator abstract
+
+  and initialiser = function
+    | Expression_initialiser value -> expression value
+    | Braced values -> initialiser_list values
+
+  and initialiser_list (values : initialiser_list) =
+    List.iter designated_initialiser values.node
+
+  and designated_initialiser (value : designated_initialiser) =
+    let { designators; initialiser = initial } = value.node in
+    List.iter designator designators;
+    initialiser initial
+
+  and designator (read : designator) =
+    match read.node with
+    | Index index -> expression index
+    | Index_range { low; high } ->
+        expression low;
+        expression high
+    | Member_designator _ -> ()
+
+  and expression (read : expression) =
+    match read.node with
+    | Identifier { name = _; resolution = _ }
+    | Constant _ | Character _ | String _ | Label_address _ ->
+        ()
+    | Parenthesized operand
+    | Post_increment operand
+    | Post_decrement operand
+    | Unary (_, operand)
+    | Sizeof_expression operand
+    | Alignof_expression operand
+    | Member { operand; member = _ }
+    | Pointer_member { operand; member = _ }
+    | Try { operand; scope = _ } ->
+        expression operand
+    | Sizeof_type name | Alignof name -> type_name name
+    | Generic { controlling; associations } ->
+        expression controlling;
+        List.iter generic_association associations
+    | Compound_literal { type_name = name; values } ->
+        type_name name;
+        initialiser_list values
+    | Qualified_constructor { variant; constructor = _ } -> type_name variant
+    | Subscript { operand = left; index = right }
+    | Binary (_, left, right)
+    | Assignment (_, left, right)
+    | Comma (left, right) ->
+        expression left;
+        expression right
+    | Call { callee; arguments } ->
+        expression callee;
+        List.iter expression arguments
+    | Cast { type_name = name; operand } ->
+        type_name name;
+        expression operand
+    | Conditional { condition = test; if_true; if_false } ->
+        expression test;
+        Option.iter expression if_true;
+        expression if_false
+    | Choose { condition = test; first; second } ->
+        expression test;
+        expression first;
+        expression second
+    | Statement_expression body -> block body
+    | Va_arg { list; type_name = name } ->
+        expression list;
+        type_name name
+    | Offsetof { type_name = name; member = _; designators } ->
+        type_name name;
+        List.iter designator designators
+    | Types_compatible (first, second) ->
+        type_name first;
+        type_name second
+    | Block_literal { parameters = _; body = _ } ->
+        refuse_definition ~at:read.span.first "a block literal"
+
+  and generic_association (association : generic_association) =
+    match association.node with
+    | Association (name, value) ->
+        type_name name;
+        expression value
+    | Default_association value -> expression value
+end
+
+(* The first construct in the statement of a defer that [Deferred]
+   refuses. *)
+let refuse_deferred state statement =
+  match Deferred.statement statement with
+  | () -> ()
+  | exception Deferred.Refused (at, diagnostic) ->
+      fail_at_token state at diagnostic
 
 (* The identifiers that are words of Type-C text where no declaration
    hides them (design 2.3). *)
@@ -1040,8 +1359,6 @@ let refuse_argument_tag state (name : identifier) =
    (design 10.1 rule 6). *)
 let declare_tag state (name : identifier) ~implicit =
   let id = Tag_at (token_of name) in
-  refuse_deferred_definition state ~at:(token_of name)
-    ("the declaration of the tag " ^ quoted name.node);
   refuse_argument_tag state name;
   if claims_tag state name.node then
     fail_claimed state name "tag" "is declared again";
@@ -1966,10 +2283,7 @@ let asm_qualifiers state =
       match peek state with
       | Keyword_token Keyword.Volatile -> Some Asm_volatile
       | Keyword_token Keyword.Inline -> Some Asm_inline
-      | Keyword_token Keyword.Goto ->
-          refuse_deferred_exit state ~at:(first_token state start)
-            "`asm goto`";
-          Some Asm_goto
+      | Keyword_token Keyword.Goto -> Some Asm_goto
       | _ -> None
     in
     match qualifier with
@@ -2502,22 +2816,6 @@ let in_definition state head ~bodies_allowed parse =
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
 
-(* A declaration with [extern] defines no object (design 6 rule 9). *)
-let refuse_deferred_storage state (specifiers : specifiers) =
-  let is_extern (specifier : declaration_specifier spanned) =
-    specifier.node = Storage_class Extern
-  in
-  let is_static (specifier : declaration_specifier spanned) =
-    specifier.node = Storage_class Static
-    || specifier.node = Storage_class Thread_local
-  in
-  match List.find_opt is_static specifiers with
-  | Some specifier when not (List.exists is_extern specifiers) ->
-      refuse_deferred_definition state ~at:specifier.span.first
-        "a declaration with static or thread storage duration and no \
-         `extern`"
-  | Some _ | None -> ()
-
 (* [only_attributes] holds while every specifier read is attributes, so
    that a tag specifier can tell whether it is alone in its declaration. *)
 let rec specifiers state context =
@@ -2539,11 +2837,7 @@ let rec specifiers state context =
           (specifier :: specifiers)
     | None -> List.rev specifiers
   in
-  let read =
-    leading @ loop ~seen_type_specifier:false ~only_attributes:true []
-  in
-  refuse_deferred_storage state read;
-  read
+  leading @ loop ~seen_type_specifier:false ~only_attributes:true []
 
 (* [alone] says that only attributes come before the specifier in the
    specifiers of a declaration, for {!ends_alone}. *)
@@ -2654,11 +2948,7 @@ and record_specifier state kind ~alone ~claimed_by =
   let leading = attributes state in
   let tag_name = optional_identifier state in
   let has_body = peek state = Punctuator_token P.Left_brace in
-  if has_body then begin
-    refuse_deferred_definition state ~at:(first_token state state.position)
-      "a structure or union with a body";
-    refuse_generic_body state ~tag_name
-  end;
+  if has_body then refuse_generic_body state ~tag_name;
   let declares = has_body || ends_alone state ~alone in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   if tag = None then Option.iter (claim_own_tag state) claimed_by;
@@ -2744,11 +3034,7 @@ and enum_specifier state ~alone =
   in
   let after_type = if underlying = None then [] else attributes state in
   let has_body = peek state = Punctuator_token P.Left_brace in
-  if has_body then begin
-    refuse_deferred_definition state ~at:(first_token state state.position)
-      "an enumeration with a body";
-    refuse_generic_enumerators state
-  end;
+  if has_body then refuse_generic_enumerators state;
   let declares = has_body || (underlying <> None && ends_alone state ~alone) in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   let enumerators =
@@ -3439,8 +3725,6 @@ and choose state start =
 (* After the [^]: the body, after the parameters if it has them. The
    body continues their scope, as a function's does (6.2.1p4). *)
 and block_literal state start =
-  refuse_deferred_definition state ~at:(first_token state start)
-    "a block literal";
   (* The literal is a function of its own, from its parameters to the end
      of its body. *)
   let literal = as_function state (fun () -> literal_after_caret state start) in
@@ -3573,7 +3857,6 @@ and declaration_of_start state = function
 and type_declaration state : type_declaration =
   let start = state.position in
   let type_keyword = state.grammar.(start).index in
-  refuse_deferred_definition state ~at:type_keyword "a type declaration";
   advance state;
   let name =
     checked_type_name state (identifier state "the name of a type declaration")
@@ -3813,8 +4096,6 @@ and label state =
     end
     else begin
       let name = identifier state "a label" in
-      refuse_deferred_definition state ~at:name.span.first
-        ("the label " ^ quoted name.node);
       expect state P.Colon "`:` after a label";
       let label = define_label state name in
       let attributes = attributes state in
@@ -3995,21 +4276,17 @@ and read_simple_statement state =
   | Punctuator_token P.Left_bracket when opens_standard_attributes state 0 ->
       attribute_statement state start
   | Keyword_token Keyword.Goto ->
-      let at = first_token state start in
       advance state;
       if accept state P.Star then begin
-        refuse_deferred_exit state ~at "`goto *`";
         let target = expression state in
         expect state P.Semicolon "`;` after `goto *`";
         finish state start (Computed_goto target)
       end
-      else begin
-        refuse_deferred_exit state ~at "`goto`";
+      else
         let name = identifier state "a label after `goto`" in
         let target = jump_label state name in
         expect state P.Semicolon "`;` after `goto`";
         finish state start (Goto target)
-      end
   | Keyword_token Keyword.Continue ->
       advance state;
       let loop = continue_target state start in
@@ -4021,7 +4298,6 @@ and read_simple_statement state =
       expect state P.Semicolon "`;` after `break`";
       finish state start (Break { leaves })
   | Keyword_token Keyword.Return ->
-      refuse_deferred_exit state ~at:(first_token state start) "`return`";
       advance state;
       let value =
         optional_expression state P.Semicolon "`;` after `return`"
@@ -4148,23 +4424,38 @@ and assembler state =
   let qualifiers = asm_qualifiers state in
   expect state P.Left_paren "`(` after `asm`";
   let template = string_literal state in
+  let takes_labels =
+    List.exists
+      (fun (qualifier : asm_qualifier spanned) -> qualifier.node = Asm_goto)
+      qualifiers
+  in
   let operands =
-    if peek state = Punctuator_token P.Colon then Some (asm_operands state)
+    if peek state = Punctuator_token P.Colon then
+      Some (asm_operands state ~takes_labels)
     else None
   in
   expect state P.Right_paren "`:` or `)` in `asm`";
   { qualifiers; template; operands }
 
-(* At the first [:] after the template. *)
-and asm_operands state =
+(* At the first [:] after the template. Only an [asm goto] has labels,
+   its jumps, which GCC and Clang read in no other (GCC manual,
+   "Extended Asm"). *)
+and asm_operands state ~takes_labels =
   let section read = if accept state P.Colon then read () else [] in
   let outputs = section (fun () -> comma_separated state asm_operand) in
   let inputs = section (fun () -> comma_separated state asm_operand) in
   let clobbers = section (fun () -> comma_separated state string_literal) in
   let labels =
-    section (fun () ->
-        comma_separated state (fun state ->
-            jump_label state (identifier state "a label")))
+    if takes_labels then
+      section (fun () ->
+          comma_separated state (fun state ->
+              jump_label state (identifier state "a label")))
+    else if peek state = Punctuator_token P.Colon then
+      fail state
+        (Rule.c_text
+           "labels after the clobbers of an `asm` without `goto` (GCC \
+            manual, \"Extended Asm\")")
+    else []
   in
   { outputs; inputs; clobbers; labels }
 
@@ -4212,13 +4503,10 @@ and local_label_declarations state =
   in
   let rec loop declarations =
     let start = state.position in
-    if accept_keyword state Keyword.Label then begin
-      refuse_deferred_definition state ~at:(first_token state start)
-        "`__label__`";
+    if accept_keyword state Keyword.Label then
       let labels = one_or_more state local_label in
       expect state P.Semicolon "`;` after the labels of `__label__`";
       loop (finish state start labels :: declarations)
-    end
     else List.rev declarations
   in
   loop []
@@ -4266,6 +4554,7 @@ and defer_statement state place =
         in_scope state (inner_scope state) (fun () -> statement state))
   in
   refuse_moved_pragmas state { first = keyword; last = statement.span.last };
+  refuse_deferred state statement;
   Block_defer { keyword = { first = keyword; last = keyword }; statement }
 
 (* At a defer statement that is a block item of a compound statement in
@@ -4499,7 +4788,6 @@ let parse_with_scopes ~keywords reader =
       scope = Scope.file;
       place = Scope.file;
       jumps = Function_body;
-      in_deferred = false;
       arm = None;
       labels = None;
       generic = None;

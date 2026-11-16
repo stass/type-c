@@ -34,10 +34,11 @@ val arm_refusal : facts -> Tree.arm -> refusal option
 (** The breach of design 4.3 rule 1 by the arm, if its end can be
     reached. Typing asks it of every match it reads. *)
 
-val label_refusal : facts -> Tree.block -> refusal option
+val label_refusal : Tree.block -> refusal option
 (** In the body of a function, the first jump, in source order, that
     enters a statement expression from outside it (GCC manual,
-    "Statement Exprs") or breaches design 4.3 rule 3, if any.
+    "Statement Exprs") or breaches design 4.3 rule 3 or 6 rule 5, if
+    any. It reads the tree alone, so typing may ask it first.
     The walk reads every expression of the body, those in types
     included, but the arguments of attributes and the parameters and
     body of a block literal, which is a function of its own. *)

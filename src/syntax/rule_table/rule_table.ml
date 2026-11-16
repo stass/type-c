@@ -335,6 +335,15 @@ let rows =
          specifier that has a body or declares its tag, a type \
          declaration or a block literal, which each copy of the statement \
          would define again." };
+    Live { name = "Deferred_entry"; code = 60;
+      clause = Some "design 6 rule 5";
+      meaning =
+        "A jump into a deferred statement from outside it, or into the \
+         scope of a defer statement from outside the scope: a [case] or \
+         [default] label there of a [switch] around it, a [goto] or [asm \
+         goto] from outside to a label there, or the GNU address of a \
+         label in the scope, which a computed [goto] could jump to from \
+         anywhere in the function." };
   ]
 
 let () =

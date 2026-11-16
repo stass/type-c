@@ -98,10 +98,11 @@ type jump = {
   jump_context : expression_context;
 }
 
-(* A statement that a jump enters only from inside it (design 4.3 rule
-   3): a match arm, or the statement of a single-pattern test, which
-   only a successful test enters (4.6 rule 6). *)
-type guarded = Arm of Tree.span | Tested of Tree.span
+(* What a jump enters only from inside it: a match arm (design 4.3 rule
+   3), the statement of a single-pattern test, which only a successful
+   test enters (4.6 rule 6), or the scope of a defer statement, the
+   items after it in its block (6 rules 1 and 5). *)
+type guarded = Arm of Tree.span | Tested of Tree.span | Defer_scope of Tree.span
 
 (* A labelled statement: its label, the innermost guarded statement
    around it, [None] outside every one, and its context. *)
@@ -132,19 +133,45 @@ let record_jump walk kind ({ name; label } : Tree.label_name) =
 (* A jump may enter a statement at a label it carries or contains. *)
 let enterable flow = flow.has_named_label || flow.has_case_label
 
+let item_span : Tree.block_item -> Tree.span = function
+  | Block_declaration declaration -> declaration.span
+  | Block_type_declaration { declaration; scope_end = _ } -> declaration.span
+  | Block_statement statement -> statement.span
+  | Block_defer { keyword; statement } ->
+      { first = keyword.first; last = statement.span.last }
+
 let rec block walk (b : Tree.block) = sequence walk b.node.items
 
 (* An item is reachable if it is first, if it follows a reachable item
    that can complete, or if a jump may enter it; a sequence completes if
    it is empty or its last item is reachable and completes. *)
 and sequence walk items =
-  let step (reaching, flow) item =
-    let next = block_item walk item in
-    let reachable = reaching || enterable next in
-    (reachable && next.completes, followed_by flow ~reachable next)
+  let scope_end =
+    match List.rev items with last :: _ -> (item_span last).last | [] -> 0
   in
-  let reaching, flow = List.fold_left step (true, completes) items in
+  let rec step walk (reaching, flow) = function
+    | [] -> (reaching, flow)
+    | item :: rest ->
+        let next = block_item walk item in
+        let reachable = reaching || enterable next in
+        step
+          (after_item walk item rest ~scope_end)
+          (reachable && next.completes, followed_by flow ~reachable next)
+          rest
+  in
+  let reaching, flow = step walk (true, completes) items in
   { flow with completes = reaching }
+
+(* The walk of the items [rest] that follow [item], which are the scope
+   of [item] if it is a defer, up to the token [scope_end]. *)
+and after_item walk item rest ~scope_end =
+  match (item, rest) with
+  | Tree.Block_defer _, first :: _ ->
+      let scope = { Tree.first = (item_span first).first; last = scope_end } in
+      { walk with guard = Some (Defer_scope scope) }
+  | Block_defer _, [] -> walk
+  | (Block_declaration _ | Block_type_declaration _ | Block_statement _), _ ->
+      walk
 
 and block_item walk = function
   | Tree.Block_declaration declaration -> declaration_flow walk declaration
@@ -152,8 +179,10 @@ and block_item walk = function
       type_declaration_flow walk declaration
   | Block_statement statement -> statement_flow walk statement
   (* The statement runs at the exits of the scope, not here (design 6
-     rule 1), and holds no label of the function (rule 9); the walk reads
-     it for the jumps into its statement expressions. *)
+     rule 1). It holds no label of the function (rule 9), and its case
+     and default labels belong to its own switches, as typing refuses
+     any other (rule 5), so nothing enters it. The walk reads it for the
+     jumps into its statement expressions. *)
   | Block_defer { statement; _ } ->
       ignore (statement_flow walk statement);
       completes
@@ -528,13 +557,19 @@ and type_declaration_flow walk (declaration : Tree.type_declaration) =
 let encloses (outer : Tree.span) (inner : Tree.span) =
   outer.first <= inner.first && inner.last <= outer.last
 
-let guarded_span = function Arm span | Tested span -> span
+let guarded_span = function
+  | Arm span | Tested span | Defer_scope span -> span
+
+let guarded_rule : guarded -> Rule.t = function
+  | Arm _ | Tested _ -> Arm_entry
+  | Defer_scope _ -> Deferred_entry
 
 (* What a diagnostic calls a guarded statement, and the same statement
    named again. *)
 let guarded_names = function
   | Arm _ -> ("a match arm", "the arm")
   | Tested _ -> ("the statement of a single-pattern test", "the statement")
+  | Defer_scope _ -> ("the scope of a defer statement", "the scope")
 
 (* The queued items of a walk in source order, so that a refusal names
    the first breach as GCC and Clang do. Spans are token indices. *)
@@ -568,15 +603,15 @@ let refuse_statement_expression_entry (definition : definition) jump =
               \"Statement Exprs\")")
   | (Outside_statement_expressions | Backends_differ), _, Goto -> ()
 
-(* Design 4.3 rule 3, 4.6 rule 6. A computed goto may jump to any label
-   whose address is taken, so a label inside a guarded statement cannot
-   have its address taken. *)
+(* Design 4.3 rule 3, 4.6 rule 6, 6 rule 5. A computed goto may jump to
+   any label whose address is taken, so a label inside a guarded
+   statement or scope cannot have its address taken. *)
 let refuse_guarded_entry (definition : definition) jump =
   match (definition.guard, jump.kind) with
   | Some guard, Address ->
       let inside, again = guarded_names guard in
       refuse jump.site
-        (Rule.message Arm_entry
+        (Rule.message (guarded_rule guard)
            (Printf.sprintf
               "the address of a label inside %s, which a computed goto \
                could jump to from outside %s"
@@ -584,7 +619,7 @@ let refuse_guarded_entry (definition : definition) jump =
   | Some guard, Goto ->
       if not (encloses (guarded_span guard) jump.site) then
         refuse jump.site
-          (Rule.message Arm_entry
+          (Rule.message (guarded_rule guard)
              (Printf.sprintf "a jump into %s from outside it"
                 (fst (guarded_names guard))))
   | None, (Goto | Address) -> ()
@@ -615,8 +650,14 @@ let arm_refusal facts (matched : Tree.arm) =
           Rule.message Arm_end "the end of the match arm can be reached" }
   else None
 
-let label_refusal facts body =
-  let walk = start facts in
+(* The labels and jumps that a walk records do not depend on the facts,
+   which decide only whether a statement completes, so this walk, which
+   reads no flow, needs none, and a body may be checked before typing
+   has read it. *)
+let no_facts = { noreturn = (fun _ -> false); non_zero = (fun _ -> false) }
+
+let label_refusal body =
+  let walk = start no_facts in
   ignore (block walk body);
   match
     let definitions = by_label walk.definitions in

@@ -39,10 +39,17 @@ type constant =
   | Unevaluable of { span : Tree.span; diagnostic : Rule.diagnostic }
 
 (* What a case or default label in the statement being typed belongs
-   to: no switch, the innermost switch, or a match arm or the statement
-   of a single-pattern test, where it belongs to no switch of its own
-   (design 4.3 rule 3, 4.6 rule 6). *)
-type label_owner = No_switch | Switch_body | Match_arm | Test_statement
+   to: no switch, the innermost switch, or a match arm, the statement of
+   a single-pattern test, the statement of a defer or the scope of one,
+   where it belongs to no switch of its own (design 4.3 rule 3, 4.6 rule
+   6, 6 rule 5). *)
+type label_owner =
+  | No_switch
+  | Switch_body
+  | Match_arm
+  | Test_statement
+  | Deferred_statement
+  | Defer_scope
 
 (* Where a statement stands: as a block item, or as the substatement of
    another statement. *)
@@ -3285,29 +3292,59 @@ and initialiser context ~constant t initialiser =
 
 and block_items context (block : Tree.block) = items context block.node.items
 
-and items context =
-  List.iter (function
-    | Tree.Block_declaration declaration ->
-        block_declaration context declaration
-    | Block_type_declaration declaration ->
-        context.type_declaration declaration
-    | Block_statement statement ->
-        standing_statement context Block_item None statement
-    | Block_defer { keyword; statement } ->
-        deferred_statement context statement;
-        context.fail keyword
-          (Rule.message Not_implemented
-             "lowering of `defer` is not implemented yet (design 13.5; work \
-              package 2.5)"))
+(* The items after a defer are its scope (design 6 rule 1). Every defer
+   is refused once its statement and its scope are typed, so that none
+   reaches lowering. *)
+and items context = function
+  | [] -> ()
+  | Tree.Block_declaration declaration :: rest ->
+      block_declaration context declaration;
+      items context rest
+  | Block_type_declaration declaration :: rest ->
+      context.type_declaration declaration;
+      items context rest
+  | Block_statement statement :: rest ->
+      standing_statement context Block_item None statement;
+      items context rest
+  | Block_defer { keyword; statement } :: scope ->
+      deferred_statement context statement;
+      defer_scope context scope;
+      context.fail keyword
+        (Rule.message Not_implemented
+           "lowering of `defer` is not implemented yet (design 13.5; work \
+            package 2.5)")
 
 (* No try stands in the statement of a defer (design 5.1 rule 4), whose
-   statements this gives no positions. Every defer is refused once its
-   statement is typed, so that none reaches lowering. *)
+   statements this gives no positions, and no case or default label in
+   it belongs to a switch around it (6 rule 5). *)
 and deferred_statement context statement =
   let enclosing =
-    { context.typed.enclosing with try_positions = No_positions }
+    { context.typed.enclosing with
+      try_positions = No_positions;
+      case_labels = guarded_from_switch context Deferred_statement }
   in
   within context enclosing (fun () -> typed_statement context statement)
+
+(* No case or default label in the scope of a defer belongs to a switch
+   around the scope, which would enter it past the defer (design 6 rule
+   5). *)
+and defer_scope context scope =
+  let enclosing =
+    { context.typed.enclosing with
+      case_labels = guarded_from_switch context Defer_scope }
+  in
+  within context enclosing (fun () -> items context scope)
+
+(* What a case or default label belongs to inside [guarded], which a
+   switch around it may not enter: only where a label would belong to
+   that switch does [guarded] decide, as anywhere else the label is
+   refused for what is around [guarded]. *)
+and guarded_from_switch context guarded =
+  match context.typed.enclosing.case_labels with
+  | Switch_body -> guarded
+  | (No_switch | Match_arm | Test_statement | Deferred_statement | Defer_scope)
+    as around ->
+      around
 
 (* A block-item declaration gives a try the position of design 5.1 rule
    3 that its initialiser confirms. *)
@@ -3456,6 +3493,18 @@ and label_of context (label : Tree.label) =
           (Rule.message Enclosing_switch_label
              "a case or default label inside the statement of a \
               single-pattern test, which only a successful test enters")
+    | Deferred_statement ->
+        context.fail label.span
+          (Rule.message Deferred_entry
+             "a case or default label in the statement of a defer that \
+              belongs to a switch around it, which would jump into the \
+              statement")
+    | Defer_scope ->
+        context.fail label.span
+          (Rule.message Deferred_entry
+             "a case or default label in the scope of a defer statement \
+              that belongs to a switch around the scope, which would jump \
+              into the scope past the defer")
     | No_switch ->
         context.fail label.span
           (Rule.c_text "a case or default label outside a switch (C11 6.8.1p2)")
@@ -3861,8 +3910,10 @@ let function_body context ~name ~return_type block =
       case_labels = No_switch; try_positions = Positions No_place }
   in
   view.function_tries <- [];
-  within context enclosing (fun () -> block_items context block);
-  (match Reachability.label_refusal (reachability_facts context) block with
+  (* Before the items, so that it is refused before the refusal of a
+     defer that lowering cannot yet write. *)
+  (match Reachability.label_refusal block with
   | Some { span; diagnostic } -> context.fail span diagnostic
   | None -> ());
+  within context enclosing (fun () -> block_items context block);
   view.tries <- view.function_tries @ view.tries

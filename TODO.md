@@ -179,12 +179,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   say that a declaration hides the word or where it is. A hidden
   universe name gets no such note either. Add a note naming the
   declaration if the pilot shows the error confusing.
-- [High] Design 6 rule 5 is not checked yet: a `case` or `default`
-  label in the statement of a defer that belongs to a `switch` outside
-  it (`case 0: defer case 1: f();`), and the address of a label in the
-  scope of a defer, are not refused. Reachability walks the statement
-  and drops its `has_case_label`; refuse there before lowering of
-  package 2.5 accepts any defer, which typing refuses until then.
+- [High] Design 6 rule 10 is checked only in the statement of a defer:
+  a GNU `goto *e`, an `asm goto` or a disputed break or continue in the
+  scope of a defer (`defer g(); goto *p;`) is not refused. Refuse them
+  before lowering of package 2.5 accepts any defer, which typing refuses
+  until then; reachability's guard for the scope (6 rule 5) knows only
+  the innermost guarded statement, so the check needs to know whether
+  any scope of a defer is around the jump.
 - [Medium] Lowering of a defer (package 2.5) copies the pragma lines of
   its statement; a `#pragma typec` line of C text there is ignored and
   must not be copied (design 13.5), and one of Type-C text stands

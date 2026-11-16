@@ -186,6 +186,19 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   c.h:1: `asm goto` in the statement of a defer, which control leaves only at its end (design 6 rule 4) [TC0058]
   [1]
 
+Labels, the jumps of `asm goto`, follow the clobbers of no other asm,
+which would otherwise jump without the qualifier.
+
+  $ cat > asm_labels.tc <<'EOF'
+  > # 1 "asm_labels.tc"
+  > # 1 "c.h" 1
+  > void f(void) { out:; _Defer __asm__ ("" : : : : out); }
+  > # 2 "asm_labels.tc" 2
+  > EOF
+  $ ./golden.exe asm_labels.tc
+  c.h:1: labels after the clobbers of an `asm` without `goto` (GCC manual, "Extended Asm")
+  [1]
+
   $ cat > try.tc <<'EOF'
   > void f(void) { defer try g(); }
   > EOF
@@ -314,7 +327,7 @@ and a null statement.
   > }
   > EOF
   $ ./golden.exe allowed.tc
-  allowed.tc:18: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  allowed.tc:19: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
   [1]
 
   $ cat > pragma.tc <<'EOF'
@@ -331,4 +344,105 @@ and a null statement.
   > EOF
   $ ./golden.exe pragma.tc
   c.h:4: a `#pragma` line whose text is no sequence of preprocessing tokens: unterminated literal (design 13.5) [TC0040]
+  [1]
+
+No jump from outside the statement of a defer or its scope enters it
+(design 6 rule 5): not a switch around it at a case or default label in
+it, not a goto from outside, and not a computed goto, which may be given
+the address of a label in the scope wherever the address is taken.
+
+  $ cat > case_in_statement.tc <<'EOF'
+  > void g(void);
+  > void f(int n) {
+  >   switch (n) {
+  >   case 0:;
+  >     defer case 1: g();
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe case_in_statement.tc
+  case_in_statement.tc:5: a case or default label in the statement of a defer that belongs to a switch around it, which would jump into the statement (design 6 rule 5) [TC0060]
+  [1]
+
+  $ cat > default_in_scope.tc <<'EOF'
+  > void g(void);
+  > void f(int n) {
+  >   switch (n) {
+  >   case 0:;
+  >     defer g();
+  >     {
+  >     default:;
+  >     }
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe default_in_scope.tc
+  default_in_scope.tc:7: a case or default label in the scope of a defer statement that belongs to a switch around the scope, which would jump into the scope past the defer (design 6 rule 5) [TC0060]
+  [1]
+
+  $ cat > goto_into_scope.tc <<'EOF'
+  > void g(void);
+  > void f(int c) {
+  >   if (c)
+  >     goto later;
+  >   defer g();
+  > later:
+  >   g();
+  > }
+  > EOF
+  $ ./golden.exe goto_into_scope.tc
+  goto_into_scope.tc:4: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  [1]
+
+  $ cat > address_in_scope.tc <<'EOF'
+  > void g(void);
+  > void f(void) {
+  >   void *p = &&later;
+  >   defer g();
+  > later:
+  >   (void)p;
+  > }
+  > EOF
+  $ ./golden.exe address_in_scope.tc
+  address_in_scope.tc:3: the address of a label inside the scope of a defer statement, which a computed goto could jump to from outside the scope (design 6 rule 5) [TC0060]
+  [1]
+
+Where no switch is around the defer, a case label in it or its scope
+belongs to none, as C says.
+
+  $ cat > case_without_switch.tc <<'EOF'
+  > void g(void);
+  > void f(void) {
+  >   defer g();
+  >   case 1:;
+  > }
+  > EOF
+  $ ./golden.exe case_without_switch.tc
+  case_without_switch.tc:4: a case or default label outside a switch (C11 6.8.1p2)
+  [1]
+
+A switch in the scope jumps to its own labels, a goto may leave the scope
+for a label before the defer, and the address of a label in no scope of
+a defer may be taken.
+
+  $ cat > entry_allowed.tc <<'EOF'
+  > void g(void);
+  > void f(int c) {
+  > before:;
+  >   defer g();
+  >   switch (c) {
+  >   case 1:
+  >     g();
+  >   }
+  > again:
+  >   if (c--)
+  >     goto again;
+  >   void *p = &&before;
+  >   (void)p;
+  >   if (c)
+  >     goto before;
+  > }
+  > EOF
+  $ ./golden.exe entry_allowed.tc
+  entry_allowed.tc:4: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
   [1]
