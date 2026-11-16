@@ -389,6 +389,21 @@ and untargeted_element typing (element : Tree.designated_initialiser) =
   List.iter (designator_expressions typing) element.node.designators;
   untargeted typing element.node.initialiser
 
+(* An initialiser at [span] with no subobject left for it (6.7.9p2),
+   which GCC drops with a warning. Type-C text holds none, as design 5.2
+   could not see a result that it drops; the 0 of the zero initialiser
+   drops none, and design 3.2 rule 7 lets it zero any object. *)
+let refuse_excess typing ~zeroes (span : Tree.span) =
+  if typing.type_c_text span && not zeroes then
+    typing.fail span
+      (Rule.message Excess_initialiser
+         "an initialiser has no element or member left to initialise, and \
+          GCC drops it (C11 6.7.9p2)")
+
+let drop_excess typing ~zeroes (element : Tree.designated_initialiser) =
+  refuse_excess typing ~zeroes element.span;
+  untargeted_element typing element
+
 (* Braced lists (6.7.9p17, p20) *)
 
 (* What an expression initialises at a subobject of type [t]: all of it,
@@ -458,11 +473,10 @@ let reach_of typing ~zeroes (t : Ctype.t) expression expression_type =
    where the walk meets it as the walk elides braces. [scalar_target]
    gives that target, as it is no distinct type unless the subobject is
    that distinct scalar, which [reach_of] meets first. The expression is
-   typed however the walk ends, so that the rules of Type-C text see it
-   even where GCC drops it as excess, in an aggregate with no subobject,
-   and Clang refuses it; its target there, an aggregate that is no
-   variant, selects no constructor and takes no conversion check, as no
-   target would. *)
+   typed however the walk ends, so that C text types it even where GCC
+   drops it as excess, in an aggregate with no subobject, and Clang
+   refuses it; its target there, an aggregate that is no variant, selects
+   no constructor and takes no conversion check, as no target would. *)
 let rec place typing ~zeroes ~depth (level, outer)
     (initialiser : Tree.initialiser) =
   let t = subobject_type typing level in
@@ -497,7 +511,9 @@ and place_expression typing ~zeroes ~elided ~depth (level, outer) expression
       | Some inner ->
           place_expression typing ~zeroes ~elided:true ~depth:(depth + 1)
             (inner, level :: outer) expression expression_type
-      | None -> None)
+      | None ->
+          refuse_excess typing ~zeroes expression.span;
+          None)
 
 (* The braced list for an object of type [t], its current object; gives
    the type of the object, completed as for {!initialise}. *)
@@ -508,14 +524,14 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
       { node =
           { designators = []; initialiser = Expression_initialiser literal };
         _ }
-      :: excess )
+      :: rest )
     when string_for typing literal.span element (form typing literal)
          = Answer true ->
       let length =
         string_initialiser typing element literal
           (typing.value (Some t) literal)
       in
-      List.iter (untargeted_element typing) excess;
+      List.iter (drop_excess typing ~zeroes:false) rest;
       completed typing t length
   | (Array _ | Record _), _ -> aggregate typing t list
   | ( (Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Function _),
@@ -582,7 +598,7 @@ and place_element typing ~zeroes t walk
           { cursor = advance typing (level :: outer); extent }
       | None -> { cursor = Lost; extent = Opaque_extent })
   | Past_end ->
-      untargeted typing initialiser;
+      drop_excess typing ~zeroes element;
       walk
   | Lost ->
       untargeted typing initialiser;
@@ -593,7 +609,7 @@ and place_element typing ~zeroes t walk
 and scalar typing ~zeroes t elements =
   match elements with
   | [] -> ()
-  | first :: excess ->
+  | first :: rest ->
       (match first.node.designators with
       | designator :: _ ->
           typing.fail designator.span
@@ -605,7 +621,7 @@ and scalar typing ~zeroes t elements =
           ignore (typing.value (scalar_target ~zeroes t) expression);
           typing.initialises expression
       | Braced inner -> ignore (braced typing t inner));
-      List.iter (untargeted_element typing) excess
+      List.iter (drop_excess typing ~zeroes) rest
 
 (* Objects (6.7.9p3, p16) *)
 

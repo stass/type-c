@@ -462,20 +462,6 @@ implicit conversions that design 3.4 leaves out, each at its operation.
   over.tc:2: the distinct type 'd' is not over an unqualified arithmetic or pointer type (design 3.4) [TC0010]
   [1]
 
-An expression initialiser that the walk places, braces elided, into a
-zero-length array, which GCC drops as excess and Clang refuses, is
-typed all the same, so Type-C text refuses there an operation that
-design 3.4 refuses on a distinct value.
-
-  $ cat > empty.tc <<'EOF'
-  > type d = distinct int;
-  > d x;
-  > struct z { int a[0]; int b; } s = { x + 1, 3 };
-  > EOF
-  $ ./golden.exe empty.tc
-  empty.tc:3: a value of the distinct type 'd' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
-  [1]
-
 An atomic builtin that only moves the value of a distinct object takes
 its other value operands of that distinct type; one that does arithmetic
 on the object refuses it (design 3.4).

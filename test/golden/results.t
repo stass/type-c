@@ -273,3 +273,61 @@ expression: C text drops a structure value as C does.
   $ ./golden.exe type_c_first.tc
   type_c_first.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
   [1]
+
+Type-C text holds no excess initialiser, which GCC and Clang drop with
+a warning, a result among them (C11 6.7.9p2). It is judged by the first
+token of the excess initialiser; C text keeps the backend's warning.
+
+  $ cat > excess_result.tc <<'EOF'
+  > result(int, int) f(void);
+  > struct p { int a; };
+  > void h(void) {
+  >   struct p s = { 1, f() };
+  >   (void)s;
+  > }
+  > EOF
+  $ ./golden.exe excess_result.tc
+  excess_result.tc:4: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) (design 5.2) [TC0050]
+  [1]
+
+  $ cat > excess.tc <<'EOF'
+  > int a[1] = { 1, 2 };
+  > EOF
+  $ ./golden.exe excess.tc
+  excess.tc:1: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) (design 5.2) [TC0050]
+  [1]
+
+An initialiser that the walk places, braces elided, into a zero-length
+array, which GCC drops and Clang refuses, is excess too.
+
+  $ cat > zero_length.tc <<'EOF'
+  > result(int, int) f(void);
+  > void h(void) {
+  >   struct z { int a[0]; int b; } s = { f(), 3 };
+  >   (void)s;
+  > }
+  > EOF
+  $ ./golden.exe zero_length.tc
+  zero_length.tc:3: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) (design 5.2) [TC0050]
+  [1]
+
+  $ cat > c_excess.tc <<'EOF'
+  > result(int, int) f(void);
+  > # 1 "header.h" 1
+  > static int a[1] = { 1, 2 };
+  > static void c_text(void) { int b[1] = { 1, f() }; (void)b; }
+  > # 3 "c_excess.tc" 2
+  > void h(void) { c_text(); (void)a; }
+  > EOF
+  $ ./golden.exe c_excess.tc > /dev/null && echo accepted
+  accepted
+
+  $ cat > c_excess_first.tc <<'EOF'
+  > int a[1] = { 1,
+  > # 1 "excess.h" 1
+  >   2
+  > # 2 "c_excess_first.tc" 2
+  > };
+  > EOF
+  $ ./golden.exe c_excess_first.tc > /dev/null && echo accepted
+  accepted

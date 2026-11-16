@@ -1327,6 +1327,28 @@ let initialisers () =
   length "struct c { int a[2]; int b; } c[] = { (int[2]){ 1, 2 }, 3, 4 };"
     "c" "struct c[<constant>]";
   accepts "int x = { 1, 2 }; int a[1] = { 1, 2 }; int y = { { 1 } };";
+  (* Type-C text holds no excess initialiser (design 5.2), judged by its
+     first token; C text keeps the backend's warning. *)
+  let excess source = rejects ~file:"in.tc" source "[TC0050]" in
+  excess "int x = { 1, 2 };";
+  excess "int a[1] = { 1, 2 };";
+  excess "int a[2] = { [1] = 1, 2 };";
+  excess "int m[1][1] = { 1, 2 };";
+  excess "union u { int i; int j; } u = { 1, 2 };";
+  excess "char s[4] = { \"ab\", 1 };";
+  excess "struct p { int a; } p = { 1, { 2 } };";
+  excess "struct e {} e = { 1 };";
+  excess "struct z { int a[0]; int b; } z = { 1, 2 };";
+  excess "struct p { int a; } p = { 1, Ok(2) };";
+  accepts "struct e {} e = { 1 }; struct z { int a[0]; int b; } z = { 1, 2 };";
+  (* The 0 of the zero initialiser zeroes any object (design 3.2 rule
+     7). *)
+  accepts ~file:"in.tc"
+    "struct e {} e = { 0 }; int a[0] = { 0 }; struct w { struct e e; int \
+     x; } w = { 0 };";
+  accepts ~file:"in.tc"
+    "int a[] = { 1, 2 }; int b[2] = { [1] = 1, [0] = 2 }; struct f { int n; \
+     int d[]; } f = { 1, 2, 3 }; int y = { { 1 } };";
   let deep =
     "struct d0 { int x; };"
     ^ String.concat ""
@@ -1363,7 +1385,8 @@ let static_initialisers () =
   accepts "int g; long n = sizeof g; int *p = 0 ? &g : 0;";
   accepts "void f(void) { l: ; static void *p = &&l; int x = 1; int y = x; }";
   accepts "struct s { int m; } s; struct s t = (struct s){ 1 };";
-  (* Excess initialisers are not checked: GCC and Clang drop them. *)
+  (* Excess initialisers of C text are not checked: GCC and Clang drop
+     them. *)
   accepts
     "int x; static int a[1] = { 1, x }; static int s = { 1, x }; union u { \
      int i; int j; } u = { 1, x };";

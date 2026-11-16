@@ -535,13 +535,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   it is discarded, but not as the last item of a statement expression or
   as the association that a selection selects, which do not pass on
   that their value is discarded.
-- [Medium] An excess initialiser drops its value without the rule of
-  design 5.2: `struct p s = { 1, f() };` and `int y[1] = { 2, f() };`
-  where `f` returns a `result` are accepted, and GCC and Clang only warn
-  (`-Wexcess-initializers`), though 6.7.9p2 makes them a constraint
-  violation. `Initialiser.untargeted` types excess elements and those
-  whose subobject typec does not know alike. Refuse an excess
-  initialiser in Type-C text, or type excess elements as discarded.
+- [Low] Type-C text accepts a string literal longer than the character
+  array it initialises, `char s[2] = "abcd";`, which C11 6.7.9p2 makes
+  a constraint violation and GCC and Clang only warn about. It drops no
+  result, so design 5.2 does not need it refused; decide whether the
+  rule against excess initialisers covers it.
 
 ## Declarations
 

@@ -276,6 +276,10 @@ let rows =
          [try] in the arguments of an attribute of Type-C text where no \
          declaration hides it: typing does not read the text, so the \
          construct would reach the backend as written." };
+    Live { name = "Excess_initialiser"; code = 50; clause = Some "design 5.2";
+      meaning =
+        "An initialiser in Type-C text that has no element or member \
+         left to initialise (C11 6.7.9p2), other than the 0 of [{0}]." };
   ]
 
 let () =

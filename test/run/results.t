@@ -50,3 +50,21 @@ a statement expression gives does too, in GNU C without
   > done
   2 3 5 5
   2 3 5 5
+
+C text keeps an excess initialiser, a result among them, which each
+backend drops with a warning (design 5.2).
+
+  $ cat > excess.h <<'EOF'
+  > static void excess(void) { int b[1] = { 1, f() }; (void)b; }
+  > EOF
+  $ cat > excess.tc <<'EOF'
+  > static result(int, int) f(void) { return Ok(1); }
+  > #include "excess.h"
+  > int main(void) { excess(); return 0; }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc -std=gnu11 -c excess.tc 2> warnings &&
+  >     grep -c 'excess elements in array initializer' warnings
+  > done
+  1
+  1

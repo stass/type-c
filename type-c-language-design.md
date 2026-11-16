@@ -1413,6 +1413,12 @@ same in both. Only a Type-C declaration makes a value of a `result`
 type, so C text holds one only where it is written against such a
 declaration.
 
+Type-C text holds no excess initialiser, one with no element or member
+left to initialise, judged by its first token: GCC drops it with a
+warning, which would drop the result of `struct p s = { 1, f() };`
+unchecked, and C11 6.7.9p2 makes it an error of C already. The 0 of
+`{0}` drops no result and zeroes any object (3.2 rule 7), so it is none.
+
 ### 5.3 Other error conventions
 
 An error of one type becomes an error of another through an ordinary
