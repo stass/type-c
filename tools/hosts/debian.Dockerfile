@@ -36,13 +36,13 @@ RUN fingerprint=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 \
                  $1 == "fpr" && primary { print $10; primary = 0 }') \
  && test "$keys" = "$fingerprint" \
  && echo "deb [signed-by=$keyring]" \
-      https://apt.llvm.org/trixie/ llvm-toolchain-trixie-20 main \
+      https://apt.llvm.org/trixie/ llvm-toolchain-trixie-21 main \
       > /etc/apt/sources.list.d/apt.llvm.org.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-      clang-20=1:20.1.8~++20250809043815+87f0227cb601-1~exp1~20250809163919.3 \
+      clang-21=1:21.1.8~++20251221033036+2078da43e25a-1~exp1~20251221153213.50 \
  && rm -rf /var/lib/apt/lists/* \
- && ln -s clang-20 /usr/bin/clang
+ && ln -s clang-21 /usr/bin/clang
 
 ENV TYPEC_TEST_CLANG=/usr/bin/clang TYPEC_TEST_GCC=/usr/bin/gcc
 

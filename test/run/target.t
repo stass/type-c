@@ -220,14 +220,15 @@ arguments, which GNU yes would refuse as options.
   typec: the C compiler does not define __STDC_VERSION__
   [81]
 
-A backend older than typec supports gives no model either. clang19 is
-the Clang of the host that claims to be Clang 19.
+A backend older than typec supports gives no model either. clang20 is
+the Clang of the host that claims to be Clang 20, the newest release
+that typec refuses.
 
-  $ cat > clang19 <<EOF
+  $ cat > clang20 <<EOF
   > #!/bin/sh
-  > "$clang" "\$@" | sed 's/__clang_major__ .*/__clang_major__ 19/'
+  > "$clang" "\$@" | sed 's/__clang_major__ .*/__clang_major__ 20/'
   > EOF
-  $ chmod +x clang19
-  $ typec --cc=./clang19 --print-target
-  typec: the C compiler is Clang 19; typec supports Clang 20 or later and GCC 14 or later
+  $ chmod +x clang20
+  $ typec --cc=./clang20 --print-target
+  typec: the C compiler is Clang 20; typec supports Clang 21 or later and GCC 14 or later
   [81]

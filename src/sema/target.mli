@@ -87,9 +87,8 @@ type error =
 
 val minimum_major_version : compiler -> int
 (** The oldest release of each compiler that typec supports: for Clang
-    the first that follows C23 6.7.2.2 (N3029) on the type of an
-    enumerator, for GCC the oldest that a test host runs (design
-    13.3). *)
+    the first that types C as the front end does, for GCC the oldest
+    that a test host runs (design 13.3). *)
 
 val max_integer_width : int
 (** 128 bits: the widest integer type of a model, which bounds the work

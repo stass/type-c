@@ -2334,13 +2334,13 @@ Clang 21 lays out in 4 bytes and not 3. Deduction is the only way to
 the unqualified form: no type name written in a program denotes it, as
 a type name that writes `s` keeps its qualifiers and an argument holds
 no `__typeof__` of an expression (3.5 rule 2, P26); only a type
-parameter bound by deduction does. *Provisional:* GCC 16.2 and
-Apple Clang 21 take `__typeof_unqual__` in every dialect of 2.4 under
-`-pedantic-errors` and remove `_Atomic` with the other qualifiers, as
-C23's `typeof_unqual` does; GCC 14 and Clang 20, the oldest releases
-that 13.3 supports, are unmeasured, and their release notes give the
-keyword in every dialect. A run of the instance tests on each settles
-it; a release without the keyword would raise the minimum.
+parameter bound by deduction does. *Provisional:* GCC 16.2, Clang 21
+and Apple Clang 21 take `__typeof_unqual__` in every dialect of 2.4
+under `-pedantic-errors` and remove `_Atomic` with the other
+qualifiers, as C23's `typeof_unqual` does; GCC 14, the oldest GCC that
+13.3 supports, is unmeasured, and its release notes give the keyword in
+every dialect. A run of the instance tests on it settles it; a release
+without the keyword would raise the minimum.
 
 The one name is moved text (13.5), a use of the first declarator that
 gives it to the type, and its declaration where the typedef stands is
@@ -2938,8 +2938,8 @@ builtin functions with their types, the typedef names that GCC and
 Clang declare before the first token (`__builtin_va_list`,
 `__int128_t` and `__uint128_t` where the target has `__int128`, and
 on AArch64 the Arm vector types that glibc names, the Neon
-`__Float32x4_t` and `__Float64x2_t` with GCC and the SVE
-`__SVFloat32_t`, `__SVFloat64_t` and `__SVBool_t` with both),
+`__Float32x4_t` and `__Float64x2_t` and the SVE `__SVFloat32_t`,
+`__SVFloat64_t` and `__SVBool_t`, with both compilers),
 `__int128` where the backend's `__SIZEOF_INT128__` says that it has the
 type, the optional floating types (`_Float16`, `_Float32`,
 `_Float64`, `_Float128`, `_Float32x`, `_Float64x` and `__float128`),
@@ -2963,8 +2963,8 @@ identifier is an error unless the table has it for the backend, and one
 that only the other compiler has, or that the backend has on other
 architectures only, is an error saying so, so a builtin is never
 guessed. *Provisional:* no macro says which Arm vector types a backend
-declares, so the compiler and the architecture decide, as GCC 14 and
-Clang 20 declare them on AArch64 whatever the target's features; a
+declares, so the architecture decides, as GCC 14 and Clang 21 declare
+Neon's and SVE's on AArch64 whatever the target's features; a
 later release that declares the names otherwise would settle it, and
 without one the rule stays. *Provisional:* an optional floating type
 is a keyword exactly where the backend's predefined macros say that it
@@ -3050,15 +3050,21 @@ unknown (below).
 
 `typec` refuses a release older than `Target.minimum_major_version`,
 the one statement of the oldest supported releases. For Clang that is
-the first release that types C as the front end does: Clang 19 gives an
-enumerator that `int` holds the type `int` in an enumeration whose
-values `int` does not all hold, where Clang 20 and GCC follow C23
-6.7.2.2 (N3029) in every dialect and give every enumerator the
-enumerated type. For GCC it is the oldest release that a test host
-runs. *Provisional:* Apple numbers its Clang releases on its own and is
-held to the same minimum, which only Apple Clang 21 confirms; an Apple
-release at or above the minimum that types C as Clang 19 does would
-settle it otherwise, and without one the minimum stays.
+the first release that types C as the front end does: Clang 20 keeps
+`_Atomic` on a member of a structure value, where Clang 21 and 23,
+Apple Clang 21 and the front end drop it. With
+`struct t { _Atomic int a; } tf(void);`, Clang 20 selects `_Atomic int`
+in `_Generic(tf().a, int: 1, _Atomic int: 2)`, and in the same with
+`(0, tf().a)` or `x ? tf().a : tf().a` as the operand, and its
+`__typeof__((0, tf().a))` is `_Atomic int`. Clang 19 also gives an enumerator
+that `int` holds the type `int` in an enumeration whose values `int`
+does not all hold, where later releases and GCC follow C23 6.7.2.2
+(N3029) in every dialect and give every enumerator the enumerated type.
+For GCC it is the oldest release that a test host runs. *Provisional:*
+Apple numbers its Clang releases on its own and is held to the same
+minimum, which only Apple Clang 21 confirms; an Apple release at or
+above the minimum that types C as Clang 20 does would settle it
+otherwise, and without one the minimum stays.
 
 **No aggregate layout.** *Provisional (P16).* The size, alignment and
 member offsets of struct, union and array types are opaque constants to

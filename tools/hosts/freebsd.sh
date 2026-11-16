@@ -50,7 +50,7 @@ set -eu
 # The compilers of the host: the oldest Clang that typec supports
 # (Target.minimum_major_version), the newest one the host has, and a GCC.
 # The base system's Clang is older than the minimum.
-oldest_clang=/usr/local/bin/clang20
+oldest_clang=/usr/local/bin/clang21
 newest_clang=/usr/local/bin/clang23
 gcc=/usr/local/bin/gcc14
 

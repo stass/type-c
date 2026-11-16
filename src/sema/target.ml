@@ -46,7 +46,7 @@ type error =
 
 (* The reasons for each release are in the interface. *)
 let minimum_major_version = function
-  | Clang -> 20
+  | Clang -> 21
   | Gcc -> 14
 
 (* The widest integer type of a model, which bounds the work of constant
@@ -256,15 +256,13 @@ let model_of_macros macros backend =
   }
 
 
-(* No macro says which Arm vector types a backend names, so the compiler
-   and the architecture decide: GCC 14 and Clang 20 declare them on every
-   AArch64 target whatever its features, GCC Neon's and SVE's, Clang
-   SVE's only. *)
+(* No macro says which Arm vector types a backend names, so the
+   architecture decides: GCC 14 and Clang 21 declare Neon's and SVE's on
+   every AArch64 target whatever its features. *)
 let vector_families target : Typec_syntax.Keyword_set.vector_family list =
-  match (target.architecture, target.backend.compiler) with
-  | Aarch64, Gcc -> [ Neon; Sve ]
-  | Aarch64, Clang -> [ Sve ]
-  | (X86 | Arm | Powerpc | Systemz | Ve | Other), _ -> []
+  match target.architecture with
+  | Aarch64 -> [ Neon; Sve ]
+  | X86 | Arm | Powerpc | Systemz | Ve | Other -> []
 
 let keywords target dialect : Typec_syntax.Keyword_set.t =
   {

@@ -79,9 +79,22 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] `Unix.execvp` hands an executable without a `#!` line to
   `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
   a backend works on some hosts only. Document it or decide one behaviour.
+- [Medium] The compile step's `-Wno-gnu-line-marker` (design 2.4,
+  `Pipeline.quiet_line_markers`) and its copy in test/run/backends.sh
+  serve Clang 20 only: Clang 21 and 23 and Apple Clang 21 do not call
+  the line markers of `-x cpp-output` input a GNU extension under
+  `-pedantic`, and Clang 20 is below the minimum. Drop the option, its
+  paragraph in design 2.4 and README step 3, unless a supported release
+  is found that needs it: meanwhile design 2.4 justifies it by Clang 20
+  alone.
 
 ## Target model
 
+- [Low] Every target now declares both Arm vector families or neither
+  (`Target.vector_families`), so `Keyword_set.vector_families` and the
+  family of `Builtin_typedef.Arm_vector` carry no information and can
+  hold states nothing produces (`[Neon]`). Make it one flag, unless a
+  release that declares the families apart is found.
 - [Low] `Target.t` is a public record, so code can build a model that
   skips the checks of `Target.of_predefined_macros`. Make it private,
   preferably with separate signed and unsigned types for the typedef
@@ -323,18 +336,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [High] Clang 20 keeps `_Atomic` on a member of a structure value,
-  where Clang 21 and 23, Apple Clang 21 and the front end drop it: with
-  `struct t { _Atomic int a; } tf(void);`, Clang 20 selects
-  `_Atomic int` in `_Generic(tf().a, int: 1, _Atomic int: 2)`, and in
-  the same with `(0, tf().a)` or `x ? tf().a : tf().a` as the operand,
-  and gives `(0, tf().a)` the type `_Atomic int`. test/run/expressions.t
-  fails with Clang 20 for it. Design 13.3 makes the minimum Clang the
-  first release that types C as the front end does, which would raise
-  `Target.minimum_major_version` to 21 (and the oldest Clang of
-  tools/hosts); the other way is an unknown type for such a member with
-  Clang 20, which `Backend_difference` cannot express yet since it
-  tells compilers apart by family only. Decide which.
 - [Medium] Design 13.5: the type name of an association of an answered
   `_Generic`, or an operand of an answered
   `__builtin_types_compatible_p`, is dropped with what it declares and

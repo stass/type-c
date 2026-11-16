@@ -37,7 +37,7 @@ let lp64 : Target.t =
 
 let ilp32 : Target.t =
   {
-    backend = { compiler = Clang; major_version = 20 };
+    backend = { compiler = Clang; major_version = 21 };
     architecture = Arm;
     char_bit = 8;
     char_signed = false;
@@ -138,9 +138,10 @@ let model_cases =
       name = "Clang that does not claim to be GCC";
       dump =
         dump_of
-          (without "__GNUC__" @ [ ("__clang__", "1"); ("__clang_major__", "20") ]);
+          (without "__GNUC__"
+          @ [ ("__clang__", "1"); ("__clang_major__", "21") ]);
       expected =
-        Ok { lp64 with backend = { compiler = Clang; major_version = 20 } };
+        Ok { lp64 with backend = { compiler = Clang; major_version = 21 } };
     };
     {
       name = "Clang 22";
@@ -215,9 +216,9 @@ let optional_float_cases =
 let error_cases =
   [
     {
-      name = "Clang 19";
-      dump = lp64_clang_dump "19";
-      expected = unsupported_backend Clang 19;
+      name = "Clang 20";
+      dump = lp64_clang_dump "20";
+      expected = unsupported_backend Clang 20;
     };
     {
       name = "GCC 13";

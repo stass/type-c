@@ -53,11 +53,11 @@ let lp64_macros =
   ]
 
 (* An ILP32 target with unsigned char, no __int128 and big-endian bytes,
-   as for 32-bit ARM, with Clang 20's spellings of the types. *)
+   as for 32-bit ARM, with Clang 21's spellings of the types. *)
 let ilp32_macros =
   [
     ("__clang__", "1");
-    ("__clang_major__", "20");
+    ("__clang_major__", "21");
     ("__GNUC__", "4");
     ("__arm__", "1");
     ("__CHAR_BIT__", "8");
@@ -107,10 +107,10 @@ let names_backend (name, _) =
 let without_backend macros =
   List.filter (fun macro -> not (names_backend macro)) macros
 
-(* [macros] as Clang 20 or GCC 14 would print them, for the typing that
+(* [macros] as Clang 21 or GCC 14 would print them, for the typing that
    depends on the backend (Backend_difference). *)
 let as_clang macros =
-  ("__clang__", "1") :: ("__clang_major__", "20") :: ("__GNUC__", "4")
+  ("__clang__", "1") :: ("__clang_major__", "21") :: ("__GNUC__", "4")
   :: without_backend macros
 
 let as_gcc macros = ("__GNUC__", "14") :: without_backend macros
