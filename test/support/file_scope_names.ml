@@ -43,13 +43,13 @@ let add_declarator names declarator (declared : declared) =
     (declared_name declarator)
 
 (* The enumerators that a variant declares for C (design 10.1 rule 6). *)
-let add_derived_enumerators names (variant : identifier) = function
+let add_derived_enumerators names (variant : Spelling.type_name) = function
   | Variant { constructors; _ } ->
       List.iter
         (fun (constructor : constructor) ->
           let name = constructor.node.name in
           Hashtbl.replace names.ordinary
-            (enumerator_name ~variant:variant.node name.node)
+            (enumerator_name ~variant name.node)
             (In_tree (derived_enumerator name.span.first)))
         constructors
   | Incomplete_variant | Alias _ | Distinct _ | Record_alias _ -> ()
@@ -70,8 +70,10 @@ let add_external names = function
       List.iter (add_specifier names) specifiers;
       add_declarator names declarator declared
   | Type_declaration { node = { name; declared; definition; _ }; _ } ->
-      Hashtbl.replace names.ordinary name.node (In_tree declared.id);
-      add_derived_enumerators names name definition
+      Hashtbl.replace names.ordinary
+        (name.node :> string)
+        (In_tree declared.id);
+      add_derived_enumerators names name.node definition
   | External_declaration { node = Static_assert _; _ }
   | Top_level_asm _ | Empty_declaration _ ->
       ()

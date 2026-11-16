@@ -622,7 +622,8 @@ and block_item reader = function
 (* A type declaration as [(type N definition)]; the tag that it claims
    is a [claims] part, whose entry is a declaration in the tag space. *)
 and type_declaration reader (d : type_declaration) =
-  let { name; declared; definition; _ } = d.node in
+  let { name = checked; declared; definition; _ } = d.node in
+  let name = (checked :> identifier) in
   let declared_name =
     noted (declaration_entry name.node declared) (identifier name)
   in
@@ -649,12 +650,12 @@ and type_declaration reader (d : type_declaration) =
         let enum_claim =
           noted
             (Declaration_entry
-               { space = Tag; name = enum_tag_name name.node; token;
+               { space = Tag; name = enum_tag_name checked.node; token;
                  earlier = None })
             (leaf "claims")
         in
         privacy ~is_private @ own
-        @ (enum_claim :: List.map (constructor reader name) constructors)
+        @ (enum_claim :: List.map (constructor reader checked) constructors)
   in
   node d.span "type" (declared_name :: parts)
 
@@ -675,7 +676,7 @@ and constructor reader variant (c : constructor) =
        { space = Ordinary;
          name = enumerator_name ~variant:variant.node name.node; token;
          earlier = None })
-    (node c.span name.node (List.map field fields))
+    (node c.span (name.node :> string) (List.map field fields))
 
 (* The qualifiers, the template and, for extended assembler, its four
    sections. *)

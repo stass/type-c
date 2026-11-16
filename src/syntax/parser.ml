@@ -606,49 +606,17 @@ let declare_tag state (name : identifier) =
     Scope.declare_tag state.scope name.node { tag = id; claimed = false };
   Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
 
-let begins_with_underscore_and_uppercase spelling =
-  String.length spelling >= 2
-  && spelling.[0] = '_'
-  && 'A' <= spelling.[1]
-  && spelling.[1] <= 'Z'
-
-(* C reserves for any use an identifier that begins with two underscores
-   or with one and an uppercase letter (C11 7.1.3p1). *)
-let is_reserved_for_any_use spelling =
-  String.starts_with ~prefix:"__" spelling
-  || begins_with_underscore_and_uppercase spelling
-
-let has_double_underscore spelling =
-  let last = String.length spelling - 1 in
-  let rec from index =
-    if index >= last then false
-    else if spelling.[index] = '_' && spelling.[index + 1] = '_' then true
-    else from (index + 1)
-  in
-  from 0
-
-(* The names that a type declaration derives begin as its name does and
-   join it with one [_] to a suffix that holds no [__] and does not begin
-   with [_], as [refuse_reserved_constructor] checks of a constructor
-   (design 3.1 rules 6 and 7). So this spelling keeps every derived name
-   from being reserved in C or holding the [__] of an instance name,
-   whatever the form of the declaration. [reason] completes the
-   sentence after the name. *)
-let refuse_misspelled_type_name state (name : identifier) =
-  let refuse reason =
-    fail_at_token state (token_of name)
-      (Rule.message Type_name_spelling
-         (Printf.sprintf "%s cannot name a type declaration%s"
-            (quoted name.node) reason))
-  in
-  let spelling = name.node in
-  if has_double_underscore spelling then refuse ", as it contains `__`"
-  else if String.ends_with ~suffix:"_" spelling then
-    refuse ", as it ends with `_`"
-  else if begins_with_underscore_and_uppercase spelling then
-    refuse ", as it begins with `_` and an uppercase letter"
-  else if Scope.is_file state.scope && String.starts_with ~prefix:"_" spelling
-  then refuse " at file scope, as it begins with `_`"
+(* The name of a type declaration, which its spelling lets derive names
+   for C (design 3.1 rules 6 and 7). *)
+let checked_type_name state (name : identifier) =
+  let at_file_scope = Scope.is_file state.scope in
+  match Spelling.type_name ~at_file_scope name.node with
+  | Ok checked -> { name with node = checked }
+  | Error reason ->
+      fail_at_token state (token_of name)
+        (Rule.message Type_name_spelling
+           (Printf.sprintf "%s cannot name a type declaration%s"
+              (quoted name.node) reason))
 
 (* The end of a refused claim's message: what holds the name already. *)
 let already_taken_by ~declared_here =
@@ -679,14 +647,15 @@ let claim_own_tag state (name : identifier) =
 (* The enumerator that the variant [variant] declares for its
    constructor [constructor] at the token [at], which it claims as it
    claims a tag. *)
-let claim_enumerator state ~(variant : identifier) ~at constructor =
+let claim_enumerator state ~(variant : Spelling.type_name spanned) ~at
+    constructor =
   let enumerator = enumerator_name ~variant:variant.node constructor in
   let declared_here = Scope.find_in_innermost state.scope enumerator <> None in
   if declared_here || claims_enumerator state enumerator then
     fail_at_token state at
       (Rule.message Claimed_name
          (Printf.sprintf "the variant %s claims the enumerator %s, which %s"
-            (quoted variant.node) (quoted enumerator)
+            (quoted (variant.node :> string)) (quoted enumerator)
             (already_taken_by ~declared_here)));
   let id = derived_enumerator at in
   state.scope <-
@@ -697,7 +666,9 @@ let claim_enumerator state ~(variant : identifier) ~at constructor =
    the current scope, which claims the tag of the name already (design
    3.1 rule 4); elsewhere it declares the name and claims the tag. Either
    claims the enumeration tag of its constructors (10.1 rule 6). *)
-let declare_variant state (name : identifier) ~type_keyword =
+let declare_variant state (checked : Spelling.type_name spanned)
+    ~type_keyword =
+  let name = (checked :> identifier) in
   let declared =
     match Scope.find_in_innermost state.scope name.node with
     | Some { kind = Incomplete_variant_type; declaration } ->
@@ -711,7 +682,7 @@ let declare_variant state (name : identifier) ~type_keyword =
         claim_own_tag state name;
         declared
   in
-  claim_tag state name ~tag:(enum_tag_name name.node)
+  claim_tag state name ~tag:(enum_tag_name checked.node)
     (derived_enum_tag ~type_keyword);
   declared
 
@@ -1518,17 +1489,18 @@ let defines_record_alone state =
          = Punctuator_token P.Semicolon
   | _ -> false
 
-(* The names of the constructors of the definition at the cursor, each
-   with its token, in order: the identifier after each [|], past the
-   fields in parentheses. Where the definition is malformed, the list
-   ends where the grammar then fails. *)
+(* The names of the constructors of the definition at the cursor, in
+   order: the identifier after each [|], past the fields in parentheses.
+   Where the definition is malformed, the list ends where the grammar
+   then fails. *)
 let constructor_names state =
   let rec loop offset names =
     match (peek_at state offset, peek_at state (offset + 1)) with
     | Punctuator_token P.Pipe, Identifier_token name ->
         let token = state.grammar.(state.position + offset + 1).index in
         let next = past_group state P.Left_paren (offset + 2) in
-        loop next ((name, token) :: names)
+        let name = { span = { first = token; last = token }; node = name } in
+        loop next (name :: names)
     | _ -> List.rev names
   in
   loop 0 []
@@ -1537,25 +1509,25 @@ let constructor_names state =
    name would read as that word or name; and its name joins the variant's
    with one [_] in the enumerator it derives, so that the enumerator holds
    no [__] (design 3.2 rule 2). *)
-let refuse_reserved_constructor state ~at constructor =
+let checked_constructor state (constructor : identifier) =
   let refuse why =
-    fail_at_token state at
+    fail_at_token state (token_of constructor)
       (Rule.message Reserved_constructor
          (Printf.sprintf "%s cannot name a constructor, as %s"
-            (quoted constructor) why))
+            (quoted constructor.node) why))
   in
-  match (type_c_word constructor, Universe.find constructor) with
+  match (type_c_word constructor.node, Universe.find constructor.node) with
   | Some _, _ -> refuse "it is a word of Type-C"
   | None, Some _ -> refuse "it is a universe name"
-  | None, None ->
-      if String.starts_with ~prefix:"_" constructor then
-        refuse "it begins with `_`"
-      else if has_double_underscore constructor then refuse "it contains `__`"
+  | None, None -> (
+      match Spelling.constructor constructor.node with
+      | Ok checked -> { constructor with node = checked }
+      | Error why -> refuse why)
 
 (* A field names a member of its constructor's structure, so its name
    may not be one C reserves for any use (design 3.2 rule 2). *)
 let refuse_reserved_field state (field : identifier) =
-  if is_reserved_for_any_use field.node then
+  if Spelling.is_reserved_for_any_use field.node then
     fail_at_token state (token_of field)
       (Rule.message Reserved_constructor
          (Printf.sprintf "%s cannot name a field, as C reserves it for any use"
@@ -1564,19 +1536,29 @@ let refuse_reserved_field state (field : identifier) =
 (* The enumerators of the variant [variant], claimed before any field is
    read: the C it lowers to declares them before the structure, so a
    field names them as C does (design 10.1 rule 6). Names within one
-   variant are unique (design 3.2 rule 2). *)
+   variant are unique (design 3.2 rule 2). Gives the names of the
+   constructors, which the tree takes from here. *)
 let claim_enumerators state ~variant =
   let seen = Hashtbl.create 8 in
-  let claim (constructor, at) =
-    refuse_reserved_constructor state ~at constructor;
-    if Hashtbl.mem seen constructor then
+  let claim (name : identifier) =
+    let checked = checked_constructor state name in
+    let at = token_of name in
+    if Hashtbl.mem seen name.node then
       fail_at_token state at
         (Rule.message Duplicate_constructor
-           (quoted constructor ^ " names two constructors of one variant"));
-    Hashtbl.replace seen constructor ();
-    claim_enumerator state ~variant ~at constructor
+           (quoted name.node ^ " names two constructors of one variant"));
+    Hashtbl.replace seen name.node ();
+    claim_enumerator state ~variant ~at checked.node;
+    checked
   in
-  List.iter claim (constructor_names state)
+  (* In source order, so that the first refused name is the one
+     reported. *)
+  let rec loop names claimed =
+    match names with
+    | name :: names -> loop names (claim name :: claimed)
+    | [] -> List.rev claimed
+  in
+  loop (constructor_names state) []
 
 let word_at state offset word = peek_at state offset = Identifier_token word
 
@@ -2581,8 +2563,9 @@ and type_declaration state : int -> type_declaration =
   let start = state.position in
   let type_keyword = state.grammar.(start).index in
   advance state;
-  let name = identifier state "the name of a type declaration" in
-  refuse_misspelled_type_name state name;
+  let name =
+    checked_type_name state (identifier state "the name of a type declaration")
+  in
   if peek state = Punctuator_token P.Left_paren then
     fail_not_implemented state ~section:"3.5" ~package:"2.1"
       "type parameters are not implemented yet";
@@ -2598,19 +2581,21 @@ and type_declaration state : int -> type_declaration =
   let span = span_from state start in
   fun scope_end -> { span; node = { name; declared; definition; scope_end } }
 
-and incomplete_variant state name =
+and incomplete_variant state checked =
+  let name = (checked :> identifier) in
   let declared = declare state ~kind:Incomplete_variant_type name in
   claim_own_tag state name;
   (declared, Incomplete_variant)
 
-(* After the [=]: the declaration of [name], which is in scope from the
-   end of its identifier, and the definition. *)
-and type_definition state name ~type_keyword =
+(* After the [=]: the declaration of [checked], which is in scope from
+   the end of its identifier, and the definition. *)
+and type_definition state checked ~type_keyword =
+  let name = (checked :> identifier) in
   let is_private = accept_private state in
   if peek state = Punctuator_token P.Pipe then begin
-    let declared = declare_variant state name ~type_keyword in
-    claim_enumerators state ~variant:name;
-    (declared, Variant { is_private; constructors = constructors state })
+    let declared = declare_variant state checked ~type_keyword in
+    let names = claim_enumerators state ~variant:checked in
+    (declared, Variant { is_private; constructors = constructors state names })
   end
   else
     match specifier_word state 0 with
@@ -2634,19 +2619,31 @@ and type_definition state name ~type_keyword =
       end_definition state name declared;
       (declared, Alias type_name)
 
-(* The constructors of a variant, each after a [|]. *)
-and constructors state =
-  let rec loop constructors =
-    if peek state = Punctuator_token P.Pipe then
-      loop (constructor state :: constructors)
-    else List.rev constructors
+(* The constructors of a variant, each after a [|], with the [names]
+   that {!claim_enumerators} read ahead. Those end at the first [|] with
+   no identifier after it, where the grammar fails. *)
+and constructors state names =
+  let rec loop names constructors =
+    match names with
+    | name :: names -> loop names (constructor state name :: constructors)
+    | [] -> List.rev constructors
   in
-  loop []
+  let constructors = loop names [] in
+  if peek state = Punctuator_token P.Pipe then begin
+    advance state;
+    fail_expected state "the name of a constructor"
+  end;
+  constructors
 
-and constructor state =
+(* At the [|] before [name], which is the next token: the lookahead of
+   [constructor_names] skips the fields as [fields] reads them, so the
+   two agree on every token where the grammar has not failed. *)
+and constructor state (name : Spelling.constructor spanned) =
   let start = state.position in
   advance state;
-  let name = identifier state "the name of a constructor" in
+  if first_token state state.position <> name.span.first then
+    invalid_arg "Parser.constructor: the lookahead lost its constructor";
+  advance state;
   let fields = if accept state P.Left_paren then fields state else [] in
   finish state start ({ name; fields } : constructor_node)
 

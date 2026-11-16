@@ -136,8 +136,8 @@ val create : unit -> t
     lowers to the braced list alone. *)
 type construction = {
   span : Tree.span;
-  variant : string;
-  constructor : string;
+  variant : Spelling.type_name;
+  constructor : Spelling.constructor;
   callee : Tree.span option;
   arguments : Tree.expression list;
   braced : bool;
@@ -153,7 +153,11 @@ type access = Through_pointer | Through_copy
 
 (** A binding of a match: its name, the constructor of its pattern and
     the field that it copies (design 4.1 rule 4). *)
-type binding = { name : string; constructor : string; field : string }
+type binding = {
+  name : string;
+  constructor : Spelling.constructor;
+  field : string;
+}
 
 (** An arm of a match: its span; the span from its first label to its
     last; the constructors it takes, in the order of its labels, where a
@@ -162,7 +166,7 @@ type binding = { name : string; constructor : string; field : string }
 type matched_arm = {
   arm : Tree.span;
   labels : Tree.span;
-  cases : string list;
+  cases : Spelling.constructor list;
   bindings : binding list;
 }
 
@@ -184,8 +188,8 @@ type test_form = If_test of { otherwise : Tree.span option } | While_test
     the valid ones (4.5), its bindings in order, and its statement. *)
 type test = {
   form : test_form;
-  constructor : string;
-  constructors : string list;
+  constructor : Spelling.constructor;
+  constructors : Spelling.constructor list;
   bindings : binding list;
   controlled : controlled;
 }
@@ -202,7 +206,7 @@ type selection = Arms of matched_arm list | Test of test
 type 'selects matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
-  variant : string;
+  variant : Spelling.type_name;
   access : access;
   selects : 'selects;
 }

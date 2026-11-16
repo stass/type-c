@@ -145,11 +145,12 @@ let has_payload constructors =
    the incomplete variant declares already where the variant [completes]
    one; the enumeration of the tags, numbered from 0 in order (rule 1);
    and the structure up to its union where it has one (rule 3). *)
-let variant_head ~completes name constructors =
+let variant_head ~completes variant constructors =
+  let name = (variant : Spelling.type_name :> string) in
   let enumerator (constructor : Tree.constructor) =
-    Tree.enumerator_name ~variant:name constructor.node.name.node
+    Tree.enumerator_name ~variant constructor.node.name.node
   in
-  let tag_enum = "enum " ^ Tree.enum_tag_name name in
+  let tag_enum = "enum " ^ Tree.enum_tag_name variant in
   let forward =
     if completes then "" else record_declarations Struct ~tag:name name ^ " "
   in
@@ -177,7 +178,9 @@ let constructor_edits tokens (constructor : Tree.constructor) =
   let field_end (field : Tree.field) =
     let after = grammar_token_after tokens field.span.last in
     if after = close then
-      replace_at tokens ~first:after (Printf.sprintf "; } %s;" name.node) []
+      replace_at tokens ~first:after
+        (Printf.sprintf "; } %s;" (name.node :> string))
+        []
     else replace_at tokens ~first:after ";" []
   in
   match fields with
@@ -204,6 +207,7 @@ let variant tokens ~location ~head (declaration : Tree.type_declaration)
 let type_declaration (tokens : Token.t array)
     (declaration : Tree.type_declaration) =
   let { Tree.name; definition; _ } = declaration.node in
+  let name = (name :> Tree.identifier) in
   let location = tokens.(declaration.span.first).location in
   let head = [ declaration.span.first; name.span.first ] in
   match definition with
@@ -242,7 +246,8 @@ let construction (tokens : Token.t array)
   let location = tokens.(span.first).location in
   let enumerator = Tree.enumerator_name ~variant constructor in
   let opening =
-    if braced then "{ " else Printf.sprintf "((struct %s){ " variant
+    if braced then "{ "
+    else Printf.sprintf "((struct %s){ " (variant :> string)
   in
   let closing = if braced then "}" else "})" in
   let tag = Printf.sprintf ".%s = %s" Tree.tag_member enumerator in
@@ -253,7 +258,8 @@ let construction (tokens : Token.t array)
         (grammar_tokens tokens span.first span.last)
   | Some callee ->
       let fields =
-        Printf.sprintf "%s, .%s.%s = { " tag Tree.union_member constructor
+        Printf.sprintf "%s, .%s.%s = { " tag Tree.union_member
+          (constructor :> string)
       in
       let left_paren = grammar_token_after tokens callee.last in
       replace tokens ~location (opening ^ fields)
@@ -281,7 +287,7 @@ let scrutinee_copy = "__tc_copy"
    the operand of a test: the opening of the block, and the declaration
    of the pointer around the scrutinee. *)
 let scrutinee_holder (matching : _ Typec_sema.Expressions.matching_of) =
-  let record = "struct " ^ matching.variant in
+  let record = "struct " ^ (matching.variant :> string) in
   match matching.access with
   | Through_pointer ->
       ( Printf.sprintf "{ const %s *const %s = &(" record scrutinee_pointer,
@@ -297,7 +303,8 @@ let scrutinee_holder (matching : _ Typec_sema.Expressions.matching_of) =
 let binding_declaration (binding : Typec_sema.Expressions.binding) =
   let field =
     Printf.sprintf "%s->%s.%s.%s" scrutinee_pointer Tree.union_member
-      binding.constructor binding.field
+      (binding.constructor :> string)
+      binding.field
   in
   Printf.sprintf " const __typeof__(%s) %s = %s;" field binding.name field
 

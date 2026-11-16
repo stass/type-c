@@ -586,7 +586,7 @@ and block_item =
 and type_declaration = type_declaration_node spanned
 
 and type_declaration_node = {
-  name : identifier;
+  name : Spelling.type_name spanned;
   declared : declared;
       (** never a redeclaration (design 3.1 rule 5), except a [Variant]
           that completes the [Incomplete_variant] of its name in its
@@ -631,7 +631,7 @@ and type_definition =
 and constructor = constructor_node spanned
 
 and constructor_node = {
-  name : identifier;
+  name : Spelling.constructor spanned;
   fields : field list;  (** in parentheses, at least one, or none *)
 }
 
@@ -715,9 +715,11 @@ let claimed_tag (Ordinary_at token) = Tag_at token
     [N_tag], declared at the token [type], and an enumerator [N_C] for
     each constructor [C], declared at the constructor's name. No other
     declaration is made at either token. *)
-let enum_tag_name variant = variant ^ "_tag"
+let enum_tag_name (variant : Spelling.type_name) = (variant :> string) ^ "_tag"
 
-let enumerator_name ~variant constructor = variant ^ "_" ^ constructor
+let enumerator_name ~(variant : Spelling.type_name)
+    (constructor : Spelling.constructor) =
+  (variant :> string) ^ "_" ^ (constructor :> string)
 
 (** The members of the structure of a variant: the tag, and the union of
     the fields where a constructor has fields (design 10.1 rule 3). *)

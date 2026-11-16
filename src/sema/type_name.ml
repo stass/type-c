@@ -18,6 +18,11 @@ let tag_name keyword name =
 
 let record_keyword = function Struct -> "struct" | Union -> "union"
 
+let record_tag_name = function
+  | Anonymous -> None
+  | Named name -> Some name
+  | Variant_name name -> Some (name :> string)
+
 let length_text = function
   | Constant count -> string_of_int count
   | Opaque -> "<constant>"
@@ -69,7 +74,9 @@ let rec declaration t declarator =
   | Enum tag ->
       specified t.qualifiers (tag_name "enum" tag.enum_name) declarator
   | Record tag ->
-      let name = tag_name (record_keyword tag.kind) tag.record_name in
+      let name =
+        tag_name (record_keyword tag.kind) (record_tag_name tag.record_name)
+      in
       specified t.qualifiers name declarator
   | Distinct distinct ->
       specified t.qualifiers distinct.distinct_name declarator

@@ -1625,7 +1625,10 @@ and read_block_declaration state (declaration : Tree.declaration) =
    entity: a typedef name of the type that it defines. *)
 
 and read_type_declaration state (declaration : Tree.type_declaration) =
-  let { Tree.name; declared; definition; scope_end } = declaration.node in
+  let { Tree.name = checked; declared; definition; scope_end } =
+    declaration.node
+  in
+  let name = (checked :> Tree.identifier) in
   Hashtbl.replace state.type_declarations declared.id declaration;
   let bind t =
     record state name.node declared
@@ -1633,7 +1636,7 @@ and read_type_declaration state (declaration : Tree.type_declaration) =
   in
   match definition with
   | Incomplete_variant ->
-      let record = variant_record state name declared in
+      let record = variant_record state checked.node declared in
       Hashtbl.replace state.incomplete_variants (In_tree declared.id) record;
       bind (Ctype.record record)
   | Variant { is_private; constructors } ->
@@ -1675,11 +1678,11 @@ and distinct_type state (name : Tree.identifier) privacy type_name =
 (* A variant is the structure that it lowers to (design 10.1): that of
    the incomplete variant it completes, or a new one under the tag that
    it claims. *)
-and variant_record state (name : Tree.identifier) (declared : Tree.declared) =
+and variant_record state name (declared : Tree.declared) =
   match declared.earlier with
   | Some forward -> Hashtbl.find state.incomplete_variants forward
   | None ->
-      let record = Ctype.declare_variant state.tags name.node in
+      let record = Ctype.declare_variant state.tags name in
       Hashtbl.replace state.tag_types (Tree.claimed_tag declared.id)
         (Record_tag record);
       record
@@ -1690,7 +1693,7 @@ and variant_record state (name : Tree.identifier) (declared : Tree.declared) =
 and read_variant state (declaration : Tree.type_declaration) privacy ~scope
     constructors bind =
   let { Tree.name; declared; _ } = declaration.node in
-  let record = variant_record state name declared in
+  let record = variant_record state name.node declared in
   let entity = bind (Ctype.record record) in
   let tag_enum = variant_tag_enum state declaration constructors in
   let tag = variant_member Tree.tag_member (Ctype.enum tag_enum) in
@@ -1773,7 +1776,8 @@ and constructor_payload state
   | [] -> None
   | _ :: _ ->
       let payload = defined_record state span Ctype.Struct fields in
-      Some (variant_member constructor_name (Ctype.record payload))
+      Some
+        (variant_member (constructor_name :> string) (Ctype.record payload))
 
 and read_field state constructor (field : Tree.field) =
   let specified = read_specifiers state field.node.specifiers in
@@ -1791,7 +1795,7 @@ and check_field_type state (constructor : Tree.constructor)
   let subject =
     Printf.sprintf "the field %s of %s"
       (quote (Option.value derived.name ~default:""))
-      (quote constructor.node.name.node)
+      (quote (constructor.node.name.node :> string))
   in
   match Value_type.problem state.tags derived.declared_type with
   | Answer None -> ()

@@ -43,12 +43,16 @@ type privacy =
 type record_tag = private {
   record_id : int;
   kind : record_kind;
-  record_name : string option;  (** [None] for an anonymous structure. *)
-  variant : bool;
-      (** Whether this is the structure that a variant lowers to (design
-          10.1), which only C text may treat as a structure (3.2 rule 6,
-          10.6); only {!declare_variant} makes one. *)
+  record_name : record_name;
 }
+
+and record_name =
+  | Anonymous
+  | Named of string
+  | Variant_name of Typec_syntax.Spelling.type_name
+      (** The structure that the variant of this name lowers to (design
+          10.1), which only C text may treat as a structure (3.2 rule 6,
+          10.6); only {!declare_variant} makes a tag of one. *)
 
 (** An enumerated type, created as a {!record_tag} is. *)
 type enum_tag = private { enum_id : int; enum_name : string option }
@@ -215,12 +219,15 @@ val atomic : t -> (t, error) result
 val create_tags : unit -> tags
 val declare_record : tags -> record_kind -> string option -> record_tag
 
-val declare_variant : tags -> string -> record_tag
+val declare_variant : tags -> Typec_syntax.Spelling.type_name -> record_tag
 (** The structure that the variant of this name lowers to (design 10.1). *)
 
 (** A constructor of a variant: its name and its fields in order, whose
     position in the list of its variant is its tag (design 10.1 rule 1). *)
-type constructor = { constructor_name : string; fields : member list }
+type constructor = {
+  constructor_name : Typec_syntax.Spelling.constructor;
+  fields : member list;
+}
 
 val declare_enum : tags -> string option -> enum_tag
 
@@ -322,7 +329,7 @@ val is_complete : tags -> t -> bool Unknown.answer
 val is_variably_modified : t -> bool Unknown.answer
 (** A variable length array, or derived from one (6.7.6p3). *)
 
-val as_variant : t -> string option
+val as_variant : t -> Typec_syntax.Spelling.type_name option
 (** The name of the variant whose structure [t] is, qualified or not, or
     [None] where [t] is no variant. *)
 

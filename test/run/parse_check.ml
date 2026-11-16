@@ -61,7 +61,8 @@ let describe = function
   | Tree.Function_definition { node = { declarator; _ }; _ } ->
       "function "
       ^ Option.value (Tree.declared_name declarator) ~default:"?"
-  | Tree.Type_declaration { node = { name; _ }; _ } -> "type " ^ name.node
+  | Tree.Type_declaration { node = { name; _ }; _ } ->
+      "type " ^ (name.node :> string)
   | Tree.Top_level_asm _ -> "assembler"
   | Tree.Empty_declaration _ -> "empty declaration"
 

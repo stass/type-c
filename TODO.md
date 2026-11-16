@@ -967,15 +967,6 @@ types (design 13.3).
   name through the claim functions of the parser, the one funnel that
   refuses a derived name claimed twice, and check a generic function's
   name as a file-scope type name (design 7.1 rule 1).
-- [Medium] That no derived name is reserved in C or holds `__` rests on
-  two spelling checks (`refuse_misspelled_type_name`,
-  `refuse_reserved_constructor`) and on `Tree.enum_tag_name` and
-  `Tree.enumerator_name` taking checked names, which only the parser's
-  order guarantees: the constructors are checked as `constructor_names`
-  reads them ahead, and the tree gets them from a second read. Make it
-  hold by construction: abstract type-name and constructor-name types
-  whose only constructors run the checks, taken by the derivation
-  functions and carried in the tree.
 - [Medium] A type declaration inside a Clang block literal is not
   lowered: `^{ type x = | a; }` reaches the backend as written.
 - [Medium] Whether a variant completes `type N;` is read from

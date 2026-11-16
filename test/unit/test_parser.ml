@@ -68,7 +68,7 @@ let scope_ends ?(file = type_c_file) text =
   and declared reader (declaration : Tree.type_declaration) =
     let { Tree.name; scope_end; _ } = declaration.node in
     let token = reader.Reader.tokens.(scope_end) in
-    [ Printf.sprintf "%s:%d:%s" name.node scope_end
+    [ Printf.sprintf "%s:%d:%s" (name.node :> string) scope_end
         (Reader.spelling reader token) ]
   in
   let external_declaration reader = function
@@ -2049,6 +2049,24 @@ let type_c_error_cases =
       "error: in.tc:1: expected a declarator, found `)`";
     case "constructors without a bar between them" "type e = | A B;"
       "error: in.tc:1: expected `;` after a type declaration, found `B`";
+    case "a variant without a constructor" "type e = | ;"
+      "error: in.tc:1: expected the name of a constructor, found `;`";
+    case "a constructor named by a number" "type e = | 5;"
+      "error: in.tc:1: expected the name of a constructor, found `5`";
+    case "a later constructor named by a number" "type e = | A(int x) | 5;"
+      "error: in.tc:1: expected the name of a constructor, found `5`";
+    case "two bars between constructors" "type e = | A(int x) | | B;"
+      "error: in.tc:1: expected the name of a constructor, found `|`";
+    case "a variant that ends at its bar" "type e = |"
+      "error: in.tc:1: expected the name of a constructor, found end of \
+       input";
+    case "a later reserved constructor before a malformed field"
+      "type e = | A(int x, ) | _b;"
+      "error: in.tc:1: `_b` cannot name a constructor, as it begins with \
+       `_` (design 3.2 rule 2) [TC0025]";
+    case "a malformed field before a later constructor"
+      "type e = | A(int x | B;"
+      "error: in.tc:1: expected `,` or `)` after a field, found `|`";
     case "a distinct type" "type d = distinct unsigned int;"
       "(type d distinct (type unsigned int))";
     case "a private variant" "type v = private | A;"

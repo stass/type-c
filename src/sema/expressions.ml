@@ -48,20 +48,24 @@ type enclosing = {
 
 type construction = {
   span : Tree.span;
-  variant : string;
-  constructor : string;
+  variant : Spelling.type_name;
+  constructor : Spelling.constructor;
   callee : Tree.span option;
   arguments : Tree.expression list;
   braced : bool;
 }
 
 type access = Through_pointer | Through_copy
-type binding = { name : string; constructor : string; field : string }
+type binding = {
+  name : string;
+  constructor : Spelling.constructor;
+  field : string;
+}
 
 type matched_arm = {
   arm : Tree.span;
   labels : Tree.span;
-  cases : string list;
+  cases : Spelling.constructor list;
   bindings : binding list;
 }
 
@@ -73,8 +77,8 @@ type test_form = If_test of { otherwise : Tree.span option } | While_test
 
 type test = {
   form : test_form;
-  constructor : string;
-  constructors : string list;
+  constructor : Spelling.constructor;
+  constructors : Spelling.constructor list;
   bindings : binding list;
   controlled : controlled;
 }
@@ -84,7 +88,7 @@ type selection = Arms of matched_arm list | Test of test
 type 'selects matching_of = {
   statement : Tree.span;
   scrutinee : Tree.span;
-  variant : string;
+  variant : Spelling.type_name;
   access : access;
   selects : 'selects;
 }
@@ -160,12 +164,12 @@ end = struct
     | None -> true
 
   (* The diagnostic for a site that [what] names, which [rule] codes. *)
-  let outside_scope rule ~what ~variant =
+  let outside_scope rule ~what ~(variant : Spelling.type_name) =
     Rule.message rule
       (Printf.sprintf
          "%s is outside the scope of the declaration of the variant %s, \
           where the names that it lowers to do not denote the variant"
-         what (quote variant))
+         what (quote (variant :> string)))
 
   (* A matching that [what] names, with what it selects typed by
      [selects] once it is known to be in scope. *)
@@ -424,7 +428,7 @@ let refuse_variant context (span : Tree.span) (t : Ctype.t) =
            (Printf.sprintf
               "the variant %s takes no such operation; Type-C text reaches \
                its tag and fields only through constructors and matching"
-              (quote name)))
+              (quote (name :> string))))
   | Some _ | None -> ()
 
 (* Distinct types (design 3.4, 10.2) *)
@@ -2004,14 +2008,14 @@ let discards cast_type = Ctype.is_void cast_type = Answer true
    type and name, and the constructor. *)
 type chosen_constructor = {
   variant_type : Ctype.t;
-  variant_name : string;
+  variant_name : Spelling.type_name;
   chosen : Ctype.constructor;
 }
 
 let find_constructor constructors name =
   List.find_opt
     (fun (constructor : Ctype.constructor) ->
-      constructor.constructor_name = name)
+      (constructor.constructor_name :> string) = name)
     constructors
 
 let constructor_message text = Rule.message Constructor_expression text
@@ -2259,9 +2263,9 @@ and construct context (whole : Tree.expression) named arguments =
          callee = called_name whole;
          arguments = Option.value arguments ~default:[];
          braced = false });
-  let described = "the variant " ^ quote named.variant_name in
+  let described = "the variant " ^ quote (named.variant_name :> string) in
   refuse_private_creation context whole.span named.variant_type ~described;
-  let name = quote named.chosen.constructor_name in
+  let name = quote (named.chosen.constructor_name :> string) in
   let fields = named.chosen.fields in
   let refuse text = context.fail whole.span (constructor_message text) in
   (match (fields, arguments) with
@@ -2333,7 +2337,7 @@ and constructor_argument context named (field : Ctype.member) argument =
              (Printf.sprintf
                 "the argument for the field %s of %s does not have its type"
                 (quote (Option.value field.member_name ~default:""))
-                (quote named.chosen.constructor_name)))
+                (quote (named.chosen.constructor_name :> string))))
 
 (* The arguments of a call of a builtin that moves a value of the object
    that its first argument points to have the target types that the
@@ -3031,7 +3035,7 @@ and scrutinee_variant context ~what span t =
            (Printf.sprintf
               "%s is of the incomplete variant %s, whose constructors are \
                unknown here"
-              what (quote variant)))
+              what (quote (variant :> string))))
   | None, _ ->
       context.fail span
         (Rule.message Match_scrutinee
@@ -3047,14 +3051,14 @@ and pattern_constructor context ~site variant constructors
   match
     List.find_opt
       (fun (constructor : Ctype.constructor) ->
-        constructor.constructor_name = name)
+        (constructor.constructor_name :> string) = name)
       constructors
   with
   | None ->
       context.fail label
         (Rule.message Pattern
            (Printf.sprintf "%s names no constructor of the variant %s"
-              (quote name) (quote variant)))
+              (quote name) (quote (variant :> string))))
   | Some constructor ->
       { constructor;
         sub_fields = sub_pattern_fields context ~site label pattern constructor
@@ -3065,7 +3069,7 @@ and pattern_constructor context ~site variant constructors
    for a constructor with fields (4.1 rule 3, 4.6 rule 2). *)
 and sub_pattern_fields context ~site label (pattern : Tree.pattern)
     (constructor : Ctype.constructor) =
-  let name = quote constructor.constructor_name in
+  let name = quote (constructor.constructor_name :> string) in
   let fields = List.length constructor.fields in
   match (pattern.sub_patterns, site) with
   | None, Match_label when fields > 0 ->
@@ -3117,7 +3121,7 @@ and coverage context ~statement variant constructors labelled =
           context.fail label.span
             (Rule.message Exhaustiveness
                (Printf.sprintf "the constructor %s is covered twice"
-                  (quote name)));
+                  (quote (name :> string))));
         named (name :: seen) defaults rest
   in
   let seen, defaults = named [] [] labelled in
@@ -3129,7 +3133,7 @@ and coverage context ~statement variant constructors labelled =
         (Rule.message Exhaustiveness
            (Printf.sprintf "the match does not cover %s of the variant %s"
               (constructor_list (List.map constructor_name missing))
-              (quote variant)))
+              (quote (variant :> string))))
   | (default : Tree.arm_label) :: _, [] ->
       context.fail default.span
         (Rule.message Default_arm
@@ -3141,7 +3145,9 @@ and constructor_name (constructor : Ctype.constructor) =
 
 (* What a diagnostic calls the constructors [names]. *)
 and constructor_list names =
-  let quoted = List.map quote names in
+  let quoted =
+    List.map (fun (name : Spelling.constructor) -> quote (name :> string)) names
+  in
   match List.rev quoted with
   | [ one ] -> "the constructor " ^ one
   | last :: before ->

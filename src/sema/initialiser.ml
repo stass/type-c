@@ -59,7 +59,7 @@ let refuse_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
            (Printf.sprintf
               "an initialiser reaches into the variant '%s'; the only braced \
                initialisers of a variant are {0} and {}"
-              name))
+              (name :> string)))
   | Some _ | None -> ()
 
 (* Subobjects (6.7.9p17) *)

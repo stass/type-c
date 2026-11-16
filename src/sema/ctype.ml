@@ -10,9 +10,13 @@ type privacy = Public | Private of Typec_cpp.File.t
 type record_tag = {
   record_id : int;
   kind : record_kind;
-  record_name : string option;
-  variant : bool;
+  record_name : record_name;
 }
+
+and record_name =
+  | Anonymous
+  | Named of string
+  | Variant_name of Typec_syntax.Spelling.type_name
 
 type enum_tag = { enum_id : int; enum_name : string option }
 type length = Constant of int | Opaque | Unknown | Variable
@@ -66,7 +70,10 @@ type record_definition = {
   by_name : found_member Names.t;
 }
 
-type constructor = { constructor_name : string; fields : member list }
+type constructor = {
+  constructor_name : Typec_syntax.Spelling.constructor;
+  fields : member list;
+}
 
 (* What the definition of a variant adds to its structure. *)
 type variant_definition = {
@@ -132,8 +139,8 @@ let unqualified t = { t with qualifiers = Qualifiers.none }
 
 let as_variant t =
   match t.shape with
-  | Record { variant = true; record_name; _ } -> record_name
-  | Record { variant = false; _ }
+  | Record { record_name = Variant_name name; _ } -> Some name
+  | Record { record_name = Anonymous | Named _; _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None
@@ -305,14 +312,14 @@ let fresh_id tags =
   tags.next_id <- id + 1;
   id
 
-let declare_record tags kind record_name =
-  { record_id = fresh_id tags; kind; record_name; variant = false }
+let declare_record tags kind name =
+  let record_name =
+    match name with Some name -> Named name | None -> Anonymous
+  in
+  { record_id = fresh_id tags; kind; record_name }
 
 let declare_variant tags name =
-  { record_id = fresh_id tags;
-    kind = Struct;
-    record_name = Some name;
-    variant = true }
+  { record_id = fresh_id tags; kind = Struct; record_name = Variant_name name }
 
 let declare_enum tags enum_name = { enum_id = fresh_id tags; enum_name }
 
@@ -620,7 +627,9 @@ let define_record target tags tag members =
   | exception Invalid error -> Error error
 
 let define_variant target tags tag privacy ~scope constructors members =
-  if not tag.variant then invalid_arg "Ctype: a variant of no variant tag";
+  (match tag.record_name with
+  | Variant_name _ -> ()
+  | Anonymous | Named _ -> invalid_arg "Ctype: a variant of no variant tag");
   Result.map
     (fun () ->
       Hashtbl.replace tags.variants tag.record_id
@@ -629,9 +638,9 @@ let define_variant target tags tag privacy ~scope constructors members =
 
 let variant_definition tags t =
   match t.shape with
-  | Record ({ variant = true; _ } as tag) ->
+  | Record ({ record_name = Variant_name _; _ } as tag) ->
       Hashtbl.find_opt tags.variants tag.record_id
-  | Record { variant = false; _ }
+  | Record { record_name = Anonymous | Named _; _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None
