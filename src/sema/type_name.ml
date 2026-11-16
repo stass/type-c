@@ -24,6 +24,7 @@ let record_tag_name = function
   | Variant_name name -> Some (name :> string)
   | Alias_name name -> Some name
   | Instance_name instance -> Some (Encoding.instance_name instance)
+  | Opaque_name name -> Some name
 
 let length_text = function
   | Constant count -> string_of_int count

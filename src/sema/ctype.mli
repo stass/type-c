@@ -47,6 +47,10 @@ type privacy =
 type instance = {
   generic : Typec_syntax.Spelling.type_name;
   arguments : string list;  (** The encoding of each argument, in order. *)
+  mentions_parameter : bool;
+      (** Whether an argument mentions a type parameter of a definition
+          check ({!declare_opaque}), which no encoding of design 10.3
+          writes; a function of [arguments]. *)
 }
 
 type record_tag = private {
@@ -73,6 +77,10 @@ and record_name =
   | Instance_name of instance
       (** The structure or union of an instance (design 10.3); only
           {!declare_instance} makes one. *)
+  | Opaque_name of string
+      (** A type parameter of the definition check of a generic (design
+          3.5 rule 4, 7.1 rule 2), an opaque value type. Only
+          {!declare_opaque} makes one. *)
 
 (** An enumerated type, created as a {!record_tag} is. *)
 type enum_tag = private {
@@ -148,6 +156,9 @@ and shape =
 and distinct = private {
   distinct_id : int;
   distinct_name : string;
+  distinct_instance : instance option;
+      (** The instance that it is, of a distinct generic (design 3.5
+          rule 3), whose generic [distinct_name] is. *)
   distinct_privacy : privacy;
   distinct_at_file_scope : bool;  (** As for {!record_tag}. *)
   representation : t;
@@ -266,9 +277,52 @@ val declare_alias_record :
 (** The untagged structure or union that the alias of this name defines
     (design 10.2). *)
 
-val declare_instance : tags -> record_kind -> instance -> record_tag
+val declare_instance :
+  tags ->
+  record_kind ->
+  instance ->
+  define:(record_tag -> unit) ->
+  record_tag
 (** The structure or union of an instance, which stands at file scope
-    (design 10.3): the same tag for the same instance. *)
+    (design 10.3): the same tag for the same instance. The first
+    declaration defers [define] of the record to the first question that
+    needs it complete (design 10.3): {!is_complete} and every question
+    about its members. [define] completes the record or raises; a need
+    of the record from within [define] finds it incomplete. A [define]
+    that leaves it incomplete, as one of a generic variant that is not
+    complete yet does, runs again at the next need. *)
+
+val read_instance : tags -> instance -> read:(unit -> t) -> t
+(** The type of an instance of a transparent alias or distinct generic:
+    [read ()] at its first reading, the same type after. *)
+
+val trial : tags -> (unit -> 'a) -> 'a
+(** [read ()], after which each instance that it declared is
+    forgotten, each that it defined is deferred again and each reading
+    that it made of {!read_instance} forgotten,
+    with what {!undo_after_trial} adds: a generic's definition check
+    defines no instance (design 3.5 rule 7). *)
+
+val undo_after_trial : tags -> (unit -> unit) -> unit
+(** Within a {!trial}, runs [undo] when the trial ends; outside one,
+    nothing. *)
+
+val end_deferral : tags -> unit
+(** Drops every definition deferred still, when reading ends: no later
+    question defines an instance. *)
+
+val declare_opaque : tags -> string -> record_tag
+(** A new type parameter of the definition check of a generic, named as
+    the definition writes it: a complete structure without members, an
+    opaque value type. *)
+
+val is_opaque : t -> bool
+(** Whether [t], qualified or not, is an opaque value type. *)
+
+val mentions_opaque : t -> bool
+(** Whether an opaque value type is part of [t], as
+    {!mentions_distinct} reads "part", or an argument of an instance
+    that [t] is. *)
 
 (** A constructor of a variant: its name and its fields in order, whose
     position in the list of its variant is its tag (design 10.1 rule 1). *)
@@ -280,9 +334,16 @@ type constructor = {
 val declare_enum : tags -> string option -> at_file_scope:bool -> enum_tag
 
 val declare_distinct :
-  tags -> string -> privacy -> t -> at_file_scope:bool -> (t, error) result
+  ?instance:instance ->
+  tags ->
+  string ->
+  privacy ->
+  t ->
+  at_file_scope:bool ->
+  (t, error) result
 (** A new distinct type of this name and privacy over its
-    representation. *)
+    representation; with [instance], that instance of the distinct
+    generic of this name. *)
 
 val name_untagged : tags -> t -> string list -> unit
 (** Records the names of the typedef declarators that derive no type in

@@ -2101,6 +2101,198 @@ let single_pattern_test () =
    ^ "int g(e v) { match (v) { case A: return 1; default: return 2; \
       if (case A = v) { in: return 3; } } }")
 
+(* Generic types (design 3.5): identity, substitution, the definition
+   check and the nesting limit. *)
+let same a b = Printf.sprintf "__builtin_types_compatible_p(%s, %s)" a b
+
+let asserts ?(holds = true) declarations condition =
+  let condition = if holds then condition else "!" ^ condition in
+  declarations ^ " _Static_assert(" ^ condition ^ ", \"\");"
+
+let vector = "type vector(T) = struct { T *data; unsigned long len; };"
+let box = "type box(T) = struct { T value; };"
+let id = "type id(T) = distinct unsigned int;"
+
+(* [depth] boxes around [int]. *)
+let boxed depth =
+  String.concat "" (List.init depth (fun _ -> "box("))
+  ^ "int"
+  ^ String.make depth ')'
+
+let generic_identity () =
+  let file = "in.tc" in
+  (* Rule 3: one type for equal encodings, after typedef expansion. *)
+  accepts ~file
+    (asserts (vector ^ " typedef int myint;")
+       (same "vector(int)" "vector(myint)"));
+  accepts ~file
+    (asserts ~holds:false vector (same "vector(int)" "vector(long)"));
+  accepts ~file
+    (vector ^ " extern vector(int) v; typedef int myint;"
+    ^ " extern vector(myint) v;");
+  accepts ~file
+    (vector ^ " vector(int) a; void f(void) { vector(int) b = a; b.len = 1; }");
+  (* A distinct instance equals only itself. *)
+  let ids =
+    id ^ " type expr = struct { int k; }; type stmt = struct { int k; };"
+  in
+  accepts ~file (asserts ids (same "id(expr)" "id(expr)"));
+  accepts ~file (asserts ~holds:false ids (same "id(expr)" "id(stmt)"));
+  accepts ~file (asserts ~holds:false ids (same "id(expr)" "unsigned int"));
+  rejects ~file (ids ^ " id(expr) e; id(stmt) s; void f(void) { e = s; }")
+    "'id__4stmt' does not convert to 'id__4expr'";
+  accepts ~file (ids ^ " id(expr) e; id(expr) e2; void f(void) { e = e2; }");
+  (* A transparent alias is the type it stands for: fp(const int) is
+     fp(int), and fr(const int) is not fr(int). *)
+  let fp = "type fp(T) = void (*)(T);" and fr = "type fr(T) = T (*)(void);" in
+  accepts ~file (asserts fp (same "fp(const int)" "fp(int)"));
+  accepts ~file (fp ^ " extern fp(int) p; extern fp(const int) p;");
+  accepts ~file (asserts ~holds:false fr (same "fr(const int)" "fr(int)"));
+  rejects ~file ~target:lp64_clang
+    (fr ^ " extern fr(int) q; extern fr(const int) q;")
+    "";
+  accepts ~file
+    (asserts "type ptr(T) = T *;" (same "ptr(int)" "int *"));
+  accepts ~file (asserts "type ptr(T) = T *;" (same "ptr(void)" "void *"));
+  accepts ~file (asserts (vector ^ " type ptr(T) = T *;")
+    (same "vector(ptr(int))" "vector(int *)"))
+
+let generic_instances () =
+  let file = "in.tc" in
+  (* Rule 7: an application under a pointer defines no instance, and a
+     generic refers to itself through one. *)
+  accepts ~file
+    "type list(T) = | Nil | Cons(T head, list(T) *tail); list(int) l;";
+  accepts ~file "type tree(T) = struct { tree(T) *left; T v; }; tree(int) t;";
+  accepts ~file "type lst(T); lst(int) *p; \
+                 type lst(T) = | Nil | Cons(T h, lst(T) *t); lst(int) l;";
+  rejects ~file "type s(T) = struct { s(T) inner; };" "incomplete";
+  rejects ~file "type s(T) = struct { s(T *) inner; };" "after a chain of 64";
+  (* Rule 5: an argument that is not a value type is checked where the
+     instance is needed complete, and the error is at the application. *)
+  accepts ~file (box ^ " struct s; box(struct s) *p;");
+  rejects ~file (box ^ " struct s; struct w { box(struct s) b; };")
+    "in the instance 'box__T1s'";
+  accepts ~file (box ^ " box(const int) c = { 1 };");
+  (* The nesting limit is exact: 64 instances that each need the next. *)
+  let member depth = box ^ " struct w { " ^ boxed depth ^ " deep; };" in
+  accepts ~file (member 64);
+  rejects ~file (member 65) "after a chain of 64";
+  accepts ~file (box ^ " " ^ boxed 65 ^ " *deep;");
+  (* A field whose type becomes void is package 2.3. *)
+  rejects ~file "type opt(T) = | No | Yes(T v); struct w { opt(void) o; };"
+    "work package 2.3";
+  accepts ~file "type ptr(T) = T *; ptr(void) v;"
+
+let generic_arguments () =
+  let file = "in.tc" in
+  (* Rule 2. *)
+  rejects ~file (box ^ " box(int[2]) b;") "is an array";
+  rejects ~file (box ^ " box(int (*)[]) *b; box(void (int)) *f;")
+    "function type";
+  rejects ~file (box ^ " box(__int128) *b;") "no instance name encodes";
+  rejects ~file
+    (box ^ " void f(void) { struct s { int x; }; box(struct s *) b; }")
+    "declared in a block";
+  rejects ~file (box ^ " typedef struct { int x; } a, b; box(a) *x;")
+    "more than one declaration names";
+  rejects ~file (box ^ " typedef struct { int x; } *anon; box(anon) *x;")
+    "which no declaration names";
+  (* The encoding of an instance is bounded: each typedef doubles it. *)
+  let pairs =
+    "type pair(A, B) = struct { A a; B b; }; typedef pair(int, int) p0;"
+    ^ String.concat ""
+        (List.init 12 (fun n ->
+             Printf.sprintf " typedef pair(p%d, p%d) p%d;" n n (n + 1)))
+  in
+  rejects ~file pairs "longer than 4096 bytes"
+
+(* [source] is refused at [line] with a message that holds [expected]. *)
+let rejects_at ~line source expected =
+  match read ~file:"in.tc" lp64 source with
+  | Ok _ -> fail_case source "accepted"
+  | Error { location; message } ->
+      if location.line <> line || not (contains message expected) then
+        fail_case source
+          (Printf.sprintf "error at line %d: %S, not at %d with %S"
+             location.line message line expected)
+
+(* [count] aliases, the nth of 2^n nested applications of the first,
+   which only a reading per instance types in time. *)
+let doubling_aliases count =
+  "type b0(T) = T;"
+  ^ String.concat ""
+      (List.init count (fun n ->
+           Printf.sprintf " type b%d(T) = b%d(b%d(T));" (n + 1) n n))
+  ^ Printf.sprintf " b%d(int) x;" count
+
+let generic_checks () =
+  let file = "in.tc" in
+  (* Rule 4: an application over a type parameter is an instance, so the
+     check finds the generic's own instance incomplete within it. *)
+  rejects ~file (box ^ " type g(T) = struct { box(g(T)) b; };") "incomplete";
+  rejects ~file (box ^ " type g(T) = struct { box(g(T *)) b; };")
+    "after a chain of 64";
+  rejects ~file "type a(T) = struct { _Atomic T x; };"
+    "`_Atomic` depends on a type parameter";
+  accepts ~file
+    (box ^ " type two(A, B) = struct { box(A) a; box(B) b; };"
+    ^ " two(int, char) t;");
+  (* Rule 7: a check defines no instance, so a real application counts
+     the instances that the generic's definition needs. *)
+  let holding depth =
+    box ^ " type g(T) = struct { T x; " ^ boxed depth ^ " y; };"
+  in
+  accepts ~file (holding 63 ^ " struct w { g(int) z; };");
+  (* Nor does it declare one: id(int) is one type after h's check. *)
+  accepts ~file
+    "type id(T) = distinct int; type g(T) = struct { T m; };\
+    \ type h(T) = struct { T a; g(id(int)) *p; };\
+    \ id(int) x; g(id(int)) v; void f(void) { x = v.m; }";
+  rejects ~file (holding 64 ^ " struct w { g(int) z; };") "after a chain of 64";
+  (* A transparent alias instance is a link of its chain, which causes
+     the instance that it needs complete. *)
+  let aliased depth =
+    box ^ " type ab(T) = box(T)[1]; struct w { ab(" ^ boxed depth
+    ^ ") deep; };"
+  in
+  accepts ~file (aliased 62);
+  rejects ~file (aliased 63) "after a chain of 64";
+  (* Each instance of a transparent alias is read once. *)
+  let started = Sys.time () in
+  accepts ~file (doubling_aliases 40);
+  if Sys.time () -. started > 2.0 then
+    fail_case "doubling_aliases 40" "took over 2 s";
+  (* An error of a nested instance is reported at the outermost
+     application. *)
+  rejects_at ~line:4
+    "type box(T) = struct { T value; };\n\
+     type wrap(T) = struct { box(T) b; };\n\
+     struct s;\n\
+     struct w { wrap(struct s) x; };"
+    "in the instance 'wrap__T1s'"
+
+let generic_definitions () =
+  let file = "in.tc" in
+  (* Rule 4 on the expanded type, and 7.1 rule 4. *)
+  rejects ~file "type same(U) = U; type d(T) = distinct same(T);"
+    "the representation after `distinct` depends on a type parameter";
+  rejects ~file "type same(U) = U; type b(T) = struct { same(T) x : 3; };"
+    "the type of a bit-field depends on a type parameter";
+  rejects ~file "type a(T) = struct { _Atomic(T) x; };"
+    "`_Atomic( )` depends on a type parameter";
+  rejects ~file "type a(T) = struct { typeof(T) x; };"
+    "`typeof( )` depends on a type parameter";
+  rejects ~file "type a(T) = struct { char b[sizeof(T)]; T v; };"
+    "in the definition of a generic type depends on a type parameter";
+  rejects ~file
+    (box ^ " type a(T) = struct { char b[sizeof(box(T))]; T v; };")
+    "in the definition of a generic type depends on a type parameter";
+  accepts ~file "type a(T) = struct { char b[sizeof(int)]; T v; }; a(int) x;";
+  accepts ~file
+    (box ^ " type pair(T) = struct { box(T) b; box(T *) p; };"
+    ^ " pair(int) x;")
+
 let () =
   type_declarations ();
   variants ();
@@ -2139,4 +2331,9 @@ let () =
   errors_are_located ();
   initialisers ();
   static_initialisers ();
+  generic_identity ();
+  generic_instances ();
+  generic_arguments ();
+  generic_definitions ();
+  generic_checks ();
   if !failures > 0 then exit 1

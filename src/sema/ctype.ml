@@ -10,6 +10,7 @@ type privacy = Public | Private of Typec_cpp.File.t
 type instance = {
   generic : Typec_syntax.Spelling.type_name;
   arguments : string list;
+  mentions_parameter : bool;
 }
 
 type record_tag = {
@@ -25,6 +26,7 @@ and record_name =
   | Variant_name of Typec_syntax.Spelling.type_name
   | Alias_name of string
   | Instance_name of instance
+  | Opaque_name of string
 
 type enum_tag = {
   enum_id : int;
@@ -55,6 +57,7 @@ and shape =
 and distinct = {
   distinct_id : int;
   distinct_name : string;
+  distinct_instance : instance option;
   distinct_privacy : privacy;
   distinct_at_file_scope : bool;
   representation : t;
@@ -111,6 +114,14 @@ type tags = {
   typedef_names : (int, string list) Hashtbl.t;
       (* the typedef names of each untagged record or enum, by id *)
   instances : (record_kind * instance, record_tag) Hashtbl.t;
+  deferred : (int, unit -> unit) Hashtbl.t;
+      (* the definition of each instance that no point has needed
+         complete yet, by record id *)
+  readings : (instance, t) Hashtbl.t;
+      (* the type of each instance read as a whole, not as a record *)
+  mutable undo : (unit -> unit) list option;
+      (* in a trial, what undoes each definition and reading made in it,
+         latest first *)
   mutable has_distinct : bool;
 }
 
@@ -167,7 +178,10 @@ let as_variant t =
   match t.shape with
   | Record { record_name = Variant_name name; _ } -> Some name
   | Record
-      { record_name = Anonymous | Named _ | Alias_name _ | Instance_name _; _ }
+      { record_name =
+          ( Anonymous | Named _ | Alias_name _ | Instance_name _
+          | Opaque_name _ );
+        _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None
@@ -332,6 +346,9 @@ let create_tags () =
     variants = Hashtbl.create 16;
     typedef_names = Hashtbl.create 16;
     instances = Hashtbl.create 16;
+    deferred = Hashtbl.create 16;
+    readings = Hashtbl.create 16;
+    undo = None;
     has_distinct = false }
 
 let fresh_id tags =
@@ -357,9 +374,14 @@ let declare_variant tags name ~at_file_scope =
 let declare_alias_record tags kind name ~at_file_scope =
   new_record tags kind (Alias_name name) ~at_file_scope
 
+let undo_after_trial tags undo =
+  match tags.undo with
+  | Some log -> tags.undo <- Some (undo :: log)
+  | None -> ()
+
 (* Design 3.5 rule 3: one application is one type, wherever it is
    written. Design 10.3: an instance is emitted at file scope. *)
-let declare_instance tags kind instance =
+let declare_instance tags kind instance ~define =
   match Hashtbl.find_opt tags.instances (kind, instance) with
   | Some record -> record
   | None ->
@@ -367,7 +389,58 @@ let declare_instance tags kind instance =
         new_record tags kind (Instance_name instance) ~at_file_scope:true
       in
       Hashtbl.replace tags.instances (kind, instance) record;
+      Hashtbl.replace tags.deferred record.record_id (fun () -> define record);
+      undo_after_trial tags (fun () ->
+          Hashtbl.remove tags.instances (kind, instance);
+          Hashtbl.remove tags.deferred record.record_id);
       record
+
+(* A type parameter in the definition check of a generic (design 3.5
+   rule 4): a complete structure without members, so that it is a value
+   type of which nothing else is known. *)
+let declare_opaque tags name =
+  let record = new_record tags Struct (Opaque_name name) ~at_file_scope:true in
+  Hashtbl.replace tags.records record.record_id
+    { members = []; positions = [||]; by_name = Names.empty };
+  record
+
+let trial tags read =
+  let outer = tags.undo in
+  tags.undo <- Some [];
+  let undo_all () =
+    Option.iter (List.iter (fun undo -> undo ())) tags.undo;
+    tags.undo <- outer
+  in
+  Fun.protect ~finally:undo_all read
+
+(* The definition runs when the record is first needed complete (design
+   10.3); it is removed first, so that a need of the record from within
+   its own definition finds it incomplete (design 3.5 rule 7). One that
+   leaves the record incomplete, of a generic not complete yet, stays
+   deferred. *)
+let run_deferred tags (tag : record_tag) =
+  let id = tag.record_id in
+  match Hashtbl.find_opt tags.deferred id with
+  | None -> ()
+  | Some define ->
+      Hashtbl.remove tags.deferred id;
+      undo_after_trial tags (fun () ->
+          Hashtbl.remove tags.records id;
+          Hashtbl.replace tags.deferred id define);
+      define ();
+      if not (Hashtbl.mem tags.records id) then
+        Hashtbl.replace tags.deferred id define
+
+let read_instance tags instance ~read =
+  match Hashtbl.find_opt tags.readings instance with
+  | Some t -> t
+  | None ->
+      let t = read () in
+      Hashtbl.replace tags.readings instance t;
+      undo_after_trial tags (fun () -> Hashtbl.remove tags.readings instance);
+      t
+
+let end_deferral tags = Hashtbl.reset tags.deferred
 
 let declare_enum tags enum_name ~at_file_scope =
   { enum_id = fresh_id tags; enum_name; enum_at_file_scope = at_file_scope }
@@ -379,7 +452,9 @@ let untagged_id t =
   | Record { record_name = Anonymous; record_id; _ } -> Some record_id
   | Enum { enum_name = None; enum_id; _ } -> Some enum_id
   | Record
-      { record_name = Named _ | Variant_name _ | Alias_name _ | Instance_name _;
+      { record_name =
+          ( Named _ | Variant_name _ | Alias_name _ | Instance_name _
+          | Opaque_name _ );
         _ }
   | Enum { enum_name = Some _; _ }
   | Void | Arithmetic _ | Pointer _ | Distinct _ | Va_list | Array _
@@ -402,8 +477,8 @@ let typedef_names tags t =
 
 (* Design 3.4: an unqualified arithmetic or pointer type. An unknown type
    may be one; the casts that depend on what it is answer as unknown. *)
-let declare_distinct tags distinct_name distinct_privacy representation
-    ~at_file_scope =
+let declare_distinct ?instance tags distinct_name distinct_privacy
+    representation ~at_file_scope =
   let representable =
     match representation.shape with
     | Arithmetic _ | Enum _ | Pointer _ | Unknown_type _ -> true
@@ -413,6 +488,7 @@ let declare_distinct tags distinct_name distinct_privacy representation
     let distinct =
       { distinct_id = fresh_id tags;
         distinct_name;
+        distinct_instance = instance;
         distinct_privacy;
         distinct_at_file_scope = at_file_scope;
         representation }
@@ -430,6 +506,33 @@ let as_distinct t =
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None
+
+let is_opaque t =
+  match t.shape with
+  | Record { record_name = Opaque_name _; _ } -> true
+  | Record
+      { record_name =
+          Anonymous | Named _ | Variant_name _ | Alias_name _ | Instance_name _;
+        _ }
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
+      false
+
+let rec mentions_opaque t =
+  match t.shape with
+  | Pointer referenced | Array { element = referenced; _ } ->
+      mentions_opaque referenced
+  | Function { return; parameters } ->
+      List.exists mentions_opaque (return :: parameter_types parameters)
+  | Record { record_name = Instance_name instance; _ }
+  | Distinct { distinct_instance = Some instance; _ } ->
+      instance.mentions_parameter
+  | Record { record_name = Opaque_name _; _ } -> true
+  | Record
+      { record_name = Anonymous | Named _ | Variant_name _ | Alias_name _; _ }
+  | Distinct { distinct_instance = None; _ }
+  | Void | Arithmetic _ | Enum _ | Va_list | Unknown_type _ ->
+      false
 
 let rec mentions_distinct t =
   match t.shape with
@@ -471,7 +574,12 @@ let enum_integer tags tag =
   | Some (Unfixed integer) -> Some integer
   | None -> None
 
-let record_definition tags tag = Hashtbl.find_opt tags.records tag.record_id
+(* Every question about the members or completeness of a record comes
+   here, which defines a deferred instance first: the one place where a
+   need of an instance complete is met. *)
+let record_definition tags tag =
+  run_deferred tags tag;
+  Hashtbl.find_opt tags.records tag.record_id
 
 let record_members tags tag =
   Option.map (fun definition -> definition.members) (record_definition tags tag)
@@ -495,7 +603,7 @@ let rec is_complete tags t =
     ->
       Depends_on unknown
   | Enum tag -> Answer (Hashtbl.mem tags.enums tag.enum_id)
-  | Record tag -> Answer (Hashtbl.mem tags.records tag.record_id)
+  | Record tag -> Answer (record_definition tags tag <> None)
   | Array { length = Unknown; _ } -> Answer false
   (* The element type was complete when the array type was built, unless
      it is unknown, and a type never becomes incomplete again. *)
@@ -735,7 +843,7 @@ let define_record target tags tag members =
 let define_variant target tags tag privacy ~scope constructors members =
   (match tag.record_name with
   | Variant_name _ -> ()
-  | Anonymous | Named _ | Alias_name _ | Instance_name _ ->
+  | Anonymous | Named _ | Alias_name _ | Instance_name _ | Opaque_name _ ->
       invalid_arg "Ctype: a variant of no variant tag");
   Result.map
     (fun () ->
@@ -748,7 +856,10 @@ let variant_definition tags t =
   | Record ({ record_name = Variant_name _; _ } as tag) ->
       Hashtbl.find_opt tags.variants tag.record_id
   | Record
-      { record_name = Anonymous | Named _ | Alias_name _ | Instance_name _; _ }
+      { record_name =
+          ( Anonymous | Named _ | Alias_name _ | Instance_name _
+          | Opaque_name _ );
+        _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None

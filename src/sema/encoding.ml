@@ -12,6 +12,7 @@ type reason =
   | Unnamed
   | Several_names of string list
   | Not_at_file_scope
+  | Too_long
 
 type no_row = { part : Ctype.t; reason : reason }
 
@@ -20,8 +21,27 @@ exception No_row of no_row
 
 let refuse part reason = raise (No_row { part; reason })
 
+(* Design 10.3 bounds no name, but an instance is one node of a type, so
+   [Ctype.max_size] does not bound the encodings that it holds: a
+   typedef of [pair(p, p)] for each [p] doubles the name. The limit keeps
+   both the memory of typec and the identifiers that it hands the
+   backend small; it is far above the names of real programs. *)
+let max_length = 4096
+
+(* An encoding is written into a buffer that refuses to grow past
+   [max_length], so that no step builds a longer string. *)
+type code = { buffer : Buffer.t; whole : Ctype.t }
+
+let add code text =
+  Buffer.add_string code.buffer text;
+  if Buffer.length code.buffer > max_length then refuse code.whole Too_long
+
 (* A name is self-delimiting after its length in bytes, which counts a
    character outside ASCII as the bytes of its UTF-8 form. *)
+let add_length_prefixed code name =
+  add code (string_of_int (String.length name));
+  add code name
+
 let length_prefixed name = string_of_int (String.length name) ^ name
 
 let integer_code part : Integer.t -> string = function
@@ -50,12 +70,12 @@ let arithmetic_code part : Arithmetic.t -> string = function
   | Complex floating -> "C" ^ floating_code floating
 
 (* Several qualifiers are written in the order A, r, V, K. *)
-let qualifier_codes (qualifiers : Qualifiers.t) =
-  let code present letter = if present then letter else "" in
-  code qualifiers.atomic "A"
-  ^ code qualifiers.restrict "r"
-  ^ code qualifiers.volatile "V"
-  ^ code qualifiers.const "K"
+let add_qualifiers code (qualifiers : Qualifiers.t) =
+  let letter present text = if present then add code text in
+  letter qualifiers.atomic "A";
+  letter qualifiers.restrict "r";
+  letter qualifiers.volatile "V";
+  letter qualifiers.const "K"
 
 let instance_code (instance : Ctype.instance) =
   "I"
@@ -72,81 +92,126 @@ let at_file_scope part declared_at_file_scope =
   if not declared_at_file_scope then refuse part Not_at_file_scope
 
 (* An untagged type is named by its one typedef name. *)
-let typedef_code tags part =
+let add_typedef_name code tags part =
   match Ctype.typedef_names tags part with
-  | [ name ] -> length_prefixed name
+  | [ name ] -> add_length_prefixed code name
   | [] -> refuse part Unnamed
   | names -> refuse part (Several_names names)
 
 (* The declaration of a type chooses its row, however a use spells it
    (design 10.3): the tag that a variant or an alias claims is no tag of
-   its own specifier. *)
-let record_code tags part (tag : Ctype.record_tag) =
+   its own specifier. A type parameter of a definition check has no row
+   of 10.3: [_], which begins none, and its id stand for it, so that the
+   instances of a check over its parameters are its own (design 3.5 rule
+   4). *)
+let add_record code tags part (tag : Ctype.record_tag) =
   at_file_scope part tag.record_at_file_scope;
   match tag.record_name with
-  | Named name -> "T" ^ length_prefixed name
-  | Variant_name name -> length_prefixed (name :> string)
-  | Alias_name name -> length_prefixed name
-  | Instance_name instance -> instance_code instance
-  | Anonymous -> typedef_code tags part
+  | Named name ->
+      add code "T";
+      add_length_prefixed code name
+  | Variant_name name -> add_length_prefixed code (name :> string)
+  | Alias_name name -> add_length_prefixed code name
+  | Instance_name instance -> add code (instance_code instance)
+  | Opaque_name _ -> add code ("_" ^ string_of_int tag.record_id ^ "_")
+  | Anonymous -> add_typedef_name code tags part
 
-let enum_code tags part (tag : Ctype.enum_tag) =
+let add_enum code tags part (tag : Ctype.enum_tag) =
   at_file_scope part tag.enum_at_file_scope;
   match tag.enum_name with
-  | Some name -> "T" ^ length_prefixed name
-  | None -> typedef_code tags part
+  | Some name ->
+      add code "T";
+      add_length_prefixed code name
+  | None -> add_typedef_name code tags part
 
-let distinct_code part (distinct : Ctype.distinct) =
+(* An instance of a distinct generic takes the row of an application. *)
+let add_distinct code part (distinct : Ctype.distinct) =
   at_file_scope part distinct.distinct_at_file_scope;
-  length_prefixed distinct.distinct_name
+  match distinct.distinct_instance with
+  | Some instance -> add code (instance_code instance)
+  | None -> add_length_prefixed code distinct.distinct_name
 
-let length_code part (length : Ctype.length) =
+let add_length code part (length : Ctype.length) =
   match length with
-  | Constant count -> string_of_int count
-  | Unknown -> ""
+  | Constant count -> add code (string_of_int count)
+  | Unknown -> ()
   | Opaque -> refuse part Opaque_length
   | Variable -> refuse part Variable_length
 
 (* [t] where an array or a function type has a row: what a pointer points
    to, or the element of such an array. The qualifiers of an array are
    those of its element, which encodes them (C11 6.7.3p9). *)
-let rec pointee_code tags (t : Ctype.t) =
+let rec add_pointee code tags (t : Ctype.t) =
   match t.shape with
   | Array { element; length } ->
-      "Y" ^ pointee_code tags element ^ length_code t length ^ "E"
+      add code "Y";
+      add_pointee code tags element;
+      add_length code t length;
+      add code "E"
   | Function { return; parameters } ->
-      "F" ^ object_code tags return ^ parameters_code tags parameters ^ "E"
+      add code "F";
+      add_object code tags return;
+      add_parameters code tags parameters;
+      add code "E"
   | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
   | Unknown_type _ ->
-      object_code tags t
+      add_object code tags t
 
 (* The parameters are adjusted and unqualified ({!Ctype.parameters}), as C
    compares them (C11 6.7.6.3p15). *)
-and parameters_code tags (parameters : Ctype.parameters) =
+and add_parameters code tags (parameters : Ctype.parameters) =
   match parameters with
-  | Prototype { types = []; variadic = false } -> "v"
+  | Prototype { types = []; variadic = false } -> add code "v"
   | Prototype { types; variadic } ->
-      let ellipsis = if variadic then "z" else "" in
-      String.concat "" (List.map (object_code tags) types) ^ ellipsis
-  | Unspecified | Old_style _ -> "N"
+      List.iter (add_object code tags) types;
+      if variadic then add code "z"
+  | Unspecified | Old_style _ -> add code "N"
 
-and object_code tags (t : Ctype.t) =
-  qualifier_codes t.qualifiers ^ unqualified_code tags t
+and add_object code tags (t : Ctype.t) =
+  add_qualifiers code t.qualifiers;
+  add_unqualified code tags t
 
-and unqualified_code tags (t : Ctype.t) =
+and add_unqualified code tags (t : Ctype.t) =
   match t.shape with
-  | Void -> "v"
-  | Arithmetic arithmetic -> arithmetic_code t arithmetic
-  | Enum tag -> enum_code tags t tag
-  | Pointer referenced -> "P" ^ pointee_code tags referenced
-  | Record tag -> record_code tags t tag
-  | Distinct distinct -> distinct_code t distinct
+  | Void -> add code "v"
+  | Arithmetic arithmetic -> add code (arithmetic_code t arithmetic)
+  | Enum tag -> add_enum code tags t tag
+  | Pointer referenced ->
+      add code "P";
+      add_pointee code tags referenced
+  | Record tag -> add_record code tags t tag
+  | Distinct distinct -> add_distinct code t distinct
   | Va_list -> refuse t Va_list
   | Array _ -> refuse t Array_not_under_pointer
   | Function _ -> refuse t Function_not_under_pointer
   | Unknown_type unknown -> refuse t (Unknown_type unknown)
 
 let encode tags t =
-  match object_code tags t with
-  | code -> Ok code
+  let code = { buffer = Buffer.create 16; whole = t } in
+  match add_object code tags t with
+  | () -> Ok (Buffer.contents code.buffer)
   | exception No_row no_row -> Error no_row
+
+(* The arguments are encoded into one buffer that holds the code of the
+   instance, which the name and every encoding that holds the instance
+   hold whole: bounding it, but for its closing [E], bounds them all.
+   The argument that takes the code past the limit is the part
+   refused. *)
+let instance (type written) tags (generic : Typec_syntax.Spelling.type_name)
+    (arguments : (written * Ctype.t) list) =
+  let exception Argument_refused of written * no_row in
+  let buffer = Buffer.create 16 in
+  let encode_argument (written, argument) =
+    let code = { buffer; whole = argument } and start = Buffer.length buffer in
+    match add_object code tags argument with
+    | () -> Buffer.sub buffer start (Buffer.length buffer - start)
+    | exception No_row no_row -> raise (Argument_refused (written, no_row))
+  in
+  Buffer.add_string buffer ("I" ^ length_prefixed (generic :> string));
+  match List.map encode_argument arguments with
+  | encodings ->
+      let mentions_parameter =
+        List.exists (fun (_, t) -> Ctype.mentions_opaque t) arguments
+      in
+      Ok { Ctype.generic; arguments = encodings; mentions_parameter }
+  | exception Argument_refused (written, no_row) -> Error (written, no_row)

@@ -15,6 +15,7 @@ type item =
   | Static_assertion
   | Function_definition of entity
   | Type_declaration of entity
+  | Generic_declaration
 
 type t = {
   tags : Ctype.tags;
@@ -75,7 +76,16 @@ type place = At_file_scope | In_prototype | In_definition | In_block
    view of the expressions, and [type_names] the type of each type name
    read, which typing and constant evaluation both ask for and whose
    declarations are made once. [type_declarations] holds each type
-   declaration read, by the id of its name. *)
+   declaration read, by the id of its name.
+   The reading of an instance (design 10.3) and the definition check of
+   a generic have [typed] and [type_names] of their own, as they read
+   the text of the generic's definition again.
+   [generics] holds the declaration of each generic type by the
+   reference of each of its declarations, the latest, which is the
+   variant that completes an incomplete one; [applied_at] the latest
+   application of each instance, where an error of its definition is
+   reported (design 3.5 rule 5), and [nesting] the chain of instances
+   whose definitions are being read (rule 7), none outside one. *)
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -86,17 +96,58 @@ type state = {
   at_file_scope : (string, entity) Hashtbl.t;
   beside : (Tree.reference, entity option) Hashtbl.t;
   overloaded : (Tree.reference, unit) Hashtbl.t;
-  typed : Expressions.t;
-  type_names : (Tree.span, Ctype.t) Hashtbl.t;
+  mutable typed : Expressions.t;
+  mutable type_names : (Tree.span, Ctype.t) Hashtbl.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
       (* the structure of each [type N;], which its variant completes *)
+  generics : (Tree.reference, Tree.type_declaration) Hashtbl.t;
+  applied_at : (Ctype.instance, Tree.span) Hashtbl.t;
+  mutable nesting : nesting option;
   mutable place : place;
   mutable next_entity : int;
 }
 
+(* A chain of instances that each cause the next (design 3.5 rule 7):
+   how many, and the application that caused the first. *)
+and nesting = { depth : int; began : Tree.span }
+
+(* How the definition of an instance is read: [read declaration f] runs
+   [f] with the type parameters of [declaration] bound to the instance's
+   arguments, for an application or for the definition check. *)
+type reading = { read : 'a. Tree.type_declaration -> (unit -> 'a) -> 'a }
+
 (* Raised at the first error; caught in [read]. *)
 exception Failed of error
+
+(* An error of the definition of an instance, already reported at its
+   application (design 3.5 rule 5), which no enclosing instance reports
+   again at its own; caught in [read]. *)
+exception Instance_failed of error
+
+(* Design 3.5 rule 7: a chain of instances that each cause the next holds
+   at most this many. It is a rule of the language, so it is exact. *)
+let max_nesting = 64
+
+let next_link nesting application =
+  match nesting with
+  | None -> { depth = 1; began = application }
+  | Some { depth; began } -> { depth = depth + 1; began }
+
+(* An instance name is at most [Encoding.max_length] bytes; a message
+   shows at most this many of them, cut at a character. *)
+let max_shown_name = 200
+
+let shown_instance instance =
+  let name = Encoding.instance_name instance in
+  let is_continuation index = Char.code name.[index] land 0xC0 = 0x80 in
+  let rec cut length =
+    if length > 0 && is_continuation length then cut (length - 1)
+    else String.sub name 0 length ^ "..."
+  in
+  if String.length name <= max_shown_name then name else cut max_shown_name
+
+let in_instance_definition state = Option.is_some state.nesting
 
 let location_of state (span : Tree.span) =
   state.text.tokens.(span.first).location
@@ -106,13 +157,6 @@ let fail state span diagnostic =
   raise (Failed { location; message = Rule.text diagnostic })
 
 let quote = Expressions.quote
-
-(* A generic type, which a later part of work package 2.1 types. *)
-let fail_generic state span =
-  fail state span
-    (Rule.message Not_implemented
-       "generic types are not implemented yet (design 3.5; work package \
-        2.1)")
 
 let checked state span = function
   | Ok t -> t
@@ -843,6 +887,8 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
   let storage = storage_class state span sorted.storage_classes in
   let base = base_type state span sorted in
   let qualifiers = qualifiers_of sorted.qualifiers in
+  if qualifiers.atomic then
+    refuse_opaque state span base "the type qualified by `_Atomic`";
   let base_type = checked state span (Ctype.qualify qualifiers base) in
   List.iter (fun (_, a) -> alignment state a) sorted.alignments;
   {
@@ -917,7 +963,9 @@ and other_type state span (specifier : Tree.type_specifier) =
   match specifier with
   | Basic _ -> invalid_arg "Declarations.other_type"
   | Atomic_type type_name ->
-      checked state span (Ctype.atomic (read_type_name state type_name))
+      let t = read_type_name state type_name in
+      refuse_opaque state type_name.span t "the type name of `_Atomic( )`";
+      checked state span (Ctype.atomic t)
   | Struct_or_union { kind; tag; members; attributes } ->
       let record = record_type state span (record_kind kind) tag members in
       let attribute = first_unrecorded_attribute attributes in
@@ -929,9 +977,13 @@ and other_type state span (specifier : Tree.type_specifier) =
       in
       let enum = enum_type state span ~attribute ~fixed tag enumerators in
       obscured state attribute (Ctype.enum enum)
-  | Typeof_type type_name -> read_type_name state type_name
+  | Typeof_type type_name ->
+      let t = read_type_name state type_name in
+      refuse_opaque state type_name.span t "the type name of `typeof( )`";
+      t
   | Typeof_expression expression -> typeof_expression state expression
-  | Application _ -> fail_generic state span
+  | Application { name; generic; arguments } ->
+      applied_type state span name generic arguments
   | Typedef_name { name; declaration } -> (
       match Hashtbl.find_opt state.entities declaration with
       | Some { declared = Typedef t; _ } -> t
@@ -1119,6 +1171,7 @@ and read_member_declarator state specified
       let derived =
         declare_type state ~parameter:false specified (Some field)
       in
+      need_complete state derived.declared_type;
       { Ctype.member_name = derived.name; member_type = derived.declared_type;
         bit_field_width = None }
   | Bit_field { declarator = field; width; attributes } ->
@@ -1130,9 +1183,16 @@ and read_member_declarator state specified
                "a bit-field has an alignment specifier (C11 6.7.5p2)"))
         specified.aligned;
       let derived = declare_type state ~parameter:false specified field in
+      refuse_opaque state declarator.span derived.declared_type
+        "the type of a bit-field";
       let bit_field_width = Some (bit_field_width state width) in
       { Ctype.member_name = derived.name; member_type = derived.declared_type;
         bit_field_width }
+
+(* A member needs its type complete (6.7.2.1p3) where it is read, so that
+   the instances that members need are defined in the order of the text
+   (design 3.5 rule 7); [Ctype.define_record] reports one incomplete. *)
+and need_complete state t = ignore (Ctype.is_complete state.tags t)
 
 and bit_field_width state width =
   match constant_expression state width with
@@ -1810,14 +1870,20 @@ and read_block_declaration state (declaration : Tree.declaration) =
    declaration of its name in its scope (rule 5), so it declares a new
    entity: a typedef name of the type that it defines. *)
 
-and read_type_declaration state
+and read_type_declaration state (scoped : Tree.scoped_type_declaration) =
+  let declaration = scoped.declaration in
+  Hashtbl.replace state.type_declarations declaration.node.declared.id
+    declaration;
+  match declaration.node.type_parameters with
+  | [] -> Some (read_named_type state scoped)
+  | _ :: _ ->
+      read_generic state scoped;
+      None
+
+and read_named_type state
     ({ declaration; scope_end } : Tree.scoped_type_declaration) =
-  let { Tree.name = checked; type_parameters; declared; definition } =
-    declaration.node
-  in
-  if type_parameters <> [] then fail_generic state declaration.span;
+  let { Tree.name = checked; declared; definition; _ } = declaration.node in
   let name = (checked :> Tree.identifier) in
-  Hashtbl.replace state.type_declarations declared.id declaration;
   let bind t =
     record state name.node declared
       { name = name.node; entity = fresh_entity state; declared = Typedef t }
@@ -1834,7 +1900,7 @@ and read_type_declaration state
   | Alias type_name -> bind (read_type_name state type_name)
   | Distinct { is_private; representation } ->
       let privacy = privacy state declaration ~is_private in
-      bind (distinct_type state name privacy representation)
+      bind (distinct_type state name.node privacy representation)
   | Record_alias specifier ->
       read_record_alias state name declared specifier bind
 
@@ -1847,12 +1913,14 @@ and privacy state (declaration : Tree.type_declaration) ~is_private :
 
 (* Design 3.4: a new type over an unqualified arithmetic or pointer
    type. *)
-and distinct_type state (name : Tree.identifier) privacy type_name =
+and distinct_type ?instance state name privacy type_name =
   let representation = read_type_name state type_name in
+  refuse_opaque state type_name.span representation
+    "the representation after `distinct`";
   let complete = Ctype.is_complete state.tags representation <> Answer false in
   match
-    Ctype.declare_distinct state.tags name.node privacy representation
-      ~at_file_scope:(at_file_scope state)
+    Ctype.declare_distinct ?instance state.tags name privacy
+      representation ~at_file_scope:(at_file_scope state)
   with
   | Ok t when complete -> t
   | Ok _ | Error Invalid_representation ->
@@ -1861,7 +1929,7 @@ and distinct_type state (name : Tree.identifier) privacy type_name =
            (Printf.sprintf
               "the distinct type '%s' is not over an unqualified arithmetic \
                or pointer type"
-              name.node))
+              name))
   | Error error ->
       fail state type_name.span
         (Rule.c_text (Ctype.error_message error))
@@ -1890,20 +1958,24 @@ and read_variant state (declaration : Tree.type_declaration) privacy ~scope
   let record = variant_record state name.node declared in
   let entity = bind (Ctype.record record) in
   let tag_enum = variant_tag_enum state declaration constructors in
-  let tag = variant_member Tree.tag_member (Ctype.enum tag_enum) in
-  let read = List.map (read_constructor state) constructors in
-  let members =
-    match List.filter_map (constructor_payload state) read with
-    | [] -> [ tag ]
-    | payloads ->
-        let span = declaration.span in
-        let union = defined_record state span Ctype.Union payloads in
-        [ tag; variant_member Tree.union_member (Ctype.record union) ]
+  let read, members =
+    variant_members state declaration.span tag_enum constructors
   in
   checked state declaration.span
     (Ctype.define_variant state.target state.tags record privacy ~scope
        (List.map fst read) members);
   entity
+
+(* The constructors read, and the members of the structure: the tag and
+   the union of the payloads. *)
+and variant_members state span tag_enum constructors =
+  let tag = variant_member Tree.tag_member (Ctype.enum tag_enum) in
+  let read = List.map (read_constructor state) constructors in
+  match List.filter_map (constructor_payload state) read with
+  | [] -> (read, [ tag ])
+  | payloads ->
+      let union = defined_record state span Ctype.Union payloads in
+      (read, [ tag; variant_member Tree.union_member (Ctype.record union) ])
 
 and variant_member name member_type =
   { Ctype.member_name = Some name; member_type; bit_field_width = None }
@@ -1923,21 +1995,26 @@ and defined_record state span kind members =
 and variant_tag_enum state (declaration : Tree.type_declaration)
     constructors =
   let span = declaration.span and variant = declaration.node.name.node in
-  let tag = Tree.enum_tag_name variant in
   let enum =
-    Ctype.declare_enum state.tags (Some tag)
-      ~at_file_scope:(at_file_scope state)
+    defined_tag_enum state span (Some (Tree.enum_tag_name variant))
+      constructors
   in
   Hashtbl.replace state.tag_types
     (Tree.derived_enum_tag ~type_keyword:span.first)
     (Enum_tag enum);
+  declare_tag_enumerators state span variant constructors;
+  enum
+
+and defined_tag_enum state span tag constructors =
+  let enum =
+    Ctype.declare_enum state.tags tag ~at_file_scope:(at_file_scope state)
+  in
   let values =
     List.mapi (fun index _ -> Exact_integer.of_int index) constructors
   in
   checked state span
     (Ctype.define_enum state.tags enum
        (Answer (enum_integer state span values)));
-  declare_tag_enumerators state span variant constructors;
   enum
 
 (* The enumerator [N_C] of each constructor, whose value is its index. *)
@@ -1997,6 +2074,14 @@ and check_field_type state (constructor : Tree.constructor)
       (quote (Option.value derived.name ~default:""))
       (quote (constructor.node.name.node :> string))
   in
+  if in_instance_definition state
+     && Ctype.is_void derived.declared_type = Answer true
+  then
+    fail state field.span
+      (Rule.message Not_implemented
+         (subject
+         ^ " has the type void in an instance, which is not implemented \
+            yet (design 3.5 rule 6; work package 2.3)"));
   match Value_type.problem state.tags derived.declared_type with
   | Answer None -> ()
   | Answer (Some problem) ->
@@ -2036,6 +2121,295 @@ and alias_record state kind (name : Tree.identifier)
     (Record_tag record);
   record
 
+(* Generic types (design 3.5) *)
+
+(* A generic declares no entity, as its name alone is no type (rule 1).
+   Its definition is checked once (rule 4) by reading the generic's own
+   instance over a new opaque value type for each type parameter, where
+   an error is reported at its place in the definition. The check is a
+   trial: it defines no instance for any later point (rule 7). *)
+and read_generic state (scoped : Tree.scoped_type_declaration) =
+  let declaration = scoped.declaration in
+  let { Tree.declared; type_parameters; _ } = declaration.node in
+  Hashtbl.replace state.generics (Tree.In_tree declared.id) declaration;
+  Option.iter
+    (fun earlier -> Hashtbl.replace state.generics earlier declaration)
+    declared.earlier;
+  let parameter (written : Tree.parameter_name) =
+    let opaque = Ctype.declare_opaque state.tags written.name.node in
+    (written.name.span, Ctype.record opaque)
+  in
+  let parameters = List.map parameter type_parameters in
+  let check =
+    { read =
+        (fun declaration read ->
+          in_own_views state (fun () ->
+              with_arguments state declaration (List.map snd parameters)
+                read)) }
+  in
+  Ctype.trial state.tags (fun () ->
+      let instance = instance_of state declaration parameters in
+      let t = instance_type state declaration instance check in
+      ignore (Ctype.is_complete state.tags t))
+
+(* A type application: its arguments, then the type that the generic's
+   definition makes of them (rule 3). *)
+and applied_type state span name reference arguments =
+  let declaration = generic_declaration state span name reference in
+  let argument (written : Tree.type_name) =
+    (written.span, read_type_name state written)
+  in
+  let arguments = List.map argument arguments in
+  let instance = instance_of state declaration arguments in
+  note_application state instance span;
+  let applied =
+    { read =
+        (fun declaration read ->
+          in_instance state declaration instance (List.map snd arguments)
+            read) }
+  in
+  instance_type state declaration instance applied
+
+(* The latest declaration of the generic that an application names: the
+   variant that completes an incomplete one, once read. *)
+and generic_declaration state span name reference =
+  match Hashtbl.find_opt state.generics reference with
+  | Some declaration -> declaration
+  | None -> not_read state span name
+
+(* The latest application of each instance, where an error of its
+   definition is reported (rule 5); a check forgets its own. *)
+and note_application state instance span =
+  let earlier = Hashtbl.find_opt state.applied_at instance in
+  Hashtbl.replace state.applied_at instance span;
+  Ctype.undo_after_trial state.tags (fun () ->
+      match earlier with
+      | Some application ->
+          Hashtbl.replace state.applied_at instance application
+      | None -> Hashtbl.remove state.applied_at instance)
+
+(* Design 3.5 rule 2: every type in an argument has a row in the table of
+   10.3, which also makes it an object type, no array and not variably
+   modified. An argument is refused at its place. *)
+and instance_of state (declaration : Tree.type_declaration) arguments =
+  let written =
+    List.map (fun ((_, t) as argument) -> (argument, t)) arguments
+  in
+  match Encoding.instance state.tags declaration.node.name.node written with
+  | Ok instance -> instance
+  | Error ((span, argument), no_row) ->
+      fail state span (no_row_diagnostic argument no_row)
+
+(* The type that the definition of a generic makes of the arguments of
+   [instance] (rule 3), whose definition [reading] reads. An instance of
+   a transparent alias or a distinct generic is read once, at its first
+   application, and a structure or union where it is first needed
+   complete (10.3). *)
+and instance_type state (declaration : Tree.type_declaration) instance
+    reading =
+  match declaration.node.definition with
+  | Alias type_name ->
+      Ctype.read_instance state.tags instance ~read:(fun () ->
+          reading.read declaration (fun () -> read_type_name state type_name))
+  | Distinct { is_private; representation } ->
+      let privacy = privacy state declaration ~is_private in
+      let name = Encoding.instance_name instance in
+      Ctype.read_instance state.tags instance ~read:(fun () ->
+          reading.read declaration (fun () ->
+              distinct_type ~instance state name privacy representation))
+  | Record_alias specifier ->
+      let { Tree.kind; attributes; members; _ } = specifier.node in
+      let define record =
+        reading.read declaration (fun () ->
+            Option.iter (define_record state specifier.span record) members)
+      in
+      let record =
+        Ctype.declare_instance state.tags (record_kind kind) instance ~define
+      in
+      obscured_by state attributes (Ctype.record record)
+  | Variant _ | Incomplete_variant ->
+      let generic = Tree.In_tree declaration.node.declared.id in
+      let define = variant_instance state generic instance reading in
+      Ctype.record (Ctype.declare_instance state.tags Struct instance ~define)
+
+(* The definition of a variant instance, by the generic's latest
+   declaration: one that completes an incomplete variant after the
+   application defines it. While none does, the instance stays
+   incomplete, and its definition deferred. The parser completes an
+   incomplete variant only with a variant (design 3.1 rule 4). *)
+and variant_instance state generic instance reading record =
+  let declaration = Hashtbl.find state.generics generic in
+  let define constructors () =
+    let span = declaration.span in
+    let tag = Encoding.instance_name instance ^ "_tag" in
+    let tag_enum = defined_tag_enum state span (Some tag) constructors in
+    let _, members = variant_members state span tag_enum constructors in
+    checked state span
+      (Ctype.define_record state.target state.tags record members)
+  in
+  match declaration.node.definition with
+  | Incomplete_variant -> ()
+  | Variant { constructors; _ } ->
+      reading.read declaration (define constructors)
+  | Alias _ | Distinct _ | Record_alias _ ->
+      invalid_arg "Declarations.variant_instance"
+
+(* [read] at file scope, where every instance stands (design 10.3), with
+   each type parameter a typedef name of its argument, as the instance
+   writes it. *)
+and with_arguments :
+      'a.
+      state -> Tree.type_declaration -> Ctype.t list -> (unit -> 'a) -> 'a =
+ fun state declaration arguments read ->
+  let bind (parameter : Tree.parameter_name) argument =
+    let reference = Tree.In_tree parameter.declared.id in
+    let saved = Hashtbl.find_opt state.entities reference in
+    Hashtbl.replace state.entities reference
+      { name = parameter.name.node; entity = fresh_entity state;
+        declared = Typedef argument };
+    (reference, saved)
+  in
+  let restore (reference, saved) =
+    match saved with
+    | Some entity -> Hashtbl.replace state.entities reference entity
+    | None -> Hashtbl.remove state.entities reference
+  in
+  let bound = List.map2 bind declaration.node.type_parameters arguments in
+  Fun.protect
+    ~finally:(fun () -> List.iter restore bound)
+    (fun () -> within state At_file_scope read)
+
+(* [read] of the definition for an instance, as the next link of the
+   chain of instances being defined (rule 7). An error in it is reported
+   at the latest application of the chain's first instance and cites
+   the definition (rule 5); one in a definition check stays in the
+   generic's definition, where that application is. *)
+and in_instance :
+      'a.
+      state ->
+      Tree.type_declaration ->
+      Ctype.instance ->
+      Ctype.t list ->
+      (unit -> 'a) ->
+      'a =
+ fun state declaration instance arguments read ->
+  let application = Hashtbl.find state.applied_at instance in
+  let outer = state.nesting in
+  let link = next_link outer application in
+  if link.depth > max_nesting then
+    fail_nesting state application instance link.began;
+  state.nesting <- Some link;
+  let restore () = state.nesting <- outer in
+  match
+    Fun.protect ~finally:restore (fun () ->
+        in_own_views state (fun () ->
+            with_arguments state declaration arguments read))
+  with
+  | result -> result
+  | exception Failed error when Option.is_none outer ->
+      raise (Instance_failed (instance_error state application instance error))
+
+(* [read] in typed views of its own, as it reads the text of a generic's
+   definition again, for an instance or for the check, whose types no
+   later point asks for. *)
+and in_own_views : 'a. state -> (unit -> 'a) -> 'a =
+ fun state read ->
+  let typed = state.typed and type_names = state.type_names in
+  state.typed <- Expressions.create ();
+  state.type_names <- Hashtbl.create 16;
+  let restore () =
+    state.typed <- typed;
+    state.type_names <- type_names
+  in
+  Fun.protect ~finally:restore read
+
+and instance_error state application instance (error : error) =
+  {
+    location = location_of state application;
+    message =
+      Printf.sprintf
+        "in the instance %s that this application names, at %s:%d: %s"
+        (quote (shown_instance instance))
+        error.location.file error.location.line error.message;
+  }
+
+and fail_nesting state application instance began =
+  let began = location_of state began in
+  let diagnostic =
+    Rule.message Instance_nesting
+      (Printf.sprintf
+         "the application would define the instance %s after a chain of \
+          %d instances that each define the next, which the application \
+          at %s:%d began; a chain holds at most %d"
+         (quote (shown_instance instance))
+         max_nesting began.file began.line max_nesting)
+  in
+  raise
+    (Instance_failed
+       { location = location_of state application;
+         message = Rule.text diagnostic })
+
+and no_row_diagnostic argument ({ part; reason } : Encoding.no_row) =
+  let argument_name = quote (Type_name.of_ctype argument) in
+  let holds what =
+    Printf.sprintf "holds %s, %s" (quote (Type_name.of_ctype part)) what
+  in
+  let refused problem =
+    Rule.message Type_argument
+      (Printf.sprintf "the type argument %s %s" argument_name problem)
+  in
+  match reason with
+  | Too_long ->
+      Rule.c_text
+        (Printf.sprintf
+           "the encoding of the type argument %s in an instance name is \
+            longer than %d bytes, the limit of typec"
+           argument_name Encoding.max_length)
+  | Array_not_under_pointer when part == argument -> refused "is an array"
+  | Function_not_under_pointer when part == argument ->
+      refused "is a function type, no object type"
+  | Variable_length when part == argument -> refused "is variably modified"
+  | Int128 | Va_list -> refused (holds "which no instance name encodes")
+  | Unknown_type unknown ->
+      refused
+        (Printf.sprintf "holds a type that typec does not compute: %s"
+           unknown.construct)
+  | Array_not_under_pointer -> refused (holds "an array not under a pointer")
+  | Function_not_under_pointer ->
+      refused (holds "a function type not under a pointer")
+  | Opaque_length ->
+      refused (holds "whose array length typec does not compute (design P16)")
+  | Variable_length -> refused (holds "which is variably modified")
+  | Unnamed -> refused (holds "which no declaration names")
+  | Several_names names ->
+      refused
+        (holds
+           ("which more than one declaration names: "
+           ^ String.concat ", " (List.map quote names)))
+  | Not_at_file_scope ->
+      refused (holds "which is declared in a block or a parameter list")
+
+(* Design 3.5 rule 4: the definition of a generic uses a type parameter
+   only as a type. A type that depends on one is opaque in its definition
+   check, where the constructs that call this refuse it. *)
+and refuse_opaque state span t construct =
+  if Ctype.is_opaque t then
+    fail state span
+      (Rule.message Generic_definition
+         (Printf.sprintf "%s depends on a type parameter" construct))
+
+(* A type name in an expression, which in the definition of a generic
+   mentions no type parameter: the value of the expression would depend
+   on one (design 7.1 rule 4), as that of [sizeof (T)] does. *)
+and expression_type_name state (type_name : Tree.type_name) =
+  let t = read_type_name state type_name in
+  if Ctype.mentions_opaque t then
+    fail state type_name.span
+      (Rule.message Generic_definition
+         "a type in an expression in the definition of a generic type \
+          depends on a type parameter");
+  t
+
 and typing state : Expressions.context =
   {
     typed = state.typed;
@@ -2045,7 +2419,7 @@ and typing state : Expressions.context =
     fail = (fun span diagnostic -> fail state span diagnostic);
     entity = referenced state;
     overloaded = Hashtbl.mem state.overloaded;
-    type_name = read_type_name state;
+    type_name = expression_type_name state;
     declaration = read_block_declaration state;
     type_declaration =
       (fun declaration -> ignore (read_type_declaration state declaration));
@@ -2131,8 +2505,10 @@ let read_external state (external_declaration : Tree.external_declaration) =
   match external_declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
-  | Type_declaration declaration ->
-      Type_declaration (read_type_declaration state declaration)
+  | Type_declaration declaration -> (
+      match read_type_declaration state declaration with
+      | Some entity -> Type_declaration entity
+      | None -> Generic_declaration)
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
 (* The location that GCC gives a name declared before the first token,
@@ -2194,15 +2570,20 @@ let read target text unit =
       type_names = Hashtbl.create 256;
       type_declarations = Hashtbl.create 16;
       incomplete_variants = Hashtbl.create 16;
+      generics = Hashtbl.create 16;
+      applied_at = Hashtbl.create 16;
+      nesting = None;
       place = At_file_scope;
       next_entity = 0;
     }
   in
   declare_builtin_typedefs state;
-  match List.map (read_external state) unit with
+  let read_all () = List.map (read_external state) unit in
+  let end_deferral () = Ctype.end_deferral state.tags in
+  match Fun.protect ~finally:end_deferral read_all with
   | items ->
       let { tags; entities; tag_types; linked; typed; type_declarations; _ } =
         state
       in
       Ok { tags; items; entities; tag_types; linked; typed; type_declarations }
-  | exception Failed error -> Error error
+  | exception (Failed error | Instance_failed error) -> Error error

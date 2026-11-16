@@ -194,11 +194,13 @@ let rows =
     Live { name = "Generic_definition"; code = 38;
       clause = Some "design 3.5 rule 4";
       meaning =
-        "In the definition of a generic type: a type parameter directly \
-         after [distinct], as the type of a bit-field or in [_Alignas]; a \
-         structure or union specifier with a body and a tag, or with a \
-         body where the definition of an instance does not hold it; an \
-         enumeration specifier with a body." };
+        "In the definition of a generic type: a type parameter, written \
+         or through a transparent alias, directly after [distinct], as \
+         the type of a bit-field, in [_Alignas], [_Atomic( )] or \
+         [typeof( )], qualified by [_Atomic], or in an expression; a \
+         structure or union specifier with a body and a \
+         tag, or with a body where the definition of an instance does \
+         not hold it; an enumeration specifier with a body." };
     Live { name = "Generic_first_mention"; code = 39;
       clause = Some "design 3.5 rule 8";
       meaning =
@@ -209,6 +211,18 @@ let rows =
       meaning =
         "A [#pragma] line in Type-C text whose text after [pragma] is no \
          sequence of preprocessing tokens." };
+    Live { name = "Type_argument"; code = 41;
+      clause = Some "design 3.5 rule 2";
+      meaning =
+        "A type argument that is no object type, an array, variably \
+         modified, holds a type without a row in the table of design \
+         10.3, one declared outside file scope or an untagged type \
+         without exactly one name." };
+    Live { name = "Instance_nesting"; code = 42;
+      clause = Some "design 3.5 rule 7";
+      meaning =
+        "An application that would cause the 65th instance of a chain \
+         in which each instance causes the next." };
   ]
 
 let () =

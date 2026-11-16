@@ -639,7 +639,12 @@ id(stmt) s;                             /* e = s is an error */
    define: a type instance that it holds by value or otherwise needs
    complete and, in the body of a function instance, a function instance
    that the body calls or names. An instance that is defined already, or
-   whose definition has begun, is caused by no later need of it. The
+   whose definition has begun, is caused by no later need of it. An
+   instance of a transparent alias or distinct generic is defined where
+   it is first applied, so the definition that holds that application
+   causes it. The definition check of rule 4 defines no instance: what
+   the check needs complete is defined, and causes its chain, at the
+   first need of an application, as if no check had run. The
    needs of a definition are visited in the order of its text, and what
    one of them causes is defined whole, with all that it causes in turn,
    before the next is visited.

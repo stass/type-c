@@ -45,6 +45,8 @@ type item =
   | Static_assertion
   | Function_definition of entity
   | Type_declaration of entity  (** a typedef name (design 3.1) *)
+  | Generic_declaration
+      (** a generic type (design 3.5), whose name alone is no type *)
 
 type t
 

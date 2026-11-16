@@ -6,15 +6,16 @@ applications and the refusals that the parser makes. Each source is
 preprocessed text, as the backend writes it for -E; a file named *.tc
 holds Type-C text.
 
-Typing generic types belongs to a later part of work package 2.1, so a
-program that declares one is refused after it parses.
+Lowering writes no instance yet, so a program that declares a generic
+type is refused once its typing has passed (design 10.3; work package
+2.1).
 
   $ cat > list.tc <<'EOF'
   > type list(T) = | Nil | Cons(T head, list(T) *tail);
   > list(int) *numbers;
   > EOF
   $ ./golden.exe list.tc
-  list.tc:1: generic types are not implemented yet (design 3.5; work package 2.1) [TC0023]
+  list.tc:1: lowering generic types is not implemented yet (design 10.3; work package 2.1) [TC0023]
   [1]
 
 A generic type is declared at file scope only (design 3.1).
@@ -128,4 +129,49 @@ own, and a tag declared before the definition is named by it.
   >   > first_mention_field.tc
   $ ./golden.exe first_mention_field.tc
   first_mention_field.tc:1: the definition of a generic type is the first to mention the tag `node` at file scope; declare the tag before the definition (design 3.5 rule 8) [TC0039]
+  [1]
+
+Typing reads the definition again for each instance, with the
+arguments bound. An instance is defined where a point first needs it
+complete, and an error of its definition is reported at the
+application (design 3.5 rule 5).
+
+  $ cat > incomplete.tc <<'EOF'
+  > type box(T) = struct { T value; };
+  > struct s;
+  > struct holder { box(struct s) b; };
+  > EOF
+  $ ./golden.exe incomplete.tc
+  incomplete.tc:3: in the instance 'box__T1s' that this application names, at incomplete.tc:1: member has an incomplete or function type
+  [1]
+
+A type argument has a row in the table of design 10.3 for every type in
+it (design 3.5 rule 2).
+
+  $ printf 'type box(T) = struct { T value; };\nbox(int[2]) *b;\n' \
+  >   > array.tc
+  $ ./golden.exe array.tc
+  array.tc:2: the type argument 'int[2]' is an array (design 3.5 rule 2) [TC0041]
+  [1]
+
+A chain of instances that each define the next holds at most 64
+(design 3.5 rule 7); one under a pointer defines nothing.
+
+  $ printf 'type box(T) = struct { T value; };\nstruct w { %sint%s deep; };\n' \
+  >   "$(printf 'box(%.0s' $(seq 65))" "$(printf ')%.0s' $(seq 65))" > deep.tc
+  $ ./golden.exe deep.tc
+  deep.tc:2: the application would define the instance 'box__i' after a chain of 64 instances that each define the next, which the application at deep.tc:2 began; a chain holds at most 64 (design 3.5 rule 7) [TC0042]
+  [1]
+
+The definition is checked once with each type parameter an opaque value
+type, so a use that the parser cannot see, through a transparent alias
+or in a constant expression, is refused there (design 3.5 rule 4).
+
+  $ printf 'type same(U) = U;\ntype d(T) = distinct same(T);\n' > through.tc
+  $ ./golden.exe through.tc
+  through.tc:2: the representation after `distinct` depends on a type parameter (design 3.5 rule 4) [TC0038]
+  [1]
+  $ printf 'type a(T) = struct { char b[sizeof(T)]; T v; };\n' > size.tc
+  $ ./golden.exe size.tc
+  size.tc:1: a type in an expression in the definition of a generic type depends on a type parameter (design 3.5 rule 4) [TC0038]
   [1]

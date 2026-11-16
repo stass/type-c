@@ -440,17 +440,19 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
-- [High] The parser refuses only the syntactic forms of design 3.5
-  rules 2 and 4; the typing of generic types in package 2.1 must check
-  the rest on the expanded type: a type parameter used other than as
-  the type of a member, field, pointed-to object, element, parameter
-  or result or as a type argument (`_Atomic(T)`, `typeof(T)`, and
-  `distinct ptr(T)` with `type ptr(U) = U;` reach typing); a constant
-  expression that depends on one (`int a[sizeof(T)]`, an `aligned`
-  attribute); and the first half of rule 2, an argument whose struct,
-  union, enum, variant or distinct type is declared in a block
-  (`struct s` declared there before `box(struct s *)`), is untagged or
-  has two typedef names, or holds an attribute.
+- [High] A type argument holds no attribute (design 3.5 rule 2), and
+  typing does not check it yet: an attribute or a nullability qualifier
+  written in the argument, or one with which a typedef name that the
+  argument uses, at any depth, is declared (`vector(wide)` where `wide`
+  is `int` with `aligned(16)`). An attribute that makes a type unknown
+  is refused already, as the type has no row in design 10.3; one that
+  `attribute_effects` reads as neutral, `aligned` among them, and
+  nullability, which `qualifiers_of` drops, are not. Record on each
+  typedef name whether its declaration holds one, and walk the
+  argument's type name. Also refuse a type parameter in the arguments of
+  an attribute in a generic's definition (`aligned(sizeof(T))`), which
+  the parser keeps as an unread token span: the parser, which resolves
+  the parameter, is the place.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it
@@ -694,20 +696,73 @@ is [type-c-language-design.md](type-c-language-design.md).
   may stand, as the pragmas break an expression. A run test should
   also compile an instance's error through the pipeline to confirm it
   is reported at its own line.
-- [High] Bound the length of an instance encoding (`Encoding.encode`):
-  an instance is one node of a `Ctype.t`, so `Ctype.max_size` does not
-  bound the encodings it holds, and `typedef pair(p1, p1) p2;` repeated
-  doubles the name each time, which exhausts memory or hands the backend
-  an identifier of gigabytes. Refuse an encoding over a named limit, or
-  use substitutions, when instances are built.
+
+- [High] An instance of a generic variant is a structure to typing:
+  `Ctype.as_variant` answers `None` for its `Instance_name` record, so
+  its constructors, its patterns and the operations that design 3.2
+  rule 6 refuses on a variant are not read. Give the instance's record
+  the variant's facts when constructor expressions and matches on
+  instances are built.
+- [High] An instance is defined at a point that needs it complete only
+  where typing asks for completeness (`Ctype.is_complete` and the
+  questions about members); the needs that the reader leaves to the
+  backend, such as an object that a block defines (C11 6.7p7), define
+  none, so lowering (part 9 of package 2.1) would not write a
+  definition there, and an error of the definition would reach the
+  backend instead of being reported at the application (design 3.5 rule
+  5). Ask for completeness at each need that design 10.3 lists. The
+  exactness of the nesting limit (design 3.5 rule 7) depends on it too:
+  a chain through a need that typing does not ask about is shorter than
+  the rule counts, so `typec` may accept a source that the rule refuses.
+- [High] Instances grow exponentially with linear text: with
+  `type G_k(T) = struct { G_k+1(A(T)) a; G_k+1(B(T)) b; };` for k up to
+  n and `G1(int) v;`, typec defines about 3 * 2^n instances (each check
+  expands its subtree again, as a trial shares no definition), 47 s at
+  n = 16; the nesting limit bounds only the depth. Add a translation
+  limit, without a rule code, on the instances that a unit defines, as
+  `Encoding.max_length` bounds a name, and give an instance reading
+  smaller typed views than `Expressions.create` makes.
+- [Medium] A constant expression may depend on a type parameter
+  through an untagged structure body in it (`char k[2 - sizeof(struct
+  { T q; })]` in a generic's definition is accepted), as
+  `Ctype.mentions_opaque` does not look into members. The parser,
+  which allows a body there, is the place: no structure or union body
+  in an expression of a generic's definition (design 3.5 rule 4).
+- [Medium] `Ctype.trial` is exact only while every write to the
+  instance tables registers its undo (`declare_instance`,
+  `run_deferred`, `read_instance` and `note_application` in
+  Declarations); the prototype-scope entities and variant tag enums
+  that a check makes are not undone, and are unreachable. Replace the
+  undo log with a snapshot of those tables restored when the trial
+  ends, if a copy per generic proves cheap enough.
+- [Low] A generic name longer than `Encoding.max_length` refuses each
+  application with a message that blames its first argument; refuse
+  such a name at its declaration.
+- [Low] Typing refuses every type in an expression of a generic's
+  definition that mentions a type parameter (`sizeof(T *)` among them),
+  where design 3.5 rule 4 and 7.1 rule 4 refuse an expression whose
+  value depends on one. Say the simpler rule in the design, or relax
+  the check.
+- [Medium] The definition check of a generic (design 3.5 rule 4) counts
+  the chain of each instance that it needs complete against the nesting
+  limit of rule 7 from the check, so it refuses a generic whose
+  definition needs a chain of 65 concrete instances (`box(...(int))`,
+  65 deep) even where a later application would find part of that chain
+  defined already and accept it. Decide whether the check counts only
+  the instances over its type parameters, or say in the design that a
+  check is refused where its own chain exceeds the limit.
+- [Medium] The opaque value type of a definition check is a structure
+  without members (`Ctype.declare_opaque`), which is exact for generic
+  types but not for the bodies of generic functions (design 7.1 rule
+  3): such a structure may be passed through `...` and is refused the
+  initialiser `{0}`. Give it a shape of its own when generic functions
+  are typed.
 - [Medium] `Ctype.instance` holds the encodings of its arguments as
   plain strings, so a caller can build one from a string that
   `Encoding.encode` did not make, which need not be self-delimiting.
   Make the encoding a type that only `Encoding` makes when instances are
   built.
-- [Medium] A distinct generic's instance has no form in
-  `Ctype.distinct`, so it would be encoded by its name, not by the row
-  `I length G args E` of design 10.3. Add one when instances are built.
+
 - [Medium] `Declarations` reads only a C typedef by the rule of design
   3.5 rule 2 that names an untagged type: a Type-C alias of an untagged
   enum or of a qualified untagged struct or union names nothing, so

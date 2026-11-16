@@ -55,6 +55,7 @@ let reason_name : Encoding.reason -> string = function
   | Unnamed -> "unnamed"
   | Several_names names -> "names " ^ String.concat ", " names
   | Not_at_file_scope -> "not at file scope"
+  | Too_long -> "too long"
 
 let outcome_text = function
   | Ok code -> "encoding " ^ code
@@ -82,7 +83,7 @@ let generic name =
   | Error message -> failwith message
 
 let instance name arguments : Ctype.instance =
-  { generic = generic name; arguments }
+  { generic = generic name; arguments; mentions_parameter = false }
 
 let arithmetic_rows () =
   encodes "typedef void t;" "v";
@@ -197,15 +198,15 @@ let built_rows () =
   in
   check "a struct in a block" (encode (pointer (Ctype.record local)))
     "no row: not at file scope";
-  let vector_int =
+  let vector_int () =
     Ctype.declare_instance tags Struct (instance "vector" [ "i" ])
+      ~define:ignore
   in
-  check "vector(int)" (encode (Ctype.record vector_int)) "encoding I6vectoriE";
-  check "vector(int) *" (encode (pointer (Ctype.record vector_int)))
+  let first = vector_int () in
+  check "vector(int)" (encode (Ctype.record first)) "encoding I6vectoriE";
+  check "vector(int) *" (encode (pointer (Ctype.record first)))
     "encoding PI6vectoriE";
-  if Ctype.declare_instance tags Struct (instance "vector" [ "i" ])
-     != vector_int
-  then fail_case "vector(int) again" "another tag";
+  if vector_int () != first then fail_case "vector(int) again" "another tag";
   check "the name of vector(int)"
     (Encoding.instance_name (instance "vector" [ "i" ]))
     "vector__i";
