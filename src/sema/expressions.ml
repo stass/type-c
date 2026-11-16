@@ -80,6 +80,18 @@ type try_site = {
   err_field : string option;
 }
 
+(* Whether a function returns void, which decides the form of a return
+   of a value in the scope of a defer (design 13.5). *)
+type returns = Returns_void | Returns_value
+
+type function_defers = {
+  function_name : string;
+  declarator : Tree.declarator;
+  body : Tree.span;
+  returns : returns;
+  sites : Reachability.defer_site list;
+}
+
 (* The try at [held_span] that [holder], the statement or declaration
    being typed, holds in the position [form]. *)
 type try_holder = { held_span : Tree.span; form : try_form; holder : holder }
@@ -319,6 +331,7 @@ type t = {
   mutable enclosing : enclosing;
   mutable tries : try_site list;
   mutable function_tries : try_site list;
+  mutable defers : function_defers list;
 }
 
 let outside_functions =
@@ -334,7 +347,8 @@ let create () =
     sites = Sites.create ();
     enclosing = outside_functions;
     tries = [];
-    function_tries = [] }
+    function_tries = [];
+    defers = [] }
 
 let find view (expression : Tree.expression) =
   Hashtbl.find_opt view.types expression.span
@@ -348,6 +362,7 @@ let selection view (expression : Tree.expression) =
 let constructions view = Sites.constructions view.sites
 let matchings view = Sites.matchings view.sites
 let tries view = List.rev view.tries
+let defers view = List.rev view.defers
 
 let answered view =
   Hashtbl.to_seq_values view.answered
@@ -3343,9 +3358,7 @@ and initialiser context ~constant t initialiser =
 
 and block_items context (block : Tree.block) = items context block.node.items
 
-(* The items after a defer are its scope (design 6 rule 1). Every defer
-   is refused once its statement and its scope are typed, so that none
-   reaches lowering. *)
+(* The items after a defer are its scope (design 6 rule 1). *)
 and items context = function
   | [] -> ()
   | Tree.Block_declaration declaration :: rest ->
@@ -3357,13 +3370,9 @@ and items context = function
   | Block_statement statement :: rest ->
       standing_statement context Block_item None statement;
       items context rest
-  | Block_defer { keyword; statement } :: scope ->
+  | Block_defer { keyword = _; statement } :: scope ->
       deferred_statement context statement;
-      defer_scope context scope;
-      context.fail keyword
-        (Rule.message Not_implemented
-           "lowering of `defer` is not implemented yet (design 13.5; work \
-            package 2.5)")
+      defer_scope context scope
 
 (* No try stands in the statement of a defer (design 5.1 rule 4), whose
    statements this gives no positions, and no case or default label in
@@ -3954,17 +3963,31 @@ and subscripted_addressable context (operand : Tree.expression) =
   | Some _ -> true
   | None -> false
 
-let function_body context ~name ~return_type block =
+(* The defer statements of the body, which reachability finds once
+   typing has read it, as its facts need, and the function around them
+   that the form of a return in their scopes needs (design 13.5). *)
+let record_defers context ~name ~declarator ~enclosing (block : Tree.block) =
+  match Reachability.defers (reachability_facts context) block with
+  | [] -> ()
+  | sites ->
+      let returns =
+        if returns_void enclosing then Returns_void else Returns_value
+      in
+      context.typed.defers <-
+        { function_name = name; declarator; body = block.span; returns;
+          sites }
+        :: context.typed.defers
+
+let function_body context ~name ~declarator ~return_type block =
   let view = context.typed in
   let enclosing =
     { function_name = Some name; return_type = Some return_type;
       case_labels = No_switch; try_positions = Positions No_place }
   in
   view.function_tries <- [];
-  (* Before the items, so that it is refused before the refusal of a
-     defer that lowering cannot yet write. *)
   (match Reachability.label_refusal block with
   | Some { span; diagnostic } -> context.fail span diagnostic
   | None -> ());
   within context enclosing (fun () -> block_items context block);
+  record_defers context ~name ~declarator ~enclosing block;
   view.tries <- view.function_tries @ view.tries

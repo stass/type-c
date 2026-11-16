@@ -10,6 +10,19 @@ type facts = {
 
 type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
 
+type exit =
+  | Jump of Tree.span
+  | Value_return of { statement : Tree.span; operand : Tree.span }
+
+type ending = Completes of int | Cannot_complete of int | Arm_end
+
+type defer_site = {
+  keyword : Tree.span;
+  deferred : Tree.span;
+  ending : ending;
+  exits : exit list;
+}
+
 exception Refused of refusal
 
 let refuse span diagnostic = raise (Refused { span; diagnostic })
@@ -101,8 +114,20 @@ type jump = {
 (* What a jump enters only from inside it: a match arm (design 4.3 rule
    3), the statement of a single-pattern test, which only a successful
    test enters (4.6 rule 6), or the scope of a defer statement, the
-   items after it in its block (6 rules 1 and 5). *)
-type guarded = Arm of Tree.span | Tested of Tree.span | Defer_scope of Tree.span
+   items after it in its block (6 rules 1 and 5), with the exits of the
+   scope that the walk has read. *)
+type guarded =
+  | Arm of Tree.span
+  | Tested of Tree.span
+  | Defer_scope of { scope : Tree.span; scope_exits : exit Queue.t }
+
+(* A defer statement that a sequence of items holds, with the exits of
+   its scope, which fill as the walk reads the items after it. *)
+type read_defer = {
+  defer_keyword : Tree.span;
+  defer_statement : Tree.span;
+  defer_exits : exit Queue.t;
+}
 
 (* A labelled statement: its label, the innermost guarded statement
    around it, [None] outside every one, and its context. *)
@@ -126,6 +151,7 @@ type walk = {
   definitions : definition Queue.t;
   jumps : jump Queue.t;
   breaches : refusal Queue.t;
+  defers : defer_site Queue.t;
 }
 
 (* The walk inside the guarded statement or scope [guard]. *)
@@ -166,9 +192,6 @@ let record_jump walk kind ({ name; label } : Tree.label_name) =
     { target = label; site = name.span; kind; jump_context = walk.context }
     walk.jumps
 
-(* A jump may enter a statement at a label it carries or contains. *)
-let enterable flow = flow.has_named_label || flow.has_case_label
-
 let item_span : Tree.block_item -> Tree.span = function
   | Block_declaration declaration -> declaration.span
   | Block_type_declaration { declaration; scope_end = _ } -> declaration.span
@@ -176,38 +199,103 @@ let item_span : Tree.block_item -> Tree.span = function
   | Block_defer { keyword; statement } ->
       { first = keyword.first; last = statement.span.last }
 
-let rec block walk (b : Tree.block) = sequence walk b.node.items
+(* Records [exit] in the scopes of the defer statements around the walk
+   that it leaves, which [leaves] says of the first token of each. *)
+let record_exit walk exit ~leaves =
+  List.iter
+    (function
+      | Defer_scope { scope; scope_exits } when leaves scope.Tree.first ->
+          Queue.add exit scope_exits
+      | Defer_scope _ | Arm _ | Tested _ -> ())
+    walk.guards
+
+(* A break or continue leaves the scopes that begin after the keyword
+   of the statement it leaves: that statement holds their blocks, as
+   the jump stands inside it and in the scope. A disputed one is refused
+   in a scope (design 6 rule 10). *)
+let record_leaving walk (statement : Tree.statement) = function
+  | Tree.Only (Statement_at target) ->
+      record_exit walk (Jump statement.span) ~leaves:(fun first ->
+          target < first)
+  | Either _ -> ()
+
+(* A return leaves every scope around it (design 6 rule 1). *)
+let record_return walk (statement : Tree.statement) value =
+  let exit =
+    match (value : Tree.expression option) with
+    | Some operand ->
+        Value_return { statement = statement.span; operand = operand.span }
+    | None -> Jump statement.span
+  in
+  record_exit walk exit ~leaves:(fun _ -> true)
+
+(* The sites of the defer statements [defers] of a sequence whose scopes
+   end in [ending], once the walk has read the sequence, so that every
+   exit of their scopes is recorded. *)
+let record_defers walk defers ending =
+  List.iter
+    (fun read ->
+      Queue.add
+        { keyword = read.defer_keyword; deferred = read.defer_statement;
+          ending; exits = List.of_seq (Queue.to_seq read.defer_exits) }
+        walk.defers)
+    defers
+
+(* A jump may enter a statement at a label it carries or contains. *)
+let enterable flow = flow.has_named_label || flow.has_case_label
+
+let rec block walk (b : Tree.block) =
+  let flow, defers = sequence walk b.node.items in
+  let ending =
+    if flow.completes then Completes b.span.last
+    else Cannot_complete b.span.last
+  in
+  record_defers walk defers ending;
+  flow
 
 (* An item is reachable if it is first, if it follows a reachable item
    that can complete, or if a jump may enter it; a sequence completes if
-   it is empty or its last item is reachable and completes. *)
+   it is empty or its last item is reachable and completes. The flow of
+   [items] comes with their defer statements, in source order. *)
 and sequence walk items =
   let scope_end =
     match List.rev items with last :: _ -> (item_span last).last | [] -> 0
   in
-  let rec step walk (reaching, flow) = function
-    | [] -> (reaching, flow)
+  let rec step walk (reaching, flow, defers) = function
+    | [] -> (reaching, flow, defers)
     | item :: rest ->
         let next = block_item walk item in
         let reachable = reaching || enterable next in
-        step
-          (after_item walk item rest ~scope_end)
-          (reachable && next.completes, followed_by flow ~reachable next)
+        let after, defers = after_item walk item rest ~scope_end defers in
+        step after
+          (reachable && next.completes, followed_by flow ~reachable next,
+           defers)
           rest
   in
-  let reaching, flow = step walk (true, completes) items in
-  { flow with completes = reaching }
+  let reaching, flow, defers = step walk (true, completes, []) items in
+  ({ flow with completes = reaching }, List.rev defers)
 
 (* The walk of the items [rest] that follow [item], which are the scope
-   of [item] if it is a defer, up to the token [scope_end]. *)
-and after_item walk item rest ~scope_end =
-  match (item, rest) with
-  | Tree.Block_defer _, first :: _ ->
+   of [item] if it is a defer, up to the token [scope_end], and
+   [defers] with such an [item]. *)
+and after_item walk item rest ~scope_end defers =
+  match item with
+  | Tree.Block_defer { keyword; statement } ->
+      let read =
+        { defer_keyword = keyword; defer_statement = statement.span;
+          defer_exits = Queue.create () }
+      in
+      (in_scope walk read rest ~scope_end, read :: defers)
+  | Block_declaration _ | Block_type_declaration _ | Block_statement _ ->
+      (walk, defers)
+
+(* The walk of the items [rest] after the defer statement [read]. *)
+and in_scope walk read rest ~scope_end =
+  match rest with
+  | first :: _ ->
       let scope = { Tree.first = (item_span first).first; last = scope_end } in
-      guarded_by (Defer_scope scope) walk
-  | Block_defer _, [] -> walk
-  | (Block_declaration _ | Block_type_declaration _ | Block_statement _), _ ->
-      walk
+      guarded_by (Defer_scope { scope; scope_exits = read.defer_exits }) walk
+  | [] -> walk
 
 and block_item walk = function
   | Tree.Block_declaration declaration -> declaration_flow walk declaration
@@ -296,11 +384,14 @@ and statement_flow walk (statement : Tree.statement) =
       { (expression walk target) with completes = false }
   | Continue { loop } ->
       disputed_jump walk statement.span "continue" loop;
+      record_leaving walk statement loop;
       { stops with continues = targets loop }
   | Break { leaves } ->
       disputed_jump walk statement.span "break" leaves;
+      record_leaving walk statement leaves;
       { stops with breaks = targets leaves }
   | Return value ->
+      record_return walk statement value;
       { (all (expression walk) (Option.to_list value)) with completes = false }
   | Asm assembler -> asm_flow walk assembler
   | Match { scrutinee; arms } -> match_flow walk target scrutinee arms
@@ -403,7 +494,11 @@ and match_flow walk target scrutinee arms =
     continues = Targets.union outside.continues arms.continues }
 
 and arm walk (arm : Tree.arm) =
-  sequence (guarded_by (Arm arm.span) walk) arm.node.items
+  let flow, defers =
+    sequence (guarded_by (Arm arm.span) walk) arm.node.items
+  in
+  record_defers walk defers Arm_end;
+  flow
 
 (* Design 4.6 rules 5 and 6: the statement of a single-pattern test may
    complete and leave what is around it, as C's does, but a jump enters
@@ -606,7 +701,7 @@ let encloses (outer : Tree.span) (inner : Tree.span) =
   outer.first <= inner.first && inner.last <= outer.last
 
 let guarded_span = function
-  | Arm span | Tested span | Defer_scope span -> span
+  | Arm span | Tested span | Defer_scope { scope = span; _ } -> span
 
 let guarded_rule : guarded -> Rule.t = function
   | Arm _ | Tested _ -> Arm_entry
@@ -688,7 +783,7 @@ let check_jump definitions jump =
 let start facts =
   { facts; guards = []; context = Outside_statement_expressions;
     definitions = Queue.create (); jumps = Queue.create ();
-    breaches = Queue.create () }
+    breaches = Queue.create (); defers = Queue.create () }
 
 (* Design 4.3 rule 1. *)
 let arm_refusal facts (matched : Tree.arm) =
@@ -728,3 +823,9 @@ let label_refusal body =
   match in_source_order span refusals with
   | first :: _ -> Some first
   | [] -> None
+
+let defers facts body =
+  let walk = start facts in
+  ignore (block walk body);
+  let keyword site = site.keyword in
+  in_source_order keyword walk.defers

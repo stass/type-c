@@ -43,6 +43,11 @@ let insert (tokens : Token.t array) ~before text =
     (Reader.range tokens ~first:before ~count:0)
     ~location:tokens.(before).location text
 
+(* [text] after token [after], as the end of the construct that ends
+   there, so that it moves with that construct's tokens. *)
+let close (tokens : Token.t array) ~after text =
+  Emitter.closing tokens ~after ~location:tokens.(after).location text
+
 (* The grammar tokens from [first] to [last], without the pragmas
    between them, which stay. *)
 let grammar_tokens (tokens : Token.t array) first last =
@@ -393,7 +398,7 @@ let matched_arm tokens ~variant (arm : Typec_sema.Expressions.matched_arm) =
   replace tokens ~location:tokens.(arm.labels.first).location
     (cases ^ " " ^ opening)
     (grammar_tokens tokens arm.labels.first arm.labels.last)
-  @ [ insert tokens ~before:(arm.arm.last + 1) closing ]
+  @ [ close tokens ~after:arm.arm.last closing ]
 
 let match_statement (tokens : Token.t array) matching arms =
   let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
@@ -451,7 +456,7 @@ let tag_check ~variant constructors =
    of the loop of a [while]. *)
 let false_branch tokens form ~controlled_last ~check =
   let after_controlled text =
-    insert tokens ~before:(controlled_last + 1) (" }" ^ text)
+    close tokens ~after:controlled_last (" }" ^ text)
   in
   match (form : Typec_sema.Expressions.test_form) with
   | If_test { otherwise = None } ->
@@ -462,7 +467,7 @@ let false_branch tokens form ~controlled_last ~check =
       :: replace tokens ~location:tokens.(else_token).location
           ("else { " ^ check)
           [ else_token ]
-      @ [ insert tokens ~before:(otherwise.last + 1) " } }" ]
+      @ [ close tokens ~after:otherwise.last " } }" ]
   | While_test -> [ after_controlled (" else { " ^ check ^ "break; } }") ]
 
 let single_pattern_test (tokens : Token.t array) matching
@@ -496,53 +501,61 @@ let matching (tokens : Token.t array)
   | Arms arms -> match_statement tokens matching arms
   | Test test -> single_pattern_test tokens matching test
 
-(* Edits in {!Emitter.in_order}, so that those that begin within a
-   stretch of tokens are found by a search, not a scan of all of them. *)
+(* Edits in {!Emitter.in_order}, so that those that a stretch of tokens
+   owns are found by a search, not a scan of all of them. *)
 type ordered_edits = Emitter.edit array
 
 let order_edits edits : ordered_edits = Array.of_list (Emitter.in_order edits)
 
-(* The edits of [ordered] that begin at token [first] to [last], in
+(* The edits of [ordered] that tokens [first] to [last] own, in
    order. *)
 let edits_within (ordered : ordered_edits) ~first ~last =
-  (* The number of edits that begin before token [index]: those below
-     [low] do, those from [high] on do not. *)
-  let rec begun_before index low high =
+  (* The number of edits owned by a token before [index]: those below
+     [low] are, those from [high] on are not. *)
+  let rec owned_before index low high =
     if low = high then low
     else
       let middle = (low + high) / 2 in
-      if ordered.(middle).range.first < index then
-        begun_before index (middle + 1) high
-      else begun_before index low middle
+      if ordered.(middle).owner < index then
+        owned_before index (middle + 1) high
+      else owned_before index low middle
   in
   let count = Array.length ordered in
-  let start = begun_before first 0 count in
-  let stop = begun_before (last + 1) start count in
+  let start = owned_before first 0 count in
+  let stop = owned_before (last + 1) start count in
   Array.to_list (Array.sub ordered start (stop - start))
 
-(* The tokens [first] to [last] of a text with the edits of [ordered]
-   applied, as moved text: every token at its own location, and the text
-   of each edit at the edit's. *)
+(* The tokens [first] to [last] of a text with the edits that they own
+   in [ordered] applied, as moved text: every token at its own location,
+   and the text of each edit at the edit's. The moved text of an edit
+   inside, such as the copies that a return in the operand of a try
+   runs, moves with it. *)
 let moved_text (text : Reader.t) ordered ~first ~last =
+  let moved_piece : Emitter.moved_piece -> Emitter.piece = function
+    | Piece piece -> piece
+    | Pragma_line _ -> invalid_arg "Lowering.moved_text: a pragma line"
+  in
   let written (edit : Emitter.edit) =
     match edit.text with
     | Emitter.Code { code = ""; _ } -> []
     | Emitter.Code { location; code } -> [ Emitter.generated location code ]
     | Emitter.Bracketed _ -> invalid_arg "Lowering.moved_text: a bracket"
-    | Emitter.Moved _ -> invalid_arg "Lowering.moved_text: moved text"
+    | Emitter.Moved pieces -> List.map moved_piece pieces
   in
   let token index =
     match Emitter.token text index with
     | Some piece -> piece
     | None -> invalid_arg "Lowering.moved_text: an unmovable token"
   in
+  (* A closing insertion that token [last] owns stands after it, so
+     the edits are done before the tokens are. *)
   let rec from index edits pieces =
     match edits with
-    | _ when index > last -> List.concat (List.rev pieces)
     | (edit : Emitter.edit) :: rest when edit.range.first = index ->
         from (index + edit.range.count) rest (written edit :: pieces)
     | (edit : Emitter.edit) :: _ when edit.range.first < index ->
         invalid_arg "Lowering.moved_text: overlapping edits"
+    | _ when index > last -> List.concat (List.rev pieces)
     | _ -> from (index + 1) edits ([ token index ] :: pieces)
   in
   from first (edits_within ordered ~first ~last) []
@@ -661,13 +674,17 @@ let outermost dropped =
   List.rev kept
 
 (* Whether [edit] goes with one of the [dropped] spans: by the tokens it
-   replaces, or for an insertion by the place it inserts at, between two
-   tokens, so that one at either edge of a span stays with the tokens
-   kept beside it. *)
+   replaces; for a closing insertion by its owner, the last token of
+   what it closes; for another insertion by the place it inserts at,
+   between two tokens, so that one at either edge of a span stays with
+   the tokens kept beside it. *)
 let goes_with dropped (edit : Emitter.edit) =
   let first = edit.range.first in
-  if edit.range.count = 0 then covers dropped ~first:(first - 1) ~last:first
-  else covers dropped ~first ~last:(Reader.end_token edit.range)
+  if edit.range.count > 0 then
+    covers dropped ~first ~last:(Reader.end_token edit.range)
+  else if edit.owner < first then
+    covers dropped ~first:edit.owner ~last:edit.owner
+  else covers dropped ~first:(first - 1) ~last:first
 
 let dropped_edits tokens { span; text } =
   replace tokens ~location:tokens.(span.first).location text
@@ -748,8 +765,9 @@ let error_path ~location ~variant (site : Typec_sema.Expressions.try_site)
   @ cleanups
   @ [ try_piece location return ]
 
-(* Typing refuses a defer statement (TC0023), so no cleanup is active at
-   any try. *)
+(* The error path of a try runs no copies of the deferred statements
+   active at it (TODO.md); the front end refuses every defer (TC0023),
+   so none reaches the backend. *)
 let no_cleanups = []
 
 (* The text in front of the holder: the null statement of its labels,
@@ -827,7 +845,7 @@ let lower_try (text : Reader.t) ordered
   | Substatement ->
       let first = (Option.value labels ~default:statement).first in
       { opening = insert tokens ~before:first "{" :: in_front :: value;
-        closing = [ insert tokens ~before:(statement.last + 1) "}" ] }
+        closing = [ close tokens ~after:statement.last "}" ] }
 
 (* The edits of a text with its tries lowered. The edits inside the
    tokens that a try replaces go with its operand, which moves, and the
@@ -843,6 +861,253 @@ let with_tries text edits tries =
   List.concat_map (fun lowered -> lowered.closing) lowered
   @ List.filter (fun edit -> not (goes_with replaced edit)) edits
   @ List.concat_map (fun lowered -> lowered.opening) lowered
+
+(* Design 6 and 13.5: a defer statement is removed, and a copy of its
+   statement [S], as a block, runs at each exit of its scope. An exit
+   that leaves several scopes runs their copies latest first. The end of
+   a block that can complete gets the copies before its [}]; one that
+   cannot gets a trap there instead (6 rule 1), and the end of a match
+   arm has its own. A jump that runs copies becomes a block that holds
+   them and then the jump, [{ copies jump; }], after the labels of its
+   statement; a [return e;] holds [e] first, in the temporary [__tc_r]
+   of the type [__tc_ret], or in a function that returns void as an
+   expression statement. A copy of [S] is the text of [S] with the edits
+   that its tokens own; [S] holds no defer (design 6 rule 11). *)
+
+module Reachability = Typec_sema.Reachability
+
+let return_type_name = "__tc_ret"
+let return_temporary = "__tc_r"
+
+(* The tokens [defer S], which lowering removes. *)
+let defer_span (site : Reachability.defer_site) =
+  { Tree.first = site.keyword.first; last = site.deferred.last }
+
+(* A place that runs the copies of the scopes it leaves: the end of a
+   block that can complete, by the token of its [}], or a jump. *)
+type exit_place = Block_end of int | Left_by of Reachability.exit
+
+let exit_places (site : Reachability.defer_site) =
+  let ending =
+    match site.ending with
+    | Completes closing -> [ Block_end closing ]
+    | Cannot_complete _ | Arm_end -> []
+  in
+  ending @ List.map (fun exit -> Left_by exit) site.exits
+
+(* Each place of [sites] with the sites whose scopes it leaves, in the
+   order their copies run, the latest first. *)
+let places (sites : Reachability.defer_site list) =
+  let pairs =
+    List.concat_map
+      (fun site -> List.map (fun place -> (place, site)) (exit_places site))
+      sites
+  in
+  let sorted = List.stable_sort (fun (a, _) (b, _) -> compare a b) pairs in
+  let group grouped (place, site) =
+    match grouped with
+    | (last, leaving) :: earlier when last = place ->
+        (last, site :: leaving) :: earlier
+    | _ -> (place, [ site ]) :: grouped
+  in
+  List.rev (List.fold_left group [] sorted)
+
+(* The trap at the end of a block that cannot complete, once for each
+   block however many defers it holds. *)
+let trap_edits (text : Reader.t) (sites : Reachability.defer_site list) =
+  let closing (site : Reachability.defer_site) =
+    match site.ending with
+    | Cannot_complete closing -> Some closing
+    | Completes _ | Arm_end -> None
+  in
+  List.sort_uniq Int.compare (List.filter_map closing sites)
+  |> List.map (fun closing -> insert text.tokens ~before:closing trap)
+
+let defer_piece location text = Emitter.Piece (Emitter.generated location text)
+
+(* The copy of the statement of [site], [{ S }], from the edits [base]
+   of the text. *)
+let copy (text : Reader.t) base (site : Reachability.defer_site) =
+  let statement = site.deferred in
+  let location = text.tokens.(statement.first).location in
+  let pieces =
+    moved_text text base ~first:statement.first ~last:statement.last
+  in
+  let moved = List.map (fun piece -> Emitter.Piece piece) pieces in
+  (defer_piece location "{" :: moved) @ [ defer_piece location "}" ]
+
+(* The text of a [return e;] that runs copies: [value_opening] replaces
+   its [return], [value_closing] its [;], before the copies, and
+   [returned] follows them. *)
+type return_form = {
+  value_opening : string;
+  value_closing : string;
+  returned : string;
+}
+
+let return_form : Typec_sema.Expressions.returns -> return_form = function
+  | Returns_value ->
+      { value_opening =
+          Printf.sprintf "{ %s %s = (" return_type_name return_temporary;
+        value_closing = ");";
+        returned = Printf.sprintf "return %s; }" return_temporary }
+  | Returns_void ->
+      { value_opening = "{"; value_closing = ";"; returned = "return; }" }
+
+(* The edits of one place of a function that [returns], which runs the
+   copies of [leaving]. *)
+let place_edits (text : Reader.t) base returns (place, leaving) =
+  let tokens = text.tokens in
+  let copies = List.concat_map (copy text base) leaving in
+  let at index = tokens.(index).location in
+  let insertion index = Reader.range tokens ~first:index ~count:0 in
+  let token index = Reader.range tokens ~first:index ~count:1 in
+  match place with
+  | Block_end closing -> [ Emitter.moved (insertion closing) copies ]
+  | Left_by (Jump jump) ->
+      [ Emitter.moved (insertion jump.first)
+          (defer_piece (at jump.first) "{" :: copies);
+        Emitter.code (token jump.last) ~location:(at jump.last) "; }" ]
+  | Left_by (Value_return { statement; operand = _ }) ->
+      let form = return_form returns in
+      [ Emitter.code (token statement.first) ~location:(at statement.first)
+          form.value_opening;
+        Emitter.moved (token statement.last)
+          ((defer_piece (at statement.last) form.value_closing :: copies)
+          @ [ defer_piece (at statement.last) form.returned ]) ]
+
+let rec names_directly (declarator : Tree.declarator) =
+  match declarator.node with
+  | Name _ -> true
+  | Parenthesized_declarator { inner; _ } -> names_directly inner
+  | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
+
+(* The parameter list of the function that a definition's declarator
+   declares: that of the function derivation of its name. *)
+let rec definition_parameters (declarator : Tree.declarator) =
+  match declarator.node with
+  | Function { inner = Some inner; parameters } when names_directly inner ->
+      parameters
+  | Parenthesized_declarator { inner; _ }
+  | Pointer { inner = Some inner; _ }
+  | Block_pointer { inner = Some inner; _ }
+  | Array { inner = Some inner; _ }
+  | Function { inner = Some inner; _ } ->
+      definition_parameters inner
+  | Name _
+  | Pointer { inner = None; _ }
+  | Block_pointer { inner = None; _ }
+  | Array { inner = None; _ }
+  | Function { inner = None; _ } ->
+      invalid_arg "Lowering: a definition that declares no function"
+
+(* The name of a parameter that the call of [__tc_ret] passes an lvalue
+   of. A parameter without a name is a refusal of the form of 13.5
+   (TODO.md), which the front end's refusal of every defer (TC0023)
+   keeps from the backend. *)
+let parameter_name (parameter : Tree.parameter) =
+  let name =
+    match parameter.node.declarator with
+    | Named_parameter { declarator; _ } -> Tree.declared_name declarator
+    | Abstract_parameter _ -> None
+  in
+  match name with
+  | Some name -> name
+  | None -> invalid_arg "Lowering: a parameter without a name"
+
+(* The parameters that the call passes: none for [(void)], the one
+   parameter that has no declarator, and the named ones of a variadic
+   function. *)
+let parameter_names : Tree.parameters -> string list = function
+  | Identifier_list names ->
+      List.map (fun (name : Tree.parameter_name) -> name.name.node) names
+  | Prototype
+      {
+        parameters =
+          [ { node = { declarator = Abstract_parameter None; _ }; _ } ];
+        variadic = false;
+      } ->
+      []
+  | Prototype { parameters; variadic = _ } -> List.map parameter_name parameters
+
+(* Design 13.5: [typedef __typeof__(call of f) __tc_ret;] in a block
+   around the body, which stays a block of its own. *)
+let return_type_edits (text : Reader.t)
+    (defers : Typec_sema.Expressions.function_defers) =
+  let tokens = text.tokens in
+  let lvalue name = Printf.sprintf "*(__typeof__(%s) *)0" name in
+  let arguments =
+    parameter_names (definition_parameters defers.declarator)
+    |> List.map lvalue |> String.concat ", "
+  in
+  let typedef =
+    Printf.sprintf "{ typedef __typeof__(((__typeof__(%s) *)0)(%s)) %s;"
+      defers.function_name arguments return_type_name
+  in
+  let body = defers.body in
+  [ insert tokens ~before:body.first typedef;
+    Emitter.code
+      (Reader.range tokens ~first:body.last ~count:1)
+      ~location:tokens.(body.last).location "} }" ]
+
+(* The token where [place] stands, which goes with any text that
+   lowering drops around it. *)
+let place_token = function
+  | Block_end closing -> closing
+  | Left_by (Jump jump) -> jump.first
+  | Left_by (Value_return { statement; operand = _ }) -> statement.first
+
+let is_value_return = function
+  | Left_by (Value_return _) -> true
+  | Block_end _ | Left_by (Jump _) -> false
+
+(* The edits of a function with its defers lowered: the copies at each
+   exit, the traps, and [__tc_ret] where a [return e;] that runs copies
+   needs it. A defer and an exit in text that lowering drops, such as
+   a statement expression in an answered type name, go with that text:
+   it never runs. *)
+let function_edits (text : Reader.t) base ~dropped
+    (defers : Typec_sema.Expressions.function_defers) =
+  let kept_token index = not (covers dropped ~first:index ~last:index) in
+  let kept_places =
+    List.filter
+      (fun (place, _) -> kept_token (place_token place))
+      (places defers.sites)
+  in
+  let kept_sites =
+    List.filter
+      (fun (site : Reachability.defer_site) -> kept_token site.keyword.first)
+      defers.sites
+  in
+  let return_type =
+    if
+      defers.returns = Returns_value
+      && List.exists (fun (place, _) -> is_value_return place) kept_places
+    then return_type_edits text defers
+    else []
+  in
+  let removal site =
+    dropped_edits text.tokens { span = defer_span site; text = "" }
+  in
+  List.concat_map (place_edits text base defers.returns) kept_places
+  @ trap_edits text kept_sites
+  @ List.concat_map removal kept_sites
+  @ return_type
+
+(* The edits of a text with the defers of its functions lowered. The
+   statements go, and the edits that their tokens own go with them, to
+   their copies. [dropped] is the text that lowering drops. *)
+let with_defers (text : Reader.t) edits ~dropped
+    (functions : Typec_sema.Expressions.function_defers list) =
+  let sites =
+    List.concat_map
+      (fun (defers : Typec_sema.Expressions.function_defers) -> defers.sites)
+      functions
+  in
+  let removed = cover (List.map defer_span sites) in
+  let base = order_edits edits in
+  List.filter (fun edit -> not (goes_with removed edit)) edits
+  @ List.concat_map (function_edits text base ~dropped) functions
 
 (* The edits of one text: the unit's own, or the definition of an
    instance. A type declaration may hold another, in a statement
@@ -890,9 +1155,16 @@ let text_edits (text : Reader.t) ~declarations ~void_field_spans ~replaced
         (List.rev (Typec_sema.Expressions.matchings typed))
     @ List.concat_map (steered_controlling tokens) answered
   in
-  with_tries text
-    (List.concat_map (dropped_edits tokens) dropped @ List.filter kept lowered)
-    (Typec_sema.Expressions.tries typed)
+  (* The defers go before the tries, so that a jump in the operand of a
+     try runs its copies wherever the operand moves. *)
+  let deferred =
+    with_defers text
+      (List.concat_map (dropped_edits tokens) dropped
+      @ List.filter kept lowered)
+      ~dropped:dropped_spans
+      (Typec_sema.Expressions.defers typed)
+  in
+  with_tries text deferred (Typec_sema.Expressions.tries typed)
 
 let named (span, name) = { span; text = name }
 

@@ -469,7 +469,7 @@ holds one as any block does.
   # 6 "arm.tc"
   ;
     
-  # 7 "arm.tc"
+  # 6 "arm.tc"
    } __builtin_trap(); }
   # 7 "arm.tc"
   
@@ -479,7 +479,7 @@ holds one as any block does.
   
       return r;
     
-  # 9 "arm.tc"
+  # 8 "arm.tc"
    __builtin_trap(); }
   # 9 "arm.tc"
   
@@ -581,7 +581,7 @@ that the labels stay under the statement around it.
   # 6 "substatement.tc"
   ;
     
-  # 7 "substatement.tc"
+  # 6 "substatement.tc"
   }
   # 7 "substatement.tc"
   else
@@ -599,7 +599,7 @@ that the labels stay under the statement around it.
   # 8 "substatement.tc"
   
     
-  # 9 "substatement.tc"
+  # 8 "substatement.tc"
   }
   # 9 "substatement.tc"
   while (c--) 
@@ -616,7 +616,7 @@ that the labels stay under the statement around it.
   # 9 "substatement.tc"
   
     
-  # 10 "substatement.tc"
+  # 9 "substatement.tc"
   }
   # 10 "substatement.tc"
   return 
@@ -803,7 +803,7 @@ without one. The Ok of the operand's type may be a result of its own.
   # 6 "nested.tc"
   ;
     
-  # 7 "nested.tc"
+  # 6 "nested.tc"
    } __builtin_trap(); }
   # 7 "nested.tc"
   
@@ -821,7 +821,7 @@ without one. The Ok of the operand's type may be a result of its own.
   # 8 "nested.tc"
   ;
     
-  # 9 "nested.tc"
+  # 8 "nested.tc"
    } __builtin_trap(); }
   # 9 "nested.tc"
   

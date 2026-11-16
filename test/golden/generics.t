@@ -212,7 +212,7 @@ opens it (design 3.3, 4).
   # 6 "construct.tc"
    return 0;
     
-  # 7 "construct.tc"
+  # 6 "construct.tc"
    __builtin_trap(); }
   # 7 "construct.tc"
   
@@ -221,7 +221,7 @@ opens it (design 3.3, 4).
   # 7 "construct.tc"
    return head + (tail ? sum(*tail) : 0);
     
-  # 8 "construct.tc"
+  # 7 "construct.tc"
    } __builtin_trap(); }
   # 8 "construct.tc"
   

@@ -272,6 +272,24 @@ type try_site = {
 val tries : t -> try_site list
 (** The tries typed, in source order. *)
 
+(** Whether a function returns void, which decides the form of a
+    [return e;] in the scope of a defer statement (design 13.5). *)
+type returns = Returns_void | Returns_value
+
+(** A function definition whose body holds a defer statement: its name
+    and declarator, which the [__tc_ret] of 13.5 is written from, the
+    span of its body, and its defer statements in source order. *)
+type function_defers = {
+  function_name : string;
+  declarator : Tree.declarator;
+  body : Tree.span;
+  returns : returns;
+  sites : Reachability.defer_site list;
+}
+
+val defers : t -> function_defers list
+(** The functions typed that hold a defer statement, in source order. *)
+
 (** How lowering answers a construct that asks whether types are
     compatible where Type-C text compares a distinct type with them
     (design 13.5), as the backend would answer for its representation:
@@ -385,10 +403,12 @@ val initialiser :
 val function_body :
   context ->
   name:string ->
+  declarator:Tree.declarator ->
   return_type:Ctype.t Unknown.answer ->
   Tree.block ->
   unit
-(** Types the body of the function [name], whose [return] statements have
+(** Types the body of the function [name], declared by [declarator],
+    whose [return] statements have
     its return type as their target type (design 3.3), or the unknown
     type of the function where typec does not know it. *)
 

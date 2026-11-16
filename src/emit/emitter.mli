@@ -75,8 +75,19 @@ type text =
     not, at its own, and reads each under the flags in effect at its
     location. An insertion, a range of no tokens, goes in front of the
     token [range.first]. The white space and markers around the range
-    are kept. Only {!code}, {!bracketed} and {!moved} make one. *)
-type edit = private { range : Typec_cpp.Reader.range; text : text }
+    are kept. Only {!code}, {!closing}, {!bracketed} and {!moved} make
+    one.
+
+    An edit belongs to one token, its [owner], so that lowering moves it
+    with every range of tokens that holds that token: the first token it
+    replaces, or the token an insertion goes in front of, except that a
+    closing insertion ({!closing}) belongs to the token it follows, as
+    it ends the construct that ends there. *)
+type edit = private {
+  range : Typec_cpp.Reader.range;
+  text : text;
+  owner : int;
+}
 
 val code : Typec_cpp.Reader.range -> location:Typec_cpp.Location.t ->
   string -> edit
@@ -84,6 +95,12 @@ val code : Typec_cpp.Reader.range -> location:Typec_cpp.Location.t ->
     [Invalid_argument] unless [text] holds only the bytes that
     {!generated} takes, so code never writes the pragmas of a bracket
     past the probe. *)
+
+val closing : Typec_cpp.Token.t array -> after:int ->
+  location:Typec_cpp.Location.t -> string -> edit
+(** [closing tokens ~after ~location text] inserts [text], as {!code}
+    does, between token [after] and the next, as the end of the
+    construct that ends at token [after], which owns it. *)
 
 val bracketed : Typec_cpp.Reader.t -> at:Typec_syntax.Tree.anchor ->
   location:Typec_cpp.Location.t -> piece list -> edit
@@ -104,7 +121,9 @@ val moved : Typec_cpp.Reader.range -> moved_piece list -> edit
 val in_order : edit list -> edit list
 (** [edits] in the order in which they apply: by the first token of
     their ranges, an insertion before a token ahead of an edit that
-    replaces it, and edits of one range in the order of the list. *)
+    replaces it, a closing insertion after a token ahead of an insertion
+    before the next, and edits of one range and owner in the order of
+    the list. Their owners follow the same order. *)
 
 (** What lowering makes of a unit: its edits, and the declarations that
     follow its text, the static assertions of {!Assumptions}. *)

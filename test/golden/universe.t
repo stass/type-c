@@ -62,7 +62,7 @@ from their tokens under markers for the lines of <universe>, with flag
   # 4 "some.tc"
    return v;
       
-  # 5 "some.tc"
+  # 4 "some.tc"
    } __builtin_trap(); }
   # 5 "some.tc"
   
@@ -71,7 +71,7 @@ from their tokens under markers for the lines of <universe>, with flag
   # 5 "some.tc"
    return 0;
     
-  # 6 "some.tc"
+  # 5 "some.tc"
    __builtin_trap(); }
   # 6 "some.tc"
   

@@ -26,6 +26,29 @@ type facts = {
 
 type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
 
+(** An exit from the scope of a defer statement by a jump (design 6 rule
+    1): a [break], [continue] or [return;], the statement after its
+    labels; or a [return e;], with the span of [e]. *)
+type exit =
+  | Jump of Tree.span
+  | Value_return of { statement : Tree.span; operand : Tree.span }
+
+(** Where the scope of a defer statement ends: at the [}], token
+    [closing], of a block that can complete, which is an exit; of one
+    that cannot, which is none (design 6 rule 1); or at the end of a
+    match arm, which cannot complete (4.3 rule 1) and holds no [}]. *)
+type ending = Completes of int | Cannot_complete of int | Arm_end
+
+(** A defer statement: its keyword, its statement [S], where its scope
+    ends, and the jumps that leave the scope, in the order of the walk.
+    A [goto] that leaves it is not among them (TODO.md). *)
+type defer_site = {
+  keyword : Tree.span;
+  deferred : Tree.span;
+  ending : ending;
+  exits : exit list;
+}
+
 (** Both walk a tree that the parser has bounded in depth
     ({!Typec_syntax.Parser.max_depth}), so their recursion is bounded
     too. *)
@@ -43,3 +66,7 @@ val label_refusal : Tree.block -> refusal option
     The walk reads every expression of the body, those in types
     included, but the arguments of attributes and the parameters and
     body of a block literal, which is a function of its own. *)
+
+val defers : facts -> Tree.block -> defer_site list
+(** The defer statements of the body of a function, in source order,
+    with the exits of their scopes. *)

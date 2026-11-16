@@ -3347,7 +3347,7 @@ let read_function_definition state (definition : Tree.function_definition) =
   | Parsed block ->
       within state In_block (fun () ->
           Expressions.function_body (typing state) ~name:entity.name
-            ~return_type:returned block)
+            ~declarator ~return_type:returned block)
   | Skipped _ -> ());
   Function_definition entity
 

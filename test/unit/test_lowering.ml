@@ -293,6 +293,154 @@ let many_tries () =
       (Printf.sprintf "%.1f s" took)
       "under 2 s"
 
+(* Design 6 and 13.5: each exit of the scope of a defer runs a copy of
+   its statement, as a block, innermost and latest first; a jump that
+   runs copies becomes a block that holds them and then the jump. *)
+let many_defers () =
+  let count = 16000 in
+  let source =
+    "void g(int);\nvoid f(int c) {\n"
+    ^ String.concat ""
+        (List.init count (fun index ->
+             Printf.sprintf "  defer g(%d);\n" index))
+    ^ "}\n"
+  in
+  let started = Sys.time () in
+  let text = words (emitted source) in
+  let took = Sys.time () -. started in
+  let ending = "{ g ( 1 ) ; } { g ( 0 ) ; } }" in
+  compares "the copy of the first of many defers runs last"
+    (String.sub text
+       (String.length text - String.length ending)
+       (String.length ending))
+    ending;
+  if took > 2.0 then
+    compares "the time to lower many defers"
+      (Printf.sprintf "%.1f s" took)
+      "under 2 s"
+
+let trap = "__builtin_trap();"
+
+let defers () =
+  lowers "a defer at the end of a block"
+    "void g(void); void f(void) { defer g(); g(); }"
+    "void g(void); void f(void) { g(); { g ( ) ; } }";
+  lowers "a defer that is the last item"
+    "void g(void); void f(void) { defer g(); }"
+    "void g(void); void f(void) { { g ( ) ; } }";
+  lowers "two defers run in reverse order"
+    "void a(void); void b(void); void f(void) { defer a(); defer b(); }"
+    "void a(void); void b(void); void f(void) { { b ( ) ; } { a ( ) ; } }";
+  lowers "the end of an inner block runs only its own"
+    "void a(void); void b(void); void f(void) { defer a(); { defer b(); } \
+     b(); }"
+    "void a(void); void b(void); void f(void) { { { b ( ) ; } } b(); { a ( ) \
+     ; } }";
+  lowers "a break that leaves the scope"
+    "void a(void); void f(int c) { while (c) { defer a(); if (c) break; } }"
+    "void a(void); void f(int c) { while (c) { if (c) { { a ( ) ; } break ; \
+     } { a ( ) ; } } }";
+  lowers "a continue that leaves the scope"
+    "void a(void); void f(int c) { for (;;) { defer a(); continue; } }"
+    ("void a(void); void f(int c) { for (;;) { { { a ( ) ; } continue ; } "
+   ^ trap ^ " } }");
+  lowers "a break of a loop inside the scope runs nothing"
+    "void a(void); void f(int c) { defer a(); while (c) break; }"
+    "void a(void); void f(int c) { while (c) break; { a ( ) ; } }";
+  lowers "a break of a switch after its labels"
+    "void a(void); void f(int c) { switch (c) { case 1: { defer a(); L: \
+     break; } } }"
+    ("void a(void); void f(int c) { switch (c) { case 1: { L: { { a ( ) ; } \
+      break ; } " ^ trap ^ " } } }");
+  lowers "a return without a value"
+    "void a(void); void f(int c) { defer a(); if (c) return; a(); }"
+    "void a(void); void f(int c) { if (c) { { a ( ) ; } return ; } a(); { a \
+     ( ) ; } }";
+  lowers "a return leaves every scope, innermost first"
+    "void a(void); void b(void); void f(int c) { defer a(); { defer b(); if \
+     (c) return; } }"
+    "void a(void); void b(void); void f(int c) { { if (c) { { b ( ) ; } { a \
+     ( ) ; } return ; } { b ( ) ; } } { a ( ) ; } }";
+  lowers "a return of a void expression"
+    "void a(void); void f(void) { defer a(); return a(); }"
+    ("void a(void); void f(void) { { a() ; { a ( ) ; } return; } " ^ trap
+   ^ " }");
+  lowers "a return of a value"
+    "void a(void); long f(int x, char *s) { defer a(); return x; }"
+    ("void a(void); long f(int x, char *s) { typedef \
+      __typeof__(((__typeof__(f) *)0)(*(__typeof__(x) *)0, *(__typeof__(s) \
+      *)0)) __tc_ret; { { __tc_ret __tc_r = ( x ); { a ( ) ; } return \
+      __tc_r; } " ^ trap ^ " } }");
+  lowers "a return of a value from a function without parameters"
+    "void a(void); int f(void) { defer a(); if (1) return 1; return 2; }"
+    ("void a(void); int f(void) { typedef \
+      __typeof__(((__typeof__(f) *)0)()) __tc_ret; { if (1) { __tc_ret \
+      __tc_r = ( 1 ); { a ( ) ; } return __tc_r; } { __tc_ret __tc_r = ( 2 \
+      ); { a ( ) ; } return __tc_r; } " ^ trap ^ " } }");
+  lowers "a return in the operand of a return"
+    "void a(void); int f(int c) { defer a(); return ({ if (c) return 1; 2; \
+     }); }"
+    ("void a(void); int f(int c) { typedef \
+      __typeof__(((__typeof__(f) *)0)(*(__typeof__(c) *)0)) __tc_ret; { { \
+      __tc_ret __tc_r = ( ({ if (c) { __tc_ret __tc_r = ( 1 ); { a ( ) ; } \
+      return __tc_r; } 2; }) ); { a ( ) ; } return __tc_r; } " ^ trap
+   ^ " } }");
+  compares "a return in the operand of a try runs the copies"
+    (between
+       (words
+          (emitted
+             "type r = result(int, int); r g(int); void a(void); r f(int c) \
+              { defer a(); int x = try ({ if (c) return Ok(0); g(c); }); \
+              return Ok(x); }"))
+       ~first:"if ( c )" ~last:"{ a ( ) ; }")
+    "if ( c ) { __tc_ret __tc_r = ( ((struct result__ii){ .tag = \
+     result__ii_Ok, .u.Ok = { 0 } }) ); { a ( ) ; }";
+  (* The text of [f] alone, after the definition of [o]. *)
+  let tested_defer form =
+    let text =
+      words
+        (emitted
+           ("type o = | A(int x) | B; void a(int); void b(void); void f(o p) \
+             { defer " ^ form ^ " b(); }"))
+    in
+    let start = String.length (between text ~first:"" ~last:"void f(o p)") in
+    String.sub text start (String.length text - start)
+  in
+  compares "a single-pattern if that ends a deferred statement"
+    (tested_defer "if (case A(v) = p) a(v);")
+    " { b(); { { const struct o *const __tc_match = &( p ); const \
+     __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == \
+     o_A) { const __typeof__(__tc_match->u.A.x) v = __tc_match->u.A.x; a ( v \
+     ) ; } else { switch (__tc_tag) { case o_A: case o_B: break; default: \
+     __builtin_trap(); } } } } }";
+  compares "a single-pattern if with else that ends a deferred statement"
+    (tested_defer "if (case A(v) = p) a(v); else b();")
+    " { b(); { { const struct o *const __tc_match = &( p ); const \
+     __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == \
+     o_A) { const __typeof__(__tc_match->u.A.x) v = __tc_match->u.A.x; a ( v \
+     ) ; } else { switch (__tc_tag) { case o_A: case o_B: break; default: \
+     __builtin_trap(); } b ( ) ; } } } }";
+  compares "a single-pattern while that ends a deferred statement"
+    (tested_defer "while (case A(v) = p) a(v);")
+    " { b(); { for (;;) { const struct o *const __tc_match = &( p ); const \
+     __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == \
+     o_A) { const __typeof__(__tc_match->u.A.x) v = __tc_match->u.A.x; a ( v \
+     ) ; } else { switch (__tc_tag) { case o_A: case o_B: break; default: \
+     __builtin_trap(); } break; } } } }";
+  lowers "a defer in a statement expression of a kept type name"
+    "void g(void); int f(int x) { return _Generic(x, __typeof__(({ int y = \
+     0; { defer g(); } y; })): 1, default: 0); }"
+    "void g(void); int f(int x) { return _Generic(x, __typeof__(({ int y = \
+     0; { { g ( ) ; } } y; })): 1, default: 0); }";
+  lowers "a defer in a match arm runs at its jumps alone"
+    "type e = | A | B; void a(void); void f(e v) { match (v) { case A: \
+     defer a(); return; case B: return; } }"
+    ("struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
+      e_tag tag; }; void a(void); void f(e v) { { const struct e *const \
+      __tc_match = &( v ); switch (__tc_match->tag) { case e_A: { { { a ( ) \
+      ; } return ; } " ^ trap ^ " } case e_B: { return; " ^ trap
+   ^ " } default: " ^ trap ^ " } } }")
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -351,4 +499,6 @@ let () =
   many_void_fields ();
   void_fields ();
   many_tries ();
+  many_defers ();
+  defers ();
   if !failures > 0 then exit 1

@@ -13,7 +13,7 @@ package 2.5 writes it, so that none reaches the backend.
   > void f(void) { defer g(); }
   > EOF
   $ ./golden.exe typed.tc
-  typed.tc:2: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  typed.tc:2: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]
 
   $ cat > typed_error.tc <<'EOF'
@@ -31,7 +31,7 @@ package 2.5 writes it, so that none reaches the backend.
   > # 2 "c_text.tc" 2
   > EOF
   $ ./golden.exe c_text.tc
-  c.h:2: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  c.h:2: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]
 
 A defer statement is a block item of a compound statement or a match arm
@@ -375,7 +375,7 @@ statement.
   > }
   > EOF
   $ ./golden.exe allowed.tc
-  allowed.tc:4: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  allowed.tc:4: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]
 
   $ cat > pragma.tc <<'EOF'
@@ -492,7 +492,7 @@ a defer may be taken.
   > }
   > EOF
   $ ./golden.exe entry_allowed.tc
-  entry_allowed.tc:4: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  entry_allowed.tc:4: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]
 
 In the scope of a defer statement there is no computed goto, no asm goto
@@ -651,5 +651,5 @@ the rule.
   > }
   > EOF
   $ ./golden.exe scope_ended.tc
-  scope_ended.tc:6: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  scope_ended.tc:6: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]

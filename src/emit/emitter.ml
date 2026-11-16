@@ -60,17 +60,25 @@ type text =
   | Bracketed of { location : Location.t; pieces : piece list }
   | Moved of moved_piece list
 
-type edit = { range : Reader.range; text : text }
+type edit = { range : Reader.range; text : text; owner : int }
 
-let code range ~location code =
+let code (range : Reader.range) ~location code =
   check_own_text ~caller:"Emitter.code" code;
-  { range; text = Code { location; code } }
+  { range; text = Code { location; code }; owner = range.first }
+
+let closing tokens ~after ~location code =
+  check_own_text ~caller:"Emitter.closing" code;
+  { range = Reader.range tokens ~first:(after + 1) ~count:0;
+    text = Code { location; code };
+    owner = after }
 
 let bracketed (unit : Reader.t) ~(at : Tree.anchor) ~location pieces =
   { range = Reader.range unit.tokens ~first:at.before ~count:0;
-    text = Bracketed { location; pieces } }
+    text = Bracketed { location; pieces };
+    owner = at.before }
 
-let moved range pieces = { range; text = Moved pieces }
+let moved (range : Reader.range) pieces =
+  { range; text = Moved pieces; owner = range.first }
 
 (* A line marker for [location], on a line of its own. It repeats the
    flags in effect at [location] and no enter or return flag, so the
@@ -210,7 +218,9 @@ let probes edits =
 let in_order edits =
   List.stable_sort
     (fun a b ->
-      compare (a.range.first, a.range.count) (b.range.first, b.range.count))
+      compare
+        (a.range.first, a.range.count, a.owner)
+        (b.range.first, b.range.count, b.owner))
     edits
 
 (* Reader.rewrite checks that the ranges do not overlap. *)

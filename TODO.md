@@ -193,10 +193,42 @@ is [type-c-language-design.md](type-c-language-design.md).
   design 6 rule 10, as a jump there passes rule 5. No backend is known
   to evaluate an attribute argument at run time; say so in the design,
   or read the arguments, if one does.
-- [Medium] Lowering of a defer (package 2.5) copies the pragma lines of
-  its statement; a `#pragma typec` line of C text there is ignored and
-  must not be copied (design 13.5), and one of Type-C text stands
-  inside a function body, which Stage 5 refuses (11.1 rule 1).
+- [Medium] Lowering of a defer (package 2.5) copies no pragma line of
+  its statement: `Lowering.moved_text` raises on one, which the front
+  end's refusal of every defer (TC0023) keeps from users. Copy them
+  through `Emitter.moved_token`; a `#pragma typec` line of C text there
+  is ignored and must not be copied (design 13.5), and one of Type-C
+  text stands inside a function body, which Stage 5 refuses (11.1 rule
+  1).
+- [Medium] No test reaches `Lowering.with_defers` with a defer, a block
+  end or a jump in text that lowering drops (an answered
+  `__builtin_types_compatible_p` or `_Generic` type name, a replaced
+  application), which `function_edits` drops with that text. Add a
+  unit case with a statement expression in an answered type name.
+- [Medium] The TC0023 sentinel (`Front_end.refuse_defers`) sees only the
+  defers that the reachability walk records, and `Reachability.sequence`
+  leaves recording them to each caller (`block`, `arm`). Let `sequence`
+  record its own, and derive the sentinel from the parse, which sees
+  every `Block_defer`, while it stands.
+- [High] Lowering of a defer (package 2.5, D3b) runs no copies at a
+  `goto` that leaves the scope (design 6 rule 1, 13.5):
+  `Reachability.defers` records break, continue and return alone. The
+  front end refuses every defer (TC0023) until it does.
+- [High] Lowering of a try (package 2.5, D6) leaves the cleanups slot of
+  the error path empty (`Lowering.no_cleanups`), so a try in the scope
+  of a defer returns without running its copies. The front end refuses
+  every defer (TC0023) until it does.
+- [High] The refusals of the form of a `return e;` in the scope of a
+  defer (design 13.5, each with its code in 13.6) are not made: a
+  parameter without a name, on which `Lowering.parameter_name` raises
+  (one sole unnamed parameter is taken for `(void)`), a parameter
+  that declares the function's own name (`long f(int f)`), a
+  redeclaration of a parameter in the outermost block of the body, a
+  function whose return type typing does not know but the backend
+  reads as void (`void __tc_r` would follow),
+  the `target` and marked attributes, and a `return e;` of a non-void or
+  unknown `e` in a void function. The front end refuses every defer
+  (TC0023) until they are.
 - [Low] GNU `__extension__` makes no node, so `__extension__ try f();`
   has the tree of `try f();`, and the position rule of design 5.1 rule
   3 would take a `try` that Appendix A does not derive there. Decide in

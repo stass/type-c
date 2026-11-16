@@ -75,11 +75,11 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   [1]
   $ printf 'void f(int try) { defer f(try); }\n' > defer.tc
   $ ./golden.exe defer.tc
-  defer.tc:1: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  defer.tc:1: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]
   $ printf 'void g(void);\nvoid f(void) { { int defer = 0; defer++; } defer g(); }\n' > ended.tc
   $ ./golden.exe ended.tc
-  ended.tc:2: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  ended.tc:2: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]
 
 A `defer` statement is a block item, so an unhidden `defer` in an
@@ -117,7 +117,7 @@ A `try` takes an operand.
 
   $ printf 'void f(void) { int defer = 0; _Defer f(); }\n' > spelling.tc
   $ ./golden.exe spelling.tc
-  spelling.tc:1: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  spelling.tc:1: lowering of `defer` is not complete yet (design 6 rule 8; work package 2.5) [TC0023]
   [1]
 
 C text, here a header that the Type-C file includes, may declare `try`,
