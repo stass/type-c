@@ -9,13 +9,12 @@
     space and line markers included, so a unit without edits is emitted
     byte for byte as it was read. {!Lowering} makes the edits. *)
 
-(** Replace the tokens [first] to [first + count - 1] by [text], which
-    the backend places at [location], the line of the construct it
-    lowers. With [count = 0] the text is inserted before token [first].
-    The white space and markers around the range are kept. *)
+(** Replace the tokens of [range] by [text], which the backend places
+    at [location], the line of the construct it lowers. An insertion, a
+    range of no tokens, goes in front of the token [range.first]. The
+    white space and markers around the range are kept. *)
 type edit = {
-  first : int;
-  count : int;
+  range : Typec_cpp.Reader.range;
   location : Typec_cpp.Location.t;
   text : string;
 }
@@ -31,9 +30,8 @@ val emit : Typec_cpp.Reader.t -> edit list -> string
     in a line marker, or the input's name before the first marker, which
     the output of [cc -E] always starts with.
 
-    The edits must be in order of [first] and not overlap, each within
-    the tokens: an edit starts at or after the end of the one before it,
-    and an insertion is before an existing token. The tokens an edit
-    replaces belong to one file, so it never drops a marker that enters
-    or leaves a file without its partner. [emit] raises
-    [Invalid_argument] otherwise. *)
+    The ranges of the edits must be made from the tokens of [unit]. They
+    are in the order that {!Typec_cpp.Reader.rewrite} takes, and the
+    tokens an edit replaces belong to one file, so it never drops a
+    marker that enters or leaves a file without its partner; [emit]
+    raises [Invalid_argument] otherwise. *)

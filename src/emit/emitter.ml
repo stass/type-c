@@ -3,7 +3,7 @@
 
 open Typec_cpp
 
-type edit = { first : int; count : int; location : Location.t; text : string }
+type edit = { range : Reader.range; location : Location.t; text : string }
 
 (* The newline in front starts the marker on a line of its own wherever
    the edit stands in a line. In a system header the marker carries flag
@@ -16,47 +16,34 @@ let marker (owner : File.t) (location : Location.t) =
 (* The presumed location of the line where the replaced bytes end: no
    token of cc -E output spans lines, so it is the line of the last token
    replaced, or of the token an insertion precedes. *)
-let end_location (tokens : Token.t array) edit =
-  if edit.count = 0 then tokens.(edit.first).location
-  else tokens.(edit.first + edit.count - 1).location
+let end_location (tokens : Token.t array) range =
+  tokens.(Reader.end_token range).location
 
 (* The line markers between tokens of one file enter and leave other
    files in pairs, so a range in one file drops whole pairs. *)
-let in_one_file (tokens : Token.t array) edit =
-  let owner = tokens.(edit.first).owner in
+let in_one_file (tokens : Token.t array) (range : Reader.range) =
+  let owner = tokens.(range.first).owner in
   let rec from index =
-    index = edit.first + edit.count
+    index = range.first + range.count
     || (tokens.(index).owner == owner && from (index + 1))
   in
-  from edit.first
+  from range.first
 
-(* Each edit starts at or after the first token the one before it leaves
-   alone, and ends within the tokens. *)
-let check_edits tokens edits =
-  let token_count = Array.length tokens in
-  let check next edit =
-    if
-      edit.first < next || edit.count < 0
-      || edit.first >= token_count
-      || edit.count > token_count - edit.first
-    then invalid_arg "Emitter.emit: edits out of order or out of range";
-    if not (in_one_file tokens edit) then
-      invalid_arg "Emitter.emit: an edit spans files";
-    edit.first + edit.count
-  in
-  ignore (List.fold_left check 0 edits)
+let check_one_file tokens edit =
+  if not (in_one_file tokens edit.range) then
+    invalid_arg "Emitter.emit: an edit spans files"
 
 (* The edit as the backend reads it: between markers that give its
    location and then the location where the replaced tokens end. *)
 let replacement (tokens : Token.t array) edit : Reader.replacement =
-  (* The edit lies in one file (check_edits). *)
-  let owner = tokens.(edit.first).owner in
+  let owner = tokens.(edit.range.first).owner in
   let text =
     marker owner edit.location ^ edit.text
-    ^ marker owner (end_location tokens edit)
+    ^ marker owner (end_location tokens edit.range)
   in
-  { first = edit.first; count = edit.count; text }
+  { range = edit.range; text }
 
+(* Reader.rewrite checks the order of the ranges. *)
 let emit (unit : Reader.t) edits =
-  check_edits unit.tokens edits;
+  List.iter (check_one_file unit.tokens) edits;
   Reader.rewrite unit (List.map (replacement unit.tokens) edits)

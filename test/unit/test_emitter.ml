@@ -29,13 +29,14 @@ let source =
 let unit = read source
 let at line : Location.t = { file = "a.tc"; line }
 
+let edit (unit : Reader.t) ~first ~count location text : Emitter.edit =
+  { range = Reader.range unit.tokens ~first ~count; location; text }
+
 (* x = 1 becomes x = 2 at line 1. *)
-let replacement =
-  { Emitter.first = 1; count = 3; location = at 1; text = "x = 2" }
+let replacement = edit unit ~first:1 ~count:3 (at 1) "x = 2"
 
 (* int w; goes before int z, at line 2. *)
-let insertion =
-  { Emitter.first = 8; count = 0; location = at 2; text = "int w;" }
+let insertion = edit unit ~first:8 ~count:0 (at 2) "int w;"
 
 let () =
   check "no edits: the text itself" (Emitter.emit unit [] = source);
@@ -59,12 +60,10 @@ let () =
 (* An edit between identifiers that universal character names spell
    leaves their bytes as written, though their names are in UTF-8. *)
 let () =
-  let written = "caf\\u00e9 = x\\U0001F600;\n" in
-  let edit =
-    { Emitter.first = 1; count = 1; location = at 1; text = "+=" }
-  in
+  let written = read "caf\\u00e9 = x\\U0001F600;\n" in
+  let edit = edit written ~first:1 ~count:1 (at 1) "+=" in
   check "an edit keeps universal character names as written"
-    (Emitter.emit (read written) [ edit ]
+    (Emitter.emit written [ edit ]
     = "caf\\u00e9 \n\
        # 1 \"a.tc\"\n\
        +=\n\
@@ -75,9 +74,7 @@ let () =
    backend's warnings. *)
 let () =
   let in_header : Location.t = { file = "h.h"; line = 1 } in
-  let edit =
-    { Emitter.first = 6; count = 1; location = in_header; text = "w" }
-  in
+  let edit = edit unit ~first:6 ~count:1 in_header "w" in
   let owner (token : Token.t) = (token.owner.name, token.owner.system_header) in
   let owners text = Array.to_list (Array.map owner (read text).tokens) in
   check "read back, an edit in a system header keeps the owners"
@@ -123,24 +120,67 @@ let () =
          location = at 1 && owner.name = "a.tc")
        edit_tokens)
 
-let raises_invalid edits =
-  match Emitter.emit unit edits with
+(* Each check raises its own message, so a test that names it shows
+   which check refused the edits. *)
+let raises make message =
+  match make () with
   | _ -> false
-  | exception Invalid_argument _ -> true
+  | exception Invalid_argument raised -> raised = message
+
+let out_of_order edits =
+  raises
+    (fun () -> Emitter.emit unit edits)
+    "Reader.rewrite: replacements out of order"
+
+let spans_files edits =
+  raises (fun () -> Emitter.emit unit edits) "Emitter.emit: an edit spans files"
+
+let outside ~first ~count =
+  raises
+    (fun () -> Reader.range unit.tokens ~first ~count)
+    "Reader.range: outside the tokens"
 
 let () =
   check "overlapping edits"
-    (raises_invalid [ replacement; { replacement with first = 3 } ]);
-  check "edits out of order" (raises_invalid [ insertion; replacement ]);
-  check "replacement past the last token"
-    (raises_invalid [ { replacement with first = 9; count = 3 } ]);
-  check "insertion after the last token"
-    (raises_invalid [ { insertion with first = 11 } ]);
+    (out_of_order [ replacement; edit unit ~first:3 ~count:1 (at 1) "2" ]);
+  check "edits out of order" (out_of_order [ insertion; replacement ]);
+  check "replacement past the last token" (outside ~first:9 ~count:3);
+  check "insertion after the last token" (outside ~first:11 ~count:0);
+  check "range before the first token" (outside ~first:(-1) ~count:1);
+  check "negative count" (outside ~first:8 ~count:(-1));
   check "an edit that spans files"
-    (raises_invalid [ { replacement with count = 6 } ]);
-  check "negative count" (raises_invalid [ { insertion with count = -1 } ]);
+    (spans_files [ edit unit ~first:1 ~count:6 (at 1) "x = 2" ]);
   check "adjacent edits"
-    (not
-       (raises_invalid
-          [ replacement; { replacement with first = 4; count = 1 } ]));
+    (Emitter.emit unit [ replacement; edit unit ~first:4 ~count:1 (at 1) "," ]
+    = "# 1 \"a.tc\"\n\
+       int \n\
+       # 1 \"a.tc\"\n\
+       x = 2\n\
+       # 1 \"a.tc\"\n\
+       \n\
+       # 1 \"a.tc\"\n\
+       ,\n\
+       # 1 \"a.tc\"\n\
+       \n\
+       # 1 \"h.h\" 1 3\n\
+       int y;\n\
+       # 2 \"a.tc\" 2\n\
+       int z;\n");
+  check "insertions in front of one token keep their order"
+    (Emitter.emit unit
+       [ edit unit ~first:8 ~count:0 (at 2) "int v;"; insertion ]
+    = "# 1 \"a.tc\"\n\
+       int x = 1;\n\
+       # 1 \"h.h\" 1 3\n\
+       int y;\n\
+       # 2 \"a.tc\" 2\n\
+       \n\
+       # 2 \"a.tc\"\n\
+       int v;\n\
+       # 2 \"a.tc\"\n\
+       \n\
+       # 2 \"a.tc\"\n\
+       int w;\n\
+       # 2 \"a.tc\"\n\
+       int z;\n");
   if !failures > 0 then exit 1

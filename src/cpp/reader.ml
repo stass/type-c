@@ -3,7 +3,8 @@
 
 type text = string
 type t = { text : text; tokens : Token.t array }
-type replacement = { first : int; count : int; text : string }
+type range = { first : int; count : int }
+type replacement = { range : range; text : string }
 type error = { location : Location.t; message : string }
 
 (* The largest line number a line marker or #line may give (C11 6.10.4);
@@ -492,28 +493,38 @@ let spelling (result : t) (token : Token.t) =
   | Number | Character _ | String _ | Punctuator _ | Pragma | Typec_pragma ->
       String.sub result.text token.start token.length
 
-(* The bytes of the text that a replacement replaces, as (start, stop). *)
-let replaced_bytes (tokens : Token.t array) replacement =
-  let start = tokens.(replacement.first).start in
-  if replacement.count = 0 then (start, start)
+let range (tokens : Token.t array) ~first ~count =
+  let token_count = Array.length tokens in
+  if first < 0 || first >= token_count || count < 0
+     || count > token_count - first
+  then invalid_arg "Reader.range: outside the tokens";
+  { first; count }
+
+let end_token range =
+  if range.count = 0 then range.first else range.first + range.count - 1
+
+(* The bytes of the text that a range replaces, as (start, stop). *)
+let replaced_bytes (tokens : Token.t array) range =
+  let start = tokens.(range.first).start in
+  if range.count = 0 then (start, start)
   else
-    let last = tokens.(replacement.first + replacement.count - 1) in
+    let last = tokens.(end_token range) in
     (start, last.start + last.length)
 
 let rewrite (result : t) replacements =
   let buffer = Buffer.create (String.length result.text) in
-  (* [copied] is the end of the text copied so far. A replacement that
-     starts before it overlaps or is out of order; one that ends before
-     it starts has a negative count. *)
-  let apply copied replacement =
-    let start, stop = replaced_bytes result.tokens replacement in
-    if start < copied || stop < start then
+  (* [next] is the token after the range of the replacement before; a
+     range that starts before it overlaps that range or is out of order.
+     [copied] is the end of the text copied so far. *)
+  let apply (next, copied) { range; text } =
+    if range.first < next then
       invalid_arg "Reader.rewrite: replacements out of order";
+    let start, stop = replaced_bytes result.tokens range in
     Buffer.add_substring buffer result.text copied (start - copied);
-    Buffer.add_string buffer replacement.text;
-    stop
+    Buffer.add_string buffer text;
+    (range.first + range.count, stop)
   in
-  let copied = List.fold_left apply 0 replacements in
+  let _, copied = List.fold_left apply (0, 0) replacements in
   Buffer.add_substring buffer result.text copied
     (String.length result.text - copied);
   Buffer.contents buffer

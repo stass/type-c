@@ -29,15 +29,21 @@ let replace (tokens : Token.t array) ~location text indexes :
   match indexes with
   | [] -> []
   | first :: _ when is_run tokens indexes ->
-      [ { first; count = List.length indexes; location; text } ]
+      let count = List.length indexes in
+      [ { range = Reader.range tokens ~first ~count; location; text } ]
   | first :: rest ->
       let delete index : Emitter.edit =
-        { first = index; count = 1; location; text = "" }
+        { range = Reader.range tokens ~first:index ~count:1;
+          location;
+          text = "" }
       in
-      { first; count = 1; location; text } :: List.map delete rest
+      { range = Reader.range tokens ~first ~count:1; location; text }
+      :: List.map delete rest
 
 let insert (tokens : Token.t array) ~before text : Emitter.edit =
-  { first = before; count = 0; location = tokens.(before).location; text }
+  { range = Reader.range tokens ~first:before ~count:0;
+    location = tokens.(before).location;
+    text }
 
 (* The grammar tokens from [first] to [last], without the pragmas
    between them, which stay. *)
@@ -430,7 +436,7 @@ let matching (tokens : Token.t array)
    answer for the representation of a distinct type, is steered to or
    replaced by the answer. Each range of its tokens that lowering
    replaces is replaced by [text], and the edits inside it go. *)
-type dropped = { first : int; last : int; text : string }
+type dropped = { span : Tree.span; text : string }
 
 let integer_constant compatible = if compatible then "1" else "0"
 
@@ -460,10 +466,7 @@ let steered_type_names associations =
     (fun (number, (association : Tree.generic_association)) ->
       match association.node with
       | Association (type_name, _) ->
-          Some
-            { first = type_name.span.first;
-              last = type_name.span.last;
-              text = steering_type number }
+          Some { span = type_name.span; text = steering_type number }
       | Default_association _ -> None)
     (numbered associations)
 
@@ -477,9 +480,7 @@ let dropped_ranges (answered : Typec_sema.Expressions.answered) =
   let { Typec_sema.Expressions.construct; answer } = answered in
   match answer with
   | Compatible compatible ->
-      [ { first = construct.first;
-          last = construct.last;
-          text = integer_constant compatible } ]
+      [ { span = construct; text = integer_constant compatible } ]
   | Selected { associations; _ } -> steered_type_names associations
 
 let steered_controlling tokens (answered : Typec_sema.Expressions.answered) =
@@ -492,26 +493,31 @@ let steered_controlling tokens (answered : Typec_sema.Expressions.answered) =
           ~before:(grammar_token_after tokens controlling.span.last)
           (Printf.sprintf "), (%s)0)" selected) ]
 
-(* A range inside another goes with it, so only the outermost are kept:
-   the edits of one inside would overlap those of the one around it. *)
-let outermost ranges =
+(* A dropped range inside another goes with it, so only the outermost
+   are kept: the edits of one inside would overlap those of the one
+   around it. *)
+let outermost dropped =
   let contains outer inner =
-    outer <> inner && outer.first <= inner.first && inner.last <= outer.last
+    outer <> inner
+    && outer.span.first <= inner.span.first
+    && inner.span.last <= outer.span.last
   in
   List.filter
-    (fun range -> not (List.exists (fun outer -> contains outer range) ranges))
-    ranges
+    (fun inner -> not (List.exists (fun outer -> contains outer inner) dropped))
+    dropped
 
-(* Whether [edit] goes with [range]: by the tokens it replaces, or for an
-   insertion by the place it inserts at, between two tokens, so that one
-   at either edge of the range stays with the tokens kept beside it. *)
-let goes_with range (edit : Emitter.edit) =
-  if edit.count = 0 then range.first < edit.first && edit.first <= range.last
-  else range.first <= edit.first && edit.first + edit.count - 1 <= range.last
+(* Whether [edit] goes with the dropped [span]: by the tokens it
+   replaces, or for an insertion by the place it inserts at, between two
+   tokens, so that one at either edge of the span stays with the tokens
+   kept beside it. *)
+let goes_with (edit : Emitter.edit) { span; _ } =
+  let first = edit.range.first in
+  if edit.range.count = 0 then span.first < first && first <= span.last
+  else span.first <= first && Reader.end_token edit.range <= span.last
 
-let dropped_edits tokens range =
-  replace tokens ~location:tokens.(range.first).location range.text
-    (grammar_tokens tokens range.first range.last)
+let dropped_edits tokens { span; text } =
+  replace tokens ~location:tokens.(span.first).location text
+    (grammar_tokens tokens span.first span.last)
 
 (* A type declaration may hold another, in a statement expression of
    its definition, and a constructor's arguments other constructors, so
@@ -527,9 +533,9 @@ let dropped_edits tokens range =
    dropped range go, and the range's own edits replace them. *)
 let edits (text : Reader.t) declarations constructions matchings answered =
   let tokens = text.tokens in
-  let ranges = outermost (List.concat_map dropped_ranges answered) in
+  let dropped = outermost (List.concat_map dropped_ranges answered) in
   let kept edit =
-    not (List.exists (fun range -> goes_with range edit) ranges)
+    not (List.exists (goes_with edit) dropped)
   in
   let lowered =
     List.concat_map (type_declaration tokens) declarations
@@ -537,6 +543,6 @@ let edits (text : Reader.t) declarations constructions matchings answered =
     @ List.concat_map (matching tokens) (List.rev matchings)
     @ List.concat_map (steered_controlling tokens) answered
   in
-  List.concat_map (dropped_edits tokens) ranges @ List.filter kept lowered
+  List.concat_map (dropped_edits tokens) dropped @ List.filter kept lowered
   |> List.stable_sort (fun (a : Emitter.edit) (b : Emitter.edit) ->
-         compare (a.first, a.count) (b.first, b.count))
+         compare (a.range.first, a.range.count) (b.range.first, b.range.count))

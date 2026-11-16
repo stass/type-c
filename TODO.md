@@ -85,13 +85,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Reader of preprocessed text
 
-- [Low] A range of tokens, `first` and `count` with 0 for an insertion
-  before `first`, is modelled twice: `Emitter.edit` and
-  `Reader.replacement`, read by `end_location` and `replaced_bytes`,
-  and checked in token indexes by `Emitter.check_edits` and in bytes by
-  `Reader.rewrite` (`Lowering`'s `dropped` has a third form). Give it
-  one type with one check in the reader, leaving the emitter to check
-  only that an edit stays in one file.
 - [Low] `Spans.spell_text` checks only that the tokens are in order and
   within the text: the text the reader keeps is its input by
   construction. Check instead that each identifier's written bytes,

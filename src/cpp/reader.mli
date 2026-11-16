@@ -60,16 +60,33 @@ val spelling : t -> Token.t -> string
 (** [spelling result token] is what [token] means: the name that an
     identifier carries, in UTF-8, and the bytes of any other token. *)
 
-(** [text] in place of the [count] tokens from the token [first], or in
-    front of the token [first] when [count] is 0. *)
-type replacement = { first : int; count : int; text : string }
+(** The [count] tokens from the token [first], or the place in front of
+    the token [first] when [count] is 0: what a replacement replaces.
+    Only {!range} makes one, so it lies within the tokens it was made
+    from. *)
+type range = private { first : int; count : int }
+
+val range : Token.t array -> first:int -> count:int -> range
+(** [range tokens ~first ~count] is the range of [tokens], those of a
+    {!t}, from [first]. [Invalid_argument] unless [first] is one of the
+    tokens and [count] is at least 0 and at most the tokens from
+    [first]. *)
+
+val end_token : range -> int
+(** The token on whose line a range ends: its last token, or the token
+    in front of which an insertion goes. *)
+
+(** [text] in place of the tokens of [range]. *)
+type replacement = { range : range; text : string }
 
 val rewrite : t -> replacement list -> string
 (** [rewrite result replacements] is the text as [cc -E] wrote it with
     the replacements made: the bytes that emission copies, in which those
-    of an identifier may differ from its {!spelling}. The replacements
-    are in the order of the text, do not overlap and lie within the
-    tokens; [Invalid_argument] otherwise. *)
+    of an identifier may differ from its {!spelling}. The ranges must be
+    made from the tokens of [result]. Each starts at or after the token
+    after the range before it, [first + count], so they do not overlap
+    and insertions in front of one token keep their order;
+    [Invalid_argument] otherwise. *)
 
 val error_message : error -> string
 (** ["file:line: message"], the form of a C compiler's diagnostics, with

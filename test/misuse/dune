@@ -2,8 +2,8 @@
 ; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 ; Code that an interface must refuse. A rule passes only when ocamlc
-; rejects its file (exit code 2) and names the abstract type that the
-; file misuses; the files are never built otherwise.
+; rejects its file (exit code 2) and names the abstract or private type
+; that the file misuses; the files are never built otherwise.
 
 (rule
  (alias runtest)
@@ -27,3 +27,30 @@
       -c
       identifier_bytes.ml)))
    (run grep -q "has type Typec_cpp.Reader.text" identifier_bytes.errors))))
+
+(rule
+ (alias runtest)
+ (deps
+  unchecked_range.ml
+  (glob_files %{workspace_root}/src/cpp/.typec_cpp.objs/byte/*.cmi))
+ (action
+  (progn
+   (with-outputs-to
+    unchecked_range.errors
+    (with-accepted-exit-codes
+     2
+     (run
+      %{ocamlc}
+      -stop-after
+      typing
+      -I
+      %{workspace_root}/src/cpp/.typec_cpp.objs/byte
+      -open
+      Typec_cpp
+      -c
+      unchecked_range.ml)))
+   (run
+    grep
+    -q
+    "private type Typec_cpp.Reader.range"
+    unchecked_range.errors))))
