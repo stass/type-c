@@ -230,19 +230,21 @@ condition, with a field list optional in a test (design 4.2, 4.6).
 
 | | Package |
 | --- | --- |
-| 2.1 | Generic type declarations and applications: identity, lazy instantiation, limits, and rule 8 of design 3.5 for type definitions. |
+| 2.1 | Generic type declarations and applications: identity, lazy instantiation and limits. The one check of the resolution property (design 13.5), built here and applied to type definitions (rule 8 of design 3.5); packages 2.4 and 2.5 pass the operand of `try`, deferred statements and the operand of a `return` through the same check and add none of their own. The packing bracket with its probe (design 10.3), and the driver's refusal of `-fpack-struct` without a value (design 13.2), in `src/driver/cc_option.ml`. |
 | 2.2 | Instance names and emission order; property tests that the naming is injective. |
 | 2.3 | The universe types `option` and `result`; `void` arguments. |
 | 2.4 | `try`: typing, the three positions, lowering; the rule against dropped results. |
 | 2.5 | `defer`: the rules, the jump constraints, lowering with name hygiene; interplay with `try`, `match` and loops. |
 | 2.6 | Pilot B: a binary reader or a parser with a single error path. |
 
-Pilot B records the statements rewritten to fit the `try` positions (P8),
-the uses of `void` type arguments (P7), how often the naming rule of
-`defer` rejected code (P9, rules 8 and 9 of section 6), whether
-instance names read well in a debugger (P10), and how often the rule
-that a generic's definition means the same in every instance rejected
-code (P23, decided at Stage 3).
+Pilot B records the statements rewritten to fit the `try` positions
+(P8), the uses of `void` type arguments (P7), the code size and the
+refusal and diagnostic counts that the P9 row of design section 15
+lists, which is the one list of them, how often rule 5 of section 6 and
+design 4.3 refused a label address `&&L` that no `goto *` is given
+(design 4.4), how often a block literal was refused (P24), whether
+instance names read well in a debugger (P10), and the counts of type
+definitions that the P23 row lists (decided at Stage 3).
 
 **Exit gate**
 
@@ -267,7 +269,7 @@ code (P23, decided at Stage 3).
 | --- | --- |
 | 3.1 | Generic function declarations: opaque type parameters and body checking. |
 | 3.2 | Calls: deduction and explicit instances. |
-| 3.3 | Instantiation and emission: per-unit instances, typedef substitution, recursion limit. |
+| 3.3 | Instantiation and emission: per-unit instances, typedef substitution, recursion limit, and rule 8 of design 3.5 for function definitions (P23). |
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
 | 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks and of function-pointer operations, compile time. |
@@ -292,7 +294,7 @@ function-pointer operations is evidence for constraints (design section
 
 | | Package |
 | --- | --- |
-| 4.1 | `--emit-c-header`. |
+| 4.1 | `--emit-c-header`, with three decisions (design 9.3): whether a Type-C translation unit may include an emitted header; whether an emitted header carries the type assertions of design 13.4, which it does not by default because they would assert the options of the client's compile; and whether `--emit-c-header` refuses the options that change one of those types, as the driver does for a `.tc` input (design 13.2). |
 | 4.2 | Review of diagnostic quality on the pilots; columns where they can be recovered. |
 | 4.3 | Build integration: documented rules for make, ninja and cmake; dependency files. |
 | 4.4 | A language reference and a tutorial for users. |

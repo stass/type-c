@@ -232,6 +232,38 @@ is [type-c-language-design.md](type-c-language-design.md).
   enumerator, where typec's error does not name the construct. Read
   both forms through one funnel at each attribute slot that both
   backends accept, which removes the list of sites.
+- [Medium] `standard_attribute_name` (`src/syntax/parser.ml`) reads
+  every `[[gnu::x]]` as the GNU attribute `x` and keeps `clang::x` as a
+  name of its own, so `[[clang::overloadable]]` misses its entry in
+  `attribute_effects`: the type is unknown and the return-form mark of
+  design 13.3 is not seen. Record the spellings of each attribute in
+  the table of effects (the GNU spelling, `gnu::x`, and Clang's
+  `clang::x` where Clang defines that spelling) and have the one
+  function that names an attribute read them from it, with no uniform
+  mapping: Apple Clang 21 accepts `[[clang::overloadable]]` and ignores
+  `[[clang::diagnose_if(...)]]` and `[[clang::noreturn]]` with a
+  warning.
+- [Medium] `function_body` (`src/syntax/parser.ml`) skips a body where
+  `owner.system_header` holds and asks nothing else, so the bodies of a
+  `.tci` found through `-isystem` or a default system directory are
+  skipped too, and a `match` or a constructor there reaches the backend
+  unlowered. Skip a body only where its `{` is C text of a system
+  header, and refuse any other token in it (design 13.3): the reason
+  for the skip, that the body is written for its own compiler, holds
+  for that text alone. The Type-C constructs that C text itself
+  writes in a skipped body are the item on C text under "Design
+  questions without a gate yet".
+- [Medium] Design section 6 rule 1 refuses `_Defer` among the tokens
+  that typing does not read, through one scan over every such token.
+  No such scan exists: `skip_balanced` (`src/syntax/parser.ml`) passes
+  over attribute arguments and skipped function bodies without looking,
+  so `_Defer` there reaches the backend as written, and the body of a
+  block literal refuses it only because the parser refuses every
+  `defer` statement (`fail_defer`). When package 2.5 builds `defer`,
+  build the one scan over the tokens that typing does not read (it
+  also refuses the word `defer` in an attribute argument of Type-C
+  text, design section 6 rule 1), with
+  no check of its own for any kind of such text.
 
 ## Expression typing
 
@@ -390,6 +422,21 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
+- [High] The typer drops the qualifiers of a function's return type
+  (`src/sema/ctype.ml:271`, `ctype.mli:113`), where it should type as
+  Clang does and keep them, and `Backend_difference` has no entry for
+  GCC, which drops them (design 13.3, "Where GCC and Clang differ", and
+  3.5 rule 3): with `const int cf(void);`, `int (*p)(void) = cf;` is
+  accepted by `typec` and refused by Clang. With GCC as the backend a
+  comparison that turns on a return qualifier has an unknown answer.
+- [Medium] Clang types a call of `_Atomic int af(void)` as
+  `_Atomic(int)`, GCC as `int`, and typec as `int`, so `x + af()`
+  passes typec and Clang refuses it; add a `Backend_difference` entry
+  for the call type of an `_Atomic` return (design 13.3).
+- [Low] With GCC as the backend, a redeclaration that turns on return
+  qualifiers makes the function's whole type unknown, so typec no
+  longer checks its calls' argument counts (GCC still does); make only
+  the return type unknown.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it
@@ -415,6 +462,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   empty `no_attributes`); a set of effects would leave the table and the
   one consumer. The table checks no attribute's arguments
   (`noreturn(1)` is accepted).
+- [Medium] `attribute_effects` (`src/sema/declarations.ml`) has no
+  entry for `target`, `target_clones`, `target_version`,
+  `cpu_dispatch`, `cpu_specific` or `diagnose_if`, so a declaration
+  that carries one has an unknown type. Add them, with the return-form
+  marks of design 13.3, and mark `unavailable` and `availability`,
+  which are in the table without one.
 - [Medium] Unknown types (design 13.3, P21) for 0.7b to replace by
   types where a point needs them: block pointers, `_Float16`, the
   builtins that the table of builtin functions leaves unknown (those of
@@ -871,6 +924,27 @@ types (design 13.3).
   the backend's own macros (__CHAR_UNSIGNED__, __WCHAR_TYPE__,
   __SIZEOF_FLOAT128__) instead.
 
+## Design questions with a gate
+
+- [High] Package 4.1 decides whether a Type-C translation unit may
+  include an emitted header (design 9.3). The include guards are macros
+  and do not survive `-E`, so what reaches a Type-C unit is the header's
+  text without them: the typedefs of arguments under `__tc_` names, and
+  the declarations and definitions of instances. Design 2.3 makes a
+  `__tc_` name an error in a Type-C unit, C text included, and an
+  instance that the unit also uses would be defined twice, by the
+  header's text and by lowering. Either keep the refusal and say in 9.3
+  that a Type-C unit includes the `.tci`, or have lowering take an
+  instance that an emitted header's text defines as defined. Until then
+  a C header that includes an emitted header cannot be shared with
+  Type-C units.
+- [Medium] Pilot B (plan, Stage 2) counts the label addresses that
+  design 4.4's reading of `&&L` refuses though no `goto *` is ever
+  given them, such as the kernel's `_THIS_IP_` (`({ __label__ __here;
+  __here: (unsigned long)&&__here; })`) in a match arm or in the scope
+  of a `defer` statement. If they occur, change the reading as design
+  4.4 says.
+
 ## Design questions without a gate yet
 
 - [Medium] When package 3.4 makes universe names typedef names to the
@@ -925,11 +999,16 @@ types (design 13.3).
   refuses a derived name claimed twice, and check a generic function's
   name as a file-scope type name (design 7.1 rule 1).
 - [Medium] C text may write the Type-C constructs (design 2.1), and one
-  inside a Clang block literal, whose body typing does not read, reaches
-  the backend unlowered: a header that writes `^{ type x = | a; }` or a
-  match there. The refusal of P24 covers Type-C text only. Either make
-  the constructs Type-C text only (amend 2.1, which that refusal then
-  covers whole) or type block bodies with Clang's capture rules (P24).
+  in a body that typing does not read reaches the backend unlowered: a
+  header that writes `^{ type x = | a; }` or a match in a Clang block
+  literal, or in the body of a function that C text of a system header
+  defines (design 13.3). A generic function that C text of a system
+  header defines has such a body itself, so no instance can be lowered
+  from it, and the design has no rule for it. The refusal of P24 covers
+  Type-C text only. Either make the constructs Type-C text only (amend
+  2.1, which leaves no such construct in either body) or type block
+  bodies with Clang's capture rules (P24) and give the body of a system
+  header a rule of its own.
 - [Medium] Whether a variant completes `type N;` is read from
   `declared.earlier` by Lowering, Declarations and the tree dump, which
   holds only while no other type declaration has an `earlier`; and

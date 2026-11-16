@@ -200,9 +200,20 @@ Rationale. Headers select constructs by `__STDC_VERSION__`; pinning the
 dialect bounds what the front end must parse. Everything Type-C lowers to
 compiles in the dialect the command line selects: ISO C11 plus only GNU
 forms that GCC and Clang accept in every dialect, also under
-`-pedantic-errors`. Two are used: `__typeof__`, which C23 standardises as
-`typeof` and which gives a match binding the type of its field where no
-name for that type is sure to be visible, and `__builtin_trap` (10.5).
+`-pedantic-errors`. Two are used: `__typeof__`, which C23 standardises
+as `typeof` and which names a type where no name for it is sure to be
+visible, the type of a field for a match binding and the return type of
+a function for the temporary of a `return` (13.5); and `__builtin_trap`
+(10.5). Lowered code also writes the three packing pragmas of the
+bracket of 10.3 and, in its probe, `#pragma pack(1)` and `#pragma
+pack(2)`. C11 6.10.6 leaves a pragma to the implementation; GCC 14.2
+and 16.2, Clang 20 and Apple Clang 21 take the three of the bracket
+without a diagnostic in the ISO and the GNU form of C11, also under
+`-pedantic-errors`. The two of the probe were measured so with GCC
+16.2, Apple Clang 21 and Clang 22 and 23 alone. A backend that ignores
+the pragmas has no packing to keep out. The one exception is GCC under
+`-fpack-struct` without a value, which ignores them and warns of each;
+the driver refuses that option (13.2).
 The emitted file is preprocessed output, with line markers, and is
 compiled as such (`-x cpp-output`). So the output dialect is the input
 dialect and nothing newer. Its line markers are the toolchain's text, not
@@ -511,28 +522,50 @@ id(stmt) s;                             /* e = s is an error */
    in it, the argument itself or one under a pointer or in a function
    type, is declared at file scope, and a struct, union or enum among
    them has a tag or exactly one typedef name declared with it, so that
-   every type in an argument has one name (10.3).
+   every type in an argument has one name (10.3). A tag that an
+   argument is the first to mention is declared where C declares a tag
+   first mentioned at that place (C11 6.7.2.3p8), in the smallest scope
+   that holds the mention. That scope is file scope only for a mention
+   at file scope and outside every parameter list, so the first mention
+   of a tag in an argument that stands in a parameter list or in a
+   block is an error; `struct s;` at file scope before it makes the
+   argument valid.
    `typedef struct { int x; } a, b;` gives its struct two names, so
-   neither `a` nor `b` is an argument. An argument holds no attribute,
-   whatever the attribute: none is written in it, and no typedef name
-   that it uses, at any depth, is declared with one. An instance name is
-   built after typedef expansion and encodes no attribute (10.3), so
+   neither `a` nor `b` is an argument. A declarator that derives
+   another type names that type and not the struct:
+   `typedef struct { int x; } n, *np;` gives its struct the one name
+   `n`. An argument holds no attribute, whatever the attribute: none is
+   written in it, and no typedef name that it uses, at any depth, is
+   declared with one. An instance name is built after typedef expansion
+   and encodes no attribute (10.3), so
    `vector(int)` and `vector(wide)`, where `wide` is a typedef of `int`
    with the GNU attribute `aligned(16)`, would have one name and two
    layouts in one translation unit, as another attribute would give one
    name two aliasing behaviours. An attribute inside the specifier of a
    struct, union or enum belongs to that type, which has its one name,
    and is not held by the argument.
-3. Two applications of one generic to pairwise identical arguments denote
-   the same type. Typedef names are transparent, qualifiers are
-   significant, and a distinct type is identical only to itself. An
-   application of a variant or distinct generic is a type of its own, as
-   a variant or distinct type is. An application of an alias generic (3.1
-   rule 3) is its definition with the arguments substituted, and is
-   transparent as a typedef name is: with `type ptr(T) = T *;`,
-   `ptr(int)` is `int *`. Where that definition is a struct or union
-   specifier with a body, as that of `vector` is, each application names
-   a structure or union of its own.
+3. An application of a variant or distinct generic is a type of its
+   own, as a variant or distinct type is. So is an application of an
+   alias generic (3.1 rule 3) whose definition is a struct or union
+   specifier with a body, as that of `vector` is: it names a structure
+   or union of its own. Two such applications of one generic denote the
+   same type exactly when the encodings of their arguments are pairwise
+   equal (10.3); no other rule says which arguments are the same.
+   Arguments are encoded after typedef expansion, so typedef names are
+   transparent, and a distinct type has an encoding of its own, so it
+   equals only itself. An application of any other alias generic is its
+   definition with the arguments substituted, and is transparent as a
+   typedef name is: with `type ptr(T) = T *;`, `ptr(int)` is `int *`. It
+   is no type of its own, so C's rules compare it as they compare the
+   type it stands for: with `type fp(T) = void (*)(T);`, `fp(const int)`
+   and `fp(int)` are one type, as `void (*)(const int)` and `void
+   (*)(int)` are, though their arguments are encoded differently. A
+   qualifier of the return type of a function type is part of the type
+   and of its encoding: the front end types C as Clang does, which
+   keeps the qualifier where GCC drops `const`, `volatile` and
+   `restrict` and keeps `_Atomic` alone (13.3, "Where GCC and Clang
+   differ"). With `type fr(T) = T (*)(void);`, `fr(const int)` and
+   `fr(int)` are two types.
 4. A generic definition uses a type parameter only as a type: of a member,
    a field, a pointed-to object, an element, a parameter or a result, or as
    a type argument. It does not use one directly after `distinct`, in a
@@ -554,10 +587,12 @@ id(stmt) s;                             /* e = s is an error */
    needed: the arguments are substituted and the result must be a valid
    definition. An error is reported at the application and cites the
    definition. Where the instance is a typedef (10.3), an argument that
-   the definition needs complete is complete at the first use of the
+   the definition needs complete is complete where the typedef stands,
+   before the external declaration that holds the first use of the
    application: with `type a2(T) = T[2];`, `a2(struct s) *` needs
-   `struct s` complete, as `struct s (*)[2]` does in C. An argument that
-   the definition uses only under a pointer need not be.
+   `struct s` complete there, as `struct s (*)[2]` needs it in C where
+   it is written. An argument that the definition uses only under a
+   pointer need not be.
 6. *Provisional (P7).* `void` may be an argument. A variant field whose type
    becomes `void` does not exist: its constructor takes no argument for it
    and a pattern has no sub-pattern for it. This makes `result(void, E)` the
@@ -577,24 +612,89 @@ id(stmt) s;                             /* e = s is an error */
    at least 64 is an error. `generic(T) void f(T *p) { f(&p); }` reaches
    it, since every instance calls one of a new type.
 8. *Provisional (P23).* The definition of a generic, type or function
-   (section 7), means the same wherever lowering writes it: in each
-   instance, where 10.3 places it. Every identifier and every tag that
-   the definition names denotes there the entity and the type that it
-   denotes at the definition. A declaration that would change either
-   there is refused: the error is reported at the application or call
-   that puts the instance there, and cites the declaration. Completing
-   a structure or union changes neither. In
+   (section 7), is moved text: lowering writes it in each instance,
+   where 10.3 places it, and the resolution property of 13.5 holds for
+   it: what the definition names, and what it declares for itself,
+   reads in each instance as it reads at the definition. A declaration
+   that would change that is refused: the error is reported at the
+   application or call that puts the instance there, and cites the
+   declaration. The definition and every instance stand at file scope,
+   so the declarations that can do so are those of file scope between
+   the two. In
 
    ```c
-   type named(T) = struct { str name; T value; };
-   int str;
-   named(int) n;
+   type handler(T) = struct { void (*call)(struct ctx *c, T value); };
+   struct ctx { int depth; };
+   handler(int) h;
    ```
 
-   the instance `named__i` is defined after `int str;`, where `str`
-   would be the object and no longer the universe type (2.3), so the
-   application is an error. Rule 3 of 7.3 shows the rule on a function.
-   The names that lowering itself writes cannot be hidden (13.5).
+   `struct ctx` in the definition is a type of the prototype's own
+   scope (C11 6.2.1p4). In the instance `handler__i`, which is defined
+   after the second line, it would be the structure of file scope, so
+   the application is an error. In
+
+   ```c
+   type slot(T) = struct { void (*call)(int (foo), T value); };
+   typedef char foo;
+   slot(int) s;
+   ```
+
+   `foo` in the definition is the name of a parameter of type `int`. In
+   the instance `slot__i` it would be the typedef name, and the
+   parameter a function that takes a `char` (C11 6.7.6.3p11), so this
+   application is an error as well. Rule 3 of 7.3 shows the property on
+   a function, where a later declaration changes the type of what the
+   body uses.
+
+   Lowering does not write the definition at its own place. By the last
+   clause of the property the definition therefore declares no name
+   that is in scope after it, apart from its generic and, where that is
+   a generic variant, its constructors, which lowering writes under the
+   names of the instances (10.1, 10.3): the text that follows would
+   lose any other declaration. Rule 4 keeps a tag with a body and an
+   enumerator out of the definition of a generic type, which leaves the
+   first mention of a tag. In
+
+   ```c
+   generic(T) struct pool *owner_of(T *p);
+   void release(struct pool *p);
+   ```
+
+   the first line is the first to mention `struct pool`, and the second
+   names that structure. In the lowered C the second line would be the
+   first mention, and would declare a structure of its prototype's own
+   scope. The first line is an error; with `struct pool;` before it,
+   both lines use a tag that is already declared. A first mention among
+   the members of a generic type is refused likewise, as that of `struct
+   node` in `type link(T) = struct { struct node *next; T v; };`: C
+   gives a tag that a member declares the scope around the structure. A
+   name whose scope ends inside the definition, in a parameter list or
+   in a block of a function's body, is declared in each instance as it
+   is at the definition.
+
+   The head of a generic function is the exception. An instance holds
+   it twice, in its prototype and at its definition (10.3), so the
+   return type and the parameter list of a generic function, with every
+   parameter list nested in them, declare no type at all: no first
+   mention of a tag stands there, and no specifier with a body, not
+   even the untagged one that rule 4 gives a place in a generic type.
+   In
+
+   ```c
+   generic(T) void put(struct item *it, T value) { /* ... */ }
+   ```
+
+   with no `struct item` declared before it, the prototype of `put__i`
+   and its definition would each declare a `struct item` of its own
+   scope, and the two would declare `put__i` with different types. The
+   generic is an error; with `struct item;` before it, both name the
+   structure of file scope.
+
+   A universe name, a constructor and a type parameter are not written
+   into an instance as the definition spells them: lowering writes names
+   that cannot be hidden (13.5), so a declaration that hides one of them
+   changes nothing, and `type named(T) = struct { str name; T value; };
+   int str; named(int) n;` is valid.
 
 Rationale for parentheses. `<` is ambiguous with less-than in C expressions.
 Parentheses need no lookahead once `G` is known to be generic, and they
@@ -678,7 +778,12 @@ expression form; a C local assigned in each arm does that job.
    field.
 5. Each arm is a block of its own. Its bindings and declarations are
    invisible to other arms and after the match, and a declaration may follow
-   a label directly.
+   a label directly. The bindings and the block items of the arm are one
+   scope: a block item that declares the name of a binding again is
+   refused, as C refuses a second declaration in one block (C11 6.7p3),
+   and a declaration in a nested block hides the binding. Text that
+   must begin a compound statement, such as `#pragma STDC FENV_ACCESS
+   ON`, may begin an arm, whether the arm binds or not (13.5).
 6. An arm may carry several labels only if none of them binds:
    `case None: case Empty:` share a body. This is one arm reached two ways,
    not fallthrough.
@@ -801,14 +906,31 @@ and for none that contains the `switch`. In `switch (n) { default: return
 `switch` can complete.
 
 The rules that say which labels control may jump to, 4.3(3) and rules 4,
-5 and 10 of section 6, read *jump to a label* and *target* by one
-definition. A `goto L` is a jump to a label, and its target is `L`. A
-GNU `asm goto` is one whose targets are all the labels it lists. A
-`switch` is one whose targets are the `case` and `default` labels that
-belong to it. The GNU address of a label, `&&L`, is a jump to `L` from
+5 and 10 of section 6, read *jump to a label* and *target* as follows. A
+`goto L` is a jump to a label, and its target is `L`. A GNU `asm goto`
+is one whose targets are all the labels it lists. A `switch` is one
+whose targets are the `case` and `default` labels that belong to it. A
+computed `goto *e` is one whose targets are the labels whose address the
+function takes.
+
+The GNU address of a label, `&&L`, has two readings, one for each
+question that these rules ask. The rules that ask what may reach a
+label, 4.3(3) and rule 5 of section 6, read it as a jump to `L` from
 every point of the function, because a computed `goto *e` at any point
-may be given that address. A computed `goto *e` is a jump to a label
-whose targets are the labels whose address the function takes.
+may be given that address. Rule 4 of section 6 asks what leaves a
+deferred statement and counts the jumps written in it. There `&&L` is no
+jump and leaves nothing: the computed `goto *e` that is given the
+address is the jump, and the rule judges it where it stands. Rule 10 of
+section 6 asks neither question. It refuses every computed `goto *e` and
+`asm goto` in the scope of a `defer` statement, whatever its targets.
+
+*Provisional.* The first reading refuses the address of a label that
+stands in a match arm or in the scope of a `defer` statement even where
+no `goto *e` is ever given that address, as none is given the one that
+the `_THIS_IP_` of the Linux kernel takes. Pilot B counts those
+refusals (plan, Stage 2). A count that matters would make `&&L` a jump
+only in a function that holds a computed `goto *e`; the default is the
+reading as stated.
 
 A constant here is an integer constant expression that the front end can
 evaluate (13.3). A statement expression of the GNU profile is treated as
@@ -840,16 +962,17 @@ Control that is evaluated again for each iteration makes the jump
 step of a `for`. Clang takes a disputed jump in a C loop to leave that
 loop, GCC the statement around the loop, and GCC refuses it where there
 is none (GCC 16, Apple Clang 21). Type-C text refuses a disputed jump. C
-text keeps it, and the backend picks its target: the parser records
-every statement that a backend may take, and the analysis lets each of
-them complete, so that an arm holding such C text, which a header
-included in the arm brings, passes these rules only if its end is
-unreachable on both readings. The operand of a `while` test is evaluated
-for each iteration too, but nothing disputes it: the lowering evaluates
-it in the body of the loop it generates (13.5), so both backends take a
-jump there to leave that `while`, in Type-C text and C text alike.
-Whether a jump is Type-C text is decided by its `break` or `continue`,
-as for every other token.
+text keeps it, except in a deferred statement or in the scope of a
+`defer` statement (section 6 rule 10), and the backend picks its target.
+The parser records every statement that a backend may take, and the
+analysis lets each of them complete. An arm that holds such C text,
+which a header included in the arm brings, therefore passes these rules
+only if its end is unreachable on both readings. The operand of a
+`while` test is evaluated for each iteration too, but nothing disputes
+it: the lowering evaluates it in the body of the loop it generates
+(13.5), so both backends take a jump there to leave that `while`, in
+Type-C text and C text alike. Whether a jump is Type-C text is decided
+by its `break` or `continue`, as for every other token.
 
 An arm that the rules reject but that cannot in fact fall through is
 fixed by adding the `break` the rules ask for.
@@ -867,6 +990,9 @@ none of its constructors traps and does not fail the test. A failed test
 stands where a `default` arm does, so it too receives real constructors
 only, and a match of one `case` and a `default` keeps its check when it
 is written as a test.
+
+`try` abbreviates a match and makes the check as well; rule 2 of 5.1
+says what it traps on.
 
 ### 4.6 Single-pattern test
 
@@ -914,9 +1040,12 @@ and not an arm.
    its bindings are (4.1(5)): where `S` is a compound statement they
    belong to its block, so a declaration there that redeclares a binding
    is refused, and one in a nested block hides it. A match of one arm
-   written as a test therefore keeps its meaning. The scope ends with
-   `S`: a binding is not visible in `S2` or after the statement, and a
-   `while` makes its bindings anew for each iteration.
+   written as a test therefore keeps its meaning. Text that must begin
+   a compound statement may begin a compound `S`, as it may begin an
+   arm (4.1(5)): `S` is written as it stands, after the bindings
+   (13.5). The scope ends with `S`: a binding is not visible in `S2`
+   or after the statement, and a `while` makes its bindings anew for
+   each iteration.
 5. `S` and `S2` are not arms, so 4.3(1) and 4.3(2) do not apply: either
    may complete, and `break` and `continue` in `S` and `S2` alike mean
    what they mean in a C `if` or `while`. A `break` in the `S` of an
@@ -981,11 +1110,18 @@ result(uint32_t, parse_error) read_number(reader *r)
    the universe scope (3.6), also where a declaration hides that name.
    Anything else is an error; there is no implicit conversion between
    error types.
-2. `try` evaluates its operand once. If the value is `Err(x)`, the function
-   returns `Err(x)` exactly as a `return` statement would, running the
-   deferred statements that are active (section 6). If it is `Ok(v)`, the
-   `try` expression has the value `v` and the type `T`; when `T` is `void`
-   it is a void expression.
+2. `try` evaluates its operand once and abbreviates a `match` on the
+   value (section 4). In the arm of `Err(x)` the function returns
+   `Err(x)` exactly as a `return` statement would, running the deferred
+   statements that are active (section 6). The error `x` is read before
+   they run: it is held in the temporary that takes the operand's value,
+   and the `Err(x)` that the function returns is built from that
+   temporary after they have run. No deferred statement can name the
+   temporary, so the error path needs no temporary of a `return` (13.5).
+   From the arm of `Ok(v)` the `try` expression has the value `v` and
+   the type `T`; when `T` is `void` it is a void expression. As in every
+   match (4.5), a value whose tag is no constructor's, here neither `Ok`
+   nor `Err`, traps (10.5) and does not take the error path.
 3. *Provisional (P8).* A `try` expression stands in one of three positions
    and nowhere else:
    * a whole expression statement, `try e;`;
@@ -995,20 +1131,39 @@ result(uint32_t, parse_error) read_number(reader *r)
      (`x += try f();`) and not chained (`a = b = try f();`);
    * the whole initialiser of the one declarator of a declaration that
      is a block item and declares an automatic object. A declaration
-     that holds a `try` has exactly one declarator, and the operand of
-     the `try` names nothing that the declaration declares, by its
-     declarator or in its specifiers. The operand is evaluated before
-     the declaration (13.5), whereas C puts a declarator in scope in
-     its own initialiser (C11 6.2.1p7): in
-     `int n = 0; { size_t n = try rd(&n); }` the source names the inner
-     `n` and the lowered code would name the outer one.
+     that holds a `try` has exactly one declarator, and the type it
+     declares is not variably modified: C evaluates the size expressions
+     of a declaration before its initialiser (C11 6.7.6p3, 6.8p3), and
+     lowering would evaluate the operand first.
+
+   In each position the operand is moved text: lowering writes it before
+   the statement or declaration that holds the `try`, and the resolution
+   property of 13.5 holds for it. Two consequences are particular to
+   `try`. The operand names nothing that the statement or declaration
+   that holds the `try` declares: a declaration by its declarator or in
+   its specifiers, an assignment in its left operand. C puts a
+   declarator in scope in its own initialiser (C11 6.2.1p7), so in `int
+   n = 0; { size_t n = try rd(&n); }` the source names the inner `n` and
+   the lowered code would name the outer one. In `a[sizeof(enum { K = 5
+   })] = try g(K);` the source names the `K` of the left operand, and
+   the lowered code writes the operand where no `K` is declared yet, or
+   an outer one is. And the operand declares no name that is in scope
+   after it, which is the third clause of the property on the operand.
+   In `a[K] = try g(sizeof(enum { K = 5 }));` the source reads the `K`
+   of `a[K]` where the operand has not yet declared one, and the lowered
+   code would read the operand's, and store to `a[5]`.
 
    A declaration in the first clause of a `for` is not a block item. The
    operand of `return`, the scrutinee of a `match` and the operand of a
    single-pattern test (4.6) are not among the positions. No `try` stands
    inside a statement expression, whatever its position there: it would
    return from inside the expression around it, where C does not say
-   which of the other operands have been evaluated.
+   which of the other operands have been evaluated. None stands inside a
+   block literal either: a block literal holds no Type-C text (13.3,
+   P24), and `try` is a word in Type-C text alone (2.3). And none
+   stands in a statement or declaration that has a pragma directly
+   before it or before any of its labels, for the reason that 13.5
+   gives with the rule.
 4. `try` cannot appear in a deferred statement.
 
 Rationale for the positions. C leaves the evaluation order of operands and
@@ -1057,33 +1212,58 @@ defer fclose(f);
 
 `defer` follows ISO/DIS TS 25755.
 
-1. The *scope* of a `defer` statement runs from its end to the end of the
-   enclosing block. `defer S` schedules the statement `S` to run when
-   control leaves that scope: by reaching the end of the block; by
+1. The *scope* of a `defer` statement runs from its end to the end of
+   the enclosing block. `defer S` schedules the statement `S` to run
+   when control leaves that scope: by reaching the end of the block; by
    `return`, `break`, `continue` or `goto` to a point outside the scope,
-   which includes a `goto` back to before the `defer` statement; or by the
-   error path of `try`. When several scopes are left together, their
-   statements run in the reverse order of the `defer` statements.
+   which includes a `goto` back to before the `defer` statement; or by
+   the error path of `try`. When several scopes are left together, their
+   statements run in the reverse order of the `defer` statements. The
+   body of a block literal is a function of its own (4.4): a `return` in
+   it leaves no scope around the literal. No `defer` statement stands
+   among the tokens that typing does not read (unread text, 13.5), in
+   any text: the statement would reach the backend as written. One
+   scan passes over every such token, whatever holds it: the body of a
+   block literal, a function body that is passed through unread
+   (13.3), an attribute argument, or anything else that typing passes
+   over. It refuses `_Defer` in every such token, and the word `defer`
+   in an attribute argument of Type-C text, where no declaration hides
+   the word (2.3). The rule therefore names no kind of unread text and
+   can miss none. The word begins a statement in Type-C text alone; of
+   its unread tokens only an attribute argument can hold a statement,
+   since a `#pragma` line holds none, and a block literal and a
+   function body that is passed through unread hold no token of Type-C
+   text (13.3).
+   `S` is moved text, so it holds no block literal (13.5).
 2. `S` runs at the exit and sees the values variables have then.
-3. The operand of `return` is evaluated, and converted to the return type,
-   before any deferred statement runs.
-4. `S` cannot be left by `return`, `break` or `continue`, no jump to a
-   label (4.4) in `S` has a target outside `S`, and `S` cannot contain
-   `try`. A loop inside `S` may use its own `break` and `continue`.
+3. The operand of `return` is evaluated, and its value converted to the
+   return type, before any deferred statement runs (13.5). The function
+   returns the value that this conversion gave: a deferred statement
+   that changes an object the operand read, or the rounding mode,
+   changes nothing of it.
+4. `S` cannot be left by `return`, `break` or `continue`, and `S`
+   cannot contain `try`. A jump to a label (4.4), where the jump itself
+   stands in `S`, has no target outside `S`. A loop inside `S` may use
+   its own `break` and `continue`.
 5. No jump to a label from outside `S` has a target in `S`, and none from
    outside the scope of a `defer` statement has a target in that scope.
    Section 4.4 says what is a jump to a label and what its targets are.
+   The address of a label, `&&L`, is by 4.4 a jump to `L` from every
+   point of the function. It is therefore refused, wherever it is
+   written, when `L` is in the scope of a `defer` statement, and only
+   then: a function that has a `defer` statement may take the address
+   of a label that is in no such scope.
 6. A loop body and a match arm are blocks: a `defer` in one runs at the end
    of each iteration or arm.
 7. `longjmp`, `exit`, `abort` and other functions that do not return leave
    without running deferred statements.
-8. *Provisional (P9).* Every identifier and tag that `S` uses resolves, at each
-   point where `S` is copied (13.5), to the declaration it resolves to at
-   the `defer` statement. A declaration in the scope of the `defer`
-   statement that would make one resolve otherwise is an error, in
-   whichever block of the scope it stands, the `defer` statement's own
-   included, and whatever it declares, a tag or a binding of a `match`
-   arm as much as an object. In
+8. *Provisional (P9).* `S` is moved text, and the resolution property of
+   13.5 holds for it: what `S` names reads, at each exit where `S` is
+   copied (13.5), as it reads at the `defer` statement. A declaration
+   that would change that at an exit is an error, in whichever block of
+   the scope it stands, the `defer` statement's own included. An
+   identifier in an attribute argument or a `#pragma` line of `S` is
+   among what `S` names (13.5). In
 
    ```c
    int x;
@@ -1091,21 +1271,47 @@ defer fclose(f);
    ```
 
    the copy of `use(x);` at the end of the block would read the inner
-   `x`, so the declaration of that `x` is an error. Each copy is a block
-   of its own, `{ S }`, so what `S` declares is declared for that copy
-   alone. The names that lowering itself writes into a copy cannot be
-   hidden (13.5).
-9. *Provisional (P9).* `S` contains no identifier label and no definition
-   of an object with static or thread storage duration. `S` is copied to
-   every exit (13.5): each copy would define the label again and would
-   hold an object of its own. A label declared with `__label__` is local
-   to its copy and would not clash; it is refused all the same, so that
-   the rule has no exception. A declaration with `extern` defines no
-   object and is allowed.
+   `x`, so the declaration of that `x` is an error. A binding named `x`
+   in a match arm that holds an exit is refused in the same way. So is
+   `__label__ L;` in a block that holds an exit, where `S` takes the
+   address `&&L` of a label of the function: the copy at that exit
+   would take the address of the local label. A declaration that has
+   no exit in its scope reaches no copy and is allowed: in
+   `{ defer use(x); { int x = 0; work(x); } }` the scope of the inner
+   `x` ends before the one exit. An exit is the place where lowering
+   writes the copy (13.5). The error path of a `try` is an exit before
+   the statement or declaration that holds the `try`, so that
+   declaration is not in scope there:
+   `{ defer use(x); { int x = try f(); } }` is allowed, since the copy
+   stands before the declaration of the inner `x`. `S` is a block, as
+   the substatement of an `if` is in C (C11 6.8.4p3), and each copy is
+   written as one, `{ S }`: what `S` declares is in scope in `S` alone,
+   at the `defer` statement as in each copy.
+9. *Provisional (P9).* `S` contains no identifier label and no
+   definition of an object with static or thread storage duration, and
+   `S` declares no type. That leaves out a struct, union or enum
+   specifier that has a body or declares its tag, and a Type-C type
+   declaration, such as a variant that a block in `S` declares. `S` is
+   copied to every exit (13.5): each copy would define the label again,
+   would hold an object of its own, and would declare a type of its
+   own, with the names it claims (10.1) and a layout set by the pragmas
+   in force at its exit and not at the `defer` statement (13.5). A
+   label declared with `__label__` is local to its copy and would not
+   clash, and neither would an incomplete type; both are refused all
+   the same, so that the rule has no exception. A declaration with
+   `extern` defines no object and is allowed, as is a typedef whose
+   specifier declares no type: the typedef itself names a type and
+   declares none (C11 6.7.8p3).
 10. Within the scope of a `defer` statement there is no GNU computed
     `goto *e` and no `asm goto`. Both are jumps to labels (4.4) that no
     deferred statement can precede: the first chooses its target when
-    it runs, and the second jumps from inside the assembly.
+    it runs, and the second jumps from inside the assembly. Neither
+    there nor in `S` is there a disputed `break` or `continue` (4.4),
+    in whichever text it stands: C text keeps a disputed jump
+    elsewhere, and `_Defer` is a `defer` statement in C text too (2.3).
+    The backend picks the statement that a disputed jump leaves, so
+    the deferred statements that it runs, and whether it leaves `S`,
+    would differ between backends.
 11. A `defer` statement is a block item, as a declaration is (Appendix A):
     it stands directly in a compound statement or in a match arm, where
     it may follow the labels of the arm (4.1). It is not the substatement
@@ -1114,13 +1320,37 @@ defer fclose(f);
     `default` of a `switch` included: write `case 1: { defer S; ... }`.
     It is not a block item of the compound statement of a statement
     expression.
+12. *Provisional (P9).* Lowering writes a `return` in the scope of a
+    `defer` statement as a block (13.5), which ends where the `return`
+    does. Its operand therefore declares no name that is in scope
+    after it, and no `goto`, `break` or `continue` leaves it, as one
+    in a statement expression would; a `return` that does either is
+    an error. The first is the third clause of the resolution property
+    of 13.5 on the operand. In `{ defer g(); if (c) goto skip; return
+    sizeof(enum { K = 5 }); skip: return K; }` the source names the
+    operand's `K` in the last statement, and the lowered code would
+    name an outer `K` there or none. In `return (p = (int[]){42}, ({
+    goto out; 0; }));` the compound literal lives until the block that
+    holds the `return` ends (C11 6.5.2.5p5), and in the lowered code
+    until the block of the `return` does, which the `goto` leaves:
+    code after `out` that reads `*p` reads 42 in the source and an
+    object whose life has ended in the lowered code (GCC 16 at `-O2`
+    gives another value). A `return` in the operand leaves the
+    function, and is no such jump.
 
-Rules 1, 5 and 10 make the set of deferred statements that a jump leaves a
-static fact, so `defer` needs no flags or run-time bookkeeping. Rule 8 is
-not in the TS; it and rule 9 let the compiler repeat `S` at each exit
-exactly as written, with every name bound as in the original and no label
-or object defined twice. `typec` always lowers `defer` itself (13.5); it
-does not depend on the C compiler implementing the TS.
+Rules 1, 5 and 10 make the set of deferred statements that a jump leaves
+a static fact, so `defer` needs no flags or run-time bookkeeping. Rules
+8 and 12 are not in the TS. Rules 8 and 9 let the compiler repeat `S` at
+each exit exactly as written, with every name bound as in the original
+and no label, object or type defined twice, and rule 12 lets it write a
+`return` as a block. `typec` lowers every `defer` statement itself
+(13.5) and hands the backend none: a `defer` statement stands either
+in text that typing reads, where it is lowered, or among the tokens
+that typing does not read, where the scan of rule 1 refuses it under
+both its spellings: `_Defer` in every such token, and `defer` in each
+one that is Type-C text, the only text in which the word begins a
+statement (2.3). It does not depend on the C compiler implementing
+the TS.
 
 Rationale for rule 11. C makes the substatement of a selection or
 iteration statement a block of its own (C11 6.8.4p3, 6.8.5p5), so the
@@ -1249,10 +1479,13 @@ convert, is weighed with P11.
    the instance `f__i` is defined after the second declaration of `g`,
    whose prototype the check of the body (7.1 rule 3) never saw, so the
    call in `h` is an error that cites that declaration. A declaration
-   that completes the array type of an object the body uses, a
+   that completes the array type of an object the body uses, and a
    file-scope declaration of a tag that the body declares for itself,
-   and one that hides a universe name the definition uses (2.3) are
-   refused in the same way.
+   are refused in the same way. The first is the refusal expected most
+   often where nothing would go wrong: a header declares
+   `extern int tbl[];`, a generic uses `tbl`, and the definition of `tbl`
+   with its size stands before an instance. The measurement of P23
+   counts these.
 4. Consequences: the code of an instance is duplicated across translation
    units, the address of an instance differs between them, and a static
    object in a generic function exists once per instance per translation
@@ -1396,14 +1629,128 @@ the types of each module stand in that module's own `.tci`.
 
 ### 9.3 C clients
 
-`typec --emit-c-header M.tci` writes `M.h`, the lowered form (section 10) of
-the declarations in `M.tci`, for C compilers: variants as tagged structs,
-distinct types as typedefs, and function prototypes. An `#include` of
-another `.tci` becomes an `#include` of its `.h`. Generic declarations are
-omitted; a type application that `M.tci` names through a typedef is emitted
-as a concrete struct. The header is specific to the target and
-configuration it was generated for. C clients can read and write everything
-it exposes, and no Type-C rule binds them.
+`typec --emit-c-header M.tci` writes `M.h`, the lowered form (section
+10) of the declarations in `M.tci`, for C compilers: variants as tagged
+structs, distinct types as typedefs, and function prototypes. An
+`#include` of another `.tci` becomes an `#include` of its `.h`. Generic
+declarations are omitted. An instance that `M.tci` names is written as
+10.3 writes it in a translation unit, by the same code: the forward
+declarations of the tags that its arguments name, the typedefs of its
+arguments, and its declaration and definition inside the packing
+bracket. A C client and a Type-C unit therefore see one layout.
+
+The header differs from a translation unit in three respects.
+
+- The whole header stands between `#ifndef M`, `#define M` and `#endif`,
+  where the macro `M` is the include guard of the header, so a client
+  may include it more than once: C lets neither the structure nor the
+  enumeration of a variant be defined twice. The guard is named from
+  the last component of the interface's path by the scheme of 13.5,
+  which is how 9.2 rule 2 identifies an interface. Two interfaces with
+  the same last component therefore have one guard, and a client that
+  includes the headers of both gets the text of the first alone: the
+  second is skipped with no message, and the client meets its names
+  as undeclared, or as what the first header declares under them.
+  That is a limitation: a program whose headers one client includes
+  keeps the last components of its interfaces distinct. More of the
+  path in the guard would not lift it, since the backend names a file
+  by the `-I` path it was found through (9.2 rule 2), and one header
+  would then have a guard for each way of reaching its interface.
+- It defines every instance that its own declarations write and that it
+  can define. A translation unit defines an instance where a point
+  needs it complete (10.3); a client may need complete an instance that
+  the header only passes by pointer. So the header defines at its end
+  every instance that an application in the declarations of `M.tci`
+  names and that it has not defined, provided that everything the
+  definition needs complete is complete there. An instance that fails
+  this is left with its declaration alone. An instance that only a
+  generated definition names is written as in a translation unit:
+  declared, and defined where that definition needs it complete. An
+  application inside a generic declaration of `M.tci` is of that
+  kind, whether it names a type parameter or not: the declaration is
+  omitted, and what it applies is first used where an instance of the
+  generic is defined (10.3). The text of the interface thus bounds the
+  instances that the header defines. With `type g(T) = struct { g(g(T))
+  *next; T v; };` and a prototype that takes a `g(int) *`, the header
+  defines `g(int)` and declares `g(g(int))`, which the definition names
+  under a pointer; were that one defined too, its definition would name
+  the next, without end.
+- The definition of an instance, and nothing else, stands between
+  `#ifndef G`, `#define G` and `#endif`, where the macro `G` is the
+  include guard of that instance, named by the scheme of 13.5 from the
+  module that defines its generic and from the instance name. C does
+  not let a structure be defined twice. All else that the header
+  writes for an instance may be repeated: a tag may be declared again,
+  and C11 lets a typedef be declared again with the same type (6.7p3).
+
+Two headers that name one instance, as each does with `vector(int)` in a
+prototype, can then be included together in either order. Each writes
+the declaration of the instance and the typedefs of its arguments for
+itself, so its own text is valid wherever it stands. The first of them
+that can define the instance defines it, and a later one finds the guard
+defined. A header that cannot define the instance sets no guard, and so
+keeps no later header from defining it: with `struct s` incomplete in
+`a.h` and complete in `b.h`, `option(struct s)` is declared by both and
+defined by `b.h`, whichever comes first. The guard of a header and the
+guard of an instance are names of different kinds (13.5), so the two
+never meet.
+
+The guard of an instance names the module of its generic because the
+instance name does not: two modules may each define a generic `vec`,
+and `vec(int)` is `vec__i` to both (10.3). A client that includes a
+header of each gets both definitions of `struct vec__i`, and its
+compiler refuses the second as a redefinition (GCC 16 as C23 accepts
+one that repeats the first member for member, which lays out alike).
+A guard of the instance name alone would skip the second definition,
+and the client would call the functions of the second module with the
+layout of the first, with no message.
+
+*Provisional.* An emitted header is written for C translation units.
+Whether a Type-C unit may include one, as it does when it shares a C
+header that includes one, is open. The guards are macros and do not
+survive preprocessing, so what reaches the unit is the header's text
+without them: names that begin with `__tc_`, which are errors in a
+Type-C unit (2.3), and definitions of instances that lowering would
+write again. Package 4.1 of the plan settles it, either by keeping the
+refusal, so that a Type-C unit includes the `.tci`, or by having
+lowering take an instance that the header's text defines as defined.
+The default is the refusal of 2.3.
+
+The header is C11, as lowered code is (2.4), and a client compiles it as
+C11 or later: C99 does not let a typedef be declared again. Its names
+that begin with `__tc_` are reserved identifiers to C (C11 7.1.3), which
+is what keeps a client's names from them (2.3). Clang reports them under
+`-Wreserved-identifier` and `-Wreserved-macro-identifier`, which
+`-Weverything` turns on and `-Wall`, `-Wextra` and `-pedantic` do not
+(Apple Clang 21). In a header that ends with the probe of 10.3,
+`-Weverything` also reports the padding of the probe's two structures
+under `-Wpadded`, which GCC 16 has as well, outside `-Wall` and
+`-Wextra`, and the `_Static_assert` and `_Alignof` of the probe under
+`-Wpre-c11-compat`. The two structures are padded by design: a `char`
+before an `int` is what makes a packing show in the alignment.
+
+The header is specific to the target and configuration it was generated
+for, and assumes that a client includes it as the command line of that
+configuration leaves the compiler: with the same options that change a
+layout, and outside the region of every `#pragma pack` and of every
+other pragma that changes one (13.5). The bracket keeps a client's
+`#pragma pack` from an instance and from nothing else in the header,
+and it assumes the reading of `#pragma pack()` that 10.3 states; a
+header that holds a bracket ends, inside its guard, with the probe of
+that reading (10.3), so a client whose compiler reads the line
+otherwise fails to compile. `typec` does not see a client's compile and
+checks nothing else of this.
+
+*Provisional.* The three type assertions that end a lowered unit (13.4)
+are not written into an emitted header. In a header they would assert
+the options of the client's compile, and what a header requires of its
+client is for package 4.1 of the plan to decide. The same package
+decides whether `--emit-c-header` refuses the options that change one
+of those types, which the driver refuses for a `.tc` input (13.2). The
+default is a header without the assertions and no such refusal.
+
+C clients can read and write everything the header exposes, and no
+Type-C rule binds them.
 
 ## 10. Representation and C ABI
 
@@ -1501,7 +1848,7 @@ same name in every translation unit:
 | Struct, union or enum whose own specifier has the tag *name* | `T` *length* *name* |
 | Variant, distinct type, alias of an untagged struct or union, or untagged type named by its typedef | *length* *name* |
 | Application `G(args)` of a variant or distinct generic, or of an alias generic whose definition is a struct or union specifier with a body | `I` *length* `G` *args* `E` |
-| Function type, under a pointer | `F` *return* *parameters* `E`. The parameters are `v` for an empty prototype and `N` for no prototype; `z` marks a trailing ellipsis; a parameter of array or function type is encoded as the pointer type that C adjusts it to (C11 6.7.6.3p7 and p8); top-level qualifiers of parameters are dropped, as in C's type compatibility, and so are qualifiers of the return type (C17 6.7.6.3p5). |
+| Function type, under a pointer | `F` *return* *parameters* `E`. The parameters are `v` for an empty prototype and `N` for no prototype; `z` marks a trailing ellipsis; a parameter of array or function type is encoded as the pointer type that C adjusts it to (C11 6.7.6.3p7 and p8); top-level qualifiers of parameters are dropped, as in C's type compatibility (C11 6.7.6.3p15), which GCC and Clang both apply. Qualifiers of the return type are encoded, as they are part of the type (3.5 rule 3). |
 
 `vector(int)` is `vector__i`, `vector(expr *)` is `vector__P4expr`, and
 `result(uint32_t, parse_error)` is `result__j11parse_error` where
@@ -1517,6 +1864,18 @@ type argument (3.5 rule 2). That leaves out the remaining types of the
 GNU profile, among them `__int128`, `unsigned __int128`, the `_Float`
 types, `__bf16` and vector types; no rule needs one as an argument.
 
+Equal encodings are what makes two applications that are types of their
+own the same type (3.5 rule 3); nothing else compares their arguments.
+The table is therefore also the statement of which qualifiers tell two
+such arguments apart: every one but a top-level qualifier of a parameter
+in a function type. An application of a transparent alias is compared by
+C's rules as the type it stands for (3.5 rule 3), and two of its
+instances may be typedefs of one type: `fp__Ki` and `fp__i`, with `type
+fp(T) = void (*)(T);`. A qualifier of a return type is part of the type
+there as it is in the table (3.5 rule 3): `fr__Ki` and `fr__i`, with
+`type fr(T) = T (*)(void);`, are typedefs of two types to the front end
+and to Clang, and of one type to GCC (13.3).
+
 The declaration of a type chooses its row, however a use spells the
 type. A type that a Type-C declaration defines, a variant or an alias of
 an untagged struct or union, is encoded by its Type-C name, also where C
@@ -1525,8 +1884,10 @@ not a tag of its own specifier. So `type n = struct { int x; };` is
 encoded `1n`, as `typedef struct { int x; } n;` is, and the encoding
 depends on the type alone, not on how the type lowers.
 
-Every encoding is self-delimiting and none begins with `_`. The name of
-a generic, type or function, meets 3.1 rule 6 (7.1 rule 1), so the first
+Every encoding is self-delimiting and none begins with `_`. A *length*
+is the number of bytes of its *name*, in decimal; a character outside
+ASCII counts as the bytes of its UTF-8 form. The name of a generic,
+type or function, meets 3.1 rule 6 (7.1 rule 1), so the first
 `__` of an instance name ends the name of its generic, and by the same
 rule no name that a variant or an alias derives is an instance name. The
 names `I_tag` and `I_C` that a variant instance `I` derives are none
@@ -1540,9 +1901,10 @@ stands for a type name such as `T[2]` or `T (*)(T)`, and a typedef name
 is one.
 
 An instance is emitted at file scope in two steps. A type instance is
-what 10.1 or 10.2 makes of the generic's definition with the arguments
-substituted, under the instance name; a function instance is a `static`
-function (7.3).
+what 10.1 or 10.2 makes of the generic's definition under the instance
+name; a function instance is a `static` function (7.3). In both, every
+type parameter is written as the typedef of its argument, as said below
+the steps.
 
 1. Its declaration stands before the external declaration that holds its
    first use. For a variant instance, or an instance of an alias that is
@@ -1550,44 +1912,184 @@ function (7.3).
    a union, `union I; typedef union I I;`. An instance of a distinct
    generic, or of an alias generic whose definition is not a struct or
    union specifier with a body, is the one `typedef` of 10.2 and stands
-   here whole, so what its type needs complete is complete at the first
-   use (3.5 rule 5). For a function instance it is the prototype.
+   here whole. For a function instance it is the prototype, so the
+   head of the generic is written twice, here and at the definition,
+   and declares no type (3.5 rule 8).
 2. Its definition is the rest of 10.1 or 10.2, or the function with its
    body. A type instance is defined before the external declaration that
    holds the first point that needs the type complete; one that no point
-   needs complete is not defined. The arguments that the definition
-   holds by value are complete there, or the application is an error
-   (3.5 rule 5). A function instance is defined before the external
-   declaration that holds its first use, which the definition of its
-   generic precedes (7.3 rule 2). The type instances that a definition
-   needs complete are defined before it.
+   needs complete is not defined. A function instance is defined before
+   the external declaration that holds its first use, which the
+   definition of its generic precedes (7.3 rule 2). The type instances
+   that a definition needs complete are defined before it.
+
+An instance names its arguments through typedefs. For each argument
+type, the typedef `__tc_arg__` followed by the encoding of the type
+stands at file scope, once, before the first instance that takes the
+type, and every use of a type parameter in a definition is written as
+that name, in type and function instances alike: `vector__Pi` holds
+`__tc_arg__Pi *data;`. The argument's own text in place of the
+parameter would be wrong: with `T` as `int *`, `const T` is a constant
+pointer, which `const __tc_arg__Pi` is and `const int *` is not. Equal
+encodings are one type, so one typedef serves every instance that takes
+the type. The name is reserved (2.3) and follows the scheme of 13.5.
+
+One rule places these texts: the typedef of an argument, the
+declaration of an instance and its definition. Each stands directly
+before an external declaration. Everything that it names is declared
+before that external declaration, and everything that it needs complete
+is complete before it; otherwise the application or call that puts the
+text there is an error. So a typedef instance such as `a2(struct s)`
+(3.5 rule 5) is refused where the declaration that holds its first use
+is the one that completes `struct s`, and so is a function instance
+whose body needs complete an argument that is not complete there.
+
+The rule reads the lowered C, in three respects.
+
+- The external declarations are those of the lowered C. A variant, or
+  an alias whose definition is a struct or union specifier with a body,
+  lowers to several (10.1, 10.2), and the instances that its body uses
+  are declared, and defined where the body holds one by value, directly
+  after its own forward declaration:
+  `type expr = | Call(vector(expr *) args);` defines `vector__P4expr`
+  after `typedef struct expr expr;` and before `enum expr_tag`.
+- What lowering declares counts as declared: another generated text,
+  and the forward declaration of a tag, which is said next.
+- Several texts before one external declaration stand in the order of
+  their first uses, and a use inside a generated text counts where
+  that text stands. An application or a call inside a generic's
+  definition, such as `vector(tree(T) *)` inside `tree`, is first used
+  where an instance of that generic is defined, and what it puts there
+  stands before that definition.
+
+The typedef of an argument names a type that has a tag in the lowered C,
+a variant or an alias of 10.2 included, by `struct`, `union` or `enum`
+and the tag, and not by a typedef name. One instance then has one
+definition wherever its first use falls, also before the typedef names
+of its arguments are declared. For every structure or union tag `T`
+that the typedef names so, `struct T;` or `union T;` stands at file
+scope before it. The tag then denotes the type of file scope also where
+the instance stands before that type's own declaration, and where a
+prototype would otherwise declare a tag of its own (C11 6.2.1p4). An
+enumeration has no such declaration in ISO C, which lowered code keeps
+to (2.4), and an untagged type that a typedef names has none at all, so
+the placement rule leaves both to the source: an argument that holds
+one is refused unless the source declares it before the external
+declaration of the first use.
+
+The generated line stands before the whole external declaration that
+holds the application, so it must leave what the source wrote earlier
+in that declaration as it was. A tag that an argument names is declared
+at file scope (3.5 rule 2), by the source before the application or by
+the application itself, and where the source declares it before a
+mention the line changes nothing at that mention. The line changes one
+kind of earlier text: a mention that declares the tag in a scope nested
+in file scope, a parameter list or a block, only because no declaration
+of the tag is visible there (C11 6.7.2.3p8). It would name the
+structure of file scope instead. A specifier with a body and a `struct
+X;` that is a declaration of its own declare a tag of their scope
+whatever is visible (C11 6.7.2.3p6 and p7), and the line changes
+neither. An application is therefore an error when a mention of its
+argument's tag that stands before it in the same external declaration
+declares the tag in a nested scope in the first of these ways. In
+
+```c
+struct H { int (*call)(struct X *); struct X { vec(struct X *) v; } x; };
+```
+
+the first `struct X` declares a tag of the prototype's own scope, so
+`vec(struct X *)` is an error. With `struct X;` before `struct H`, or
+with a member `struct X *p;` before `call`, the source declares the tag
+at file scope before that mention, and the application is valid. A
+structure that names itself in an argument, as `struct node {
+option(struct node *) next; };` does, is valid as it stands: before the
+application only the head of the structure mentions the tag, and it
+declares the tag at file scope, as the generated line does.
+
+`typec` does not read the body of a block literal (13.3), so it cannot
+tell whether one holds such a mention. An application is an error as
+well when a block literal stands before it in the same external
+declaration and the source does not declare the tag at file scope
+before the literal. In
+
+```c
+int (^probe)(void) = ^{ struct X *p = 0; struct X { int n; } y; /* ... */ },
+    size = sizeof(ptr(struct X *));
+```
+
+`p` points to the structure that the body declares, and with the
+generated line before the declaration it would point to the one of
+file scope, with no message from the backend (Apple Clang 21).
+
+Every text that the two steps write for an instance, a declaration as
+much as a definition, stands between the lines `#pragma pack(push)` and
+`#pragma pack()` before it and `#pragma pack(pop)` after it. The layout
+of an instance is then the one that the command line gives, whatever
+packing a pragma has put in force where its first use puts it, and the
+packing around it stays as it was. No rule need say which of these texts
+can hold a layout, since all are written through the one bracket. A
+generic that is defined under `#pragma pack` is not packed by it; a
+struct or union in a generic that is to be packed says so in the
+definition, with `__attribute__((packed))`, which every instance then
+carries. Under `-fpack-struct=n` the packing of the command line is
+that option's, for an instance as for every other structure of the unit.
+Other pragmas that change a layout are not kept from an instance (13.5).
+
+The bracket assumes that `#pragma pack()` restores the packing of the
+command line and leaves the stack of `push` alone, as GCC and Clang
+read it. How a backend reads the line is a fact of the compile and not
+of a place in the unit, so one probe settles it for every bracket. A
+unit that holds a bracket ends with
+
+```c
+#pragma pack(push)
+#pragma pack(1)
+#pragma pack(push)
+#pragma pack()
+struct __tc_pack_probe_1 { char c; int i; };
+#pragma pack(pop)
+#pragma pack(2)
+#pragma pack(push)
+#pragma pack()
+struct __tc_pack_probe_2 { char c; int i; };
+#pragma pack(pop)
+#pragma pack(pop)
+_Static_assert(_Alignof(struct __tc_pack_probe_1)
+               == _Alignof(struct __tc_pack_probe_2),
+               "typec: '#pragma pack()' does not restore the packing of "
+               "the command line (-fapple-pragma-pack or "
+               "-fxl-pragma-pack?)");
+```
+
+among the assertions of 13.4, and an emitted header that holds one ends
+with the same text inside its guard, the two structures named for the
+header (9.3, 13.5). Each structure stands in a bracket, written as
+every bracket is: the first inside a region that the probe packs to 1,
+the second inside one that it packs to 2. Under the assumed reading
+both have the packing of the command line, whatever it is, and are
+aligned alike. Where the backend reads `#pragma pack()` as a pop, each
+has the packing of its region and the assertion fails the build,
+whichever route gave the backend that reading: an option, a wrapper, a
+config file or the default of the target. No route passes the probe by,
+so the driver refuses no option on this ground; the message names the
+options known to give the other reading.
+
+The probe compares two brackets with each other and with no structure of
+the command line's packing, so it does not depend on where it stands.
+Its outer `push` and `pop` leave the packing around it and the stack as
+they were, also where a client includes a header inside a region of
+`#pragma pack`. `_Alignof` needs no header, as `offsetof` would. The
+probe tells the two readings apart where `int` is aligned to 2 or more
+without packing; where it is aligned to 1, packing changes nothing of
+the two structures. Apple Clang 21, Clang 22 and 23 and GCC 16 pass the
+probe by default, under `-fpack-struct=1` and `-fpack-struct=2`, under
+`-mms-bitfields`, and inside regions that pack to 1 and to 4, which they
+leave in force. The three Clangs fail it under `-fapple-pragma-pack`,
+with and without those two values of `-fpack-struct`, and Apple Clang 21
+fails it for AIX, where the other reading is the default of the target.
 
 What a definition names means in the instance what it means in the
 generic (3.5 rule 8).
-
-External declarations are counted in the lowered C. A variant, or an
-alias whose definition is a struct or union specifier with a body,
-lowers to several (10.1, 10.2), and the instances that its body uses are
-declared, and defined where the body holds one by value, directly after
-its own forward declaration: `type expr = | Call(vector(expr *) args);`
-defines `vector__P4expr` after `typedef struct expr expr;` and before
-`enum expr_tag`. An application or a call inside a generic's definition,
-such as `vector(tree(T) *)` inside `tree`, is first used where an
-instance of that generic is defined.
-
-An instance names an argument that has a tag in the lowered C, a variant
-or an alias of 10.2 included, by `struct`, `union` or `enum` and the
-tag, and not by a typedef name. One instance then has one definition
-wherever its first use falls, also before the typedef names of its
-arguments are declared. For every structure or union tag `T` that an
-instance names so, `struct T;` or `union T;` stands at file scope before
-the declaration of the instance. The tag then denotes the type of file
-scope also where the instance stands before that type's own
-declaration, and where a prototype would otherwise declare a tag of its
-own (C11 6.2.1p4). An enumeration has no such declaration in ISO C,
-which lowered code keeps to (2.4). An application whose argument holds
-an enumeration that is declared in the external declaration of the
-instance's first use is therefore an error.
 
 At the external declaration of its first use an instance claims, at file
 scope, every name it declares there: a type instance its typedef name
@@ -1596,7 +2098,13 @@ of 10.1; a function instance its name. All go through the one check
 that claims a variant's names (10.1 rule 6): any other declaration of
 one of them in the file scope or in a scope nested in it, in C text as
 well, is an error, whichever comes first. A block that declares
-`int max__i;` where `max__i` is claimed is refused.
+`int max__i;` where `max__i` is claimed is refused. The claim begins at
+that external declaration, in the lowered C: a block that ends before
+it there holds no use of the instance and may have declared one of the
+names. A block in the body of a generic function stands in the lowered
+C where the instances of that function do, not where the generic is
+defined, so it is refused when it declares a name that is claimed
+before one of those instances.
 
 Rationale. The typedef name of a variant is not claimed, because only
 the source names it. The names of an instance are written by the
@@ -1620,9 +2128,10 @@ to the failing code. By default it is `__builtin_trap()` on GNU-compatible
 compilers. `--trap-function=name` calls `_Noreturn void name(void)`, which
 the program supplies, before the builtin; freestanding targets use this to
 report the failure. Where the compiler has no such builtin, the call is
-followed by an endless loop. The traps are: an invalid tag in `match` or
-in a single-pattern test, the end of a match arm, a slice index or
-sub-slice out of range, and the checks of checked mode.
+followed by an endless loop. The traps are: an invalid tag in `match`,
+in a single-pattern test (4.5) or in `try` (5.1 rule 2), the end of a
+match arm, a slice index or sub-slice out of range, and the checks of
+checked mode.
 
 ### 10.6 What C code sees
 
@@ -1630,7 +2139,7 @@ sub-slice out of range, and the checks of checked mode.
 | --- | --- |
 | Variant | Tagged struct (10.1), by value |
 | Distinct type | Its underlying type |
-| Type application | Struct, union or typedef under the instance name |
+| Type application | Struct, union or typedef under the instance name, written as 10.3 writes an instance; an emitted header carries the same text, with the definition of each instance under an include guard (9.3) |
 | `option`, `result`, `slice`, `str` | Instances of the universe generics |
 | Non-generic function | The same function |
 | Generic function | Nothing; wrap an instance (7.3) |
@@ -1829,14 +2338,46 @@ language is defined here and not by the tool.
   such as `env -i` or `sudo`, still loops. No use of a nested `typec` is
   known, so neither cost is worth more mechanism.
 - *Provisional (P15).* The backend preprocesses: `typec` runs it with
-  `-E -x c` and the user's options, parses the result, and compiles its own
-  output with `-x cpp-output`. Macros are expanded once, by the compiler that
-  compiles the result, so the two cannot disagree. The cost is that
-  locations are a file and a line: columns and macro backtraces are not
-  available, and backend warnings that depend on macro provenance or on
-  comments can differ from a direct compile.
+  `-E -x c` and the user's options, parses the result, and compiles its
+  own output with `-x cpp-output`. Macros are expanded once, by the
+  compiler that compiles the result, so the two cannot disagree. The
+  cost is that locations are a file and a line: columns and macro
+  backtraces are not available, and backend warnings that depend on
+  macro provenance or on comments can differ from a direct compile. The
+  reader requires a line marker naming a file before the first token of
+  the `-E` output, so options that remove line markers, however they
+  reach the preprocessor, are refused. Without the markers every token,
+  those of system headers included, would count as the input's own and
+  so as Type-C text (2.1).
 - `--emit-c` stops after emission and writes the C. `--emit-c-header` is
   described in 9.3.
+- With a `.tc` input, `-fpack-struct` without a value is refused as an
+  error of the command line: under it GCC ignores the three lines of
+  the bracket that 10.3 writes around an instance and warns of each,
+  for every instance (GCC 16.2), which fails a build under `-Werror`.
+  `-fpack-struct=n` is accepted: the reset restores the option's
+  packing, so an instance is laid out as every other structure of the
+  unit is, and alike in every unit built with the same value, which C
+  already requires of units that share a structure. The driver refuses
+  no option for the way it makes the backend read `#pragma pack()`:
+  `-fapple-pragma-pack` and `-fxl-pragma-pack` are passed on, and the
+  probe of 10.3 fails the build wherever the backend then takes that
+  reading, as it does for every other route to it, with a message that
+  names the two. Apple Clang 21 takes the reading under
+  `-fapple-pragma-pack`. Its driver ignores `-fxl-pragma-pack` for a
+  target other than AIX, with the warning "argument unused during
+  compilation": the reading stays the assumed one and the probe passes,
+  as it should. The probe fails where the option reaches the front end
+  through `-Xclang`, and for AIX, where the reading is the default.
+- With a `.tc` input, the options known to change one of the three
+  types that the front end assumes (13.4), `-funsigned-bitfields`,
+  `-fsingle-precision-constant` and `-fshort-enums`, and their aliases,
+  as `-fno-signed-bitfields`, are refused as an error of the command
+  line. The refusal names the option before anything is compiled; the
+  assertions of 13.4 cover the routes that the command line does not
+  show. An option that changes a macro the target model reads (13.3),
+  as `-funsigned-char` and `-fshort-wchar` do, reaches the model and is
+  accepted.
 - Subprocesses are started with argument vectors, never through a shell.
   Intermediate files live in a private temporary directory.
 - A backend step that fails ends `typec` with the backend's own status,
@@ -1872,7 +2413,10 @@ would have to agree with the parser's at every point. Parsing needs the
 kind of a name (a typedef name or not), never its type, in Type-C as in
 C. Members belong to their structure and are resolved by type. A
 label's scope is its function (6.2.1p3), so a jump to it resolves once
-the function's body is read.
+the function's body is read. The parser records each mention's label,
+identified by the token of the first mention that resolves to it, and
+refuses a `goto` to a label that its body does not define where the
+body ends.
 
 **GNU profile.** The front end accepts the extensions that system headers
 and common code use: attributes, including those among the qualifiers
@@ -1928,7 +2472,7 @@ backend of the test hosts: where the compiler lacks the keyword, the C
 library declares the spelling, as glibc declares `typedef __float128
 _Float128;` for Clang, so no fixed keyword set reads glibc under both
 GCC and Clang. No macro says that a backend reserves a spelling it
-cannot use, as Apple clang reserves `__float128` and GCC `_Float128x`;
+cannot use, as Apple Clang reserves `__float128` and GCC `_Float128x`;
 typec reads such a spelling as an identifier, which only a program that
 declares a reserved identifier (C11 7.1.3) can tell; GCC's `__float128`
 is a builtin typedef name, which such a program can tell as well. Both
@@ -1938,50 +2482,81 @@ x86-64 backends confirm the rule; a backend of another architecture
 whose macros disagree with its keywords would settle it otherwise, and
 without one the rule stays. A construct outside the profile is an error
 that names it; the front end does not guess. GCC's nested functions are
-outside the profile, as Clang has none. Bodies of functions defined
-in system headers are not parsed: they are brace-matched and passed
-through.
+outside the profile, as Clang has none. A function body whose `{` is C
+text of a system header is not parsed: it is brace-matched and passed
+through, because it is written for its own compiler and may use any of
+that compiler's extensions. Such a body is C text of system headers
+only, as a block literal is C text only (below): every token from its
+`{` to its `}` decides, and one that is Type-C text, or C text of a
+file that is no system header, is an error. The body is unread text
+(13.5), and the one scan of the tokens that typing does not read
+finds such a token (section 6 rule 1). A body is therefore passed
+through unread only where every token of it is C text of a system
+header, and no body that holds Type-C text goes unread: a `.tci` that
+a system header includes inside a body is refused. A body whose `{`
+is any other text is read, each token as the text it is, whatever an
+include puts inside it. A macro of a system header that opens a body
+which the user's text fills gives such a body: tokens of a macro
+expansion belong to the file of the expansion (2.4), so its `{` is
+the user's text. The reason for passing a body through holds for C
+text alone: Type-C text that is found through `-isystem` or in a
+default system directory is read, typed and lowered as any other
+Type-C text is.
 
-**Block literals.** *Provisional (P24).* A block literal is C text
-only: Type-C text that writes one, or that an include puts inside one,
-is an error. Typing does not read the body of a block literal, so a
-Type-C construct there, which typing finds for lowering, would reach
-the backend as written; typing the body needs Clang's rules for blocks,
+**Block literals.** *Provisional (P24).* A block literal is C text only:
+one that holds a token of Type-C text, from its `^` to the brace that
+closes its body, is an error. The one rule covers a literal that Type-C
+text writes, one that an include puts Type-C text inside, and one that a
+C macro builds around its argument, as `ASYNC(try f())` does. Typing
+does not read the body of a block literal. The one scan of the tokens
+that typing does not read passes over the body, for this rule and for
+`_Defer` (section 6 rule 1). A Type-C
+construct in the body, which typing finds for lowering, would reach the
+backend as written; typing the body needs Clang's rules for blocks,
 chiefly that a captured automatic variable is a `const` copy, without
 which typec would answer a `_Generic` or lower a match on a captured
-variant differently from Clang. Type-C code reaches an API that takes
-a block through C text, or through the function-pointer form that such
-APIs also have (`dispatch_async_f`). Type-C code on macOS settles it: a
-block-taking API with no function-pointer form that Type-C code needs
-would make typec type block bodies; the default is that blocks stay C
-text.
+variant differently from Clang. The body is unread text, which keeps a
+block literal out of moved text (13.5). Type-C code reaches an
+API that takes a block through C text, or through the function-pointer
+form that such APIs also have (`dispatch_async_f`). Type-C code on macOS
+settles it: a block-taking API with no function-pointer form that Type-C
+code needs would make typec type block bodies; the default is that
+blocks stay C text.
 
 **Typing.** The front end types every expression by C's rules: promotions,
 usual arithmetic conversions, lvalues, qualifiers, composite types and
 `_Generic`. Type-C rules need the type of any expression that can hold a
-Type-C value, and that is any expression.
+Type-C value, and that is any expression. Where GCC and Clang type a
+construct differently, one rule decides (below).
 
-**Target model.** Sizes of scalar types, the signedness of `char` and the
-types behind `size_t`, `ptrdiff_t` and `wchar_t` are read from the
+**Target model.** Sizes of scalar types, the signedness of `char` and
+the types behind `size_t`, `ptrdiff_t` and `wchar_t` are read from the
 backend's predefined macros, obtained from the same compiler with the
 options of the step that compiles the output. Preprocessing options such
 as `-D` and `-undef` are left out: they cannot change the ABI of that
 step, and `-D__SIZEOF_LONG__=4` would make the model lie. `typec` has no
-target table of its own. The model also names the backend, Clang when
-`__clang__` is defined and GCC otherwise, with its major version
-(`__clang_major__` or `__GNUC__`). The compiler decides the constructs
-whose types are unknown (below), and `typec` refuses a release older
-than `Target.minimum_major_version`, the one statement of the oldest
-supported releases. For Clang that is the first release that types C as
-the front end does: Clang 19 gives an enumerator that `int` holds the
-type `int` in an enumeration whose values `int` does not all hold, where
-Clang 20 and GCC follow C23 6.7.2.2 (N3029) in every dialect and give
-every enumerator the enumerated type. For GCC it is the oldest release
-that a test host runs. *Provisional:* Apple numbers its Clang releases
-on its own and is held to the same minimum, which only Apple clang 21
-confirms; an Apple release at or above the minimum that types C as
-Clang 19 does would settle it otherwise, and without one the minimum
-stays.
+target table of its own.
+
+The front end assumes three types that no predefined macro states.
+13.4 names them and asserts them in the emitted C, and the driver
+refuses the options known to change one (13.2).
+
+The model also names the backend, Clang when `__clang__` is defined and
+GCC otherwise, with its major version (`__clang_major__` or
+`__GNUC__`). The compiler decides the constructs whose types are
+unknown (below).
+
+`typec` refuses a release older than `Target.minimum_major_version`,
+the one statement of the oldest supported releases. For Clang that is
+the first release that types C as the front end does: Clang 19 gives an
+enumerator that `int` holds the type `int` in an enumeration whose
+values `int` does not all hold, where Clang 20 and GCC follow C23
+6.7.2.2 (N3029) in every dialect and give every enumerator the
+enumerated type. For GCC it is the oldest release that a test host
+runs. *Provisional:* Apple numbers its Clang releases on its own and is
+held to the same minimum, which only Apple Clang 21 confirms; an Apple
+release at or above the minimum that types C as Clang 19 does would
+settle it otherwise, and without one the minimum stays.
 
 **No aggregate layout.** *Provisional (P16).* The size, alignment and
 member offsets of struct, union and array types are opaque constants to
@@ -2032,6 +2607,60 @@ corpus settle it: a point that often needs an unknown type's properties
 makes the front end type that construct; the default is that unknown
 types stay.
 
+The table of effects holds one more fact of an attribute: a mark on
+each that, on a declaration of a function, breaks on its own the
+property on which the form of a `return` in the scope of a `defer`
+statement rests (13.5, P9), that the function's name names exactly one
+function which `__typeof__` may name. 13.5 says what a mark refuses.
+A mark is a fact of the attribute alone: `typec` reads no attribute
+arguments, and a mark does not ask which backend compiles the unit, as
+the refusal for `target` does not (13.5). It applies to the attribute
+under the one name that reading gives it, however the source spells
+it. The table records the spellings of each attribute, and the one
+function that names an attribute reads them from it: the GNU
+spelling, as `overloadable` and `__overloadable__`; in a C23
+specifier `[[gnu::x]]`; and Clang's `[[clang::x]]` where Clang
+defines that spelling. No uniform mapping gives the last: Apple Clang
+21 accepts `[[clang::overloadable]]` and ignores
+`[[clang::diagnose_if(...)]]` and `[[clang::noreturn]]` with a
+warning. The table is the one list of marks:
+
+- `overloadable`. The front end does not tell the members of an
+  overload set from redeclarations of one of them ("Overloads" below),
+  so the attribute alone decides. Apple Clang 21 refuses the `f` of the
+  typedef where two overloads are in scope, and in a plain function
+  with an overload declared beside it; it takes the form for a set of
+  one.
+- `cpu_dispatch` and `cpu_specific`, which make the name stand for
+  several versions of a function. Apple Clang 21 refuses the `f` for
+  `cpu_specific`, with and without a `cpu_dispatch` declaration.
+- `target_clones` and `target_version`, on the property alone, since
+  the name stands for more than one function: both backends take the
+  form for `target_clones`, and Clang for `target_version` on AArch64.
+- `unavailable`, which forbids a mention of the name. GCC 16 refuses
+  the `f` with "'f' is unavailable"; Apple Clang 21 takes the form.
+- `availability`, whatever its arguments and whichever the backend.
+  One that makes the function unavailable forbids a mention of the
+  name: GCC 16 on Darwin refuses the `f` for `availability(macos,
+  unavailable)` with the same message and takes it for an
+  `availability` that makes nothing unavailable, and Apple Clang 21
+  takes the form whatever the arguments. `typec` cannot tell the two
+  kinds apart without reading the arguments, so every `availability`
+  is marked. Few functions that a program defines carry the attribute,
+  and P9 counts the refusals.
+- Clang's `diagnose_if`, whatever its arguments. It reports a mention
+  of the name where its condition holds, as an error or as a warning,
+  whichever an argument says, and `typec` cannot tell which without
+  reading the arguments, so every `diagnose_if` is marked. Apple Clang
+  21 reports the `f` where the condition holds and reads no parameter.
+
+`deprecated` has no mark: it reports a mention of the name as a
+warning, and the table of diagnostics in 13.5 holds what the form adds
+for it. Under `-Werror` the added warning breaks a build, which the P9
+row of section 15 counts; a mark is for what reports an error by
+itself. An attribute that is found to break the form joins the table
+with a mark; 13.5 says what an attribute without one means there.
+
 **Where GCC and Clang differ.** The front end types C as Clang does,
 whichever the backend is. GCC types a few constructs otherwise: the
 value of a bit-field narrower than its type, which it gives a type of
@@ -2047,19 +2676,34 @@ function of an old-style definition with parameters, to which Clang
 gives the prototype of their promoted types, which a later declaration
 without a prototype inherits and the uses that the definition reaches do
 not see (C11 6.9.1p7, DR 316), where GCC gives the definition no
-prototype of its own and keeps one before it; and the composite of an
+prototype of its own and keeps one before it; the composite of an
 enumerated type and its compatible integer type, which is the enumerated
-type in GCC and the integer type in Clang. With GCC as
-the backend each of these has an unknown type (P21) wherever GCC's type
-differs from Clang's, and the real part of a bit-field, which differs in
-being an lvalue, has one too: the front end neither guesses GCC's type nor
-refuses what GCC accepts, and the error at a point that needs the type
-names the construct and says that GCC types it otherwise. One table,
-`Backend_difference`, holds the constructs, what GCC does and a probe of
-each, and decides for every place that types one. GCC 14 to 16 and
-Clang 20 to 22 confirm every entry but the old-style definition and the
-composite, which GCC 16 and Clang 21 to 23 confirm. One rule for the class replaces a policy
-per construct: the front end models one compiler's typing, and the other
+type in GCC and the integer type in Clang; and a function type whose
+return type is qualified with `const`, `volatile` or `restrict`, from
+which it drops those three qualifiers (C17 6.7.6.3p5), so that `const
+int (void)` and `int (void)` are one type, where Clang keeps them and
+holds the two incompatible: with `const int cf(void);`, `int
+(*p)(void) = cf;` is an error to Clang and none to GCC. GCC keeps
+`_Atomic` in the function type, as Clang does, and both refuse
+`_Atomic int af(void); int af(void);`, so the entry covers the three
+qualifiers and not `_Atomic`. With GCC as the backend each of these
+has an unknown type
+(P21) wherever GCC's type differs from Clang's, and the real part of a
+bit-field, which differs in being an lvalue, has one too: the front end
+neither guesses GCC's type nor refuses what GCC accepts, and the error
+at a point that needs the type names the construct and says that GCC
+types it otherwise. For the return type that is those three qualifiers
+alone: a comparison of two function types that turns on them has an
+unknown answer, so the initialiser of `p` is an error with Clang as
+the backend
+and is left to GCC with GCC. One table, `Backend_difference`, holds the
+constructs, what GCC does and a probe of each, and decides for every
+place that types one. GCC 14 to 16 and Clang 20 to 22 confirm every
+entry but the old-style definition and the composite, which GCC 16 and
+Clang 21 to 23 confirm, and the return type, which is measured on GCC
+16.2 and Apple Clang 21 only. One rule for the class replaces a policy
+per
+construct: the front end models one compiler's typing, and the other
 costs an unknown type where it differs, not a second model.
 *Provisional:* the table holds the differences that probes have found;
 a construct that the typing oracle or the corpus shows GCC typing
@@ -2104,13 +2748,44 @@ Every marker, copied or written by `typec`, takes the GNU form
 input, where it refuses `#line`, and the only one with flags: flag 3
 marks a system header, which the backend exempts from warnings, so that
 the user's `-pedantic-errors` or `-Wextra` judges the user's code and
-not the platform's headers. A marker that `typec` writes inside a file
-that a marker with flag 3 opened carries flag 3 and no enter or return
-flag, which keeps the exemption; without it the exemption would end until
-the backend's next marker with flag 3. A header that only
-`#pragma GCC system_header` makes a system header, and a region that GCC
-marks as the expansion of a system macro, is not seen as one (2.4 owner
-rule), so an edit there ends the exemption until the next such marker.
+not the platform's headers. A marker that `typec` writes carries the
+flags 3 and 4 of the marker in effect at the location it gives, and no
+enter or return flag. A marker without a file name, and `#line`, keep
+the flags in effect. The marker before lowered text takes the flags of
+the construct it lowers, and the marker after it those of the last
+replaced token, so the backend exempts the text after an edit exactly as
+before: in a file that a marker with flag 3 opened, after
+`#pragma GCC system_header`, and in a region GCC marks as a system
+macro's expansion, where the lowered text is exempt as well. The owner
+(2.4) does not change: a header that only the pragma makes a system
+header is not one to `typec`.
+
+The front end assumes three types that no predefined macro of the
+target model (13.3) states: a plain `int` bit-field is signed, an
+unsuffixed floating constant is `double`, and an enumeration of the
+value 0 has the compatible type that the model's rule gives it. A
+backend that holds otherwise would compile code that the front end has
+typed differently, with no message. The C of a unit with a Type-C
+construct therefore ends with static assertions of these three, and of
+no other type assumption, under a marker for `<typec>` with flag 3, so
+the user's warnings do not judge them. The backend thus fails the build
+when an option, wrapper, config file or target default changes one of
+those types out of the model's sight. One enumeration stands for all of
+them, because those routes change the rule for the whole unit.
+`#pragma GCC optimize` regions are not covered. *Provisional:* the one
+enumeration is confirmed for the measured targets alone. A target whose
+rule differs from the model's only for values other than 0 would settle
+it otherwise, with an assertion for each enumeration; without one, the
+one enumeration stays.
+
+A unit that holds a packing bracket ends, under the same marker, with
+one assertion more: the probe of 10.3, which asserts how the backend
+reads `#pragma pack()` and no type. The message of each of the four
+names the options known to break it. The driver refuses those of the
+three types as well, and none for the probe (13.2). A unit without
+Type-C constructs gets none of this, since its text is the backend's
+own. An emitted header ends with the probe where it holds a bracket and
+carries none of the three type assertions (9.3).
 
 Two properties follow by construction:
 
@@ -2128,14 +2803,14 @@ Two properties follow by construction:
 | --- | --- |
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
 | Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. Inside an initialiser, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. |
-| `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that declares the bindings and ends in a trap; `break`, `continue` and `return` unchanged; `default:` holding the trap. |
-| Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is the controlled statement with the binding declarations first in its block, or in a block made around a statement that is not a compound statement. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
+| `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. |
+| Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
-| Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter replaced by a typedef of its argument. Its prototype and its definition stand where 10.3 says. |
-| `try` | A temporary of the result type; a test of its tag; on `Err`, the active cleanups and a `return`; then the `Ok` field, read where the `try` stood. The temporary and the test stand before the statement or declaration that holds the `try` (5.1), in the block of that statement, or in a block made around it where it is not a block item, as the substatement of an `if`, a loop or a label is not. Where `T` is `void`, `Ok` has no field (3.5 rule 6) and nothing is read after the test. |
-| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order; `return e;` becomes a temporary, the cleanups, and `return` of the temporary. Where `e` is a void expression, as in `return f();` of a function that returns `void`, there is no temporary: it becomes `e;`, the cleanups and `return;`. Rules 8 and 9 of section 6 guarantee that each copy binds its names as the original does and defines no label or object twice. |
+| Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
+| `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. Where `T` is `void`, `Ok` has no field (3.5 rule 6) and nothing is read after the test. |
+| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. A `return e;` in the scope becomes a block, as said below the table. |
 | Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes, named as said below the table. |
 | Checked-mode checks | Inline tests that trap. |
 
@@ -2161,21 +2836,436 @@ typec does not read attribute arguments or `#pragma` lines, where a
 binding can be named; it would also hide the bindings from a debugger
 under their own names (4.1).
 
-Every name that lowering writes is claimed (10.1, 10.3) or reserved
-(2.3), so no declaration hides one: not in a block, not in a copy of a
-deferred statement and not in an instance. The tokens of the source that
-it writes at another point, a deferred statement or the definition of a
-generic, keep their meaning there by rule 8 of section 6 and rule 8 of
-3.5.
+**The statement that holds a `try`.** The temporary and the test of a
+`try` stand directly before the statement or declaration that holds it,
+in the same block, so the operand is moved text. The temporary is named
+`__tc_t` and a number, which counts the `try` expressions of the
+function from 0 in the order of the source: the temporaries of one block
+share a scope, so each needs a name of its own. The labels of the
+statement stay in place on a null statement, `L: ;`, and the temporary,
+the test and the statement follow it. No block is then made around a
+labelled statement, and a tag that the statement declares keeps the
+scope it has in the source. Where the statement is not a block item once
+its labels are set aside, it is the substatement of another statement,
+which C makes a block of its own (C11 6.8.4p3, 6.8.5p5), and a block is
+made around the null statement of the labels and the three, so the
+labels stay inside the substatement: `if (c) L: x = try f();` becomes
+`if (c) { L: ; /* temporary, test */ x = /* the Ok field */; }`, with
+`L` under the `if`.
 
-The identifiers that the compiler invents begin with `__tc_`. The internal
-function of a slice index or of a universe function is named `__tc_`, then
-`slice_index` or the name of the universe function, then the `__` and the
-argument encoding of the slice instance it serves (10.3):
-`__tc_slice_sub__h` for a `slice(unsigned char)`. The prefix keeps it from
-every name in the text (2.3), no other invented name holds a `__` after
-the prefix, and the rest tells these functions apart as it tells instances
-apart.
+Nothing stands between the test and the statement, so a pragma before
+the statement or before one of its labels would come to stand before
+the temporary, or before the null statement of the labels. A `try` is
+therefore an error where a pragma stands directly before the statement
+or declaration that holds it, or directly before any of its labels: a
+`#pragma` line, which is also how a `_Pragma` operator reaches `typec`.
+`typec` sees the line as tokens and applies the rule without reading
+them, whatever the pragma. A pragma there may govern the one statement
+after it, as OpenMP's `critical` does. It would govern the declaration
+of the temporary, which GCC 16 refuses under `-fopenmp` and the front
+end of Apple Clang 21 under `-Xclang -fopenmp` (Apple's driver rejects
+`-fopenmp` itself), and the error path of the `try` would leave the
+governed statement.
+
+The temporaries share the block of their statements, so a build that
+asks for C90's order of declarations or for C++'s jump rule hears of
+them: `-Wdeclaration-after-statement` reports a temporary that follows
+a statement of its block, and `-Wjump-misses-init` a `goto` that
+crosses one (Apple Clang 21, GCC 16). Neither is in `-Wall` or
+`-Wextra`.
+
+The error path returns the `Err` that is built from the temporary after
+the cleanups (5.1 rule 2).
+
+**`return` in the scope of a `defer` statement.** *Provisional (P9).*
+A function that returns a value and holds a `return e;` in the scope of
+a `defer` statement declares its return type under the name `__tc_ret`,
+once, and each such `return` becomes a block that holds a temporary of
+that type, the cleanups and the `return` of the temporary. The function
+`long f(int a, char *b) { /* body */ }` becomes
+
+```c
+long f(int a, char *b)
+{ typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(a) *)0,
+                                          *(__typeof__(b) *)0)) __tc_ret;
+  { /* body */ } }
+```
+
+and each such `return e;` in its body becomes
+
+```c
+{ __tc_ret __tc_r = (e); /* cleanups */ return __tc_r; }
+```
+
+A function with no such `return` is written as it stands.
+
+The type of `__tc_ret` is the type of a call of `f`, which is the
+return type, and the typedef spells no part of that type. The tokens of
+the head cannot be written a second time: they may declare a type, as
+in `struct s { int a; } f(void)`, and a parameter may hide a name among
+them, as in `T f(int T)`. The call goes through a null pointer to the
+type of `f` and passes, for each parameter of the definition in order,
+an lvalue of the parameter's type. A function with no parameters passes
+none, and a variadic function its named parameters alone. In a function
+instance `f` is the instance name. No part of the call is evaluated:
+the operand of `__typeof__` is evaluated only where its type is
+variably modified, as the operand of `sizeof` is (C11 6.5.3.4p2), and
+no return type is.
+
+The initialisation converts the value of `e` to the return type as the
+`return` would have, as if by assignment (C11 6.8.6.4p3), and before the
+cleanups (section 6 rule 3); the `return` of the temporary converts
+nothing. A constructor expression or a `str` literal that takes its type
+from the return type (3.3) is written in the initialiser as the compound
+literal it lowers to, which carries that type. `__tc_ret` and `__tc_r`
+are reserved (2.3), so neither the body, `e` nor a cleanup names one,
+and each such block declares its own `__tc_r`.
+
+The typedef is the first block item of the function's body, and the
+body as written is a block after it. At the typedef the names in scope
+are those of file scope and those that the parameter list declares, and
+no others, so no declaration of the body hides `f` or a parameter
+there. The names in the typedef are read where the head declares them
+and are not moved text; no rule about a hidden name is needed at a
+`return`.
+
+The body is a block of its own because some text must begin a compound
+statement: `#pragma STDC FENV_ACCESS` and `#pragma clang fp` lines, and
+`__label__` declarations. Clang refuses those pragmas after the typedef
+in one block, and both backends refuse `__label__` there. In the inner
+block Apple Clang 21 and GCC 16 take all three, and a pragma before the
+first statement of the body, such as `#pragma clang loop` or `#pragma
+GCC ivdep`, governs that statement as it does in the source.
+
+The bindings of a match arm and of a single-pattern test are declared
+before the block or statement that uses them, not inside it, for the
+same reason (the table above). An arm that binds is
+`{ bindings { items } trap }`, so that what begins the arm still
+begins a compound statement. An arm that
+binds nothing is `{ items trap }`: its items begin the arm's own block
+and need no second one. The true branch of a test is `{ bindings S }`
+with the controlled statement `S` as written. A compound statement `S`
+is still begun by what begins it in the source, and a pragma that the
+source writes between the `)` of the test and `S`, as `#pragma GCC
+unroll` before a loop, still stands directly before `S`. A test that
+binds nothing gets the block too, since the false branch follows it as
+an `else`, which an `if` in `S` would otherwise take. The added scope
+would let a second declaration of a binding's name, among the items of
+the arm or in the outermost block of a compound `S`, hide the binding,
+where the source has the two in one scope; the front end refuses that
+declaration (4.1(5), 4.6(4)).
+
+The inner block is one scope further in than the body is in C, where
+the parameters and the outermost block of the body share one scope
+(C11 6.2.1p4). Two refusals follow from that, and a function that gets
+the typedef is an error in each.
+
+- The parameter list declares the function's own name, as a parameter
+  or as an enumeration constant. In `long f(int f)`, `__typeof__(f)`
+  would name the parameter. The own name of a function instance is its
+  instance name, which is claimed (10.3), so no parameter list declares
+  it: a parameter with the name of the generic hides nothing that the
+  typedef names.
+- A declaration in the outermost block of the body declares a name that
+  the parameter list declares, in the same name space. C reads the two
+  as declarations of one scope. It forbids the second declaration of a
+  parameter or of an enumeration constant (C11 6.7p3), and both
+  backends refuse it in plain C; it lets the block complete a tag of
+  the parameter list, as in `int f(struct s *p) { struct s { int a; };
+  return p->a; }`. In the inner block the first would hide the
+  parameter with no message, and the second would declare another
+  structure, which the backends then refuse at `p->a`.
+
+The form cannot be written in three more cases. A function that gets
+the typedef is an error in the first two, and the `return` in the
+third.
+
+- A function whose name does not, at its definition, name exactly one
+  function that `__typeof__(f)` may name there. The typedef rests on
+  that one property of the name, and the property is a fact of the
+  declarations of the name that are in scope at the definition, the
+  definition's own among them: the form is refused where the backend
+  keeps two of them apart, as it does the members of an overload set
+  (13.3, "Overloads") and the versions of a function, or where one of
+  them forbids a mention of the name, or reports one as an error.
+  `typec` decides it from those declarations in two ways, and from
+  nothing else.
+  - Two of the declarations carry `target` attributes whose arguments
+    differ: they declare two versions of the function. `typec` compares
+    the arguments token for token and does not read them, so two
+    spellings of one set of features, as `target("avx2,fma")` and
+    `target("fma,avx2")`, count as two versions and the function is
+    refused, which errs on the safe side. A single
+    definition with `target("avx2")` is one function and gets the
+    form, and so does a function whose declarations repeat one `target`
+    attribute. Apple Clang 21 on x86-64 refuses the `f` of the typedef
+    for two versions and takes it for a function of either of those
+    shapes. GCC 16 reads two such declarations as one function in C
+    there and takes the form; the refusal does not ask which backend
+    compiles the unit.
+  - One of the declarations carries an attribute that breaks the
+    property on its own, whatever else is declared, as `overloadable`
+    does. The table of attributes that the front end knows marks each
+    such attribute (13.3, "Unknown types"). It is the one list of
+    them and says what was measured of each.
+
+  Nothing else refuses the form on this ground: an attribute without a
+  mark, or with no entry in the table, does not. A backend error that
+  such an attribute causes in the typedef is a bug in `typec` (13.3),
+  and the attribute joins the table.
+- A function with a parameter that has no name, which the backends
+  accept in a definition as an extension: the typedef has no lvalue to
+  write for it.
+- A `return e;` in a function that returns `void`, where `e` is not a
+  void expression or has an unknown type (13.3, P21). C forbids the
+  first (C11 6.8.6.4p1), the block that is said next would lose the
+  backend's diagnostic, and an unknown type does not say which case it
+  is. In a function that returns a value the form needs no type of `e`,
+  so an operand of unknown type is no error there.
+
+In a function that returns `void` there is no value to hold and no
+typedef. `return e;` with a void expression for `e`, as in
+`return g();`, becomes `{ e; /* cleanups */ return; }`. The `return` of
+the error path of a `try` needs no temporary either: the temporary of
+the `try` holds its value, and no cleanup reads or changes that one,
+since its name is reserved (2.3).
+
+Apple Clang 21 and GCC 16 take the form under `-std=c11
+-pedantic-errors -Wall -Wextra -Wconversion -Wsign-conversion
+-Wfloat-conversion -Wformat-security`. They report the conversion of
+`e`, a format string and a bit-field operand as they do for the plain
+`return e;`; that was measured as well for a null pointer constant in a
+function that returns a pointer (`return 0;`) and for parameters of
+variably modified type. A diagnostic of the conversion speaks of an
+initialisation where the plain form speaks of a `return`, and names the
+type as `'__tc_ret' (aka 'int')` in Clang and `'__tc_ret' {aka 'int'}`
+in GCC.
+
+The diagnostics differ by one rule and its mirror. A diagnostic that
+rests on the operand standing in a `return` statement, on the `return`
+standing without braces, or on a name going unused, is lost: the
+operand stands in an initialiser, the `return` in a block, and the
+typedef names the function and every parameter. The form adds the
+diagnostics of the text that it writes. Measured with both backends,
+at `-O0` and `-O2`, and with Clang's `-Weverything`:
+
+| Diagnostic | Plain `return e;` | The form |
+| --- | --- | --- |
+| Clang `-Wreturn-stack-address` (on by default), `return &x;` of a local | Reported | Lost |
+| GCC `-Wreturn-local-addr` (on by default), the same | Reported | Lost at `-O0`; reported at `-O2` |
+| Clang `-Wnonnull` (on by default), `return 0;` in a function declared `returns_nonnull` or with a `_Nonnull` return type | Reported | Lost |
+| `-Wmisleading-indentation` (in `-Wall`), both backends, `if (c) return x;` followed by a statement indented as if the `if` guarded it | Reported | Lost: the `return` stands in a block |
+| `-Wunused-parameter`, `-Wunused-but-set-parameter`, both backends | Reported | Lost for every parameter of the function |
+| Clang `-Wunused-function`, an unused `static` function | Reported | Replaced by `-Wunneeded-internal-declaration`; GCC reports `-Wunused-function` for both |
+| `-Wshadow`, both backends, where `e` holds a statement expression with such a `return` of its own | None | Added: the inner `__tc_r` hides the outer one |
+| Clang `-Wunreachable-code`, where `e` is a call of a `noreturn` function | None | Added: what follows the initialiser is never reached |
+| Clang `-Wused-but-marked-unused` (in `-Weverything`), a parameter marked `unused` | None | Added, once for the function |
+| Clang `-Wdeprecated-non-prototype`, an old-style definition with no prototype in scope | Once, for the definition | Once more, for the call in the typedef |
+| GCC `-Wdeprecated-declarations`, a function marked `deprecated` | None | Added, once for the function; Clang reports none |
+| `-pedantic`, `return e;` of a void expression in a function that returns `void` | Reported | Lost |
+
+Clang's `-Weverything` also reports every `__tc_` name that a lowered
+unit declares under `-Wreserved-identifier`, as it does those of an
+emitted header (9.3).
+
+Pilot B judges the form against this list and the refusals above, with
+the rest of P9; the P9 row of section 15 is the one list of what it
+counts. Without a finding against it, the form stays.
+
+Rules 8 and 9 of section 6 guarantee that each copy of a deferred
+statement binds its names as the original does and defines no label,
+object or type twice. Rule 12 guarantees that the block ends the scope
+of no name that the operand declares, and that control leaves the
+operand only as it ends or by leaving the function, so that the block
+ends the life of no object that the source keeps.
+
+**Moved text.** Lowering writes some source text at a place other than
+its own: a deferred statement at each exit from its scope (section 6),
+the definition of a generic in each instance (10.3) and the operand of
+a `try` before the statement or declaration that holds it (5.1). One
+*resolution property* holds for such *moved text*: it reads, at each
+place where lowering writes it, as it reads at its own place, and the
+text around it reads as it would had nothing moved. Lowering writes a
+name of moved text in one of two ways, and the property has a half for
+each. A third clause covers the text around it.
+
+- A name that lowering writes as the source spells it, an ordinary
+  identifier, a tag or a label name, has one reading at both places.
+  Where the text uses the name, it denotes the same entity at both, and
+  the entity has the same type. Where the text declares the name for
+  itself, the name denotes at each place of writing what it denotes at
+  the text's own place, the entity that the text declares: the name of a
+  parameter does not become a typedef name that is visible there, and a
+  tag of a prototype's own scope does not become a structure that file
+  scope declares before the place of writing. A declaration that would
+  make a reading differ at a place where the text is written is an
+  error; a declaration in whose scope no such place lies is none.
+  Completing a structure or union changes neither an entity nor its
+  type, and neither does declaring an entity again with the type it has:
+  a member that names a structure of file scope reads alike where the
+  structure is completed between the text and the place of writing.
+- Every other name that lowering writes there is its own: the name of
+  what a type application, a universe name, a constructor or a type
+  parameter denotes (10.1, 10.3), or a name that it invents. Each is
+  claimed (10.1, 10.3) or reserved (2.3), so no declaration hides one:
+  not in a block, not in a copy of a deferred statement and not in an
+  instance. A declaration that hides a universe name or a constructor
+  from the source therefore changes no moved text.
+- Moved text declares no name that is in scope after it. The text does
+  not stay at its own place, so what follows it there would lose the
+  declaration, and what follows a place of writing would gain it. A name
+  whose scope ends inside the text, in a parameter list or in a block,
+  is no such name. The kinds of moved text meet the clause each in its
+  own way. A deferred statement is a block (section 6 rule 8), so the
+  clause holds for it by construction. The operand of a `try` declares
+  no tag and no enumeration constant in the scope around it (5.1 rule
+  3). The definition of a generic declares its generic, and that of a
+  generic variant its constructors, which lowering writes under the
+  names of the instances (10.1, 10.3), and nothing else: it is not the
+  first mention of a tag in file scope, and the head of a generic
+  function declares no type at all (3.5 rule 8). The clause holds as
+  well for the operand of a `return` that lowering writes as a block,
+  though that text does not move (section 6 rule 12).
+
+The property is stated here alone and checked in one place. Every move
+goes through one check of the three clauses, and so does the block that
+lowering makes around the operand of a `return` (above), where the
+third clause applies. No kind of moved text has a check of the property
+of its own: rules 8 and 12 of section 6, rule 8 of 3.5 and rule 3 of 5.1
+cite the property and show it on examples, and what rule 3 of 5.1 and
+rule 12 of section 6 say of a name that the operand declares is the
+third clause on their text.
+
+A place where the text is written is a place in the lowered C. The
+copies of deferred statements for the error path of a `try` stand with
+its test, before the statement or declaration that holds the `try`, so
+a declaration that holds a `try` is not in scope at them (section 6
+rule 8).
+
+The property covers the text that `typec` reads. *Unread text* is
+every token that typing does not read. Attribute arguments, `#pragma`
+lines, the bodies of block literals and the function bodies that are
+passed through unread (13.3) are unread text. The backend
+resolves what unread text names, at the place where the text is
+written and under the spelling of the source. `typec` looks at the
+identifiers of an attribute argument and of a `#pragma` line, which it
+reads as preprocessing tokens (C11 6.10.6),
+without knowing which of them the backend reads as a name. A pragma
+line that is not a sequence of preprocessing tokens is left to the
+backend whole and holds no identifier for `typec`: GCC keeps some
+pragmas verbatim in its `-E` output, the free text of a `#pragma mark`
+line among them. Three rules carry the property into unread text.
+
+- For the first half, an identifier in an attribute argument or a
+  `#pragma` line of moved text that denotes something at the text's own
+  place, as an ordinary identifier or as a tag, counts as a use of it. A
+  declaration that hides it at a place of writing is refused as for any
+  other use: where a deferred statement declares an object with
+  `__attribute__((vector_size(N)))` and `N` is an enumeration constant,
+  an `enum { N = 4 };` in a block that holds an exit is an error. An
+  identifier that denotes nothing at the text's own place is not
+  counted, which is the case of most words of a pragma, such as `push`.
+  `typec` cannot tell such a word from a name that the source left
+  undeclared, and what the backend finds under it at a place of writing
+  is the backend's to say. A word that does denote something is counted,
+  and a declaration that hides it at a place of writing is refused
+  though it would change nothing. The measurements of P9 and P23 count
+  these refusals.
+- For the second half, an identifier in an attribute argument or a
+  `#pragma` line may denote, at its place, what lowering writes under a
+  name of its own: a type parameter, a universe name, a constructor or
+  a generic. Lowering leaves unread text as the source spells it,
+  whether the text is moved or not, so the backend reads the spelling
+  as the lowered C declares it there. Where the Type-C name hides a C
+  entity of that spelling, the backend would read that entity, with no
+  message, and the identifier is an error, in all Type-C text and in
+  moved text that is C text: with `typedef char T;` at file scope,
+  `__attribute__((aligned(sizeof(T))))` in a generic with a type
+  parameter `T` would take the size of `char` in every instance. Where
+  it hides none, the lowered C declares nothing under the spelling and
+  the backend decides: it refuses a name that it cannot find, as the
+  `option` of `__attribute__((aligned(_Alignof(option(int)))))`, and
+  takes a word that is no name, as the `push` of `#pragma pack(push)`
+  in the scope of a generic named `push`.
+- No other unread text stands in moved text, in any text. The two
+  rules above cover attribute arguments and `#pragma` lines, whose
+  identifiers `typec` looks at. All other unread text is a body that
+  holds statements and declarations and is unread as a whole, so that
+  neither rule reaches into it: the body of a block literal and a
+  function body that is passed through unread (13.3). A block literal
+  holds no Type-C text (13.3), so the rule refuses one in a deferred
+  statement that C text writes with `_Defer` and in a generic that C
+  text defines. A function body that is passed through unread is moved
+  text only as the body of a generic function, and that function is an
+  error: no instance could be lowered from its body.
+
+The state that positional pragmas set is that of the place where the
+text is written, and it is outside the property. A deferred statement
+declares no type for such state to lay out (section 6 rule 9). An
+instance is kept from `#pragma pack` by the bracket of 10.3 and from no
+other pragma that changes a layout, among them `#pragma ms_struct on`,
+GCC's `#pragma scalar_storage_order` and a `#pragma clang attribute
+push` that applies `packed`. An instance that is first used inside the
+region of one of them in one translation unit, and outside it in
+another, has one name and two layouts. A function instance is likewise
+compiled under the pragmas in force where its first use puts its
+definition: `#pragma GCC target`, `#pragma GCC optimize`, `#pragma clang
+attribute push` and the pragmas that name a section apply to an instance
+first used in their region. Code under such a pragma keeps the first use
+of every instance outside its region.
+
+The identifiers that the compiler invents begin with `__tc_`, which
+keeps them from every name in the text (2.3). One that is declared at
+file scope or defined as a macro, and is one of many of its kind,
+continues with a word for its kind, then `__`, then what tells it from
+the others of its kind:
+
+- the internal function of a slice index or of a universe function:
+  `slice_index` or the name of the universe function, then the argument
+  encoding of the slice instance it serves (10.3), as in
+  `__tc_slice_sub__h` for a `slice(unsigned char)`;
+- the typedef of a type argument (10.3): `arg`, then the encoding of
+  the type, as in `__tc_arg__Pi` for `int *`;
+- the include guard of an emitted header itself (9.3): `module`, then
+  the module of its interface, as in `__tc_module__ir_5fexpr` for
+  `ir_expr.tci`. The *module* of a file is the last component of its
+  path without a `.tci` suffix, and it is written with an ASCII letter
+  or a digit standing for itself and every other byte as `_` and its
+  two hexadecimal digits in lower case;
+- the include guard of the definition of an instance in an emitted
+  header (9.3): `header`, then the module of the file that defines the
+  instance's generic, then `__`, then the instance name, as in
+  `__tc_header__vec__vector__i` for `vector(int)` where `vec.tci`
+  defines `vector`. No file defines a generic of the universe (3.6),
+  and its module is written as nothing: `__tc_header____option__i` for
+  `option(int)`;
+- the two structures of the packing probe of an emitted header (10.3):
+  `pack_probe_1` or `pack_probe_2`, then the module of the header, as
+  in `__tc_pack_probe_1__ir_5fexpr`.
+
+No kind word holds a `__` or ends in `_`, so the first `__` after the
+prefix ends the word, and names of different kinds differ: the guard of
+a header never meets the guard of an instance. The name of a universe
+function is the kind word of its internal functions, and no universe
+function has the word of another kind of this list as its name. Within
+a kind, an encoding is one type, an instance name one instance (10.3),
+and the written form of a module that last component alone, since
+every `_` in it begins an escape. The written form holds no `__` and
+does not end in `_` either, so in the guard of an instance the first
+`__` after the kind word's ends the module, and the guard is one module
+and one instance. A generic of the universe shares its guards with no
+other: no generic of a file has a universe name (3.6), so none has its
+instance names.
+
+No other invented name holds a `__` after the prefix. `__tc_ret`, the
+return type of a function, is declared once in the outermost block of
+its function, and `__tc_r`, the temporary of a `return`, in a block of
+its own; neither needs more than the prefix. `__tc_t0`, `__tc_t1` and
+so on are the temporaries of the `try` expressions of a function, which
+share its blocks and take the number that tells them apart. `__tc_bits`
+and `__tc_enum_probe` are the probes of the assertions that end a unit
+(13.4), and `__tc_pack_probe_1` and `__tc_pack_probe_2` the two
+structures of the packing probe that ends one (10.3), one of each.
 
 ### 13.6 Diagnostics and debugging
 
@@ -2230,6 +3320,8 @@ a crash.
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), another declaration of a name that an instance claims (10.3) and a placement that 10.3 or 7.3 rule 2 refuses are compile errors | Nothing |
+| Text that lowering moves means what it means at its own place, and the text around it what it means without the move | A deferred statement at each exit, a generic's definition in each instance and the operand of a `try` (13.5). Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. An instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), an instance first used inside its region in one translation unit and outside it in another has one name and two layouts, and a function instance is compiled under the target, optimisation, attribute and section pragmas in force at its first use (13.5) |
+| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for` | Explicit casts to `void` |
 | A slice access stays in bounds | `s[i]`, `slice_sub` | The slice describes live storage of its length |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |
@@ -2249,7 +3341,7 @@ numbers refer to the implementation plan.
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions (5.1) | Stage 2 pilot: rewrites the limit forced | As specified |
-| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8 and 9 of section 6 (13.5) | Stage 2: code size on the pilot; how often rules 8 and 9 reject code | Repetition |
+| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6, and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; among those of rule 8, the refusals that 13.5 makes for an identifier in an attribute argument or a `#pragma` line of a deferred statement; how often each refusal of the form (13.5) rejects a function or a `return`; the returns where the plain form reports a diagnostic of the list of 13.5 that the form loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
 | P12 | Instances are per translation unit (7.3) | Stage 3: code size of the library and pilot | Per unit |
@@ -2263,8 +3355,8 @@ numbers refer to the implementation plan.
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
-| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 3: how often rule 8 rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
-| P24 | A block literal is C text only (13.3) | Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
+| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, the refusals that 13.5 makes for an identifier in an attribute argument or a `#pragma` line of a definition among them. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
+| P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
 
 ## 16. Non-goals
 
