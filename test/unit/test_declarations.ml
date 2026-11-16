@@ -22,10 +22,10 @@ let read ?(file = "in.c") target source =
   in
   let keywords = Target.keywords target Gnu in
   match Parser.parse_with_scopes ~keywords text with
-  | Ok (unit, { Parser.file_scope; _ }) ->
+  | Ok (_, ({ Parser.file_scope; _ } as scopes)) ->
       Result.map
         (fun result -> (file_scope, result))
-        (Declarations.read target text unit)
+        (Declarations.read target text scopes)
   | Error error -> Error error
 
 (* What [name] denotes at file scope at the end of what [read] read. *)
@@ -2623,6 +2623,134 @@ let generic_definitions () =
     (box ^ " type pair(T) = struct { box(T) b; box(T *) p; };"
     ^ " pair(int) x;")
 
+(* Design 13.5 and 3.5 rule 8: the definition of a generic reads where
+   an instance's text stands as at the definition. *)
+let generic_resolution () =
+  let file = "in.tc" in
+  (* A tag of a prototype's own scope, and a parameter's name, that
+     file scope declares between the definition and the instance. *)
+  rejects ~file
+    "type handler(T) = struct { void (*call)(struct ctx *c, T value); }; \
+     struct ctx { int depth; }; handler(int) h;"
+    "in the instance 'handler__i' that this application names";
+  rejects ~file
+    "type handler(T) = struct { void (*call)(struct ctx *c, T value); }; \
+     struct ctx { int depth; }; handler(int) h;"
+    "the tag 'ctx' in a scope of its own";
+  rejects ~file
+    "type slot(T) = struct { void (*call)(int (foo), T value); }; \
+     typedef char foo; slot(int) s;"
+    "the text declares 'foo' for itself";
+  accepts ~file
+    "type slot(T) = struct { void (*call)(int (foo), T value); }; \
+     int foo; slot(int) s;";
+  accepts ~file
+    "type slot(T) = struct { void (*call)(int (foo), T value); }; \
+     slot(int) s; typedef char foo; slot(int) t;";
+  (* What the text uses: an array type completed, a function type
+     changed, and a type that depends on an unknown one, are refused;
+     a structure completed and a declaration with the same type are
+     not. *)
+  let uses = "type g(T) = struct { T v; typeof(a) *p; };" in
+  rejects ~file ("extern int a[]; " ^ uses ^ " int a[3]; g(int) x;")
+    "changes the type that the text uses";
+  rejects ~file ("int a(); " ^ uses ^ " int a(int); g(int) x;")
+    "changes the type that the text uses (design 13.5) [TC0044]";
+  accepts ~file ("extern int a[2]; " ^ uses ^ " extern int a[2]; g(int) x;");
+  accepts ~file ("int a(int); " ^ uses ^ " int a(int); g(int) x;");
+  accepts ~file ("extern int a[]; " ^ uses ^ " g(int) x; int a[3];");
+  accepts ~file
+    "struct s; type g(T) = struct { T v; struct s *p; }; \
+     struct s { int a; }; g(int) x;";
+  rejects ~file
+    ("static _Float16 a(_Float16); " ^ uses
+   ^ " static _Float16 a(_Float16 x) { return x; } g(int) x;")
+    "[TC0045]";
+  accepts ~file ("static _Float16 a(_Float16); " ^ uses ^ " g(int) x;");
+  (* Unread text: an attribute's identifier that denotes a type
+     parameter is refused where C declares its spelling, and one that
+     denotes a declaration is a use of it. *)
+  let aligned =
+    "type g(T) = struct { T v __attribute__((aligned(sizeof(T)))); };"
+  in
+  rejects ~file ("typedef char T; " ^ aligned ^ " g(int) x;") "[TC0046]";
+  rejects ~file (aligned ^ " typedef char T; g(int) x;")
+    "denotes a type parameter";
+  accepts ~file (aligned ^ " g(int) x;");
+  accepts ~file
+    "enum { N = 8 }; \
+     type g(T) = struct { T v __attribute__((aligned(N))); }; g(int) x;";
+  rejects ~file
+    "extern int a[]; \
+     type g(T) = struct { T v __attribute__((aligned(sizeof(a)))); }; \
+     int a[4]; g(int) x;"
+    "changes the type that the text uses";
+  rejects ~file
+    "type g(T) = struct { T v __attribute__((aligned(sizeof(option)))); }; \
+     int option; g(int) x;"
+    "denotes a universe name";
+  accepts ~file
+    "type named(T) = struct { int name; T value; }; int name; \
+     named(int) n;";
+  (* A definition check writes no text: the check of [b] reads [a] over
+     an opaque type after the typedef, but [a(int)] stands before it. *)
+  accepts ~file
+    "type a(T) = struct { T v; void (*f)(int (foo)); }; a(int) early; \
+     typedef char foo; type b(T) = struct { a(T) inner; }; b(int) y;";
+  (* The place of writing holds what lowering declares there: the
+     forward declaration of a variant or a record alias whose body uses
+     the instance (design 10.3), and the tag line of each tag that an
+     instance's argument names, at a nested instance too. *)
+  let slot =
+    "type slot(T) = struct { void (*call)(int (expr), T value); };"
+  in
+  rejects ~file (slot ^ " type expr = | Call(slot(int) s) | Nil;")
+    "the text declares 'expr' for itself";
+  rejects ~file (slot ^ " type expr = struct { slot(int) s; };")
+    "the text declares 'expr' for itself";
+  rejects ~file
+    "type handler(T) = struct { void (*call)(struct expr *c, T value); }; \
+     type expr = | Call(handler(int) h) | Nil;"
+    "the tag 'expr' in a scope of its own";
+  let handler =
+    "type handler(T) = struct { void (*call)(struct ctx *c, T value); };"
+  in
+  rejects ~file (handler ^ " handler(struct ctx *) h;")
+    "the tag 'ctx' in a scope of its own";
+  rejects ~file
+    (handler ^ " type alias(T) = handler(T); alias(struct ctx *) h;")
+    "the tag 'ctx' in a scope of its own";
+  rejects ~file
+    (handler
+   ^ " type outer(T) = struct { handler(T) inner; }; \
+      outer(struct ctx *) o;")
+    "the tag 'ctx' in a scope of its own";
+  accepts ~file (handler ^ " handler(struct other *) h;");
+  (* A tag in unread text is a use of the tag. *)
+  accepts ~file
+    "struct s { int a; }; \
+     type g(T) = struct { T v __attribute__((aligned(sizeof(struct s)))); }; \
+     struct s; g(int) x;";
+  (* The instance of a generic variant that a later declaration
+     completes is defined, and checked, where a point first needs it
+     complete after that. *)
+  let deferred =
+    "type g(T); g(int) *p; type g(T) = | A(void (*f)(int (foo))) | B(T v);"
+  in
+  rejects ~file (deferred ^ " typedef char foo; g(int) q;")
+    "the text declares 'foo' for itself";
+  accepts ~file (deferred ^ " g(int) q; typedef char foo;");
+  (* A nested instance is checked where it stands, before the external
+     declaration of the outer instance's first use. *)
+  rejects ~file
+    "type inner(T) = struct { void (*f)(int (y)); T v; }; \
+     type outer(T) = struct { inner(T) i; }; typedef int y; outer(int) o;"
+    "the text declares 'y' for itself";
+  (* Moved text declares no name that is in scope after it, even where
+     no instance is written (design 13.5, 3.5 rule 8). *)
+  rejects ~file "type link(T) = struct { struct node *next; T v; };"
+    "the tag 'node' is declared in the scope around the text"
+
 let () =
   type_declarations ();
   variants ();
@@ -2669,4 +2797,5 @@ let () =
   generic_arguments ();
   generic_definitions ();
   generic_checks ();
+  generic_resolution ();
   if !failures > 0 then exit 1

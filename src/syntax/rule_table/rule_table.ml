@@ -201,12 +201,13 @@ let rows =
          structure or union specifier with a body and a \
          tag, or with a body where the definition of an instance does \
          not hold it; an enumeration specifier with a body." };
-    Live { name = "Generic_first_mention"; code = 39;
-      clause = Some "design 3.5 rule 8";
+    Live { name = "Moved_declaration"; code = 39;
+      clause = Some "design 13.5";
       meaning =
-        "A tag that the definition of a generic type is the first to \
-         mention in the scope around its structure, which is file \
-         scope." };
+        "A declaration in moved text of a name that is in scope after \
+         the text, such as a tag that the definition of a generic type \
+         is the first to mention in the scope around its structure, \
+         which is file scope (design 3.5 rule 8)." };
     Live { name = "Pragma_tokens"; code = 40; clause = Some "design 13.5";
       meaning =
         "A [#pragma] line in Type-C text whose text after [pragma] is no \
@@ -229,6 +230,26 @@ let rows =
          external declaration that holds it: a type that they name or \
          need complete is not ready there, or the forward declaration of \
          a tag that they write would change a mention before it." };
+    Live { name = "Moved_text"; code = 44; clause = Some "design 13.5";
+      meaning =
+        "A declaration between moved text and a place where lowering \
+         writes it that makes a name of the text read otherwise there: a \
+         name that the text uses denotes another entity or tag, or an \
+         entity of another type, or a name that the text declares for \
+         itself is a typedef name or a tag of the scope around it." };
+    Live { name = "Moved_text_unknown"; code = 45;
+      clause = Some "design 13.5, P21";
+      meaning =
+        "A declaration between moved text and a place where lowering \
+         writes it of an entity that the text uses, where whether the \
+         entity keeps its type depends on a type that typec does not \
+         compute." };
+    Live { name = "Unread_own_name"; code = 46; clause = Some "design 13.5";
+      meaning =
+        "An identifier in the arguments of an attribute that denotes a \
+         type parameter, a generic or a universe name, where the place \
+         that lowering writes it at declares a C entity of its \
+         spelling, which the backend would read." };
   ]
 
 let () =

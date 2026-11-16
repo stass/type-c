@@ -126,6 +126,6 @@ val types_compatible : t -> Tree.expression -> bool Unknown.answer option
 (** The answer of a [__builtin_types_compatible_p] that the reader has
     typed; see {!Expressions.types_compatible}. *)
 
-val read : Target.t -> Reader.t -> Tree.translation_unit -> (t, error) result
-(** [read target text unit] reads [unit], parsed from [text], for
-    [target]. *)
+val read : Target.t -> Reader.t -> Parser.scopes -> (t, error) result
+(** [read target text scopes] reads the unit whose external declarations
+    [scopes] holds, parsed from [text], for [target]. *)

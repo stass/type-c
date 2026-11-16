@@ -58,11 +58,12 @@ let read target source =
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in
-  match Parser.parse ~keywords:(Target.keywords target Gnu) text with
-  | Ok unit ->
+  let keywords = Target.keywords target Gnu in
+  match Parser.parse_with_scopes ~keywords text with
+  | Ok (unit, scopes) ->
       Result.map
         (fun result -> (unit, result))
-        (Declarations.read target text unit)
+        (Declarations.read target text scopes)
   | Error error -> Error error
 
 (* The last expression statement of the body of the last function

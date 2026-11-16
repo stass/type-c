@@ -24,7 +24,9 @@ let lp64 = Canned_targets.target Canned_targets.lp64_macros
 (* The only call of the parser, so that a change to its interface is one
    edit here. *)
 let parse reader =
-  Parser.parse ~keywords:(Typec_sema.Target.keywords lp64 Gnu) reader
+  Parser.parse_with_scopes
+    ~keywords:(Typec_sema.Target.keywords lp64 Gnu)
+    reader
 
 let check_spans reader unit =
   let dump = Tree_dump.translation_unit reader unit in
@@ -35,22 +37,23 @@ let check_spans reader unit =
 (* The parser keeps its typedef scope in its own state; parsing again in
    the same process shows whether any of it outlives a parse. *)
 let check_deterministic reader unit =
-  if parse reader <> Ok unit then violated "parsing is deterministic"
+  if Result.map fst (parse reader) <> Ok unit then
+    violated "parsing is deterministic"
 
-let read_declarations reader unit =
-  match Typec_sema.Declarations.read lp64 reader unit with
+let read_declarations reader scopes =
+  match Typec_sema.Declarations.read lp64 reader scopes with
   | Ok _ -> ()
   | Error error -> Property.check_refusal error
 
-let check_parsed reader unit =
+let check_parsed reader (unit, scopes) =
   check_spans reader unit;
   check_deterministic reader unit;
-  read_declarations reader unit
+  read_declarations reader scopes
 
 let check text =
   match Reader.read ~name:"fuzz.i" text with
   | Error error -> Property.check_refusal error
   | Ok reader -> (
       match Small_stack.run (fun () -> parse reader) with
-      | Ok unit -> check_parsed reader unit
+      | Ok parsed -> check_parsed reader parsed
       | Error error -> Property.check_refusal error)

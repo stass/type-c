@@ -728,6 +728,36 @@ is [type-c-language-design.md](type-c-language-design.md).
   of package 2.1, which merges brackets with the edits of lowering,
   would repeat it again. Keep the order in one place: one function that
   merges edits, or the sort in `Emitter.emit`.
+- [Medium] The record of what a generic's definition uses and declares,
+  which `Resolution.check` reads, is complete only while every lookup of
+  a use in `state.entities` and `state.tag_types` goes through
+  `entity_used` or `prior_tag`, and every declaration through
+  `bind_entity` or `bind_tag`. Make the two tables an abstract module in
+  `declarations.ml` whose only lookup of a use and only binding record
+  them, with separate, named accessors for the comparison at a place,
+  the type parameters of an instance, the final types of enumerators
+  and the builtins, so that a new lookup cannot skip the record.
+- [Medium] `note_own` takes the scope of a declaration in a generic's
+  definition from the reader's `state.place`, which a block read for a
+  statement expression leaves at file scope: `type g(T) = struct { T v;
+  int a[sizeof(({ int k = 1; k; }))]; };` is refused as declaring `k`
+  around the text (TC0039), where the backend would refuse the
+  statement expression at file scope anyway. Let the parser, which
+  knows every scope, record in `Tree.declared` and `Declares` whether
+  the declaration's scope is file scope, and read that instead; generic
+  functions (package 2.2), which have bodies, need it right.
+- [Medium] Design 13.5 refuses an identifier of unread text that
+  denotes a constructor where C declares its spelling, and refuses the
+  identifiers of the second unread-text rule in all Type-C text.
+  `Resolution` checks only moved text, and cannot tell a constructor:
+  the parser's views hold none, as a target type selects one (3.3).
+  Decide with package 2.3 how unread text names a constructor, and check
+  the rule for Type-C text that does not move at its own place.
+- [Low] Design 3.5's example `type named(T) = struct { str name; T
+  value; }; int str; named(int) n;` is valid, but the parser reads
+  `str` as an ordinary identifier until package 3.4 gives it its
+  meaning. Add it to `generic_resolution` in `test_declarations.ml`
+  then.
 
 - [Medium] The needs of a type complete (design 10.3) are calls of
   `Declarations.needs_complete` at each construct of the list, so a

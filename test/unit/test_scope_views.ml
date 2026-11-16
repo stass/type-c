@@ -71,7 +71,7 @@ let outcome see ?(file = "in.i") case =
 (* The view in front of each external declaration, separated by " | ",
    or a mismatch where the declarations are not those of the tree. *)
 let declaration_views reader unit (scopes : Parser.scopes) names =
-  if List.map fst scopes.declarations <> Tree.external_declarations unit then
+  if List.map fst scopes.declarations <> unit then
     "the declarations with views are not those of the tree"
   else
     List.map (fun (_, view) -> show_view reader names view) scopes.declarations

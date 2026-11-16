@@ -166,12 +166,12 @@ own, and a tag declared before the definition is named by it.
   $ printf 'type link(T) = struct { struct node *next; T v; };\n' \
   >   > first_mention.tc
   $ ./golden.exe first_mention.tc
-  first_mention.tc:1: the definition of a generic type is the first to mention the tag `node` at file scope; declare the tag before the definition (design 3.5 rule 8) [TC0039]
+  first_mention.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0039]
   [1]
   $ printf 'type step(T) = | Done | Next(struct node *n, T v);\n' \
   >   > first_mention_field.tc
   $ ./golden.exe first_mention_field.tc
-  first_mention_field.tc:1: the definition of a generic type is the first to mention the tag `node` at file scope; declare the tag before the definition (design 3.5 rule 8) [TC0039]
+  first_mention_field.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0039]
   [1]
 
 Typing reads the definition again for each instance, with the
@@ -227,4 +227,39 @@ or in a constant expression, is refused there (design 3.5 rule 4).
   $ printf 'type a(T) = struct { char b[sizeof(T)]; T v; };\n' > size.tc
   $ ./golden.exe size.tc
   size.tc:1: a type in an expression in the definition of a generic type depends on a type parameter (design 3.5 rule 4) [TC0038]
+  [1]
+
+The definition of a generic reads where the text of an instance stands
+as at the definition (design 13.5, 3.5 rule 8). A tag of a prototype's
+own scope that file scope declares before the instance is refused at
+the application, as is a declaration of a used entity whose type may
+change through a type that typec does not compute (P21), and a type
+parameter in an attribute whose spelling C declares there.
+
+  $ cat > handler.tc <<'EOF'
+  > type handler(T) = struct { void (*call)(struct ctx *c, T value); };
+  > struct ctx { int depth; };
+  > handler(int) h;
+  > EOF
+  $ ./golden.exe handler.tc
+  handler.tc:3: in the instance 'handler__i' that this application names, at handler.tc:1: the text declares the tag 'ctx' in a scope of its own, but where lowering writes it the tag is the one declared at handler.tc:2 (design 13.5) [TC0044]
+  [1]
+
+  $ cat > dot.tc <<'EOF'
+  > static _Float16 dot(_Float16);
+  > type g(T) = struct { T v; typeof(dot) *f; };
+  > static _Float16 dot(_Float16 x) { return x; }
+  > g(int) x;
+  > EOF
+  $ ./golden.exe dot.tc
+  dot.tc:4: in the instance 'g__i' that this application names, at dot.tc:2: the declaration of 'dot' at dot.tc:3, between the text and a place where lowering writes it, may change the type that the text uses: that depends on '_Float16', whose type typec does not compute (design 13.5, P21) [TC0045]
+  [1]
+
+  $ cat > aligned.tc <<'EOF'
+  > typedef char T;
+  > type g(T) = struct { T v __attribute__((aligned(sizeof(T)))); };
+  > g(int) x;
+  > EOF
+  $ ./golden.exe aligned.tc
+  aligned.tc:3: in the instance 'g__i' that this application names, at aligned.tc:2: 'T' in the arguments of an attribute denotes a type parameter, but where lowering writes the text the backend reads the declaration of 'T' there, the one declared at aligned.tc:1 (design 13.5) [TC0046]
   [1]

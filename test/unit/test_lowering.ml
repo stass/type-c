@@ -23,12 +23,14 @@ let lowered source =
     | Ok text -> text
     | Error error -> failwith (Reader.error_message error)
   in
-  let unit =
-    match Parser.parse ~keywords:(Target.keywords lp64 Gnu) text with
-    | Ok unit -> unit
+  let scopes =
+    let keywords = Target.keywords lp64 Gnu in
+    match Parser.parse_with_scopes ~keywords text with
+    | Ok (_, scopes) -> scopes
     | Error error -> failwith (Parser.error_message error)
   in
-  match Declarations.read lp64 text unit with
+  let unit = List.map fst scopes.declarations in
+  match Declarations.read lp64 text scopes with
   | Ok declarations ->
       let edits =
         Lowering.edits text

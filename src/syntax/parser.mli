@@ -102,6 +102,9 @@ type ordinary = { declaration : Tree.reference; kind : kind }
 module View : sig
   type t
 
+  val empty : t
+  (** A view in which nothing is declared. *)
+
   val find : t -> string -> ordinary option
   (** The declaration of an ordinary identifier that is visible: that of
       the innermost scope that declares it. *)
@@ -120,6 +123,11 @@ val attribute_view : views -> Tree.attribute -> View.t option
 (** The view at the arguments of an attribute of the unit that [views]
     were taken in, or [None] for an attribute without arguments. *)
 
+val attributes_within : views -> Tree.span -> (Tree.span * View.t) list
+(** The arguments of each attribute whose arguments begin within the span,
+    in source order, each with the view at them: every attribute of a
+    text, wherever the grammar puts it. *)
+
 val pragma_view : views -> int -> View.t option
 (** [pragma_view views index] is the view at the token at [index] in
     [Reader.t.tokens] of the unit that [views] were taken in, if it is a
@@ -132,7 +140,7 @@ val pragma_view : views -> int -> View.t option
 (** What the parser records of the scopes of a unit beside its tree. *)
 type scopes = {
   file_scope : file_scope;
-  declarations : (Tree.external_declaration * View.t) list;
+  declarations : (Tree.external_declaration Tree.item * View.t) list;
       (** the external declarations of the unit in order, each with the
           view in front of it, which is file scope there *)
   views : views;

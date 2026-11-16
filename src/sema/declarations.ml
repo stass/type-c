@@ -110,10 +110,18 @@ type place = At_file_scope | In_prototype | In_definition | In_block
    instances so far, those of definition checks included, which a trial
    does not undo. [external_facts] are those of the external declaration
    being read, and [placements] where the texts of the instances stand
-   (design 10.3). *)
+   (design 10.3).
+   [views] are the parser's views of the unit's unread text, and
+   [definition_views] holds the view in front of each declaration of a
+   generic, by its id, which is the own place of its definition (design
+   13.5). [moved] collects what the reading of a generic's definition
+   finds in it, none outside one. *)
 type state = {
   target : Target.t;
   text : Reader.t;
+  views : Parser.views;
+  definition_views : (Tree.declaration_id, Parser.View.t) Hashtbl.t;
+  mutable moved : moved option;
   tags : Ctype.tags;
   entities : (Tree.reference, entity) Hashtbl.t;
   tag_types : (Tree.tag_id, tag) Hashtbl.t;
@@ -141,13 +149,26 @@ type state = {
    whose definition is being read, the last. *)
 and nesting = { depth : int; began : Tree.span; defining : Ctype.instance }
 
+(* What the reading of a generic's definition finds in its text, latest
+   first: the names that it uses and those that it declares, which the
+   resolution property checks (design 13.5), and whether lowering writes
+   the text, as it does for an instance but not for a definition check
+   or an instance read within one. *)
+and moved = {
+  mutable uses : Resolution.name list;
+  mutable declares : Resolution.own list;
+  written : bool;
+}
+
 (* What the placement of instances (design 10.3) asks of the external
    declaration being read: its index in the unit, the moment it began,
    the tags that its own text completes, with where, the tags that a
    mention in a nested scope of it declares only because none is
    visible (C11 6.7.2.3p8), and the moment of its first block literal.
-   The sets are tables, as one declaration can hold many of each. A
-   definition check adds to them and no trial removes that: a generic
+   [texts_at] is where the texts of instances stand, in front of it: the
+   parser's view there, with what lowering declares there so far (design
+   13.5). The sets are tables, as one declaration can hold many of each.
+   A definition check adds to them and no trial removes that: a generic
    is a declaration of its own at file scope, which holds nothing else
    that the facts are asked about. *)
 and external_facts = {
@@ -156,6 +177,7 @@ and external_facts = {
   completed : (Ctype.named_tag, Location.t) Hashtbl.t;
   nested_tags : (string, unit) Hashtbl.t;
   mutable block_literal : Ctype.moment option;
+  mutable texts_at : Resolution.place;
 }
 
 (* How the definition of an instance is read: [read declaration f] runs
@@ -190,9 +212,10 @@ let next_link nesting application defining =
   | Some { depth; began; defining = _ } ->
       { depth = depth + 1; began; defining }
 
-let declaration_state tags index =
+let declaration_state tags index view =
   { index; start = Ctype.now tags; completed = Hashtbl.create 16;
-    nested_tags = Hashtbl.create 16; block_literal = None }
+    nested_tags = Hashtbl.create 16; block_literal = None;
+    texts_at = { view; typedef_names = []; tags = [] } }
 
 (* An instance name is at most [Encoding.max_length] bytes; a message
    shows at most this many of them, cut at a character. *)
@@ -264,9 +287,34 @@ let not_read state span name =
       ^ " is declared where typec does not read declarations yet (design \
          13.3)"))
 
+(* What the text of a generic's definition being read uses and declares
+   (design 13.5): every use of a name passes [note_use], and every
+   declaration of one [note_own], whose scope is that around the text
+   where the reader reads it at file scope. *)
+let note_use state span name declaration =
+  match state.moved with
+  | Some moved ->
+      moved.uses <- { Resolution.name; span; declaration } :: moved.uses
+  | None -> ()
+
+let note_own state span name declaration ~implicit =
+  match state.moved with
+  | Some moved ->
+      let declared = { Resolution.name; span; declaration } in
+      let in_scope_after = state.place = At_file_scope in
+      moved.declares <-
+        { Resolution.declared; implicit; in_scope_after } :: moved.declares
+  | None -> ()
+
+(* What [reference] denotes at the use of [name] at [span], if the reader
+   has met its declaration. *)
+let entity_used state span name reference =
+  note_use state span name (Resolution.Ordinary reference);
+  Hashtbl.find_opt state.entities reference
+
 (* The entity that [reference] denotes at the use of [name] at [span]. *)
 let referenced state span name reference =
-  match Hashtbl.find_opt state.entities reference with
+  match entity_used state span name reference with
   | Some entity -> entity
   | None -> not_read state span name
 
@@ -356,13 +404,22 @@ let redeclared state span name prior next =
            (quote name ^ " is redeclared as a different kind of identifier \
                           (C11 6.7p3)"))
 
+(* What [declared] declares [name] as, which the text of a generic's
+   definition being read declares (design 13.5). *)
+let bind_entity state name (declared : Tree.declared) entity =
+  let reference = Tree.In_tree declared.id in
+  let (Ordinary_at token) = declared.id in
+  note_own state { first = token; last = token } name
+    (Resolution.Ordinary reference) ~implicit:false;
+  Hashtbl.replace state.entities reference entity
+
 (* An overload (design 13.3) is a new entity, which is not linked under
    its name, and stands beside what a declaration in its place would
    redeclare. *)
 let bind_overload state span name (declared : Tree.declared) next =
   let entity = { name; entity = fresh_entity state; declared = next } in
   let reference = Tree.In_tree declared.id in
-  Hashtbl.replace state.entities reference entity;
+  bind_entity state name declared entity;
   Hashtbl.replace state.beside reference
     (earlier_entity state span name declared);
   Hashtbl.replace state.overloaded reference ();
@@ -375,7 +432,7 @@ let follows_overload state (declared : Tree.declared) =
 
 let record state name (declared : Tree.declared) entity =
   let reference = Tree.In_tree declared.id in
-  Hashtbl.replace state.entities reference entity;
+  bind_entity state name declared entity;
   if follows_overload state declared then
     Hashtbl.replace state.overloaded reference ();
   if linkage_of entity.declared <> No_linkage then
@@ -1047,7 +1104,7 @@ and other_type state span (specifier : Tree.type_specifier) =
   | Application { name; generic; arguments } ->
       applied_type state span name generic arguments
   | Typedef_name { name; declaration } -> (
-      match Hashtbl.find_opt state.entities declaration with
+      match entity_used state span name declaration with
       | Some { declared = Typedef t; _ } -> t
       | Some _ | None ->
           fail state span (Rule.c_text (quote name ^ " is not a typedef name")))
@@ -1081,9 +1138,13 @@ and prior_tag state (tag : Tree.tag) =
     | Some found -> found
     | None -> not_read state tag.name.span tag.name.node
   in
+  let used id =
+    note_use state tag.name.span tag.name.node (Resolution.Tag id);
+    known id
+  in
   match tag.binding with
-  | Declares { earlier; id = _; implicit = _ } -> Option.map known earlier
-  | Names id -> Some (known id)
+  | Declares { earlier; id = _; implicit = _ } -> Option.map used earlier
+  | Names id -> Some (used id)
 
 (* A mention that declares its tag in a parameter list or a block only
    because none is visible (C11 6.7.2.3p8), which the placement of an
@@ -1098,7 +1159,9 @@ and note_nested_mention state (tag : Tree.tag) =
 (* [tag] is a declaration of [found] where it declares one. *)
 and bind_tag state (tag : Tree.tag) found =
   match tag.binding with
-  | Declares { id; earlier = _; implicit = _ } ->
+  | Declares { id; earlier = _; implicit } ->
+      note_own state tag.name.span tag.name.node (Resolution.Tag id)
+        ~implicit;
       Hashtbl.replace state.tag_types id found
   | Names _ -> ()
 
@@ -2270,6 +2333,8 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
   let declaration = scoped.declaration in
   let { Tree.declared; type_parameters; _ } = declaration.node in
   Hashtbl.replace state.generics (Tree.In_tree declared.id) declaration;
+  Hashtbl.replace state.definition_views declared.id
+    state.external_facts.texts_at.view;
   Option.iter
     (fun earlier -> Hashtbl.replace state.generics earlier declaration)
     declared.earlier;
@@ -2281,9 +2346,8 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
   let check =
     { read =
         (fun declaration read ->
-          in_own_views state (fun () ->
-              with_arguments state declaration (List.map snd parameters)
-                read)) }
+          read_definition state declaration (List.map snd parameters)
+            ~written:false read) }
   in
   in_trial state (fun () ->
       let instance = instance_of state declaration parameters in
@@ -2341,10 +2405,34 @@ and note_application state instance arguments span =
   let placements = state.placements in
   if not (Ctype.Instances.mem instance placements.used) then (
     List.iter (refuse_undeclared_argument state) arguments;
+    List.iter (note_tag_lines state) arguments;
     state.placements <-
       { placements with
         used = Ctype.Instances.add instance () placements.used;
         uses = placement_here state instance :: placements.uses })
+
+(* Design 10.3: before the typedef of an argument, which stands with the
+   instance at its first use, lowering writes [struct T;] for each
+   structure or union tag [T] that the argument names, which declares
+   the tag of file scope where the instance's text stands (design
+   13.5). The tag of a variant or an alias is one that its declaration
+   claims, which the view there holds already, and that of an instance
+   is reserved (design 2.3). *)
+and note_tag_lines state (span, argument) =
+  let facts = state.external_facts in
+  let note = function
+    | Ctype.Named_record { record_name = Named name; _ } ->
+        let lowered = { Resolution.lowered_name = name; written_for = span } in
+        facts.texts_at <-
+          { facts.texts_at with tags = lowered :: facts.texts_at.tags }
+    | Named_record
+        { record_name =
+            Anonymous | Variant_name _ | Alias_name _ | Instance_name _
+            | Opaque_name _; _ }
+    | Named_enum _ ->
+        ()
+  in
+  List.iter note (Ctype.named_tags argument)
 
 (* Design 10.3: an enumeration, and an untagged type that a typedef
    names, have no forward declaration that lowering could write, so the
@@ -2526,14 +2614,76 @@ and in_instance :
   state.instance_tokens <- tokens;
   state.nesting <- Some link;
   let restore () = state.nesting <- outer in
-  match
-    Fun.protect ~finally:restore (fun () ->
-        in_own_views state (fun () ->
-            with_arguments state declaration arguments read))
-  with
+  let written =
+    match state.moved with Some outer -> outer.written | None -> true
+  in
+  let read_instance () =
+    read_definition state declaration arguments ~written read
+  in
+  match Fun.protect ~finally:restore read_instance with
   | result -> result
   | exception Failed error when Option.is_none outer ->
       raise (Instance_failed (instance_error state application instance error))
+
+(* [read] of the definition of a generic with its type parameters bound
+   to [arguments], in views of its own, followed by the one check of the
+   resolution property (design 13.5) on what the reading found: at the
+   place in front of the external declaration being read, where the
+   instance's text stands, if lowering writes the text. *)
+and read_definition :
+      'a.
+      state ->
+      Tree.type_declaration ->
+      Ctype.t list ->
+      written:bool ->
+      (unit -> 'a) ->
+      'a =
+ fun state declaration arguments ~written read ->
+  let outer = state.moved in
+  let moved = { uses = []; declares = []; written } in
+  state.moved <- Some moved;
+  let read_and_check () =
+    let result =
+      in_own_views state (fun () ->
+          with_arguments state declaration arguments read)
+    in
+    check_resolution state declaration moved;
+    result
+  in
+  Fun.protect ~finally:(fun () -> state.moved <- outer) read_and_check
+
+and check_resolution state (declaration : Tree.type_declaration) moved =
+  let text =
+    { Resolution.span = declaration.span;
+      own_place =
+        Hashtbl.find state.definition_views declaration.node.declared.id;
+      uses = List.rev moved.uses;
+      declares = List.rev moved.declares }
+  in
+  let context =
+    { Resolution.tokens = state.text;
+      views = state.views;
+      entity = Hashtbl.find_opt state.entities;
+      same_tag = same_tag state;
+      same_type =
+        Ctype.same_type state.target state.tags
+          (location_of state declaration.span) }
+  in
+  let at = if moved.written then Some state.external_facts.texts_at else None in
+  match Resolution.check context text ~at with
+  | Ok () -> ()
+  | Error (span, diagnostic) -> fail state span diagnostic
+
+(* Whether two tag declarations declare one tag, as a completion or a
+   redeclaration does (C11 6.7.2.3p4). *)
+and same_tag state first second =
+  match
+    (Hashtbl.find_opt state.tag_types first,
+     Hashtbl.find_opt state.tag_types second)
+  with
+  | Some (Record_tag a), Some (Record_tag b) -> a.record_id = b.record_id
+  | Some (Enum_tag a), Some (Enum_tag b) -> a.enum_id = b.enum_id
+  | Some (Record_tag _ | Enum_tag _), _ | None, _ -> false
 
 (* [read] in typed views of its own, as it reads the text of a generic's
    definition again, for an instance or for the check, whose types no
@@ -2749,12 +2899,32 @@ let read_function_definition state (definition : Tree.function_definition) =
   | Skipped _ -> ());
   Function_definition entity
 
-let read_external state index (item : Tree.external_declaration Tree.item) =
-  state.external_facts <- declaration_state state.tags index;
+(* Design 10.3: a variant, or a record alias, that is no generic lowers
+   to a forward declaration [struct X; typedef struct X X;] first, which
+   the instances that its body uses follow. *)
+let note_forward_declaration state (scoped : Tree.scoped_type_declaration) =
+  let { Tree.name; type_parameters; definition; _ } = scoped.declaration.node in
+  match (type_parameters, definition) with
+  | [], (Variant _ | Record_alias _) ->
+      let facts = state.external_facts in
+      let lowered =
+        { Resolution.lowered_name = (name.node :> string);
+          written_for = name.span }
+      in
+      facts.texts_at <-
+        { facts.texts_at with
+          typedef_names = lowered :: facts.texts_at.typedef_names;
+          tags = lowered :: facts.texts_at.tags }
+  | [], (Incomplete_variant | Alias _ | Distinct _) | _ :: _, _ -> ()
+
+let read_external state index
+    ((item : Tree.external_declaration Tree.item), view) =
+  state.external_facts <- declaration_state state.tags index view;
   match item.declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
   | Type_declaration declaration -> (
+      note_forward_declaration state declaration;
       match read_type_declaration state declaration with
       | Some entity -> Type_declaration entity
       | None -> Generic_declaration)
@@ -2803,12 +2973,15 @@ let declare_builtin_typedefs state =
   |> List.filter (fun (_, builtin) -> Builtin_typedef.declared keywords builtin)
   |> List.iter declare
 
-let read target text unit =
+let read target text (scopes : Parser.scopes) =
   let tags = Ctype.create_tags () in
   let state =
     {
       target;
       text;
+      views = scopes.views;
+      definition_views = Hashtbl.create 16;
+      moved = None;
       tags;
       entities = Hashtbl.create 1024;
       tag_types = Hashtbl.create 256;
@@ -2824,14 +2997,14 @@ let read target text unit =
       applied_at = Ctype.Instances.empty;
       instance_tokens = 0;
       nesting = None;
-      external_facts = declaration_state tags 0;
+      external_facts = declaration_state tags 0 Parser.View.empty;
       placements = no_placements;
       place = At_file_scope;
       next_entity = 0;
     }
   in
   declare_builtin_typedefs state;
-  let read_all () = List.mapi (read_external state) unit in
+  let read_all () = List.mapi (read_external state) scopes.declarations in
   let end_deferral () = Ctype.end_deferral state.tags in
   match Fun.protect ~finally:end_deferral read_all with
   | items ->

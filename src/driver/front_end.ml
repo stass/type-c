@@ -32,8 +32,8 @@ let refuse_generics (text : Typec_cpp.Reader.t) type_declarations =
 
 let lower dialect target text =
   let keywords = Typec_sema.Target.keywords target dialect in
-  let* unit = Typec_syntax.Parser.parse ~keywords text in
-  let* declarations = Typec_sema.Declarations.read target text unit in
+  let* _, scopes = Typec_syntax.Parser.parse_with_scopes ~keywords text in
+  let* declarations = Typec_sema.Declarations.read target text scopes in
   let type_declarations =
     Typec_sema.Declarations.type_declarations declarations
   in

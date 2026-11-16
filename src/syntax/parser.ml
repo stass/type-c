@@ -98,8 +98,11 @@ module Places = Map.Make (Int)
 
 (* The scopes that unread text stands in (design 13.5), by the index of
    a token: at the [(] of the arguments of each attribute, and at each
-   pragma token. *)
-type views = { attributes : scope Places.t; pragmas : scope Places.t }
+   pragma token, and for an attribute the span of its arguments. *)
+type views = {
+  attributes : (span * scope) Places.t;
+  pragmas : scope Places.t;
+}
 
 (* The innermost statement around the cursor that a break or continue
    may leave. A break leaves a loop, switch or match, and a continue the
@@ -872,19 +875,6 @@ let at_file_level state =
   | Some { parameter_depth; _ } -> Scope.depth state.scope = parameter_depth
   | None -> Scope.is_file state.scope
 
-(* The definition of a generic type declares no tag in the scope around
-   its structure, which is file scope: lowering writes the definition in
-   each instance, so text after it would name a tag that the lowered C
-   declares later (design 3.5 rule 8). *)
-let refuse_generic_tag state (name : identifier) =
-  if Option.is_some state.generic && at_file_level state then
-    fail_at_token state (token_of name)
-      (Rule.message Generic_first_mention
-         (Printf.sprintf
-            "the definition of a generic type is the first to mention the \
-             tag %s at file scope; declare the tag before the definition"
-            (quoted name.node)))
-
 (* A tag that a type argument declares has one name only at file scope
    (design 3.5 rule 2). *)
 let refuse_argument_tag state (name : identifier) =
@@ -900,7 +890,6 @@ let refuse_argument_tag state (name : identifier) =
    (design 10.1 rule 6). *)
 let declare_tag state (name : identifier) ~implicit =
   let id = Tag_at (token_of name) in
-  refuse_generic_tag state name;
   refuse_argument_tag state name;
   if claims_tag state name.node then
     fail_claimed state name "tag" "is declared again";
@@ -1462,7 +1451,8 @@ let attribute_arguments state =
     state.views <-
       {
         state.views with
-        attributes = Places.add arguments.first scope state.views.attributes;
+        attributes =
+          Places.add arguments.first (arguments, scope) state.views.attributes;
       };
     Some arguments
   end
@@ -3998,6 +3988,8 @@ let file_scope_declarations scope =
 module View = struct
   type t = scope
 
+  let empty = Scope.file
+
   let find view name = Scope.find view name
 
   let find_tag view name =
@@ -4006,7 +3998,7 @@ end
 
 type scopes = {
   file_scope : file_scope;
-  declarations : (external_declaration * View.t) list;
+  declarations : (external_declaration item * View.t) list;
   views : views;
 }
 
@@ -4015,8 +4007,14 @@ type scopes = {
    gets one, so [Places.find] finds it. *)
 let attribute_view (views : views) (attribute : attribute) =
   Option.map
-    (fun (arguments : span) -> Places.find arguments.first views.attributes)
+    (fun (arguments : span) ->
+      snd (Places.find arguments.first views.attributes))
     attribute.node.arguments
+
+let attributes_within (views : views) (span : span) =
+  Places.to_seq_from span.first views.attributes
+  |> Seq.take_while (fun (first, _) -> first <= span.last)
+  |> Seq.map snd |> List.of_seq
 
 let pragma_view (views : views) token = Places.find_opt token views.pragmas
 
@@ -4046,9 +4044,10 @@ let parse_with_scopes ~keywords reader =
       (* Every scope the unit opens is closed, so [state.scope] is file
          scope as the unit leaves it. *)
       let file_scope = file_scope_declarations state.scope in
+      let item (declaration, view) = (Anchor.item declaration, view) in
+      let declarations = List.map item declarations in
       let scopes = { file_scope; declarations; views = state.views } in
-      let item (declaration, _) = Anchor.item declaration in
-      Ok (List.map item declarations, scopes)
+      Ok (List.map fst declarations, scopes)
   | exception Failed error -> Error error
 
 let parse ~keywords reader =
