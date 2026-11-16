@@ -843,8 +843,11 @@ backends, checks that the two print the same, and writes the bytes of
 machine code of each object and the run times to `OUT/results.md` (by
 default `/Volumes/Optaine/typec-gate4`), with the objects, the lowered C
 and the hyperfine exports under `OUT/work`. It
-runs on macOS and needs hyperfine and jq; `results.md` states how the
-verdicts are drawn.
+runs on macOS, FreeBSD and Linux and needs hyperfine and jq; the code
+size is read with `size -m` from Mach-O objects (the `__text*`
+sections) and with `size -A` from ELF objects (the `.text*` sections),
+and `size` must be installed. Off the macOS development host, name `OUT` and the backends (`TYPEC_TEST_CLANG`,
+`TYPEC_TEST_GCC`). `results.md` states how the verdicts are drawn.
 
 ```sh
 brew install hyperfine jq

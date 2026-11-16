@@ -14,8 +14,12 @@
 # repository because they are raw data. TYPEC names the compiler (by
 # default the one dune builds in this tree), TYPEC_TEST_CLANG and
 # TYPEC_TEST_GCC the backends as for the tests, RUNS the timed runs of
-# each batch (default 30). The code size is read from Mach-O sections,
-# so the script runs on macOS only, and it needs hyperfine and jq.
+# each batch (default 30). The script runs on macOS, FreeBSD and Linux
+# and needs hyperfine, jq and size; off the macOS development host,
+# name OUT, TYPEC_TEST_CLANG and TYPEC_TEST_GCC. The code size is the
+# bytes of machine code in an object, read by the tool of the object
+# format of the clang backend: size -m for Mach-O, size -A for ELF (GNU
+# and LLVM size print the same table).
 
 set -eu
 
@@ -35,9 +39,9 @@ fail() {
   exit 1
 }
 
-[ "$(uname -s)" = Darwin ] || fail "reads Mach-O sections; run on macOS"
 command -v hyperfine > /dev/null || fail "needs hyperfine"
 command -v jq > /dev/null || fail "needs jq"
+command -v size > /dev/null || fail "needs size"
 
 . "$root/test/run/backends.sh"
 
@@ -58,16 +62,33 @@ arguments_of() {
   esac
 }
 
-# The bytes of machine code in an object: the sum of its __TEXT sections
-# named __text*, which GCC splits into __text, __text_startup and
-# __text_cold. Strings and unwind tables are left out; the padding that
-# aligns each function is counted.
+# The object format of both backends, told by the target of clang: Mach-O
+# for an Apple target, ELF for any other. The bytes of machine code are
+# the sum of the code sections of the object, which GCC splits into
+# several (Mach-O __text, __text_startup and __text_cold; ELF .text,
+# .text.startup and .text.unlikely). Strings and unwind tables are left
+# out; the padding that aligns each function is counted. Each format
+# names the flag of size that lists the sections and the awk rule that
+# prints the size of each code section from that list.
+case $("$clang" -dumpmachine) in
+*-apple-*)
+  code_description="bytes of the __text* sections of the object (size -m)"
+  size_flag=-m
+  code_section_sizes='/Section \(__TEXT, __text/ { print $NF }'
+  ;;
+*)
+  code_description="bytes of the .text* sections of the object (size -A)"
+  size_flag=-A
+  code_section_sizes='$1 ~ /^\.text(\..*)?$/ { print $2 }'
+  ;;
+esac
+
 code_bytes() {
-  sections=$(size -m "$1") || fail "size -m failed on $1"
-  echo "$sections" | awk '
-    /Section \(__TEXT, __text/ { sum += $NF; found = 1 }
-    END { if (!found) exit 1; print sum }' ||
-    fail "no __text section in $1"
+  sections=$(size $size_flag "$1") || fail "cannot size $1"
+  printf '%s\n' "$sections" | awk "$code_section_sizes" |
+    awk '{ sum += $1; found = 1 }
+      END { if (!found) exit 1; print sum }' ||
+    fail "no code section in $1"
 }
 
 # Compiles one program of the pair to an object, sizes it and links it;
@@ -148,6 +169,16 @@ row() {
     }'
 }
 
+# The model of the CPU of the host, from the place each system keeps it.
+cpu_model() {
+  case $(uname -s) in
+  Darwin) sysctl -n machdep.cpu.brand_string 2>/dev/null ;;
+  FreeBSD) sysctl -n hw.model 2>/dev/null ;;
+  Linux) sed -n 's/^model name[[:space:]]*: *//p' /proc/cpuinfo 2>/dev/null |
+    head -n 1 ;;
+  esac | grep . || echo "unknown CPU"
+}
+
 header() {
   cat <<EOF
 # Stage 1 exit gate 4: size and speed against hand-written C
@@ -155,14 +186,14 @@ header() {
 Written by tools/measure/gate4.sh at
 $(git -C "$root" describe --always --dirty) on $(date -u +%Y-%m-%dT%H:%MZ),
 $(uname -m),
-$(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo "unknown CPU").
+$(cpu_model).
 
 * clang: $("$clang" --version | head -n 1)
 * gcc: $("$gcc" --version | head -n 1)
 * flags: $flags
 * timing: hyperfine, 3 warm-up runs and $runs timed runs per batch, in
   the order C twin, Type-C, C twin again
-* code: bytes of the __text* sections of the object (size -m)
+* code: $code_description
 
 Code size has no noise, so it is within noise only when equal. The
 Type-C time is its median with its interquartile range in parentheses;
