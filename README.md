@@ -140,7 +140,10 @@ TYPEC_TEST_GCC=/usr/bin/gcc dune test   # with another GCC
 
 Library tests are in `test/unit`; the parser's are tables of C text and
 the structural dump of its tree (`test/support/tree_dump.ml`) or its
-error. `test/golden` holds cram tests that show the C or the diagnostic
+error. `test_deep_trees` runs every chain that the parser reads in a
+loop (`test/support/chains.ml`), as deep as `Parser.max_depth` lets it,
+through the stages after the parser on a stack limited to 256K words.
+`test/golden` holds cram tests that show the C or the diagnostic
 that the front end gives for a source, with no backend
 (`test/golden/golden.ml`); `dune test test/golden` runs them and
 `dune promote` takes a changed output. Every rule that typec enforces has

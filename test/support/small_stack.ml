@@ -27,11 +27,14 @@ let on_fresh_fiber stage =
   Effect.Deep.match_with stage ()
     { retc = Fun.id; exnc = reraise; effc = (fun _ -> None) }
 
-let run stage =
+(* Runs [stage] on a stack of at most [words]. *)
+let run_within words stage =
   let saved = (Gc.get ()).stack_limit in
   let limited () =
-    set_limit limit_words;
+    set_limit words;
     stage ()
   in
   Fun.protect ~finally:(fun () -> set_limit saved) (fun () ->
       on_fresh_fiber limited)
+
+let run stage = run_within limit_words stage

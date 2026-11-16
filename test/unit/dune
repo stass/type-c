@@ -45,3 +45,13 @@
  (name test_rule_codegen)
  (modules test_rule_codegen)
  (libraries rule_codegen))
+
+(test
+ (name test_deep_trees)
+ (modules test_deep_trees)
+ (libraries
+  typec_cpp
+  typec_syntax
+  typec_emit
+  typec_driver
+  typec_test_support))

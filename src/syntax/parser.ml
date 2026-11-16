@@ -32,7 +32,7 @@ let max_nesting = 256
    chain has 66 links. 10000 is seventy times the deepest, and a tree
    that deep needs under 140K words (1.1 MiB) of stack in the later
    stages, on macOS and Linux, against the runtime's default limit of
-   128M words. *)
+   128M words; test_deep_trees holds them to 256K. *)
 let max_depth = 10_000
 
 (* How much of a token's spelling an error message quotes, so that a long
@@ -107,9 +107,9 @@ type jump_scope =
    judges them where the arm ends. *)
 type arm_breaks = { matched : jump_target; mutable leaving : int list }
 
-(* A node that [finish] made: the first token of its span and its height,
-   the most nodes on a path from it to a leaf. *)
-type made = { first_token : int; height : int }
+(* A constructor's name that the lookahead read and checked, at the token
+   [at]. *)
+type constructor_ahead = { at : int; checked : Spelling.constructor }
 
 (* The cursor. [scope] is persistent, so leaving a scope restores the
    value saved on entering it, and so is [jumps]; leaving an arm restores
@@ -123,10 +123,7 @@ type state = {
   mutable scope : scope;
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
-  mutable outermost : made list;
-      (** the nodes made and not yet inside a node made after them,
-          latest first, so their first tokens decrease: [recorded] takes
-          every entry at or after the first token it pushes *)
+  counter : Spanned.counter;  (** of the nodes made so far *)
 }
 
 (* The function derivation applied to the name that a declarator
@@ -173,9 +170,11 @@ let peek state = peek_at state 0
 
 (* Spans. A node starts at a grammar position taken before it is read and
    ends at the last token read, so every node holds at least one token.
-   [recorded] is the only way to give a node its span: [finish] for a
-   node read from [start], or directly for a node that wraps another in
-   the same span or whose span was taken before it is built. *)
+   [counted] is the only way to give a node that holds another its span,
+   as only a name is built outside it: [finish] for a node read from
+   [start], [spanned] for one that wraps another in the same span, or
+   directly for one that is counted once its parts are made but built
+   later, when what it holds besides them is known. *)
 
 (* The index in [Reader.t.tokens] of the last grammar token read. *)
 let last_read state = state.grammar.(state.position - 1).index
@@ -242,28 +241,14 @@ let too_deep =
      limit, C11 5.2.4.1)"
     max_depth
 
-(* Records a node with [span] and gives the span back: the nodes made
-   since whose first token lies in the span are its parts or inside them
-   (a node's span holds its parts, which are made before it), so the
-   node is one taller than the tallest of them, whatever loop or
-   recursion read it. The height is never below the node's, but for a
-   leaf that [constructor_names] makes unrecorded, an error of one that
-   does not grow. *)
-let recorded state (span : span) =
-  let rec take_parts tallest = function
-    | (part : made) :: rest when part.first_token >= span.first ->
-        take_parts (max tallest part.height) rest
-    | rest -> (tallest, rest)
-  in
-  let tallest_part, outside = take_parts 0 state.outermost in
-  let height = tallest_part + 1 in
-  if height > max_depth then
-    fail_at_token state span.first (Rule.c_text too_deep);
-  state.outermost <- { first_token = span.first; height } :: outside;
-  span
+(* Counts a node with [span], or refuses it where it is too deep. *)
+let counted state (span : span) =
+  match Spanned.count state.counter span with
+  | Some counted -> counted
+  | None -> fail_at_token state span.first (Rule.c_text too_deep)
 
-let finish state start node =
-  { span = recorded state (span_from state start); node }
+let spanned state span node = Spanned.make (counted state span) node
+let finish state start node = spanned state (span_from state start) node
 
 (* The refusal of the break or continue at [start]. *)
 let fail_jump state start diagnostic =
@@ -683,11 +668,12 @@ let declare_tag state (name : identifier) =
   Declares { id; earlier = Option.map (fun entry -> entry.tag) earlier }
 
 (* The name of a type declaration, which its spelling lets derive names
-   for C (design 3.1 rules 6 and 7). *)
+   for C (design 3.1 rules 6 and 7). [name] is the node made last, which
+   the checked name replaces: it counts as a part, a level too many. *)
 let checked_type_name state (name : identifier) =
   let at_file_scope = Scope.is_file state.scope in
   match Spelling.type_name ~at_file_scope name.node with
-  | Ok checked -> { name with node = checked }
+  | Ok checked -> spanned state name.span checked
   | Error reason ->
       fail_at_token state (token_of name)
         (Rule.message Type_name_spelling
@@ -1576,7 +1562,7 @@ let constructor_names state =
     | Punctuator_token P.Pipe, Identifier_token name ->
         let token = state.grammar.(state.position + offset + 1).index in
         let next = past_group state P.Left_paren (offset + 2) in
-        let name = { span = { first = token; last = token }; node = name } in
+        let name = Spanned.identifier { first = token; last = token } name in
         loop next (name :: names)
     | _ -> List.rev names
   in
@@ -1598,7 +1584,7 @@ let checked_constructor state (constructor : identifier) =
   | None, Some _ -> refuse "it is a universe name"
   | None, None -> (
       match Spelling.constructor constructor.node with
-      | Ok checked -> { constructor with node = checked }
+      | Ok checked -> checked
       | Error why -> refuse why)
 
 (* A field names a member of its constructor's structure, so its name
@@ -1614,7 +1600,7 @@ let refuse_reserved_field state (field : identifier) =
    read: the C it lowers to declares them before the structure, so a
    field names them as C does (design 10.1 rule 6). Names within one
    variant are unique (design 3.2 rule 2). Gives the names of the
-   constructors, which the tree takes from here. *)
+   constructors, which the tree takes as [constructor] reads them. *)
 let claim_enumerators state ~variant =
   let seen = Hashtbl.create 8 in
   let claim (name : identifier) =
@@ -1625,8 +1611,8 @@ let claim_enumerators state ~variant =
         (Rule.message Duplicate_constructor
            (quoted name.node ^ " names two constructors of one variant"));
     Hashtbl.replace seen name.node ();
-    claim_enumerator state ~variant ~at checked.node;
-    checked
+    claim_enumerator state ~variant ~at checked;
+    { at; checked }
   in
   (* In source order, so that the first refused name is the one
      reported. *)
@@ -2661,8 +2647,9 @@ and type_declaration state : int -> type_declaration =
       declared_definition
     end
   in
-  let span = recorded state (span_from state start) in
-  fun scope_end -> { span; node = { name; declared; definition; scope_end } }
+  let declaration_span = counted state (span_from state start) in
+  fun scope_end ->
+    Spanned.make declaration_span { name; declared; definition; scope_end }
 
 and incomplete_variant state checked =
   let name = (checked :> identifier) in
@@ -2721,12 +2708,14 @@ and constructors state names =
 (* At the [|] before [name], which is the next token: the lookahead of
    [constructor_names] skips the fields as [fields] reads them, so the
    two agree on every token where the grammar has not failed. *)
-and constructor state (name : Spelling.constructor spanned) =
+and constructor state (ahead : constructor_ahead) =
   let start = state.position in
   advance state;
-  if first_token state state.position <> name.span.first then
+  let name_start = state.position in
+  if first_token state name_start <> ahead.at then
     invalid_arg "Parser.constructor: the lookahead lost its constructor";
   advance state;
+  let name = finish state name_start ahead.checked in
   let fields = if accept state P.Left_paren then fields state else [] in
   finish state start ({ name; fields } : constructor_node)
 
@@ -2780,13 +2769,13 @@ and pattern_test state keyword =
   let start = state.position in
   advance state;
   let words = pattern_words state in
-  let pattern_span = recorded state (span_from state start) in
+  let pattern_span = counted state (span_from state start) in
   expect state P.Equal "`=` after the pattern of a single-pattern test";
   let operand = expression state in
   expect state P.Right_paren
     (Printf.sprintf "`)` after the operand of the test of `%s`" keyword);
   fun () ->
-    let pattern = { span = pattern_span; node = bound_pattern state words } in
+    let pattern = Spanned.make pattern_span (bound_pattern state words) in
     Pattern_test { pattern; operand }
 
 (* The controlling expression of a [do] after [keyword], in the
@@ -2930,7 +2919,7 @@ and open_statements state opened =
   | Punctuator_token P.Left_brace when binds_substatement opened ->
       let body = compound_statement state in
       (close_statements [@tailcall]) state opened
-        { span = recorded state body.span; node = Compound body }
+        (spanned state body.span (Compound body))
   | _ ->
       let statement = simple_statement state in
       (close_statements [@tailcall]) state opened statement
@@ -3004,7 +2993,7 @@ and simple_statement state =
   match peek state with
   | Punctuator_token P.Left_brace ->
       let body = block state in
-      { span = recorded state body.span; node = Compound body }
+      spanned state body.span (Compound body)
   | Punctuator_token P.Semicolon ->
       advance state;
       finish state start Null_statement
@@ -3395,7 +3384,7 @@ let parse_with_file_scope ~keywords reader =
       scope = initial_scope keywords;
       jumps = Function_body;
       arm = None;
-      outermost = [];
+      counter = Spanned.counter ~max_depth;
     }
   in
   match

@@ -4,6 +4,7 @@
 open Typec_cpp
 open Typec_syntax
 open Typec_test_support
+open Chains
 
 (* The keywords of gnu11 on a backend with every optional floating type
    and [__int128], which most cases are read with. *)
@@ -1613,8 +1614,6 @@ let error_cases =
     case "only pragmas" "#pragma once\n#pragma typec checked\n" "";
   ]
 
-let repeat count text = String.concat "" (List.init count (fun _ -> text))
-
 (* Declarations whose [:] tokens close no [?], so that the brackets the
    cursor counts would be out of step after them if a [:] closed the
    wrong thing. *)
@@ -1695,63 +1694,6 @@ let failed_nesting_cases () =
         beyond;
     ]
 
-let in_body statements = "void f(void) { " ^ statements ^ " }"
-
-(* Chains that the parser reads in loops and that nest, [links] levels
-   deep, each with the file it is read from. *)
-let nesting_chain_texts links =
-  let chain separator last =
-    String.concat separator (List.init links (fun _ -> "a")) ^ last
-  in
-  let c_texts =
-    [
-      ("binary operators", "int x = " ^ chain " + " ";");
-      ("assignments", "int x = " ^ chain " = " ";");
-      ("conditionals", "int x = " ^ chain " ? a : " ";");
-      ("omitted middle operands", "int x = " ^ chain " ?: " ";");
-      ("comma operators", "int x = (" ^ chain ", " ");");
-      ("sizeof", "int x = " ^ repeat links "sizeof " ^ "a;");
-      ("unary operators", "int x = " ^ repeat links "- " ^ "a;");
-      ( "real and imaginary parts",
-        "int x = " ^ repeat (links / 2) "__real__ __imag__ " ^ "a;" );
-      ("alignof", "int x = " ^ repeat links "__alignof__ " ^ "a;");
-      ("increments", "int x = " ^ repeat links "++" ^ "a;");
-      ("casts", "int x = " ^ repeat links "(int)" ^ "a;");
-      ("postfix operators", "int x = a" ^ repeat links "[0]" ^ ";");
-      ("pointers", "int " ^ String.make links '*' ^ "p;");
-      ("arrays", "int a" ^ repeat links "[1]" ^ ";");
-      ("ifs", in_body (repeat links "if (a) " ^ ";"));
-      ("else-if chains", in_body (repeat links "if (a) ; else " ^ ";"));
-      ( "dangling elses",
-        in_body (repeat links "if (a) " ^ ";" ^ repeat links " else ;") );
-      ("labels", in_body (repeat links "a: " ^ ";"));
-      ("case labels", in_body ("switch (a) " ^ repeat links "case 1: " ^ ";"));
-      ("default labels", in_body (repeat links "default: " ^ ";"));
-      ("switches", in_body (repeat links "switch (a) " ^ ";"));
-      ("whiles", in_body (repeat links "while (a) " ^ ";"));
-      ("fors", in_body (repeat links "for (int i = 0;;) " ^ ";"));
-      ("dos", in_body (repeat links "do " ^ ";" ^ repeat links " while (a);"));
-      ( "case ranges",
-        in_body ("switch (a) " ^ repeat links "case 1 ... 2: " ^ ";") );
-      ("block pointers", "int " ^ String.make links '^' ^ "p;");
-      ( "attributed pointers",
-        "int " ^ repeat links "* __attribute__((a)) const " ^ "p;" );
-      ( "attributed labels",
-        in_body (repeat links "a: __attribute__((a)) " ^ ";") );
-    ]
-  in
-  (* Each break of the chain is in tail position of the arm (design 4.3
-     rule 5), which the parser checks against every one. *)
-  let type_c_texts =
-    [
-      ( "else-if chains of breaks in an arm",
-        "type e = | A; void f(e v, int a) { match (v) { default: "
-        ^ repeat links "if (a) break; else " ^ "break; } }" );
-    ]
-  in
-  List.map (fun (name, text) -> (name, "in.i", text)) c_texts
-  @ List.map (fun (name, text) -> (name, type_c_file, text)) type_c_texts
-
 (* Chains that the parser reads in loops and that list, [length] long, so
    that their trees are as wide as they are long. *)
 let listing_chain_texts length =
@@ -1798,11 +1740,11 @@ let failed_chain_cases () =
        limit, C11 5.2.4.1)"
       Parser.max_depth
   in
-  let within (name, file, text) =
+  let within { name; file; text; lowers = _ } =
     Option.map (fun message -> (name ^ " within the bound", message))
       (parse_failure file text)
   in
-  let beyond (name, file, text) =
+  let beyond { name; file; text; lowers = _ } =
     match parse_failure file text with
     | Some message when message = too_deep -> None
     | Some message -> Some (name ^ " beyond the bound", message)
@@ -1813,8 +1755,8 @@ let failed_chain_cases () =
   in
   List.concat
     [
-      List.filter_map within (nesting_chain_texts (Parser.max_depth - 16));
-      List.filter_map beyond (nesting_chain_texts (Parser.max_depth + 1));
+      List.filter_map within (nesting_chains links_within_bound);
+      List.filter_map beyond (nesting_chains (Parser.max_depth + 1));
       List.filter_map listed (listing_chain_texts 100_000);
     ]
 

@@ -350,7 +350,8 @@ type sorted = {
   others : Tree.type_specifier list;
   qualifiers : Tree.type_qualifier list;
   function_specifiers : Tree.function_specifier list;
-  alignments : Tree.alignment Tree.spanned list;
+  alignments : (Tree.span * Tree.alignment) list;
+      (** each with the span of its specifier *)
   attributes : Tree.attribute list;
 }
 
@@ -365,8 +366,7 @@ let sort_specifiers (specifiers : Tree.specifiers) =
     | Function_specifier f ->
         { sorted with function_specifiers = f :: sorted.function_specifiers }
     | Alignment_specifier a ->
-        let alignment = { Tree.span = specifier.span; node = a } in
-        { sorted with alignments = alignment :: sorted.alignments }
+        { sorted with alignments = (specifier.span, a) :: sorted.alignments }
     | Attributes list ->
         { sorted with attributes = List.rev_append list sorted.attributes }
   in
@@ -745,7 +745,7 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
   let base = base_type state span sorted in
   let qualifiers = qualifiers_of sorted.qualifiers in
   let base_type = checked state span (Ctype.qualify qualifiers base) in
-  List.iter (alignment state) sorted.alignments;
+  List.iter (fun (_, a) -> alignment state a) sorted.alignments;
   {
     storage;
     thread_local = List.mem Tree.Thread_local sorted.storage_classes;
@@ -755,7 +755,7 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
     aligned =
       (match sorted.alignments with
       | [] -> None
-      | first :: _ -> Some first.span);
+      | (first, _) :: _ -> Some first);
     attributed;
   }
 
@@ -840,8 +840,8 @@ and typeof_expression state expression =
   (Expressions.whole_value (typing state) expression).expression_type
 
 (* 6.7.5p3: the value is the backend's to check, as layout is. *)
-and alignment state (alignment : Tree.alignment Tree.spanned) =
-  match alignment.node with
+and alignment state (alignment : Tree.alignment) =
+  match alignment with
   | Alignas_type type_name -> ignore (read_type_name state type_name)
   | Alignas_expression expression -> (
       match constant_expression state expression with

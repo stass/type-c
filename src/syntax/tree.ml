@@ -28,9 +28,11 @@ open Typec_cpp
 (** Tokens [first] to [last] of [Reader.t.tokens], with [first <= last].
     Neither end is a pragma token; pragma tokens between the ends belong
     to the node. *)
-type span = { first : int; last : int }
+type span = Spanned.span = { first : int; last : int }
 
-type 'a spanned = { span : span; node : 'a }
+(** Private, so that only {!Spanned} builds a node, which keeps the
+    parser's bound on the depth of the tree for every node. *)
+type +'a spanned = 'a Spanned.t = private { span : span; node : 'a }
 type identifier = string spanned
 
 (** The identity of a declaration of an ordinary identifier made in the
@@ -681,7 +683,7 @@ and asm_operand_node = {
     stack. *)
 let rec declared_identifier declarator =
   match declarator.node with
-  | Name name -> Some { span = declarator.span; node = name }
+  | Name name -> Some (Spanned.identifier declarator.span name)
   | Parenthesized_declarator { inner; _ }
   | Pointer { inner = Some inner; _ }
   | Block_pointer { inner = Some inner; _ }
