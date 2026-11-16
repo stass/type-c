@@ -939,12 +939,6 @@ types (design 13.3).
 
 ## Typing oracle
 
-- [Medium] No gate runs the oracle's comparison with Clang
-  (`tools/oracle`): it builds only in the `oracle` context of
-  `tools/oracle/oracle.workspace`, so `dune test` skips it, and a change
-  to `src/sema` (c5bb594) left `compare.t` stale unnoticed. Give the
-  full gate one command that runs the default suite and the oracle,
-  and document it as the command to run before a commit.
 - [Medium] (0.10) The comparison leaves 2748 records of the corpus
   unresolved for naming an anonymous structure, union or member by its
   location (`union (unnamed union at src/lstate.h:181:3)`), which no

@@ -144,6 +144,14 @@ TYPEC_TEST_GCC=/usr/bin/gcc dune test   # with another GCC
 
 `dune exec typec -- ARGS` runs the compiler from the build tree.
 
+`tools/gate.sh` is the command to run before a commit: it runs `dune build`
+and `dune test`, then builds the typing oracle and runs its tests, which
+`dune test` skips (see [Typing oracle](#typing-oracle)). It needs the opam
+switch `tools` and fails, saying where to find how to create it, when the
+switch is missing. It prints the end of the log when a step fails; the
+variables in the header of the script set the opam root, the oracle's build
+directory and the log.
+
 Library tests are in `test/unit`; the parser's are tables of C text and
 the structural dump of its tree (`test/support/tree_dump.ml`) or its
 error. `test_deep_trees` runs every chain that the parser reads in a
