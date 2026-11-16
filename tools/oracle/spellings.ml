@@ -98,7 +98,8 @@ let is_tag_keyword spelling =
 let is_identifier (token : Token.t) =
   match token.kind with
   | Identifier _ -> true
-  | Number | Character _ | String _ | Punctuator _ | Pragma | Typec_pragma ->
+  | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
+    ->
       false
 
 (* The candidates with a tag that their typedef declares, at file scope or

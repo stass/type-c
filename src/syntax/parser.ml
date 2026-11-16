@@ -58,20 +58,10 @@ type grammar_token = { lexeme : lexeme; index : int }
    or the [?] of a conditional, which its [:] closes. *)
 type opening = Open_bracket of P.t | Open_conditional
 
-(* How far the type declaration of a name has got: within a definition
-   that may not use the name (design 3.1 rule 2), past its definition or
-   within one that may use it, or declaring an incomplete variant that a
-   variant definition may still complete (rule 4). *)
+(* [stage], [kind] and [ordinary] are public; parser.mli says what they
+   mean. *)
 type stage = Defining | Defined | Awaiting_variant
 
-(* The kind of an ordinary identifier in scope, which is what parsing
-   needs of a name: never its type. A [Declared_type] is a typedef name to C
-   that a type declaration declares, which is the only declaration of
-   its name in its scope (design 3.1 rule 5), with the number of its type
-   parameters, which is not zero for a generic type (design 3.5). A
-   [Type_parameter] names a type within the definition of its generic. A
-   [Derived_enumerator] is an enumerator that a variant claims for C
-   (design 10.1 rule 6). *)
 type kind =
   | Not_a_type
   | Typedef_name
@@ -79,8 +69,6 @@ type kind =
   | Type_parameter
   | Derived_enumerator
 
-(* What the grammar needs of an ordinary identifier in scope: its
-   declaration and its kind. *)
 type ordinary = { declaration : reference; kind : kind }
 
 (* What the definition of a generic type allows at the cursor (design 3.5
@@ -104,6 +92,13 @@ type tag_entry = { tag : tag_id; claimed : bool }
    makes, so it is not among them: a name that no scope declares is
    looked up in {!Universe}. *)
 type scope = (ordinary, tag_entry) Scope.t
+
+(* Values by the index of a token in [Reader.t.tokens]. *)
+module Places = Map.Make (Int)
+
+(* The scope at the [(] of the arguments of each attribute, by that
+   token (design 13.5). *)
+type views = scope Places.t
 
 (* The innermost statement around the cursor that a break or continue
    may leave. A break leaves a loop, switch or match, and a continue the
@@ -163,6 +158,7 @@ type state = {
   mutable generic : generic_place option;
       (** [None] outside the definition of a generic type *)
   mutable in_type_argument : bool;  (** design 3.5 rule 2 *)
+  mutable attribute_views : views;  (** taken so far *)
   counter : Spanned.counter;  (** of the nodes made so far *)
 }
 
@@ -190,7 +186,7 @@ let lexeme_of keywords (token : Token.t) =
   | Token.Character encoding -> Some (Character_token encoding)
   | Token.String encoding -> Some (String_token encoding)
   | Token.Punctuator punctuator -> Some (Punctuator_token punctuator)
-  | Token.Pragma | Token.Typec_pragma -> None
+  | Token.Pragma _ | Token.Typec_pragma -> None
 
 let grammar_tokens keywords (reader : Reader.t) =
   Array.to_seqi reader.tokens
@@ -585,6 +581,23 @@ let refuse_generated_names state =
       | Character_token _ | String_token _ | End_of_input ->
           ())
     state.grammar
+
+(* A rule looks at the identifiers of every pragma in Type-C text (design
+   13.5), so there a pragma line needs some: one that is no sequence of
+   tokens is refused. In C text it passes on whole. *)
+let refuse_pragma_without_tokens state index (token : Token.t) =
+  match token.kind with
+  | Token.Pragma (Not_tokens reason) when is_type_c_text_at state index ->
+      fail_at_token state index
+        (Rule.message Pragma_tokens
+           ("a `#pragma` line whose text is no sequence of preprocessing \
+             tokens: " ^ reason))
+  | Token.Pragma (Not_tokens _ | Identifiers _) | Typec_pragma | Identifier _
+  | Number | Character _ | String _ | Punctuator _ ->
+      ()
+
+let refuse_pragmas_without_tokens state =
+  Array.iteri (refuse_pragma_without_tokens state) state.reader.tokens
 
 (* A construct that a later work package implements, at the cursor. *)
 let fail_not_implemented state ~section ~package text =
@@ -1412,6 +1425,23 @@ let skip_balanced state expected =
 
 (* GNU attributes (GCC manual 6.39). *)
 
+(* The arguments of an attribute, if the cursor is at their [(]. The
+   parser does not read them, so it keeps the scope there, under the
+   token where their span starts, which says what each identifier among
+   them denotes (design 13.5). A scope is persistent, so keeping one
+   copies nothing. *)
+let attribute_arguments state =
+  if peek state = Punctuator_token P.Left_paren then begin
+    let scope = state.scope in
+    let arguments =
+      skip_balanced state "`)` to end the arguments of an attribute"
+    in
+    state.attribute_views <-
+      Places.add arguments.first scope state.attribute_views;
+    Some arguments
+  end
+  else None
+
 (* GCC takes [__name__] for the attribute [name], so that a header can
    name one that a macro of the program would replace. *)
 let attribute_name state =
@@ -1437,13 +1467,7 @@ let attribute_name state =
 let attribute state =
   let start = state.position in
   let name = attribute_name state in
-  let arguments =
-    if peek state = Punctuator_token P.Left_paren then
-      Some
-        (skip_balanced state
-           "`)` to end the arguments of an attribute")
-    else None
-  in
+  let arguments = attribute_arguments state in
   finish state start { name; arguments }
 
 (* After the [__attribute__], up to and including its [))]: attributes
@@ -1517,13 +1541,7 @@ let standard_attribute_name state =
 let standard_attribute state =
   let start = state.position in
   let name = standard_attribute_name state in
-  let arguments =
-    if peek state = Punctuator_token P.Left_paren then
-      Some
-        (skip_balanced state
-           "`)` to end the arguments of an attribute")
-    else None
-  in
+  let arguments = attribute_arguments state in
   Option.map (fun name -> finish state start { name; arguments }) name
 
 (* From the [[[] to the []]]: attributes separated by commas, where an
@@ -3910,15 +3928,18 @@ let c_external_declaration state =
       | declaration_start ->
           External_declaration (declaration_of_start state declaration_start))
 
+(* An external declaration and the scope in front of it, which is
+   persistent, so keeping it copies nothing (design 13.5). *)
 let external_declaration state =
+  let view = state.scope in
   if begins_type_declaration state then
     let declaration = type_declaration state in
     Until_scope_end
-      (fun scope_end -> Type_declaration { declaration; scope_end })
-  else Complete (c_external_declaration state)
+      (fun scope_end -> (Type_declaration { declaration; scope_end }, view))
+  else Complete (c_external_declaration state, view)
 
-(* File scope closes with the text, whose last token may be a pragma
-   token. *)
+(* The external declarations, each with the scope in front of it. File
+   scope closes with the text, whose last token may be a pragma token. *)
 let translation_unit state =
   let rec loop read =
     if peek state = End_of_input then
@@ -3944,7 +3965,30 @@ let file_scope_declarations scope =
         (Scope.tags_declared_in_innermost scope);
   }
 
-let parse_with_file_scope ~keywords reader =
+module View = struct
+  type t = scope
+
+  let find view name = Scope.find view name
+
+  let find_tag view name =
+    Option.map (fun (entry : tag_entry) -> entry.tag) (Scope.find_tag view name)
+end
+
+type scopes = {
+  file_scope : file_scope;
+  declarations : (external_declaration * View.t) list;
+  attribute_views : views;
+}
+
+(* [attribute_arguments] keeps a view under the first token of each span
+   of arguments that it makes, which is the only way a parsed attribute
+   gets one, so [Places.find] finds it. *)
+let attribute_view attribute_views (attribute : attribute) =
+  Option.map
+    (fun (arguments : span) -> Places.find arguments.first attribute_views)
+    attribute.node.arguments
+
+let parse_with_scopes ~keywords reader =
   let state =
     {
       reader;
@@ -3957,20 +4001,26 @@ let parse_with_file_scope ~keywords reader =
       labels = None;
       generic = None;
       in_type_argument = false;
+      attribute_views = Places.empty;
       counter = Spanned.counter ~max_depth;
     }
   in
   match
     refuse_generated_names state;
+    refuse_pragmas_without_tokens state;
     translation_unit state
   with
-  | translation_unit ->
+  | declarations ->
       (* Every scope the unit opens is closed, so [state.scope] is file
          scope as the unit leaves it. *)
-      Ok (translation_unit, file_scope_declarations state.scope)
+      let file_scope = file_scope_declarations state.scope in
+      let scopes =
+        { file_scope; declarations; attribute_views = state.attribute_views }
+      in
+      Ok (List.map fst declarations, scopes)
   | exception Failed error -> Error error
 
 let parse ~keywords reader =
-  Result.map fst (parse_with_file_scope ~keywords reader)
+  Result.map fst (parse_with_scopes ~keywords reader)
 
 let error_message = Reader.error_message

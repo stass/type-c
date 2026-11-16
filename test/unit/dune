@@ -52,6 +52,11 @@
  (libraries typec_cpp typec_syntax typec_test_support))
 
 (test
+ (name test_scope_views)
+ (modules test_scope_views)
+ (libraries typec_cpp typec_syntax typec_test_support))
+
+(test
  (name test_rule_codegen)
  (modules test_rule_codegen)
  (libraries rule_codegen))

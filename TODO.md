@@ -109,6 +109,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   which Clang and GCC accept in gnu11, are misread: as an identifier and
   a string, as an unterminated literal, or with their inner lines taken
   as directives. Lex them, counting their newlines.
+- [Low] `read_pragma` takes a line for `#pragma typec` when its first
+  word, read as ASCII identifier bytes, is `typec`, so `#pragma typecé x`
+  is one. Decide by the first token that the pragma's text reads as
+  (`Identifier "typec"`).
 - [Low] Diagnostics of later stages print names and spellings from the
   text, and file names from line markers (`Expressions.needing`), where
   a crafted name can hold control bytes or a fake `[TC0018]`; route them
@@ -138,6 +142,16 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Parser
 
+- [Medium] The parser takes no view of the scopes at a `#pragma` line
+  inside the definition of a generic, so the resolution check of
+  design 13.5 cannot yet say what a pragma's identifiers denote there,
+  as it can for an attribute's arguments (`Parser.attribute_view`).
+  Take one where the parser passes over a pragma token in moved text.
+- [Low] Design 2.3 refuses an identifier that begins with `__tc_`
+  anywhere in the text, C text included; the parser checks the grammar
+  tokens only, not the identifiers of a `#pragma` line
+  (`Token.Identifiers`). Decide whether a pragma's identifiers count,
+  and refuse them there if they do.
 - [Low] Where a declaration hides `try` or `defer` (design 2.3), Type-C
   text that writes the construct gets a plain syntax error at the token
   after the word (`expected ; after return, found f`), which does not

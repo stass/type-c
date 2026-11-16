@@ -435,11 +435,38 @@ let read_line_directive state =
     (Option.value name ~default:state.presumed.file)
     next_line state.presumed.flags
 
+(* The names of the identifiers among the tokens of the rest of the
+   line, in order. Raises [Failed] at the first part that is no token;
+   no token holds a newline, so the cursor stays on the line. *)
+let rec line_identifiers state names =
+  skip_while state is_blank;
+  match peek state 0 with
+  | None | Some '\n' -> List.rev names
+  | Some _ -> (
+      match scan_token state with
+      | Token.Identifier name -> line_identifiers state (name :: names)
+      | Number | Character _ | String _ | Punctuator _ | Pragma _
+      | Typec_pragma ->
+          line_identifiers state names)
+
+(* A pragma line that is no sequence of tokens is no error of the text:
+   C text passes the line on whole, and the parser refuses it where a
+   rule reads its identifiers (design 13.5). *)
+let pragma_text state =
+  match line_identifiers state [] with
+  | names -> Token.Identifiers names
+  | exception Failed { message; _ } -> Token.Not_tokens message
+
 (* The whole line is the token, so that it can be passed through. *)
 let read_pragma state hash =
   skip_while state is_blank;
+  let text_start = state.pos in
   let kind =
-    if read_word state = "typec" then Token.Typec_pragma else Token.Pragma
+    if read_word state = "typec" then Token.Typec_pragma
+    else begin
+      state.pos <- text_start;
+      Token.Pragma (pragma_text state)
+    end
   in
   skip_while state (fun c -> c <> '\n');
   add_token state kind hash
@@ -499,7 +526,8 @@ let read ~name text =
 let spelling (result : t) (token : Token.t) =
   match token.kind with
   | Identifier name -> name
-  | Number | Character _ | String _ | Punctuator _ | Pragma | Typec_pragma ->
+  | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
+    ->
       String.sub result.text token.start token.length
 
 let range (tokens : Token.t array) ~first ~count =

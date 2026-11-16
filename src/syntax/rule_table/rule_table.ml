@@ -205,6 +205,10 @@ let rows =
         "A tag that the definition of a generic type is the first to \
          mention in the scope around its structure, which is file \
          scope." };
+    Live { name = "Pragma_tokens"; code = 40; clause = Some "design 13.5";
+      meaning =
+        "A [#pragma] line in Type-C text whose text after [pragma] is no \
+         sequence of preprocessing tokens." };
   ]
 
 let () =

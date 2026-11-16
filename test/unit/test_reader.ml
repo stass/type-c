@@ -20,7 +20,7 @@ let kind_name = function
   | Token.Character encoding -> "char" ^ encoding_name encoding
   | Token.String encoding -> "str" ^ encoding_name encoding
   | Token.Punctuator _ -> "punct"
-  | Token.Pragma -> "pragma"
+  | Token.Pragma _ -> "pragma"
   | Token.Typec_pragma -> "typec-pragma"
 
 (* Each [show] takes the text read, the reader's result and a token. *)
@@ -190,6 +190,56 @@ let kind_cases =
        | number 1E-x | number 1P+ | number 1.e5.x | number 0x1 | punct + \
        | number 1";
     case "invalid UTF-8 in a number" "1\xff" "error: in.i:1: invalid UTF-8";
+  ]
+
+(* What the text after [pragma] is for a pragma token, as
+   "pragma [identifiers]" or "pragma not tokens: reason", and the kind
+   and spelling of any other token. *)
+let show_pragma text result (token : Token.t) =
+  match token.kind with
+  | Token.Pragma (Identifiers names) ->
+      "pragma [" ^ String.concat " " names ^ "]"
+  | Token.Pragma (Not_tokens reason) -> "pragma not tokens: " ^ reason
+  | _ -> show_kind text result token
+
+(* The reader reads the text of a pragma line as preprocessing tokens,
+   under its own rules, and a line that is none passes whole (design
+   13.5). *)
+let pragma_cases =
+  List.map opened
+  [
+    case "the identifiers of a pragma, in order"
+      "#pragma GCC visibility push(default)\n#pragma weak f = g\n\
+       #pragma omp parallel for\n"
+      "pragma [GCC visibility push default] | pragma [weak f g] \
+       | pragma [omp parallel for]";
+    case "no identifiers" "#pragma\n#pragma 4 + (2)\n" "pragma [] | pragma []";
+    case "literals are tokens, and their prefixes are no identifiers"
+      "#pragma message(\"don't\") u8\"s\" L'c' '\\'' 1.0e+3\n"
+      "pragma [message]";
+    case "an identifier by its name in UTF-8"
+      "#pragma caf\\u00e9 caf\xc3\xa9\n" "pragma [caf\xc3\xa9 caf\xc3\xa9]";
+    case "a quote that begins no literal ending on the line"
+      "#pragma mark - Don't edit\nx\n#pragma weak f '\ny\n\
+       #pragma x \"open\n"
+      "pragma not tokens: unterminated literal | id x \
+       | pragma not tokens: unterminated literal | id y \
+       | pragma not tokens: unterminated literal";
+    case "a byte that begins no token"
+      "#pragma x @\n#pragma a \\ b\n#pragma \xff\n"
+      "pragma not tokens: unexpected character '@' \
+       | pragma not tokens: unexpected character '\\' \
+       | pragma not tokens: invalid UTF-8";
+    case "an identifier that the reader refuses"
+      "#pragma mark \xe2\x80\x94 Helpers\n#pragma \\u0300a\n"
+      "pragma not tokens: character U+2014 cannot be part of an identifier \
+       | pragma not tokens: character U+0300 cannot begin an identifier";
+    case "an empty character constant" "#pragma ''\n"
+      "pragma not tokens: empty character constant";
+    case "a #pragma typec line is not read as tokens"
+      "#pragma typec 'x\n#pragma typecx 'y\n"
+      "typec-pragma #pragma typec 'x \
+       | pragma not tokens: unterminated literal";
   ]
 
 (* "spelling = written" for each token: the name of an identifier
@@ -527,6 +577,7 @@ let () =
     failed_cases show_kind kind_cases
     @ failed_cases show_written written_cases
     @ failed_cases show_place place_cases
+    @ failed_cases show_pragma pragma_cases
   in
   List.iter
     (fun (case, actual) ->

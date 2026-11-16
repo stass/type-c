@@ -22,7 +22,9 @@
     Pragma tokens ([#pragma] lines, including those that [_Pragma] writes
     in the middle of an expression, and [#pragma typec] lines) are not
     part of the grammar: the parser passes over them, and the node around
-    them holds them in its span, so emission keeps them in place.
+    them holds them in its span, so emission keeps them in place. In
+    Type-C text it refuses a [#pragma] line whose text is no sequence of
+    preprocessing tokens ({!Typec_cpp.Token.pragma_text}, design 13.5).
 
     Parsing takes time linear in the number of tokens, up to a logarithmic
     factor for each name it looks up, and its recursion is bounded by
@@ -66,12 +68,73 @@ type file_scope = {
   tags : (string * Tree.tag_id) list;
 }
 
-val parse_with_file_scope :
+(** How far the type declaration of a name has got: within a definition
+    that may not use the name (design 3.1 rule 2), past its definition or
+    within one that may use it, or declaring an incomplete variant that a
+    variant definition may still complete (rule 4). *)
+type stage = Defining | Defined | Awaiting_variant
+
+(** The kind of an ordinary identifier in scope, which is what parsing
+    needs of a name: never its type. *)
+type kind =
+  | Not_a_type  (** an object, a function or an enumerator of C *)
+  | Typedef_name  (** of C, or one that GCC and Clang declare *)
+  | Declared_type of { stage : stage; parameters : int }
+      (** the typedef name to C that a type declaration declares, which is
+          the only declaration of its name in its scope (design 3.1 rule
+          5), with the number of its type parameters, which is not zero
+          for a generic type (design 3.5) *)
+  | Type_parameter  (** within the definition of its generic *)
+  | Derived_enumerator
+      (** an enumerator that a variant claims for C (design 10.1 rule 6) *)
+
+(** What an ordinary identifier in scope denotes: its declaration and its
+    kind. *)
+type ordinary = { declaration : Tree.reference; kind : kind }
+
+(** A view of the scopes open at a place of the unit (C11 6.2.1), as the
+    parser resolved names there: what the resolution property of design
+    13.5 compares between the place of moved text and a place where
+    lowering writes it. A view holds what is declared in front of its
+    place and nothing that is declared after it. The universe scope
+    (design 2.3) is not in it: a name that no scope declares may be a
+    name of {!Universe}. *)
+module View : sig
+  type t
+
+  val find : t -> string -> ordinary option
+  (** The declaration of an ordinary identifier that is visible: that of
+      the innermost scope that declares it. *)
+
+  val find_tag : t -> string -> Tree.tag_id option
+  (** The tag of the name that is visible. *)
+end
+
+(** The views that the parser takes at the [(] of the arguments of each
+    attribute of a unit. The parser does not read the arguments, so a
+    view says what each identifier among them denotes where they
+    stand. *)
+type views
+
+val attribute_view : views -> Tree.attribute -> View.t option
+(** The view at the arguments of an attribute of the unit that [views]
+    were taken in, or [None] for an attribute without arguments. *)
+
+(** What the parser records of the scopes of a unit beside its tree. *)
+type scopes = {
+  file_scope : file_scope;
+  declarations : (Tree.external_declaration * View.t) list;
+      (** the external declarations of the unit in order, each with the
+          view in front of it, which is file scope there *)
+  attribute_views : views;
+}
+
+val parse_with_scopes :
   keywords:Keyword_set.t ->
   Reader.t ->
-  (Tree.translation_unit * file_scope, error) result
-(** {!parse}, and what file scope declares where the unit ends, for a
-    test that names what a unit declares there. *)
+  (Tree.translation_unit * scopes, error) result
+(** {!parse}, with what file scope declares where the unit ends and the
+    views of its scopes. *)
 
 val error_message : error -> string
 (** ["file:line: message"], as {!Reader.error_message}. *)

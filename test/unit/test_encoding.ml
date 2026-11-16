@@ -21,8 +21,8 @@ let read ~file source =
     | Error error -> failwith (Reader.error_message error)
   in
   let keywords = Target.keywords lp64 Gnu in
-  match Parser.parse_with_file_scope ~keywords text with
-  | Ok (unit, file_scope) ->
+  match Parser.parse_with_scopes ~keywords text with
+  | Ok (unit, { Parser.file_scope; _ }) ->
       Result.map
         (fun result -> (file_scope, result))
         (Declarations.read lp64 text unit)

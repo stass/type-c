@@ -1673,6 +1673,8 @@ let error_cases =
       "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
     case "an empty file" "" "";
     case "only pragmas" "#pragma once\n#pragma typec checked\n" "";
+    case "a pragma line of no tokens passes whole in C text"
+      "#pragma mark - Don't edit\n" "";
   ]
 
 (* Declarations whose [:] tokens close no [?], so that the brackets the
@@ -1984,6 +1986,10 @@ let type_declaration_cases =
 
 let type_c_error_cases =
   [
+    case "a pragma line of no tokens in Type-C text"
+      "int x;\n#pragma mark - Don't edit\nint y;"
+      "error: in.tc:2: a `#pragma` line whose text is no sequence of \
+       preprocessing tokens: unterminated literal (design 13.5) [TC0040]";
     case "a try expression is not implemented"
       "int f(void) { return try f(); }"
       "error: in.tc:1: `try` is not implemented yet (design 5.1; work package \

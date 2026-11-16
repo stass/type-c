@@ -101,9 +101,8 @@ let () =
         or_exit Reader.error_message (Reader.read ~name:source contents)
       in
       let keywords = Target.keywords target Gnu in
-      let unit, file_scope =
-        or_exit Parser.error_message
-          (Parser.parse_with_file_scope ~keywords text)
+      let unit, ({ file_scope; _ } : Parser.scopes) =
+        or_exit Parser.error_message (Parser.parse_with_scopes ~keywords text)
       in
       let result =
         or_exit Reader.error_message (Declarations.read target text unit)

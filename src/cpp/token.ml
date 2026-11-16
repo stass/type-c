@@ -13,6 +13,19 @@ type encoding =
   | Char32  (** [U] *)
   | Wide  (** [L] *)
 
+(** The text of a [#pragma] line after [pragma], read as preprocessing
+    tokens (C11 6.10.6) under the reader's rules for the text around it
+    (design 13.5). A line that is no such sequence is a token all the
+    same: C text that does not move passes it on whole. *)
+type pragma_text =
+  | Identifiers of string list
+      (** the names of the identifiers among the tokens, in order, as
+          {!Identifier} carries them *)
+  | Not_tokens of string
+      (** no sequence of preprocessing tokens, as a line with a quote that
+          begins no literal ending on the line (C11 6.4p3) or a byte that
+          begins no token, and why, in the reader's words *)
+
 (** What a token is. Keywords are identifiers here: whether [try] or
     [defer] is a keyword depends on the file the token belongs to, which
     the parser decides. *)
@@ -28,7 +41,8 @@ type kind =
   | Character of encoding
   | String of encoding
   | Punctuator of Punctuator.t
-  | Pragma  (** a [#pragma] line other than [#pragma typec] *)
+  | Pragma of pragma_text
+      (** a [#pragma] line other than [#pragma typec] *)
   | Typec_pragma  (** a [#pragma typec] line, which [typec] consumes *)
 
 (** A token is the bytes [start] to [start + length - 1] of the text it

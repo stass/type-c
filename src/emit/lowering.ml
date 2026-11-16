@@ -55,7 +55,7 @@ let grammar_tokens (tokens : Token.t array) first last =
   List.init (last - first + 1) (fun offset -> first + offset)
   |> List.filter (fun index ->
          match tokens.(index).kind with
-         | Token.Pragma | Token.Typec_pragma -> false
+         | Token.Pragma _ | Token.Typec_pragma -> false
          | Token.Identifier _ | Token.Number | Token.Character _
          | Token.String _ | Token.Punctuator _ ->
              true)
@@ -65,7 +65,7 @@ let grammar_tokens (tokens : Token.t array) first last =
 let rec grammar_token_before (tokens : Token.t array) index =
   let before = index - 1 in
   match tokens.(before).kind with
-  | Token.Pragma | Token.Typec_pragma -> grammar_token_before tokens before
+  | Token.Pragma _ | Token.Typec_pragma -> grammar_token_before tokens before
   | Token.Identifier _ | Token.Number | Token.Character _ | Token.String _
   | Token.Punctuator _ ->
       before
@@ -74,7 +74,7 @@ let rec grammar_token_before (tokens : Token.t array) index =
 let rec grammar_token_after (tokens : Token.t array) index =
   let after = index + 1 in
   match tokens.(after).kind with
-  | Token.Pragma | Token.Typec_pragma -> grammar_token_after tokens after
+  | Token.Pragma _ | Token.Typec_pragma -> grammar_token_after tokens after
   | Token.Identifier _ | Token.Number | Token.Character _ | Token.String _
   | Token.Punctuator _ ->
       after
