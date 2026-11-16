@@ -21,6 +21,7 @@ RUN apt-get update \
       gcc=4:14.2.0-1 gcc-14=14.2.0-19 \
       libc6-dev=2.41-12+deb13u4 linux-libc-dev=6.12.117-1 \
       file=1:5.46-5 \
+      csmith=2.3.0-8 libcsmith-dev=2.3.0-8 \
       opam=2.3.0-1+deb13u2 \
       ca-certificates curl gpg git make patch unzip bzip2 \
  && rm -rf /var/lib/apt/lists/*
