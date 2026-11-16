@@ -1563,10 +1563,13 @@ defer fclose(f);
     It is not the statement of a labelled statement, a `case` or
     `default` of a `switch` included: write `case 1: { defer S; ... }`.
     It is not a block item of the compound statement of a statement
-    expression. No `defer` statement, under either spelling, stands in
-    the definition of a generic type (3.5), where a block inside a
-    statement expression would otherwise hold one, as in the size of
-    an array member.
+    expression. A `defer` statement, under either spelling, stands
+    only in a function body. Outside one, only a block inside a
+    statement expression could hold it, and it is an error wherever
+    that expression stands: in the definition of a generic type (3.5),
+    as in the size of an array member, in the head of a function,
+    generic (section 7) or not, or in any other declaration of file
+    scope, in C text too.
 12. *Provisional (P9).* Lowering writes a `return` in the scope of a
     `defer` statement as a block (13.5), which ends where the `return`
     does. Its operand therefore declares no name that is in scope
@@ -1602,13 +1605,17 @@ the TS.
 
 The measurement of P9 (section 15) counts the refusals of rule 8, of
 rule 9, of rule 12 and of each refusal of the form of a `return` (13.5)
-apart, and their diagnostics tell them apart (13.6). A refusal under
-rule 8 carries the code of the clause of the resolution property that
-it breaks, with a message that names a deferred statement. Rule 9 has
-one code. Under rule 12, a declaration in the operand carries the code
-of the third clause of the property, and a jump out of the operand a
-code of its own. The refusals of the form of a `return` share one
-code, each with a message of its own.
+apart, and their diagnostics tell them apart (13.6). The count of a
+rule reads codes and matches no message text. A failure of the
+resolution property for a deferred statement is a refusal under rule 8
+and carries the code of rule 8: one code, whichever clause of the
+property fails. Rule 8 has no check of its own for that. The one check
+of the property derives the code from the kind of text that it reads
+(13.5). Rule 9 has one code. Under rule 12, a declaration in the
+operand fails the same check on the operand of a `return` and carries
+the code of that kind of text, and a jump out of the operand a code of
+its own; no other rule has either code. The refusals of the form of a
+`return` share one code, each with a message of its own.
 
 Rationale for rule 11. C makes the substatement of a selection or
 iteration statement a block of its own (C11 6.8.4p3, 6.8.5p5), so the
@@ -1616,13 +1623,22 @@ scope of a `defer` statement there would be empty and `S` would run at
 once. A label is followed by a statement, which a declaration is not in
 C11 or in the accepted dialect (2.4, 13.3), and a `defer` statement
 stands where a declaration does. The last expression of a statement
-expression is its value and leaves `S` no place after it. The definition
-of a generic type stands at file scope (3.5 rule 8), where neither
-backend takes a statement expression: Apple Clang 21 and GCC 16 refuse
-one in an array size, in a `__typeof__` and in the value of an
-enumeration constant. No instance of such a definition compiles, so the
-refusal costs no program, and lowering writes no copy of a deferred
-statement in the definition of a type instance (10.3).
+expression is its value and leaves `S` no place after it. Outside a
+function body a block stands only in a statement expression, or in the
+body of a block literal, which is unread text (rule 1). Neither backend
+takes a statement expression there. Apple Clang 21 and GCC 16 refuse
+one in a declaration of file scope: in an array size, in a
+`__typeof__`, in an initialiser and in the value of an enumeration
+constant. They refuse one in the head of a function definition too: in
+the array size of a parameter, in a `__typeof__` of the return type and
+in a declaration of an old-style parameter. One rule therefore covers
+the definition of a generic type, which stands at file scope (3.5 rule
+8), the head of a generic function, whose instances stand there (10.3),
+and C text of file scope. The text that it refuses compiles nowhere,
+and no instance of such a generic does, so the refusal costs no code
+that a backend takes. Lowering writes no copy of a deferred statement
+outside a function body: none in the definition of a type instance and
+none in the head of a function instance (10.3).
 
 ## 7. Generic functions
 
@@ -3285,7 +3301,7 @@ Two properties follow by construction:
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. A statement `try e;` reads no field: nothing is written after its test, as said below the table. It is the one position of a `try` whose `T` is `void` (5.1 rule 2), where `Ok` has no field (3.5 rule 6). Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
-| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4), and gets no copy where it cannot (section 6 rule 1). A `defer` statement inside `S` is lowered in `S`, so its copies are part of the text that each copy of `S` repeats (section 6 rule 4). A `return e;` in the scope becomes a block, as said below the table; "Moved text" below says at which place each exit has its copies. |
+| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4), and gets no copy where it cannot (section 6 rule 1). A `defer` statement inside `S` is lowered in `S`, so its copies are part of the text that each copy of `S` repeats (section 6 rule 4). A `break`, `continue`, `goto` or `return;` that leaves the scope is written as a block that holds the copies it runs and then the jump, `{ copies jump; }`. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;`, stays one statement; a jump that is a block item gets the same block. A `return e;` in the scope becomes a block of its own form, as said below the table; "Moved text" below says at which place each exit has its copies. |
 | Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes, named as said below the table. |
 | Checked-mode checks | Inline tests that trap. |
 
@@ -3555,11 +3571,11 @@ the `try` holds its value, and no cleanup reads or changes that one,
 since its name is reserved (2.3).
 
 A `return;` with no operand has no value to hold in any function and
-becomes `{ /* cleanups */ return; }`. In a function that returns a
-value C forbids it (C11 6.8.6.4p1). The lowered code keeps the
-`return;`, so the diagnostic stays the backend's, and `typec` refuses
-nothing. Such a `return` asks for no typedef: a function gets
-`__tc_ret` for a `return e;` alone.
+is written as every jump that runs copies is (the `defer` row). In a
+function that returns a value C forbids it (C11 6.8.6.4p1). The lowered
+code keeps the `return;`, so the diagnostic stays the backend's, and
+`typec` refuses nothing. Such a `return` asks for no typedef: a
+function gets `__tc_ret` for a `return e;` alone.
 
 Apple Clang 21 and GCC 16 take the form under `-std=c11
 -pedantic-errors -Wall -Wextra -Wconversion -Wsign-conversion
@@ -3696,14 +3712,20 @@ third clause applies. No kind of moved text has a check of the property
 of its own: rules 8 and 12 of section 6, rule 8 of 3.5 and rule 3 of 5.1
 cite the property and show it on examples, and what rule 3 of 5.1 and
 rule 12 of section 6 say of a name that the operand declares is the
-third clause on their text.
+third clause on their text. The check is told the kind of text that it
+reads, and a failure carries the code of that kind (13.6): one code for
+each kind, whichever clause fails. A count of the refusals that one of
+those rules makes through the property so reads a code, and no kind
+needs a check of its own to have a code of its own.
 
 A place where the text is written is a place in the lowered C. The
 copies of deferred statements stand at one place for each exit (section
 6 rule 1), and the check reads the names that are in scope there:
 
-- for a `break`, `continue` or `goto`, and for a `return;`, directly
-  before the keyword of the jump and after the labels of its statement;
+- for a `break`, `continue`, `goto` or `return;`, directly before the
+  keyword of the jump, in the block that stands in its place (the
+  `defer` row). That block declares nothing, so the names in scope
+  there are those in scope at the jump;
 - for the end of a block that can complete (4.4), directly before its
   `}`;
 - for a `return e;`, directly before the `return` keyword. Lowering
