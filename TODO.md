@@ -294,7 +294,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   the backend, so under GCC `[[clang::overloadable]]` makes an overload
   GCC ignores, as `__attribute__((overloadable))` already does. Ask the
   backend (`__has_c_attribute`) once, in `Target`, if this matters.
-- [Medium] Design section 6 rule 1 refuses `_Defer` among the tokens
+- [Medium] Design section 6 rule 13 refuses `_Defer` among the tokens
   that typing does not read, through one scan over every such token.
   No such scan exists: `skip_balanced` (`src/syntax/parser.ml`) passes
   over attribute arguments and skipped function bodies without looking,
@@ -303,7 +303,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   `defer` statement (`fail_defer`). When package 2.5 builds `defer`,
   build the one scan over the tokens that typing does not read (it
   also refuses the word `defer` in an attribute argument of Type-C
-  text, design section 6 rule 1), with
+  text, design section 6 rule 13), with
   no check of its own for any kind of such text. The scan also takes
   over the text rules of a block literal (`refuse_type_c_text_in_block`)
   and of a skipped function body (`skipped_body`), which run as checks of
