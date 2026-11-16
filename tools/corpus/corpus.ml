@@ -26,6 +26,9 @@ let fatal fmt = Printf.ksprintf (fun message -> raise (Fatal message)) fmt
 exception Step_failed of string
 
 module Exit_status = Typec_driver.Exit_status
+module Pipeline = Typec_driver.Pipeline
+module Target_query = Typec_driver.Target_query
+module Command_line = Typec_driver.Command_line
 
 type options = {
   corpus : string;  (** the corpus repository *)
@@ -141,11 +144,19 @@ let typec_identity options =
   Printf.sprintf "blake2b-256 %s (checkout at run time: %s)" digest
     options.typec_revision
 
+(* The compiler that [cc] is, which no option changes: the commands that
+   compile C that typec emitted depend on it. *)
+let backend_compiler cc =
+  match Target_query.query ~program:cc [] with
+  | Ok target -> target.backend.compiler
+  | Error error -> fatal "%s" (Target_query.error_message ~program:cc error)
+
 (* What one build needs to run its commands. *)
 type context = {
   root : string;  (** the build tree, the directory of every command *)
   log : Unix.file_descr;  (** the stderr of every command *)
   cc : string;
+  compiler : Typec_sema.Target.compiler;  (** which one [cc] is *)
   typec : string;
   flags : string list;  (** -O2 and the recipe's cflags *)
 }
@@ -267,38 +278,81 @@ let run_typec context ~step ~errors command =
           fatal "%s cannot work in this environment: %s" step message
       | None -> raise (Step_failed (step ^ " " ^ Command.describe status)))
 
+(* A backend step of the reference compile: [preprocess] writes the
+   text, which [compile] reads from [text_file] in [directory]. *)
+type reference_step = {
+  preprocess : string list;
+  directory : string;
+  text_file : string;
+  compile : string list;
+}
+
+(* The files of the reference compiles are outside the build tree, as the
+   test scripts' are, so that a script that looks for the tree's C sources
+   does not find the text. *)
+let reference_dir context = context.root ^ ".reference"
+
+(* The only translation of a plan for the .tc copy of a unit, whose
+   goal is one of the plan's own: [arguments], the goal on the copy. *)
+let reference_translation context ~temp_dir arguments =
+  let arguments = Command_line.read (context.flags @ arguments) in
+  match
+    Pipeline.plan ~program:context.cc ~emit_c:false ~temp_dir arguments
+  with
+  | Ok { translations = [ translation ]; _ } -> translation
+  | Ok _ -> fatal "typec's plan of the reference compile has another shape"
+  | Error error -> fatal "%s" (Pipeline.error_message error)
+
+(* The step of typec's own pipeline (src/driver/pipeline.mli) for a goal
+   on the .tc copy. Its commands are typec's, so the reference differs
+   from typec only in its front end: it compiles the preprocessed text
+   where typec compiles the C it emits. *)
+let reference_step context ~temp_dir arguments =
+  let translation = reference_translation context ~temp_dir arguments in
+  match (translation.emitted, translation.compile) with
+  | File text_file, Some compile ->
+      {
+        preprocess = translation.preprocess;
+        directory = translation.directory;
+        text_file;
+        compile = compile context.compiler;
+      }
+  | _ -> fatal "typec's plan of the reference compile has another shape"
+
 (* typec compiles the .tc copy of the unit first, so that a unit it
-   refuses is reported as its failure. The reference follows
-   test/run/pipeline.t: the backend preprocesses the .tc copy as typec
-   does and compiles the text with -x cpp-output, both with -std=gnu11
-   before the recipe's options. *)
+   refuses is reported as its failure. The reference is the backend
+   preprocessing the .tc copy as typec does and compiling the text as
+   typec compiles its C. The text stays in U.ref.i, which the oracle
+   reads (README), and the compiles read its copy where typec's plan puts
+   the C; both goals name the same file, as the plan names it by the
+   input only. *)
 let compile_unit context unit =
-  let tc = type_c_copy unit and reference_i = derived unit ".ref.i" in
+  let tc = type_c_copy unit in
+  let temp_dir = Filename.concat (reference_dir context) tc in
+  let reference_i = derived unit ".ref.i" in
   let reference_o = derived unit ".ref.o" and object_ = derived unit ".o" in
-  let cc = context.cc and flags = context.flags in
-  let typec = [ context.typec; "--cc=" ^ cc ] @ flags in
-  let backend_on_text = [ cc; "-x"; "cpp-output"; "-std=gnu11" ] @ flags in
+  let typec = [ context.typec; "--cc=" ^ context.cc ] @ context.flags in
   copy_file ~source:(in_tree context unit) ~target:(in_tree context tc);
   let _ : float =
     run_typec context ~step:"typec -c" ~errors:(derived unit ".typec.err")
       (typec @ [ "-c"; tc; "-o"; object_ ])
   in
+  let reference =
+    reference_step context ~temp_dir [ "-c"; tc; "-o"; reference_o ]
+  and syntax = reference_step context ~temp_dir [ "-fsyntax-only"; tc ] in
   let preprocess =
     run_into_file context ~step:"preprocessing" ~output:reference_i
-      ([ cc; "-E"; "-x"; "c"; "-D__TYPEC__=1"; "-std=gnu11" ] @ flags @ [ tc ])
+      reference.preprocess
   in
-  let _ : float =
-    run context ~step:"the reference compile"
-      (backend_on_text @ [ "-c"; reference_i; "-o"; reference_o ])
-  in
+  make_directories reference.directory;
+  copy_file ~source:(in_tree context reference_i)
+    ~target:reference.text_file;
+  let _ : float = run context ~step:"the reference compile" reference.compile in
   let emit_c =
     run_typec context ~step:"typec --emit-c" ~errors:(derived unit ".emit.err")
       (typec @ [ "--emit-c"; tc; "-o"; derived unit ".emit.i" ])
   in
-  let syntax_only =
-    run context ~step:"-fsyntax-only"
-      (backend_on_text @ [ "-fsyntax-only"; reference_i ])
-  in
+  let syntax_only = run context ~step:"-fsyntax-only" syntax.compile in
   let times = { preprocess; emit_c; syntax_only } in
   let same =
     read_file (in_tree context reference_o)
@@ -421,7 +475,10 @@ let run_test context ~recipe_dir ~linked index (test : Recipe.test) =
 (* The build tree is made afresh: the trees of the recipe, copied from
    the cache, then its prepare script. *)
 let set_up context ~cache ~recipe_dir (recipe : Recipe.t) =
-  let remove = [ "rm"; "-rf"; "--"; context.root; tests_dir context ] in
+  let remove =
+    [ "rm"; "-rf"; "--"; context.root; tests_dir context;
+      reference_dir context ]
+  in
   ignore (run ~cwd:"/" context ~step:"removing the old tree" remove);
   let copy (tree : Recipe.tree) =
     let source = List.fold_left Filename.concat cache [ "src"; tree.archive ] in
@@ -639,6 +696,7 @@ let run_program options host ~cc program =
             root = Filename.concat build_dir backend;
             log = fd;
             cc;
+            compiler = backend_compiler cc;
             typec = options.typec;
             flags = "-O2" :: recipe.cflags;
           }

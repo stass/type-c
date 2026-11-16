@@ -102,6 +102,7 @@ digits and an optional -dirty, and both revisions are required.
   $ ls cache/build/*/hello/
   clang
   clang.log
+  clang.reference
   clang.tests
   $ ls cache/build/*/hello/clang/
   bin
@@ -459,3 +460,20 @@ lines can name one.
   $ ./corpus.exe --corpus corpus hello
   corpus: usage: corpus.exe --corpus DIR --cache DIR --typec PATH --typec-revision REV --corpus-revision REV --cc PATH [--cc PATH]... PROGRAM...
   [2]
+
+The reference reads the preprocessed text as typec's backend does, with
+trigraphs off: under -std=c11 a trigraph that a macro builds is not read
+by either, so the reference object is typec's.
+
+  $ mkdir -p corpus/programs/trigraph cache/src/trigraph-1
+  $ cat > cache/src/trigraph-1/t.c <<'EOF2'
+  > #define STRING(x) #x
+  > const char *trigraph(void) { return STRING(?\
+  > ?=); }
+  > EOF2
+  $ printf 'tree trigraph-1\ncflags -std=c11\nprogram a t.c\ntest own t.sh\n' \
+  >   > corpus/programs/trigraph/recipe
+  $ echo 'exit 0' > corpus/programs/trigraph/t.sh
+  $ run trigraph | grep -E '^(identical|different)'
+  identical    1
+  different    0
