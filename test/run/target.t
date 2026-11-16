@@ -136,6 +136,47 @@ command line without a .tc input.
   $ typec --cc=$clang -fno-short-enums -fsigned-bitfields -c enum.tc
   $ typec --cc=$gcc -fshort-enums --print-target > /dev/null
 
+Other routes to these options reach the backend unseen, such as Clang's
+-Xclang or a wrapper around the backend. The C that typec emits for a
+unit with a Type-C construct therefore ends with a static assertion of
+each type it assumes, which the backend fails. GCC quotes the message,
+and Clang shows it again in the line it quotes.
+
+  $ cat > lowered.tc <<'EOF'
+  > enum colour { red, green };
+  > type hue = enum colour;
+  > EOF
+  $ assumptions() { grep error: log | grep -o 'typec assumes [^"]*'; }
+  $ typec --cc=$clang -Xclang -fshort-enums -c lowered.tc 2> log ||
+  >   assumptions
+  typec assumes an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)
+  $ cat > gcc-wrapped <<EOF
+  > #!/bin/sh
+  > exec "$gcc" -fshort-enums -funsigned-bitfields \
+  >   -fsingle-precision-constant "\$@"
+  > EOF
+  $ chmod +x gcc-wrapped
+  $ typec --cc=./gcc-wrapped -c lowered.tc 2> log || assumptions
+  typec assumes plain int bit-fields are signed (-funsigned-bitfields?)
+  typec assumes unsuffixed floating constants are double (-fsingle-precision-constant?)
+  typec assumes an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)
+
+The assertions stand under a line marker with flag 3, so the warnings
+that judge the user's code pass over them, as over a system header;
+alone, they are valid C11 and C17 under -pedantic-errors.
+
+  $ typec --cc=$gcc -Wc++-compat -Werror -c lowered.tc
+  $ typec --cc=$clang --emit-c -o - lowered.tc |
+  >   sed -n '/^# 1 "<typec>" 3$/,$p' | grep -v '^# ' > assertions.c
+  $ wc -l < assertions.c | tr -d ' '
+  3
+  $ for cc in $clang $gcc; do
+  >   for std in c11 c17; do
+  >     $cc -std=$std -Wall -Wextra -pedantic-errors -fsyntax-only \
+  >       assertions.c
+  >   done
+  > done
+
 A backend that fails, cannot be started, prints something other than
 macro definitions, prints without end, or omits a macro the model needs
 gives one message and no model. endless prints without end whatever its

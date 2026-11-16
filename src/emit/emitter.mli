@@ -3,11 +3,12 @@
 
 (** Emission of a translation unit that {!Typec_cpp.Reader.read} has
     read: its text, with some ranges of its tokens replaced by new C text
-    (design 13.4).
+    and declarations after it (design 13.4).
 
     Everything outside the replaced ranges is copied from the text, white
-    space and line markers included, so a unit without edits is emitted
-    byte for byte as it was read. {!Lowering} makes the edits. *)
+    space and line markers included, so a unit without edits or
+    assertions is emitted byte for byte as it was read. {!Lowering} makes
+    the edits and {!Assumptions} the assertions. *)
 
 (** Replace the tokens of [range] by [text], which the backend places
     at [location], the line of the construct it lowers, and reads under
@@ -20,9 +21,15 @@ type edit = {
   text : string;
 }
 
-val emit : Typec_cpp.Reader.t -> edit list -> string
-(** [emit unit edits] is the text of [unit] with each edit applied. The
-    text of an edit is preceded by a line marker for its location and
+(** What lowering makes of a unit: its edits, and the declarations that
+    follow its text, the static assertions of {!Assumptions}. *)
+type lowered = { edits : edit list; assertions : string list }
+
+val emit : Typec_cpp.Reader.t -> lowered -> string
+(** [emit unit { edits; assertions }] is the text of [unit] with each
+    edit applied, then, where there are [assertions], a line marker for
+    line 1 of the file ["<typec>"] with flag 3, and each assertion on a
+    line of its own. The text of an edit is preceded by a line marker for its location and
     followed by one that restores the presumed line where the replaced
     range ends, so the rest of the text keeps its lines. Each marker
     carries the flags 3 and 4 in effect at its location

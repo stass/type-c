@@ -104,7 +104,7 @@ let query_target ~program (translation : Pipeline.translation) =
 
 let lower dialect target text =
   match Front_end.lower dialect target text with
-  | Ok edits -> edits
+  | Ok lowered -> lowered
   | Error error ->
       stop Exit_status.Refused (Typec_cpp.Reader.error_message error)
 
@@ -133,8 +133,8 @@ let translate ~program ~null (translation : Pipeline.translation) =
   preprocess ~null translation;
   let text = read_preprocessed translation in
   let target = query_target ~program translation in
-  let edits = lower translation.dialect target text in
-  write_emitted translation.emitted (Typec_emit.Emitter.emit text edits);
+  let lowered = lower translation.dialect target text in
+  write_emitted translation.emitted (Typec_emit.Emitter.emit text lowered);
   Option.iter (run_step ~stdin:null ~stdout:Unix.stdout) translation.compile
 
 (* The final command reads typec's stdin, which an input "-" names. *)

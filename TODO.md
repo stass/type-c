@@ -70,18 +70,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   skips the checks of `Target.of_predefined_macros`. Make it private,
   preferably with separate signed and unsigned types for the typedef
   fields, once the tests build their models from dumps only.
-- [Medium] The driver refuses `-fshort-enums`, `-funsigned-bitfields`
-  and `-fsingle-precision-constant` by their spellings, so any other
-  route to them leaves the target model wrong without a message: a
-  target whose default differs (GCC's bare-metal 32-bit ARM EABI is
-  said to default to short enumerations; unmeasured), `-Xclang` or
-  `-Xarch_x86_64 -fshort-enums` (verified with Apple Clang), Clang's
-  `--config` files and `CCC_OVERRIDE_OPTIONS`, GCC's `-specs=`, or a
-  `--cc` wrapper. A fix by construction: the emitted C states each
-  assumption no macro gives as a `_Static_assert`, such as the size of
-  each completed enumeration, `_Generic(+(struct { int b : 32; }){0}.b,
-  int: 1, default: 0)` and `_Generic(1.5, double: 1, default: 0)`, so
-  the backend refuses a mismatch whatever caused it.
+- [Low] The static assertions that end a lowered unit
+  (`src/emit/assumptions.ml`) see the options in effect where the unit
+  ends. GCC's `#pragma GCC optimize ("short-enums")` and
+  `("single-precision-constant")` change the types of the declarations
+  and constants after them (measured with GCC 16), so a region between
+  `#pragma GCC push_options` and `pop_options` passes unseen; so may
+  `__attribute__((optimize))` (unmeasured). Refuse those pragmas in a
+  unit with Type-C constructs, or assert the type of each enumeration
+  at file scope where the unit ends.
 - [Low] The target query gives the backend typec's stdin, which it never
   needs; a stray `-` among the options makes it read the terminal. Give
   it `/dev/null`.

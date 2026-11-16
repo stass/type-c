@@ -44,7 +44,24 @@ let replacement (tokens : Token.t array) edit : Reader.replacement =
   in
   { range = edit.range; text }
 
+type lowered = { edits : edit list; assertions : string list }
+
+(* The assertions are typec's own text, so their marker names no file of
+   the unit, and a failure reads as typec's. Flag 3 exempts them from the
+   warnings that judge the user's code, such as -Wc++-compat, as for a
+   system header (design 13.4); a failed assertion is an error all the
+   same. *)
+let assertions_location : Location.t =
+  { file = "<typec>"; line = 1; flags = System }
+
+let assertion_block = function
+  | [] -> ""
+  | assertions ->
+      marker assertions_location
+      ^ String.concat "" (List.map (fun line -> line ^ "\n") assertions)
+
 (* Reader.rewrite checks the order of the ranges. *)
-let emit (unit : Reader.t) edits =
+let emit (unit : Reader.t) { edits; assertions } =
   List.iter (check_one_file unit.tokens) edits;
   Reader.rewrite unit (List.map (replacement unit.tokens) edits)
+  ^ assertion_block assertions

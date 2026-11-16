@@ -294,8 +294,8 @@ before it, goes through three steps:
    for the target model that the backend gives with the options of step
    3 (see "Printing the target model"). A text that the front end
    refuses stops `typec` with one message, `FILE:LINE: MESSAGE`. With no
-   Type-C construct yet the emitted text is the preprocessed text, byte
-   for byte;
+   Type-C construct the emitted text is the preprocessed text, byte for
+   byte;
 3. `BACKEND -std=gnu11 OPTIONS -c -o OUTPUT -Wno-gnu-line-marker
    -x cpp-output EMITTED`, or `-S`, or `-fsyntax-only`, as the command
    line asks. The option keeps Clang 20 from calling the line markers of
@@ -343,7 +343,13 @@ It refuses the options known to change a type of C without changing a
 macro that the target model reads, which the model therefore cannot
 see: `-fshort-enums`, `-funsigned-bitfields` or `-fno-signed-bitfields`,
 and `-fsingle-precision-constant`, even when a later option undoes
-them. An option that changes a macro the model reads, such as
+them. Other routes to these types, such as `-Xclang -fshort-enums`, a
+config file, a wrapper or a target whose default differs, fail in step
+3: the C of a unit with a Type-C construct ends, after a line marker
+for `<typec>` with flag 3, with a static assertion of each such type
+that `typec` assumes, whose message names the option that would break
+it. Flag 3 keeps the user's warning options off typec's own text. An option
+that changes a macro the model reads, such as
 `-funsigned-char` or `-fshort-wchar`, reaches the target model.
 It also refuses `-arch` options that name more than one architecture: cc
 builds a universal binary from them, but step 1 preprocesses for one

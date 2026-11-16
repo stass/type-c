@@ -7,7 +7,8 @@
    under FILE's name, which golden writes. It runs the stages that typec
    runs after the backend preprocesses (Front_end.lower), for the LP64
    target of the unit tests in gnu11, so that its output depends on no
-   backend. *)
+   backend. It leaves out the assertions that end a lowered unit, which
+   are the same for every unit and which test/run/target.t checks. *)
 
 open Typec_cpp
 
@@ -25,7 +26,8 @@ let () =
       (Reader.read ~name:path (preprocessed path source))
       (fun text ->
         Result.map
-          (fun edits -> Typec_emit.Emitter.emit text edits)
+          (fun (lowered : Typec_emit.Emitter.lowered) ->
+            Typec_emit.Emitter.emit text { lowered with assertions = [] })
           (Typec_driver.Front_end.lower Gnu target text))
   in
   match lowered with

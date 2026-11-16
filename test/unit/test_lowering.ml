@@ -29,12 +29,14 @@ let emitted source =
   in
   match Declarations.read lp64 text unit with
   | Ok declarations ->
-      Emitter.emit text
-        (Lowering.edits text
-           (Declarations.type_declarations declarations)
-           (Declarations.constructions declarations)
-           (Declarations.matchings declarations)
-           (Declarations.answered declarations))
+      let edits =
+        Lowering.edits text
+          (Declarations.type_declarations declarations)
+          (Declarations.constructions declarations)
+          (Declarations.matchings declarations)
+          (Declarations.answered declarations)
+      in
+      Emitter.emit text { edits; assertions = [] }
   | Error error -> failwith (Reader.error_message error)
 
 let is_marker line = String.starts_with ~prefix:"# " line

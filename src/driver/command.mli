@@ -20,7 +20,8 @@ val run : env_cc:string option -> outer_cc:string option -> string list -> 'a
     at the first that fails. Between the preprocessing and the compile
     step of each translation it runs {!Front_end.lower} on the text, for
     the model from {!Target_query.query} with the translation's
-    [target_options], and emits the text with the edits it gives. When a
+    [target_options], and emits the text with the edits and assertions
+    it gives. When a
     command fails, [typec] exits with its status, or ends by the signal
     that ended it, or by a signal that {!Signals} caught. To print the
     target model, it prints {!Typec_sema.Target.to_string} of the model

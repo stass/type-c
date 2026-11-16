@@ -25,7 +25,10 @@ let check_accepted text (result : Reader.t) =
     violated "the tokens and gaps spell the text";
   if not (Spans.gaps_are_layout text result) then
     violated "the gaps hold only white space and line markers";
-  if Typec_emit.Emitter.emit result [] <> text then
+  let unchanged : Typec_emit.Emitter.lowered =
+    { edits = []; assertions = [] }
+  in
+  if Typec_emit.Emitter.emit result unchanged <> text then
     violated "a unit without edits is emitted as it was read";
   classify_numbers result
 

@@ -145,7 +145,8 @@ constructor with every field zero, as `{0}` does (design 3.2 rule 7).
   $ typec --cc=$gcc -Wall -Werror -o gcc-empty empty.tc && ./gcc-empty
   0 0 0 0 0 0
 
---emit-c shows the typedef that an alias becomes, at its own line.
+--emit-c shows the typedef that an alias becomes, at its own line, and
+the assertions that end every unit with a Type-C construct.
 
   $ printf 'type count = unsigned long;\ncount n;\n' > emit.tc
   $ typec --cc=$clang --emit-c -o - emit.tc | grep -v '^# ' | grep .
@@ -154,6 +155,9 @@ constructor with every field zero, as `{0}` does (design 3.2 rule 7).
   count
   ;
   count n;
+  _Static_assert(_Generic(+(struct { int __tc_bits : 32; }){ 0 }.__tc_bits, int: 1, default: 0), "typec assumes plain int bit-fields are signed (-funsigned-bitfields?)");
+  _Static_assert(_Generic(1.5, double: 1, default: 0), "typec assumes unsuffixed floating constants are double (-fsingle-precision-constant?)");
+  _Static_assert(_Generic((enum { __tc_enum_probe })0, unsigned int: 1, default: 0), "typec assumes an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)");
 
 A distinct type is the typedef of its representation (design 10.2): the
 same size and alignment on each backend, and a C header reads its value

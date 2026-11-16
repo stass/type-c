@@ -29,6 +29,9 @@ let source =
 let unit = read source
 let at line : Location.t = { file = "a.tc"; line; flags = No_flags }
 
+(* The text with [edits] and no assertions. *)
+let emit unit edits = Emitter.emit unit { edits; assertions = [] }
+
 let edit (unit : Reader.t) ~first ~count location text : Emitter.edit =
   { range = Reader.range unit.tokens ~first ~count; location; text }
 
@@ -39,9 +42,9 @@ let replacement = edit unit ~first:1 ~count:3 (at 1) "x = 2"
 let insertion = edit unit ~first:8 ~count:0 (at 2) "int w;"
 
 let () =
-  check "no edits: the text itself" (Emitter.emit unit [] = source);
+  check "no edits: the text itself" (emit unit [] = source);
   check "a replacement and an insertion"
-    (Emitter.emit unit [ replacement; insertion ]
+    (emit unit [ replacement; insertion ]
     = "# 1 \"a.tc\"\n\
        int \n\
        # 1 \"a.tc\"\n\
@@ -63,7 +66,7 @@ let () =
   let written = read "# 1 \"input.i\"\ncaf\\u00e9 = x\\U0001F600;\n" in
   let edit = edit written ~first:1 ~count:1 (at 1) "+=" in
   check "an edit keeps universal character names as written"
-    (Emitter.emit written [ edit ]
+    (emit written [ edit ]
     = "# 1 \"input.i\"\n\
        caf\\u00e9 \n\
        # 1 \"a.tc\"\n\
@@ -79,9 +82,9 @@ let () =
   let owner (token : Token.t) = (token.owner.name, token.owner.system_header) in
   let owners text = Array.to_list (Array.map owner (read text).tokens) in
   check "read back, an edit in a system header keeps the owners"
-    (owners (Emitter.emit unit [ edit ]) = owners source);
+    (owners (emit unit [ edit ]) = owners source);
   check "an edit in a system header"
-    (Emitter.emit unit [ edit ]
+    (emit unit [ edit ]
     = "# 1 \"a.tc\"\n\
        int x = 1;\n\
        # 1 \"h.h\" 1 3\n\
@@ -110,9 +113,9 @@ let () =
   let owner (token : Token.t) = token.owner in
   let owners text = Array.to_list (Array.map owner (read text).tokens) in
   check "read back, an edit after the pragma keeps the owners"
-    (owners (Emitter.emit unit [ edit ]) = owners source);
+    (owners (emit unit [ edit ]) = owners source);
   check "an edit after the marker of the pragma"
-    (Emitter.emit unit [ edit ]
+    (emit unit [ edit ]
     = "# 1 \"a.tc\"\n\
        # 1 \"p.h\" 1\n\
        # 2 \"p.h\" 3\n\
@@ -141,7 +144,7 @@ let () =
   let inside = edit unit ~first:1 ~count:1 unit.tokens.(1).location "n" in
   let before = edit unit ~first:0 ~count:1 unit.tokens.(0).location "long" in
   check "edits in and before a system macro region"
-    (Emitter.emit unit [ before; inside ]
+    (emit unit [ before; inside ]
     = "# 1 \"a.tc\"\n\
        \n\
        # 1 \"a.tc\"\n\
@@ -173,7 +176,7 @@ let rec take count list =
 (* Read back, the tokens outside the replaced range keep their place and
    owner, and those of the edit are at its location. *)
 let () =
-  let emitted = read (Emitter.emit unit [ replacement ]) in
+  let emitted = read (emit unit [ replacement ]) in
   let before = take 1 (seen_all unit) and after = drop 4 (seen_all unit) in
   let emitted_tokens = seen_all emitted in
   let edit_tokens = take 3 (drop 1 emitted_tokens) in
@@ -194,11 +197,11 @@ let raises make message =
 
 let out_of_order edits =
   raises
-    (fun () -> Emitter.emit unit edits)
+    (fun () -> emit unit edits)
     "Reader.rewrite: replacements out of order"
 
 let spans_files edits =
-  raises (fun () -> Emitter.emit unit edits) "Emitter.emit: an edit spans files"
+  raises (fun () -> emit unit edits) "Emitter.emit: an edit spans files"
 
 let outside ~first ~count =
   raises
@@ -216,7 +219,7 @@ let () =
   check "an edit that spans files"
     (spans_files [ edit unit ~first:1 ~count:6 (at 1) "x = 2" ]);
   check "adjacent edits"
-    (Emitter.emit unit [ replacement; edit unit ~first:4 ~count:1 (at 1) "," ]
+    (emit unit [ replacement; edit unit ~first:4 ~count:1 (at 1) "," ]
     = "# 1 \"a.tc\"\n\
        int \n\
        # 1 \"a.tc\"\n\
@@ -232,7 +235,7 @@ let () =
        # 2 \"a.tc\" 2\n\
        int z;\n");
   check "insertions in front of one token keep their order"
-    (Emitter.emit unit
+    (emit unit
        [ edit unit ~first:8 ~count:0 (at 2) "int v;"; insertion ]
     = "# 1 \"a.tc\"\n\
        int x = 1;\n\
@@ -248,4 +251,21 @@ let () =
        int w;\n\
        # 2 \"a.tc\"\n\
        int z;\n");
+  check "assertions follow the text under a marker of their own"
+    (Emitter.emit unit
+       { edits = [ replacement ]; assertions = [ "int a;"; "int b;" ] }
+    = "# 1 \"a.tc\"\n\
+       int \n\
+       # 1 \"a.tc\"\n\
+       x = 2\n\
+       # 1 \"a.tc\"\n\
+       ;\n\
+       # 1 \"h.h\" 1 3\n\
+       int y;\n\
+       # 2 \"a.tc\" 2\n\
+       int z;\n\
+       \n\
+       # 1 \"<typec>\" 3\n\
+       int a;\n\
+       int b;\n");
   if !failures > 0 then exit 1
