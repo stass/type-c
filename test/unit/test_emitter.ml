@@ -32,9 +32,8 @@ let at line : Location.t = { file = "a.tc"; line; flags = No_flags }
 (* The text with [edits] and no assertions. *)
 let emit unit edits = Emitter.emit unit { edits; assertions = [] }
 
-let edit (unit : Reader.t) ~first ~count location text : Emitter.edit =
-  { range = Reader.range unit.tokens ~first ~count; location;
-    text = Code text }
+let edit (unit : Reader.t) ~first ~count location text =
+  Emitter.code (Reader.range unit.tokens ~first ~count) ~location text
 
 (* x = 1 becomes x = 2 at line 1. *)
 let replacement = edit unit ~first:1 ~count:3 (at 1) "x = 2"
@@ -271,9 +270,18 @@ let () =
        int b;\n");
   ()
 
-(* A bracketed text stands in the packing bracket of design 10.3, under
-   its marker, and the unit ends with the packing probe after the
-   assertions; one without assertions gets the probe all the same. *)
+let declarations = Typec_test_support.External_declarations.of_unit
+
+(* The pieces of the [count] tokens of [unit] from [first], none of them
+   a pragma line. *)
+let pieces unit ~first ~count =
+  List.init count (fun offset ->
+      Option.get (Emitter.token unit (first + offset)))
+
+(* A bracketed text stands in the packing bracket of design 10.3, whose
+   pragmas take the line of the edit, and the unit ends with the packing
+   probe after the assertions; one without assertions gets the probe all
+   the same. *)
 let probe =
   "#pragma pack(push)\n\
    #pragma pack(1)\n\
@@ -293,10 +301,10 @@ let probe =
    (-fapple-pragma-pack or -fxl-pragma-pack?)\");\n"
 
 let () =
-  let bracketed : Emitter.edit =
-    { range = Reader.range unit.tokens ~first:8 ~count:0;
-      location = at 2;
-      text = Bracketed "struct s { int n; };" }
+  let before = List.nth (declarations unit) 2 in
+  let bracketed =
+    Emitter.bracketed unit ~before ~location:(at 2)
+      [ Emitter.generated (at 2) "struct s { int n; };" ]
   in
   let text =
     "# 1 \"a.tc\"\n\
@@ -305,11 +313,12 @@ let () =
      int y;\n\
      # 2 \"a.tc\" 2\n\
      \n\
+     # 2 \"a.tc\"\n\
      #pragma pack(push)\n\
      #pragma pack()\n\
-     \n\
      # 2 \"a.tc\"\n\
      struct s { int n; };\n\
+     # 2 \"a.tc\"\n\
      #pragma pack(pop)\n\
      # 2 \"a.tc\"\n\
      int z;\n\
@@ -322,5 +331,126 @@ let () =
   check "the probe without assertions"
     (Emitter.emit unit { edits = [ bracketed ]; assertions = [] }
     = text ^ probe)
+
+(* Tokens: struct box { int value ; } ; (g.h, lines 1 to 3) |
+   typedef int word ; (s.h, a system header) | int z ; (a.tc, line 2) *)
+let moving =
+  read
+    "# 1 \"a.tc\"\n\
+     # 1 \"g.h\" 1\n\
+     struct box {\n\
+    \  int value;\n\
+     };\n\
+     # 1 \"s.h\" 1 3\n\
+     typedef int word;\n\
+     # 4 \"g.h\" 2\n\
+     # 2 \"a.tc\" 2\n\
+     int z;\n"
+
+let own index = moving.tokens.(index).location
+
+(* The typedef of s.h and the structure of g.h, renamed as an instance
+   would be, move in front of int z: each token keeps its own file, line
+   and flags, the name written for box takes the line of box, and the
+   bracket takes the line of the edit. *)
+let moved =
+  Emitter.bracketed moving
+    ~before:(List.nth (declarations moving) 2)
+    ~location:(own 12)
+    (pieces moving ~first:8 ~count:4
+    @ pieces moving ~first:0 ~count:1
+    @ [ Emitter.generated (own 1) "box__i" ]
+    @ pieces moving ~first:2 ~count:6)
+
+let moved_text = Emitter.emit moving { edits = [ moved ]; assertions = [] }
+
+let () =
+  check "moved text keeps the lines of its tokens"
+    (moved_text
+    = "# 1 \"a.tc\"\n\
+       # 1 \"g.h\" 1\n\
+       struct box {\n\
+      \  int value;\n\
+       };\n\
+       # 1 \"s.h\" 1 3\n\
+       typedef int word;\n\
+       # 4 \"g.h\" 2\n\
+       # 2 \"a.tc\" 2\n\
+       \n\
+       # 2 \"a.tc\"\n\
+       #pragma pack(push)\n\
+       #pragma pack()\n\
+       # 1 \"s.h\" 3\n\
+       typedef int word ;\n\
+       # 1 \"g.h\"\n\
+       struct box__i {\n\
+       # 2 \"g.h\"\n\
+       int value ;\n\
+       # 3 \"g.h\"\n\
+       } ;\n\
+       # 2 \"a.tc\"\n\
+       #pragma pack(pop)\n\
+       # 2 \"a.tc\"\n\
+       int z;\n\
+       \n\
+       # 1 \"<typec>\" 3\n"
+      ^ probe)
+
+(* Read back, every moved token is where its own token was, the pragmas
+   of the bracket open at the edit's line and close on it, and the tokens
+   after it are where they were. The emitted tokens are the 12 of the
+   text before the edit, the two opening pragmas, the 12 moved, the
+   closing pragma and int z ;. *)
+let () =
+  let location (token : Token.t) = token.location in
+  let read_back =
+    Array.to_list (Array.map location (read moved_text).tokens)
+  in
+  check "read back, moved tokens are at their own locations"
+    (take 12 (drop 14 read_back)
+    = List.map own [ 8; 9; 10; 11; 0; 1; 2; 3; 4; 5; 6; 7 ]);
+  check "read back, the bracket and the text after it are at the edit"
+    (take 2 (drop 12 read_back) = [ own 12; { (own 12) with line = 3 } ]
+    && take 4 (drop 26 read_back) = List.map own [ 12; 12; 13; 14 ])
+
+(* A piece holds no pragma line: the token of one is none, nor is a #,
+   which Clang reads as the start of a directive where it begins a line
+   of preprocessed text, and typec's own text that would write one is
+   refused. Tokens: two pragma lines | int a # b %: c ; *)
+let () =
+  let unit =
+    read
+      "# 1 \"a.tc\"\n\
+       #pragma pack(1)\n\
+       #pragma typec checked\n\
+       int a # b %: c;\n"
+  in
+  let piece index = Option.is_some (Emitter.token unit index) in
+  check "no piece of a pragma line" (not (piece 0));
+  check "no piece of a pragma typec line" (not (piece 1));
+  check "no piece of a #" ((not (piece 4)) && not (piece 6));
+  check "a piece of any other token" (piece 2 && piece 3 && piece 8);
+  let refused text =
+    raises
+      (fun () -> Emitter.generated (at 1) text)
+      (Printf.sprintf
+         "Emitter.generated: %S holds a byte that typec's text never does"
+         text)
+  in
+  check "generated text holds no #pragma" (refused "#pragma pack(1)");
+  check "generated text holds no %: pragma" (refused "%:pragma pack(1)");
+  check "generated text holds no ??= pragma" (refused "??=pragma pack(1)");
+  check "generated text holds no _Pragma" (refused "_Pragma(\"pack(1)\")");
+  check "generated text is one line" (refused "int a;\nint b;");
+  check "generated text ends no line in Clang" (refused "int a;\r");
+  check "generated text splices no line" (refused "int a; \\");
+  check "generated text opens no comment" (refused "int a; /*");
+  check "generated text may hold a name with _Pragma"
+    (not (refused "typedef int my_Pragma;"));
+  check "code holds no pragma"
+    (raises
+       (fun () -> edit unit ~first:2 ~count:0 (at 1) "#pragma pack(push)")
+       "Emitter.code: \"#pragma pack(push)\" holds a byte that typec's \
+        text never does")
 
 let () = if !failures > 0 then exit 1

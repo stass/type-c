@@ -122,6 +122,11 @@ let () =
     "struct e; typedef struct e e; enum e_tag { e_A }; struct e { enum e_tag \
      tag; union { struct { #pragma pack() int x ; } A; } u; };";
   lowers "an alias" "type id = unsigned int;" "typedef unsigned int id ;";
+  lowers "names that hold the word _Pragma"
+    "type my_Pragma = int; type box = | my_Pragma_of(int v);"
+    "typedef int my_Pragma ; struct box; typedef struct box box; enum \
+     box_tag { box_my_Pragma_of }; struct box { enum box_tag tag; union { \
+     struct { int v ; } my_Pragma_of; } u; };";
   lowers "the name in a declarator" "type handler = void (*)(int);"
     "typedef void (* handler )(int);";
   lowers "the name before a suffix" "type table = char *[4];"

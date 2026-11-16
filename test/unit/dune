@@ -34,7 +34,7 @@
 (test
  (name test_emitter)
  (modules test_emitter)
- (libraries typec_cpp typec_emit))
+ (libraries typec_cpp typec_emit typec_test_support))
 
 (test
  (name test_lowering)

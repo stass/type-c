@@ -132,6 +132,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   prose) and assert `[TC0031]` at each site.
 - [Low] A diagnostic gives the file and the line but not the source line
   that design 13.6 says it carries; print the line of text under it.
+- [Medium] A `#` that follows a blank is a punctuator to the reader, as
+  in `cc -E` output of an object-like macro that expands to `#`
+  (`#define H #` then `H pragma pack(1)` gives ` # pragma pack(1)`), but
+  Apple Clang 21 reads that line of preprocessed input as a directive
+  and packs what follows, while GCC 16 reports a stray `#`. typec reads
+  no pragma there. Refuse a `#` or `%:` punctuator that is the first
+  token of its line, which no valid C needs.
 - [Low] `#ident` and `#sccs`, which `cc -E` passes through, are refused
   as unsupported directives. Pass them through like a pragma if a corpus
   uses them.
@@ -700,19 +707,26 @@ is [type-c-language-design.md](type-c-language-design.md).
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
-- [Medium] When the instances of package 2.1 fill `Emitter.Bracketed`
-  from a generic's definition, a `#pragma pack` (or a `_Pragma("pack")`,
-  which `cc -E` writes as one) kept between the definition's tokens
-  lands inside the bracket: it packs the instance or pops the stack of
-  the unit, and the probe cannot see it. Design 10.3 keeps only other
-  pragmas from an instance; either refuse a `pack` pragma inside a
-  generic's definition or make the text of a bracket a type that holds
-  no pragma line. A `Code` text that spells the bracket's pragmas itself
-  escapes the probe the same way, and the type of instance text should
-  close both; it should also confine a bracket to where a declaration
-  may stand, as the pragmas break an expression. A run test should
-  also compile an instance's error through the pipeline to confirm it
-  is reported at its own line.
+- [High] `Emitter.token` makes no piece of a pragma line or of a `#`
+  punctuator, so the bracket of an instance holds no pragma, but design
+  13.5 speaks of the `#pragma` lines of moved text as written, and a
+  generic function's body may hold `#pragma GCC diagnostic` or
+  `_Pragma` lines. Lowering (part 9 of package 2.1) must refuse a
+  generic whose definition holds such a token, never drop it (a `#` in
+  an attribute argument, which the parser skips, would change the
+  argument), and design 10.3 and 13.5 say so. If the pragmas other than
+  `pack` are to be kept, a piece for them can admit a line whose first
+  word is not `pack` and that reads as tokens.
+- [Medium] `Emitter.bracketed` anchors a bracket only in front of an
+  external declaration of the tree, but design 10.3 also puts the
+  instances that a variant or a record alias uses directly after its
+  own forward declaration, inside the text that lowering writes for the
+  type declaration. Part 9 of package 2.1 needs an anchor for that place
+  too, made from the type declaration, so that no other position can be
+  named. The anchor can also be forged, as `Tree.Empty_declaration`
+  takes a public span and `Spanned.make` is public: an abstract anchor
+  that only the parser makes, one per external declaration, would make
+  a bracket inside an expression unwritable.
 
 - [High] An instance is defined at a point that needs it complete only
   where typing asks for completeness (`Ctype.is_complete` and the

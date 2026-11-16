@@ -2,7 +2,7 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 (* Emits the preprocessed file named on the command line with a bracketed
-   structure, struct instance, inserted before its first token, as the
+   structure, struct instance, inserted before its first declaration, as the
    instance of a generic would be, so that the unit ends with the packing
    probe of design 10.3, for a backend to compile. *)
 
@@ -17,9 +17,14 @@ let () =
     | Ok unit -> unit
     | Error error -> failwith (Reader.error_message error)
   in
-  let instance : Emitter.edit =
-    { range = Reader.range unit.tokens ~first:0 ~count:0;
-      location = unit.tokens.(0).location;
-      text = Bracketed "struct instance { char c; int i; };" }
+  let before =
+    match Typec_test_support.External_declarations.of_unit unit with
+    | first :: _ -> first
+    | [] -> failwith "pack_probe: no external declaration"
+  in
+  let location = unit.tokens.(0).location in
+  let instance =
+    Emitter.bracketed unit ~before ~location
+      [ Emitter.generated location "struct instance { char c; int i; };" ]
   in
   print_string (Emitter.emit unit { edits = [ instance ]; assertions = [] })
