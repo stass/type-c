@@ -19,6 +19,13 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
+- [Medium] A build system that does not know `.tc` can bypass `typec`
+  without a word: CMake with `set_source_files_properties(calc.tc
+  PROPERTIES LANGUAGE C)` puts `-x c` before the input, so `typec`
+  hands it to the backend as C, and a `.tc` file with no Type-C
+  construct yet builds as plain C (CMake 4.4 without the property drops
+  the file). Plan package 4.3 should give each build system a rule that
+  reaches the `.tc` pipeline and a test that fails when it does not.
 - [Low] `Target_query.query` starts and waits for the backend itself,
   so in a compilation it hands the backend `typec`'s stdin, not
   `/dev/null`, and does not pass on a caught signal as `Process.wait`
@@ -1186,6 +1193,13 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
+- [Medium] What a renamed C file loses is spread over design 2.2, 2.3,
+  2.4, 13.2 and 13.3, and the README's "Adopting one file" repeats it
+  by hand; the refusal of a source character that is not valid UTF-8
+  (`src/sema/escape.ml`) and of a builtin outside the table are in no
+  section. Make design 2.2 the one list of the exceptions to the
+  superset property, each pointing at the section that states it, and
+  have the README link to it instead of keeping its own list.
 - [Medium] C text keeps C's meaning for a universe generic at three
   grammar sites (`opens_nested_declarator`, `parameters`,
   `identifier_list` in the parser), and package 3.4 would repeat them for

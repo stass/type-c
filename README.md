@@ -13,10 +13,21 @@ test/run/readme.sh says how the blocks are marked.
 Type-C is C11 with the types C is missing: variants checked by `match`,
 distinct types for ids and units, and generic types. Its compiler,
 `typec`, takes the command line of `cc`, turns Type-C into C that you
-can read, and hands that to your C compiler. A C11 file keeps its
-meaning, and there is no runtime: no library to link, no hidden
-allocation. Type-C is early: the examples below work today, and the rest
-of the language is designed but not built yet ([Status](#status)).
+can read, and hands that to your C compiler.
+
+You adopt it one file at a time, with no rewrite: rename one `.c` file
+of your program to `.tc`, build with `CC=typec`, and use the new types
+in that file where they help. The file keeps its meaning
+([the fine print](#adopting-one-file)), and everything else stays as it
+is: your headers, your other C files, your libraries, your debugger and
+your ABI. Your build system needs a rule that compiles a `.tc` file,
+and the fine print lists the few options that such a file refuses.
+There is no runtime, no library to link and no hidden allocation;
+nothing is added at run time but the checks of the Type-C that you
+write.
+
+Type-C is early: the examples below work today, and the rest of the
+language is designed but not built yet ([Status](#status)).
 
 A tagged union in C, with two bugs:
 
@@ -82,6 +93,116 @@ written for a kind that is none of the three, or an `int` kind, hides
 it. Nothing in C catches the wrong-member read. A `match` needs no
 `default`: it stops the program on such a value, and a case added
 later is an error at every `match` that misses it.
+
+## One file of an existing program
+
+A small C program: `main.c` calls `calc.c` through `calc.h`.
+
+<!-- file: calc.h -->
+```c
+/* Applies a line such as "add 5" or "neg" to *total: 0 when it
+   knows the line, else -1. */
+int calc_apply(const char *line, long *total);
+```
+
+<!-- file: main.c -->
+```c
+#include <stdio.h>
+#include "calc.h"
+
+int main(void) {
+  const char *lines[] = {"add 5", "neg", "add 2", "mul 3"};
+  long total = 0;
+  for (int i = 0; i < 4; i++)
+    if (calc_apply(lines[i], &total) != 0)
+      printf("unknown: %s\n", lines[i]);
+  printf("%ld\n", total);
+  return 0;
+}
+```
+
+<!-- file: calc.c -->
+```c
+#include <stdlib.h>
+#include <string.h>
+#include "calc.h"
+
+int calc_apply(const char *line, long *total) {
+  if (strncmp(line, "add ", 4) == 0) {
+    *total += strtol(line + 4, NULL, 10);
+    return 0;
+  }
+  if (strcmp(line, "neg") == 0) {
+    *total = -*total;
+    return 0;
+  }
+  return -1;
+}
+```
+
+```console
+$ cc -Wall -Wextra -c main.c calc.c
+$ cc main.o calc.o -o calc
+$ ./calc
+unknown: mul 3
+-3
+```
+
+`calc.c` becomes `calc.tc`, which parses a line into a variant and
+matches on it. It still includes `calc.h`, and `calc_apply` keeps its C
+type, so `main.c` and `calc.h` do not change:
+
+<!-- file: calc.tc -->
+```c
+#include <stdlib.h>
+#include <string.h>
+#include "calc.h"
+
+type command = | Add(long n) | Neg | Unknown;
+
+static command parse(const char *line) {
+  if (strncmp(line, "add ", 4) == 0)
+    return Add(strtol(line + 4, NULL, 10));
+  if (strcmp(line, "neg") == 0)
+    return Neg;
+  return Unknown;
+}
+
+int calc_apply(const char *line, long *total) {
+  match (parse(line)) {
+  case Add(n):
+    *total += n;
+    return 0;
+  case Neg:
+    *total = -*total;
+    return 0;
+  case Unknown:
+    return -1;
+  }
+}
+```
+
+`typec` compiles `calc.tc` to an ordinary object. The C compiler links
+it with the `main.o` of the C build, which is not even recompiled:
+
+```console
+$ typec -Wall -Wextra -c calc.tc
+$ cc main.o calc.o -o calc
+$ ./calc
+unknown: mul 3
+-3
+```
+
+A command added to `command` later, such as `Mul(long n)`, stops the
+build at every `match` that does not handle it.
+
+In a build, `CC=typec` compiles `main.c` and every other C file as the
+C compiler does, since `typec` hands them to it untouched. The build
+also needs a rule for the `.tc` file, as make has none built in: in a
+GNU Makefile, `%.o: %.tc` with the command
+`$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<`, and in other build systems
+their own form of it. Documented rules for make,
+ninja and CMake are plan package 4.3, not done yet.
 
 ## A short tour
 
@@ -225,6 +346,74 @@ types. The C compiler is `cc` unless `--cc=PATH` or
 `TYPEC_CC` names another ([choosing it](#choosing-the-backend)).
 
 ## In detail
+
+### Adopting one file
+
+A C11 translation unit is a Type-C unit with the same meaning
+([design 2.2](type-c-language-design.md#22-type-c-is-a-superset-of-c11)):
+each Type-C construct begins with tokens that C refuses, and the words
+Type-C adds, such as `type`, `match` and `result`, stay free for C's
+identifiers
+([design 2.3](type-c-language-design.md#23-words)). So a file renamed
+to `.tc` compiles before any Type-C is written in it, and while it uses
+no Type-C construct, `typec` hands the C compiler its preprocessed text
+byte for byte: the object equals the one that the C compiler builds from
+that same preprocessed text with the same options
+([`test/run/pipeline.t`](test/run/pipeline.t)). The corpus runner
+checks the same on every file of real programs, among them zlib, Lua,
+SQLite and QBE, each renamed to `.tc`
+([Running the corpus](docs/development.md#running-the-corpus));
+recording a run of the whole corpus at one revision on every host is
+open in [TODO.md](TODO.md#corpus).
+
+The fine print, for a `.tc` file:
+
+- The dialect is C11 or C17, in the ISO or the GNU form, with the GNU
+  and Clang extensions that system headers and common code use
+  ([design 13.3](type-c-language-design.md#133-front-end)). Any other
+  `-std=` is refused, so a build that selects C99 or C23 changes its
+  option for the file. Without a `-std=`, `typec` selects `-std=gnu11`,
+  older than the default of current GCC and Clang, so
+  `__STDC_VERSION__` is `201112L`. A build that relies on Clang's
+  current default, `gnu17`, keeps it with `-std=gnu17`; the `gnu23` of
+  GCC 15 and later cannot be kept.
+- An extension outside that set, such as a GNU nested function, is
+  refused with a message, and so is a call of a builtin function that
+  the table of `typec` lacks, such as `__builtin_cpu_supports`
+  ([TODO.md](TODO.md) tracks the table).
+- A source character that is not valid UTF-8, such as a Latin-1 byte in
+  a string literal, is refused.
+- A universe name (`option`, `result`, `slice`, `str` and the like) as
+  a parameter of an old-style definition is an error: the name is a
+  typedef name in a `.tc` file, and C11 6.9.1p6 forbids one there
+  (design 2.2).
+- Identifiers that begin with `__tc_` are reserved to `typec`, and one
+  in the unit is an error (design 2.3).
+- `typec` defines `__TYPEC__` as `1` while it preprocesses the unit
+  (design 2.1).
+- `__FILE__` names the `.tc` file, as it names any renamed file.
+- A few options are refused, among them `-E`, `-save-temps`,
+  `-fshort-enums` and more than one `-arch`
+  ([Compiling a `.tc` input](#compiling-a-tc-input) lists them).
+- The C compiler reads preprocessed text, so its warnings that depend on
+  where a macro came from or on comments can differ from a direct
+  compile
+  ([design 13.2](type-c-language-design.md#132-driver-and-preprocessing)).
+
+The code that you write in Type-C compiles to plain C
+([What the C looks like](#what-the-c-looks-like)). Of the code that the
+compiler adds without the source spelling it out, the traps of matching
+are all that is built; `defer`, slice bounds checks and checked mode
+will add the rest ([principle 4](#principles)). The rest of a program
+links as before: Type-C functions are C functions under their own
+names, with no mangling, and `typec` adds no library to the link
+([design 10.4](type-c-language-design.md#104-functions-and-objects)).
+Debuggers step through the lines of the `.tc` file
+([design 13.6](type-c-language-design.md#136-diagnostics-and-debugging)),
+but the debug information is not yet that of a direct compile: with
+Clang it names a temporary file as the compilation unit, and on macOS a
+command that links a `.tc` input with other inputs loses the `.dSYM` of
+`-g` ([TODO.md](TODO.md#driver)).
 
 ### What typec reports
 
@@ -531,6 +720,69 @@ compilers and compared in code size and in the instructions they retire
 The cost of the checks themselves, and what is not measured yet, are
 open in [TODO.md](TODO.md).
 
+### Using Type-C types from C
+
+C code sees what
+[design 10.6](type-c-language-design.md#106-what-c-code-sees) lists: a
+variant is the structure shown above, a distinct type is the type it is
+made from, and a function is the same C function. The C compiler lays
+out both sides, so they agree:
+[`test/run/abi.t`](test/run/abi.t) links objects that `typec` builds
+with objects of the C compiler alone, in every pairing of GCC and
+Clang, and passes variants with fields of each class of C object type
+both ways, the C side reading them through a structure written by hand
+as [design 10.1](type-c-language-design.md#101-variants) gives it.
+
+One header can serve both kinds of file. `typec` defines `__TYPEC__`
+while it preprocesses a Type-C unit, so the header can give Type-C
+files a distinct type where C files see a plain `typedef`
+([design 2.1](type-c-language-design.md#21-files)). Both have the same
+representation, so both call the same function, and only the Type-C
+side gets the check:
+
+<!-- file: user.h -->
+```c
+#ifdef __TYPEC__
+type user_id = distinct unsigned;  /* in .tc files */
+#else
+typedef unsigned user_id;          /* in .c files */
+#endif
+
+int user_is_root(user_id u);
+```
+
+<!-- file: user.tc -->
+```c
+#include "user.h"
+
+int user_is_root(user_id u) {
+  return u == (user_id)0;
+}
+```
+
+<!-- file: admin.c -->
+```c
+#include <stdio.h>
+#include "user.h"
+
+int main(void) {
+  printf("%d\n", user_is_root(0));
+  return 0;
+}
+```
+
+```console
+$ typec -Wall -Wextra user.tc admin.c -o admin
+$ ./admin
+1
+```
+
+Not built yet: `typec --emit-c-header`, which writes the C header of a
+`.tci` interface, so that C code gets its variants without a structure
+written by hand
+([design 9.3](type-c-language-design.md#93-c-clients), plan package
+4.1).
+
 ### Principles
 
 One line each on the principles of
@@ -574,18 +826,25 @@ module. An analyzer finds what the paths it explores reach. In Type-C
 these mistakes are type errors that every build checks, with no extra
 tool.
 
-**...use C++?** `std::variant`, `enum class` and templates do much of
-this, in another language. A C program is not always a C++ program
-(`int *p = malloc(n);` is an error in C++), and C++ brings exceptions
-and a runtime library. A C file stays valid Type-C, and `typec` writes
-C.
-
 **...use Rust or Zig?** Both have exhaustive tagged unions and generic
 types, and Rust's safe code is memory safe, which Type-C is not
-([design 14](type-c-language-design.md#14-guarantees)). Both call C and
-Zig compiles it, but C code gains their checks only when it is
-rewritten in their language. Type-C starts from the C you have: rename
-a file to `.tc`, and use a variant in it where it helps.
+([design 14](type-c-language-design.md#14-guarantees)). Both call C, but
+C code gains their checks only when it is rewritten in their language,
+and the build gains their toolchain and a boundary between the
+languages: Rust reads C's declarations through `extern "C"`
+blocks, written by hand or generated by bindgen, and Zig translates C
+headers into Zig. `typec` is a tool to add too, but in Type-C the checks
+start in the one file you rename. It includes the same headers as they
+are, is compiled by the same C compiler, and gives an object with the C
+ABI, which links with the rest as before
+([One file of an existing program](#one-file-of-an-existing-program)).
+
+**...use C++?** `std::variant`, `enum class` and templates do much of
+this, in another language. A C file is not always a C++ file
+(`int *p = malloc(n);` is an error in C++), C++ reaches C functions
+through `extern "C"` declarations, and C++ brings exceptions and a
+runtime library to link. A C file stays valid Type-C, and `typec`
+writes C.
 
 **...write macros?** A macro that writes `struct { T *data; ... }`
 makes a new type at each use, so the `VECTOR(int)` of one declaration
