@@ -778,10 +778,17 @@ let statements () =
 (* Design 5.2: Type-C text discards no value of a result type, which
    C text may. *)
 let dropped_results () =
-  let declarations = "int x; result(int, int) r; result(int, int) f(void); " in
+  let declarations =
+    "int x; result(int, int) r; result(int, int) f(void); \
+     int u __attribute__((vector_size(16))); "
+  in
   let type_c body = in_function ~declarations body in
   let rejects body =
     rejects_source ~file:"in.tc" (type_c body) "[TC0048]"
+  in
+  let undecided body =
+    rejects_source ~file:"in.tc" (type_c body)
+      "the type of a discarded conditional with a branch of a result type"
   in
   let accepts body = accepts_source ~file:"in.tc" (type_c body) in
   rejects "f()";
@@ -803,6 +810,15 @@ let dropped_results () =
   accepts "r = ({ x; f(); })";
   accepts "r = ({ x; done: f(); })";
   rejects "({ f(); int y = 0; })";
+  rejects "return f()";
+  accepts "return (void)f()";
+  undecided "x ? f() : u";
+  undecided "(x, (x ? u : r))";
+  undecided "return x ? f() : u";
+  accepts "r = x ? u : r";
+  accepts "(void)(x ? f() : u)";
+  accepts "x ? u : u";
+  accepts "__extension__ (r = f())";
   accepts "result(int, int) s = f(); (void)s";
   accepts_source ~file:"in.tc"
     (declarations ^ "\n# 1 \"c.h\" 1\nvoid t(void) { f(); r; }\n")

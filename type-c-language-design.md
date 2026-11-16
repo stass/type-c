@@ -1359,12 +1359,22 @@ before the statement holds the `try`. General placement is in section 12.
 ### 5.2 Results are not dropped
 
 An expression of a `result` type whose value is discarded is an error: as
-an expression statement, as the left operand of `,`, and as the first or
-third clause of `for`, and as a branch of a conditional whose type is
+an expression statement, as the left operand of `,`, as the first or
+third clause of `for`, as the expression of a `return` in a function
+that returns `void`, and as a branch of a conditional whose type is
 `void`, as GNU C makes one with a `void` branch. Handle the value with
 `try` or `match`, store it, or discard it on purpose with a cast to
 `void`. The value of an assignment is the value it stored, so
 discarding it drops nothing: `r = f();` is no error.
+
+C forbids `return f();` in a `void` function where `f` returns a value
+(C11 6.8.6.4p1), but GCC and Clang accept it under
+`-Wno-return-mismatch` and drop the value, so the rule refuses it as
+it refuses `f();`. Where the value of a conditional is discarded, one
+branch is a `result` and the other has a type that `typec` does not
+know (13.3), the result is dropped whether the conditional is `void` or
+not, and the conditional is an error (P21). Where its value is used, a
+`void` conditional is an error of C.
 
 A `result` type is what rule 1 of 5.1 asks of an operand: an instance
 of the `result` of the universe scope, under a typedef name or an alias
@@ -3968,7 +3978,7 @@ a crash.
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 refuses are compile errors | Nothing |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. An instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), an instance first used inside its region in one translation unit and outside it in another has one name and two layouts, and a function instance is compiled under the target, optimisation, attribute and section pragmas in force at its first use (13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
-| A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for` | Explicit casts to `void` |
+| A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
 | A slice access stays in bounds | `s[i]`, `slice_sub` | The slice describes live storage of its length |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |
 

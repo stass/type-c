@@ -500,20 +500,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   kind of tag only at run time. Give encodings a private type that only
   the encoder makes, and hand the `define` of
   `Ctype.declare_variant_instance` a definer bound to its tag.
-- [Medium] The rule against dropped results (design 5.2) is checked at
-  each position where C makes a value void: `refuse_dropped_result` in
-  `src/sema/expressions.ml` is called by the expression statement, the
-  left operand of a comma, both expression clauses of `for` and a void
-  conditional, and a new such position (the operand of `try e;`, a
-  deferred statement) must remember to call it. Make one funnel that
-  types an expression evaluated as a void expression and refuses a
-  result there, which those positions use and only a cast to void
-  bypasses; it would also reach a `return f();` in a void function,
-  which typec leaves to the backend (refused by default, accepted under
-  `-Wno-return-mismatch`), and give every position the completeness
-  check of 6.3.2.1p2 that only the expression statement does now. A
-  conditional of a result and a branch of a type that typec does not
-  know is not checked, though the backend may make it void.
 - [Medium] A definition check of a generic passes a definition that
   discards a value of a type parameter, which an instance at `result`
   then fails, against design 3.5 rule 4: `type pair(T) = struct { int
@@ -530,10 +516,27 @@ is [type-c-language-design.md](type-c-language-design.md).
   universe's declaration itself, or take the name from `Universe`.
 - [Low] An assignment is exempt from the rule against dropped results
   only bare or parenthesized, so `c ? (r = f()) : (r = g());`,
-  `__extension__ (r = f());` and `({ r = f(); });` are refused although
-  they only store. If a real program meets one, see through `?:`,
-  `__extension__`, a selection and the value of a statement expression
-  as well.
+  `_Generic(0, int: (r = f()));` and `({ r = f(); });` are refused
+  although they only store. If a real program meets one, see through
+  `?:`, a selection and the value of a statement expression as well.
+- [Low] A discarded value of a type that typec does not know (design
+  13.3) is not checked against design 5.2, though an attribute that
+  typec does not model may hide a `result` there, as in `f();` after
+  `result(int, int) __attribute__((x)) f(void);`. Nor is the value of a
+  `return` in a function whose return type typec does not know, which
+  may be void. Refusing them through `needing` would refuse every
+  discarded call of a function of unknown type; decide by what P21
+  measures. A conditional of a result and such a value is refused where
+  it is discarded, but not as the last item of a statement expression or
+  as the association that a selection selects, which do not pass on
+  that their value is discarded.
+- [Medium] An excess initialiser drops its value without the rule of
+  design 5.2: `struct p s = { 1, f() };` and `int y[1] = { 2, f() };`
+  where `f` returns a `result` are accepted, and GCC and Clang only warn
+  (`-Wexcess-initializers`), though 6.7.9p2 makes them a constraint
+  violation. `Initialiser.untargeted` types excess elements and those
+  whose subobject typec does not know alike. Refuse an excess
+  initialiser in Type-C text, or type excess elements as discarded.
 
 ## Declarations
 

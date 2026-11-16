@@ -220,8 +220,10 @@ end = struct
 end
 
 (* The target type of an expression's position, which selects an
-   unqualified constructor (design 3.3), or none. *)
-type position = Untargeted | Targeted of Ctype.t
+   unqualified constructor (design 3.3), or none. A [Discarded] position
+   has none and discards the value (6.3.2.2p1), which a conditional of a
+   type that typec does not know needs to tell (design 5.2). *)
+type position = Untargeted | Targeted of Ctype.t | Discarded
 
 (* Where a pattern stands, which decides whether it may omit the field
    list of a constructor with fields: only a test may (design 4.1 rule 3,
@@ -310,6 +312,11 @@ let needing need (unknown : Unknown.t) =
   Rule.message Profile
     (Printf.sprintf "%s depends on %s at %s:%d, %s (design 13.3)" need
        unknown.construct unknown.location.file unknown.location.line why)
+
+let returns_void enclosing =
+  match enclosing.return_type with
+  | Some t -> Ctype.is_void t = Answer true
+  | None -> false
 
 let within context enclosing walk =
   let view = context.typed in
@@ -447,19 +454,23 @@ let rec is_assignment (expression : Tree.expression) =
   | Parenthesized inner -> is_assignment inner
   | _ -> false
 
-(* Design 5.2: Type-C text discards no value of a result type, judged by
-   the first token of [discarded], whose typing [typed] is; discarding an
-   assignment drops nothing. *)
+(* Design 5.2: whether discarding [discarded], typed as [typed], drops a
+   value of a result type in Type-C text, judged by its first token;
+   discarding an assignment drops nothing. *)
+let drops_result context (discarded : Tree.expression) typed =
+  Option.is_some (Ctype.as_result typed.expression_type)
+  && is_type_c_text context discarded.span
+  && not (is_assignment discarded)
+
+let dropped_result =
+  Rule.message Dropped_result
+    "a value of a result type is discarded; handle it with try or match, \
+     store it, or cast it to void"
+
+(* Design 5.2: Type-C text discards no value of a result type. *)
 let refuse_dropped_result context (discarded : Tree.expression) typed =
-  match Ctype.as_result typed.expression_type with
-  | Some _
-    when is_type_c_text context discarded.span
-         && not (is_assignment discarded) ->
-      context.fail discarded.span
-        (Rule.message Dropped_result
-           "a value of a result type is discarded; handle it with try or \
-            match, store it, or cast it to void")
-  | Some _ | None -> ()
+  if drops_result context discarded typed then
+    context.fail discarded.span dropped_result
 
 (* Distinct types (design 3.4, 10.2) *)
 
@@ -1361,6 +1372,30 @@ let composite_pointer context span (a : Ctype.t) (b : Ctype.t) =
    whether it is a null pointer constant, with its type. *)
 type branch = { branch : Tree.expression; branch_typed : typed }
 
+(* GNU C: a conditional of type [t] discards the value of each branch
+   where [t] is void (design 5.2). Where typec does not know whether it
+   is void (design 13.3) and the conditional's own value is discarded, a
+   branch of a result type is dropped either way, so it is refused; where
+   the value is used, a void conditional is the backend's error. *)
+let discard_branches context position (t : Ctype.t) branches =
+  let diagnostic =
+    match (Ctype.is_void t, position) with
+    | Answer true, _ -> Some dropped_result
+    | Depends_on unknown, Discarded ->
+        Some
+          (needing
+             "the type of a discarded conditional with a branch of a \
+              result type"
+             unknown)
+    | Answer false, _ | Depends_on _, (Untargeted | Targeted _) -> None
+  in
+  let refuse diagnostic { branch; branch_typed } =
+    if drops_result context branch branch_typed then
+      context.fail branch.span diagnostic
+  in
+  Option.iter (fun diagnostic -> List.iter (refuse diagnostic) branches)
+    diagnostic
+
 (* Whether an operand is a null pointer constant (6.3.2.3p3); [Opaque]
    where it is one of a value that the backend computes. *)
 type null_pointer = Null | Not_null | Opaque_constant
@@ -2211,7 +2246,7 @@ let unqualified_constructor context position (span : Tree.span) name =
       context.needs_complete t;
       Option.bind (Ctype.constructors context.tags t) (fun constructors ->
           named_in t constructors name)
-  | Targeted _ | Untargeted -> None
+  | Targeted _ | Untargeted | Discarded -> None
 
 (* [T.C]: the type name denotes a complete variant with a constructor [C]. *)
 let qualified_constructor context (variant : Tree.type_name)
@@ -2300,7 +2335,7 @@ and positioned context position (expression : Tree.expression) =
       (* 6.5.16.1p2, 6.5.2.2p7: converted as if by assignment. *)
       context.needs_complete typed.expression_type;
       refuse_distinct_conversion context expression.span target typed
-  | Untargeted -> ());
+  | Untargeted | Discarded -> ());
   Hashtbl.replace context.typed.types expression.span typed;
   Hashtbl.replace context.typed.constants expression.span
     (classify context expression typed);
@@ -2391,7 +2426,7 @@ and expression_node context position (whole : Tree.expression) =
       assignment context span op left_typed (typed right)
   (* 6.5.17p2: the right operand's value. *)
   | Comma (left, right) ->
-      refuse_dropped_result context left (as_whole left);
+      discard context left;
       let right = as_enclosing right in
       context.needs_complete right.expression_type;
       { (value (value_type right)) with bit_field = value_of right.bit_field }
@@ -2577,7 +2612,7 @@ and prototype_positions context (callee : typed) arguments =
 and argument context position argument =
   match position with
   | Targeted _ -> positioned context position argument
-  | Untargeted -> expression context argument
+  | Untargeted | Discarded -> expression context argument
 
 (* GNU [__real__] and [__imag__] and the operators of 6.5.3. *)
 and unary context span (op : Tree.unary_operator) typed =
@@ -2693,11 +2728,7 @@ and conditional context span position condition if_true if_false =
   in
   let third = { branch = if_false; branch_typed = branch_typed if_false } in
   let result = conditional_type context span second third in
-  (* GNU C: a void conditional discards the value of its other branch. *)
-  if Ctype.is_void result = Answer true then begin
-    refuse_dropped_result context second.branch second.branch_typed;
-    refuse_dropped_result context third.branch third.branch_typed
-  end;
+  discard_branches context position result [ second; third ];
   result
 
 (* 6.5.15p3 to p6: the type of a conditional of these branches. *)
@@ -2817,7 +2848,8 @@ and statement_expression context (block : Tree.block) =
 and statement_value context (statement : Tree.statement) =
   match statement.node with
   | Expression_statement value ->
-      Ctype.unqualified (value_type (statement_operand context value))
+      Ctype.unqualified
+        (value_type (statement_operand context Untargeted value))
   | Labeled
       { label = { node = Named_label _; _ } as label; statement = labeled } ->
       label_of context label;
@@ -2830,12 +2862,21 @@ and statement_value context (statement : Tree.statement) =
       typed_statement context statement;
       Ctype.void
 
-(* 6.3.2.1p2: the expression of an expression statement, an lvalue
-   converted to its value. *)
-and statement_operand context value =
-  let typed = whole_value context value in
+(* 6.3.2.1p2: an expression evaluated on its own, as an expression
+   statement is, an lvalue converted to its value. *)
+and statement_operand context position value =
+  let typed = positioned context position value in
   context.needs_complete typed.expression_type;
   typed
+
+(* 6.3.2.2p1: an expression evaluated as a void expression, for its
+   effects alone, which discards its value (design 5.2). The statements
+   and the comma type such an expression here; a cast to void, which
+   discards on purpose, and a void conditional, which discards a branch
+   that it has typed, do otherwise. *)
+and discard context value =
+  refuse_dropped_result context value
+    (statement_operand context Discarded value)
 
 (* 7.19p3: each step of the member path of [offsetof] reaches into the
    type that the steps before it reach, which may not be a variant (design
@@ -2968,8 +3009,7 @@ and typed_statement context (statement : Tree.statement) =
       label_of context label;
       typed_statement context labeled
   | Compound block -> block_items context block
-  | Expression_statement value ->
-      refuse_dropped_result context value (statement_operand context value)
+  | Expression_statement value -> discard context value
   | Computed_goto value -> ignore (expression context value)
   | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _ ->
       ()
@@ -3005,15 +3045,14 @@ and typed_statement context (statement : Tree.statement) =
   | For { clause; condition; step; body } ->
       Option.iter (for_clause context) clause;
       Option.iter (scalar ~clause:"6.8.5p2") condition;
-      Option.iter
-        (fun step ->
-          refuse_dropped_result context step (whole_value context step))
-        step;
+      Option.iter (discard context) step;
       typed_statement context body
   (* 6.8.6.4p1 is left to the backend: GCC and Clang refuse a return
      that mismatches the function by default but accept it under
      -Wno-return-mismatch, and GNU C returns a void expression from a
-     void function. *)
+     void function. Either way a void function discards the value; a
+     return type that typec does not know is a target, as any other. *)
+  | Return (Some value) when returns_void enclosing -> discard context value
   | Return value ->
       let position =
         match enclosing.return_type with
@@ -3040,8 +3079,7 @@ and typed_statement context (statement : Tree.statement) =
 and for_clause context (clause : Tree.for_clause) =
   match clause with
   | Clause_declaration declaration -> context.declaration declaration
-  | Clause_expression value ->
-      refuse_dropped_result context value (whole_value context value)
+  | Clause_expression value -> discard context value
 
 (* 6.8.4.2p1. *)
 and switch_controlling context controlling =

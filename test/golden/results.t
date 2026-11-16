@@ -58,6 +58,35 @@ branch, discards the value of the other branch.
   void_branch.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
   [1]
 
+Where the value of a conditional is discarded and typec does not know
+the type of the other branch, the result is dropped whether the
+conditional is void or not, and typec refuses it (design 13.3).
+
+  $ cat > unknown_branch.tc <<'EOF'
+  > result(int, int) f(void);
+  > int u __attribute__((vector_size(16)));
+  > void h(int c) {
+  >   c ? f() : u;
+  > }
+  > EOF
+  $ ./golden.exe unknown_branch.tc
+  unknown_branch.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'vector_size' at unknown_branch.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  [1]
+
+A function that returns void discards the value of a return statement,
+as GNU C returns a void expression and GCC and Clang accept any other
+under -Wno-return-mismatch.
+
+  $ cat > return_void.tc <<'EOF'
+  > result(int, int) f(void);
+  > void h(void) {
+  >   return f();
+  > }
+  > EOF
+  $ ./golden.exe return_void.tc
+  return_void.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  [1]
+
 The rule goes by position, also in an operand that is not evaluated.
 
   $ cat > sizeof.tc <<'EOF'
@@ -72,11 +101,13 @@ The rule goes by position, also in an operand that is not evaluated.
 
 A cast to void discards on purpose. A declaration or an assignment
 stores the value, and the value of an assignment is the one stored, so
-an assignment discards none, parenthesized or not.
+an assignment discards none, parenthesized or not. A void function
+returns a void expression.
 
   $ cat > handled.tc <<'EOF'
   > result(int, int) f(void);
   > int g(void);
+  > void v(void);
   > void h(void) {
   >   (void)f();
   >   result(int, int) r = f();
@@ -85,6 +116,9 @@ an assignment discards none, parenthesized or not.
   >   (r = f(), g());
   >   for (r = f(); 0; r = f()) {}
   >   (void)r;
+  > }
+  > void k(void) {
+  >   return v();
   > }
   > EOF
   $ ./golden.exe handled.tc > /dev/null && echo accepted
