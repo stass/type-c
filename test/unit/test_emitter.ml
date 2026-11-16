@@ -482,4 +482,92 @@ let () =
     (emit unit [ edit unit ~first:a ~count:1 (at 1) "b" ]
     = "# 1 \"a.tc\"\nint \n# 1 \"a.tc\"\nb\n# 1 \"a.tc\"\n;\n")
 
+(* A token of moved text is a pragma line where it is a #pragma line
+   that is a sequence of preprocessing tokens, a piece where it is a
+   movable token, and none else. Tokens: four pragma lines | int a ; *)
+let () =
+  let unit =
+    read
+      "# 1 \"a.tc\"\n\
+       #pragma GCC diagnostic push\n\
+       #pragma typec checked\n\
+       #pragma mark - Don't\n\
+       #pragma weak f \\\n\
+       int a;\n"
+  in
+  let moved index =
+    match Emitter.moved_token unit index with
+    | Some (Pragma_line _) -> `Line
+    | Some (Piece _) -> `Piece
+    | None -> `None
+  in
+  check "a pragma line of a #pragma line" (moved 0 = `Line);
+  check "no moved token of a pragma typec line" (moved 1 = `None);
+  check "no moved token of a line with an open quote" (moved 2 = `None);
+  check "no moved token of a line that would splice the next"
+    (moved 3 = `None);
+  check "a piece of any other token"
+    (List.for_all (fun index -> moved index = `Piece) [ 4; 5; 6 ])
+
+(* Tokens: int a ; (line 1) | a pragma line (line 2) | int b ; (line 3) |
+   int z ; (line 4) *)
+let pragmatic =
+  read
+    "# 1 \"a.tc\"\n\
+     int a;\n\
+     #pragma GCC diagnostic push\n\
+     int b;\n\
+     int z;\n"
+
+let moved index = Option.get (Emitter.moved_token pragmatic index)
+
+(* The tokens of int a ; #pragma int b ; and a name of typec's at the
+   pragma's line, moved in place of int z ;. *)
+let moved_with_pragma =
+  Emitter.moved
+    (Reader.range pragmatic.tokens ~first:7 ~count:3)
+    [ moved 0; moved 1; moved 2; moved 3;
+      Emitter.Piece (Emitter.generated (at 2) "int c;");
+      moved 4; moved 5; moved 6 ]
+
+let moved_pragma_text = emit pragmatic [ moved_with_pragma ]
+
+(* Moved text is written as in a bracket, without the bracket's pragmas
+   and so without the probe; the pragma line stands on a line of its own
+   under a marker for its line, and joins no piece at that line. *)
+let () =
+  check "moved text with a pragma line"
+    (moved_pragma_text
+    = "# 1 \"a.tc\"\n\
+       int a;\n\
+       #pragma GCC diagnostic push\n\
+       int b;\n\
+       \n\
+       # 1 \"a.tc\"\n\
+       int a ;\n\
+       # 2 \"a.tc\"\n\
+       #pragma GCC diagnostic push\n\
+       # 2 \"a.tc\"\n\
+       int c;\n\
+       # 3 \"a.tc\"\n\
+       int b ;\n\
+       # 4 \"a.tc\"\n\
+       \n")
+
+(* Read back, every moved token, the pragma line among them, is at its
+   own location, and nothing follows the edit. The emitted tokens are
+   the 7 before the edit and the 10 moved. *)
+let () =
+  let read_back = (read moved_pragma_text).tokens in
+  let location (token : Token.t) = token.location in
+  check "read back, a moved pragma line is a pragma line"
+    (match read_back.(10).kind with
+     | Pragma (Identifiers [ "GCC"; "diagnostic"; "push" ]) -> true
+     | _ -> false);
+  check "read back, moved tokens and a pragma line at their own places"
+    (drop 7 (Array.to_list (Array.map location read_back))
+    = List.map at [ 1; 1; 1; 2; 2; 2; 2; 3; 3; 3 ]);
+  check "read back, nothing follows the moved text"
+    (Array.length read_back = 17)
+
 let () = if !failures > 0 then exit 1

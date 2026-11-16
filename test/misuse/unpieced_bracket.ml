@@ -8,4 +8,6 @@
    token that is no pragma line or typec's text that holds none, so this
    must not compile. *)
 
-let text = Emitter.Bracketed "#pragma pack(1)\nstruct s { int n; };"
+let text location =
+  Emitter.Bracketed
+    { location; pieces = "#pragma pack(1)\nstruct s { int n; };" }

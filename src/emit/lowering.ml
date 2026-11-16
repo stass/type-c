@@ -665,9 +665,10 @@ let moved_text (text : Reader.t) edits ~first ~last =
   in
   let written (edit : Emitter.edit) =
     match edit.text with
-    | Emitter.Code "" -> []
-    | Emitter.Code code -> [ Emitter.generated edit.location code ]
+    | Emitter.Code { code = ""; _ } -> []
+    | Emitter.Code { location; code } -> [ Emitter.generated location code ]
     | Emitter.Bracketed _ -> invalid_arg "Lowering.moved_text: a bracket"
+    | Emitter.Moved _ -> invalid_arg "Lowering.moved_text: moved text"
   in
   let token index =
     match Emitter.token text index with

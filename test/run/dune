@@ -104,3 +104,14 @@
 (cram
  (applies_to moved_lines)
  (deps moved_probe.exe))
+
+; moved_pragmas.t compiles the output of moved_pragma_probe with each
+; backend.
+
+(executable
+ (name moved_pragma_probe)
+ (libraries typec_cpp typec_syntax typec_emit typec_test_support))
+
+(cram
+ (applies_to moved_pragmas)
+ (deps moved_pragma_probe.exe))

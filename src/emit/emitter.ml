@@ -6,10 +6,14 @@ open Typec_syntax
 
 type piece = { text : string; location : Location.t }
 
-let token (unit : Reader.t) index =
+(* The token [index] of [unit] at its own location. *)
+let own_piece (unit : Reader.t) index =
   let token = unit.tokens.(index) in
-  if Token.is_movable token.kind then
-    Some { text = Reader.spelling unit token; location = token.location }
+  { text = Reader.spelling unit token; location = token.location }
+
+let token (unit : Reader.t) index =
+  if Token.is_movable unit.tokens.(index).kind then
+    Some (own_piece unit index)
   else None
 
 (* The bytes of typec's own text: those of identifiers, UTF-8 included,
@@ -36,17 +40,37 @@ let generated location text =
   check_own_text ~caller:"Emitter.generated" text;
   { text; location }
 
-type text = Code of string | Bracketed of piece list
-type edit = { range : Reader.range; location : Location.t; text : text }
+(* A pragma line is a whole line of the source, of a type of its own so
+   that no bracket holds one, inside this module as outside it. *)
+type pragma_line = { line : piece }
 
-let code range ~location text =
-  check_own_text ~caller:"Emitter.code" text;
-  { range; location; text = Code text }
+type moved_piece = Piece of piece | Pragma_line of pragma_line
+
+(* Only a pragma line whose identifiers the rules of design 13.5 can
+   read may move; the other lines are errors there, whose checks
+   lowering makes. *)
+let moved_token (unit : Reader.t) index =
+  match unit.tokens.(index).kind with
+  | Pragma (Identifiers _) -> Some (Pragma_line { line = own_piece unit index })
+  | kind when Token.is_movable kind -> Some (Piece (own_piece unit index))
+  | _ -> None
+
+type text =
+  | Code of { location : Location.t; code : string }
+  | Bracketed of { location : Location.t; pieces : piece list }
+  | Moved of moved_piece list
+
+type edit = { range : Reader.range; text : text }
+
+let code range ~location code =
+  check_own_text ~caller:"Emitter.code" code;
+  { range; text = Code { location; code } }
 
 let bracketed (unit : Reader.t) ~(at : Tree.anchor) ~location pieces =
   { range = Reader.range unit.tokens ~first:at.before ~count:0;
-    location;
-    text = Bracketed pieces }
+    text = Bracketed { location; pieces } }
+
+let moved range pieces = { range; text = Moved pieces }
 
 (* A line marker for [location], on a line of its own. It repeats the
    flags in effect at [location] and no enter or return flag, so the
@@ -88,36 +112,51 @@ let check_one_file tokens edit =
 let bracket lines =
   [ "#pragma pack(push)"; "#pragma pack()" ] @ lines @ [ "#pragma pack(pop)" ]
 
-(* The lines of moved text: a marker for each run of pieces that share a
-   location, then the run on one line, so that every piece keeps its own
-   file and line (design 13.4). *)
+(* A line of moved text: the pieces that share a location, or a pragma
+   line, which no piece may join (C11 6.10p2). *)
+type run = Pieces of Location.t * string list | Line of pragma_line
+
+(* The lines of moved text: a marker for the location of each run, then
+   the run on one line, so that every piece keeps its own file and line
+   (design 13.4). *)
 let moved_lines pieces =
-  let add runs (piece : piece) =
-    match runs with
-    | (location, texts) :: earlier when location = piece.location ->
-        (location, piece.text :: texts) :: earlier
-    | _ -> (piece.location, [ piece.text ]) :: runs
+  let add runs = function
+    | Pragma_line line -> Line line :: runs
+    | Piece piece -> (
+        match runs with
+        | Pieces (location, texts) :: earlier when location = piece.location
+          ->
+            Pieces (location, piece.text :: texts) :: earlier
+        | _ -> Pieces (piece.location, [ piece.text ]) :: runs)
   in
-  let lines (location, texts) =
-    [ marker_line location; String.concat " " (List.rev texts) ]
+  let lines = function
+    | Pieces (location, texts) ->
+        [ marker_line location; String.concat " " (List.rev texts) ]
+    | Line { line } -> [ marker_line line.location; line.text ]
   in
   List.concat_map lines (List.rev (List.fold_left add [] pieces))
 
-(* The pragmas of a bracket open at the line of the edit, the second on
-   the line after it, and the last stands on it. The newline in front starts the bracket on a line of
-   its own wherever the edit stands in a line. *)
-let written location = function
-  | Code text -> marker location ^ text
-  | Bracketed pieces ->
+let as_moved piece = Piece piece
+
+(* The pragmas of a bracket stand at its location: the marker of the
+   location precedes the first and the last, and the second is on the
+   line after the first. The newline in front starts moved text on a
+   line of its own wherever the edit stands in a line. *)
+let written = function
+  | Code { location; code } -> marker location ^ code
+  | Bracketed { location; pieces } ->
       let opening = marker_line location in
+      let pieces = List.map as_moved pieces in
       let lines = bracket (moved_lines pieces @ [ marker_line location ]) in
       "\n" ^ String.concat "\n" (opening :: lines)
+  | Moved pieces -> "\n" ^ String.concat "\n" (moved_lines pieces)
 
-(* The edit as the backend reads it: between markers that give its
-   location and then the location where the replaced tokens end. *)
+(* The edit as the backend reads it: its text, which begins with a
+   marker, then a marker for the location where the replaced tokens
+   end. *)
 let replacement (tokens : Token.t array) edit : Reader.replacement =
   let text =
-    written edit.location edit.text ^ marker (end_location tokens edit.range)
+    written edit.text ^ marker (end_location tokens edit.range)
   in
   { range = edit.range; text }
 
@@ -161,7 +200,7 @@ let packing_probe =
     @ [ "#pragma pack(pop)"; assertion ])
 
 let is_bracketed edit =
-  match edit.text with Bracketed _ -> true | Code _ -> false
+  match edit.text with Bracketed _ -> true | Code _ | Moved _ -> false
 
 (* The probe is a fact of the backend that every bracket rests on, so
    emission, the one place that writes a bracket, adds it. *)

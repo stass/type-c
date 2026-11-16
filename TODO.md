@@ -1244,6 +1244,19 @@ types (design 13.3).
 - [Low] Each edit of the emitter is wrapped in two line markers, so
   `--emit-c` shows a lowered alias over eight lines. An edit whose text
   and replaced tokens hold no newline could go without them.
+- [Medium] Before package 2.4 lowers a `try` in a generic function:
+  `Lowering.moved_text` refuses a `Moved` edit inside the definition of
+  a generic (`invalid_arg`), as its pieces may be pragma lines that a
+  bracket cannot hold, though design 10.3 refuses a generic that holds
+  a pragma. Decide how the operand gets into the bracket: a function of
+  the emitter from moved text without pragma lines to pieces, or a
+  lowering of `try` there without `Moved`.
+- [Medium] `Emitter.moved` takes any range, so only the lowering that
+  calls it keeps the text of an instance, which needs the packing
+  bracket of design 10.3, from being written without one. When packages
+  2.4 and 2.5 use it, give it a site that only the parser makes, as
+  `Emitter.bracketed` takes an anchor: the operand of a `try` or the
+  place of a copy of a deferred statement.
 
 - [Medium] Design 9.2 rule 4 leaves to checked mode the operations that
   reinterpret storage as a private value (`*(symbol *)p`, a union member,
