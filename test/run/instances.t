@@ -236,3 +236,87 @@ constructor Some of option(int) the tag of None on both backends.
   typec: hidden_tag.tc:2: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
   typec: hidden_tag.tc:2: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
   [80]
+
+The typedef of a type argument spells the one name of an untagged type
+that the argument names, and a declaration of that name with an
+attribute between the declaration that typec read and the place where
+lowering writes the typedef would give the payload another type on the
+backend (design 13.5): Apple Clang 21 aligns the pointee of p to 4 and
+that of the payload to 16.
+
+  $ cat > spelled.tc <<'EOF'
+  > #include <stdio.h>
+  > typedef struct { int x[4]; } s;
+  > typedef s *p;
+  > typedef s s __attribute__((aligned(16)));
+  > int main(void) {
+  >   option(p) o = Some((p)0);
+  >   match (o) {
+  >   case Some(v):
+  >     printf("%d\n", __alignof__(*(p)0) == __alignof__(*v));
+  >     break;
+  >   case None:
+  >     break;
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o spelled spelled.tc && ./spelled
+  > done
+  typec: spelled.tc:6: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  typec: spelled.tc:6: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [80]
+
+Where the typedef stands before that declaration, the name has the
+type that typec read, and the payload is aligned as the pointee of p on
+both backends.
+
+  $ cat > spelled_early.tc <<'EOF'
+  > #include <stdio.h>
+  > typedef struct { int x[4]; } s;
+  > typedef s *p;
+  > option(p) early;
+  > typedef s s __attribute__((aligned(16)));
+  > int main(void) {
+  >   option(p) o = Some((p)0);
+  >   match (o) {
+  >   case Some(v):
+  >     printf("%d\n", __alignof__(*(p)0) == __alignof__(*v));
+  >     break;
+  >   case None:
+  >     break;
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o spelled_early spelled_early.tc && ./spelled_early
+  > done
+  1
+  1
+
+So does a declarator of the one name that holds the attribute itself,
+though the argument's declarator in the same declaration does not.
+
+  $ cat > spelled_own.tc <<'EOF'
+  > #include <stdio.h>
+  > typedef struct { int x[4]; } s __attribute__((aligned(16))), *p;
+  > int main(void) {
+  >   option(p) o = Some((p)0);
+  >   match (o) {
+  >   case Some(v):
+  >     printf("%d\n", __alignof__(*(p)0) == __alignof__(*v));
+  >     break;
+  >   case None:
+  >     break;
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o spelled_own spelled_own.tc && ./spelled_own
+  > done
+  typec: spelled_own.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:2 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
+  typec: spelled_own.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:2 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
+  [80]

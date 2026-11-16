@@ -2243,6 +2243,20 @@ that 13.3 supports, are unmeasured, and their release notes give the
 keyword in every dialect. A run of the instance tests on each settles
 it; a release without the keyword would raise the minimum.
 
+The one name is moved text (13.5), a use of the first declarator that
+gives it to the type, and its declaration where the typedef stands is
+exact as well, which no declaration of the argument vouches for. An
+application is an error where its typedef would stand after a
+declaration of that name with an attribute or a `__typeof__` of an
+expression, or after such a declaration, and so is one where the
+declarator that gives the name holds an attribute. With
+`typedef struct { int x[4]; } s; typedef s *p;`, a later
+`typedef s s __attribute__((aligned(16)));` makes `option(p)` an error
+after it, though `p` is exact: `typedef s *__tc_arg__P1s;` there would
+point to the aligned type, and `p` to the other (Apple Clang 21), as it
+would after `typedef struct { int x[4]; } s
+__attribute__((aligned(16))), *p;` on both backends.
+
 One rule places these texts: the typedef of an argument, the
 declaration of an instance and its definition. Each stands directly
 before an external declaration. Everything that it names is declared
@@ -3539,8 +3553,9 @@ ends the life of no object that the source keeps.
 
 **Moved text.** Lowering writes some source text at a place other than
 its own: a deferred statement at each exit from its scope (section 6),
-the definition of a generic in each instance (10.3) and the operand of
-a `try` before the statement or declaration that holds it (5.1). One
+the definition of a generic in each instance (10.3), the one name of an
+untagged type in the typedef of a type argument (10.3) and the operand
+of a `try` before the statement or declaration that holds it (5.1). One
 *resolution property* holds for such *moved text*: it reads, at each
 place where lowering writes it, as it reads at its own place, and the
 text around it reads as it would had nothing moved. Lowering writes a
@@ -3609,7 +3624,9 @@ each. A third clause covers the text around it.
   generic variant its constructors, which lowering writes under the
   names of the instances (10.1, 10.3), and nothing else: it is not the
   first mention of a tag in file scope, and the head of a generic
-  function declares no type at all (3.5 rule 8). The clause holds as
+  function declares no type at all (3.5 rule 8). The one name of an
+  untagged type declares nothing, and the typedef around it only its
+  reserved name (2.3). The clause holds as
   well for the operand of a `return` that lowering writes as a block,
   though that text does not move (section 6 rule 12).
 
@@ -3857,7 +3874,7 @@ a crash.
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 refuses are compile errors | Nothing |
-| Text that lowering moves means what it means at its own place, and the text around it what it means without the move | A deferred statement at each exit, a generic's definition in each instance and the operand of a `try` (13.5). Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. An instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), an instance first used inside its region in one translation unit and outside it in another has one name and two layouts, and a function instance is compiled under the target, optimisation, attribute and section pragmas in force at its first use (13.5) |
+| Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. An instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), an instance first used inside its region in one translation unit and outside it in another has one name and two layouts, and a function instance is compiled under the target, optimisation, attribute and section pragmas in force at its first use (13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for` | Explicit casts to `void` |
 | A slice access stays in bounds | `s[i]`, `slice_sub` | The slice describes live storage of its length |

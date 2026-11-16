@@ -19,7 +19,7 @@ type item =
 
 type argument_typedef = {
   name : string;
-  argument : Ctype.t;
+  line : string;
   tag_lines : Type_name.tag_line list;
 }
 
@@ -276,6 +276,18 @@ let location_of state (span : Tree.span) =
 let fail state span diagnostic =
   let location = location_of state span in
   raise (Failed { location; message = Rule.text diagnostic })
+
+(* [fail], with the diagnostic placed [within] a text that it names. *)
+let fail_within state span within diagnostic =
+  let location = location_of state span in
+  raise
+    (Failed { location; message = within ^ ": " ^ Rule.text diagnostic })
+
+(* Whether lowering writes the text being read: the unit's own, or the
+   definition of an instance, and not the definition of a generic that
+   its check reads. *)
+let writes_text state =
+  match state.moved with Some moved -> moved.written | None -> true
 
 let quote = Expressions.quote
 
@@ -1049,7 +1061,12 @@ let rec derives_nothing (declarator : Tree.declarator) =
 (* The name that a declarator gives the type of its specifiers, if any. *)
 let naming_name (init_declarator : Tree.init_declarator) =
   let declarator = init_declarator.node.declarator in
-  if derives_nothing declarator then Tree.declared_name declarator else None
+  let declared = Tree.In_tree init_declarator.node.declared.id in
+  if derives_nothing declarator then
+    Option.map
+      (fun name -> { Ctype.name; declared })
+      (Tree.declared_name declarator)
+  else None
 
 (* Whether the text that spells a type is inexact: it holds an attribute
    or a [__typeof__] of an expression at the depth of design 3.5 rule 2,
@@ -2686,12 +2703,16 @@ and note_argument_typedefs state (instance : Ctype.instance) arguments
 (* The typedef of an argument that no earlier text declares, now
    declared, with its tag lines noted at the place of the texts. *)
 and note_typedef state encoding span argument =
+  let name = Encoding.argument_name encoding in
+  let lowered = Type_name.lowered_declaration state.tags argument name in
+  let line = "typedef " ^ lowered.text ^ ";" in
+  check_spelled_names state span lowered ~line;
   let placements = state.placements in
   state.placements <-
     { placements with typedefs = Encodings.add encoding placements.typedefs };
   let tag_lines = Type_name.tag_lines argument in
   List.iter (note_tag_line state span) tag_lines;
-  { name = Encoding.argument_name encoding; argument; tag_lines }
+  { name; line; tag_lines }
 
 and note_tag_line state span (tag_line : Type_name.tag_line) =
   let facts = state.external_facts in
@@ -2700,6 +2721,29 @@ and note_tag_line state span (tag_line : Type_name.tag_line) =
   in
   facts.texts_at <-
     { facts.texts_at with tags = lowered :: facts.texts_at.tags }
+
+(* Design 10.3, 13.5: the typedef of an argument spells the one typedef
+   name of each untagged type that the argument names, which must read
+   where the typedef stands as at the declaration that gives the type
+   its name, and be exact there. A definition check writes no typedef. *)
+and check_spelled_names state application (lowered : Type_name.lowered)
+    ~line =
+  let use (spelled : Ctype.typedef_name) =
+    { Resolution.name = spelled.name; span = application;
+      declaration = Ordinary spelled.declared }
+  in
+  if writes_text state then
+    match
+      Resolution.check_spelled
+        (resolution_context state application)
+        (List.map use lowered.spelled) ~at:state.external_facts.texts_at
+    with
+    | Ok () -> ()
+    | Error (_, diagnostic) ->
+        fail_within state application
+          (Printf.sprintf "in `%s`, which lowering writes for this application"
+             line)
+          diagnostic
 
 (* Design 10.3: an enumeration, and an untagged type that a typedef
    names, have no forward declaration that lowering could write, so the
@@ -2883,10 +2927,7 @@ and in_instance :
   state.instance_tokens <- tokens;
   state.nesting <- Some link;
   let restore () = state.nesting <- outer in
-  let written =
-    match state.moved with Some outer -> outer.written | None -> true
-  in
-  let lowered = if written then Some instance else None in
+  let lowered = if writes_text state then Some instance else None in
   let read_instance () =
     read_definition state declaration arguments ~lowered read
   in
@@ -2960,19 +3001,21 @@ and check_resolution state (declaration : Tree.type_declaration) moved =
       uses = List.rev moved.uses;
       declares = List.rev moved.declares }
   in
-  let context =
-    { Resolution.tokens = state.text;
-      views = state.views;
-      entity = Hashtbl.find_opt state.entities;
-      same_tag = same_tag state;
-      same_type =
-        Ctype.same_type state.target state.tags
-          (location_of state declaration.span) }
-  in
+  let context = resolution_context state declaration.span in
   let at = if moved.written then Some state.external_facts.texts_at else None in
   match Resolution.check context text ~at with
   | Ok () -> ()
   | Error (span, diagnostic) -> fail state span diagnostic
+
+(* What the check of the resolution property (design 13.5) asks of the
+   reader, for a text whose types are compared at [span]. *)
+and resolution_context state span =
+  { Resolution.tokens = state.text;
+    views = state.views;
+    entity = Hashtbl.find_opt state.entities;
+    same_tag = same_tag state;
+    same_type =
+      Ctype.same_type state.target state.tags (location_of state span) }
 
 (* Whether two tag declarations declare one tag, as a completion or a
    redeclaration does (C11 6.7.2.3p4). *)

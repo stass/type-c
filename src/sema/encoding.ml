@@ -104,9 +104,11 @@ let at_file_scope part declared_at_file_scope =
 (* An untagged type is named by its one typedef name. *)
 let add_typedef_name code tags part =
   match Ctype.typedef_names tags part with
-  | [ name ] -> add_length_prefixed code name
+  | [ { name; _ } ] -> add_length_prefixed code name
   | [] -> refuse part Unnamed
-  | names -> refuse part (Several_names names)
+  | names ->
+      let name (typedef : Ctype.typedef_name) = typedef.name in
+      refuse part (Several_names (List.map name names))
 
 (* The declaration of a type chooses its row, however a use spells it
    (design 10.3): the tag that a variant or an alias claims is no tag of

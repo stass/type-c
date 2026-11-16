@@ -87,24 +87,27 @@ let tag_lines t =
    name, which is its instance name where it is an instance. A typedef
    name denotes the qualifiers of its declaration too, which no qualifier
    written beside it takes away, so a qualified one is spelled through
-   [__typeof_unqual__]. *)
+   [__typeof_unqual__]. Gives the typedef name that it spells, if any. *)
 let lowered_name tags t =
   let typedef_name () =
     match Ctype.typedef_names tags t with
-    | [ name ] when Ctype.typedef_qualifiers tags t = Qualifiers.none -> name
-    | [ name ] -> "__typeof_unqual__(" ^ name ^ ")"
+    | [ typedef ] when Ctype.typedef_qualifiers tags t = Qualifiers.none ->
+        (typedef.name, Some typedef)
+    | [ typedef ] ->
+        ("__typeof_unqual__(" ^ typedef.name ^ ")", Some typedef)
     | [] | _ :: _ :: _ -> invalid_arg "Type_name.lowered_name: no one name"
   in
   match t.shape with
-  | Enum { enum_name = Some name; _ } -> "enum " ^ name
+  | Enum { enum_name = Some name; _ } -> ("enum " ^ name, None)
   | Record { kind; record_name; _ } -> (
       match record_tag_name record_name with
-      | Some name -> record_keyword kind ^ " " ^ name
+      | Some name -> (record_keyword kind ^ " " ^ name, None)
       | None -> typedef_name ())
   | Enum { enum_name = None; _ } -> typedef_name ()
   | Distinct { distinct_instance = Some instance; _ } ->
-      Encoding.instance_name instance
-  | Distinct { distinct_instance = None; distinct_name; _ } -> distinct_name
+      (Encoding.instance_name instance, None)
+  | Distinct { distinct_instance = None; distinct_name; _ } ->
+      (distinct_name, None)
   | Void | Arithmetic _ | Pointer _ | Va_list | Array _ | Function _
   | Unknown_type _ ->
       invalid_arg "Type_name.lowered_name"
@@ -149,5 +152,14 @@ and parameter_list ~named = function
 let declaration t name = declared ~named:shown_name t name
 let of_ctype t = declaration t ""
 
+type lowered = { text : string; spelled : Ctype.typedef_name list }
+
 let lowered_declaration tags t name =
-  declared ~named:(lowered_name tags) t name
+  let spelled = ref [] in
+  let named t =
+    let text, typedef = lowered_name tags t in
+    Option.iter (fun typedef -> spelled := typedef :: !spelled) typedef;
+    text
+  in
+  let text = declared ~named t name in
+  { text; spelled = List.rev !spelled }

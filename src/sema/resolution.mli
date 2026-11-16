@@ -89,3 +89,13 @@ val check :
     order, with the diagnostic that cites the declaration that makes it
     so. A text that lowering writes nowhere, as
     the definition of a generic is in its check, has no place [at]. *)
+
+val check_spelled :
+  context -> name list -> at:place -> (unit, Tree.span * Rule.diagnostic) result
+(** [check_spelled context names ~at] is the first half of the property
+    for a text that lowering makes rather than moves, and that spells
+    [names] of the source at the place [at], as the typedef of a type
+    argument does (design 10.3): each is a use of its declaration, which
+    the text holds none of, and its declaration at [at] is exact, as no
+    own place of the text vouches for it. The result is that of
+    {!check}. *)

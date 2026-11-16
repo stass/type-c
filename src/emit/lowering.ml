@@ -709,15 +709,11 @@ type instance_context = {
 }
 
 (* Design 10.3: each typedef after the lines that declare its tags. *)
-let argument_typedefs context location typedefs =
-  let tags = Typec_sema.Declarations.tags context.declarations in
+let argument_typedefs location typedefs =
   let lines (typedef : Typec_sema.Declarations.argument_typedef) =
-    let { Typec_sema.Declarations.name; argument; tag_lines } = typedef in
     List.map (fun (tag_line : Typec_sema.Type_name.tag_line) -> tag_line.line)
-      tag_lines
-    @ [ "typedef "
-        ^ Typec_sema.Type_name.lowered_declaration tags argument name
-        ^ ";" ]
+      typedef.tag_lines
+    @ [ typedef.line ]
   in
   List.concat_map lines typedefs |> List.map (Emitter.generated location)
 
@@ -753,7 +749,7 @@ let instance_rest context instance =
 let placement_text context (placement : Typec_sema.Declarations.placement) =
   let location = context.unit.tokens.(placement.application.first).location in
   match placement.step with
-  | Typedefs typedefs -> argument_typedefs context location typedefs
+  | Typedefs typedefs -> argument_typedefs location typedefs
   | Declared { generic } ->
       instance_declaration context location placement.instance generic
   | Defined -> instance_rest context placement.instance

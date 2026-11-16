@@ -48,11 +48,11 @@ type item =
   | Generic_declaration
       (** a generic type (design 3.5), whose name alone is no type *)
 
-(** The typedef [name] of an argument of type [argument] (design 10.3),
+(** The typedef [name] of an argument (design 10.3), written as [line],
     after the lines that declare the tags it names. *)
 type argument_typedef = {
   name : string;
-  argument : Ctype.t;
+  line : string;
   tag_lines : Type_name.tag_line list;
 }
 

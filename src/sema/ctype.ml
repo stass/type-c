@@ -136,10 +136,12 @@ module Record_instances = Map.Make (struct
   let compare = compare
 end)
 
+type typedef_name = { name : string; declared : Typec_syntax.Tree.reference }
+
 (* The typedef names of an untagged record or enum, and the qualifiers
    of the type that they denote, those of the declaration's specifiers. *)
 type untagged_names = {
-  names : string list;
+  names : typedef_name list;
   named_qualifiers : Qualifiers.t;
 }
 
@@ -573,13 +575,22 @@ let untagged_id t =
       None
 
 (* A name repeated in one declaration, as in [typedef struct {...} n, n;],
-   is one name. *)
+   is one name, given by its first declarator: a later one may add an
+   attribute, which the type that typec reads lacks. *)
+let first_of_each_name names =
+  let add kept (named : typedef_name) =
+    if List.exists (fun (k : typedef_name) -> k.name = named.name) kept then
+      kept
+    else named :: kept
+  in
+  List.fold_left add [] names
+  |> List.sort (fun (a : typedef_name) b -> String.compare a.name b.name)
+
 let name_untagged tags t names =
   match untagged_id t with
   | Some id ->
       let named =
-        { names = List.sort_uniq compare names;
-          named_qualifiers = t.qualifiers }
+        { names = first_of_each_name names; named_qualifiers = t.qualifiers }
       in
       tags.facts <-
         { tags.facts with

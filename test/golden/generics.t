@@ -696,3 +696,41 @@ the constructor of the return type is still written there.
   $ ./golden.exe claim_hidden.tc
   claim_hidden.tc:1: the name `option__i_None` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
   [1]
+
+The typedef of a type argument spells the one name of an untagged type
+that the argument names, and it reads that name where it stands as at
+the declaration that gives the type the name (design 13.5): a
+declaration of the name with an attribute between the two is refused,
+though the argument's own declaration is exact.
+
+  $ cat > spelled.tc <<'EOF'
+  > typedef struct { int x[4]; } s;
+  > typedef s *p;
+  > typedef s s __attribute__((aligned(16)));
+  > option(p) o;
+  > EOF
+  $ ./golden.exe spelled.tc
+  spelled.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:3, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [1]
+
+The one name is that of the first declarator that gives it, as a later
+one in the same declaration may add an attribute.
+
+  $ cat > spelled_twice.tc <<'EOF'
+  > typedef struct { int x[4]; } n, *q, n __attribute__((aligned(16)));
+  > option(q) o;
+  > EOF
+  $ ./golden.exe spelled_twice.tc
+  spelled_twice.tc:2: in `typedef n *__tc_arg__P1n;`, which lowering writes for this application: the declaration of 'n' at spelled_twice.tc:1, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  [1]
+
+The declarator that gives the one name may hold the attribute itself,
+which no declaration of the argument shows.
+
+  $ cat > spelled_own.tc <<'EOF'
+  > typedef struct { int x[4]; } s __attribute__((aligned(16))), *p;
+  > option(p) o;
+  > EOF
+  $ ./golden.exe spelled_own.tc
+  spelled_own.tc:2: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
+  [1]

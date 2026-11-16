@@ -28,7 +28,12 @@ val tag_lines : Ctype.t -> tag_line list
     instance included, and none for an enumeration, which ISO C does not
     declare so, or for an untagged type. *)
 
-val lowered_declaration : Ctype.tags -> Ctype.t -> string -> string
+type lowered = { text : string; spelled : Ctype.typedef_name list }
+(** A declaration as lowered C writes it, and the typedef names that its
+    [text] spells, which are source names that the text uses
+    where lowering writes it (design 10.3, 13.5). *)
+
+val lowered_declaration : Ctype.tags -> Ctype.t -> string -> lowered
 (** {!declaration} as lowered C writes it (design 10.3), of a type that
     has an encoding: a structure, union or enumeration by its tag in the
     lowered C, that of a variant or an alias of 10.2 included, or else

@@ -391,7 +391,11 @@ val declare_distinct :
     representation; with [instance], that instance of the distinct
     generic of this name. *)
 
-val name_untagged : tags -> t -> string list -> unit
+type typedef_name = { name : string; declared : Typec_syntax.Tree.reference }
+(** A typedef name of an untagged structure, union or enumeration, with
+    the declarator that gives it to the type (design 3.5 rule 2). *)
+
+val name_untagged : tags -> t -> typedef_name list -> unit
 (** Records the names of the typedef declarators that derive no type in
     the declaration whose specifier is the untagged structure, union or
     enumeration [t], qualified or not (design 3.5 rule 2), with the
@@ -400,10 +404,10 @@ val name_untagged : tags -> t -> string list -> unit
     other type is left as it is: one that an attribute makes unknown has
     no name to record. *)
 
-val typedef_names : tags -> t -> string list
-(** The distinct names that {!name_untagged} recorded for [t], sorted;
-    none for a type that is no untagged structure, union or
-    enumeration. *)
+val typedef_names : tags -> t -> typedef_name list
+(** The distinct names that {!name_untagged} recorded for [t], sorted,
+    each with its first declarator; none for a type that is no untagged
+    structure, union or enumeration. *)
 
 val typedef_qualifiers : tags -> t -> Qualifiers.t
 (** The qualifiers of the type that the names of {!typedef_names} denote,

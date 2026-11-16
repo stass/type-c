@@ -134,8 +134,10 @@ let defined_enum tag =
   get (Ctype.define_enum tags tag (Answer Int));
   Ctype.enum tag
 
+(* The declarator of a name is no part of its encoding. *)
 let named_untagged t =
-  Ctype.name_untagged tags t [ c_name () ];
+  let declared = Typec_syntax.Tree.Builtin "" in
+  Ctype.name_untagged tags t [ { name = c_name (); declared } ];
   t
 
 (* A type of a kind that a name, a tag or an id tells apart. *)

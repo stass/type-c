@@ -234,12 +234,14 @@ let check_tag context place span name tag =
            "the tag %s is not visible where lowering writes the text"
            (quote name))
 
+let check_name context place (use : name) =
+  match use.declaration with
+  | Ordinary reference ->
+      check_ordinary context place use.span use.name reference
+  | Tag tag -> check_tag context place use.span use.name tag
+
 let check_use context text place (use : name) =
-  if is_outside text use.declaration then
-    match use.declaration with
-    | Ordinary reference ->
-        check_ordinary context place use.span use.name reference
-    | Tag tag -> check_tag context place use.span use.name tag
+  if is_outside text use.declaration then check_name context place use
 
 (* The second half: a name that the text declares for itself is read as
    a declarator, so it must not become a typedef name of the scope
@@ -327,5 +329,35 @@ let check context text ~at =
     List.iter (check_scope text) text.declares;
     Option.iter (check_reading context text) at
   with
+  | () -> Ok ()
+  | exception Reads_otherwise (span, diagnostic) -> Error (span, diagnostic)
+
+(* A name that lowering spells in a text of its own has no own place
+   whose exactness 3.5 rule 2 vouches for: the declarator that gives it
+   may carry the attribute itself, so its declaration at the place must
+   be exact as well. *)
+let check_exact context place (use : name) =
+  match Parser.View.find place.view use.name with
+  | Some { declaration; _ } -> (
+      match context.entity declaration with
+      | Some there when is_inexact there ->
+          refuse use.span Moved_text
+            (Printf.sprintf
+               "the declaration of %s at %s gives it a type that may hold an \
+                attribute or `typeof` of an expression, which the text that \
+                lowering writes would carry"
+               (quote use.name)
+               (declared_at context (Ordinary declaration)))
+      | Some _ | None -> ())
+  | None -> ()
+
+let check_spelled_name context place use =
+  check_name context place use;
+  check_exact context place use
+
+(* The first half of the property for a text that lowering makes and
+   that spells [names] of the source. *)
+let check_spelled context names ~at =
+  match List.iter (check_spelled_name context at) names with
   | () -> Ok ()
   | exception Reads_otherwise (span, diagnostic) -> Error (span, diagnostic)
