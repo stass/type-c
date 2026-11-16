@@ -725,14 +725,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   exactness of the nesting limit (design 3.5 rule 7) depends on it too:
   a chain through a need that typing does not ask about is shorter than
   the rule counts, so `typec` may accept a source that the rule refuses.
-- [High] `Value_type.contents_problem` walks every member of every
-  nested structure or union and remembers nothing, so a type holding
-  two copies of the structure below it, n levels deep, costs 2^n:
-  `struct n0 { int a; };`, `struct n<k+1> { struct n<k> a; struct n<k>
-  b; };` up to 27 and `type v = | C(struct n27 f) | D;` (1.5 KB) take
-  9.9 s, and the instance token limit does not bound it, as no generic
-  is involved. Compute the problem once, when the record is defined, and
-  keep it in its definition.
+- [High] `Initialiser.holds_variant` walks every member of every nested
+  structure or union and remembers nothing, so a type holding two copies
+  of the structure below it, n levels deep, costs 2^n, once for each
+  element of a Type-C braced list after its walk is lost (at an array of
+  opaque or variable length or an unknown type; found by reading the
+  code, not reproduced yet). Find whether a record
+  holds a variant once, when it is defined, beside the `holds` of its
+  definition in `Ctype` (`Ctype.holds`), and ask that fact instead.
 - [Medium] Each instance reading makes typed views with
   `Expressions.create`, whose two tables start at 4096 buckets, which is
   most of the 47 us that an instance of a small definition costs, so a

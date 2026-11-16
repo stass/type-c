@@ -443,6 +443,19 @@ val fix_enum :
 val record_members : tags -> record_tag -> member list option
 (** The members of a complete structure or union, in order. *)
 
+(** A member that a structure or union may hold at any depth. *)
+type held =
+  | Const_member  (** one that is const-qualified *)
+  | Flexible_array_member
+
+val holds : tags -> t -> held option Unknown.answer
+(** The first member, in order, that an object of the type, or each
+    element of one of the array type, holds as a member, as a member of a
+    member, or as an element of an array member, at any depth; pointed-to
+    types and the representations of distinct types are not held. An
+    incomplete structure or union holds none. The answer is found when a
+    structure or union is defined, so asking costs no walk. *)
+
 (** A member found by name. [path] is where: the position of the member
     that holds it (see {!member_at}), then its position in each anonymous
     member down to it. [anonymous_qualifiers] are the [const] and

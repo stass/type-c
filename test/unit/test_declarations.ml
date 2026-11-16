@@ -1391,6 +1391,18 @@ let type_declarations () =
   declares ~file "type t = int; void f(void) { type t = long; t x; } t y;" "y"
     "object int external static"
 
+(* Structures n0 to n[depth], each holding two of the one below, and a
+   variant whose field is a structure holding n[depth] and then the
+   members [last]. *)
+let doubling_structures depth last =
+  "struct n0 { int a; };"
+  ^ String.concat ""
+      (List.init depth (fun n ->
+           Printf.sprintf " struct n%d { struct n%d a; struct n%d b; };"
+             (n + 1) n n))
+  ^ Printf.sprintf " struct top { struct n%d n;%s };" depth last
+  ^ " type v = | C(struct top f) | D;"
+
 (* Variants (design 3.2) are the structures they lower to (10.1). *)
 let variants () =
   let file = "in.tc" in
@@ -1430,7 +1442,23 @@ let variants () =
   rejects ~file "struct f { int n; int a[]; }; type e = | A(struct f v);"
     "has a flexible array member";
   accepts ~file "struct s { const int *p; }; type e = | A(struct s v);";
-  rejects ~file "type e = | A(int x, long x);" "duplicate member"
+  rejects ~file
+    "struct s { const int c; }; struct a { struct s e[2]; };\
+    \ type e = | A(struct a v);"
+    "has a const-qualified member";
+  rejects ~file "struct s { int i; const int : 2; }; type e = | A(struct s v);"
+    "has a const-qualified member";
+  rejects ~file
+    "struct s { const int c; int a[]; }; type e = | A(struct s v);"
+    "has a const-qualified member";
+  rejects ~file "type e = | A(int x, long x);" "duplicate member";
+  (* Whether a record holds a const member is found once per record, so
+     the time is linear in the text, not in the size of the value. *)
+  let started = Sys.time () in
+  accepts ~file (doubling_structures 30 "");
+  rejects ~file (doubling_structures 30 " const int c;") "const-qualified";
+  if Sys.time () -. started > 2.0 then
+    fail_case "doubling_structures 30" "took over 2 s"
 
 (* Type-C text takes a variant only whole (design 3.2 rule 6): it may
    initialise, assign, pass, return, size and address one; C text may use

@@ -81,13 +81,19 @@ type found_member = {
   anonymous_qualifiers : Qualifiers.t;
 }
 
+type held = Const_member | Flexible_array_member
+
 (* The members in order; those with a position, which are those that an
-   initialiser reaches; and every member by name, those of anonymous
-   members included. *)
+   initialiser reaches; every member by name, those of anonymous members
+   included; and the first member, at any depth, of a kind that [held]
+   names, found from the [holds] of the records among the members, so
+   that no question walks the members of a record again and a record
+   held twice costs once. *)
 type record_definition = {
   members : member list;
   positions : member array;
   by_name : found_member Names.t;
+  holds : held option Unknown.answer;
 }
 
 type constructor = {
@@ -433,7 +439,8 @@ let add_enum_definition tags id definition =
 let declare_opaque tags name =
   let record = new_record tags Struct (Opaque_name name) ~at_file_scope:true in
   add_record_definition tags record.record_id
-    { members = []; positions = [||]; by_name = Names.empty };
+    { members = []; positions = [||]; by_name = Names.empty;
+      holds = Answer None };
   record
 
 let trial tags read =
@@ -626,6 +633,43 @@ let member_at tags tag position =
       if position < Array.length definition.positions then
         Some definition.positions.(position)
       else None)
+
+let rec innermost_element t =
+  match t.shape with
+  | Array { element; _ } -> innermost_element element
+  | _ -> t
+
+(* Pointed-to types are not held, nor the representation of a distinct
+   type. A definition is final, so its [holds] stays true. *)
+let holds tags t =
+  let element = innermost_element t in
+  match element.shape with
+  | Record tag -> (
+      match record_definition tags tag with
+      | Some definition -> definition.holds
+      | None -> Answer None)
+  | Unknown_type unknown -> Depends_on unknown
+  (* [Array] is not an innermost element. *)
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
+  | Function _ ->
+      Answer None
+
+(* A member holds what it is, a flexible array member or const-qualified
+   (an array's qualifiers are its element's), or else what its type
+   holds. *)
+let member_holds tags member =
+  let element = innermost_element member.member_type in
+  match member.member_type.shape with
+  | Array { length = Unknown; _ } -> Answer (Some Flexible_array_member)
+  | _ when element.qualifiers.const -> Answer (Some Const_member)
+  | _ -> holds tags element
+
+let rec first_held tags = function
+  | [] -> Answer None
+  | member :: rest -> (
+      match member_holds tags member with
+      | Answer None -> first_held tags rest
+      | found -> found)
 
 let rec is_complete tags t =
   match t.shape with
@@ -864,7 +908,7 @@ let definition_of target tags tag members =
     List.mapi (fun index member -> (index, member)) (Array.to_list positions)
   in
   let by_name = List.fold_left (add_member_names tags) Names.empty indexed in
-  { members; positions; by_name }
+  { members; positions; by_name; holds = first_held tags members }
 
 let define_record target tags tag members =
   match definition_of target tags tag members with
