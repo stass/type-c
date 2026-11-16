@@ -821,6 +821,29 @@ is [type-c-language-design.md](type-c-language-design.md).
   because each reference sits inside the block that declares it. A name
   unique per match (by the token index of `match`) would make that hold
   by construction.
+- [Low] Design 13.5 names the invented names that are one of a kind
+  (`__tc_ret`, `__tc_r`, `__tc_t0`, the probes) but not `__tc_match`,
+  `__tc_copy` and `__tc_tag`, which lowering writes. Its rule (no `__`
+  after the prefix) holds for them, as `test/unit/test_naming.ml`
+  checks on the emitted C; add them to that paragraph, or state the
+  rule alone without the list.
+- [Low] Invented names are string literals in lowering, the emitter
+  and the assertions, and `test/unit/test_naming.ml` finds them by
+  scanning the C of one sample unit, with a count of the names it
+  expects: a name of a construct the sample lacks goes unchecked. Make
+  one module mint every invented name, with a constructor for a name of
+  one of a kind that refuses `__` and one for a kind word and its rest,
+  so design 13.5's rule holds by type. The kind words (`slice_index`,
+  `arg`, `module`, `header`, `pack_probe_1`, `pack_probe_2`) are not in
+  the code yet; with that module the test can check that no universe
+  function name is another kind's word.
+- [Low] `Ctype.same_type` holds `Unspecified`, `Old_style []` and
+  `Old_style [int]` to be three types, while design 10.3 encodes all
+  three `N` and Clang takes `typedef int (*t)();` and
+  `typedef __typeof__(&f) t;` for an old-style `f` as one type. typec
+  accepts that pair too, so the old-style list may never reach
+  `same_type`; find whether it can, and if so compare lists without a
+  prototype as one, so that `test/unit/test_naming.ml` can draw them.
 - [Low] Where `match` is a typedef name, `match (f(void)) { ... }` in a
   block, a GNU nested function, now reports an expression error rather
   than the GNU profile's refusal of nested functions.

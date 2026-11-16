@@ -22,6 +22,17 @@
  (libraries typec_cpp typec_syntax typec_sema typec_test_support))
 
 (test
+ (name test_naming)
+ (modules test_naming)
+ (libraries
+  typec_cpp
+  typec_syntax
+  typec_sema
+  typec_emit
+  typec_driver
+  typec_test_support))
+
+(test
  (name test_reader)
  (modules test_reader)
  (libraries typec_cpp typec_test_support))
