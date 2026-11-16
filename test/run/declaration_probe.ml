@@ -73,7 +73,7 @@ let print_declared result name (declared : Entity.declared) =
   match declared with
   | Object { object_type = t; _ } | Function { function_type = t; _ } ->
       assert_selects ("&" ^ name) (pointer_to t)
-  | Typedef t ->
+  | Typedef { typedef_type = t; _ } ->
       assert_selects ("(" ^ name ^ " *)0") (pointer_to t);
       print_enum_integer result name t
   | Enumerator { enumerator_type; value } ->

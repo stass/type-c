@@ -80,15 +80,19 @@ let tag_lines t =
   in
   List.filter_map tag_line (Ctype.named_tags t)
 
-(* How lowered C names one (design 10.3): a type with a tag in the
-   lowered C, a variant or an alias of 10.2 included, by that tag; an
-   untagged one by the one typedef name that its encoding takes; a
-   distinct type by its typedef name, which is its instance name where
-   it is an instance. *)
+(* How lowered C names one without its qualifiers, which the caller
+   writes (design 10.3): a type with a tag in the lowered C, a variant or
+   an alias of 10.2 included, by that tag; an untagged one by the one
+   typedef name that its encoding takes; a distinct type by its typedef
+   name, which is its instance name where it is an instance. A typedef
+   name denotes the qualifiers of its declaration too, which no qualifier
+   written beside it takes away, so a qualified one is spelled through
+   [__typeof_unqual__]. *)
 let lowered_name tags t =
   let typedef_name () =
     match Ctype.typedef_names tags t with
-    | [ name ] -> name
+    | [ name ] when Ctype.typedef_qualifiers tags t = Qualifiers.none -> name
+    | [ name ] -> "__typeof_unqual__(" ^ name ^ ")"
     | [] | _ :: _ :: _ -> invalid_arg "Type_name.lowered_name: no one name"
   in
   match t.shape with

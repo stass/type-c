@@ -430,6 +430,42 @@ it (design 3.5 rule 2).
   array.tc:2: the type argument 'int[2]' is an array (design 3.5 rule 2) [TC0041]
   [1]
 
+An argument holds no attribute: none is written in it, and no typedef
+name, alias or transparent alias generic that it uses, at any depth, is
+declared with one (design 3.5 rule 2). Its instance name would not tell
+it from the argument without the attribute.
+
+  $ for argument in wide 'wider *' 'int * _Nonnull' 'void (*)(wide)' \
+  >     'int __attribute__((aligned(16))) *' alias 'over(int)'; do
+  >   printf '%s\n' 'typedef int wide __attribute__((aligned(16)));' \
+  >     'typedef wide wider;' 'type alias = wider;' 'type over(T) = wide;' \
+  >     'type box(T) = struct { T value; };' "box($argument) *b;" \
+  >     > attributed.tc
+  >   ./golden.exe attributed.tc
+  > done
+  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'void (*)(int)' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  [1]
+
+A typedef name redeclared keeps the attribute of either declaration, as
+both backends do.
+
+  $ for first in '' ' __attribute__((aligned(16)))'; do
+  >   second=' __attribute__((aligned(16)))'
+  >   test -z "$first" || second=
+  >   printf '%s\n' "typedef int t$first;" "typedef int t$second;" \
+  >     'type box(T) = struct { T value; };' 'box(t) *b;' > redeclared.tc
+  >   ./golden.exe redeclared.tc
+  > done
+  redeclared.tc:4: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  redeclared.tc:4: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  [1]
+
 A chain of instances that each define the next holds at most 64
 (design 3.5 rule 7); one under a pointer defines nothing.
 

@@ -86,7 +86,8 @@ let typedef_types (unit : Typec_unit.t) =
     let index = index_of (line_of_span unit block.span) in
     let declared = Tree.In_tree d.node.declared.id in
     match Declarations.entity unit.declarations declared with
-    | Some { declared = Typedef t; _ } -> Hashtbl.replace types index t
+    | Some { declared = Typedef { typedef_type; _ }; _ } ->
+        Hashtbl.replace types index typedef_type
     | _ -> failwith "an appended typedef declares no type"
   in
   List.iter add (appended_function unit).node.items;

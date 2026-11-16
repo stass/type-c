@@ -218,8 +218,9 @@ let rows =
       meaning =
         "A type argument that is no object type, an array, variably \
          modified, holds a type without a row in the table of design \
-         10.3, one declared outside file scope or an untagged type \
-         without exactly one name." };
+         10.3, one declared outside file scope, an untagged type \
+         without exactly one name or an attribute, written in it or in \
+         the declaration of a typedef name or alias that it uses." };
     Live { name = "Instance_nesting"; code = 42;
       clause = Some "design 3.5 rule 7";
       meaning =

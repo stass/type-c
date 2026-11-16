@@ -135,6 +135,13 @@ module Record_instances = Map.Make (struct
   let compare = compare
 end)
 
+(* The typedef names of an untagged record or enum, and the qualifiers
+   of the type that they denote, those of the declaration's specifiers. *)
+type untagged_names = {
+  names : string list;
+  named_qualifiers : Qualifiers.t;
+}
+
 (* What declarations and definitions have added to the tags, as one
    persistent value, so that a trial restores all of it at once and no
    write made within the trial outlives it. *)
@@ -142,7 +149,7 @@ type facts = {
   records : record_definition Ids.t;
   enums : enum_definition Ids.t;
   variants : variant_definition Ids.t;
-  typedef_names : string list Ids.t;
+  typedef_names : untagged_names Ids.t;
       (* the typedef names of each untagged record or enum, by id *)
   instances : record_tag Record_instances.t;
   deferred : (unit -> unit) Ids.t;
@@ -558,17 +565,28 @@ let untagged_id t =
 let name_untagged tags t names =
   match untagged_id t with
   | Some id ->
-      let names = List.sort_uniq compare names in
+      let named =
+        { names = List.sort_uniq compare names;
+          named_qualifiers = t.qualifiers }
+      in
       tags.facts <-
         { tags.facts with
-          typedef_names = Ids.add id names tags.facts.typedef_names }
+          typedef_names = Ids.add id named tags.facts.typedef_names }
   | None -> ()
 
+let untagged_names tags t =
+  Option.bind (untagged_id t) (fun id ->
+      Ids.find_opt id tags.facts.typedef_names)
+
 let typedef_names tags t =
-  match untagged_id t with
-  | Some id ->
-      Option.value (Ids.find_opt id tags.facts.typedef_names) ~default:[]
+  match untagged_names tags t with
+  | Some named -> named.names
   | None -> []
+
+let typedef_qualifiers tags t =
+  match untagged_names tags t with
+  | Some named -> named.named_qualifiers
+  | None -> Qualifiers.none
 
 (* Design 3.4: an unqualified arithmetic or pointer type. An unknown type
    may be one; the casts that depend on what it is answer as unknown. *)

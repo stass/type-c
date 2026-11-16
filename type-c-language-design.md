@@ -200,10 +200,12 @@ Rationale. Headers select constructs by `__STDC_VERSION__`; pinning the
 dialect bounds what the front end must parse. Everything Type-C lowers to
 compiles in the dialect the command line selects: ISO C11 plus only GNU
 forms that GCC and Clang accept in every dialect, also under
-`-pedantic-errors`. Two are used: `__typeof__`, which C23 standardises
+`-pedantic-errors`. Three are used: `__typeof__`, which C23 standardises
 as `typeof` and which names a type where no name for it is sure to be
 visible, the type of a field for a match binding and the return type of
-a function for the temporary of a `return` (13.5); and `__builtin_trap`
+a function for the temporary of a `return` (13.5); `__typeof_unqual__`,
+C23's `typeof_unqual`, which names an untagged type without the
+qualifiers that its one name carries (10.3); and `__builtin_trap`
 (10.5). Lowered code also writes the three packing pragmas of the
 bracket of 10.3 and, in its probe, `#pragma pack(1)` and `#pragma
 pack(2)`. C11 6.10.6 leaves a pragma to the implementation; GCC 14.2
@@ -556,10 +558,13 @@ id(stmt) s;                             /* e = s is an error */
    spell the argument: a typedef name that the argument writes, one
    that the declaration of such a name writes, and so on down to the
    type specifiers, under every pointer, array, function and qualifier
-   on the way. A typedef name is declared with an attribute where one
-   stands among the specifiers of its declaration, in its declarator or
-   after it. The text inside the specifier of a struct, union or enum
-   is outside that depth. An attribute there, after the keyword or
+   on the way. A Type-C alias is a typedef name here, and so is an
+   application of a transparent alias generic, which is expanded as a
+   typedef name is (10.3): the alias's definition is its declaration. A
+   typedef name is declared with an attribute where one stands among
+   the specifiers of its declaration, in its declarator or after it.
+   The text inside the specifier of a struct, union or enum is outside
+   that depth. An attribute there, after the keyword or
    after the closing brace, belongs to that type and not to a typedef
    name that the same declaration declares, and a member there is part
    of that type, which has its one name and one layout wherever an
@@ -2059,6 +2064,24 @@ parameter would be wrong: with `T` as `int *`, `const T` is a constant
 pointer, which `const __tc_arg__Pi` is and `const int *` is not. Equal
 encodings are one type, so one typedef serves every instance that takes
 the type. The name is reserved (2.3) and follows the scheme of 13.5.
+
+The typedef spells exactly the argument's type. An untagged type is
+spelled through its one name (3.5 rule 2), which denotes the type with
+the qualifiers of that name's declaration, and no qualifier written
+beside a typedef name takes one of them away. Where that declaration
+qualifies the type, the typedef writes `__typeof_unqual__(`*name*`)`
+with the argument's own qualifiers: with
+`typedef _Atomic struct { char a, b, c; } s;`, the argument
+`__typeof__(1 ? x : x)` for an `s x` is the unqualified struct, encoded
+`1s`, whose typedef is `typedef __typeof_unqual__(s) __tc_arg__1s;`;
+`typedef s __tc_arg__1s;` would make it atomic again, which Apple
+Clang 21 lays out in 4 bytes and not 3. *Provisional:* GCC 16.2 and
+Apple Clang 21 take `__typeof_unqual__` in every dialect of 2.4 under
+`-pedantic-errors` and remove `_Atomic` with the other qualifiers, as
+C23's `typeof_unqual` does; GCC 14 and Clang 20, the oldest releases
+that 13.3 supports, are unmeasured, and their release notes give the
+keyword in every dialect. A run of the instance tests on each settles
+it; a release without the keyword would raise the minimum.
 
 One rule places these texts: the typedef of an argument, the
 declaration of an instance and its definition. Each stands directly

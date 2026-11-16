@@ -121,3 +121,61 @@ preprocessor makes a pragma line, is refused (design 10.3, P25).
   $ typec --cc=$clang -fsyntax-only pragma.tc
   typec: pragma.tc:1: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold (design 10.3, P25) [TC0047]
   [80]
+
+An argument is spelled through the one name of an untagged type, which
+denotes the type with the qualifiers of its declaration; an argument
+without them, as the value of a conditional is, keeps none (design
+10.3). The address of each member converts to a pointer to the
+unqualified type, which a qualified member would refuse, and the
+argument with the qualifiers is the qualified type.
+
+  $ cat > unqualified.tc <<'EOF'
+  > typedef _Atomic struct { char a, b, c; } atomic_s;
+  > typedef const struct { int x; } const_s;
+  > typedef const enum { E0, E1 } const_e;
+  > extern atomic_s a;
+  > extern const_s c;
+  > extern const_e e;
+  > type box(T) = struct { T v; };
+  > static box(__typeof__(1 ? a : a)) plain_a;
+  > static box(__typeof__(1 ? c : c)) plain_c;
+  > static box(__typeof__((0, e))) plain_e;
+  > static box(atomic_s) atomic_a;
+  > int main(void) {
+  >   __typeof__(1 ? a : a) *to_a = &plain_a.v;
+  >   __typeof__(1 ? c : c) *to_c = &plain_c.v;
+  >   atomic_s *to_atomic = &atomic_a.v;
+  >   plain_c.v.x = 2;
+  >   plain_e.v = E1;
+  >   return to_a == 0 || to_c->x != 2 || plain_e.v != E1 || to_atomic == 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o unqualified unqualified.tc && ./unqualified ||
+  >     echo "$cc"
+  > done
+
+An argument holds no attribute (design 3.5 rule 2), and a structure
+that holds an attributed member keeps the layout that the attribute
+gives it. An attribute after one declarator of a typedef is that
+declarator's alone.
+
+  $ cat > attributed.tc <<'EOF'
+  > typedef int wide __attribute__((aligned(16)));
+  > struct holder { wide w; };
+  > typedef int plain, aligned __attribute__((aligned(16)));
+  > type box(T) = struct { T v; };
+  > _Static_assert(_Alignof(box(struct holder)) == 16, "aligned");
+  > _Static_assert(_Alignof(box(plain)) == _Alignof(int), "plain");
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -fsyntax-only attributed.tc || echo "$cc"
+  > done
+  $ cat > wide.tc <<'EOF'
+  > typedef int wide __attribute__((aligned(16)));
+  > type box(T) = struct { T v; };
+  > box(wide) b;
+  > EOF
+  $ typec --cc=$clang $flags -fsyntax-only wide.tc
+  typec: wide.tc:3: the type argument holds an attribute, or a typedef name or an alias declared with one, which no instance name encodes: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  [80]

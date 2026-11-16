@@ -40,7 +40,15 @@ type declared =
               list (6.9.1p6), whose uses see no prototype in Clang
               (DR 316). *)
     }
-  | Typedef of Ctype.t
+  | Typedef of {
+      typedef_type : Ctype.t;
+      with_attribute : bool;
+          (** Declared with an attribute at the depth of design 3.5 rule
+              2, so that the name spells no type argument: one stands
+              among the specifiers of its declaration, in its declarator
+              or after it, or a typedef name that the declaration writes
+              is declared with one. *)
+    }
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }
       (** The type is [int] when every value of the enumeration fits it,
           else the enumerated type; while its list is read, the type is

@@ -391,7 +391,8 @@ val declare_distinct :
 val name_untagged : tags -> t -> string list -> unit
 (** Records the names of the typedef declarators that derive no type in
     the declaration whose specifier is the untagged structure, union or
-    enumeration [t], qualified or not (design 3.5 rule 2). The one
+    enumeration [t], qualified or not (design 3.5 rule 2), with the
+    qualifiers of [t], which the names denote. The one
     declaration that holds the specifier gives all its names at once. Any
     other type is left as it is: one that an attribute makes unknown has
     no name to record. *)
@@ -400,6 +401,11 @@ val typedef_names : tags -> t -> string list
 (** The distinct names that {!name_untagged} recorded for [t], sorted;
     none for a type that is no untagged structure, union or
     enumeration. *)
+
+val typedef_qualifiers : tags -> t -> Qualifiers.t
+(** The qualifiers of the type that the names of {!typedef_names} denote,
+    those of the specifiers of their declaration, whatever the qualifiers
+    of [t]: [const] for [typedef const struct { int x; } s;]. *)
 
 val define_record :
   Target.t -> tags -> record_tag -> member list -> (unit, error) result

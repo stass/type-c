@@ -76,7 +76,7 @@ let describe (declared : Entity.declared) =
         @ (if noreturn then [ "noreturn" ] else [])
         @ (if gnu_inline then [ "gnu_inline" ] else [])
         @ if overload then [ "overload" ] else [])
-  | Typedef t -> "typedef " ^ Type_name.of_ctype t
+  | Typedef { typedef_type; _ } -> "typedef " ^ Type_name.of_ctype typedef_type
   | Enumerator { enumerator_type; value } ->
       Printf.sprintf "enumerator %s = %s"
         (Type_name.of_ctype enumerator_type)

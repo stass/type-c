@@ -40,7 +40,7 @@ let encoding_of ?(file = "in.c") source =
           (Declarations.entity result)
       in
       match entity with
-      | Some { declared = Typedef t; _ } ->
+      | Some { declared = Typedef { typedef_type = t; _ }; _ } ->
           Ok (Encoding.encode (Declarations.tags result) t)
       | Some _ | None -> Error "t is no typedef name")
 

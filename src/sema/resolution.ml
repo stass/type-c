@@ -77,7 +77,7 @@ let type_of (entity : Entity.t) =
   match entity.declared with
   | Object { object_type; _ } -> object_type
   | Function { function_type; _ } -> function_type
-  | Typedef t -> t
+  | Typedef { typedef_type; _ } -> typedef_type
   | Enumerator { enumerator_type; _ } -> enumerator_type
 
 (* What the backend reads as a typedef name: a Type-C type that is no

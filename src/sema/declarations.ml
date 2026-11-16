@@ -400,10 +400,13 @@ let redeclared state span name prior next =
   match (prior, next) with
   | Typedef old, Typedef same -> (
       match
-        Ctype.same_type state.target state.tags (location_of state span) old
-          same
+        Ctype.same_type state.target state.tags (location_of state span)
+          old.typedef_type same.typedef_type
       with
-      | Answer true | Depends_on _ -> next
+      | Answer true | Depends_on _ ->
+          Typedef
+            { same with
+              with_attribute = old.with_attribute || same.with_attribute }
       | Answer false ->
           fail state span
             (Rule.c_text
@@ -552,6 +555,9 @@ type specified = {
       (** The type specifier is a structure, union or enumeration specifier
           without a tag, which a typedef declarator names (design 3.5 rule
           2). *)
+  with_attribute : bool;
+      (** An attribute at the depth of design 3.5 rule 2 stands among the
+          specifiers; [read_init_declarator] adds its declarator's. *)
 }
 
 (* The declaration specifiers of each kind, in order. *)
@@ -641,6 +647,11 @@ let qualifiers_of (qualifiers : Tree.type_qualifier list) =
     | Nullability _ -> q
   in
   List.fold_left add Qualifiers.none qualifiers
+
+(* Design 3.5 rule 2 holds Clang's nullability to be an attribute. *)
+let is_nullability : Tree.type_qualifier -> bool = function
+  | Nullability _ -> true
+  | Const | Restrict | Volatile | Atomic -> false
 
 let spanned_qualifiers (qualifiers : Tree.type_qualifier Tree.spanned list) =
   qualifiers_of (List.map (fun (q : _ Tree.spanned) -> q.node) qualifiers)
@@ -964,7 +975,9 @@ let declared_as state scope span specified name declared (derived : derived) =
   | Some Typedef, _ ->
       no_function_specifiers state span specified;
       no_alignment state span specified "a typedef";
-      Typedef derived.declared_type
+      Typedef
+        { typedef_type = derived.declared_type;
+          with_attribute = specified.with_attribute }
   | Some (Auto | Register | Thread_local), File_scope ->
       fail state span (Rule.c_text "auto or register at file scope (C11 6.9p2)")
   | storage, _ -> (
@@ -1035,6 +1048,93 @@ let naming_name (init_declarator : Tree.init_declarator) =
   let declarator = init_declarator.node.declarator in
   if derives_nothing declarator then Tree.declared_name declarator else None
 
+(* Whether the text that spells a type holds an attribute at the depth
+   of design 3.5 rule 2, where a typedef name's entity records its own;
+   a [__typeof__] operand is not looked into (TODO.md). *)
+let rec specifiers_have_attribute state (specifiers : Tree.specifiers) =
+  List.exists
+    (fun (specifier : Tree.declaration_specifier Tree.spanned) ->
+      specifier_has_attribute state specifier.node)
+    specifiers
+
+and specifier_has_attribute state : Tree.declaration_specifier -> bool =
+  function
+  | Attributes attributes -> attributes <> []
+  | Type_qualifier qualifier -> is_nullability qualifier
+  | Type_specifier specifier -> type_specifier_has_attribute state specifier
+  | Storage_class _ | Function_specifier _ | Alignment_specifier _ -> false
+
+and type_specifier_has_attribute state : Tree.type_specifier -> bool =
+  function
+  | Atomic_type type_name | Typeof_type type_name ->
+      type_name_has_attribute state type_name
+  | Typedef_name { declaration; name = _ } -> (
+      match Hashtbl.find_opt state.entities declaration with
+      | Some { declared = Typedef { with_attribute; _ }; _ } -> with_attribute
+      | Some _ | None -> false)
+  | Application { generic; name = _; arguments = _ } ->
+      alias_has_attribute state generic
+  | Basic _ | Struct_or_union _ | Enum _ | Typeof_expression _ -> false
+
+(* Each generic read names only generics read before it, so the look
+   through definitions ends; a type parameter in one adds nothing, as
+   its argument is checked where the application is read. *)
+and alias_has_attribute state generic =
+  match Hashtbl.find_opt state.generics generic with
+  | Some { node = { definition = Alias type_name; _ }; _ } ->
+      type_name_has_attribute state type_name
+  | Some _ | None -> false
+
+and type_name_has_attribute state (type_name : Tree.type_name) =
+  let { Tree.specifier_qualifiers; abstract } = type_name.node in
+  specifiers_have_attribute state specifier_qualifiers
+  || optional_declarator_has_attribute state abstract
+
+and optional_declarator_has_attribute state = function
+  | Some declarator -> declarator_has_attribute state declarator
+  | None -> false
+
+and declarator_has_attribute state (declarator : Tree.declarator) =
+  let qualified_with_attribute qualifiers =
+    List.exists
+      (fun (qualifier : Tree.type_qualifier Tree.spanned) ->
+        is_nullability qualifier.node)
+      qualifiers
+  in
+  match declarator.node with
+  | Name _ -> false
+  | Parenthesized_declarator { attributes; inner } ->
+      attributes <> [] || declarator_has_attribute state inner
+  | Pointer { qualifiers; attributes; inner }
+  | Block_pointer { qualifiers; attributes; inner } ->
+      attributes <> []
+      || qualified_with_attribute qualifiers
+      || optional_declarator_has_attribute state inner
+  | Array { inner; qualifiers; size = _ } ->
+      qualified_with_attribute qualifiers
+      || optional_declarator_has_attribute state inner
+  | Function { inner; parameters } ->
+      optional_declarator_has_attribute state inner
+      || parameters_have_attribute state parameters
+
+and parameters_have_attribute state : Tree.parameters -> bool = function
+  | Prototype { parameters; variadic = _ } ->
+      List.exists (parameter_has_attribute state) parameters
+  | Identifier_list _ -> false
+
+and parameter_has_attribute state (parameter : Tree.parameter) =
+  let ({ specifiers; declarator; attributes } : Tree.parameter_node) =
+    parameter.node
+  in
+  let declarator =
+    match declarator with
+    | Named_parameter { declarator; declared = _ } -> Some declarator
+    | Abstract_parameter declarator -> declarator
+  in
+  attributes <> []
+  || specifiers_have_attribute state specifiers
+  || optional_declarator_has_attribute state declarator
+
 let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
   let sorted = sort_specifiers specifiers in
@@ -1059,6 +1159,7 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
       | (first, _) :: _ -> Some first);
     attributed;
     untagged = is_untagged sorted.others;
+    with_attribute = specifiers_have_attribute state specifiers;
   }
 
 and base_type state span sorted =
@@ -1144,9 +1245,9 @@ and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
       applied_type state own name generic arguments
   | Typedef_name { name; declaration } -> (
       match entity_used state span name declaration with
-      | Some { declared = Typedef t; _ } ->
+      | Some { declared = Typedef { typedef_type; _ }; _ } ->
           note_parameter_use state own declaration;
-          t
+          typedef_type
       | Some _ | None ->
           fail state span (Rule.c_text (quote name ^ " is not a typedef name")))
 
@@ -2033,6 +2134,12 @@ and read_init_declarator state scope specified
     init_declarator.node
   in
   let specified = for_declarator specified attributes in
+  let specified =
+    { specified with
+      with_attribute =
+        specified.with_attribute || attributes <> []
+        || declarator_has_attribute state declarator }
+  in
   (* The effects of attributes are recorded where design 13.3 places
      them: on a function declared at file scope, not on a typedef. *)
   let records_effects =
@@ -2132,10 +2239,13 @@ and read_named_type state
     ({ declaration; scope_end } : Tree.scoped_type_declaration) =
   let { Tree.name = checked; declared; definition; _ } = declaration.node in
   let name = (checked :> Tree.identifier) in
-  let bind t =
+  (* The name as a typedef name of the type that it defines. *)
+  let bind_spelled ~with_attribute typedef_type =
     record state name.node declared
-      { name = name.node; entity = fresh_entity state; declared = Typedef t }
+      { name = name.node; entity = fresh_entity state;
+        declared = Typedef { typedef_type; with_attribute } }
   in
+  let bind = bind_spelled ~with_attribute:false in
   match definition with
   | Incomplete_variant ->
       let record = variant_record state checked.node declared in
@@ -2145,7 +2255,9 @@ and read_named_type state
       let privacy = privacy state declaration ~is_private in
       let scope = { declaration.span with last = scope_end } in
       read_variant state declaration privacy ~scope constructors bind
-  | Alias type_name -> bind (read_type_name state type_name)
+  | Alias type_name ->
+      let t = read_type_name state type_name in
+      bind_spelled ~with_attribute:(type_name_has_attribute state type_name) t
   | Distinct { is_private; representation } ->
       let privacy = privacy state declaration ~is_private in
       bind (distinct_type state name.node privacy representation)
@@ -2434,13 +2546,14 @@ and in_trial state read =
 
 (* A type application: its arguments, then the type that the generic's
    definition makes of them (rule 3). *)
-and applied_type state span name reference arguments =
+and applied_type state span name reference written =
   let declaration = generic_declaration state span name reference in
-  let argument (written : Tree.type_name) =
-    (written.span, read_type_name state written)
+  let argument (argument : Tree.type_name) =
+    (argument.span, read_type_name state argument)
   in
-  let arguments = List.map argument arguments in
+  let arguments = List.map argument written in
   let instance = instance_of state declaration arguments in
+  List.iter2 (refuse_attributed state) written arguments;
   let first_use = note_application state instance arguments span in
   let types = List.map snd arguments in
   let applied =
@@ -2454,6 +2567,19 @@ and applied_type state span name reference arguments =
       (Declared { generic = declaration });
   note_name state span (Encoding.instance_name instance);
   applied_type
+
+(* Design 3.5 rule 2: an argument with an attribute, refused from its
+   text, as its type, which encodes it, holds none after typedef
+   expansion. *)
+and refuse_attributed state (written : Tree.type_name) (_, t) =
+  if type_name_has_attribute state written then
+    fail state written.span
+      (Rule.message Type_argument
+         (Printf.sprintf
+            "the type argument holds an attribute, or a typedef name or \
+             an alias declared with one, which no instance name encodes: \
+             it would share the instance of %s"
+            (quote (Type_name.of_ctype t))))
 
 (* The latest declaration of the generic that an application names: the
    variant that completes an incomplete one, once read. *)
@@ -2682,8 +2808,10 @@ and with_arguments :
     let reference = Tree.In_tree parameter.declared.id in
     let saved = Hashtbl.find_opt state.entities reference in
     Hashtbl.replace state.entities reference
+      (* [applied_type] has refused an argument with an attribute. *)
       { name = parameter.name.node; entity = fresh_entity state;
-        declared = Typedef argument };
+        declared =
+          Typedef { typedef_type = argument; with_attribute = false } };
     (reference, saved)
   in
   let restore (reference, saved) =
@@ -3105,7 +3233,8 @@ let declare_builtin_typedefs state =
     match builtin_type state.target name builtin with
     | Ok t ->
         let entity =
-          { name; entity = fresh_entity state; declared = Typedef t }
+          { name; entity = fresh_entity state;
+            declared = Typedef { typedef_type = t; with_attribute = false } }
         in
         Hashtbl.replace state.entities (Builtin name) entity
     | Error error -> invalid_arg (Ctype.error_message error)
