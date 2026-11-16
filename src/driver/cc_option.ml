@@ -70,6 +70,11 @@ let float_constants =
   "GCC makes an unsuffixed floating constant float, which typec's \
    target model does not read"
 
+(* Design 10.3 and 13.2. *)
+let pack_struct =
+  "under it GCC ignores each '#pragma pack' that typec writes around an \
+   instance of a generic, and warns of it; -fpack-struct=n passes"
+
 (* The options of typec, and those of the C compilers that typec
    supports (Target.minimum_major_version) up to GCC 16 and Clang 21,
    Apple's included, that the pipeline must tell apart or that take a
@@ -118,17 +123,19 @@ let table =
       entries (Refused "typec does not read the inputs after it") Flag
         [ "--" ];
       (* Options that change a type of C but no macro the target model
-         reads, so the model would disagree with the backend. Each is
-         refused wherever it stands, even before the option that undoes
-         it. Options that change a macro the model reads, such as
+         reads, so the model would disagree with the backend, or that
+         make the backend ignore what typec writes. Each is refused
+         wherever it stands, even before the option that undoes it.
+         Options that change a macro the model reads, such as
          -fshort-wchar, reach it through the target query, and the front
-         end computes no layout, so the options of layout alone, such as
-         -fpack-struct, pass. *)
+         end computes no layout, so the other options of layout, such as
+         -fpack-struct=n, pass. *)
       entries (Refused short_enums) Flag [ "-fshort-enums" ];
       entries (Refused unsigned_bit_fields) Flag
         [ "-funsigned-bitfields"; "-fno-signed-bitfields" ];
       entries (Refused float_constants) Flag
         [ "-fsingle-precision-constant" ];
+      entries (Refused pack_struct) Flag [ "-fpack-struct" ];
       (* Preprocessing. *)
       entries Preprocess Joined_or_separate
         [

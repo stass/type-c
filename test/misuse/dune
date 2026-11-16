@@ -16,7 +16,8 @@
    (glob_files *.ml))
   (:cmis
    (glob_files ../../src/cpp/.typec_cpp.objs/public_cmi/*.cmi)
-   (glob_files ../../src/syntax/.typec_syntax.objs/public_cmi/*.cmi)))
+   (glob_files ../../src/syntax/.typec_syntax.objs/public_cmi/*.cmi)
+   (glob_files ../../src/emit/.typec_emit.objs/byte/*.cmi)))
  (action
   (setenv
    MISUSE_CMIS

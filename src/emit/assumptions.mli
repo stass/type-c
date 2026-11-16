@@ -13,6 +13,13 @@
     failure is fixed by building without the option that changes the
     type, or by a target model that reads the type it changes. *)
 
+val assertion : holds:string -> assumes:string -> option:string -> string
+(** [assertion ~holds ~assumes ~option] is a static assertion of the
+    constant expression [holds], whose message says that typec assumes
+    [assumes] and asks whether [option] breaks it. [assumes] and
+    [option] are typec's own text, without a quote or a backslash, as
+    they go into a string literal unescaped. *)
+
 val assertions : Typec_sema.Target.t -> string list
 (** [assertions target]: one declaration per line, valid at file scope in
     C11 and C17 under [-Wall -Wextra -pedantic-errors], each true for the

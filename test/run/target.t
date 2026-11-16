@@ -136,6 +136,19 @@ command line without a .tc input.
   $ typec --cc=$clang -fno-short-enums -fsigned-bitfields -c enum.tc
   $ typec --cc=$gcc -fshort-enums --print-target > /dev/null
 
+GCC's -fpack-struct without a value makes it ignore every '#pragma
+pack' that typec writes around an instance of a generic, with a warning
+for each, which fails a build under -Werror. typec refuses it with a .tc
+input, whatever the backend, as the option table is the same for all. -fpack-struct=n keeps the pragmas and passes, and so does
+-fpack-struct on a command line without a .tc input.
+
+  $ typec --cc=$gcc -fpack-struct -c enum.tc
+  typec: -fpack-struct cannot be used with a .tc input: under it GCC ignores each '#pragma pack' that typec writes around an instance of a generic, and warns of it; -fpack-struct=n passes
+  [81]
+  $ typec --cc=$gcc -fpack-struct=2 -c enum.tc
+  $ typec --cc=$clang -fpack-struct=1 -c enum.tc
+  $ typec --cc=$gcc -fpack-struct --print-target > /dev/null
+
 Other routes to these options reach the backend unseen, such as Clang's
 -Xclang or a wrapper around the backend. The C that typec emits for a
 unit with a Type-C construct therefore ends with a static assertion of

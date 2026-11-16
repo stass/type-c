@@ -654,6 +654,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
+- [Medium] When the instances of package 2.1 fill `Emitter.Bracketed`
+  from a generic's definition, a `#pragma pack` (or a `_Pragma("pack")`,
+  which `cc -E` writes as one) kept between the definition's tokens
+  lands inside the bracket: it packs the instance or pops the stack of
+  the unit, and the probe cannot see it. Design 10.3 keeps only other
+  pragmas from an instance; either refuse a `pack` pragma inside a
+  generic's definition or make the text of a bracket a type that holds
+  no pragma line. A `Code` text that spells the bracket's pragmas itself
+  escapes the probe the same way, and the type of instance text should
+  close both; it should also confine a bracket to where a declaration
+  may stand, as the pragmas break an expression. A run test should also compile an instance's error
+  through the pipeline to confirm it is reported at its own line.
 
 ## Matching
 

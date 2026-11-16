@@ -2133,8 +2133,8 @@ struct __tc_pack_probe_2 { char c; int i; };
 #pragma pack(pop)
 _Static_assert(_Alignof(struct __tc_pack_probe_1)
                == _Alignof(struct __tc_pack_probe_2),
-               "typec: '#pragma pack()' does not restore the packing of "
-               "the command line (-fapple-pragma-pack or "
+               "typec assumes '#pragma pack()' restores the packing "
+               "of the command line (-fapple-pragma-pack or "
                "-fxl-pragma-pack?)");
 ```
 

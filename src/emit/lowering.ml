@@ -30,20 +30,24 @@ let replace (tokens : Token.t array) ~location text indexes :
   | [] -> []
   | first :: _ when is_run tokens indexes ->
       let count = List.length indexes in
-      [ { range = Reader.range tokens ~first ~count; location; text } ]
+      [ { range = Reader.range tokens ~first ~count;
+          location;
+          text = Code text } ]
   | first :: rest ->
       let delete index : Emitter.edit =
         { range = Reader.range tokens ~first:index ~count:1;
           location;
-          text = "" }
+          text = Code "" }
       in
-      { range = Reader.range tokens ~first ~count:1; location; text }
+      { range = Reader.range tokens ~first ~count:1;
+        location;
+        text = Code text }
       :: List.map delete rest
 
 let insert (tokens : Token.t array) ~before text : Emitter.edit =
   { range = Reader.range tokens ~first:before ~count:0;
     location = tokens.(before).location;
-    text }
+    text = Code text }
 
 (* The grammar tokens from [first] to [last], without the pragmas
    between them, which stay. *)

@@ -31,6 +31,16 @@
  (applies_to types)
  (deps type_probe.exe))
 
+; packing.t compiles the output of pack_probe with each backend.
+
+(executable
+ (name pack_probe)
+ (libraries typec_cpp typec_emit))
+
+(cram
+ (applies_to packing)
+ (deps pack_probe.exe))
+
 ; parse.t and headers.t run the parser on the output of both backends.
 
 (executable

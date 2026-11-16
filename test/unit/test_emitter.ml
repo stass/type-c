@@ -33,7 +33,8 @@ let at line : Location.t = { file = "a.tc"; line; flags = No_flags }
 let emit unit edits = Emitter.emit unit { edits; assertions = [] }
 
 let edit (unit : Reader.t) ~first ~count location text : Emitter.edit =
-  { range = Reader.range unit.tokens ~first ~count; location; text }
+  { range = Reader.range unit.tokens ~first ~count; location;
+    text = Code text }
 
 (* x = 1 becomes x = 2 at line 1. *)
 let replacement = edit unit ~first:1 ~count:3 (at 1) "x = 2"
@@ -268,4 +269,58 @@ let () =
        # 1 \"<typec>\" 3\n\
        int a;\n\
        int b;\n");
-  if !failures > 0 then exit 1
+  ()
+
+(* A bracketed text stands in the packing bracket of design 10.3, under
+   its marker, and the unit ends with the packing probe after the
+   assertions; one without assertions gets the probe all the same. *)
+let probe =
+  "#pragma pack(push)\n\
+   #pragma pack(1)\n\
+   #pragma pack(push)\n\
+   #pragma pack()\n\
+   struct __tc_pack_probe_1 { char c; int i; };\n\
+   #pragma pack(pop)\n\
+   #pragma pack(2)\n\
+   #pragma pack(push)\n\
+   #pragma pack()\n\
+   struct __tc_pack_probe_2 { char c; int i; };\n\
+   #pragma pack(pop)\n\
+   #pragma pack(pop)\n\
+   _Static_assert(_Alignof(struct __tc_pack_probe_1) \
+   == _Alignof(struct __tc_pack_probe_2), \"typec assumes \
+   '#pragma pack()' restores the packing of the command line \
+   (-fapple-pragma-pack or -fxl-pragma-pack?)\");\n"
+
+let () =
+  let bracketed : Emitter.edit =
+    { range = Reader.range unit.tokens ~first:8 ~count:0;
+      location = at 2;
+      text = Bracketed "struct s { int n; };" }
+  in
+  let text =
+    "# 1 \"a.tc\"\n\
+     int x = 1;\n\
+     # 1 \"h.h\" 1 3\n\
+     int y;\n\
+     # 2 \"a.tc\" 2\n\
+     \n\
+     #pragma pack(push)\n\
+     #pragma pack()\n\
+     \n\
+     # 2 \"a.tc\"\n\
+     struct s { int n; };\n\
+     #pragma pack(pop)\n\
+     # 2 \"a.tc\"\n\
+     int z;\n\
+     \n\
+     # 1 \"<typec>\" 3\n"
+  in
+  check "a bracketed text, then the assertions and the probe"
+    (Emitter.emit unit { edits = [ bracketed ]; assertions = [ "int a;" ] }
+    = text ^ "int a;\n" ^ probe);
+  check "the probe without assertions"
+    (Emitter.emit unit { edits = [ bracketed ]; assertions = [] }
+    = text ^ probe)
+
+let () = if !failures > 0 then exit 1

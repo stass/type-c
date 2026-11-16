@@ -359,6 +359,12 @@ that `typec` assumes, whose message names the option that would break
 it. Flag 3 keeps the user's warning options off typec's own text. An option
 that changes a macro the model reads, such as
 `-funsigned-char` or `-fshort-wchar`, reaches the target model.
+It refuses `-fpack-struct` without a value, under which GCC
+ignores the `#pragma pack` lines that `typec` writes around an instance
+of a generic and warns of each; `-fpack-struct=n` passes. A unit that
+holds such lines also ends with a probe that fails where the backend
+reads `#pragma pack()` as a pop, as Clang does under
+`-fapple-pragma-pack`.
 It also refuses `-arch` options that name more than one architecture: cc
 builds a universal binary from them, but step 1 preprocesses for one
 architecture only. Build each architecture with its own `-arch` and join
