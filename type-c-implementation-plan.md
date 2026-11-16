@@ -171,14 +171,16 @@ lives in its own repository and records:
    file, and read from a C file that declares the layout of design 10.1 by
    hand.
 4. Differential tests against hand-written C give the same output, and
-   size and speed within measurement noise at `-O2`. The C twin carries
-   the guarantees of its Type-C program: its `switch` on a tag traps on
-   a tag that is none of the constructors, as every `match` does (design
-   4.5), so a `default` arm of the `match` becomes cases for the
-   remaining constructors before a trapping `default`; and the payload
-   fields a binding reads are copied into locals when the case is
-   entered (design 4.1). The gate then measures the cost
-   of the lowering, not of the guarantees. Speed is the count of
+   size and speed within measurement noise at `-O2`. The C twin declares
+   each variant as design 10.1 lays it out, one union member per
+   constructor, and carries the guarantees of its Type-C program: its
+   `switch` on a tag traps on a tag that is none of the constructors, as
+   every `match` does (design 4.5), so a `default` arm of the `match`
+   becomes cases for the remaining constructors before a trapping
+   `default`; and the payload fields a binding reads are copied into
+   locals when the case is entered (design 4.1). The gate then measures
+   the cost of the lowering, not of the representation or the
+   guarantees. Speed is the count of
    instructions a program retires in user mode, read from the hardware
    counters of the FreeBSD test host (`pmcstat`), not its wall time:
    that host is never idle, and its load moves wall time by more than

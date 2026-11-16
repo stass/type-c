@@ -930,25 +930,12 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   accepts an identical second definition of a tag and rejects a
   different one: a `-fsyntax-only` step on `abi.tci` followed by an
   unprefixed `hand.h` would prove it, if `typec` passes `-std=c23` on.
-- [High] Stage 1 exit gate 4 does not hold for `tree` on GCC.
-  `tools/measure/gate4.sh` on p620, with clang 21.1.8 and GCC 14.2
-  (`/Volumes/Optaine/typec-gate4/results.md`), finds every other pair
-  equal in code size and within noise in instructions (at most 17
-  instructions apart in up to 1.4e9). On GCC 14 the Type-C `tree` is
-  12 bytes smaller than its twin and retires 329,623 fewer
-  instructions (0.037%), outside a noise of 2,490, so it fails both
-  halves; its cycles, which judge nothing, are 1.1 to 1.3% more in
-  four runs (one recorded). On GCC 16, on the macOS host
-  (`results-macos-62b6c68.md` beside it, timed by wall clock), `tree`
-  was 51 bytes larger: its function `main` keeps three arms storing
-  constructors of the same layout separate (17 jumps against 14), and
-  giving the twin's union one member per constructor (design 10.1)
-  accounts for 49 of the 51 bytes. Next: compare the lowered C of
-  `tree` with `tree.c` on GCC 14 to find the construct behind its
-  difference; if it is the layout of 10.1, give the twin that layout,
-  so that the gate measures the lowering, not the representation.
-  GCC 16 is not counted by instructions on any pair, since p620 has
-  none.
+- [Low] Gate 4 has no instruction counts for GCC 16.
+  `tools/measure/gate4.sh` needs hwpmc, which only p620 has, with GCC
+  14 but not GCC 16; the macOS host has GCC 16 but no hardware
+  counters, so it can only be timed by wall clock. Building
+  `lang/gcc16` from ports on p620 and naming it in `TYPEC_TEST_GCC` for
+  a second run would count it.
 - [Medium] On GCC 16 the trapping `default` of a `match` in a hot loop
   costs about 18% in `shapes`: its loop over the array keeps an index
   counter beside the pointer, while a twin without the `default` (and

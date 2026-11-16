@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
 
-/* The hand-written twin of tree.tc: a tag, a union and a switch, with
-   the guarantees of the Type-C match (a trap on an invalid tag and the
+/* The hand-written twin of tree.tc: a tag, a union with one member per
+   constructor (the layout of design 10.1) and a switch, with the
+   guarantees of the Type-C match (a trap on an invalid tag and the
    payload copied into locals when the case is entered), so that the
-   gate measures the lowering and not the guarantees. */
+   gate measures the lowering and not the representation or the
+   guarantees. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,24 +15,29 @@ enum kind { NUMBER, ADD, SUBTRACT, MULTIPLY };
 struct expr {
   enum kind kind;
   union {
-    unsigned long value;
-    struct { const struct expr *left, *right; } pair;
+    struct { unsigned long value; } number;
+    struct { const struct expr *left, *right; } add;
+    struct { const struct expr *left, *right; } subtract;
+    struct { const struct expr *left, *right; } multiply;
   } u;
 };
 
 static unsigned long eval(const struct expr *e) {
   switch (e->kind) {
-  case NUMBER: return e->u.value;
+  case NUMBER: {
+    unsigned long n = e->u.number.value;
+    return n;
+  }
   case ADD: {
-    const struct expr *l = e->u.pair.left, *r = e->u.pair.right;
+    const struct expr *l = e->u.add.left, *r = e->u.add.right;
     return eval(l) + eval(r);
   }
   case SUBTRACT: {
-    const struct expr *l = e->u.pair.left, *r = e->u.pair.right;
+    const struct expr *l = e->u.subtract.left, *r = e->u.subtract.right;
     return eval(l) - eval(r);
   }
   case MULTIPLY: {
-    const struct expr *l = e->u.pair.left, *r = e->u.pair.right;
+    const struct expr *l = e->u.multiply.left, *r = e->u.multiply.right;
     return eval(l) * eval(r);
   }
   default:
@@ -43,28 +50,23 @@ static unsigned long next_random(unsigned long *state) {
   return *state >> 33;
 }
 
-static struct expr number(unsigned long value) {
-  struct expr e = { NUMBER, { .value = value } };
-  return e;
-}
-
-static struct expr pair(enum kind kind, const struct expr *l,
-                        const struct expr *r) {
-  struct expr e = { kind, { .pair = { l, r } } };
-  return e;
-}
-
 static void build(struct expr *nodes, unsigned long leaves,
                   unsigned long seed) {
   unsigned long internal = leaves - 1;
   for (unsigned long i = internal; i < internal + leaves; i++)
-    nodes[i] = number(next_random(&seed));
+    nodes[i] = (struct expr){ NUMBER, { .number = { next_random(&seed) } } };
   for (unsigned long i = internal; i-- > 0;) {
     const struct expr *l = &nodes[2 * i + 1], *r = &nodes[2 * i + 2];
     switch (next_random(&seed) % 3) {
-    case 0: nodes[i] = pair(ADD, l, r); break;
-    case 1: nodes[i] = pair(SUBTRACT, l, r); break;
-    default: nodes[i] = pair(MULTIPLY, l, r); break;
+    case 0:
+      nodes[i] = (struct expr){ ADD, { .add = { l, r } } };
+      break;
+    case 1:
+      nodes[i] = (struct expr){ SUBTRACT, { .subtract = { l, r } } };
+      break;
+    default:
+      nodes[i] = (struct expr){ MULTIPLY, { .multiply = { l, r } } };
+      break;
     }
   }
 }
@@ -84,7 +86,8 @@ int main(int argc, char **argv) {
   build(nodes, leaves, seed);
   unsigned long sum = 0;
   for (unsigned long round = 0; round < rounds; round++) {
-    nodes[internal + round % leaves] = number(round);
+    nodes[internal + round % leaves] =
+        (struct expr){ NUMBER, { .number = { round } } };
     sum += eval(&nodes[0]);
   }
   printf("%lu\n", sum);
