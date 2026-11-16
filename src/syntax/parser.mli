@@ -59,7 +59,7 @@ val parse :
     token for a backend with [keywords] ({!Builtin_typedef.declared}).
 
     Where [text] holds the universe text in front of the unit's own
-    ({!Reader.read_with_universe}), its generics are declared in the
+    ({!Reader.read}), its generics are declared in the
     universe scope (design 2.3), which encloses file scope: a declaration
     of the same name in any scope hides one and is no redeclaration of
     it. They are not in the tree, which holds the unit's own text alone,

@@ -557,9 +557,9 @@ let owners_are_shared () =
    changes no owner. *)
 let main_cases =
   [
-    ( "# 1 \"m.tc\"\na\n# 1 \"m.tc\" 1\nb\n# 2 \"m.tc\" 2\nc\n",
-      [ ("m.tc", true); ("m.tc", false); ("m.tc", true) ] );
-    ("# 1 \"m.tc\"\na\n# 7 \"n.tc\"\nb\n", [ ("m.tc", true); ("m.tc", true) ])
+    ( "# 1 \"m.c\"\na\n# 1 \"m.c\" 1\nb\n# 2 \"m.c\" 2\nc\n",
+      [ ("m.c", true); ("m.c", false); ("m.c", true) ] );
+    ("# 1 \"m.c\"\na\n# 7 \"n.c\"\nb\n", [ ("m.c", true); ("m.c", true) ])
   ]
 
 let failed_main_cases () =
@@ -595,10 +595,11 @@ let failed_owner_cases () =
     (fun (declaring, text, expected) -> File.owns ~declaring text <> expected)
     owner_cases
 
-(* The universe text (design 3.6) in front of the unit's own text. *)
+(* The universe text (design 3.6) in front of the own text of a unit
+   whose main file is Type-C text, whatever the name it is read under. *)
 
-let read_universe text =
-  match Reader.read_with_universe ~name:"in.i" text with
+let read_unit text =
+  match Reader.read ~name:"in.i" text with
   | Ok result -> result
   | Error error -> failwith (Reader.error_message error)
 
@@ -645,8 +646,22 @@ let first_own_owner read text =
 
 let forged_universe = "# 1 \"m.tc\"\n# 1 \"<universe>\" 1\nint b;\n"
 
+(* The number of tokens of the unit of [text]. *)
+let token_count ~name text =
+  match Reader.read ~name text with
+  | Ok unit -> Array.length unit.tokens
+  | Error _ -> -1
+
+(* Texts that hold the one token [x]: a C unit that includes a Type-C
+   interface, and one whose first file entered after the main file's
+   marker is Type-C text. *)
+let c_unit_with_interface =
+  "# 1 \"m.c\"\n# 1 \"h.tci\" 1\nx\n# 2 \"m.c\" 2\n"
+
+let c_unit_after_preamble = "# 1 \"m.c\"\n# 1 \"p.tc\" 1\n# 1 \"m.c\" 2\nx\n"
+
 let universe_checks () =
-  let unit = read_universe universe_unit_text in
+  let unit = read_unit universe_unit_text in
   let tokens = Array.to_list unit.tokens in
   let first_own = universe_token_count in
   let prefix = List.filteri (fun index _ -> index < first_own) tokens in
@@ -656,7 +671,7 @@ let universe_checks () =
     Reader.rewrite unit [ { range; text = "x" } ]
   in
   let is_universe (token : Token.t) = token.owner == File.universe in
-  let forged = first_own_owner Reader.read_with_universe forged_universe in
+  let forged = first_own_owner Reader.read forged_universe in
   let forged_main = first_own_owner Reader.read "# 1 \"<universe>\"\nint b;" in
   [ ( "the universe tokens come first, at their lines",
       List.map (show_presumed unit) prefix = universe_places );
@@ -680,10 +695,24 @@ let universe_checks () =
       match forged_main with
       | Some owner -> owner <> File.universe && owner.origin = File.Main
       | None -> false );
+    ( "the tokens and gaps of a Type-C unit spell its text",
+      Spans.spell_text universe_unit_text unit
+      && Spans.gaps_are_layout universe_unit_text unit );
     ( "rewrite writes the unit's own bytes",
       Reader.rewrite unit [] = universe_unit_text );
-    ( "rewrite of an empty unit is empty",
-      Reader.rewrite (read_universe "") [] = "" );
+    ( "rewrite of a Type-C unit with no tokens is its own text",
+      Reader.rewrite (read_unit "# 1 \"m.tc\"\n") [] = "# 1 \"m.tc\"\n" );
+    ( "a unit whose main file is a Type-C interface has the universe",
+      token_count ~name:"in.i" "# 1 \"m.tci\"\nx" = universe_token_count + 1
+    );
+    ( "a unit with no main file has no universe",
+      token_count ~name:"in.tc" "" = 0 );
+    ( "a C unit has no universe, whatever its name",
+      token_count ~name:"in.tc" "# 1 \"m.c\"\nx" = 1 );
+    ( "a C unit that includes Type-C text has no universe",
+      token_count ~name:"in.i" c_unit_with_interface = 1 );
+    ( "the main file decides, not a file entered after it",
+      token_count ~name:"in.i" c_unit_after_preamble = 1 );
     ( "a replacement of a universe token is refused",
       raises (replace ~first:0 ~count:1) in_universe_message );
     ( "an insertion in front of a universe token is refused",
@@ -693,10 +722,10 @@ let universe_checks () =
     ( "an insertion in front of the unit's first token is its own",
       replace ~first:first_own ~count:0 () = unit_head ^ "x" ^ unit_rest );
     ( "the unit's errors are at its own lines",
-      match Reader.read_with_universe ~name:"in.i" "\nint a;" with
+      match Reader.read ~name:"in.i" "# 1 \"m.tc\"\n\n@" with
       | Error error ->
           error.location
-          = { Location.file = "in.i"; line = 2; flags = No_flags }
+          = { Location.file = "m.tc"; line = 2; flags = No_flags }
       | Ok _ -> false ) ]
 
 let failed_universe_checks () =

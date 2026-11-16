@@ -36,17 +36,20 @@
     ({!Location.flags}), which decide what the backend exempts from
     warnings, whatever the owner.
 
-    {!read_with_universe} reads the universe text, {!File.universe_text},
-    in front of the unit's own text, so that its tokens come first and
-    keep their indices whatever the unit holds. They belong to
-    {!File.universe} and are placed at its lines, and the unit's own text
-    is then read as {!read} reads it.
+    A unit is a Type-C unit when its main file is Type-C text
+    ({!File.is_type_c_text}, design 2.1), and a C unit otherwise; the
+    files it enters do not change that. In front of the own text of a
+    Type-C unit {!read} reads the universe text, {!File.universe_text},
+    so that its tokens come first and keep their indices whatever the
+    unit holds. They belong to {!File.universe} and are placed at its
+    lines, and the unit's own text is then read as if it were alone. A C
+    unit has no universe text.
 
     Reading takes time and memory linear in the size of the text and
     never recurses on it. *)
 
 (** The text as [cc -E] wrote it, and the universe text in front of it
-    where the unit was read with it. Only {!spelling} and {!rewrite} read
+    where the unit is a Type-C unit. Only {!spelling} and {!rewrite} read
     it: a stage cannot slice it by token offsets and take the bytes of an
     identifier for its name. {!rewrite} gives the bytes for emission
     alone. *)
@@ -62,13 +65,12 @@ type t = private { text : text; tokens : Token.t array }
 type error = { location : Location.t; message : string }
 
 val read : name:string -> string -> (t, error) result
-(** [read ~name text] reads [text], which was read from the file [name].
-    [name] is the presumed file name until a line marker changes it. *)
-
-val read_with_universe : name:string -> string -> (t, error) result
-(** [read_with_universe ~name text] reads the universe text and then
-    [text] as {!read} does: the tokens are those of the universe text,
-    then those of [text]. *)
+(** [read ~name text] reads [text], which was read from the file [name]:
+    the tokens are those of the universe text, where the unit is a
+    Type-C unit, then those of [text]. [name] is the presumed file name
+    until a line marker changes it, and its suffix does not decide the
+    kind of the unit: the name in the marker that opens the main file
+    does, which is the source path that [cc -E] was given. *)
 
 val spelling : t -> Token.t -> string
 (** [spelling result token] is what [token] means: the name that an

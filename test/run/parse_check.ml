@@ -5,7 +5,8 @@
    the keywords of the backend whose cc -dM -E output is MACROS, in GNU C
    whatever the dialect of FILE, checks that the spans of the tree nest
    in order and that every token outside the external declarations is a
-   pragma, and prints what each external declaration declares. *)
+   pragma or the universe text's, and prints what each external
+   declaration declares. *)
 
 open Typec_cpp
 open Typec_syntax
@@ -33,7 +34,7 @@ let is_pragma (token : Token.t) =
       false
 
 (* The first token that no external declaration holds and that is not a
-   pragma. *)
+   pragma or the universe text's, which the tree never holds. *)
 let first_token_outside (reader : Reader.t) unit =
   let held = Array.make (Array.length reader.tokens) false in
   List.iter
@@ -43,7 +44,9 @@ let first_token_outside (reader : Reader.t) unit =
     unit;
   Array.to_seqi reader.tokens
   |> Seq.find (fun (index, token) ->
-         (not held.(index)) && not (is_pragma token))
+         (not held.(index))
+         && (not (is_pragma token))
+         && not (File.is_universe token.owner))
 
 let names declarators =
   List.filter_map

@@ -1,7 +1,7 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* [bytes] is the universe text, where the unit was read with it, then
+(* [bytes] is the universe text, where the unit is a Type-C unit, then
    the unit's own text, which starts at [own_start]. *)
 type text = { bytes : string; own_start : int }
 type t = { text : text; tokens : Token.t array }
@@ -549,22 +549,41 @@ let read_part state ~stop ~first ~include_stack =
     read_next state
   done
 
+let initial_state ~name text =
+  {
+    text;
+    pos = 0;
+    presumed = first_line name;
+    include_stack = [];
+    owners = Owners.empty;
+    tokens = [];
+  }
+
+(* Whether the main file is Type-C text (design 2.1), which makes the
+   unit a Type-C unit. Only the lines up to the marker that opens the
+   main file are read, as no token comes before it. Text that has no
+   such marker, or fails before it, is a C unit here, and its full read
+   then reports the same failure, at the same place. *)
+let is_type_c_unit ~name text =
+  let state = initial_state ~name text in
+  match
+    while state.pos < String.length text && state.include_stack = [] do
+      read_next state
+    done
+  with
+  | () -> (
+      match state.include_stack with
+      | main :: _ -> File.is_type_c_text main
+      | [] -> false)
+  | exception Failed _ -> false
+
 (* The universe text needs no line marker: its owner is on the stack from
    its first byte. The unit's own text then starts afresh, as if it were
    read alone. *)
 let read_after ~universe ~name text =
   let bytes = universe ^ text in
   let own_start = String.length universe in
-  let state =
-    {
-      text = bytes;
-      pos = 0;
-      presumed = first_line name;
-      include_stack = [];
-      owners = Owners.empty;
-      tokens = [];
-    }
-  in
+  let state = initial_state ~name bytes in
   match
     read_part state ~stop:own_start ~first:universe_first_line
       ~include_stack:[ File.universe ];
@@ -576,11 +595,13 @@ let read_after ~universe ~name text =
       Ok { text = { bytes; own_start }; tokens }
   | exception Failed error -> Error error
 
-(* With no universe text the first part is empty and reads nothing. *)
-let read ~name text = read_after ~universe:"" ~name text
-
-let read_with_universe ~name text =
-  read_after ~universe:File.universe_text ~name text
+(* A C unit has no universe text, so its first part is empty and reads
+   nothing. *)
+let read ~name text =
+  let universe =
+    if is_type_c_unit ~name text then File.universe_text else ""
+  in
+  read_after ~universe ~name text
 
 let spelling (result : t) (token : Token.t) =
   match token.kind with

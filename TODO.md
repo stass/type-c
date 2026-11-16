@@ -1148,12 +1148,12 @@ types (design 13.3).
   `(`, decided in the one predicate behind `starts_declaration` and
   `is_typedef_name`, which would cover every C position at once. Owner
   decision: it changes the wording of design 2.2 and 2.3.
-- [Medium] Whether a unit gets the universe text rests on each caller
-  choosing `Reader.read_with_universe` (the driver, the golden runner);
-  the unit tests read Type-C text with `Reader.read`, where `option(int)`
-  is an undeclared name, so lowering is tested under a model the driver
-  never uses. Make one funnel: `Front_end.lower` reading the raw text
-  itself, or a reader entry that takes the unit's kind.
+- [Medium] The tests rebuild where the universe tokens end, which the
+  reader alone knows: `Spans.read_bytes` puts `File.universe_text` in
+  front of the text, and `test_parser`'s `universe_token_count` counts
+  the universe's tokens. A reader view for tests (the index of the first
+  own token, the bytes the tokens index) would make them read the one
+  fact instead.
 
 - [Medium] When package 3.4 makes its universe names typedef names to
   the parser, each gets design 2.3's exception to C11 6.7.6.3p11 (a

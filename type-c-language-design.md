@@ -2771,11 +2771,12 @@ refuses a `goto` to a label that its body does not define where the
 body ends.
 
 **Universe text.** The generic types of the universe scope are Type-C
-text, the two lines of 3.6, which the reader reads in front of the
-unit's own text into one token array. The parser declares them in the
-universe scope (2.3), and the type checker and lowering then treat them
-as any generic declaration, so every identity
-that a token index gives (a declaration's id, a span, moved text) covers
+text, the two lines of 3.6, which the reader reads in front of the own
+text of a unit whose main file is Type-C text (2.1) into one token
+array; that file alone decides, so no caller of the reader chooses.
+The parser declares them in the universe scope (2.3), and the type
+checker and lowering then treat them as any generic declaration, so
+every identity that a token index gives (a declaration's id, a span, moved text) covers
 them with no second source of the declarations. Their tokens belong to
 a file `<universe>` that no line marker opens: a marker that names
 `<universe>` opens an ordinary file of that name, which is C text.

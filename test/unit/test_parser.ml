@@ -25,10 +25,10 @@ let case name text expected = { name; text; expected }
 (* Type-C text is that of a file named [*.tc] (design 2.1). *)
 let type_c_file = "in.tc"
 
-(* [read] is {!Reader.read}, or {!Reader.read_with_universe} for a text
-   that the universe generics stand in front of (design 13.3). *)
-let outcome ?(file = "in.i") ?(read = Reader.read) ~parse ~spans text =
-  match read ~name:file (Preprocessed.text ~name:file text) with
+(* The universe generics stand in front of the text of a [file] that is
+   Type-C text (design 13.3). *)
+let outcome ?(file = "in.i") ~parse ~spans text =
+  match Reader.read ~name:file (Preprocessed.text ~name:file text) with
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match parse reader with
@@ -51,9 +51,17 @@ let resolutions ?(file = "in.i") text =
       | Ok unit ->
           Tree_dump.resolutions (Tree_dump.translation_unit reader unit))
 
+(* The number of universe tokens, which come first in a Type-C unit. *)
+let universe_token_count (reader : Reader.t) =
+  Array.fold_left
+    (fun count (token : Token.t) ->
+      if File.is_universe token.owner then count + 1 else count)
+    0 reader.tokens
+
 (* The scope end that the parser gives each type declaration of a text,
-   as [N:i:t] with [i] the index of that token and [t] its spelling, in
-   order, or the error.
+   as [N:i:t] with [i] the index of that token among the text's own,
+   after the universe tokens, and [t] its spelling, in order, or the
+   error.
    It walks file scope, function bodies, blocks and match arms. *)
 let scope_ends ?(file = type_c_file) text =
   let rec item reader = function
@@ -72,7 +80,8 @@ let scope_ends ?(file = type_c_file) text =
       ({ declaration; scope_end } : Tree.scoped_type_declaration) =
     let name = declaration.node.name in
     let token = reader.Reader.tokens.(scope_end) in
-    [ Printf.sprintf "%s:%d:%s" (name.node :> string) scope_end
+    [ Printf.sprintf "%s:%d:%s" (name.node :> string)
+        (scope_end - universe_token_count reader)
         (Reader.spelling reader token) ]
   in
   let external_declaration reader = function
@@ -2363,7 +2372,7 @@ let universe_cases =
    generics apart, and the view in front of a declaration finds them. *)
 let failed_universe_scope () =
   let text = Preprocessed.text ~name:type_c_file "int a;" in
-  match Reader.read_with_universe ~name:type_c_file text with
+  match Reader.read ~name:type_c_file text with
   | Error error -> [ ("universe scope", Reader.error_message error) ]
   | Ok reader -> (
       match Parser.parse_with_scopes ~keywords:gnu_keywords reader with
@@ -2475,9 +2484,9 @@ let failures () =
         if actual = case.expected then None else Some (case, actual))
       cases
   in
-  let failed_cases ?file ?read ?(parse = Parser.parse ~keywords:gnu_keywords)
+  let failed_cases ?file ?(parse = Parser.parse ~keywords:gnu_keywords)
       ~spans cases =
-    failed_with (outcome ?file ?read ~parse ~spans) cases
+    failed_with (outcome ?file ~parse ~spans) cases
   in
   let parse_with ?(int128 = true) dialect optional_floats =
     Parser.parse
@@ -2520,8 +2529,7 @@ let failures () =
     @ failed_with (resolutions ~file:type_c_file) type_c_resolution_cases
     @ failed_cases ~file:type_c_file ~spans:false match_cases
     @ failed_with (resolutions ~file:type_c_file) match_resolution_cases
-    @ failed_cases ~file:type_c_file ~read:Reader.read_with_universe
-        ~spans:false universe_cases
+    @ failed_cases ~file:type_c_file ~spans:false universe_cases
     @ failed_with scope_ends scope_end_cases
     @ failed_with jump_targets jump_target_cases
     @ failed_with (jump_targets ~file:"in.i") c_text_jump_target_cases

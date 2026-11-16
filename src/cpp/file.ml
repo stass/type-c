@@ -29,8 +29,8 @@ type origin =
 type t = { name : string; system_header : bool; origin : origin }
 
 (** The Type-C text of the generic types of the universe scope, the two
-    lines of design 3.6, which the reader puts in front of a unit's own
-    text ({!Reader.read_with_universe}). It ends with a newline, so the
+    lines of design 3.6, which the reader puts in front of the own text
+    of a Type-C unit ({!Reader.read}). It ends with a newline, so the
     unit's text starts a line. It declares one generic a line, as
     [type name(...)], which is how [Typec_syntax.Universe] reads the
     names. *)

@@ -83,7 +83,7 @@ let read_preprocessed (translation : Pipeline.translation) =
       stop Exit_status.Environment
         ("cannot read the preprocessed text: " ^ message)
   in
-  match Typec_cpp.Reader.read_with_universe ~name:translation.source text with
+  match Typec_cpp.Reader.read ~name:translation.source text with
   | Ok unit -> unit
   | Error error ->
       stop Exit_status.Refused (Typec_cpp.Reader.error_message error)

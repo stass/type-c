@@ -7,9 +7,18 @@
 
 open Typec_cpp
 
-(* The gaps as (start, stop) byte ranges, one more than there are
-   tokens, or None when the tokens are empty, overlap or are out of
-   order. *)
+(* The bytes the tokens index: [text], with the universe text in front
+   where the unit is a Type-C unit, whose first token is the universe's. *)
+let read_bytes text (result : Reader.t) =
+  if
+    Array.length result.tokens > 0
+    && File.is_universe result.tokens.(0).owner
+  then File.universe_text ^ text
+  else text
+
+(* The gaps of [text], the bytes the tokens index, as (start, stop) byte
+   ranges, one more than there are tokens, or None when the tokens are
+   empty, overlap or are out of order. *)
 let gaps text (result : Reader.t) =
   let ordered = ref true and previous_end = ref 0 and gaps = ref [] in
   Array.iter
@@ -29,7 +38,8 @@ let gaps text (result : Reader.t) =
    in order and apart, and the text that the reader keeps for emission
    is the text it read. *)
 let spell_text text (result : Reader.t) =
-  Option.is_some (gaps text result) && Reader.rewrite result [] = text
+  Option.is_some (gaps (read_bytes text result) result)
+  && Reader.rewrite result [] = text
 
 let is_space = function
   | ' ' | '\t' | '\r' | '\011' | '\012' | '\n' -> true
@@ -78,6 +88,7 @@ let gap_is_layout text (start, stop) =
        lines)
 
 let gaps_are_layout text (result : Reader.t) =
-  match gaps text result with
+  let bytes = read_bytes text result in
+  match gaps bytes result with
   | None -> false
-  | Some gaps -> List.for_all (gap_is_layout text) gaps
+  | Some gaps -> List.for_all (gap_is_layout bytes) gaps

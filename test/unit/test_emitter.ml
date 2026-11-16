@@ -20,15 +20,15 @@ let read text =
 
 (* Tokens: int x = 1 ; | int y ; (in h.h) | int z ; *)
 let source =
-  "# 1 \"a.tc\"\n\
+  "# 1 \"a.c\"\n\
    int x = 1;\n\
    # 1 \"h.h\" 1 3\n\
    int y;\n\
-   # 2 \"a.tc\" 2\n\
+   # 2 \"a.c\" 2\n\
    int z;\n"
 
 let unit = read source
-let at line : Location.t = { file = "a.tc"; line; flags = No_flags }
+let at line : Location.t = { file = "a.c"; line; flags = No_flags }
 
 (* The text with [edits] and no assertions. *)
 let emit unit edits = Emitter.emit unit { edits; assertions = [] }
@@ -46,19 +46,19 @@ let () =
   check "no edits: the text itself" (emit unit [] = source);
   check "a replacement and an insertion"
     (emit unit [ replacement; insertion ]
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        int \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        x = 2\n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        ;\n\
        # 1 \"h.h\" 1 3\n\
        int y;\n\
-       # 2 \"a.tc\" 2\n\
+       # 2 \"a.c\" 2\n\
        \n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        int w;\n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        int z;\n")
 
 (* An edit between identifiers that universal character names spell
@@ -70,7 +70,7 @@ let () =
     (emit written [ edit ]
     = "# 1 \"input.i\"\n\
        caf\\u00e9 \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        +=\n\
        # 1 \"input.i\"\n\
       \ x\\U0001F600;\n")
@@ -86,7 +86,7 @@ let () =
     (owners (emit unit [ edit ]) = owners source);
   check "an edit in a system header"
     (emit unit [ edit ]
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        int x = 1;\n\
        # 1 \"h.h\" 1 3\n\
        int \n\
@@ -94,7 +94,7 @@ let () =
        w\n\
        # 1 \"h.h\" 3\n\
        ;\n\
-       # 2 \"a.tc\" 2\n\
+       # 2 \"a.c\" 2\n\
        int z;\n")
 
 (* y becomes w after the marker that #pragma GCC system_header gives:
@@ -102,11 +102,11 @@ let () =
    and read back keep the owners. *)
 let () =
   let source =
-    "# 1 \"a.tc\"\n\
+    "# 1 \"a.c\"\n\
      # 1 \"p.h\" 1\n\
      # 2 \"p.h\" 3\n\
      int y;\n\
-     # 2 \"a.tc\" 2\n\
+     # 2 \"a.c\" 2\n\
      int z;\n"
   in
   let unit = read source in
@@ -117,7 +117,7 @@ let () =
     (owners (emit unit [ edit ]) = owners source);
   check "an edit after the marker of the pragma"
     (emit unit [ edit ]
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        # 1 \"p.h\" 1\n\
        # 2 \"p.h\" 3\n\
        int \n\
@@ -125,7 +125,7 @@ let () =
        w\n\
        # 2 \"p.h\" 3\n\
        ;\n\
-       # 2 \"a.tc\" 2\n\
+       # 2 \"a.c\" 2\n\
        int z;\n")
 
 (* In the expansion of a macro that a system header defines, which GCC
@@ -135,30 +135,30 @@ let () =
 let () =
   let unit =
     read
-      "# 1 \"a.tc\"\n\
+      "# 1 \"a.c\"\n\
        int\n\
-       # 1 \"a.tc\" 3 4\n\
+       # 1 \"a.c\" 3 4\n\
        m\n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        ;\n"
   in
   let inside = edit unit ~first:1 ~count:1 unit.tokens.(1).location "n" in
   let before = edit unit ~first:0 ~count:1 unit.tokens.(0).location "long" in
   check "edits in and before a system macro region"
     (emit unit [ before; inside ]
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        long\n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        \n\
-       # 1 \"a.tc\" 3 4\n\
+       # 1 \"a.c\" 3 4\n\
        \n\
-       # 1 \"a.tc\" 3 4\n\
+       # 1 \"a.c\" 3 4\n\
        n\n\
-       # 1 \"a.tc\" 3 4\n\
+       # 1 \"a.c\" 3 4\n\
        \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        ;\n")
 
 (* What the backend sees of a token: its bytes, where it is and the file
@@ -186,7 +186,7 @@ let () =
   check "edit tokens are at its location"
     (List.for_all
        (fun (_, location, (owner : File.t)) ->
-         location = at 1 && owner.name = "a.tc")
+         location = at 1 && owner.name = "a.c")
        edit_tokens)
 
 (* Each check raises its own message, so a test that names it shows
@@ -223,49 +223,49 @@ let () =
     (spans_files [ edit unit ~first:1 ~count:6 (at 1) "x = 2" ]);
   check "adjacent edits"
     (emit unit [ replacement; edit unit ~first:4 ~count:1 (at 1) "," ]
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        int \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        x = 2\n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        ,\n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        \n\
        # 1 \"h.h\" 1 3\n\
        int y;\n\
-       # 2 \"a.tc\" 2\n\
+       # 2 \"a.c\" 2\n\
        int z;\n");
   check "insertions in front of one token keep their order"
     (emit unit
        [ edit unit ~first:8 ~count:0 (at 2) "int v;"; insertion ]
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        int x = 1;\n\
        # 1 \"h.h\" 1 3\n\
        int y;\n\
-       # 2 \"a.tc\" 2\n\
+       # 2 \"a.c\" 2\n\
        \n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        int v;\n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        \n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        int w;\n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        int z;\n");
   check "assertions follow the text under a marker of their own"
     (Emitter.emit unit
        { edits = [ replacement ]; assertions = [ "int a;"; "int b;" ] }
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        int \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        x = 2\n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        ;\n\
        # 1 \"h.h\" 1 3\n\
        int y;\n\
-       # 2 \"a.tc\" 2\n\
+       # 2 \"a.c\" 2\n\
        int z;\n\
        \n\
        # 1 \"<typec>\" 3\n\
@@ -310,20 +310,20 @@ let () =
       [ Emitter.generated (at 2) "struct s { int n; };" ]
   in
   let text =
-    "# 1 \"a.tc\"\n\
+    "# 1 \"a.c\"\n\
      int x = 1;\n\
      # 1 \"h.h\" 1 3\n\
      int y;\n\
-     # 2 \"a.tc\" 2\n\
+     # 2 \"a.c\" 2\n\
      \n\
-     # 2 \"a.tc\"\n\
+     # 2 \"a.c\"\n\
      #pragma pack(push)\n\
      #pragma pack()\n\
-     # 2 \"a.tc\"\n\
+     # 2 \"a.c\"\n\
      struct s { int n; };\n\
-     # 2 \"a.tc\"\n\
+     # 2 \"a.c\"\n\
      #pragma pack(pop)\n\
-     # 2 \"a.tc\"\n\
+     # 2 \"a.c\"\n\
      int z;\n\
      \n\
      # 1 \"<typec>\" 3\n"
@@ -336,10 +336,10 @@ let () =
     = text ^ probe)
 
 (* Tokens: struct box { int value ; } ; (g.h, lines 1 to 3) |
-   typedef int word ; (s.h, a system header) | int z ; (a.tc, line 2) *)
+   typedef int word ; (s.h, a system header) | int z ; (a.c, line 2) *)
 let moving =
   read
-    "# 1 \"a.tc\"\n\
+    "# 1 \"a.c\"\n\
      # 1 \"g.h\" 1\n\
      struct box {\n\
     \  int value;\n\
@@ -347,7 +347,7 @@ let moving =
      # 1 \"s.h\" 1 3\n\
      typedef int word;\n\
      # 4 \"g.h\" 2\n\
-     # 2 \"a.tc\" 2\n\
+     # 2 \"a.c\" 2\n\
      int z;\n"
 
 let own index = moving.tokens.(index).location
@@ -370,7 +370,7 @@ let moved_text = Emitter.emit moving { edits = [ moved ]; assertions = [] }
 let () =
   check "moved text keeps the lines of its tokens"
     (moved_text
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        # 1 \"g.h\" 1\n\
        struct box {\n\
       \  int value;\n\
@@ -378,9 +378,9 @@ let () =
        # 1 \"s.h\" 1 3\n\
        typedef int word;\n\
        # 4 \"g.h\" 2\n\
-       # 2 \"a.tc\" 2\n\
+       # 2 \"a.c\" 2\n\
        \n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        #pragma pack(push)\n\
        #pragma pack()\n\
        # 1 \"s.h\" 3\n\
@@ -391,9 +391,9 @@ let () =
        int value ;\n\
        # 3 \"g.h\"\n\
        } ;\n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        #pragma pack(pop)\n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        int z;\n\
        \n\
        # 1 \"<typec>\" 3\n"
@@ -422,7 +422,7 @@ let () =
 let () =
   let unit =
     read
-      "# 1 \"a.tc\"\n\
+      "# 1 \"a.c\"\n\
        #pragma pack(1)\n\
        #pragma typec checked\n\
        int a;\n"
@@ -456,15 +456,13 @@ let () =
 
 (* A token of the universe text (design 3.6) is a piece at its own place
    in the universe, under flag 3 as typec's own text (design 13.4), and
-   emission writes the unit's own text alone.
+   emission writes the unit's own text alone. The other cases read C
+   units, which have no universe text.
    Tokens: the universe text, line 2 from its 16th | int a ; *)
 let () =
   let own_text = "# 1 \"a.tc\"\nint a;\n" in
-  let unit =
-    match Reader.read_with_universe ~name:"input.i" own_text with
-    | Ok unit -> unit
-    | Error error -> failwith (Reader.error_message error)
-  in
+  let unit = read own_text in
+  let at line : Location.t = { file = "a.tc"; line; flags = No_flags } in
   let a = Array.length unit.tokens - 2 in
   let universe_at line : Location.t =
     { file = "<universe>"; line; flags = System }
@@ -488,7 +486,7 @@ let () =
 let () =
   let unit =
     read
-      "# 1 \"a.tc\"\n\
+      "# 1 \"a.c\"\n\
        #pragma GCC diagnostic push\n\
        #pragma typec checked\n\
        #pragma mark - Don't\n\
@@ -513,7 +511,7 @@ let () =
    int z ; (line 4) *)
 let pragmatic =
   read
-    "# 1 \"a.tc\"\n\
+    "# 1 \"a.c\"\n\
      int a;\n\
      #pragma GCC diagnostic push\n\
      int b;\n\
@@ -538,20 +536,20 @@ let moved_pragma_text = emit pragmatic [ moved_with_pragma ]
 let () =
   check "moved text with a pragma line"
     (moved_pragma_text
-    = "# 1 \"a.tc\"\n\
+    = "# 1 \"a.c\"\n\
        int a;\n\
        #pragma GCC diagnostic push\n\
        int b;\n\
        \n\
-       # 1 \"a.tc\"\n\
+       # 1 \"a.c\"\n\
        int a ;\n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        #pragma GCC diagnostic push\n\
-       # 2 \"a.tc\"\n\
+       # 2 \"a.c\"\n\
        int c;\n\
-       # 3 \"a.tc\"\n\
+       # 3 \"a.c\"\n\
        int b ;\n\
-       # 4 \"a.tc\"\n\
+       # 4 \"a.c\"\n\
        \n")
 
 (* Read back, every moved token, the pragma line among them, is at its
