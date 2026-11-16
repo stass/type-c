@@ -7,18 +7,30 @@ type record_kind = Struct | Union
 
 type privacy = Public | Private of Typec_cpp.File.t
 
+type instance = {
+  generic : Typec_syntax.Spelling.type_name;
+  arguments : string list;
+}
+
 type record_tag = {
   record_id : int;
   kind : record_kind;
   record_name : record_name;
+  record_at_file_scope : bool;
 }
 
 and record_name =
   | Anonymous
   | Named of string
   | Variant_name of Typec_syntax.Spelling.type_name
+  | Alias_name of string
+  | Instance_name of instance
 
-type enum_tag = { enum_id : int; enum_name : string option }
+type enum_tag = {
+  enum_id : int;
+  enum_name : string option;
+  enum_at_file_scope : bool;
+}
 type length = Constant of int | Opaque | Unknown | Variable
 
 type parameters =
@@ -44,6 +56,7 @@ and distinct = {
   distinct_id : int;
   distinct_name : string;
   distinct_privacy : privacy;
+  distinct_at_file_scope : bool;
   representation : t;
 }
 
@@ -95,6 +108,9 @@ type tags = {
   records : (int, record_definition) Hashtbl.t;
   enums : (int, enum_definition) Hashtbl.t;
   variants : (int, variant_definition) Hashtbl.t;
+  typedef_names : (int, string list) Hashtbl.t;
+      (* the typedef names of each untagged record or enum, by id *)
+  instances : (record_kind * instance, record_tag) Hashtbl.t;
   mutable has_distinct : bool;
 }
 
@@ -150,7 +166,8 @@ let unqualified t = { t with qualifiers = Qualifiers.none }
 let as_variant t =
   match t.shape with
   | Record { record_name = Variant_name name; _ } -> Some name
-  | Record { record_name = Anonymous | Named _; _ }
+  | Record
+      { record_name = Anonymous | Named _ | Alias_name _ | Instance_name _; _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None
@@ -313,6 +330,8 @@ let create_tags () =
     records = Hashtbl.create 16;
     enums = Hashtbl.create 16;
     variants = Hashtbl.create 16;
+    typedef_names = Hashtbl.create 16;
+    instances = Hashtbl.create 16;
     has_distinct = false }
 
 let fresh_id tags =
@@ -320,20 +339,71 @@ let fresh_id tags =
   tags.next_id <- id + 1;
   id
 
-let declare_record tags kind name =
+let new_record tags kind record_name ~at_file_scope =
+  { record_id = fresh_id tags;
+    kind;
+    record_name;
+    record_at_file_scope = at_file_scope }
+
+let declare_record tags kind name ~at_file_scope =
   let record_name =
     match name with Some name -> Named name | None -> Anonymous
   in
-  { record_id = fresh_id tags; kind; record_name }
+  new_record tags kind record_name ~at_file_scope
 
-let declare_variant tags name =
-  { record_id = fresh_id tags; kind = Struct; record_name = Variant_name name }
+let declare_variant tags name ~at_file_scope =
+  new_record tags Struct (Variant_name name) ~at_file_scope
 
-let declare_enum tags enum_name = { enum_id = fresh_id tags; enum_name }
+let declare_alias_record tags kind name ~at_file_scope =
+  new_record tags kind (Alias_name name) ~at_file_scope
+
+(* Design 3.5 rule 3: one application is one type, wherever it is
+   written. Design 10.3: an instance is emitted at file scope. *)
+let declare_instance tags kind instance =
+  match Hashtbl.find_opt tags.instances (kind, instance) with
+  | Some record -> record
+  | None ->
+      let record =
+        new_record tags kind (Instance_name instance) ~at_file_scope:true
+      in
+      Hashtbl.replace tags.instances (kind, instance) record;
+      record
+
+let declare_enum tags enum_name ~at_file_scope =
+  { enum_id = fresh_id tags; enum_name; enum_at_file_scope = at_file_scope }
+
+(* Only an untagged specifier is named by its typedefs (design 3.5
+   rule 2); a tagged one has its tag. *)
+let untagged_id t =
+  match t.shape with
+  | Record { record_name = Anonymous; record_id; _ } -> Some record_id
+  | Enum { enum_name = None; enum_id; _ } -> Some enum_id
+  | Record
+      { record_name = Named _ | Variant_name _ | Alias_name _ | Instance_name _;
+        _ }
+  | Enum { enum_name = Some _; _ }
+  | Void | Arithmetic _ | Pointer _ | Distinct _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
+      None
+
+(* A name repeated in one declaration, as in [typedef struct {...} n, n;],
+   is one name. *)
+let name_untagged tags t names =
+  match untagged_id t with
+  | Some id ->
+      Hashtbl.replace tags.typedef_names id (List.sort_uniq compare names)
+  | None -> ()
+
+let typedef_names tags t =
+  match untagged_id t with
+  | Some id ->
+      Option.value (Hashtbl.find_opt tags.typedef_names id) ~default:[]
+  | None -> []
 
 (* Design 3.4: an unqualified arithmetic or pointer type. An unknown type
    may be one; the casts that depend on what it is answer as unknown. *)
-let declare_distinct tags distinct_name distinct_privacy representation =
+let declare_distinct tags distinct_name distinct_privacy representation
+    ~at_file_scope =
   let representable =
     match representation.shape with
     | Arithmetic _ | Enum _ | Pointer _ | Unknown_type _ -> true
@@ -344,6 +414,7 @@ let declare_distinct tags distinct_name distinct_privacy representation =
       { distinct_id = fresh_id tags;
         distinct_name;
         distinct_privacy;
+        distinct_at_file_scope = at_file_scope;
         representation }
     in
     let t = of_shape (Distinct distinct) in
@@ -664,7 +735,8 @@ let define_record target tags tag members =
 let define_variant target tags tag privacy ~scope constructors members =
   (match tag.record_name with
   | Variant_name _ -> ()
-  | Anonymous | Named _ -> invalid_arg "Ctype: a variant of no variant tag");
+  | Anonymous | Named _ | Alias_name _ | Instance_name _ ->
+      invalid_arg "Ctype: a variant of no variant tag");
   Result.map
     (fun () ->
       Hashtbl.replace tags.variants tag.record_id
@@ -675,7 +747,8 @@ let variant_definition tags t =
   match t.shape with
   | Record ({ record_name = Variant_name _; _ } as tag) ->
       Hashtbl.find_opt tags.variants tag.record_id
-  | Record { record_name = Anonymous | Named _; _ }
+  | Record
+      { record_name = Anonymous | Named _ | Alias_name _ | Instance_name _; _ }
   | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list | Array _
   | Function _ | Unknown_type _ ->
       None

@@ -128,6 +128,8 @@ let unknown_type state span construct kind =
 let fail_needing state span need unknown =
   fail state span (Expressions.needing need unknown)
 
+let at_file_scope state = state.place = At_file_scope
+
 let fresh_entity state =
   let entity = state.next_entity in
   state.next_entity <- entity + 1;
@@ -344,6 +346,10 @@ type specified = {
   noreturn : bool;
   aligned : Tree.span option;  (** The first alignment specifier. *)
   attributed : attributed;
+  untagged : bool;
+      (** The type specifier is a structure, union or enumeration specifier
+          without a tag, which a typedef declarator names (design 3.5 rule
+          2). *)
 }
 
 (* The declaration specifiers of each kind, in order. *)
@@ -805,6 +811,24 @@ let declare_in state scope span specified declared (derived : derived) =
       entity)
   | None -> invalid_arg "Declarations: a declarator without a name"
 
+let is_untagged (others : Tree.type_specifier list) =
+  match others with
+  | [ Struct_or_union { tag = None; _ } ] | [ Enum { tag = None; _ } ] -> true
+  | _ -> false
+
+(* Design 3.5 rule 2: a declarator that derives another type names that
+   type, not the type of its specifiers. *)
+let rec derives_nothing (declarator : Tree.declarator) =
+  match declarator.node with
+  | Name _ -> true
+  | Parenthesized_declarator { inner; _ } -> derives_nothing inner
+  | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
+
+(* The name that a declarator gives the type of its specifiers, if any. *)
+let naming_name (init_declarator : Tree.init_declarator) =
+  let declarator = init_declarator.node.declarator in
+  if derives_nothing declarator then Tree.declared_name declarator else None
+
 let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
   let sorted = sort_specifiers specifiers in
@@ -825,6 +849,7 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
       | [] -> None
       | (first, _) :: _ -> Some first);
     attributed;
+    untagged = is_untagged sorted.others;
   }
 
 and base_type state span sorted =
@@ -946,13 +971,17 @@ and bind_tag state (tag : Tree.tag) found =
 and record_type state span kind (tag : Tree.tag option) members =
   let record =
     match tag with
-    | None -> Ctype.declare_record state.tags kind None
+    | None ->
+        Ctype.declare_record state.tags kind None
+          ~at_file_scope:(at_file_scope state)
     | Some tag ->
         let record =
           match prior_tag state tag with
           | Some (Record_tag record) when record.kind = kind -> record
           | Some (Record_tag _ | Enum_tag _) -> wrong_kind_of_tag state tag.name
-          | None -> Ctype.declare_record state.tags kind (Some tag.name.node)
+          | None ->
+              Ctype.declare_record state.tags kind (Some tag.name.node)
+                ~at_file_scope:(at_file_scope state)
         in
         bind_tag state tag (Record_tag record);
         record
@@ -975,13 +1004,16 @@ and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
      not allow, as both backends accept it. *)
   let enum =
     match tag with
-    | None -> Ctype.declare_enum state.tags None
+    | None ->
+        Ctype.declare_enum state.tags None ~at_file_scope:(at_file_scope state)
     | Some tag ->
         let enum =
           match prior_tag state tag with
           | Some (Enum_tag enum) -> enum
           | Some (Record_tag _) -> wrong_kind_of_tag state tag.name
-          | None -> Ctype.declare_enum state.tags (Some tag.name.node)
+          | None ->
+              Ctype.declare_enum state.tags (Some tag.name.node)
+                ~at_file_scope:(at_file_scope state)
         in
         bind_tag state tag (Enum_tag enum);
         enum
@@ -1744,11 +1776,23 @@ and initialised state scope span declared (entity : entity) initialiser =
       fail state span
         (Rule.c_text "an initialiser for what is not an object (C11 6.7.9p3)")
 
+(* The specifiers of a declaration with declarators. The typedef
+   declarators that derive no type name an untagged type of the specifiers
+   (design 3.5 rule 2), which is recorded before any declarator is read, so
+   that every use sees all its names. *)
+and declaration_specifiers state specifiers
+    (declarators : Tree.init_declarator list) =
+  let specified = read_specifiers state specifiers in
+  if specified.storage = Some Typedef && specified.untagged then
+    Ctype.name_untagged state.tags specified.base_type
+      (List.filter_map naming_name declarators);
+  specified
+
 and read_block_declaration state (declaration : Tree.declaration) =
   match declaration.node with
   | Static_assert assertion -> static_assert state assertion
   | Declaration { specifiers; declarators } ->
-      let specified = read_specifiers state specifiers in
+      let specified = declaration_specifiers state specifiers declarators in
       List.iter
         (fun declarator ->
           ignore (read_init_declarator state Block_scope specified declarator))
@@ -1797,6 +1841,7 @@ and distinct_type state (name : Tree.identifier) privacy type_name =
   let complete = Ctype.is_complete state.tags representation <> Answer false in
   match
     Ctype.declare_distinct state.tags name.node privacy representation
+      ~at_file_scope:(at_file_scope state)
   with
   | Ok t when complete -> t
   | Ok _ | Error Invalid_representation ->
@@ -1817,7 +1862,10 @@ and variant_record state name (declared : Tree.declared) =
   match declared.earlier with
   | Some forward -> Hashtbl.find state.incomplete_variants forward
   | None ->
-      let record = Ctype.declare_variant state.tags name in
+      let record =
+        Ctype.declare_variant state.tags name
+          ~at_file_scope:(at_file_scope state)
+      in
       Hashtbl.replace state.tag_types (Tree.claimed_tag declared.id)
         (Record_tag record);
       record
@@ -1850,7 +1898,10 @@ and variant_member name member_type =
   { Ctype.member_name = Some name; member_type; bit_field_width = None }
 
 and defined_record state span kind members =
-  let record = Ctype.declare_record state.tags kind None in
+  let record =
+    Ctype.declare_record state.tags kind None
+      ~at_file_scope:(at_file_scope state)
+  in
   checked state span
     (Ctype.define_record state.target state.tags record members);
   record
@@ -1862,7 +1913,10 @@ and variant_tag_enum state (declaration : Tree.type_declaration)
     constructors =
   let span = declaration.span and variant = declaration.node.name.node in
   let tag = Tree.enum_tag_name variant in
-  let enum = Ctype.declare_enum state.tags (Some tag) in
+  let enum =
+    Ctype.declare_enum state.tags (Some tag)
+      ~at_file_scope:(at_file_scope state)
+  in
   Hashtbl.replace state.tag_types
     (Tree.derived_enum_tag ~type_keyword:span.first)
     (Enum_tag enum);
@@ -1949,16 +2003,27 @@ and check_field_type state (constructor : Tree.constructor)
 and read_record_alias state name (declared : Tree.declared)
     (specifier : Tree.record_specifier Tree.spanned) bind =
   let { Tree.kind; attributes; tag; members } = specifier.node in
-  let claimed : Tree.tag =
-    { name;
-      binding = Declares { id = Tree.claimed_tag declared.id; earlier = None } }
+  let span = specifier.span and kind = record_kind kind in
+  let record =
+    match tag with
+    | Some tag -> record_type state span kind (Some tag) None
+    | None -> alias_record state kind name declared
   in
-  let tag = Option.value tag ~default:claimed in
-  let span = specifier.span in
-  let record = record_type state span (record_kind kind) (Some tag) None in
   let entity = bind (obscured_by state attributes (Ctype.record record)) in
   Option.iter (define_record state span record) members;
   entity
+
+(* The untagged record of an alias, which design 10.3 encodes by the
+   alias's name, under the tag that the declaration claims (10.2). *)
+and alias_record state kind (name : Tree.identifier)
+    (declared : Tree.declared) =
+  let record =
+    Ctype.declare_alias_record state.tags kind name.node
+      ~at_file_scope:(at_file_scope state)
+  in
+  Hashtbl.replace state.tag_types (Tree.claimed_tag declared.id)
+    (Record_tag record);
+  record
 
 and typing state : Expressions.context =
   {
@@ -1995,7 +2060,7 @@ let read_declaration state (declaration : Tree.declaration) =
       static_assert state assertion;
       Static_assertion
   | Declaration { specifiers; declarators } ->
-      let specified = read_specifiers state specifiers in
+      let specified = declaration_specifiers state specifiers declarators in
       Declaration
         (List.map (read_init_declarator state File_scope specified) declarators)
 

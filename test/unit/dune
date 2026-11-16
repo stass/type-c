@@ -7,8 +7,18 @@
  (libraries typec_driver))
 
 (tests
- (names test_target test_types test_declarations test_expressions)
- (modules test_target test_types test_declarations test_expressions)
+ (names
+  test_target
+  test_types
+  test_declarations
+  test_expressions
+  test_encoding)
+ (modules
+  test_target
+  test_types
+  test_declarations
+  test_expressions
+  test_encoding)
  (libraries typec_cpp typec_syntax typec_sema typec_test_support))
 
 (test

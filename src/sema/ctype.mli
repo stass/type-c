@@ -40,22 +40,46 @@ type privacy =
       (** The file whose text declares the type, whose owners
           {!Typec_cpp.File.owns} names. *)
 
+(** An application of a generic that is a type of its own (design 3.5
+    rule 3). Its identity is its generic and the encodings of its
+    arguments ({!Encoding.encode}), so two applications are one type
+    exactly when those are equal, as the rule says. *)
+type instance = {
+  generic : Typec_syntax.Spelling.type_name;
+  arguments : string list;  (** The encoding of each argument, in order. *)
+}
+
 type record_tag = private {
   record_id : int;
   kind : record_kind;
   record_name : record_name;
+  record_at_file_scope : bool;
+      (** Declared at file scope, not in a block or a parameter list. *)
 }
 
+(** The name of a structure or union, which chooses its row in the table of
+    instance encodings (design 10.3). *)
 and record_name =
   | Anonymous
-  | Named of string
+  | Named of string  (** The tag of its own specifier. *)
   | Variant_name of Typec_syntax.Spelling.type_name
       (** The structure that the variant of this name lowers to (design
           10.1), which only C text may treat as a structure (3.2 rule 6,
           10.6); only {!declare_variant} makes a tag of one. *)
+  | Alias_name of string
+      (** The untagged structure or union that an alias of this name
+          defines, whose tag the declaration claims (design 10.2); only
+          {!declare_alias_record} makes one. *)
+  | Instance_name of instance
+      (** The structure or union of an instance (design 10.3); only
+          {!declare_instance} makes one. *)
 
 (** An enumerated type, created as a {!record_tag} is. *)
-type enum_tag = private { enum_id : int; enum_name : string option }
+type enum_tag = private {
+  enum_id : int;
+  enum_name : string option;
+  enum_at_file_scope : bool;  (** As for {!record_tag}. *)
+}
 
 (** The length of an array type (6.7.6.2p4). A variable length is
     evaluated at run time, so the type does not carry it. *)
@@ -125,6 +149,7 @@ and distinct = private {
   distinct_id : int;
   distinct_name : string;
   distinct_privacy : privacy;
+  distinct_at_file_scope : bool;  (** As for {!record_tag}. *)
   representation : t;
       (** The unqualified arithmetic or pointer type that it has the size,
           alignment and representation of. *)
@@ -223,11 +248,27 @@ val atomic : t -> (t, error) result
 
 (** {1 Tags} *)
 
-val create_tags : unit -> tags
-val declare_record : tags -> record_kind -> string option -> record_tag
+(** Each declaration says whether it stands at file scope, which design
+    3.5 rule 2 asks of every type in a type argument. *)
 
-val declare_variant : tags -> Typec_syntax.Spelling.type_name -> record_tag
+val create_tags : unit -> tags
+
+val declare_record :
+  tags -> record_kind -> string option -> at_file_scope:bool -> record_tag
+(** A structure or union with the tag of its own specifier, or none. *)
+
+val declare_variant :
+  tags -> Typec_syntax.Spelling.type_name -> at_file_scope:bool -> record_tag
 (** The structure that the variant of this name lowers to (design 10.1). *)
+
+val declare_alias_record :
+  tags -> record_kind -> string -> at_file_scope:bool -> record_tag
+(** The untagged structure or union that the alias of this name defines
+    (design 10.2). *)
+
+val declare_instance : tags -> record_kind -> instance -> record_tag
+(** The structure or union of an instance, which stands at file scope
+    (design 10.3): the same tag for the same instance. *)
 
 (** A constructor of a variant: its name and its fields in order, whose
     position in the list of its variant is its tag (design 10.1 rule 1). *)
@@ -236,11 +277,25 @@ type constructor = {
   fields : member list;
 }
 
-val declare_enum : tags -> string option -> enum_tag
+val declare_enum : tags -> string option -> at_file_scope:bool -> enum_tag
 
-val declare_distinct : tags -> string -> privacy -> t -> (t, error) result
+val declare_distinct :
+  tags -> string -> privacy -> t -> at_file_scope:bool -> (t, error) result
 (** A new distinct type of this name and privacy over its
     representation. *)
+
+val name_untagged : tags -> t -> string list -> unit
+(** Records the names of the typedef declarators that derive no type in
+    the declaration whose specifier is the untagged structure, union or
+    enumeration [t], qualified or not (design 3.5 rule 2). The one
+    declaration that holds the specifier gives all its names at once. Any
+    other type is left as it is: one that an attribute makes unknown has
+    no name to record. *)
+
+val typedef_names : tags -> t -> string list
+(** The distinct names that {!name_untagged} recorded for [t], sorted;
+    none for a type that is no untagged structure, union or
+    enumeration. *)
 
 val define_record :
   Target.t -> tags -> record_tag -> member list -> (unit, error) result

@@ -134,7 +134,7 @@ let print_enums target tags =
   List.mapi
     (fun index range ->
       let tag_name = Printf.sprintf "e%d" index in
-      let tag = Ctype.declare_enum tags (Some tag_name) in
+      let tag = Ctype.declare_enum tags (Some tag_name) ~at_file_scope:true in
       let values =
         List.mapi
           (fun value_index value ->
@@ -164,7 +164,8 @@ let compatibility_types target tags enums =
   let const_qualifier = { Qualifiers.none with const = true } in
   let const t = get (Ctype.qualify const_qualifier t) in
   let struct_type name =
-    Ctype.record (Ctype.declare_record tags Struct (Some name))
+    Ctype.record
+      (Ctype.declare_record tags Struct (Some name) ~at_file_scope:true)
   in
   print_string "struct a;\nstruct b;\n";
   let integer i = arithmetic target (Integer i) in

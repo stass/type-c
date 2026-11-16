@@ -206,12 +206,14 @@ let check_enum (name, target, range, expected) =
 
 (* Building types *)
 
-let struct_s = Ctype.declare_record tags Struct (Some "s")
-let other_struct_s = Ctype.declare_record tags Struct (Some "s")
-let incomplete_struct = Ctype.declare_record tags Struct (Some "incomplete")
-let enum_u = Ctype.declare_enum tags (Some "u")
-let other_enum_u = Ctype.declare_enum tags (Some "v")
-let incomplete_enum = Ctype.declare_enum tags (Some "later")
+let struct_s = Ctype.declare_record tags Struct (Some "s") ~at_file_scope:true
+let other_struct_s =
+  Ctype.declare_record tags Struct (Some "s") ~at_file_scope:true
+let incomplete_struct =
+  Ctype.declare_record tags Struct (Some "incomplete") ~at_file_scope:true
+let enum_u = Ctype.declare_enum tags (Some "u") ~at_file_scope:true
+let other_enum_u = Ctype.declare_enum tags (Some "v") ~at_file_scope:true
+let incomplete_enum = Ctype.declare_enum tags (Some "later") ~at_file_scope:true
 
 let member ?bit_field_width name member_type =
   { Ctype.member_name = name; member_type; bit_field_width }
@@ -376,8 +378,9 @@ let construction_facts () =
 
 (* Tags and members *)
 
-let anonymous_inner = Ctype.declare_record tags Union None
-let with_anonymous = Ctype.declare_record tags Struct (Some "outer")
+let anonymous_inner = Ctype.declare_record tags Union None ~at_file_scope:true
+let with_anonymous =
+  Ctype.declare_record tags Struct (Some "outer") ~at_file_scope:true
 
 let () =
   get
@@ -392,7 +395,8 @@ let () =
          member ~bit_field_width:5 (Some "bits") unsigned_type;
        ])
 
-let anonymous_with_array = Ctype.declare_record tags Struct None
+let anonymous_with_array =
+  Ctype.declare_record tags Struct None ~at_file_scope:true
 
 let () =
   get
@@ -400,11 +404,12 @@ let () =
        [ member (Some "y") (array int_type (Constant 3)) ])
 
 let definition_outcome kind members =
-  let tag = Ctype.declare_record tags kind None in
+  let tag = Ctype.declare_record tags kind None ~at_file_scope:true in
   error_of (Ctype.define_record lp64 tags tag members)
 
 let flexible = array int_type Unknown
-let self_referential = Ctype.declare_record tags Struct (Some "node")
+let self_referential =
+  Ctype.declare_record tags Struct (Some "node") ~at_file_scope:true
 
 let definition_cases : (string * Ctype.error option * Ctype.error option)
     list =
@@ -781,7 +786,9 @@ let unknown_facts () =
   let function_unknown = unknown_of Unknown_function in
   let u = Ctype.unknown object_unknown in
   let f = Ctype.unknown function_unknown in
-  let packed_enum = Ctype.declare_enum tags (Some "packed") in
+  let packed_enum =
+    Ctype.declare_enum tags (Some "packed") ~at_file_scope:true
+  in
   get (Ctype.define_enum tags packed_enum (Depends_on object_unknown));
   let packed = Ctype.enum packed_enum in
   check "an unknown type may be an integer" (Ctype.is_integer u)

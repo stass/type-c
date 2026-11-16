@@ -675,8 +675,43 @@ is [type-c-language-design.md](type-c-language-design.md).
   no pragma line. A `Code` text that spells the bracket's pragmas itself
   escapes the probe the same way, and the type of instance text should
   close both; it should also confine a bracket to where a declaration
-  may stand, as the pragmas break an expression. A run test should also compile an instance's error
-  through the pipeline to confirm it is reported at its own line.
+  may stand, as the pragmas break an expression. A run test should
+  also compile an instance's error through the pipeline to confirm it
+  is reported at its own line.
+- [High] Bound the length of an instance encoding (`Encoding.encode`):
+  an instance is one node of a `Ctype.t`, so `Ctype.max_size` does not
+  bound the encodings it holds, and `typedef pair(p1, p1) p2;` repeated
+  doubles the name each time, which exhausts memory or hands the backend
+  an identifier of gigabytes. Refuse an encoding over a named limit, or
+  use substitutions, when instances are built.
+- [Medium] `Ctype.instance` holds the encodings of its arguments as
+  plain strings, so a caller can build one from a string that
+  `Encoding.encode` did not make, which need not be self-delimiting.
+  Make the encoding a type that only `Encoding` makes when instances are
+  built.
+- [Medium] A distinct generic's instance has no form in
+  `Ctype.distinct`, so it would be encoded by its name, not by the row
+  `I length G args E` of design 10.3. Add one when instances are built.
+- [Medium] Design 10.3 names an untagged type by its one typedef name,
+  but a Type-C alias of an untagged type other than a bare struct or
+  union specifier names nothing: `type e = enum { A };` and
+  `type s = const struct { int x; };` have no row, where
+  `typedef enum { A } e;` is `1e` and `typedef const struct { int x; } s;`
+  is `K1s`. Nor do `_Atomic(struct {...})` and `__typeof__(struct {...})`
+  name their struct in a typedef. One rule decides for both: a
+  declaration names an untagged type when its specifier is untagged
+  and its declarator derives nothing. Write it into design 3.5 rule 2
+  and read Type-C aliases and C typedefs by it.
+- [Low] The enumeration of a variant's tags is declared with the tag
+  `N_tag`, so it is encoded `T5N_tag`, a row of a tag of its own
+  specifier that design 10.3 does not give a derived enumeration. Give
+  the design a row for it, or `Ctype.enum_tag` a derived name.
+- [Low] Whether a tag is declared at file scope is read from the
+  reader's place (`Declarations.at_file_scope`), a second model of the
+  scope that the parser chooses for it. A generic definition that opens
+  a scope without a place of its own would mark a tag in its body as at
+  file scope. Have the parser record the kind of scope in the tag's
+  binding.
 
 ## Matching
 
