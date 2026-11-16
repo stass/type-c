@@ -417,13 +417,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
-- [High] The typer drops the qualifiers of a function's return type
-  (`src/sema/ctype.ml:271`, `ctype.mli:113`), where it should type as
-  Clang does and keep them, and `Backend_difference` has no entry for
-  GCC, which drops them (design 13.3, "Where GCC and Clang differ", and
-  3.5 rule 3): with `const int cf(void);`, `int (*p)(void) = cf;` is
-  accepted by `typec` and refused by Clang. With GCC as the backend a
-  comparison that turns on a return qualifier has an unknown answer.
 - [Medium] Clang types a call of `_Atomic int af(void)` as
   `_Atomic(int)`, GCC as `int`, and typec as `int`, so `x + af()`
   passes typec and Clang refuses it; add a `Backend_difference` entry
