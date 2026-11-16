@@ -318,9 +318,9 @@ let rows =
         "A [defer] statement that is no block item of a compound \
          statement or a match arm in a function body: the substatement \
          of a statement, the statement of a label, [case] or [default], \
-         the deferred statement of another, a block item of the compound \
-         statement of a statement expression, or outside every function \
-         body." };
+         anywhere in the deferred statement of another, a block item of \
+         the compound statement of a statement expression, or outside \
+         every function body." };
     Live { name = "Deferred_exit"; code = 58;
       clause = Some "design 6 rule 4";
       meaning =

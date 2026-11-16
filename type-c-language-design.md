@@ -1498,12 +1498,7 @@ defer fclose(f);
    9). The three are therefore refused whatever they name, a `goto *e`
    also in a function that takes the address of no label. A `switch` in
    `S` jumps to its own `case` and `default` labels and is allowed. A
-   loop inside `S` may use its own `break` and `continue`. `S`, or a
-   block in it, may hold a `defer` statement of its own, as in
-   `defer { begin(); defer end(); flush(); }`. The scope of the inner
-   statement lies in `S`, and by this rule so does every exit from it:
-   its copies are part of the text of `S` (13.5), and rule 8 holds for
-   each of the two statements on its own.
+   loop inside `S` may use its own `break` and `continue`.
 5. No jump to a label from outside `S` has a target in `S`, and none from
    outside the scope of a `defer` statement has a target in that scope.
    Section 4.4 says what is a jump to a label and what its targets are.
@@ -1586,13 +1581,17 @@ defer fclose(f);
     It is not the statement of a labelled statement, a `case` or
     `default` of a `switch` included: write `case 1: { defer S; ... }`.
     It is not a block item of the compound statement of a statement
-    expression. A `defer` statement, which C text writes too, as
-    `_Defer` (rule 10), stands only in a function body. Outside one,
-    only a block inside a statement expression could hold it, and it
-    is an error wherever that expression stands: in the definition of
-    a generic type (3.5), as in the size of an array member, in the
-    head of a function, generic (section 7) or not, or in any other
-    declaration of file scope, in C text too.
+    expression. It does not stand in the statement `S` of another
+    `defer` statement, at any depth of `S`: not as `S` itself, as in
+    `defer defer g();`, and not in a block of `S`, a statement
+    expression in `S` or a match arm in `S`. A `defer` statement,
+    which C text writes too, as `_Defer` (rule 10), stands only in a
+    function body. Outside one, only a block inside a statement
+    expression could hold it, and it is an error wherever that
+    expression stands: in the definition of a generic type (3.5), as in
+    the size of an array member, in the head of a function, generic
+    (section 7) or not, or in any other declaration of file scope, in C
+    text too.
 12. *Provisional (P9).* Lowering writes a `return` in the scope of a
     `defer` statement as a block (13.5), which ends where the `return`
     does. Its operand therefore declares no name that is in scope
@@ -1675,6 +1674,16 @@ and no instance of such a generic does, so the refusal costs no code
 that a backend takes. Lowering writes no copy of a deferred statement
 outside a function body: none in the definition of a type instance and
 none in the head of a function instance (10.3).
+
+The refusal of a `defer` statement in `S` follows from the repetition
+of P9 (section 15). Lowering copies `S` to every exit of its scope
+(13.5), so each copy of `S` would hold every copy of a `defer`
+statement in it: with `e` exits at each of `n` levels of nesting, the
+innermost statement is written `e` to the power `n` times. A prototype
+of the lowering turned 655 bytes of source with 12 levels and 3 exits
+per level into 24 MB of C. With no `defer` statement in `S`, the text
+that lowering writes for a scope is linear in its exits times its
+`defer` statements.
 
 ## 7. Generic functions
 
@@ -3355,7 +3364,7 @@ Two properties follow by construction:
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. A statement `try e;` reads no field: nothing is written after its test, as said below the table. It is the one position of a `try` whose `T` is `void` (5.1 rule 2), where `Ok` has no field (3.5 rule 6). Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
-| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). A `defer` statement inside `S` is lowered in `S`, so its copies are part of the text that each copy of `S` repeats (section 6 rule 4). Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
+| `defer` | *Provisional (P9).* The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
 | Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes, named as said below the table. |
 | Checked-mode checks | Inline tests that trap. |
 
@@ -4065,7 +4074,7 @@ numbers refer to the implementation plan.
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions, in a statement or declaration that neither holds nor directly follows a pragma line (5.1) | Stage 2, Pilot B: rewrites the limit forced, and statements refused for a pragma | As specified |
-| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6, and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; how often each refusal of the form (13.5) rejects a function or a `return`; the returns, and the other jumps that run copies, where the plain statement reports a diagnostic of the list of 13.5 that its block loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
+| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11), and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; how often each refusal of the form (13.5) rejects a function or a `return`; the returns, and the other jumps that run copies, where the plain statement reports a diagnostic of the list of 13.5 that its block loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
 | P12 | Instances are per translation unit (7.3) | Stage 3: code size of the library and pilot | Per unit |

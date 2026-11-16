@@ -77,7 +77,55 @@ in a function body (design 6 rule 11).
   > void f(void) { defer defer g(); }
   > EOF
   $ ./golden.exe deferred.tc
-  deferred.tc:2: a `defer` statement is a block item of a compound statement or a match arm in a function body, not the statement of a `defer`; write it in a compound statement (design 6 rule 11) [TC0057]
+  deferred.tc:2: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
+  [1]
+
+No `defer` statement stands in the statement of another at any depth:
+not in a block of it, a statement expression in it or a match arm in it.
+
+  $ cat > deferred_block.tc <<'EOF'
+  > void g(void);
+  > void f(void) {
+  >   defer {
+  >     g();
+  >     {
+  >       defer g();
+  >     }
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe deferred_block.tc
+  deferred_block.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
+  [1]
+
+  $ cat > deferred_value.tc <<'EOF'
+  > void g(void);
+  > void f(void) {
+  >   defer (void)({
+  >     { _Defer g(); }
+  >     0;
+  >   });
+  > }
+  > EOF
+  $ ./golden.exe deferred_value.tc
+  deferred_value.tc:4: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
+  [1]
+
+  $ cat > deferred_arm.tc <<'EOF'
+  > type t = | A | B;
+  > void g(void);
+  > void f(t v) {
+  >   defer match (v) {
+  >   case A:
+  >     defer g();
+  >     break;
+  >   default:
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe deferred_arm.tc
+  deferred_arm.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
   [1]
 
   $ cat > statement_expression.tc <<'EOF'
@@ -299,8 +347,8 @@ copy would define again (design 6 rule 9).
 
 What a copy can repeat is allowed: a declaration with extern, a typedef
 that declares no type, a tag already visible, a loop that uses its own
-break and continue, a switch with its own case labels, a nested defer
-and a null statement.
+break and continue, a switch with its own case labels and a null
+statement.
 
   $ cat > allowed.tc <<'EOF'
   > struct s { int a; };
@@ -320,14 +368,14 @@ and a null statement.
   >     case 1:
   >       break;
   >     }
-  >     defer g(n);
-  >     defer;
+  >     g(n);
+  >     ;
   >     g(v.a);
   >   }
   > }
   > EOF
   $ ./golden.exe allowed.tc
-  allowed.tc:19: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  allowed.tc:4: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
   [1]
 
   $ cat > pragma.tc <<'EOF'

@@ -926,18 +926,30 @@ let fail_defer_position state where =
        ("a `defer` statement is a block item of a compound statement or a \
          match arm in a function body, not " ^ where))
 
+(* A defer in the statement of another, at any depth (design 6 rule 11):
+   lowering copies the outer statement to each exit of its scope, and
+   each copy would hold every copy of the inner one, so the output would
+   multiply with each level of nesting. *)
+let defer_in_deferred =
+  Rule.message Defer_position
+    "a `defer` statement in the statement of a defer, which lowering \
+     copies to each exit of its scope, where each copy would repeat every \
+     copy of the inner statement"
+
 (* The statement of a defer, which lowering copies to each exit of its
-   scope (design 6 rules 4, 9 and 10, 13.5): a jump out of it would skip
-   the rest of the exit, a definition in it would be made once for each
-   copy, and a disputed jump would leave it on one backend's reading.
-   One walk over its tree, once the parser has read it, refuses the
-   first such construct in the order of the source; an error of the
-   parser in the statement, or in a defer inside it, which the parser
-   walks first, comes before it. It matches every node and every field, with
-   no wildcard, so that a node added to the tree fails to compile here
-   until it is classified. It stops at a construct it refuses, such as a
-   block literal or the body of a structure, so what those hold needs no
-   class. A break or continue that leaves the statement is no node: the
+   scope (design 6 rules 4, 9, 10 and 11, 13.5): a jump out of it would
+   skip the rest of the exit, a definition in it would be made once for
+   each copy, a disputed jump would leave it on one backend's reading,
+   and a defer in it would multiply the copies. One walk over its tree,
+   once the parser has read it, refuses the first such construct in the
+   order of the source; an error that the parser reports while it reads
+   the statement comes before it, as does one in the statement of a
+   defer inside it, which the parser walks as it reads that defer. It
+   matches every node and every field, with no wildcard, so that a node
+   added to the tree fails to compile here until it is classified. It
+   stops at a construct it refuses, such as a block literal or the body
+   of a structure, so what those hold needs no class. A break or
+   continue that leaves the statement is no node: the
    [Deferred_statement] scope of its jumps refuses it as it is read. *)
 module Deferred = struct
   exception Refused of int * Rule.diagnostic
@@ -1079,7 +1091,8 @@ module Deferred = struct
     | Block_type_declaration { declaration = declared; scope_end = _ } ->
         refuse_definition ~at:declared.span.first "a type declaration"
     | Block_statement read -> statement read
-    | Block_defer { keyword = _; statement = deferred } -> statement deferred
+    | Block_defer { keyword; statement = _ } ->
+        raise (Refused (keyword.first, defer_in_deferred))
 
   and declaration (read : declaration) =
     match read.node with
@@ -4142,7 +4155,7 @@ and open_statements state opened =
         :: opened)
   (* A block item reaches here only after a label, as [read_block_item]
      reads a defer itself. *)
-  | _ when begins_defer state -> fail_defer_position state (unopened opened)
+  | _ when begins_defer state -> refuse_defer_as_statement state opened
   | Keyword_token Keyword.If ->
       advance state;
       open_block_statement ~body_jumps:outer_jumps (fun () ->
@@ -4186,15 +4199,19 @@ and open_statements state opened =
       let statement = simple_statement state in
       (close_statements [@tailcall]) state opened statement
 
-(* Where a defer that [open_statements] meets stands, inside [opened];
-   each is no block item, so it wants braces around it. *)
-and unopened opened =
+(* At a defer that [open_statements] meets inside [opened], which is no
+   block item. With nothing open it is the statement of a defer, as
+   [read_block_item] reads every other defer, and braces would not help
+   there: rule 11 refuses a defer anywhere in that statement. *)
+and refuse_defer_as_statement state opened =
   match opened with
-  | [] -> "the statement of a `defer`; write it in a compound statement"
+  | [] -> fail state defer_in_deferred
   | { kind = Open_labeled _; _ } :: _ ->
-      "the statement of a label; write it in a compound statement"
+      fail_defer_position state
+        "the statement of a label; write it in a compound statement"
   | _ :: _ ->
-      "the substatement of a statement; write it in a compound statement"
+      fail_defer_position state
+        "the substatement of a statement; write it in a compound statement"
 
 (* Whether the substatement about to be read is the statement of a
    single-pattern test, whose bindings and compound statement are one
