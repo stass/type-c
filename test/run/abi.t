@@ -77,17 +77,27 @@ hand.h is the C a client writes for these variants by hand, as 10.1
 gives it; the C file below reads it in place of the header that
 --emit-c-header writes (9.3), and writes the underlying type of each
 distinct type itself (10.2). Its struct tags, enumeration tags and
-enumerators take the prefix c_ so that a translation unit can hold them
-next to the lowering, which claims the unprefixed names.
+enumerators are spelled through HAND, which adds HAND_PREFIX. layout.tc
+sets it to c_ so that its translation unit can hold them next to the
+lowering, which claims the unprefixed names. side.c leaves it empty: it
+declares the functions of Type-C with the same tags as the lowering, so
+the types are compatible across translation units (C11 6.2.7).
 
   $ cat > include/hand.h <<'EOF'
   > #include "fields.h"
-  > enum c_scalar_tag {
-  >   c_scalar_Empty, c_scalar_Chars, c_scalar_Shorts, c_scalar_Ints,
-  >   c_scalar_Longs, c_scalar_Reals, c_scalar_Pointers
+  > #ifndef HAND_PREFIX
+  > #define HAND_PREFIX
+  > #endif
+  > #define HAND_PASTE(a, b) HAND_PASTE_(a, b)
+  > #define HAND_PASTE_(a, b) a##b
+  > #define HAND(name) HAND_PASTE(HAND_PREFIX, name)
+  > enum HAND(scalar_tag) {
+  >   HAND(scalar_Empty), HAND(scalar_Chars), HAND(scalar_Shorts),
+  >   HAND(scalar_Ints), HAND(scalar_Longs), HAND(scalar_Reals),
+  >   HAND(scalar_Pointers)
   > };
-  > struct c_scalar {
-  >   enum c_scalar_tag tag;
+  > struct HAND(scalar) {
+  >   enum HAND(scalar_tag) tag;
   >   union {
   >     struct { char c; signed char sc; unsigned char uc; } Chars;
   >     struct { short s; unsigned short us; } Shorts;
@@ -95,36 +105,36 @@ next to the lowering, which claims the unprefixed names.
   >     struct { long l; long long ll; unsigned long long ull; } Longs;
   >     struct { float f; double d; long double ld; } Reals;
   >     struct {
-  >       const char *text; struct c_scalar *next; long (*twice)(long);
+  >       const char *text; struct HAND(scalar) *next; long (*twice)(long);
   >     } Pointers;
   >   } u;
   > };
-  > enum c_compound_tag {
-  >   c_compound_Point, c_compound_Bits, c_compound_Name, c_compound_Flags,
-  >   c_compound_Inner
+  > enum HAND(compound_tag) {
+  >   HAND(compound_Point), HAND(compound_Bits), HAND(compound_Name),
+  >   HAND(compound_Flags), HAND(compound_Inner)
   > };
-  > struct c_compound {
-  >   enum c_compound_tag tag;
+  > struct HAND(compound) {
+  >   enum HAND(compound_tag) tag;
   >   union {
   >     struct { struct point p; } Point;
   >     struct { union bits b; } Bits;
   >     struct { struct name n; } Name;
   >     struct { struct flags f; } Flags;
-  >     struct { struct c_scalar s; char after; } Inner;
+  >     struct { struct HAND(scalar) s; char after; } Inner;
   >   } u;
   > };
-  > enum c_measure_tag { c_measure_Metres, c_measure_Count };
-  > struct c_measure {
-  >   enum c_measure_tag tag;
+  > enum HAND(measure_tag) { HAND(measure_Metres), HAND(measure_Count) };
+  > struct HAND(measure) {
+  >   enum HAND(measure_tag) tag;
   >   union { struct { double m; } Metres; struct { long n; } Count; } u;
   > };
-  > enum c_ratio_tag { c_ratio_Ratio };
-  > struct c_ratio {
-  >   enum c_ratio_tag tag;
+  > enum HAND(ratio_tag) { HAND(ratio_Ratio) };
+  > struct HAND(ratio) {
+  >   enum HAND(ratio_tag) tag;
   >   union { struct { float num; float den; } Ratio; } u;
   > };
-  > enum c_flag_tag { c_flag_Off, c_flag_On };
-  > struct c_flag { enum c_flag_tag tag; };
+  > enum HAND(flag_tag) { HAND(flag_Off), HAND(flag_On) };
+  > struct HAND(flag) { enum HAND(flag_tag) tag; };
   > EOF
 
 layout.h asserts that the lowering and the hand-written structures
@@ -137,16 +147,16 @@ backend checks them on both targets.
 
   $ cat > include/layout.h <<'EOF'
   > #include <limits.h>
-  > #define SAME_SIZE(t)                                                    \
-  >   _Static_assert(sizeof (t) == sizeof (struct c_##t)                    \
-  >                  && _Alignof (t) == _Alignof (struct c_##t)             \
-  >                  && sizeof (enum t##_tag) == sizeof (enum c_##t##_tag), \
+  > #define SAME_SIZE(t)                                                     \
+  >   _Static_assert(sizeof (t) == sizeof (struct HAND(t))                   \
+  >                  && _Alignof (t) == _Alignof (struct HAND(t))            \
+  >                  && sizeof (enum t##_tag) == sizeof (enum HAND(t##_tag)), \
   >                  #t)
-  > #define SAME_OFFSET(t, m)                                               \
-  >   _Static_assert(offsetof(struct t, m) == offsetof(struct c_##t, m),    \
+  > #define SAME_OFFSET(t, m)                                                \
+  >   _Static_assert(offsetof(struct t, m) == offsetof(struct HAND(t), m),   \
   >                  #t "." #m)
   > #define TAG(t, c, n) _Static_assert(t##_##c == n, #t "_" #c)
-  > #define SAME_AS(d, u)                                                   \
+  > #define SAME_AS(d, u)                                                    \
   >   _Static_assert(sizeof (d) == sizeof (u) && _Alignof (d) == _Alignof (u), \
   >                  #d)
   > SAME_SIZE(scalar);
@@ -233,8 +243,8 @@ backend checks them on both targets.
   > _Static_assert((int)(d_bool)2 == 1, "d_bool");
   > EOF
 
-  $ printf '#include "abi.tci"\n#include "hand.h"\n#include "layout.h"\n' \
-  >   > layout.tc
+  $ printf '#include "abi.tci"\n#define HAND_PREFIX c_\n' > layout.tc
+  $ printf '#include "hand.h"\n#include "layout.h"\n' >> layout.tc
   $ for cc in "$clang" "$gcc"; do
   >   for target in "" "$hosted_second_target"; do
   >     typec --cc="$cc" $target -Wall -Wextra -Werror -Iinclude \
@@ -519,11 +529,11 @@ calls; it prints values with switch on the tag.
   > #include "hand.h"
   > #include "third.h"
   > 
-  > typedef struct c_scalar scalar;
-  > typedef struct c_compound compound;
-  > typedef struct c_measure measure;
-  > typedef struct c_ratio ratio;
-  > typedef struct c_flag flag;
+  > typedef struct scalar scalar;
+  > typedef struct compound compound;
+  > typedef struct measure measure;
+  > typedef struct ratio ratio;
+  > typedef struct flag flag;
   > typedef void (*distinct_printer)(char, signed char, unsigned char, short,
   >     unsigned short, int, unsigned, long, unsigned long, long long,
   >     unsigned long long, _Bool, float, double, long double, _Complex double,
@@ -561,25 +571,25 @@ calls; it prints values with switch on the tag.
   > static void scalar_fields(scalar v) {
   >   printf("%s", scalar_names[v.tag]);
   >   switch (v.tag) {
-  >   case c_scalar_Empty:
+  >   case scalar_Empty:
   >     break;
-  >   case c_scalar_Chars:
+  >   case scalar_Chars:
   >     printf(" %c %d %d", v.u.Chars.c, v.u.Chars.sc, v.u.Chars.uc);
   >     break;
-  >   case c_scalar_Shorts:
+  >   case scalar_Shorts:
   >     printf(" %d %d", v.u.Shorts.s, v.u.Shorts.us);
   >     break;
-  >   case c_scalar_Ints:
+  >   case scalar_Ints:
   >     printf(" %d %u %d", v.u.Ints.i, v.u.Ints.u, v.u.Ints.b);
   >     break;
-  >   case c_scalar_Longs:
+  >   case scalar_Longs:
   >     printf(" %ld %lld %llu", v.u.Longs.l, v.u.Longs.ll, v.u.Longs.ull);
   >     break;
-  >   case c_scalar_Reals:
+  >   case scalar_Reals:
   >     printf(" %a %a %s", v.u.Reals.f, v.u.Reals.d,
   >            third_text(v.u.Reals.ld));
   >     break;
-  >   case c_scalar_Pointers:
+  >   case scalar_Pointers:
   >     printf(" %s %s %ld", v.u.Pointers.text,
   >            scalar_names[v.u.Pointers.next->tag], v.u.Pointers.twice(21));
   >     break;
@@ -593,20 +603,20 @@ calls; it prints values with switch on the tag.
   > 
   > static void c_print_compound(compound v) {
   >   switch (v.tag) {
-  >   case c_compound_Point:
+  >   case compound_Point:
   >     printf("Point %a %a\n", v.u.Point.p.x, v.u.Point.p.y);
   >     break;
-  >   case c_compound_Bits:
+  >   case compound_Bits:
   >     printf("Bits %#x\n", v.u.Bits.b.u);
   >     break;
-  >   case c_compound_Name:
+  >   case compound_Name:
   >     printf("Name %s\n", v.u.Name.n.text);
   >     break;
-  >   case c_compound_Flags:
+  >   case compound_Flags:
   >     printf("Flags %d %d %d\n", v.u.Flags.f.ready, v.u.Flags.f.level,
   >            v.u.Flags.f.delta);
   >     break;
-  >   case c_compound_Inner:
+  >   case compound_Inner:
   >     printf("Inner %c ", v.u.Inner.after);
   >     scalar_fields(v.u.Inner.s);
   >     printf("\n");
@@ -615,24 +625,24 @@ calls; it prints values with switch on the tag.
   > }
   > 
   > /* The values that C makes, the same as those of make_scalar in Type-C. */
-  > static scalar chars = { c_scalar_Chars,
+  > static scalar chars = { scalar_Chars,
   >                         .u.Chars = { 'A', SCHAR_MIN, UCHAR_MAX } };
   > static const scalar scalars[] = {
-  >   { .tag = c_scalar_Empty },
-  >   { c_scalar_Chars, .u.Chars = { 'A', SCHAR_MIN, UCHAR_MAX } },
-  >   { c_scalar_Shorts, .u.Shorts = { SHRT_MIN, USHRT_MAX } },
-  >   { c_scalar_Ints, .u.Ints = { INT_MIN, UINT_MAX, 1 } },
-  >   { c_scalar_Longs, .u.Longs = { LONG_MIN, LLONG_MIN, ULLONG_MAX } },
-  >   { c_scalar_Reals, .u.Reals = { 0.1f, 0.1, 1.0L / 3 } },
-  >   { c_scalar_Pointers, .u.Pointers = { "text", &chars, twice } },
+  >   { .tag = scalar_Empty },
+  >   { scalar_Chars, .u.Chars = { 'A', SCHAR_MIN, UCHAR_MAX } },
+  >   { scalar_Shorts, .u.Shorts = { SHRT_MIN, USHRT_MAX } },
+  >   { scalar_Ints, .u.Ints = { INT_MIN, UINT_MAX, 1 } },
+  >   { scalar_Longs, .u.Longs = { LONG_MIN, LLONG_MIN, ULLONG_MAX } },
+  >   { scalar_Reals, .u.Reals = { 0.1f, 0.1, 1.0L / 3 } },
+  >   { scalar_Pointers, .u.Pointers = { "text", &chars, twice } },
   > };
   > static const compound compounds[] = {
-  >   { c_compound_Point, .u.Point = { { 1.5, -2.25 } } },
-  >   { c_compound_Bits, .u.Bits = { { 0x3f800000u } } },
-  >   { c_compound_Name, .u.Name = { { "abcdef" } } },
-  >   { c_compound_Flags, .u.Flags = { { 1, 5, -3 } } },
-  >   { c_compound_Inner,
-  >     .u.Inner = { { c_scalar_Reals, .u.Reals = { 0.1f, 0.1, 1.0L / 3 } },
+  >   { compound_Point, .u.Point = { { 1.5, -2.25 } } },
+  >   { compound_Bits, .u.Bits = { { 0x3f800000u } } },
+  >   { compound_Name, .u.Name = { { "abcdef" } } },
+  >   { compound_Flags, .u.Flags = { { 1, 5, -3 } } },
+  >   { compound_Inner,
+  >     .u.Inner = { { scalar_Reals, .u.Reals = { 0.1f, 0.1, 1.0L / 3 } },
   >                  'z' } },
   > };
   > #define COUNT(a) (sizeof (a) / sizeof (a)[0])
@@ -641,7 +651,7 @@ calls; it prints values with switch on the tag.
   > 
   > measure c_scale(measure m, ratio r) {
   >   float factor = r.u.Ratio.num / r.u.Ratio.den;
-  >   if (m.tag == c_measure_Metres)
+  >   if (m.tag == measure_Metres)
   >     m.u.Metres.m *= factor;
   >   else
   >     m.u.Count.n = (long)(m.u.Count.n * factor);
@@ -649,10 +659,10 @@ calls; it prints values with switch on the tag.
   > }
   > 
   > flag c_flip(flag f) {
-  >   if (f.tag == c_flag_On)
-  >     f.tag = c_flag_Off;
+  >   if (f.tag == flag_On)
+  >     f.tag = flag_Off;
   >   else
-  >     f.tag = c_flag_On;
+  >     f.tag = flag_On;
   >   return f;
   > }
   > 
@@ -668,7 +678,7 @@ calls; it prints values with switch on the tag.
   >   for (; *kinds; kinds++) {
   >     if (*kinds == 'm') {
   >       measure m = va_arg(ap, measure);
-  >       if (m.tag == c_measure_Metres)
+  >       if (m.tag == measure_Metres)
   >         printf(" Metres %a", m.u.Metres.m);
   >       else
   >         printf(" Count %ld", m.u.Count.n);
@@ -677,7 +687,7 @@ calls; it prints values with switch on the tag.
   >       printf(" Ratio %a %a", r.u.Ratio.num, r.u.Ratio.den);
   >     } else if (*kinds == 'f') {
   >       flag f = va_arg(ap, flag);
-  >       printf(f.tag == c_flag_On ? " On" : " Off");
+  >       printf(f.tag == flag_On ? " On" : " Off");
   >     } else {
   >       printf(" %a", va_arg(ap, double));
   >     }
@@ -718,10 +728,10 @@ calls; it prints values with switch on the tag.
   >     tc_print_compound(compounds[i]);
   >     c_print_compound(tc_rebuild_compound(compounds[i]));
   >   }
-  >   measure metres = { c_measure_Metres, .u.Metres = { 2.5 } };
-  >   measure count = { c_measure_Count, .u.Count = { -7 } };
-  >   ratio three_halves = { c_ratio_Ratio, .u.Ratio = { 3, 2 } };
-  >   flag on = { c_flag_On };
+  >   measure metres = { measure_Metres, .u.Metres = { 2.5 } };
+  >   measure count = { measure_Count, .u.Count = { -7 } };
+  >   ratio three_halves = { ratio_Ratio, .u.Ratio = { 3, 2 } };
+  >   flag on = { flag_On };
   >   c_print_small("mmf", tc_scale(metres, three_halves),
   >                 tc_scale(count, three_halves), tc_flip(on));
   >   tc_print_small("mmf", tc_scale(metres, three_halves),

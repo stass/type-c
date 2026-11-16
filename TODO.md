@@ -893,12 +893,13 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   comparing against what was sent.
 - [Low] Neither host script bounds the size of the results a host sends
   back, so a host that runs hostile corpus code can fill the local disk.
-- [Medium] In `test/run/abi.t` the C side declares the Type-C functions
-  with the hand-written tags `struct c_scalar` and the like, while the
-  lowering uses `struct scalar`: across translation units the types are
-  not compatible (C11 6.2.7), which works at the ABI but would trip
-  `-fsanitize=cfi-icall`. Let `hand.h` spell its names through one
-  prefix macro that `layout.tc` sets to `c_` and `side.c` leaves empty.
+- [Low] `test/run/abi.t` checks the compatibility of `hand.h` with the
+  lowering only as far as layout, so a member that keeps its size but
+  changes its type (`unsigned u` to `int u`) passes while the tags stop
+  being compatible across translation units. GCC 16 under `-std=c23`
+  accepts an identical second definition of a tag and rejects a
+  different one: a `-fsyntax-only` step on `abi.tci` followed by an
+  unprefixed `hand.h` would prove it, if `typec` passes `-std=c23` on.
 - [High] Stage 1 exit gate 4 does not hold for size as stated, and
   its speed is not yet settled. `tools/measure/gate4.sh` (results in
   `/Volumes/Optaine/typec-gate4/results.md`), with twins that carry the
