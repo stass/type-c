@@ -519,40 +519,66 @@ let steered_controlling tokens (answered : Typec_sema.Expressions.answered) =
           ~before:(grammar_token_after tokens controlling.span.last)
           (Printf.sprintf "), (%s)0)" selected) ]
 
-(* A dropped range inside another goes with it, so only the outermost
-   are kept: the edits of one inside would overlap those of the one
-   around it. *)
+(* Spans sorted by first token, each with the furthest last token of
+   the spans up to it, so that whether one span covers a stretch is one
+   search, not a comparison with each. *)
+type cover = { firsts : int array; reaches : int array }
+
+let cover (spans : Tree.span list) =
+  let sorted = Array.of_list spans in
+  Array.stable_sort
+    (fun (a : Tree.span) (b : Tree.span) -> compare a.first b.first)
+    sorted;
+  let reaches = Array.map (fun (span : Tree.span) -> span.last) sorted in
+  for index = 1 to Array.length reaches - 1 do
+    reaches.(index) <- max reaches.(index) reaches.(index - 1)
+  done;
+  { firsts = Array.map (fun (span : Tree.span) -> span.first) sorted; reaches }
+
+(* Whether one of the spans begins at or before token [first] and ends
+   at or after token [last]. *)
+let covers { firsts; reaches } ~first ~last =
+  (* The number of spans that begin at or before [first]: those below
+     [low] do, those from [high] on do not. *)
+  let rec begun low high =
+    if low = high then low
+    else
+      let middle = (low + high) / 2 in
+      if firsts.(middle) <= first then begun (middle + 1) high
+      else begun low middle
+  in
+  let count = begun 0 (Array.length firsts) in
+  count > 0 && reaches.(count - 1) >= last
+
+(* The outermost of the dropped ranges, the first of those with one
+   span: the edits of a range inside another would overlap those of the
+   one around it, so it goes with it, and an answered construct's text
+   stands before the name of an application with the same tokens, such
+   as the steering type of an association that names an instance. In
+   order of first token and longest first, a range is inside an earlier
+   one or has its span exactly when it ends no later than the furthest
+   of them. *)
 let outermost dropped =
-  let contains outer inner =
-    outer.span <> inner.span
-    && outer.span.first <= inner.span.first
-    && inner.span.last <= outer.span.last
+  let order a b =
+    match compare a.span.first b.span.first with
+    | 0 -> compare b.span.last a.span.last
+    | by_first -> by_first
   in
-  List.filter
-    (fun inner -> not (List.exists (fun outer -> contains outer inner) dropped))
-    dropped
-
-(* The first of the ranges of each span: an answered construct's text
-   before the name of an application with the same tokens, such as the
-   steering type of an association that names an instance. *)
-let one_per_span dropped =
-  let seen = Hashtbl.create 16 in
-  let first range =
-    if Hashtbl.mem seen range.span then false
-    else (
-      Hashtbl.add seen range.span ();
-      true)
+  let keep (reach, kept) range =
+    if range.span.last <= reach then (reach, kept)
+    else (range.span.last, range :: kept)
   in
-  List.filter first dropped
+  let _, kept = List.fold_left keep (-1, []) (List.stable_sort order dropped) in
+  List.rev kept
 
-(* Whether [edit] goes with the dropped [span]: by the tokens it
+(* Whether [edit] goes with one of the [dropped] spans: by the tokens it
    replaces, or for an insertion by the place it inserts at, between two
-   tokens, so that one at either edge of the span stays with the tokens
+   tokens, so that one at either edge of a span stays with the tokens
    kept beside it. *)
-let goes_with (edit : Emitter.edit) { span; _ } =
+let goes_with dropped (edit : Emitter.edit) =
   let first = edit.range.first in
-  if edit.range.count = 0 then span.first < first && first <= span.last
-  else span.first <= first && Reader.end_token edit.range <= span.last
+  if edit.range.count = 0 then covers dropped ~first:(first - 1) ~last:first
+  else covers dropped ~first ~last:(Reader.end_token edit.range)
 
 let dropped_edits tokens { span; text } =
   replace tokens ~location:tokens.(span.first).location text
@@ -575,20 +601,15 @@ let dropped_edits tokens { span; text } =
 let text_edits tokens ~declarations ~replaced typed =
   let answered = Typec_sema.Expressions.answered typed in
   let constructions = Typec_sema.Expressions.constructions typed in
-  let heads = List.map (construction_head tokens) constructions in
-  let in_head { span; _ } =
-    List.exists
-      (fun (head : Tree.span) ->
-        head.first <= span.first && span.last <= head.last)
-      heads
-  in
+  let heads = cover (List.map (construction_head tokens) constructions) in
+  let in_head { span; _ } = covers heads ~first:span.first ~last:span.last in
   let dropped =
     outermost
-      (one_per_span
-         (List.concat_map dropped_ranges answered
-         @ List.filter (fun range -> not (in_head range)) replaced))
+      (List.concat_map dropped_ranges answered
+      @ List.filter (fun range -> not (in_head range)) replaced)
   in
-  let kept edit = not (List.exists (goes_with edit) dropped) in
+  let dropped_spans = cover (List.map (fun range -> range.span) dropped) in
+  let kept edit = not (goes_with dropped_spans edit) in
   let declaration (lowered, declaration) =
     type_declaration tokens ~lowered declaration
   in

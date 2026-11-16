@@ -169,6 +169,25 @@ let anchors () =
     (string_of_int (List.length anchored))
     "1"
 
+(* Every application is a range that lowering replaces, so the time to
+   lower a unit is linear in its applications, not in their square. *)
+let many_applications () =
+  let count = 20000 in
+  let source =
+    "type box(T) = struct { T value; };\n"
+    ^ String.concat "" (List.init count (fun _ -> "box(int) *p;\n"))
+  in
+  let started = Sys.time () in
+  let _, _, edits = lowered source in
+  let took = Sys.time () -. started in
+  compares "the edits of many applications"
+    (string_of_int (List.length edits))
+    (string_of_int (count + 2));
+  if took > 2.0 then
+    compares "the time to lower many applications"
+      (Printf.sprintf "%.1f s" took)
+      "under 2 s"
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -223,4 +242,5 @@ let () =
     "void f(void) { typedef typeof(({ typedef int b ; (b)1; })) * a ; }";
   constructors ();
   anchors ();
+  many_applications ();
   if !failures > 0 then exit 1

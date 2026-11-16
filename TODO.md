@@ -705,11 +705,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   alignments and no size of `_Bool` or of an atomic type, so `_Alignof`
   of any type and those sizes are opaque too, although they are not
   aggregates. How often real code needs each is for the corpus to show.
-- [Medium] Lowering is quadratic in the replaced ranges of a unit:
-  every application is one, and `outermost`, `kept` and `in_head` in
-  `Lowering.text_edits` compare each with each (8000 lines of
-  `box(int) *p;` take 1.5 s, against 0.09 s without the application).
-  Sort the ranges by first token and longest first and sweep once.
 - [Low] A constructor in the arguments of an attribute reaches the
   backend as written (`aligned(sizeof(B(1)))`, which it refuses as a
   call of an undeclared function), though design 13.5 refuses one in
