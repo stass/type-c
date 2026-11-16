@@ -7,15 +7,37 @@
 
     [name] is spelled as in the line marker that opened the file, between
     the quotes and with its escape sequences not decoded. [system_header]
-    is whether that marker carried the system header flag (3). [main] is
-    whether the file is the primary source file of the translation unit,
-    the one at the bottom of the stack of files being read, which the
-    first line marker with a file name opens; a file that a marker with
-    the enter flag opens never is.
+    is whether that marker carried the system header flag (3).
 
-    The reader makes one value per name and flags, so owners compare with
-    [==] as well as [=]. *)
-type t = { name : string; system_header : bool; main : bool }
+    The reader makes one value per name, flags and origin, and the
+    universe has the one value {!universe}, so owners compare with [==]
+    as well as [=]. *)
+
+(** How the file came to be read. *)
+type origin =
+  | Main
+      (** the primary source file of the translation unit, the one at the
+          bottom of the stack of files being read, which the first line
+          marker with a file name opens *)
+  | Entered  (** a file that a line marker with the enter flag opens *)
+  | Universe
+      (** the text of the universe generics, {!universe_text}, which no
+          line marker opens *)
+
+type t = { name : string; system_header : bool; origin : origin }
+
+(** The Type-C text of the generic types of the universe scope, the two
+    lines of design 3.6, which the reader puts in front of a unit's own
+    text ({!Reader.read_with_universe}). It ends with a newline, so the
+    unit's text starts a line. *)
+let universe_text =
+  "type option(T)    = | None | Some(T value);\n\
+   type result(T, E) = | Err(E error) | Ok(T value);\n"
+
+(** The one owner of {!universe_text}. A line marker that names
+    [<universe>] opens a file of another origin, so source text cannot
+    pass for the universe. *)
+let universe = { name = "<universe>"; system_header = false; origin = Universe }
 
 (** The suffix of a Type-C source file and of a Type-C interface (design
     2.1). *)
@@ -23,11 +45,15 @@ let source_suffix = ".tc"
 
 let interface_suffix = ".tci"
 
-(** Whether text that [file] holds is Type-C text, which the suffix of
-    its name decides (design 2.1); all other text is C text. *)
+(** Whether text that [file] holds is Type-C text: the universe text is,
+    and the suffix of the name decides for any other file (design 2.1);
+    all other text is C text. *)
 let is_type_c_text file =
-  Filename.check_suffix file.name source_suffix
-  || Filename.check_suffix file.name interface_suffix
+  match file.origin with
+  | Universe -> true
+  | Main | Entered ->
+      Filename.check_suffix file.name source_suffix
+      || Filename.check_suffix file.name interface_suffix
 
 (* The module [M] of a name [M ^ suffix], without its directory, or [None]
    where the name lacks the suffix. *)
@@ -42,7 +68,8 @@ let module_name ~suffix name =
 let implements ~declaring file =
   match module_name ~suffix:interface_suffix declaring.name with
   | Some interface ->
-      file.main && module_name ~suffix:source_suffix file.name = Some interface
+      file.origin = Main
+      && module_name ~suffix:source_suffix file.name = Some interface
   | None -> false
 
 (** The owner rule (design 9.2 rule 2): whether the text of [file] owns

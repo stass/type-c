@@ -1,7 +1,9 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type text = string
+(* [bytes] is the universe text, where the unit was read with it, then
+   the unit's own text, which starts at [own_start]. *)
+type text = { bytes : string; own_start : int }
 type t = { text : text; tokens : Token.t array }
 type range = { first : int; count : int }
 type replacement = { range : range; text : string }
@@ -15,7 +17,7 @@ let max_line_number = 2147483647
 type motion = Stay | Enter | Return
 
 module Owners = Map.Make (struct
-  type t = string * bool * bool
+  type t = string * bool * File.origin
 
   let compare = Stdlib.compare
 end)
@@ -98,12 +100,12 @@ let start_next_line state =
   state.presumed <- { state.presumed with line = state.presumed.line + 1 }
 
 (* The one value for an owner. *)
-let owner state ~main name system_header =
-  let key = (name, system_header, main) in
+let owner state ~origin name system_header =
+  let key = (name, system_header, origin) in
   match Owners.find_opt key state.owners with
   | Some file -> file
   | None ->
-      let file = { File.name; system_header; main } in
+      let file = { File.name; system_header; origin } in
       state.owners <- Owners.add key file state.owners;
       file
 
@@ -406,8 +408,8 @@ let stack_after_marker state motion name (flags : Location.flags) =
   in
   match (motion, state.include_stack) with
   | Enter, [] -> fail state "line marker enters a file before the main file"
-  | Enter, stack -> owner state ~main:false name system_header :: stack
-  | Stay, [] -> [ owner state ~main:true name system_header ]
+  | Enter, stack -> owner state ~origin:Entered name system_header :: stack
+  | Stay, [] -> [ owner state ~origin:Main name system_header ]
   | Stay, stack -> stack
   | Return, _ :: (_ :: _ as includer) -> includer
   | Return, _ -> fail state "line marker returns from the main file"
@@ -529,33 +531,55 @@ let read_next state =
   | '#' when starts_line state -> read_directive state
   | _ -> read_token state
 
-let read ~name text =
+let first_line name = { Location.file = name; line = 1; flags = No_flags }
+
+(* Reads the text from the cursor up to [stop], which ends a line, from
+   the first line of [name] and with [include_stack] in place. *)
+let read_part state ~stop ~name ~include_stack =
+  state.presumed <- first_line name;
+  state.include_stack <- include_stack;
+  while state.pos < stop do
+    read_next state
+  done
+
+(* The universe text needs no line marker: its owner is on the stack from
+   its first byte. The unit's own text then starts afresh, as if it were
+   read alone. *)
+let read_after ~universe ~name text =
+  let bytes = universe ^ text in
+  let own_start = String.length universe in
   let state =
     {
-      text;
+      text = bytes;
       pos = 0;
-      presumed = { Location.file = name; line = 1; flags = No_flags };
+      presumed = first_line name;
       include_stack = [];
       owners = Owners.empty;
       tokens = [];
     }
   in
   match
-    while state.pos < String.length text do
-      read_next state
-    done
+    read_part state ~stop:own_start ~name:File.universe.name
+      ~include_stack:[ File.universe ];
+    read_part state ~stop:(String.length bytes) ~name ~include_stack:[]
   with
   | () ->
       let tokens = Array.of_list (List.rev state.tokens) in
-      Ok { text; tokens }
+      Ok { text = { bytes; own_start }; tokens }
   | exception Failed error -> Error error
+
+(* With no universe text the first part is empty and reads nothing. *)
+let read ~name text = read_after ~universe:"" ~name text
+
+let read_with_universe ~name text =
+  read_after ~universe:File.universe_text ~name text
 
 let spelling (result : t) (token : Token.t) =
   match token.kind with
   | Identifier name -> name
   | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
     ->
-      String.sub result.text token.start token.length
+      String.sub result.text.bytes token.start token.length
 
 let range (tokens : Token.t array) ~first ~count =
   let token_count = Array.length tokens in
@@ -576,21 +600,24 @@ let replaced_bytes (tokens : Token.t array) range =
     (start, last.start + last.length)
 
 let rewrite (result : t) replacements =
-  let buffer = Buffer.create (String.length result.text) in
+  let { bytes; own_start } = result.text in
+  let buffer = Buffer.create (String.length bytes - own_start) in
   (* [next] is the token after the range of the replacement before; a
      range that starts before it overlaps that range or is out of order.
-     [copied] is the end of the text copied so far. *)
+     [copied] is the end of the text copied so far, which starts with the
+     unit's own text. *)
   let apply (next, copied) { range; text } =
     if range.first < next then
       invalid_arg "Reader.rewrite: replacements out of order";
     let start, stop = replaced_bytes result.tokens range in
-    Buffer.add_substring buffer result.text copied (start - copied);
+    if start < own_start then
+      invalid_arg "Reader.rewrite: a replacement in the universe";
+    Buffer.add_substring buffer bytes copied (start - copied);
     Buffer.add_string buffer text;
     (range.first + range.count, stop)
   in
-  let _, copied = List.fold_left apply (0, 0) replacements in
-  Buffer.add_substring buffer result.text copied
-    (String.length result.text - copied);
+  let _, copied = List.fold_left apply (0, own_start) replacements in
+  Buffer.add_substring buffer bytes copied (String.length bytes - copied);
   Buffer.contents buffer
 
 let escaped_byte c = Printf.sprintf "\\x%02X" (Char.code c)

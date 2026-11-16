@@ -569,30 +569,140 @@ let failed_main_cases () =
       | Ok { tokens; _ } ->
           Array.to_list tokens
           |> List.map (fun (token : Token.t) ->
-                 (token.owner.name, token.owner.main))
+                 (token.owner.name, token.owner.origin = File.Main))
           <> expected
       | Error _ -> true)
     main_cases
 
 (* The owner rule (design 9.2 rule 2): a declaring file, the file of the
    text, and whether that text owns the declarations. *)
-let file ?(main = false) name = { File.name; system_header = false; main }
+let file ?(origin = File.Entered) name =
+  { File.name; system_header = false; origin }
 
 let owner_cases =
   [ (file "ir.tci", file "ir.tci", true);
-    (file "include/ir.tci", file ~main:true "src/ir.tc", true);
+    (file "include/ir.tci", file ~origin:Main "src/ir.tc", true);
     (file "ir.tci", file "ir.tc", false);
-    (file "ir.tci", file ~main:true "client.tc", false);
-    (file "ir.tci", file ~main:true "ir.tci.tc", false);
-    (file "ir.tc", file ~main:true "ir.tc", false);
-    (file ~main:true "ir.tc", file ~main:true "ir.tc", true);
-    (file "ir.h", file ~main:true "ir.tc", false);
-    (file "ir.tci", file ~main:true "ir.c", false) ]
+    (file "ir.tci", file ~origin:Main "client.tc", false);
+    (file "ir.tci", file ~origin:Main "ir.tci.tc", false);
+    (file "ir.tc", file ~origin:Main "ir.tc", false);
+    (file ~origin:Main "ir.tc", file ~origin:Main "ir.tc", true);
+    (file "ir.h", file ~origin:Main "ir.tc", false);
+    (file "ir.tci", file ~origin:Main "ir.c", false) ]
 
 let failed_owner_cases () =
   List.filter
     (fun (declaring, text, expected) -> File.owns ~declaring text <> expected)
     owner_cases
+
+(* The universe text (design 3.6) in front of the unit's own text. *)
+
+let read_universe text =
+  match Reader.read_with_universe ~name:"in.i" text with
+  | Ok result -> result
+  | Error error -> failwith (Reader.error_message error)
+
+(* "spelling file:line" for each token of line [line] of the universe
+   text, whose tokens [spellings] separates with blanks. *)
+let universe_line line spellings =
+  String.split_on_char ' ' spellings
+  |> List.map (fun spelling -> Printf.sprintf "%s <universe>:%d" spelling line)
+
+let universe_places =
+  universe_line 1 "type option ( T ) = | None | Some ( T value ) ;"
+  @ universe_line 2
+      "type result ( T , E ) = | Err ( E error ) | Ok ( T value ) ;"
+
+let universe_token_count = List.length universe_places
+
+let show_presumed result (token : Token.t) =
+  Printf.sprintf "%s %s:%d"
+    (Reader.spelling result token)
+    token.location.file token.location.line
+
+(* Whether [make] raises [Invalid_argument] with [message]. *)
+let raises make message =
+  match make () with
+  | _ -> false
+  | exception Invalid_argument raised -> raised = message
+
+let in_universe_message = "Reader.rewrite: a replacement in the universe"
+
+(* A unit whose own text has odd blanks, an included file and no newline
+   at its end, so that only its own bytes rewrite to it. Its tokens: int
+   a ; | int b ; (in h.h) | c *)
+let unit_head = "# 1 \"m.tc\"\n  "
+let unit_rest = "int\ta ;  \n# 1 \"h.h\" 1\nint b;\n# 2 \"m.tc\" 2\nc"
+let universe_unit_text = unit_head ^ unit_rest
+
+(* The owner of the first of the last three tokens, which are the
+   unit's own in each text read below. *)
+let first_own_owner read text =
+  match read ~name:"in.i" text with
+  | Ok { Reader.tokens; _ } ->
+      Some tokens.(Array.length tokens - 3).Token.owner
+  | Error _ -> None
+
+let forged_universe = "# 1 \"m.tc\"\n# 1 \"<universe>\" 1\nint b;\n"
+
+let universe_checks () =
+  let unit = read_universe universe_unit_text in
+  let tokens = Array.to_list unit.tokens in
+  let first_own = universe_token_count in
+  let prefix = List.filteri (fun index _ -> index < first_own) tokens in
+  let own = List.filteri (fun index _ -> index >= first_own) tokens in
+  let replace ~first ~count () =
+    let range = Reader.range unit.tokens ~first ~count in
+    Reader.rewrite unit [ { range; text = "x" } ]
+  in
+  let is_universe (token : Token.t) = token.owner == File.universe in
+  let forged = first_own_owner Reader.read_with_universe forged_universe in
+  let forged_main = first_own_owner Reader.read "# 1 \"<universe>\"\nint b;" in
+  [ ( "the universe tokens come first, at their lines",
+      List.map (show_presumed unit) prefix = universe_places );
+    ("the universe owns its tokens", List.for_all is_universe prefix);
+    ( "the unit's tokens follow, in its own files",
+      List.map (show_presumed unit) own
+      = [ "int m.tc:1"; "a m.tc:1"; "; m.tc:1"; "int h.h:1"; "b h.h:1";
+          "; h.h:1"; "c m.tc:2" ]
+      && not (List.exists is_universe own) );
+    ( "the unit's first marker opens its main file",
+      unit.tokens.(first_own).owner.origin = File.Main );
+    ("the universe is Type-C text", File.is_type_c_text File.universe);
+    ("the universe is not the main file", File.universe.origin <> File.Main);
+    ( "a marker naming the universe enters another file",
+      match forged with
+      | Some owner ->
+          owner <> File.universe && owner.name = "<universe>"
+          && not (File.is_type_c_text owner)
+      | None -> false );
+    ( "a first marker naming the universe opens another main file",
+      match forged_main with
+      | Some owner -> owner <> File.universe && owner.origin = File.Main
+      | None -> false );
+    ( "rewrite writes the unit's own bytes",
+      Reader.rewrite unit [] = universe_unit_text );
+    ( "rewrite of an empty unit is empty",
+      Reader.rewrite (read_universe "") [] = "" );
+    ( "a replacement of a universe token is refused",
+      raises (replace ~first:0 ~count:1) in_universe_message );
+    ( "an insertion in front of a universe token is refused",
+      raises (replace ~first:(first_own - 1) ~count:0) in_universe_message );
+    ( "a range from the universe into the unit is refused",
+      raises (replace ~first:(first_own - 1) ~count:2) in_universe_message );
+    ( "an insertion in front of the unit's first token is its own",
+      replace ~first:first_own ~count:0 () = unit_head ^ "x" ^ unit_rest );
+    ( "the unit's errors are at its own lines",
+      match Reader.read_with_universe ~name:"in.i" "\nint a;" with
+      | Error error ->
+          error.location
+          = { Location.file = "in.i"; line = 2; flags = No_flags }
+      | Ok _ -> false ) ]
+
+let failed_universe_checks () =
+  List.filter_map
+    (fun (name, passed) -> if passed then None else Some name)
+    (universe_checks ())
 
 let () =
   let failed_cases show cases =
@@ -635,7 +745,10 @@ let () =
       Printf.eprintf "FAIL: owner rule for %s in %s\n" declaring.name
         text.name)
     failed_owners;
+  let failed_universe = failed_universe_checks () in
+  List.iter (Printf.eprintf "FAIL: %s\n") failed_universe;
   if
     failed <> [] || failed_constants <> [] || failed_punctuators <> []
     || (not shared) || failed_mains <> [] || failed_owners <> []
+    || failed_universe <> []
   then exit 1

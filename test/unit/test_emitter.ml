@@ -454,4 +454,31 @@ let () =
        "Emitter.code: \"#pragma pack(push)\" holds a byte that typec's \
         text never does")
 
+(* A token of the universe text (design 3.6) is a piece at its own place
+   in the universe, and emission writes the unit's own text alone.
+   Tokens: the universe text, line 2 from its 16th | int a ; *)
+let () =
+  let own_text = "# 1 \"a.tc\"\nint a;\n" in
+  let unit =
+    match Reader.read_with_universe ~name:"input.i" own_text with
+    | Ok unit -> unit
+    | Error error -> failwith (Reader.error_message error)
+  in
+  let a = Array.length unit.tokens - 2 in
+  let universe_at line : Location.t =
+    { file = "<universe>"; line; flags = No_flags }
+  in
+  (* A piece is the text and its location, as typec's own text is. *)
+  let is_piece index location text =
+    Emitter.token unit index = Some (Emitter.generated location text)
+  in
+  check "a universe token is at its line"
+    (is_piece 1 (universe_at 1) "option"
+    && is_piece 15 (universe_at 2) "type");
+  check "a token of the unit follows the universe" (is_piece a (at 1) "a");
+  check "no edits: the unit's own text" (emit unit [] = own_text);
+  check "an edit of the unit's own text"
+    (emit unit [ edit unit ~first:a ~count:1 (at 1) "b" ]
+    = "# 1 \"a.tc\"\nint \n# 1 \"a.tc\"\nb\n# 1 \"a.tc\"\n;\n")
+
 let () = if !failures > 0 then exit 1

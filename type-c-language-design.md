@@ -2603,6 +2603,18 @@ identified by the token of the first mention that resolves to it, and
 refuses a `goto` to a label that its body does not define where the
 body ends.
 
+**Universe text.** The generic types of the universe scope are Type-C
+text, the two lines of 3.6, which the reader reads in front of the
+unit's own text into one token array. The parser declares them in the
+universe scope (2.3), and the type checker and lowering then treat them
+as any generic declaration, so every identity
+that a token index gives (a declaration's id, a span, moved text) covers
+them with no second source of the declarations. Their tokens belong to
+a file `<universe>` that no line marker opens: a marker that names
+`<universe>` opens an ordinary file of that name, which is C text.
+Emission writes the unit's own text alone and refuses an edit of the
+universe text.
+
 **GNU profile.** The front end accepts the extensions that system headers
 and common code use: attributes, including those among the qualifiers
 of a pointer, at the start of a parenthesized declarator, before a

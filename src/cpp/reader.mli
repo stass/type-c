@@ -36,12 +36,19 @@
     ({!Location.flags}), which decide what the backend exempts from
     warnings, whatever the owner.
 
+    {!read_with_universe} reads the universe text, {!File.universe_text},
+    in front of the unit's own text, so that its tokens come first and
+    keep their indices whatever the unit holds. They belong to
+    {!File.universe} and are placed at its lines, and the unit's own text
+    is then read as {!read} reads it.
+
     Reading takes time and memory linear in the size of the text and
     never recurses on it. *)
 
-(** The text as [cc -E] wrote it, which only {!spelling} and {!rewrite}
-    read: a stage cannot slice it by token offsets and take the bytes of
-    an identifier for its name. {!rewrite} gives the bytes for emission
+(** The text as [cc -E] wrote it, and the universe text in front of it
+    where the unit was read with it. Only {!spelling} and {!rewrite} read
+    it: a stage cannot slice it by token offsets and take the bytes of an
+    identifier for its name. {!rewrite} gives the bytes for emission
     alone. *)
 type text
 
@@ -57,6 +64,11 @@ type error = { location : Location.t; message : string }
 val read : name:string -> string -> (t, error) result
 (** [read ~name text] reads [text], which was read from the file [name].
     [name] is the presumed file name until a line marker changes it. *)
+
+val read_with_universe : name:string -> string -> (t, error) result
+(** [read_with_universe ~name text] reads the universe text and then
+    [text] as {!read} does: the tokens are those of the universe text,
+    then those of [text]. *)
 
 val spelling : t -> Token.t -> string
 (** [spelling result token] is what [token] means: the name that an
@@ -84,11 +96,12 @@ type replacement = { range : range; text : string }
 val rewrite : t -> replacement list -> string
 (** [rewrite result replacements] is the text as [cc -E] wrote it with
     the replacements made: the bytes that emission copies, in which those
-    of an identifier may differ from its {!spelling}. The ranges must be
-    made from the tokens of [result]. Each starts at or after the token
-    after the range before it, [first + count], so they do not overlap
-    and insertions in front of one token keep their order;
-    [Invalid_argument] otherwise. *)
+    of an identifier may differ from its {!spelling}. It holds no byte of
+    the universe text, which the backend never reads. The ranges must be
+    made from the tokens of [result], and none may start at a token of
+    the universe text. Each starts at or after the token after the range
+    before it, [first + count], so they do not overlap and insertions in
+    front of one token keep their order; [Invalid_argument] otherwise. *)
 
 val error_message : error -> string
 (** ["file:line: message"], the form of a C compiler's diagnostics, with
