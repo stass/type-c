@@ -1,6 +1,8 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
+(* misuse: Typec_cpp has type Typec_cpp.Reader.text *)
+
 (* A stage that takes an identifier's name from the bytes that spell it,
    which may be universal character names: Reader.text is abstract, so
    this must not compile. *)

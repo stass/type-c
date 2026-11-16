@@ -692,14 +692,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   OCaml takes both changes, drop the patch and pin the release that has
   them.
 
-## Tests
-
-- [Low] Each negative compile test in `test/misuse/dune` is a 25-line
-  rule that differs from the others only in its file, include
-  directories, opened library and expected type name. Drive them from
-  one script (`misuse.sh FILE LIBRARY PATTERN`) so a new test is one
-  short rule.
-
 ## Test hosts
 
 `tools/hosts` runs the suite on Debian 13 (glibc) and Alpine 3.24

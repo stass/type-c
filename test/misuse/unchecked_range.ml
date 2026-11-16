@@ -1,6 +1,8 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
+(* misuse: Typec_cpp private type Typec_cpp.Reader.range *)
+
 (* A range made without Reader.range, so nothing checks that it lies
    within the tokens: Reader.range is private, so this must not
    compile. *)

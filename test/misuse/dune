@@ -1,116 +1,21 @@
 ; SPDX-License-Identifier: BSD-2-Clause
 ; Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-; Code that an interface must refuse. A rule passes only when ocamlc
-; rejects its file (exit code 2) and names the abstract or private type
-; that the file misuses; the files are never built otherwise.
+; Code that an interface must refuse: every .ml here is a test that
+; misuse.sh checks, so a new file needs no rule. The include path is
+; the directories of the interface files below.
 
 (rule
  (alias runtest)
  (deps
-  identifier_bytes.ml
-  (glob_files %{workspace_root}/src/cpp/.typec_cpp.objs/byte/*.cmi))
+  misuse.sh
+  (:tests
+   (glob_files *.ml))
+  (:cmis
+   (glob_files %{workspace_root}/src/cpp/.typec_cpp.objs/byte/*.cmi)
+   (glob_files %{workspace_root}/src/syntax/.typec_syntax.objs/byte/*.cmi)))
  (action
-  (progn
-   (with-outputs-to
-    identifier_bytes.errors
-    (with-accepted-exit-codes
-     2
-     (run
-      %{ocamlc}
-      -stop-after
-      typing
-      -I
-      %{workspace_root}/src/cpp/.typec_cpp.objs/byte
-      -open
-      Typec_cpp
-      -c
-      identifier_bytes.ml)))
-   (run grep -q "has type Typec_cpp.Reader.text" identifier_bytes.errors))))
-
-(rule
- (alias runtest)
- (deps
-  unchecked_range.ml
-  (glob_files %{workspace_root}/src/cpp/.typec_cpp.objs/byte/*.cmi))
- (action
-  (progn
-   (with-outputs-to
-    unchecked_range.errors
-    (with-accepted-exit-codes
-     2
-     (run
-      %{ocamlc}
-      -stop-after
-      typing
-      -I
-      %{workspace_root}/src/cpp/.typec_cpp.objs/byte
-      -open
-      Typec_cpp
-      -c
-      unchecked_range.ml)))
-   (run
-    grep
-    -q
-    "private type Typec_cpp.Reader.range"
-    unchecked_range.errors))))
-
-(rule
- (alias runtest)
- (deps
-  unchecked_type_name.ml
-  (glob_files %{workspace_root}/src/cpp/.typec_cpp.objs/byte/*.cmi)
-  (glob_files %{workspace_root}/src/syntax/.typec_syntax.objs/byte/*.cmi))
- (action
-  (progn
-   (with-outputs-to
-    unchecked_type_name.errors
-    (with-accepted-exit-codes
-     2
-     (run
-      %{ocamlc}
-      -stop-after
-      typing
-      -I
-      %{workspace_root}/src/cpp/.typec_cpp.objs/byte
-      -I
-      %{workspace_root}/src/syntax/.typec_syntax.objs/byte
-      -open
-      Typec_syntax
-      -c
-      unchecked_type_name.ml)))
-   (run
-    grep
-    -q
-    "Typec_syntax.Spelling.type_name"
-    unchecked_type_name.errors))))
-
-(rule
- (alias runtest)
- (deps
-  unchecked_constructor.ml
-  (glob_files %{workspace_root}/src/cpp/.typec_cpp.objs/byte/*.cmi)
-  (glob_files %{workspace_root}/src/syntax/.typec_syntax.objs/byte/*.cmi))
- (action
-  (progn
-   (with-outputs-to
-    unchecked_constructor.errors
-    (with-accepted-exit-codes
-     2
-     (run
-      %{ocamlc}
-      -stop-after
-      typing
-      -I
-      %{workspace_root}/src/cpp/.typec_cpp.objs/byte
-      -I
-      %{workspace_root}/src/syntax/.typec_syntax.objs/byte
-      -open
-      Typec_syntax
-      -c
-      unchecked_constructor.ml)))
-   (run
-    grep
-    -q
-    "Typec_syntax.Spelling.constructor"
-    unchecked_constructor.errors))))
+  (setenv
+   MISUSE_CMIS
+   "%{cmis}"
+   (run sh misuse.sh %{ocamlc} %{tests}))))
