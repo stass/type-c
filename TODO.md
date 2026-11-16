@@ -435,6 +435,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
+- [High] The parser refuses only the syntactic forms of design 3.5
+  rules 2 and 4; the typing of generic types in package 2.1 must check
+  the rest on the expanded type: a type parameter used other than as
+  the type of a member, field, pointed-to object, element, parameter
+  or result or as a type argument (`_Atomic(T)`, `typeof(T)`, and
+  `distinct ptr(T)` with `type ptr(U) = U;` reach typing); a constant
+  expression that depends on one (`int a[sizeof(T)]`, an `aligned`
+  attribute); and the first half of rule 2, an argument whose struct,
+  union, enum, variant or distinct type is declared in a block
+  (`struct s` declared there before `box(struct s *)`), is untagged or
+  has two typedef names, or holds an attribute.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it

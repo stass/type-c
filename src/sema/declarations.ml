@@ -107,6 +107,13 @@ let fail state span diagnostic =
 
 let quote = Expressions.quote
 
+(* A generic type, which a later part of work package 2.1 types. *)
+let fail_generic state span =
+  fail state span
+    (Rule.message Not_implemented
+       "generic types are not implemented yet (design 3.5; work package \
+        2.1)")
+
 let checked state span = function
   | Ok t -> t
   | Error error -> fail state span (Rule.c_text (Ctype.error_message error))
@@ -924,6 +931,7 @@ and other_type state span (specifier : Tree.type_specifier) =
       obscured state attribute (Ctype.enum enum)
   | Typeof_type type_name -> read_type_name state type_name
   | Typeof_expression expression -> typeof_expression state expression
+  | Application _ -> fail_generic state span
   | Typedef_name { name; declaration } -> (
       match Hashtbl.find_opt state.entities declaration with
       | Some { declared = Typedef t; _ } -> t
@@ -1804,7 +1812,10 @@ and read_block_declaration state (declaration : Tree.declaration) =
 
 and read_type_declaration state
     ({ declaration; scope_end } : Tree.scoped_type_declaration) =
-  let { Tree.name = checked; declared; definition } = declaration.node in
+  let { Tree.name = checked; type_parameters; declared; definition } =
+    declaration.node
+  in
+  if type_parameters <> [] then fail_generic state declaration.span;
   let name = (checked :> Tree.identifier) in
   Hashtbl.replace state.type_declarations declared.id declaration;
   let bind t =

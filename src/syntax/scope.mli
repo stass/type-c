@@ -25,6 +25,9 @@ val enter : ('ordinary, 'tag) t -> ('ordinary, 'tag) t
 val is_file : ('ordinary, 'tag) t -> bool
 (** Whether the innermost scope is file scope. *)
 
+val depth : ('ordinary, 'tag) t -> int
+(** The number of scopes open, file scope counted: [1] at file scope. *)
+
 val reenter :
   ('ordinary, 'tag) t -> inner:('ordinary, 'tag) t -> ('ordinary, 'tag) t
 (** [reenter outer ~inner] is the innermost scope of [inner] inside

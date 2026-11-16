@@ -419,7 +419,7 @@ implements them.
 
   $ printf 'type box(T) = struct { T value; };\n' > generic.tc
   $ ./golden.exe generic.tc
-  generic.tc:1: type parameters are not implemented yet (design 3.5; work package 2.1) [TC0023]
+  generic.tc:1: generic types are not implemented yet (design 3.5; work package 2.1) [TC0023]
   [1]
   $ printf 'void f(void) { defer f(); }\n' > defer.tc
   $ ./golden.exe defer.tc

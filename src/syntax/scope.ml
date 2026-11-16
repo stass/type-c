@@ -37,6 +37,8 @@ let is_file = function
   | [ _ ] -> true
   | _ -> false
 
+let depth = List.length
+
 (* [inner]'s declarations, hiding those of [outer] of the same name. *)
 let hiding outer inner =
   Names.union (fun _ declaration _hidden -> Some declaration) inner outer

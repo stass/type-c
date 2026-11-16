@@ -448,6 +448,7 @@ and type_specifier_flow walk = function
       both
         (all (specifiers_flow walk) (Option.to_list underlying))
         (all value (Option.value enumerators ~default:[]))
+  | Application { arguments; _ } -> all (type_name_flow walk) arguments
   | Basic _ | Typedef_name _ -> completes
 
 and record_flow walk (specifier : Tree.record_specifier) =

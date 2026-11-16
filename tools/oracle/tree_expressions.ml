@@ -100,6 +100,8 @@ and type_specifier visit = function
       option specifiers visit underlying;
       option (list enumerator) visit enumerators
   | Typeof_expression value -> expression visit value
+  | Application { name = _; generic = _; arguments } ->
+      list type_name visit arguments
 
 and member_declaration visit (member : member_declaration) =
   match member.node with

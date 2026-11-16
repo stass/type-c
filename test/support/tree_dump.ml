@@ -335,6 +335,10 @@ and specifier reader (s : declaration_specifier spanned) =
   | Type_specifier (Basic basic) -> here (basic_label basic) []
   | Type_specifier (Typedef_name { name; declaration }) ->
       noted (use_entry name (Resolved declaration)) (here name [])
+  | Type_specifier (Application { name; generic; arguments }) ->
+      noted
+        (use_entry name (Resolved generic))
+        (here name (List.map (type_name reader) arguments))
   | Type_specifier (Atomic_type t) -> here "atomic" [ type_name reader t ]
   | Type_specifier (Typeof_expression e) ->
       here "typeof" [ expression reader e ]
@@ -628,13 +632,26 @@ and block_item reader = function
       type_declaration reader declaration
   | Block_statement s -> statement reader s
 
-(* A type declaration as [(type N definition)]; the tag that it claims
-   is a [claims] part, whose entry is a declaration in the tag space. *)
+(* A type declaration as [(type N definition)], or
+   [(type N (parameters T ...) definition)] for a generic type; the tag
+   that it claims is a [claims] part, whose entry is a declaration in the
+   tag space. A generic type claims none. *)
 and type_declaration reader (d : type_declaration) =
-  let { name = checked; declared; definition } = d.node in
+  let { name = checked; type_parameters; declared; definition } = d.node in
   let name = (checked :> identifier) in
+  let generic = type_parameters <> [] in
   let declared_name =
     noted (declaration_entry name.node declared) (identifier name)
+  in
+  let parameter (listed : parameter_name) =
+    noted
+      (declaration_entry listed.name.node listed.declared)
+      (identifier listed.name)
+  in
+  let parameters =
+    if generic then
+      [ group (leaf "parameters" :: List.map parameter type_parameters) ]
+    else []
   in
   let (Tag_at token) = claimed_tag declared.id in
   let claim =
@@ -643,18 +660,19 @@ and type_declaration reader (d : type_declaration) =
          { space = Tag; name = name.node; token; earlier = None })
       (leaf "claims")
   in
+  let claims = if generic then [] else [ claim ] in
   let parts =
     match definition with
-    | Incomplete_variant -> [ claim ]
+    | Incomplete_variant -> claims
     | Alias t -> [ type_name reader t ]
     | Distinct { is_private; representation } ->
         privacy ~is_private
         @ [ leaf "distinct"; type_name reader representation ]
     | Record_alias { span; node = specifier } ->
-        let claimed = if specifier.tag = None then [ claim ] else [] in
+        let claimed = if specifier.tag = None then claims else [] in
         [ specifier_dump reader (node span) ~claimed specifier ]
     | Variant { is_private; constructors } ->
-        let own = if declared.earlier = None then [ claim ] else [] in
+        let own = if declared.earlier = None then claims else [] in
         let (Tag_at token) = derived_enum_tag ~type_keyword:d.span.first in
         let enum_claim =
           noted
@@ -663,16 +681,18 @@ and type_declaration reader (d : type_declaration) =
                  earlier = None })
             (leaf "claims")
         in
-        privacy ~is_private @ own
-        @ (enum_claim :: List.map (constructor reader checked) constructors)
+        let enum_claims = if generic then [] else [ enum_claim ] in
+        privacy ~is_private @ own @ enum_claims
+        @ List.map (constructor reader checked ~generic) constructors
   in
-  node d.span "type" (declared_name :: parts)
+  node d.span "type" ((declared_name :: parameters) @ parts)
 
 (* The word [private] of a definition (design 9.2) as a [private] part. *)
 and privacy ~is_private = if is_private then [ leaf "private" ] else []
 
-(* A constructor as [(C fields)], noted with the enumerator it claims. *)
-and constructor reader variant (c : constructor) =
+(* A constructor as [(C fields)], noted with the enumerator it claims,
+   unless its variant is [generic]. *)
+and constructor reader variant ~generic (c : constructor) =
   let { name; fields } = c.node in
   let (Ordinary_at token) = derived_enumerator name.span.first in
   let field (f : field) =
@@ -680,12 +700,15 @@ and constructor reader variant (c : constructor) =
       [ group (specifiers reader f.node.specifiers);
         declarator reader f.node.declarator ]
   in
-  noted
-    (Declaration_entry
-       { space = Ordinary;
-         name = enumerator_name ~variant:variant.node name.node; token;
-         earlier = None })
-    (node c.span (name.node :> string) (List.map field fields))
+  let dumped = node c.span (name.node :> string) (List.map field fields) in
+  if generic then dumped
+  else
+    noted
+      (Declaration_entry
+         { space = Ordinary;
+           name = enumerator_name ~variant:variant.node name.node; token;
+           earlier = None })
+      dumped
 
 (* The qualifiers, the template and, for extended assembler, its four
    sections. *)

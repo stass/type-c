@@ -15,8 +15,9 @@ type error = Reader.error = { location : Location.t; message : string }
    recursion has a constant depth: the ten precedences of
    [binary_expression] and a few frames of declarations and statements.
    A specifier holds another only inside a bracket (a structure body,
-   [_Atomic (], [typeof (]), and the fixed type of an enumeration takes
-   no specifier that holds another (see [allowed]). So [advance] bounds
+   [_Atomic (], [typeof (], the [(] of a type application), and the fixed
+   type of an enumeration takes no specifier that holds another outside
+   such a bracket (see [allowed]). So [advance] bounds
    the recursion by bounding the brackets open. C11
    5.2.4.1 asks for 63 levels of parentheses in an expression; 256 is the
    bracket depth Clang accepts by default, enough for real code, and
@@ -57,25 +58,41 @@ type grammar_token = { lexeme : lexeme; index : int }
    or the [?] of a conditional, which its [:] closes. *)
 type opening = Open_bracket of P.t | Open_conditional
 
+(* How far the type declaration of a name has got: within a definition
+   that may not use the name (design 3.1 rule 2), past its definition or
+   within one that may use it, or declaring an incomplete variant that a
+   variant definition may still complete (rule 4). *)
+type stage = Defining | Defined | Awaiting_variant
+
 (* The kind of an ordinary identifier in scope, which is what parsing
    needs of a name: never its type. A [Declared_type] is a typedef name to C
    that a type declaration declares, which is the only declaration of
-   its name in its scope (design 3.1 rule 5); it is [Defining_type]
-   within its own definition where that may not use it (rule 2), and
-   [Incomplete_variant_type] where a variant definition may still
-   complete it (rule 4). A [Derived_enumerator] is an enumerator that a
-   variant claims for C (design 10.1 rule 6). *)
+   its name in its scope (design 3.1 rule 5), with the number of its type
+   parameters, which is not zero for a generic type (design 3.5). A
+   [Type_parameter] names a type within the definition of its generic. A
+   [Derived_enumerator] is an enumerator that a variant claims for C
+   (design 10.1 rule 6). *)
 type kind =
   | Not_a_type
   | Typedef_name
-  | Declared_type
-  | Defining_type
-  | Incomplete_variant_type
+  | Declared_type of { stage : stage; parameters : int }
+  | Type_parameter
   | Derived_enumerator
 
 (* What the grammar needs of an ordinary identifier in scope: its
    declaration and its kind. *)
 type ordinary = { declaration : reference; kind : kind }
+
+(* What the definition of a generic type allows at the cursor (design 3.5
+   rule 4): a structure or union body only where the definition of an
+   instance holds it, and no type parameter inside an [_Alignas]. The
+   scope of its type parameters, at [parameter_depth], stands where file
+   scope stands in the C that the text lowers to (rule 8). *)
+type generic_place = {
+  bodies_allowed : bool;
+  in_alignment : bool;
+  parameter_depth : int;
+}
 
 (* A tag in scope: its declaration, and whether a type declaration
    claims it for the C that it lowers to (design 10.1 rule 6, 10.2). *)
@@ -143,6 +160,9 @@ type state = {
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
   mutable labels : body_labels option;  (** [None] outside every body *)
+  mutable generic : generic_place option;
+      (** [None] outside the definition of a generic type *)
+  mutable in_type_argument : bool;  (** design 3.5 rule 2 *)
   counter : Spanned.counter;  (** of the nodes made so far *)
 }
 
@@ -666,8 +686,15 @@ let initial_scope keywords =
 
 let names_type = function
   | Not_a_type | Derived_enumerator -> false
-  | Typedef_name | Declared_type | Defining_type | Incomplete_variant_type ->
-      true
+  | Typedef_name | Declared_type _ | Type_parameter -> true
+
+(* The number of type parameters of the type that a name of [kind]
+   names, which is not zero for a generic type (design 3.5 rule 1). *)
+let type_parameters_of = function
+  | Declared_type { parameters; _ } -> parameters
+  | Not_a_type | Typedef_name | Type_parameter | Derived_enumerator -> 0
+
+let is_generic kind = type_parameters_of kind > 0
 
 (* The visible declaration of [name] where it is a typedef name. *)
 let typedef_declaration state name =
@@ -682,8 +709,8 @@ let is_typedef_name state name = typedef_declaration state name <> None
 let token_of (name : identifier) = name.span.first
 
 let is_type_declared = function
-  | Declared_type | Defining_type | Incomplete_variant_type -> true
-  | Not_a_type | Typedef_name | Derived_enumerator -> false
+  | Declared_type _ -> true
+  | Not_a_type | Typedef_name | Type_parameter | Derived_enumerator -> false
 
 let fail_claimed state (name : identifier) what text =
   fail_at_token state (token_of name)
@@ -731,12 +758,20 @@ let declare state ~kind (name : identifier) =
     Scope.declare state.scope name.node { declaration = In_tree id; kind };
   { id; earlier = Option.map (fun ordinary -> ordinary.declaration) earlier }
 
+(* The kind of the name of a type declaration with [parameters] type
+   parameters at [stage]. *)
+let declared_type ~parameters stage = Declared_type { stage; parameters }
+
 (* The name of a type declaration as of the end of its definition, which
    may use it from there on. *)
-let end_definition state (name : identifier) (declared : declared) =
+let end_definition state (name : identifier) (declared : declared)
+    ~parameters =
   state.scope <-
     Scope.declare state.scope name.node
-      { declaration = In_tree declared.id; kind = Declared_type }
+      {
+        declaration = In_tree declared.id;
+        kind = declared_type ~parameters Defined;
+      }
 
 (* A name that no scope declares may be one of the universe scope,
    which no work package has given a meaning yet. *)
@@ -797,10 +832,43 @@ let resolve state name =
       refuse_universe_name state name;
       Undeclared
 
+(* Whether the innermost scope is file scope in the C that the text
+   lowers to, where the scope of a generic's type parameters is not. *)
+let at_file_level state =
+  match state.generic with
+  | Some { parameter_depth; _ } -> Scope.depth state.scope = parameter_depth
+  | None -> Scope.is_file state.scope
+
+(* The definition of a generic type declares no tag in the scope around
+   its structure, which is file scope: lowering writes the definition in
+   each instance, so text after it would name a tag that the lowered C
+   declares later (design 3.5 rule 8). *)
+let refuse_generic_tag state (name : identifier) =
+  if Option.is_some state.generic && at_file_level state then
+    fail_at_token state (token_of name)
+      (Rule.message Generic_first_mention
+         (Printf.sprintf
+            "the definition of a generic type is the first to mention the \
+             tag %s at file scope; declare the tag before the definition"
+            (quoted name.node)))
+
+(* A tag that a type argument declares has one name only at file scope
+   (design 3.5 rule 2). *)
+let refuse_argument_tag state (name : identifier) =
+  if state.in_type_argument && not (at_file_level state) then
+    fail_at_token state (token_of name)
+      (Rule.message Argument_tag
+         (Printf.sprintf
+            "a type argument declares the tag %s in a parameter list or a \
+             block (C11 6.7.2.3p8); declare the tag at file scope before it"
+            (quoted name.node)))
+
 (* A C declaration of a tag that a type declaration claims is an error
    (design 10.1 rule 6). *)
 let declare_tag state (name : identifier) =
   let id = Tag_at (token_of name) in
+  refuse_generic_tag state name;
+  refuse_argument_tag state name;
   if claims_tag state name.node then
     fail_claimed state name "tag" "is declared again";
   let earlier = Scope.find_tag_in_innermost state.scope name.node in
@@ -865,28 +933,55 @@ let claim_enumerator state ~(variant : Spelling.type_name spanned) ~at
     Scope.declare state.scope enumerator
       { declaration = In_tree id; kind = Derived_enumerator }
 
-(* A variant definition completes the incomplete variant of its name in
-   the current scope, which claims the tag of the name already (design
-   3.1 rule 4); elsewhere it declares the name and claims the tag. Either
-   claims the enumeration tag of its constructors (10.1 rule 6). *)
+(* [count] of [noun], as text. *)
+let counted count noun =
+  if count = 1 then "1 " ^ noun else Printf.sprintf "%d %ss" count noun
+
+(* The definition that completes an incomplete variant has as many type
+   parameters (design 3.1 rule 4). *)
+let refuse_completion state (name : identifier) ~parameters ~awaited =
+  if parameters <> awaited then
+    fail_at_token state (token_of name)
+      (Rule.message Completion_parameters
+         (Printf.sprintf
+            "the variant %s has %s, and the incomplete variant that it \
+             completes has %s"
+            (quoted name.node)
+            (counted parameters "type parameter")
+            (counted awaited "type parameter")))
+
+(* A variant definition with [parameters] type parameters completes the
+   incomplete variant of its name in the current scope, which has as
+   many and claims the tag of the name already (design 3.1 rule 4);
+   elsewhere it declares the name and claims the tag. Either claims the
+   enumeration tag of its constructors (10.1 rule 6). A generic variant
+   claims nothing: its instances claim their names (10.3). *)
 let declare_variant state (checked : Spelling.type_name spanned)
-    ~type_keyword =
+    ~type_keyword ~parameters =
   let name = (checked :> identifier) in
+  let generic = parameters > 0 in
+  let kind = declared_type ~parameters Defined in
   let declared =
     match Scope.find_in_innermost state.scope name.node with
-    | Some { kind = Incomplete_variant_type; declaration } ->
+    | Some
+        {
+          kind =
+            Declared_type { stage = Awaiting_variant; parameters = awaited };
+          declaration;
+        } ->
+        refuse_completion state name ~parameters ~awaited;
         let id = Ordinary_at (token_of name) in
-        state.scope <-
-          Scope.declare state.scope name.node
-            { declaration = In_tree id; kind = Declared_type };
+        let completed = { declaration = In_tree id; kind } in
+        state.scope <- Scope.declare state.scope name.node completed;
         { id; earlier = Some declaration }
     | Some _ | None ->
-        let declared = declare state ~kind:Declared_type name in
-        claim_own_tag state name;
+        let declared = declare state ~kind name in
+        if not generic then claim_own_tag state name;
         declared
   in
-  claim_tag state name ~tag:(enum_tag_name checked.node)
-    (derived_enum_tag ~type_keyword);
+  if not generic then
+    claim_tag state name ~tag:(enum_tag_name checked.node)
+      (derived_enum_tag ~type_keyword);
   declared
 
 
@@ -929,6 +1024,38 @@ let run_in_scope state scope parse =
   (result, left)
 
 let in_scope state scope parse = fst (run_in_scope state scope parse)
+
+(* Runs [parse] with [state.generic] set to [generic] and
+   [state.in_type_argument] to [in_type_argument], then restores them.
+   An error abandons the state, so it needs no restoring on one. *)
+let with_generic state ?(in_type_argument = state.in_type_argument) generic
+    parse =
+  let saved_generic = state.generic in
+  let saved_in_type_argument = state.in_type_argument in
+  state.generic <- generic;
+  state.in_type_argument <- in_type_argument;
+  let result = parse () in
+  state.generic <- saved_generic;
+  state.in_type_argument <- saved_in_type_argument;
+  result
+
+(* Runs [parse] on a type argument, which no definition of an instance
+   holds, so a body inside it is not where design 3.5 rule 4 allows
+   one. *)
+let read_type_argument state parse =
+  let generic =
+    Option.map
+      (fun place -> { place with bodies_allowed = false })
+      state.generic
+  in
+  with_generic state ~in_type_argument:true generic parse
+
+(* Runs [parse] on the operand of an [_Alignas]. *)
+let read_alignment_operand state parse =
+  let generic =
+    Option.map (fun place -> { place with in_alignment = true }) state.generic
+  in
+  with_generic state generic parse
 
 (* A block item or external declaration as read. One that holds a type
    declaration is complete only where the scope that holds it closes,
@@ -1005,28 +1132,6 @@ let keyword_specifier_word state offset keyword =
   | Builtin_types_compatible_p | Builtin_choose_expr | Real | Imag | Defer ->
       None
 
-(* A type name followed by [.] begins a postfix expression in Type-C
-   text only, where it names a constructor (design 2.2, 3.3); C rejects
-   it. So that every check for a type name agrees, it is no specifier. *)
-let begins_qualified_constructor state offset =
-  peek_at state (offset + 1) = Punctuator_token P.Dot
-  && is_type_c_text_at state state.grammar.(state.position + offset).index
-
-(* The specifier that the token [offset] places ahead begins. A typedef
-   name is one only where no other type specifier precedes it, which the
-   caller decides. *)
-let specifier_word state offset =
-  match peek_at state offset with
-  | Keyword_token keyword -> keyword_specifier_word state offset keyword
-  | Identifier_token name -> (
-      match typedef_declaration state name with
-      | Some _ when begins_qualified_constructor state offset -> None
-      | Some ordinary -> Some (Typedef_word (name, ordinary))
-      | None -> None)
-  | Punctuator_token _ | Number_token | Character_token _ | String_token _
-  | End_of_input ->
-      None
-
 (* The offset after the bracketed group that [opener] opens [offset]
    tokens ahead, or of the end of the input if it does not close;
    [offset] if no [opener] opens there. The lookahead only decides; the
@@ -1043,6 +1148,38 @@ let past_group state opener offset =
   in
   if peek_at state offset = Punctuator_token opener then loop offset 0
   else offset
+
+(* A type name [offset] tokens ahead, of the type that [ordinary] names,
+   followed by [.] begins a postfix expression in Type-C text only, where
+   it names a constructor (design 2.2, 3.3); C rejects it. So that every
+   check for a type name agrees, it is no specifier. The type name of a
+   generic type is an application, which ends at its [)]. *)
+let begins_qualified_constructor state offset (ordinary : ordinary) =
+  let after_name = offset + 1 in
+  let after_type_name =
+    if is_generic ordinary.kind then
+      past_group state P.Left_paren after_name
+    else after_name
+  in
+  peek_at state after_type_name = Punctuator_token P.Dot
+  && is_type_c_text_at state state.grammar.(state.position + offset).index
+
+(* The specifier that the token [offset] places ahead begins. A typedef
+   name is one only where no other type specifier precedes it, which the
+   caller decides. *)
+let specifier_word state offset =
+  match peek_at state offset with
+  | Keyword_token keyword -> keyword_specifier_word state offset keyword
+  | Identifier_token name -> (
+      match typedef_declaration state name with
+      | Some ordinary when begins_qualified_constructor state offset ordinary
+        ->
+          None
+      | Some ordinary -> Some (Typedef_word (name, ordinary))
+      | None -> None)
+  | Punctuator_token _ | Number_token | Character_token _ | String_token _
+  | End_of_input ->
+      None
 
 (* C23's [[ ]] begins an attribute specifier, which GCC and Clang read in
    C11 as well; no other C construct has two [[] in a row. *)
@@ -1111,8 +1248,10 @@ let opens_type_name_at state offset =
 (* Which specifiers a context takes: a specifier-qualifier list has no
    storage class or function specifier. The fixed type of an enumeration
    is an integer type that is not an enumeration (C23 6.7.2.2p5), so it
-   takes only the specifiers that hold no other specifier: the list
-   cannot nest, and needs no bracket to bound its recursion. *)
+   takes only the specifiers that hold no other specifier outside a
+   bracket: a qualifier, a basic type or a typedef name, whose type
+   arguments, where it is a generic type, are in the [(] that bounds
+   their recursion. *)
 type specifier_context =
   | Declaration_specifiers
   | Specifier_qualifiers
@@ -1159,10 +1298,32 @@ let fail_type_name state expected name =
        (Printf.sprintf "expected %s, found the type name %s" expected
           (quoted name)))
 
+(* A generic type's name alone is not a type (design 3.5 rule 1). At the
+   name, the token [at]. *)
+let fail_bare_generic state ~at name =
+  fail_at_token state at
+    (Rule.message Generic_name
+       (Printf.sprintf
+          "the generic type %s names a type only in a type application, \
+           %s"
+          (quoted name) (quoted (name ^ "(...)"))))
+
+(* The alignment of an instance would depend on a type argument, which
+   design 3.5 rule 4 rules out. At the type parameter, the token [at]. *)
+let refuse_parameter_in_alignment state ~at name =
+  match state.generic with
+  | Some { in_alignment = true; _ } ->
+      fail_at_token state at
+        (Rule.message Generic_definition
+           (Printf.sprintf "the type parameter %s is used in `_Alignas`"
+              (quoted name)))
+  | Some { in_alignment = false; _ } | None -> ()
+
 (* A type declaration names its type only inside a structure or union
-   specifier of its definition (design 3.1 rule 2). *)
-let fail_own_name state name =
-  fail state
+   specifier of its definition (design 3.1 rule 2). At the name, the
+   token [at]. *)
+let fail_own_name state ~at name =
+  fail_at_token state at
     (Rule.message Own_name
        (quoted name
        ^ " is used in its own definition, which is not a structure or \
@@ -1746,8 +1907,9 @@ let refuse_reserved_field state (field : identifier) =
    read: the C it lowers to declares them before the structure, so a
    field names them as C does (design 10.1 rule 6). Names within one
    variant are unique (design 3.2 rule 2). Gives the names of the
-   constructors, which the tree takes as [constructor] reads them. *)
-let claim_enumerators state ~variant =
+   constructors, which the tree takes as [constructor] reads them. A
+   [generic] variant claims none (design 10.3). *)
+let claim_enumerators state ~variant ~generic =
   let seen = Hashtbl.create 8 in
   let claim (name : identifier) =
     let checked = checked_constructor state name in
@@ -1757,7 +1919,7 @@ let claim_enumerators state ~variant =
         (Rule.message Duplicate_constructor
            (quoted name.node ^ " names two constructors of one variant"));
     Hashtbl.replace seen name.node ();
-    claim_enumerator state ~variant ~at checked;
+    if not generic then claim_enumerator state ~variant ~at checked;
     { at; checked }
   in
   (* In source order, so that the first refused name is the one
@@ -1787,6 +1949,175 @@ let accept_private state =
   in
   if is_private then advance state;
   is_private
+
+(* The definition of a generic type (design 3.5 rule 4). *)
+
+(* A type parameter used where design 3.5 rule 4 rules it out, which
+   [use] says. *)
+type parameter_use = { parameter : string; at : int }
+
+(* The use of a type parameter that a specifier among [specifiers] is,
+   if one is: only the definition of a generic declares one. *)
+let type_parameter_among state (specifiers : specifiers) =
+  let use (specifier : declaration_specifier spanned) =
+    match specifier.node with
+    | Type_specifier (Typedef_name { name; declaration }) -> (
+        match Scope.find state.scope name with
+        | Some { kind = Type_parameter; declaration = visible }
+          when visible = declaration ->
+            Some { parameter = name; at = specifier.span.first }
+        | Some _ | None -> None)
+    | Type_specifier _ | Storage_class _ | Type_qualifier _
+    | Function_specifier _ | Alignment_specifier _ | Attributes _ ->
+        None
+  in
+  List.find_map use specifiers
+
+let fail_type_parameter_use state { parameter; at } use =
+  fail_at_token state at
+    (Rule.message Generic_definition
+       (Printf.sprintf "the type parameter %s %s" (quoted parameter) use))
+
+(* A bit-field of a parameter's type would have the type of an argument,
+   which may be any value type. *)
+let refuse_parameter_bit_field state specifiers declarators =
+  let is_bit_field (declarator : member_declarator) =
+    match declarator.node with
+    | Bit_field _ -> true
+    | Field _ -> false
+  in
+  if List.exists is_bit_field declarators then
+    Option.iter
+      (fun parameter ->
+        fail_type_parameter_use state parameter "is the type of a bit-field")
+      (type_parameter_among state specifiers)
+
+(* An instance of a generic type is defined after typedef expansion
+   (design 10.3), where a body with a tag would define the tag again in
+   every instance, and a body stands only where the definition of an
+   instance holds it. At the [{], after the tag [tag_name], if any. *)
+let refuse_generic_body state ~tag_name =
+  match (state.generic, tag_name) with
+  | None, _ | Some { bodies_allowed = true; _ }, None -> ()
+  | Some _, Some (tag : identifier) ->
+      fail_at_token state (token_of tag)
+        (Rule.message Generic_definition
+           (Printf.sprintf
+              "the structure or union %s has a body in the definition of \
+               a generic type, where a body has no tag"
+              (quoted tag.node)))
+  | Some { bodies_allowed = false; _ }, None ->
+      fail state
+        (Rule.message Generic_definition
+           "a structure or union body stands in the definition of a \
+            generic type only as the whole definition or in a field of a \
+            variant, or inside either, and not in a type argument")
+
+(* Every instance would declare the enumerators again. At the [{]. *)
+let refuse_generic_enumerators state =
+  if Option.is_some state.generic then
+    fail state
+      (Rule.message Generic_definition
+         "an enumeration specifier has a body in the definition of a \
+          generic type, so that every instance would declare its \
+          enumerators again")
+
+(* A distinct generic type's representation is not one of its type
+   parameters, qualified or not (design 3.5 rule 4). *)
+let refuse_distinct_parameter state (representation : type_name) =
+  if Option.is_none representation.node.abstract then
+    Option.iter
+      (fun parameter ->
+        fail_type_parameter_use state parameter
+          "is the representation after `distinct`")
+      (type_parameter_among state representation.node.specifier_qualifiers)
+
+(* The form of the definition after the [=] of a type declaration and
+   any [private] (design 3.1 rule 3), which says where the declared name
+   is in scope (rule 2). *)
+type definition_form =
+  | Variant_form
+  | Record_form of struct_or_union
+      (** a structure or union specifier with a body and nothing else *)
+  | Distinct_form
+  | Alias_form
+
+let definition_form state =
+  if peek state = Punctuator_token P.Pipe then Variant_form
+  else
+    match specifier_word state 0 with
+    | Some (Struct_word kind) when defines_record_alone state ->
+        Record_form kind
+    | _ when begins_distinct state -> Distinct_form
+    | _ -> Alias_form
+
+(* The type parameters of a generic type, and the scope that declares
+   them, which its definition is read in. *)
+type generic_head = {
+  parameter_names : parameter_name list;
+  parameter_frame : scope;
+}
+
+let type_parameter_count = function
+  | Some head -> List.length head.parameter_names
+  | None -> 0
+
+(* Type parameters have distinct names. *)
+let declare_type_parameter state (name : identifier) : parameter_name =
+  if Scope.find_in_innermost state.scope name.node <> None then
+    fail_at_token state (token_of name)
+      (Rule.message One_definition
+         (quoted name.node ^ " names two type parameters of one generic type"));
+  { name; declared = declare state ~kind:Type_parameter name }
+
+(* At the [(] after the name of a generic type, which is declared at file
+   scope only, where its instances are emitted (design 3.1), and has no
+   universe name (3.6): its type parameters, which a scope of their own
+   declares. *)
+let generic_head state (checked : Spelling.type_name spanned) =
+  let name = (checked :> identifier) in
+  if not (Scope.is_file state.scope) then
+    fail_at_token state (token_of name)
+      (Rule.message Generic_scope
+         (Printf.sprintf
+            "the generic type %s is declared in a block; a generic type is \
+             declared at file scope only"
+            (quoted name.node)));
+  if Universe.find name.node <> None then
+    fail_at_token state (token_of name)
+      (Rule.message Generic_universe_name
+         (quoted name.node ^ " is a universe name, which no generic type has"));
+  advance state;
+  let rec parameters declared =
+    let name = identifier state "the name of a type parameter" in
+    let declared = declare_type_parameter state name :: declared in
+    if accept state P.Comma then parameters declared
+    else begin
+      expect state P.Right_paren "`,` or `)` after a type parameter";
+      List.rev declared
+    end
+  in
+  let parameter_names, parameter_frame =
+    run_in_scope state (inner_scope state) (fun () -> parameters [])
+  in
+  { parameter_names; parameter_frame }
+
+(* Runs [parse] on the definition of a type declaration with the type
+   parameters of [head] visible around it, if it is generic, where
+   [bodies_allowed] says whether a structure or union body may stand
+   (design 3.5
+   rule 4). *)
+let in_definition state head ~bodies_allowed parse =
+  match head with
+  | None -> parse ()
+  | Some { parameter_frame; _ } ->
+      let scope = reentered_scope state ~inner:parameter_frame in
+      let parameter_depth = Scope.depth scope in
+      let generic =
+        Some { bodies_allowed; in_alignment = false; parameter_depth }
+      in
+      in_scope state scope (fun () ->
+          with_generic state ~in_type_argument:false generic parse)
 
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
@@ -1818,10 +2149,6 @@ let rec specifiers state context =
    specifiers of a declaration, for {!ends_alone}. *)
 and specifier state word ~alone =
   let start = state.position in
-  (match word with
-  | Typedef_word (name, { kind = Defining_type; _ }) ->
-      fail_own_name state name
-  | _ -> ());
   advance state;
   let node =
     match word with
@@ -1829,8 +2156,9 @@ and specifier state word ~alone =
     | Qualifier_word qualifier -> Type_qualifier qualifier
     | Function_word function_specifier -> Function_specifier function_specifier
     | Basic_word basic -> Type_specifier (Basic basic)
-    | Typedef_word (name, { declaration; _ }) ->
-        Type_specifier (Typedef_name { name; declaration })
+    | Typedef_word (name, ordinary) ->
+        let at = first_token state start in
+        Type_specifier (named_type state name ordinary ~at)
     | Atomic_type_word ->
         expect state P.Left_paren "`(` after `_Atomic`";
         let type_name = type_name state in
@@ -1843,6 +2171,46 @@ and specifier state word ~alone =
     | Attribute_word -> Attributes (attribute_list state)
   in
   finish state start node
+
+(* After the typedef name [name] at the token [at], which [ordinary]
+   declares: its specifier, which for a generic type is an application
+   of it. *)
+and named_type state name (ordinary : ordinary) ~at =
+  (match ordinary.kind with
+  | Declared_type { stage = Defining; _ } -> fail_own_name state ~at name
+  | Type_parameter -> refuse_parameter_in_alignment state ~at name
+  | Not_a_type | Typedef_name | Declared_type _ | Derived_enumerator -> ());
+  let declaration = ordinary.declaration in
+  match type_parameters_of ordinary.kind with
+  | 0 -> Typedef_name { name; declaration }
+  | parameters ->
+      let arguments = type_arguments state name ~at ~parameters in
+      Application { name; generic = declaration; arguments }
+
+(* After the name of a generic type at the token [at]: its arguments,
+   one type name for each of its [parameters] (design 3.5 rule 1). *)
+and type_arguments state name ~at ~parameters =
+  if peek state <> Punctuator_token P.Left_paren then
+    fail_bare_generic state ~at name;
+  advance state;
+  let rec loop arguments =
+    let argument = read_type_argument state (fun () -> type_name state) in
+    if accept state P.Comma then loop (argument :: arguments)
+    else begin
+      expect state P.Right_paren "`,` or `)` after a type argument";
+      List.rev (argument :: arguments)
+    end
+  in
+  let arguments = loop [] in
+  let count = List.length arguments in
+  if count <> parameters then
+    fail_at_token state at
+      (Rule.message Generic_name
+         (Printf.sprintf "the generic type %s takes %s, not %d"
+            (quoted name)
+            (counted parameters "type argument")
+            count));
+  arguments
 
 (* Where a declaration must begin and does not. A universe name there may
    be a type that typec does not implement yet, which the error says. *)
@@ -1868,8 +2236,9 @@ and typeof_specifier state =
 and alignment state =
   expect state P.Left_paren "`(` after `_Alignas`";
   let alignment =
-    if starts_type_name state 0 then Alignas_type (type_name state)
-    else Alignas_expression (constant_expression state)
+    read_alignment_operand state (fun () ->
+        if starts_type_name state 0 then Alignas_type (type_name state)
+        else Alignas_expression (constant_expression state))
   in
   expect state P.Right_paren "`)` after the operand of `_Alignas`";
   alignment
@@ -1884,9 +2253,9 @@ and struct_or_union state kind ~alone =
 and record_specifier state kind ~alone ~claimed_by =
   let leading = attributes state in
   let tag_name = optional_identifier state in
-  let declares =
-    peek state = Punctuator_token P.Left_brace || ends_alone state ~alone
-  in
+  let has_body = peek state = Punctuator_token P.Left_brace in
+  if has_body then refuse_generic_body state ~tag_name;
+  let declares = has_body || ends_alone state ~alone in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   if tag = None then Option.iter (claim_own_tag state) claimed_by;
   let body_start = state.position in
@@ -1923,6 +2292,7 @@ and member_declaration state =
       if peek state = Punctuator_token P.Semicolon then []
       else member_declarators state
     in
+    refuse_parameter_bit_field state specifiers declarators;
     expect state P.Semicolon "`;` after a member declaration";
     finish state start (Members { specifiers; declarators })
 
@@ -1969,10 +2339,9 @@ and enum_specifier state ~alone =
     else None
   in
   let after_type = if underlying = None then [] else attributes state in
-  let declares =
-    peek state = Punctuator_token P.Left_brace
-    || (underlying <> None && ends_alone state ~alone)
-  in
+  let has_body = peek state = Punctuator_token P.Left_brace in
+  if has_body then refuse_generic_enumerators state;
+  let declares = has_body || (underlying <> None && ends_alone state ~alone) in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   let enumerators =
     if accept state P.Left_brace then Some (enumerators state) else None
@@ -2486,16 +2855,12 @@ and postfix_operators state start operand =
 
 (* At the type name of [T.C]: the constructor, and the postfix operators
    after it, such as the arguments of [T.C(...)]. *)
-and qualified_constructor state name =
+and qualified_constructor state name ordinary =
   let start = state.position in
-  let declaration =
-    match typedef_declaration state name with
-    | Some ordinary -> ordinary.declaration
-    | None -> invalid_arg "Parser: a qualified constructor of no type name"
-  in
   advance state;
+  let at = first_token state start in
   let specifier =
-    finish state start (Type_specifier (Typedef_name { name; declaration }))
+    finish state start (Type_specifier (named_type state name ordinary ~at))
   in
   let variant =
     finish state start { specifier_qualifiers = [ specifier ]; abstract = None }
@@ -2533,14 +2898,20 @@ and name_operand state name =
    of a qualified constructor before [.], and otherwise a name that
    typing reads as an unqualified constructor where the target type has
    one and refuses elsewhere (design 3.3). C text has no constructors,
-   and a type's own definition has no target type that could have one. *)
+   and a type's own definition has no target type that could have one.
+   A generic type has constructors only in an application, which
+   begins a type name. *)
 and typedef_name_operand state name (ordinary : ordinary) =
+  let at = state.grammar.(state.position).index in
   match ordinary.kind with
-  | Defining_type -> fail_own_name state name
-  | _ when begins_qualified_constructor state 0 ->
-      qualified_constructor state name
-  | _ when is_type_c_text_at state state.grammar.(state.position).index ->
-      name_operand state name
+  | Declared_type { stage = Defining; _ } -> fail_own_name state ~at name
+  | _ when begins_qualified_constructor state 0 ordinary ->
+      qualified_constructor state name ordinary
+  | kind when is_generic kind ->
+      if peek_at state 1 = Punctuator_token P.Left_paren then
+        fail_type_name state "an expression" name
+      else fail_bare_generic state ~at name
+  | _ when is_type_c_text_at state at -> name_operand state name
   | _ -> fail_type_name state "an expression" name
 
 and primary_expression state =
@@ -2779,56 +3150,90 @@ and type_declaration state : type_declaration =
   let name =
     checked_type_name state (identifier state "the name of a type declaration")
   in
-  if peek state = Punctuator_token P.Left_paren then
-    fail_not_implemented state ~section:"3.5" ~package:"2.1"
-      "type parameters are not implemented yet";
+  let head =
+    if peek state = Punctuator_token P.Left_paren then
+      Some (generic_head state name)
+    else None
+  in
   let declared, definition =
-    if accept state P.Semicolon then incomplete_variant state name
+    if accept state P.Semicolon then incomplete_variant state name head
     else begin
       expect state P.Equal "`=` or `;` after the name of a type declaration";
-      let declared_definition = type_definition state name ~type_keyword in
+      let declared_definition = type_definition state name head ~type_keyword in
       expect state P.Semicolon "`;` after a type declaration";
       declared_definition
     end
   in
-  finish state start { name; declared; definition }
+  let type_parameters =
+    match head with Some head -> head.parameter_names | None -> []
+  in
+  finish state start
+    ({ name; type_parameters; declared; definition } : type_declaration_node)
 
-and incomplete_variant state checked =
+and incomplete_variant state checked head =
   let name = (checked :> identifier) in
-  let declared = declare state ~kind:Incomplete_variant_type name in
-  claim_own_tag state name;
+  let parameters = type_parameter_count head in
+  let kind = declared_type ~parameters Awaiting_variant in
+  let declared = declare state ~kind name in
+  if Option.is_none head then claim_own_tag state name;
   (declared, Incomplete_variant)
 
 (* After the [=]: the declaration of [checked], which is in scope from
-   the end of its identifier, and the definition. *)
-and type_definition state checked ~type_keyword =
+   the end of its identifier, and the definition, which the type
+   parameters of [head] are visible in. A generic type claims no name
+   (design 10.3). *)
+and type_definition state checked head ~type_keyword =
   let name = (checked :> identifier) in
-  let is_private = accept_private state in
-  if peek state = Punctuator_token P.Pipe then begin
-    let declared = declare_variant state checked ~type_keyword in
-    let names = claim_enumerators state ~variant:checked in
-    (declared, Variant { is_private; constructors = constructors state names })
-  end
-  else
-    match specifier_word state 0 with
-  | Some (Struct_word kind) when defines_record_alone state ->
-      let declared = declare state ~kind:Declared_type name in
-      let start = state.position in
-      advance state;
-      let specifier =
-        record_specifier state kind ~alone:false ~claimed_by:(Some name)
+  let parameters = type_parameter_count head in
+  let generic = Option.is_some head in
+  let definition_part ~bodies_allowed parse =
+    in_definition state head ~bodies_allowed parse
+  in
+  let is_private, form =
+    definition_part ~bodies_allowed:false (fun () ->
+        let is_private = accept_private state in
+        (is_private, definition_form state))
+  in
+  match form with
+  | Variant_form ->
+      let declared = declare_variant state checked ~type_keyword ~parameters in
+      let names = claim_enumerators state ~variant:checked ~generic in
+      let constructors =
+        definition_part ~bodies_allowed:true (fun () ->
+            constructors state names)
       in
-      (declared, Record_alias (finish state start specifier))
-  | _ when begins_distinct state ->
+      (declared, Variant { is_private; constructors })
+  | Record_form kind ->
+      let kind_of_name = declared_type ~parameters Defined in
+      let declared = declare state ~kind:kind_of_name name in
+      let claimed_by = if generic then None else Some name in
+      let specifier =
+        definition_part ~bodies_allowed:true (fun () ->
+            let start = state.position in
+            advance state;
+            finish state start
+              (record_specifier state kind ~alone:false ~claimed_by))
+      in
+      (declared, Record_alias specifier)
+  | Distinct_form ->
       advance state;
-      let declared = declare state ~kind:Defining_type name in
-      let representation = type_name state in
-      end_definition state name declared;
+      let kind = declared_type ~parameters Defining in
+      let declared = declare state ~kind name in
+      let representation =
+        definition_part ~bodies_allowed:false (fun () ->
+            let representation = type_name state in
+            refuse_distinct_parameter state representation;
+            representation)
+      in
+      end_definition state name declared ~parameters;
       (declared, Distinct { is_private; representation })
-  | _ ->
-      let declared = declare state ~kind:Defining_type name in
-      let type_name = type_name state in
-      end_definition state name declared;
+  | Alias_form ->
+      let kind = declared_type ~parameters Defining in
+      let declared = declare state ~kind name in
+      let type_name =
+        definition_part ~bodies_allowed:false (fun () -> type_name state)
+      in
+      end_definition state name declared ~parameters;
       (declared, Alias type_name)
 
 (* The constructors of a variant, each after a [|], with the [names]
@@ -3550,6 +3955,8 @@ let parse_with_file_scope ~keywords reader =
       jumps = Function_body;
       arm = None;
       labels = None;
+      generic = None;
+      in_type_argument = false;
       counter = Spanned.counter ~max_depth;
     }
   in

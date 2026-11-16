@@ -170,6 +170,41 @@ let rows =
         "A token other than C text of a system header in a function \
          body whose [{] is C text of a system header, which is passed \
          through unread." };
+    Live { name = "Generic_scope"; code = 33; clause = Some "design 3.1";
+      meaning =
+        "A type declaration with type parameters outside file scope." };
+    Live { name = "Generic_universe_name"; code = 34;
+      clause = Some "design 3.6";
+      meaning =
+        "A type declaration with type parameters whose name is a universe \
+         name." };
+    Live { name = "Generic_name"; code = 35; clause = Some "design 3.5 rule 1";
+      meaning =
+        "The name of a generic type other than in a type application \
+         with one argument for each of its type parameters." };
+    Live { name = "Completion_parameters"; code = 36;
+      clause = Some "design 3.1 rule 4";
+      meaning =
+        "A variant definition that completes an incomplete variant with \
+         a different number of type parameters." };
+    Live { name = "Argument_tag"; code = 37; clause = Some "design 3.5 rule 2";
+      meaning =
+        "A tag that a type argument declares, or is the first to mention, \
+         in a parameter list or a block." };
+    Live { name = "Generic_definition"; code = 38;
+      clause = Some "design 3.5 rule 4";
+      meaning =
+        "In the definition of a generic type: a type parameter directly \
+         after [distinct], as the type of a bit-field or in [_Alignas]; a \
+         structure or union specifier with a body and a tag, or with a \
+         body where the definition of an instance does not hold it; an \
+         enumeration specifier with a body." };
+    Live { name = "Generic_first_mention"; code = 39;
+      clause = Some "design 3.5 rule 8";
+      meaning =
+        "A tag that the definition of a generic type is the first to \
+         mention in the scope around its structure, which is file \
+         scope." };
   ]
 
 let () =

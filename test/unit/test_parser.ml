@@ -1916,6 +1916,57 @@ let type_declaration_cases =
       "type list; type list = | Nil | Cons(int head, list *tail); list l;"
       "(type list claims) | (type list claims Nil (Cons (field (int) head) \
        (field (list) (pointer tail)))) | (declaration (list) l)";
+    case "a generic structure"
+      "type pair(A, B) = struct { A first; B second; };"
+      "(type pair (parameters A B) (struct (member (A) first) (member (B) \
+       second)))";
+    case "a generic variant that refers to itself through a pointer"
+      "type list(T) = | Nil | Cons(T head, list(T) *tail);"
+      "(type list (parameters T) Nil (Cons (field (T) head) (field ((list \
+       (type T))) (pointer tail))))";
+    case "an application as the operand of sizeof"
+      "type vector(T) = struct { T *data; }; int n = sizeof(vector(int));"
+      "(type vector (parameters T) (struct (member (T) (pointer data)))) | \
+       (declaration (int) (init n (sizeof-type (type (vector (type int))))))";
+    case "applications in a cast, a compound literal and an application"
+      "type vector(T) = struct { T *data; }; vector(vector(int)) v; void \
+       *p = (vector(int) *)0; int f(void) { return (vector(int)){0}.data \
+       != 0; }"
+      "(type vector (parameters T) (struct (member (T) (pointer data)))) | \
+       (declaration ((vector (type (vector (type int))))) v) | (declaration \
+       (void) (init (pointer p) (cast (type (vector (type int)) pointer) 0))) \
+       | (define (int) (function f (void)) (block (return (!= (. (literal \
+       (type (vector (type int))) ({} 0)) data) 0))))";
+    case "a qualified constructor of an application"
+      "type opt(T) = | No | Yes(T v); opt(int) x = opt(int).No;"
+      "(type opt (parameters T) No (Yes (field (T) v))) | (declaration ((opt \
+       (type int))) (init x (constructor (type (opt (type int))) No)))";
+    case "a generic alias and a distinct generic"
+      "type ptr(T) = T *; type id(T) = distinct unsigned int; ptr(int) p; \
+       id(ptr(int)) i;"
+      "(type ptr (parameters T) (type T pointer)) | (type id (parameters T) \
+       distinct (type unsigned int)) | (declaration ((ptr (type int))) p) | \
+       (declaration ((id (type (ptr (type int))))) i)";
+    case "a generic variant completes one with as many parameters"
+      "type list(T); type list(U) = | Nil | Cons(U head, list(U) *tail);"
+      "(type list (parameters T)) | (type list (parameters U) Nil (Cons \
+       (field (U) head) (field ((list (type U))) (pointer tail))))";
+    case "a tag in a prototype scope of a member"
+      "type handler(T) = struct { void (*call)(struct ctx *c, T value); };"
+      "(type handler (parameters T) (struct (member (void) (function (paren \
+       (pointer call)) ((struct ctx) (pointer c)) (T value)))))";
+    case "a tag declared before the definition"
+      "struct node; type link(T) = struct { struct node *next; T v; };"
+      "(declaration ((struct node))) | (type link (parameters T) (struct \
+       (member ((struct node)) (pointer next)) (member (T) v)))";
+    case "a tag that an argument at file scope mentions first"
+      "type vector(T) = struct { T *data; }; vector(struct s) v;"
+      "(type vector (parameters T) (struct (member (T) (pointer data)))) | \
+       (declaration ((vector (type (struct s)))) v)";
+    case "a structure body in a field of a generic variant"
+      "type tree(T) = | Leaf | Node(struct { T v; tree(T) *kids; } n);"
+      "(type tree (parameters T) Leaf (Node (field ((struct (member (T) v) \
+       (member ((tree (type T))) (pointer kids)))) n)))";
     case "a variant in a block hides an outer C structure"
       "struct e { int i; }; void f(void) { type e = | A; e x; }"
       "(declaration ((struct e (member (int) i)))) | (define (void) \
@@ -2119,9 +2170,17 @@ let type_c_error_cases =
       "typedef int private; type v = private distinct;"
       "error: in.tc:1: expected `;` after a type declaration, found \
        `distinct`";
-    case "type parameters" "type box(T) = struct { T value; };"
-      "error: in.tc:1: type parameters are not implemented yet (design 3.5; \
-       work package 2.1) [TC0023]";
+    case "an application with an argument too many"
+      "type box(T) = struct { T value; }; box(int, int) b;"
+      "error: in.tc:1: the generic type `box` takes 1 type argument, not 2 \
+       (design 3.5 rule 1) [TC0035]";
+    case "a generic name alone in an expression"
+      "type box(T) = struct { T value; }; int n = sizeof box;"
+      "error: in.tc:1: the generic type `box` names a type only in a type \
+       application, `box(...)` (design 3.5 rule 1) [TC0035]";
+    case "an application where an expression begins"
+      "type box(T) = struct { T value; }; int n = sizeof box(int);"
+      "error: in.tc:1: expected an expression, found the type name `box`";
     case "a type declaration without = or ;" "type t int;"
       "error: in.tc:1: expected `=` or `;` after the name of a type \
        declaration, found `int`";
@@ -2204,6 +2263,19 @@ let type_c_resolution_cases =
     case "a block hides the name of a variant"
       "type e = | A; void f(void) { int e; e = 1; }"
       "e#1 tag e#1 tag e_tag#1 e_A#1 f#1 e#2 e->#2";
+    case "a type parameter hides a typedef name in its definition only"
+      "typedef int T; type box(T) = struct { T v; }; T x;"
+      "T#1 box#1 T#2 T->#2 T->#1 x#1";
+    case "a block hides a generic type"
+      "type vector(T) = struct { T *data; }; void f(void) { int vector; \
+       vector = 1; }"
+      "vector#1 T#1 T->#1 f#1 vector#2 vector->#2";
+    case "the definition that completes a generic variant binds its names"
+      "type list(T); type list(U) = | Nil | Cons(U head, list(U) *tail);"
+      "list#1 T#1 list#2<#1 U#1 U->#1 list->#2 U->#1";
+    case "type as a typedef name before a parenthesised name"
+      "typedef int type; type list(int);"
+      "type#1 type->#1 list#1";
     case "a type declaration in a block hides an outer one"
       "type t = int; void f(void) { type t = long; t x; } t y;"
       "t#1 f#1 t#2 t->#2 x#1 t->#1 y#1";

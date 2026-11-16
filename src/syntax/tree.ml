@@ -317,7 +317,15 @@ and type_specifier =
           (** [None] without a body; a body holds at least one *)
     }
   | Typedef_name of { name : string; declaration : reference }
-      (** a typedef name is one only where its declaration is visible *)
+      (** a typedef name is one only where its declaration is visible; a
+          type parameter is one in the definition of its generic *)
+  | Application of {
+      name : string;
+      generic : reference;  (** the type declaration of the generic *)
+      arguments : type_name list;
+          (** one for each type parameter of the generic, in order *)
+    }
+      (** [G(A1, ..., An)], a type application (design 3.5 rule 1) *)
   | Typeof_expression of expression  (** GNU [typeof (] expression [)] *)
   | Typeof_type of type_name  (** GNU [typeof (] type-name [)] *)
 
@@ -419,7 +427,9 @@ and parameters =
       (** old style; [()] is the empty list *)
 
 (** A name in an identifier list, which declares it in the prototype
-    scope; the declaration list of a definition declares it again. *)
+    scope, where the declaration list of a definition declares it again;
+    or a type parameter, which a type declaration declares in a scope of
+    its own around its definition (design 3.5). *)
 and parameter_name = { name : identifier; declared : declared }
 
 and parameter = parameter_node spanned
@@ -606,13 +616,18 @@ and block_item =
   | Block_statement of statement
 
 (** A type declaration (design 3.1): [type], the name, which is in scope
-    from the end of its identifier as a typedef name, and the definition.
+    from the end of its identifier as a typedef name, the type parameters
+    and the definition.
     It stands where an external declaration or a block item may, and
     nowhere else that a C declaration may (design Appendix A). *)
 and type_declaration = type_declaration_node spanned
 
 and type_declaration_node = {
   name : Spelling.type_name spanned;
+  type_parameters : parameter_name list;
+      (** in order, with distinct names; none unless the declaration is
+          of a generic type (design 3.5), which stands at file scope and
+          claims no name: its instances claim theirs (design 10.3) *)
   declared : declared;
       (** never a redeclaration (design 3.1 rule 5), except a [Variant]
           that completes the [Incomplete_variant] of its name in its
@@ -633,15 +648,15 @@ and scoped_type_declaration = {
 and type_definition =
   | Incomplete_variant
       (** [type N;], which claims the structure tag [N] that its
-          lowering declares (design 10.1 rule 6) *)
+          lowering declares (design 10.1 rule 6), unless it is generic *)
   | Variant of { is_private : bool; constructors : constructor list }
       (** [= private? | C ... ;]: whether [private] restricts creating
           values to the owner (design 9.2), and the constructors in order,
           at least one, whose names are unique (design 3.2 rule 2). The
-          definition may use the name. It claims the tag [N] where it
-          completes no incomplete variant, and the enumeration tag and
-          enumerators of the names {!enum_tag_name} and {!enumerator_name}
-          give (design 10.1 rule 6). *)
+          definition may use the name. Unless it is generic, it claims the
+          tag [N] where it completes no incomplete variant, and the
+          enumeration tag and enumerators of the names {!enum_tag_name}
+          and {!enumerator_name} give (design 10.1 rule 6). *)
   | Alias of type_name
       (** [= type-name;] for a type name that is not a [Record_alias]:
           the name denotes the type, as [typedef] makes it, and the
@@ -655,7 +670,9 @@ and type_definition =
       (** [= struct-or-union-specifier;] with a body, which its
           [members] always hold, and nothing else; it may use the name.
           Without a tag of its own, the specifier takes the declared name
-          as its tag, which the declaration claims (design 10.2). *)
+          as its tag, which the declaration claims (design 10.2), unless
+          it is generic, where the specifier has no tag (design 3.5 rule
+          4). *)
 
 (** A constructor of a variant, from its [|] to its name or [)]. *)
 and constructor = constructor_node spanned
