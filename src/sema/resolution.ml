@@ -34,13 +34,38 @@ type place = {
 }
 
 module Events = Map.Make (Int)
+module By_entity = Map.Make (Int)
+module Positions = Set.Make (Int)
+
+(* Indexed by how a check reads them: a use, the token indices of those
+   of its own object or function; every check, those of typedef names
+   in its window. *)
+type redeclarations = {
+  objects : Positions.t By_entity.t;
+  typedefs : Entity.t Events.t;
+}
+
+let no_redeclarations = { objects = By_entity.empty; typedefs = Events.empty }
+
+let add_redeclared token (entity : Entity.t) events =
+  let add positions =
+    let known = Option.value positions ~default:Positions.empty in
+    Some (Positions.add token known)
+  in
+  match entity.declared with
+  | Object _ | Function _ ->
+      let objects = By_entity.update entity.entity add events.objects in
+      { events with objects }
+  | Typedef _ ->
+      { events with typedefs = Events.add token entity events.typedefs }
+  | Enumerator _ -> events
 
 type context = {
   tokens : Reader.t;
   views : Parser.views;
   entity : Tree.reference -> Entity.t option;
   tag : Tree.tag_id -> Ctype.named_tag option;
-  redeclared : Entity.t Events.t;
+  redeclared : redeclarations;
   completed : Ctype.named_tag Events.t;
   same_type : Ctype.t -> Ctype.t -> bool Unknown.answer;
 }
@@ -314,42 +339,31 @@ let check_name context place (use : name) =
    token follows the place. *)
 let place_precedes text place = place.before <= text.span.first
 
-(* The events of [events] in the window of design 13.5: between the
-   text's own place and the place of writing, in either order, without
-   those of the text itself, which move with it. *)
-let within_window text place events =
-  let first, after =
-    if place_precedes text place then (place.before, text.span.first)
-    else (text.span.last + 1, place.before)
-  in
-  Events.to_seq_from first events
-  |> Seq.take_while (fun (index, _) -> index < after)
+(* The window of design 13.5, the tokens from [first] to before [after]:
+   between the text's own place and the place of writing, in either
+   order, without the text itself, whose events move with it. *)
+type window = { first : int; after : int }
 
-(* The window as the check reads it: the index of a declaration of each
-   object or function declared again inexactly in it, by entity, so that
-   each use costs one lookup; the typedef names declared so; and the tags
-   completed in it, which only a place before the text reads. *)
-type window = {
-  objects : (int, int) Hashtbl.t;
-  typedefs : (int * Entity.t) list;
-  completions : (int * Ctype.named_tag) list;
-}
+let window_of text place =
+  if place_precedes text place then
+    { first = place.before; after = text.span.first }
+  else { first = text.span.last + 1; after = place.before }
 
-let window context text place =
-  let objects = Hashtbl.create 8 and typedefs = ref [] in
-  let sort (index, (again : Entity.t)) =
-    match again.declared with
-    | Object _ | Function _ -> Hashtbl.replace objects again.entity index
-    | Typedef _ -> typedefs := (index, again) :: !typedefs
-    | Enumerator _ -> ()
+let within window events =
+  Events.to_seq_from window.first events
+  |> Seq.take_while (fun (index, _) -> index < window.after)
+
+(* The first inexact redeclaration of [entity] in the window, if any,
+   which a refusal cites, as the typedef clause cites its first. *)
+let redeclared_within context window (entity : Entity.t) =
+  let positions =
+    By_entity.find_opt entity.entity context.redeclared.objects
+    |> Option.value ~default:Positions.empty
   in
-  Seq.iter sort (within_window text place context.redeclared);
-  let completions =
-    if place_precedes text place then
-      List.of_seq (within_window text place context.completed)
-    else []
-  in
-  { objects; typedefs = !typedefs; completions }
+  let at_or_after_first index = index >= window.first in
+  match Positions.find_first_opt at_or_after_first positions with
+  | Some index when index < window.after -> Some index
+  | Some _ | None -> None
 
 (* The view at the earlier of the two places, which sees what is
    declared before both. *)
@@ -361,7 +375,7 @@ let earlier_view text place =
    what the text reads where the text uses it. typec's types hold no
    attribute, so it cannot tell that the declaration keeps the type. *)
 let check_redeclared context window (use : name) (used : Entity.t) =
-  match Hashtbl.find_opt window.objects used.entity with
+  match redeclared_within context window used with
   | Some index ->
       refuse use.span Moved_text
         (Printf.sprintf
@@ -510,17 +524,23 @@ let check_unread context window text place ((arguments : Tree.span), view) =
         ()
   done
 
-(* The first two clauses, with the window, at a place where lowering
+(* The first two clauses and the window, at a place where lowering
    writes the text. *)
 let check_reading context text place =
-  let window = window context text place in
+  let window = window_of text place in
   List.iter (check_use context window text place) text.uses;
   List.iter (check_own context text place) text.declares;
   List.iter
     (check_unread context window text place)
     (Parser.attributes_within context.views text.span);
-  List.iter (check_typedef context text place) window.typedefs;
-  List.iter (check_completion context text place) window.completions
+  Seq.iter
+    (check_typedef context text place)
+    (within window context.redeclared.typedefs);
+  (* A completion changes nothing for text written after it. *)
+  if place_precedes text place then
+    Seq.iter
+      (check_completion context text place)
+      (within window context.completed)
 
 let check context text ~at =
   checking (kind_rule text.kind) (fun () ->

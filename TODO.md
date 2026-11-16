@@ -623,6 +623,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   has none). Refuse C text inside moved text, or hold the rule of
   `Resolution.check_unread_declarations` in the parser's one scan of
   unread text (`scan_unread`) for every unread kind in a moved span.
+- [Low] Each check of moved text walks every inexact typedef
+  redeclaration in its window (`Resolution.check_reading`), and stops
+  only at one of a name declared before both places. Redeclarations of
+  names first declared inside the window are passed over at every
+  check, so N pairs `typedef int tK; typedef int tK
+  __attribute__((unused));` between a generic and N instances take
+  quadratic time (4.2 s at N = 8000, 15 s at 16000). Index them by the
+  token of each name's first declaration, so that a check finds one
+  declared before its window directly (a range query over tokens), if
+  such input is met.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it

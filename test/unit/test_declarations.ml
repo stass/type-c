@@ -2966,6 +2966,29 @@ let generic_resolution () =
     added;
   accepts ~file
     ("type g(T) = struct { int v; T t; }; " ^ plain ^ widened ^ "g(int) x;");
+  (* A check looks up the redeclarations of each object that the text
+     uses, so those of another object in its window cost it nothing.
+     Four times the redeclarations and instances take about four times
+     as long, and sixteen if each check scanned the redeclarations; the
+     ratio of two sizes does not depend on the host's speed. *)
+  let unrelated count =
+    let repeated line = String.concat "" (List.init count line) in
+    "extern int o; type g(T) = struct { T *p; }; "
+    ^ repeated (fun _ -> "extern int o __attribute__((aligned(16))); ")
+    ^ repeated (fun index ->
+          Printf.sprintf "struct s%d { int a; }; g(struct s%d) x%d; " index
+            index index)
+  in
+  let time_accepting count =
+    let started = Sys.time () in
+    accepts ~file (unrelated count);
+    Sys.time () -. started
+  in
+  let small = time_accepting 2000 and large = time_accepting 8000 in
+  if large > 8.0 *. small then
+    fail_case "unrelated 2000 and 8000"
+      (Printf.sprintf "took %.2f s and %.2f s, over 8 times as long" small
+         large);
   (* A structure completed after the text is complete at the place, where
      the text reads it through a pointer as it does at its own place. *)
   accepts ~file

@@ -86,21 +86,31 @@ type place = {
     at most one declarator's name or one specifier's first token. *)
 module Events : Map.S with type key = int
 
+(** The inexact declarations of entities declared before them that the
+    reader has met, events of the window of design 13.5, indexed so that
+    a check reads only those of the entities it uses and of typedef
+    names. *)
+type redeclarations
+
+val no_redeclarations : redeclarations
+
+val add_redeclared : int -> Entity.t -> redeclarations -> redeclarations
+(** [add_redeclared token entity events] adds the declaration whose name is
+    the token at [token], of [entity] as that declaration records it. *)
+
 (** What the check asks of the reader of the unit: its tokens, the
     parser's views of its unread text, what each declaration declares and
     each tag declaration names, as the reader records them, and whether
     two types are the same (6.7p3). The events of the window of design
     13.5 that the reader has met are kept apart, as a window after the
-    text reads only the first kind: [redeclared] holds each inexact
-    declaration of an entity declared before it, at its name, with the
-    entity as that declaration records it, and [completed] each tag
-    completed, at the first token of its specifier. *)
+    text reads only the first kind: [redeclared], and [completed] each
+    tag completed, at the first token of its specifier. *)
 type context = {
   tokens : Reader.t;
   views : Parser.views;
   entity : Tree.reference -> Entity.t option;
   tag : Tree.tag_id -> Ctype.named_tag option;
-  redeclared : Entity.t Events.t;
+  redeclared : redeclarations;
   completed : Ctype.named_tag Events.t;
   same_type : Ctype.t -> Ctype.t -> bool Unknown.answer;
 }

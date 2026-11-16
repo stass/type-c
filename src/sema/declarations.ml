@@ -163,7 +163,7 @@ type state = {
   definition_views : (Tree.declaration_id, Parser.View.t) Hashtbl.t;
   mutable moved : moved option;
   mutable found : found list;
-  mutable redeclared_at : Entity.t Resolution.Events.t;
+  mutable redeclared_at : Resolution.redeclarations;
   mutable completed_at : Ctype.named_tag Resolution.Events.t;
   tags : Ctype.tags;
   entities : (Tree.reference, entity) Hashtbl.t;
@@ -530,7 +530,7 @@ let record_again state name (declared : Tree.declared) (entity : entity) =
   (if entity.inexact then
      let (Ordinary_at token) = declared.id in
      state.redeclared_at <-
-       Resolution.Events.add token entity state.redeclared_at);
+       Resolution.add_redeclared token entity state.redeclared_at);
   record state name declared entity
 
 (* Records what [declared] declares [name] as: a new entity, or [prior],
@@ -3452,7 +3452,7 @@ let read target text (scopes : Parser.scopes) =
       definition_views = Hashtbl.create 16;
       moved = None;
       found = [];
-      redeclared_at = Resolution.Events.empty;
+      redeclared_at = Resolution.no_redeclarations;
       completed_at = Resolution.Events.empty;
       tags;
       entities = Hashtbl.create 1024;
