@@ -714,27 +714,27 @@ is [type-c-language-design.md](type-c-language-design.md).
   exactness of the nesting limit (design 3.5 rule 7) depends on it too:
   a chain through a need that typing does not ask about is shorter than
   the rule counts, so `typec` may accept a source that the rule refuses.
-- [High] Instances grow exponentially with linear text: with
-  `type G_k(T) = struct { G_k+1(A(T)) a; G_k+1(B(T)) b; };` for k up to
-  n and `G1(int) v;`, typec defines about 3 * 2^n instances (each check
-  expands its subtree again, as a trial shares no definition), 47 s at
-  n = 16; the nesting limit bounds only the depth. Add a translation
-  limit, without a rule code, on the instances that a unit defines, as
-  `Encoding.max_length` bounds a name, and give an instance reading
-  smaller typed views than `Expressions.create` makes.
+- [High] `Value_type.contents_problem` walks every member of every
+  nested structure or union and remembers nothing, so a type holding
+  two copies of the structure below it, n levels deep, costs 2^n:
+  `struct n0 { int a; };`, `struct n<k+1> { struct n<k> a; struct n<k>
+  b; };` up to 27 and `type v = | C(struct n27 f) | D;` (1.5 KB) take
+  9.9 s, and the instance token limit does not bound it, as no generic
+  is involved. Compute the problem once, when the record is defined, and
+  keep it in its definition.
+- [Medium] Each instance reading makes typed views with
+  `Expressions.create`, whose two tables start at 4096 buckets, which is
+  most of the 47 us that an instance of a small definition costs, so a
+  doubling chain of small generics takes 2 s to reach
+  `Declarations.max_instance_tokens`; tables of 16 make a reading eight
+  times faster (measured on that chain). Make smaller views for an
+  instance reading.
 - [Medium] A constant expression may depend on a type parameter
   through an untagged structure body in it (`char k[2 - sizeof(struct
   { T q; })]` in a generic's definition is accepted), as
   `Ctype.mentions_opaque` does not look into members. The parser,
   which allows a body there, is the place: no structure or union body
   in an expression of a generic's definition (design 3.5 rule 4).
-- [Medium] `Ctype.trial` is exact only while every write to the
-  instance tables registers its undo (`declare_instance`,
-  `run_deferred`, `read_instance` and `note_application` in
-  Declarations); the prototype-scope entities and variant tag enums
-  that a check makes are not undone, and are unreachable. Replace the
-  undo log with a snapshot of those tables restored when the trial
-  ends, if a copy per generic proves cheap enough.
 - [Low] A generic name longer than `Encoding.max_length` refuses each
   application with a message that blames its first argument; refuse
   such a name at its declaration.
@@ -743,14 +743,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   where design 3.5 rule 4 and 7.1 rule 4 refuse an expression whose
   value depends on one. Say the simpler rule in the design, or relax
   the check.
-- [Medium] The definition check of a generic (design 3.5 rule 4) counts
-  the chain of each instance that it needs complete against the nesting
-  limit of rule 7 from the check, so it refuses a generic whose
-  definition needs a chain of 65 concrete instances (`box(...(int))`,
-  65 deep) even where a later application would find part of that chain
-  defined already and accept it. Decide whether the check counts only
-  the instances over its type parameters, or say in the design that a
-  check is refused where its own chain exceeds the limit.
 - [Medium] The opaque value type of a definition check is a structure
   without members (`Ctype.declare_opaque`), which is exact for generic
   types but not for the bodies of generic functions (design 7.1 rule

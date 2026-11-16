@@ -106,24 +106,42 @@ type variant_definition = {
   constructors : constructor list;
 }
 
-type tags = {
-  mutable next_id : int;
-  records : (int, record_definition) Hashtbl.t;
-  enums : (int, enum_definition) Hashtbl.t;
-  variants : (int, variant_definition) Hashtbl.t;
-  typedef_names : (int, string list) Hashtbl.t;
+module Ids = Map.Make (Int)
+
+module Instances = Map.Make (struct
+  type t = instance
+
+  let compare = compare
+end)
+
+module Record_instances = Map.Make (struct
+  type t = record_kind * instance
+
+  let compare = compare
+end)
+
+(* What declarations and definitions have added to the tags, as one
+   persistent value, so that a trial restores all of it at once and no
+   write made within the trial outlives it. *)
+type facts = {
+  records : record_definition Ids.t;
+  enums : enum_definition Ids.t;
+  variants : variant_definition Ids.t;
+  typedef_names : string list Ids.t;
       (* the typedef names of each untagged record or enum, by id *)
-  instances : (record_kind * instance, record_tag) Hashtbl.t;
-  deferred : (int, unit -> unit) Hashtbl.t;
+  instances : record_tag Record_instances.t;
+  deferred : (unit -> unit) Ids.t;
       (* the definition of each instance that no point has needed
          complete yet, by record id *)
-  readings : (instance, t) Hashtbl.t;
+  readings : t Instances.t;
       (* the type of each instance read as a whole, not as a record *)
-  mutable undo : (unit -> unit) list option;
-      (* in a trial, what undoes each definition and reading made in it,
-         latest first *)
-  mutable has_distinct : bool;
+  has_distinct : bool;
 }
+
+(* [next_id] stays outside [facts]: a tag that a trial declares outlives
+   it in the tables of Declarations, unreachable, and an id handed out
+   again would make a later tag equal to it. *)
+type tags = { mutable next_id : int; mutable facts : facts }
 
 type error =
   | Too_large
@@ -341,15 +359,15 @@ let atomic t =
 
 let create_tags () =
   { next_id = 0;
-    records = Hashtbl.create 16;
-    enums = Hashtbl.create 16;
-    variants = Hashtbl.create 16;
-    typedef_names = Hashtbl.create 16;
-    instances = Hashtbl.create 16;
-    deferred = Hashtbl.create 16;
-    readings = Hashtbl.create 16;
-    undo = None;
-    has_distinct = false }
+    facts =
+      { records = Ids.empty;
+        enums = Ids.empty;
+        variants = Ids.empty;
+        typedef_names = Ids.empty;
+        instances = Record_instances.empty;
+        deferred = Ids.empty;
+        readings = Instances.empty;
+        has_distinct = false } }
 
 let fresh_id tags =
   let id = tags.next_id in
@@ -374,44 +392,46 @@ let declare_variant tags name ~at_file_scope =
 let declare_alias_record tags kind name ~at_file_scope =
   new_record tags kind (Alias_name name) ~at_file_scope
 
-let undo_after_trial tags undo =
-  match tags.undo with
-  | Some log -> tags.undo <- Some (undo :: log)
-  | None -> ()
-
 (* Design 3.5 rule 3: one application is one type, wherever it is
    written. Design 10.3: an instance is emitted at file scope. *)
 let declare_instance tags kind instance ~define =
-  match Hashtbl.find_opt tags.instances (kind, instance) with
+  match Record_instances.find_opt (kind, instance) tags.facts.instances with
   | Some record -> record
   | None ->
       let record =
         new_record tags kind (Instance_name instance) ~at_file_scope:true
       in
-      Hashtbl.replace tags.instances (kind, instance) record;
-      Hashtbl.replace tags.deferred record.record_id (fun () -> define record);
-      undo_after_trial tags (fun () ->
-          Hashtbl.remove tags.instances (kind, instance);
-          Hashtbl.remove tags.deferred record.record_id);
+      let deferred () = define record in
+      let facts = tags.facts in
+      tags.facts <-
+        { facts with
+          instances =
+            Record_instances.add (kind, instance) record facts.instances;
+          deferred = Ids.add record.record_id deferred facts.deferred };
       record
+
+let add_record_definition tags id definition =
+  tags.facts <-
+    { tags.facts with records = Ids.add id definition tags.facts.records }
+
+let add_enum_definition tags id definition =
+  tags.facts <-
+    { tags.facts with enums = Ids.add id definition tags.facts.enums }
 
 (* A type parameter in the definition check of a generic (design 3.5
    rule 4): a complete structure without members, so that it is a value
    type of which nothing else is known. *)
 let declare_opaque tags name =
   let record = new_record tags Struct (Opaque_name name) ~at_file_scope:true in
-  Hashtbl.replace tags.records record.record_id
+  add_record_definition tags record.record_id
     { members = []; positions = [||]; by_name = Names.empty };
   record
 
 let trial tags read =
-  let outer = tags.undo in
-  tags.undo <- Some [];
-  let undo_all () =
-    Option.iter (List.iter (fun undo -> undo ())) tags.undo;
-    tags.undo <- outer
-  in
-  Fun.protect ~finally:undo_all read
+  let before = tags.facts in
+  Fun.protect ~finally:(fun () -> tags.facts <- before) read
+
+let set_deferred tags deferred = tags.facts <- { tags.facts with deferred }
 
 (* The definition runs when the record is first needed complete (design
    10.3); it is removed first, so that a need of the record from within
@@ -420,27 +440,24 @@ let trial tags read =
    deferred. *)
 let run_deferred tags (tag : record_tag) =
   let id = tag.record_id in
-  match Hashtbl.find_opt tags.deferred id with
+  match Ids.find_opt id tags.facts.deferred with
   | None -> ()
   | Some define ->
-      Hashtbl.remove tags.deferred id;
-      undo_after_trial tags (fun () ->
-          Hashtbl.remove tags.records id;
-          Hashtbl.replace tags.deferred id define);
+      set_deferred tags (Ids.remove id tags.facts.deferred);
       define ();
-      if not (Hashtbl.mem tags.records id) then
-        Hashtbl.replace tags.deferred id define
+      if not (Ids.mem id tags.facts.records) then
+        set_deferred tags (Ids.add id define tags.facts.deferred)
 
 let read_instance tags instance ~read =
-  match Hashtbl.find_opt tags.readings instance with
+  match Instances.find_opt instance tags.facts.readings with
   | Some t -> t
   | None ->
       let t = read () in
-      Hashtbl.replace tags.readings instance t;
-      undo_after_trial tags (fun () -> Hashtbl.remove tags.readings instance);
+      let readings = Instances.add instance t tags.facts.readings in
+      tags.facts <- { tags.facts with readings };
       t
 
-let end_deferral tags = Hashtbl.reset tags.deferred
+let end_deferral tags = set_deferred tags Ids.empty
 
 let declare_enum tags enum_name ~at_file_scope =
   { enum_id = fresh_id tags; enum_name; enum_at_file_scope = at_file_scope }
@@ -466,13 +483,16 @@ let untagged_id t =
 let name_untagged tags t names =
   match untagged_id t with
   | Some id ->
-      Hashtbl.replace tags.typedef_names id (List.sort_uniq compare names)
+      let names = List.sort_uniq compare names in
+      tags.facts <-
+        { tags.facts with
+          typedef_names = Ids.add id names tags.facts.typedef_names }
   | None -> ()
 
 let typedef_names tags t =
   match untagged_id t with
   | Some id ->
-      Option.value (Hashtbl.find_opt tags.typedef_names id) ~default:[]
+      Option.value (Ids.find_opt id tags.facts.typedef_names) ~default:[]
   | None -> []
 
 (* Design 3.4: an unqualified arithmetic or pointer type. An unknown type
@@ -494,11 +514,11 @@ let declare_distinct ?instance tags distinct_name distinct_privacy
         representation }
     in
     let t = of_shape (Distinct distinct) in
-    tags.has_distinct <- true;
+    tags.facts <- { tags.facts with has_distinct = true };
     if t.size > max_size then Error Too_large else Ok t
   else Error Invalid_representation
 
-let has_distinct tags = tags.has_distinct
+let has_distinct tags = tags.facts.has_distinct
 
 let as_distinct t =
   match t.shape with
@@ -569,7 +589,7 @@ and replace_in_parameters = function
 let representation t = if mentions_distinct t then replace_distinct t else t
 
 let enum_integer tags tag =
-  match Hashtbl.find_opt tags.enums tag.enum_id with
+  match Ids.find_opt tag.enum_id tags.facts.enums with
   | Some (Fixed { fixed; listed = _ }) -> Some fixed
   | Some (Unfixed integer) -> Some integer
   | None -> None
@@ -579,7 +599,7 @@ let enum_integer tags tag =
    need of an instance complete is met. *)
 let record_definition tags tag =
   run_deferred tags tag;
-  Hashtbl.find_opt tags.records tag.record_id
+  Ids.find_opt tag.record_id tags.facts.records
 
 let record_members tags tag =
   Option.map (fun definition -> definition.members) (record_definition tags tag)
@@ -602,7 +622,7 @@ let rec is_complete tags t =
   | Unknown_type ({ kind = Unknown_object | Object_or_function; _ } as unknown)
     ->
       Depends_on unknown
-  | Enum tag -> Answer (Hashtbl.mem tags.enums tag.enum_id)
+  | Enum tag -> Answer (Ids.mem tag.enum_id tags.facts.enums)
   | Record tag -> Answer (record_definition tags tag <> None)
   | Array { length = Unknown; _ } -> Answer false
   (* The element type was complete when the array type was built, unless
@@ -630,14 +650,14 @@ let rec is_variably_modified t =
   | Void | Arithmetic _ | Enum _ | Record _ | Va_list -> Answer false
 
 let check_unfixed_list tags tag =
-  match Hashtbl.find_opt tags.enums tag.enum_id with
+  match Ids.find_opt tag.enum_id tags.facts.enums with
   | Some (Fixed _) -> Error Fixed_and_unfixed
   | Some (Unfixed _) -> Error Redefinition
   | None -> Ok ()
 
 let define_enum tags tag integer =
   Result.map
-    (fun () -> Hashtbl.replace tags.enums tag.enum_id (Unfixed integer))
+    (fun () -> add_enum_definition tags tag.enum_id (Unfixed integer))
     (check_unfixed_list tags tag)
 
 (* The first fixed type stays: a later fixed type that typec does not
@@ -645,10 +665,10 @@ let define_enum tags tag integer =
    can tell them apart, and both backends refuse a different one. *)
 let fix_enum tags tag stated ~listed =
   let record fixed listed =
-    Hashtbl.replace tags.enums tag.enum_id (Fixed { fixed; listed });
+    add_enum_definition tags tag.enum_id (Fixed { fixed; listed });
     Ok fixed
   in
-  match (Hashtbl.find_opt tags.enums tag.enum_id, stated) with
+  match (Ids.find_opt tag.enum_id tags.facts.enums, stated) with
   | None, _ -> record stated listed
   | Some (Unfixed _), _ -> Error Fixed_and_unfixed
   | Some (Fixed { fixed = Answer before; _ }), Answer now when before <> now
@@ -821,7 +841,7 @@ let check_member target tags ~last member =
   Option.iter (check_bit_field target tags member) member.bit_field_width
 
 let definition_of target tags tag members =
-  if Hashtbl.mem tags.records tag.record_id then raise (Invalid Redefinition);
+  if Ids.mem tag.record_id tags.facts.records then raise (Invalid Redefinition);
   let last = List.length members - 1 in
   List.iteri
     (fun index member -> check_member target tags ~last:(index = last) member)
@@ -836,7 +856,7 @@ let definition_of target tags tag members =
 let define_record target tags tag members =
   match definition_of target tags tag members with
   | definition ->
-      Hashtbl.replace tags.records tag.record_id definition;
+      add_record_definition tags tag.record_id definition;
       Ok ()
   | exception Invalid error -> Error error
 
@@ -847,14 +867,16 @@ let define_variant target tags tag privacy ~scope constructors members =
       invalid_arg "Ctype: a variant of no variant tag");
   Result.map
     (fun () ->
-      Hashtbl.replace tags.variants tag.record_id
-        { privacy; scope; constructors })
+      let variant = { privacy; scope; constructors } in
+      tags.facts <-
+        { tags.facts with
+          variants = Ids.add tag.record_id variant tags.facts.variants })
     (define_record target tags tag members)
 
 let variant_definition tags t =
   match t.shape with
   | Record ({ record_name = Variant_name _; _ } as tag) ->
-      Hashtbl.find_opt tags.variants tag.record_id
+      Ids.find_opt tag.record_id tags.facts.variants
   | Record
       { record_name =
           ( Anonymous | Named _ | Alias_name _ | Instance_name _

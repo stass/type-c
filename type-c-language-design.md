@@ -644,10 +644,13 @@ id(stmt) s;                             /* e = s is an error */
    it is first applied, so the definition that holds that application
    causes it. The definition check of rule 4 defines no instance: what
    the check needs complete is defined, and causes its chain, at the
-   first need of an application, as if no check had run. The
-   needs of a definition are visited in the order of its text, and what
-   one of them causes is defined whole, with all that it causes in turn,
-   before the next is visited.
+   first need of an application, as if no check had run. The check is
+   still refused where its own chain, which begins at an instance that
+   the definition needs, would hold a 65th instance (the limit below),
+   even if a later application would find part of that chain defined
+   already. The needs of a definition are visited in the order of its
+   text, and what one of them causes is defined whole, with all that it
+   causes in turn, before the next is visited.
    Instantiation *nests* along a chain of instances in which each
    causes the next, and a chain holds at most 64 instances. The
    application or call that would cause a 65th is an error, reported at

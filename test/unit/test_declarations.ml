@@ -2226,6 +2226,21 @@ let doubling_aliases count =
            Printf.sprintf " type b%d(T) = b%d(b%d(T));" (n + 1) n n))
   ^ Printf.sprintf " b%d(int) x;" count
 
+(* [count] generics, the nth of which needs two instances of the one
+   before it, so that its definition check and [g<count>(int)] each need
+   2^n instances of distinct arguments; [g0] has [members] members. *)
+let doubling_instances ?(members = 1) count =
+  let member index = Printf.sprintf " T v%d;" index in
+  "type l(T) = struct { T x; }; type r(T) = struct { T y; };\
+  \ type g0(T) = struct {"
+  ^ String.concat "" (List.init members member)
+  ^ " };"
+  ^ String.concat ""
+      (List.init count (fun n ->
+           Printf.sprintf " type g%d(T) = struct { g%d(l(T)) a; g%d(r(T)) b; };"
+             (n + 1) n n))
+  ^ Printf.sprintf " g%d(int) x;" count
+
 let generic_checks () =
   let file = "in.tc" in
   (* Rule 4: an application over a type parameter is an instance, so the
@@ -2250,6 +2265,29 @@ let generic_checks () =
     \ type h(T) = struct { T a; g(id(int)) *p; };\
     \ id(int) x; g(id(int)) v; void f(void) { x = v.m; }";
   rejects ~file (holding 64 ^ " struct w { g(int) z; };") "after a chain of 64";
+  (* A check counts its own chains, which begin at the instances that
+     the definition needs, and no later application can shorten them. *)
+  accepts ~file (holding 64);
+  rejects ~file (holding 65) "after a chain of 64";
+  (* An instance defined before the check ends a chain. *)
+  accepts ~file
+    (box ^ " struct p { " ^ boxed 60 ^ " q; };"
+    ^ " type g(T) = struct { T x; " ^ boxed 65 ^ " y; };");
+  (* Nor does a check make a distinct type for any later point. *)
+  accepts ~file
+    "type d(T) = distinct int; int n;\
+    \ int f(void) { return _Generic(__builtin_choose_expr(\
+    __builtin_constant_p(n), n, n), int: 1, default: 2); }";
+  (* A translation limit bounds the tokens that a unit reads for its
+     instances, which can grow exponentially with the text, and so the
+     time of the refusal, which is about a second. *)
+  let started = Sys.time () in
+  rejects ~file (doubling_instances 30) "tokens of definitions";
+  if Sys.time () -. started > 10.0 then
+    fail_case "doubling_instances 30" "took over 10 s";
+  (* A definition of many members reaches the limit after fewer
+     readings. *)
+  rejects ~file (doubling_instances ~members:1000 30) "tokens of definitions";
   (* A transparent alias instance is a link of its chain, which causes
      the instance that it needs complete. *)
   let aliased depth =

@@ -53,6 +53,10 @@ type instance = {
           writes; a function of [arguments]. *)
 }
 
+(** Persistent maps by instance, which a {!trial} restores by keeping
+    the map that it began with. *)
+module Instances : Map.S with type key = instance
+
 type record_tag = private {
   record_id : int;
   kind : record_kind;
@@ -297,15 +301,9 @@ val read_instance : tags -> instance -> read:(unit -> t) -> t
     [read ()] at its first reading, the same type after. *)
 
 val trial : tags -> (unit -> 'a) -> 'a
-(** [read ()], after which each instance that it declared is
-    forgotten, each that it defined is deferred again and each reading
-    that it made of {!read_instance} forgotten,
-    with what {!undo_after_trial} adds: a generic's definition check
-    defines no instance (design 3.5 rule 7). *)
-
-val undo_after_trial : tags -> (unit -> unit) -> unit
-(** Within a {!trial}, runs [undo] when the trial ends; outside one,
-    nothing. *)
+(** [read ()], after which the tags hold what they held before it, apart
+    from the ids that it used: a generic's definition check defines no
+    instance (design 3.5 rule 7). *)
 
 val end_deferral : tags -> unit
 (** Drops every definition deferred still, when reading ends: no later

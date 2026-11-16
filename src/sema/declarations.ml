@@ -85,7 +85,10 @@ type place = At_file_scope | In_prototype | In_definition | In_block
    variant that completes an incomplete one; [applied_at] the latest
    application of each instance, where an error of its definition is
    reported (design 3.5 rule 5), and [nesting] the chain of instances
-   whose definitions are being read (rule 7), none outside one. *)
+   whose definitions are being read (rule 7), none outside one.
+   [instance_tokens] counts the tokens of the definitions read for
+   instances so far, those of definition checks included, which a trial
+   does not undo. *)
 type state = {
   target : Target.t;
   text : Reader.t;
@@ -102,8 +105,9 @@ type state = {
   incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
       (* the structure of each [type N;], which its variant completes *)
   generics : (Tree.reference, Tree.type_declaration) Hashtbl.t;
-  applied_at : (Ctype.instance, Tree.span) Hashtbl.t;
+  mutable applied_at : Tree.span Ctype.Instances.t;
   mutable nesting : nesting option;
+  mutable instance_tokens : int;
   mutable place : place;
   mutable next_entity : int;
 }
@@ -128,6 +132,15 @@ exception Instance_failed of error
 (* Design 3.5 rule 7: a chain of instances that each cause the next holds
    at most this many. It is a rule of the language, so it is exact. *)
 let max_nesting = 64
+
+(* A translation limit of typec on the tokens of the definitions that a
+   unit reads for its instances, each time it reads one: instances can
+   grow exponentially with the text, as where each generic needs two
+   instances of the one before it, and the work and memory of a reading
+   grow with its definition. Counting tokens bounds both; about 5300
+   instances of 30 tokens each, which a heavy C++ unit has, read a
+   third of it. *)
+let max_instance_tokens = 524288
 
 let next_link nesting application =
   match nesting with
@@ -2147,10 +2160,21 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
               with_arguments state declaration (List.map snd parameters)
                 read)) }
   in
-  Ctype.trial state.tags (fun () ->
+  in_trial state (fun () ->
       let instance = instance_of state declaration parameters in
       let t = instance_type state declaration instance check in
       ignore (Ctype.is_complete state.tags t))
+
+(* [read ()] as a trial, after which the tags and the latest application
+   of each instance are as they were before it. The entities and tags
+   that the check declares stay, unreachable: each reading of the text
+   declares them again, and rule 4 lets no body in it complete a tag
+   declared outside. *)
+and in_trial state read =
+  let applied_at = state.applied_at in
+  Fun.protect
+    ~finally:(fun () -> state.applied_at <- applied_at)
+    (fun () -> Ctype.trial state.tags read)
 
 (* A type application: its arguments, then the type that the generic's
    definition makes of them (rule 3). *)
@@ -2178,15 +2202,10 @@ and generic_declaration state span name reference =
   | None -> not_read state span name
 
 (* The latest application of each instance, where an error of its
-   definition is reported (rule 5); a check forgets its own. *)
+   definition is reported (rule 5); a check forgets its own
+   ([in_trial]). *)
 and note_application state instance span =
-  let earlier = Hashtbl.find_opt state.applied_at instance in
-  Hashtbl.replace state.applied_at instance span;
-  Ctype.undo_after_trial state.tags (fun () ->
-      match earlier with
-      | Some application ->
-          Hashtbl.replace state.applied_at instance application
-      | None -> Hashtbl.remove state.applied_at instance)
+  state.applied_at <- Ctype.Instances.add instance span state.applied_at
 
 (* Design 3.5 rule 2: every type in an argument has a row in the table of
    10.3, which also makes it an object type, no array and not variably
@@ -2293,11 +2312,16 @@ and in_instance :
       (unit -> 'a) ->
       'a =
  fun state declaration instance arguments read ->
-  let application = Hashtbl.find state.applied_at instance in
+  let application = Ctype.Instances.find instance state.applied_at in
   let outer = state.nesting in
   let link = next_link outer application in
   if link.depth > max_nesting then
     fail_nesting state application instance link.began;
+  let span = declaration.span in
+  let tokens = state.instance_tokens + (span.last - span.first + 1) in
+  if tokens > max_instance_tokens then
+    fail_instances state application instance;
+  state.instance_tokens <- tokens;
   state.nesting <- Some link;
   let restore () = state.nesting <- outer in
   match
@@ -2348,6 +2372,20 @@ and fail_nesting state application instance began =
     (Instance_failed
        { location = location_of state application;
          message = Rule.text diagnostic })
+
+and fail_instances state application instance =
+  let message =
+    Printf.sprintf
+      "the application would define the instance %s, which would read \
+       more than %d tokens of definitions for the instances of the unit, \
+       those that definition checks need included, the limit of typec"
+      (quote (shown_instance instance))
+      max_instance_tokens
+  in
+  raise
+    (Instance_failed
+       { location = location_of state application;
+         message = Rule.text (Rule.c_text message) })
 
 and no_row_diagnostic argument ({ part; reason } : Encoding.no_row) =
   let argument_name = quote (Type_name.of_ctype argument) in
@@ -2571,7 +2609,8 @@ let read target text unit =
       type_declarations = Hashtbl.create 16;
       incomplete_variants = Hashtbl.create 16;
       generics = Hashtbl.create 16;
-      applied_at = Hashtbl.create 16;
+      applied_at = Ctype.Instances.empty;
+      instance_tokens = 0;
       nesting = None;
       place = At_file_scope;
       next_entity = 0;
