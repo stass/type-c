@@ -671,6 +671,18 @@ option(int) lowers to.
   claim_before.tc:2: the generic `box` claims every name that begins with its own name and `__` for its instances, and this scope declares `box__i` already (design 10.1 rule 6) [TC0004]
   [1]
 
+A tag declared before is refused as well, and the message names the
+name of the space that the scope declares first.
+
+  $ cat > claim_tag_before.tc <<'EOF'
+  > struct box__z;
+  > int box__a;
+  > type box(T) = struct { T v; };
+  > EOF
+  $ ./golden.exe claim_tag_before.tc
+  claim_tag_before.tc:3: the generic `box` claims every name that begins with its own name and `__` for its instances, and this scope declares `box__z` already (design 10.1 rule 6) [TC0004]
+  [1]
+
 A name whose part before its first `__` is no generic is no claimed
 name.
 

@@ -2423,6 +2423,28 @@ let universe_cases =
        yet (design 8; work package 3.4) [TC0023]";
   ]
 
+(* A generic claims the names of its instances by one lookup in the
+   names of its scope, not a scan of them (design 10.3), so a unit of
+   many generics among many other names parses in time linear in it. *)
+let failed_instance_claims () =
+  let count = 32000 in
+  let declarations index =
+    Printf.sprintf "int n%d; struct s%d; type g%d(T);\n" index index index
+  in
+  let text = String.concat "" (List.init count declarations) in
+  let started = Sys.time () in
+  let failure = parse_failure type_c_file text in
+  let took = Sys.time () -. started in
+  let failed_parse =
+    Option.map (fun message -> ("many generics", message)) failure
+  in
+  let too_slow =
+    if took > 2.0 then
+      Some ("many generics", Printf.sprintf "took %.1f s, over 2 s" took)
+    else None
+  in
+  List.filter_map Fun.id [ failed_parse; too_slow ]
+
 (* File scope opens inside the universe scope: the tree and what file
    scope declares hold no universe generic, the scopes hold the two
    generics apart, and the view in front of a declaration finds them. *)
@@ -2594,6 +2616,7 @@ let failures () =
   in
   ( failed,
     failed_nesting_cases () @ failed_chain_cases () @ failed_universe_scope ()
+    @ failed_instance_claims ()
   )
 
 let () =

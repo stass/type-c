@@ -58,6 +58,11 @@ val declared_in_innermost : ('ordinary, 'tag) t -> (string * 'ordinary) list
 (** The ordinary identifiers that the innermost scope declares, sorted by
     name, each with its declaration there. *)
 
+val first_in_space : ('ordinary, 'tag) t -> string -> string option
+(** [first_in_space scopes generic] is the earliest declared name, an
+    ordinary identifier or a tag, that the innermost scope declares in
+    the instance space of [generic] ({!Spelling.instance_space}). *)
+
 val find_tag : ('ordinary, 'tag) t -> string -> 'tag option
 val find_tag_in_innermost : ('ordinary, 'tag) t -> string -> 'tag option
 val declare_tag : ('ordinary, 'tag) t -> string -> 'tag -> ('ordinary, 'tag) t

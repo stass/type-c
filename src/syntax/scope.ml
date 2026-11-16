@@ -11,13 +11,17 @@ type ('ordinary, 'tag) frame = {
 }
 
 (* An open scope: what it declares, what is visible in it, which is
-   what it declares over what is visible around it, and its depth.
-   Keeping [visible] and [depth] makes a lookup and the depth cost the
-   same at any depth, so that a long chain of nested statements, which
-   the parser reads in a loop, takes linear time. *)
+   what it declares over what is visible around it, the earliest name
+   that it declares in each instance space, and its depth. Keeping
+   [visible] and [depth] makes a lookup and the depth cost the same at
+   any depth, so that a long chain of nested statements, which the
+   parser reads in a loop, takes linear time; keeping [instance_spaces]
+   makes the claim of a generic a lookup, not a scan of what the scope
+   declares. *)
 type ('ordinary, 'tag) level = {
   declared : ('ordinary, 'tag) frame;
   visible : ('ordinary, 'tag) frame;
+  instance_spaces : string Names.t;
   depth : int;
 }
 
@@ -25,7 +29,15 @@ type ('ordinary, 'tag) level = {
 type ('ordinary, 'tag) t = ('ordinary, 'tag) level list
 
 let empty_frame = { ordinary = Names.empty; tags = Names.empty }
-let file = [ { declared = empty_frame; visible = empty_frame; depth = 1 } ]
+let file =
+  [
+    {
+      declared = empty_frame;
+      visible = empty_frame;
+      instance_spaces = Names.empty;
+      depth = 1;
+    };
+  ]
 
 let innermost = function
   | level :: _ -> level
@@ -38,13 +50,19 @@ let file_within universe =
     {
       declared = empty_frame;
       visible = (innermost universe).visible;
+      instance_spaces = Names.empty;
       depth = 1;
     };
   ]
 
 let enter scopes =
   let around = innermost scopes in
-  { declared = empty_frame; visible = around.visible; depth = around.depth + 1 }
+  {
+    declared = empty_frame;
+    visible = around.visible;
+    instance_spaces = Names.empty;
+    depth = around.depth + 1;
+  }
   :: scopes
 
 let is_file = function
@@ -58,7 +76,7 @@ let hiding outer inner =
   Names.union (fun _ declaration _hidden -> Some declaration) inner outer
 
 let reenter outer ~inner =
-  let declared = (innermost inner).declared in
+  let { declared; instance_spaces; _ } = innermost inner in
   let around = innermost outer in
   let visible =
     {
@@ -66,7 +84,7 @@ let reenter outer ~inner =
       tags = hiding around.visible.tags declared.tags;
     }
   in
-  { declared; visible; depth = around.depth + 1 } :: outer
+  { declared; visible; instance_spaces; depth = around.depth + 1 } :: outer
 
 let replace_innermost scopes level =
   match scopes with
@@ -81,6 +99,17 @@ let find_in_innermost scopes name =
 let declared_in_innermost scopes =
   Names.bindings (innermost scopes).declared.ordinary
 
+let first_in_space scopes generic =
+  Names.find_opt generic (innermost scopes).instance_spaces
+
+(* [spaces] with [name] in its instance space, keeping any name
+   already there. *)
+let add_to_space name spaces =
+  match Spelling.instance_space name with
+  | Some generic when not (Names.mem generic spaces) ->
+      Names.add generic name spaces
+  | Some _ | None -> spaces
+
 let add_ordinary name binding frame =
   { frame with ordinary = Names.add name binding frame.ordinary }
 
@@ -91,6 +120,7 @@ let declare scopes name binding =
       level with
       declared = add_ordinary name binding level.declared;
       visible = add_ordinary name binding level.visible;
+      instance_spaces = add_to_space name level.instance_spaces;
     }
 
 let find_tag scopes name = Names.find_opt name (innermost scopes).visible.tags
@@ -111,4 +141,5 @@ let declare_tag scopes name binding =
       level with
       declared = add_tag name binding level.declared;
       visible = add_tag name binding level.visible;
+      instance_spaces = add_to_space name level.instance_spaces;
     }

@@ -820,16 +820,8 @@ let refuse_instance_name state (name : identifier) ~what ~use =
    in the universe scope only, and no scope that ended before it can hold
    a use of it. *)
 let claim_instance_space state (name : identifier) =
-  let in_space entries =
-    List.filter
-      (fun declared -> Spelling.instance_space declared = Some name.node)
-      (List.map fst entries)
-  in
-  match
-    in_space (Scope.declared_in_innermost state.scope)
-    @ in_space (Scope.tags_declared_in_innermost state.scope)
-  with
-  | taken :: _ ->
+  match Scope.first_in_space state.scope name.node with
+  | Some taken ->
       fail_at_token state (token_of name)
         (Rule.message Claimed_name
            (Printf.sprintf
@@ -837,7 +829,7 @@ let claim_instance_space state (name : identifier) =
                name and `__` for its instances, and this scope declares %s \
                already"
               (quoted name.node) (quoted taken)))
-  | [] -> state.generics <- Name_set.add name.node state.generics
+  | None -> state.generics <- Name_set.add name.node state.generics
 
 (* A type declaration is the only declaration of its name in its scope
    (design 3.1 rule 5): unlike [typedef], it is not repeated. *)
