@@ -1691,10 +1691,9 @@ and read_block_declaration state (declaration : Tree.declaration) =
    declaration of its name in its scope (rule 5), so it declares a new
    entity: a typedef name of the type that it defines. *)
 
-and read_type_declaration state (declaration : Tree.type_declaration) =
-  let { Tree.name = checked; declared; definition; scope_end } =
-    declaration.node
-  in
+and read_type_declaration state
+    ({ declaration; scope_end } : Tree.scoped_type_declaration) =
+  let { Tree.name = checked; declared; definition } = declaration.node in
   let name = (checked :> Tree.identifier) in
   Hashtbl.replace state.type_declarations declared.id declaration;
   let bind t =

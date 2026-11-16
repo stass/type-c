@@ -3,7 +3,10 @@
 
 ; Code that an interface must refuse: every .ml here is a test that
 ; misuse.sh checks, so a new file needs no rule. The include path is
-; the directories of the interface files below.
+; the directories of the interface files below: the public ones, which
+; dune keeps apart in public_cmi for a library with private modules (in
+; byte for one without), so a private module is out of reach here as it
+; is outside its library.
 
 (rule
  (alias runtest)
@@ -12,8 +15,8 @@
   (:tests
    (glob_files *.ml))
   (:cmis
-   (glob_files %{workspace_root}/src/cpp/.typec_cpp.objs/byte/*.cmi)
-   (glob_files %{workspace_root}/src/syntax/.typec_syntax.objs/byte/*.cmi)))
+   (glob_files ../../src/cpp/.typec_cpp.objs/public_cmi/*.cmi)
+   (glob_files ../../src/syntax/.typec_syntax.objs/public_cmi/*.cmi)))
  (action
   (setenv
    MISUSE_CMIS

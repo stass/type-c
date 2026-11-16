@@ -178,7 +178,8 @@ and sequence walk items =
 
 and block_item walk = function
   | Tree.Block_declaration declaration -> declaration_flow walk declaration
-  | Block_type_declaration declaration -> type_declaration_flow walk declaration
+  | Block_type_declaration { declaration; _ } ->
+      type_declaration_flow walk declaration
   | Block_statement statement -> statement_flow walk statement
 
 and declaration_flow walk (declaration : Tree.declaration) =

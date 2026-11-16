@@ -12,15 +12,13 @@ type counter = {
   max_depth : int;
   mutable outermost : made list;
       (** the nodes made and not yet inside a node made after them,
-          latest first, so their first tokens decrease: [count] takes
+          latest first, so their first tokens decrease: [make] takes
           every entry at or after the first token it pushes *)
 }
 
 let counter ~max_depth = { max_depth; outermost = [] }
 
-type counted = span
-
-let count counter (span : span) =
+let make counter (span : span) node =
   let rec take_parts tallest = function
     | (part : made) :: rest when part.first_token >= span.first ->
         take_parts (max tallest part.height) rest
@@ -31,8 +29,7 @@ let count counter (span : span) =
   if height > counter.max_depth then None
   else begin
     counter.outermost <- { first_token = span.first; height } :: outside;
-    Some span
+    Some { span; node }
   end
 
-let make span node = { span; node }
 let identifier span name = { span; node = name }

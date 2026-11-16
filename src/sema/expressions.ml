@@ -291,7 +291,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  type_declaration : Tree.type_declaration -> unit;
+  type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
 }
 
@@ -2812,13 +2812,14 @@ and typed_statement context (statement : Tree.statement) =
       scalar ~clause:"6.8.4.1p1" condition;
       typed_statement context then_branch;
       Option.iter (typed_statement context) else_branch
-  | If { condition = Pattern_test { pattern; operand }; then_branch;
-         else_branch } ->
+  | If
+      { condition = Pattern_test { pattern_span; pattern; operand };
+        then_branch; else_branch } ->
       let otherwise =
         Option.map (fun (branch : Tree.statement) -> branch.span) else_branch
       in
-      single_pattern_test context statement ~pattern ~operand then_branch
-        (If_test { otherwise });
+      single_pattern_test context statement ~pattern_span ~pattern ~operand
+        then_branch (If_test { otherwise });
       Option.iter (typed_statement context) else_branch
   | Switch { controlling; body } ->
       switch_controlling context controlling;
@@ -2829,9 +2830,10 @@ and typed_statement context (statement : Tree.statement) =
   | While { condition = Controlling condition; body } ->
       scalar ~clause:"6.8.5p2" condition;
       typed_statement context body
-  | While { condition = Pattern_test { pattern; operand }; body } ->
-      single_pattern_test context statement ~pattern ~operand body
-        While_test
+  | While
+      { condition = Pattern_test { pattern_span; pattern; operand }; body } ->
+      single_pattern_test context statement ~pattern_span ~pattern ~operand
+        body While_test
   | Do { body; condition } ->
       typed_statement context body;
       scalar ~clause:"6.8.5p2" condition
@@ -2958,8 +2960,8 @@ and match_statement context (statement : Tree.statement) scrutinee arms =
 (* Design 4.6: the operand obeys 4.1 rule 1 and the pattern 4.1 rule 3,
    as a scrutinee and a label of a match do. The [else] statement is the
    caller's. *)
-and single_pattern_test context (statement : Tree.statement)
-    ~(pattern : Tree.pattern Tree.spanned) ~(operand : Tree.expression)
+and single_pattern_test context (statement : Tree.statement) ~pattern_span
+    ~(pattern : Tree.pattern) ~(operand : Tree.expression)
     (controlled : Tree.statement) form =
   let t = (expression context operand).expression_type in
   let variant, constructors =
@@ -2972,16 +2974,17 @@ and single_pattern_test context (statement : Tree.statement)
          access = access_of context operand t;
          selects =
            (fun () ->
-             tested context variant constructors pattern controlled form) })
+             tested context variant constructors ~pattern_span pattern
+               controlled form) })
 
 (* The bindings of a test, then its statement, which is in their scope
    and in which no case or default label of a switch around it may stand
    (4.6 rules 4 and 6). *)
-and tested context variant constructors (pattern : Tree.pattern Tree.spanned)
-    (controlled : Tree.statement) form =
+and tested context variant constructors ~pattern_span
+    (pattern : Tree.pattern) (controlled : Tree.statement) form =
   let checked =
     pattern_constructor context ~site:Test_pattern variant constructors
-      pattern.span pattern.node
+      pattern_span pattern
   in
   let bindings = pattern_bindings context checked in
   let enclosing =

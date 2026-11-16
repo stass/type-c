@@ -66,8 +66,9 @@ let scope_ends ?(file = type_c_file) text =
           (fun (arm : Tree.arm) -> List.concat_map (item reader) arm.node.items)
           arms
     | _ -> []
-  and declared reader (declaration : Tree.type_declaration) =
-    let { Tree.name; scope_end; _ } = declaration.node in
+  and declared reader
+      ({ declaration; scope_end } : Tree.scoped_type_declaration) =
+    let name = declaration.node.name in
     let token = reader.Reader.tokens.(scope_end) in
     [ Printf.sprintf "%s:%d:%s" (name.node :> string) scope_end
         (Reader.spelling reader token) ]

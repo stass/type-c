@@ -520,9 +520,14 @@ and statement_node =
     branch or the body, in the block scope that its bindings begin. *)
 and condition =
   | Controlling of expression
-  | Pattern_test of { pattern : pattern spanned; operand : expression }
-      (** [case] pattern [=] operand; the span of [pattern] runs from
-          the [case] *)
+  | Pattern_test of {
+      pattern_span : span;
+      pattern : pattern;
+      operand : expression;
+    }
+      (** [case] pattern [=] operand; [pattern_span] runs from the [case]
+          to the end of the pattern, which is not a node: its names are
+          parts of the statement *)
 
 (** C11 6.8.1. The span runs to the [:], and past the attributes of a
     named label. *)
@@ -580,7 +585,7 @@ and local_label_declaration = identifier list spanned
 (** Declarations and statements in any order. *)
 and block_item =
   | Block_declaration of declaration
-  | Block_type_declaration of type_declaration
+  | Block_type_declaration of scoped_type_declaration
   | Block_statement of statement
 
 (** A type declaration (design 3.1): [type], the name, which is in scope
@@ -596,12 +601,16 @@ and type_declaration_node = {
           that completes the [Incomplete_variant] of its name in its
           scope (rule 4), which is its [earlier] *)
   definition : type_definition;
+}
+
+(** A type declaration and the last token of the scope that holds it, in
+    [Reader.t.tokens], which the parser gives it where it closes that
+    scope: of its block, its arm or the text, where the last may be a
+    pragma token. The names that a variant derives denote it from the
+    declaration to there (design 10.1 rule 6). *)
+and scoped_type_declaration = {
+  declaration : type_declaration;
   scope_end : int;
-      (** the last token of the scope that holds the declaration, in
-          [Reader.t.tokens], which the parser gives it where it closes that
-          scope: of its block, its arm or the text, where the last may
-          be a pragma token. The names that a variant derives denote it
-          from the declaration to there (design 10.1 rule 6). *)
 }
 
 and type_definition =
@@ -758,7 +767,7 @@ and function_definition_node = {
 
 type external_declaration =
   | External_declaration of declaration
-  | Type_declaration of type_declaration
+  | Type_declaration of scoped_type_declaration
   | Function_definition of function_definition
   | Top_level_asm of assembler spanned  (** GNU [asm (...);] *)
   | Empty_declaration of span  (** a GNU [;] alone *)

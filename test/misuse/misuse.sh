@@ -11,7 +11,7 @@
 # any other. TEXT is matched with runs of blanks and newlines read as one
 # space, because ocamlc wraps its messages. Every FILE runs; the exit
 # status says whether all passed.
-# MISUSE_CMIS lists the interface files of every library; their
+# MISUSE_CMIS lists the public interface files of every library; their
 # directories are the include path.
 
 set -efu

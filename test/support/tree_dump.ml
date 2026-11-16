@@ -578,11 +578,11 @@ and statement reader (s : statement) =
 (* A single-pattern test as [(test pattern operand)]. *)
 and condition reader = function
   | Controlling value -> expression reader value
-  | Pattern_test { pattern = p; operand } ->
+  | Pattern_test { pattern_span; pattern = p; operand } ->
       node
-        { first = p.span.first; last = operand.span.last }
+        { first = pattern_span.first; last = operand.span.last }
         "test"
-        [ pattern p.span p.node; expression reader operand ]
+        [ pattern pattern_span p; expression reader operand ]
 
 (* An arm as [(arm labels items)]; a pattern as [(case C sub-patterns)],
    where a binding is a declaration entry and [_] a leaf. *)
@@ -616,13 +616,14 @@ and local_labels (d : local_label_declaration) =
 
 and block_item reader = function
   | Block_declaration d -> declaration reader d
-  | Block_type_declaration d -> type_declaration reader d
+  | Block_type_declaration { declaration; _ } ->
+      type_declaration reader declaration
   | Block_statement s -> statement reader s
 
 (* A type declaration as [(type N definition)]; the tag that it claims
    is a [claims] part, whose entry is a declaration in the tag space. *)
 and type_declaration reader (d : type_declaration) =
-  let { name = checked; declared; definition; _ } = d.node in
+  let { name = checked; declared; definition } = d.node in
   let name = (checked :> identifier) in
   let declared_name =
     noted (declaration_entry name.node declared) (identifier name)
@@ -715,7 +716,7 @@ let function_body reader = function
 
 let external_declaration reader = function
   | External_declaration d -> declaration reader d
-  | Type_declaration d -> type_declaration reader d
+  | Type_declaration { declaration; _ } -> type_declaration reader declaration
   | Function_definition { span; node = definition } ->
       node span "define"
         ([

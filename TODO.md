@@ -154,18 +154,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   `_Generic(const int, const int: 1, int: 2)`), which GCC 16 and Clang
   accept in gnu11, is a syntax error. Read it, with its type unconverted,
   if the corpus has one.
-- [Medium] Two parser sites count a node's span and build the node
-  later (`type_declaration`, for its `scope_end`, and `pattern_test`,
-  for its bindings), so `Spanned` hands out a `counted` span that
-  `make` could use twice, or that a part counted after it would escape.
-  Make `Spanned.make` count and build in one call, taking the counter,
-  by moving `scope_end` out of the spanned declaration and building the
-  pattern where it is read, with its bindings beside it in
-  `Pattern_test`.
-- [Low] `test/misuse` reads every `.cmi` of a library, private modules
-  included, so it cannot show that `Spanned` is out of reach outside
-  `typec_syntax`. Point it at `public_cmi` where a library has private
-  modules and add a misuse of `Spanned.make`.
 - [Low] `&&a` of a label that is not defined is left to the backend,
   which refuses it: the parser keeps the arguments of an attribute as
   tokens, and both backends compile `&&b` where `b` is defined in a

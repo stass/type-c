@@ -170,11 +170,10 @@ let peek state = peek_at state 0
 
 (* Spans. A node starts at a grammar position taken before it is read and
    ends at the last token read, so every node holds at least one token.
-   [counted] is the only way to give a node that holds another its span,
+   [spanned] is the only way to give a node that holds another its span,
    as only a name is built outside it: [finish] for a node read from
-   [start], [spanned] for one that wraps another in the same span, or
-   directly for one that is counted once its parts are made but built
-   later, when what it holds besides them is known. *)
+   [start], or [spanned] itself for one that wraps another in the same
+   span. *)
 
 (* The index in [Reader.t.tokens] of the last grammar token read. *)
 let last_read state = state.grammar.(state.position - 1).index
@@ -241,13 +240,13 @@ let too_deep =
      limit, C11 5.2.4.1)"
     max_depth
 
-(* Counts a node with [span], or refuses it where it is too deep. *)
-let counted state (span : span) =
-  match Spanned.count state.counter span with
-  | Some counted -> counted
+(* Counts and makes a node with [span], or refuses it where it is too
+   deep. *)
+let spanned state (span : span) node =
+  match Spanned.make state.counter span node with
+  | Some made -> made
   | None -> fail_at_token state span.first (Rule.c_text too_deep)
 
-let spanned state span node = Spanned.make (counted state span) node
 let finish state start node = spanned state (span_from state start) node
 
 (* The refusal of the break or continue at [start]. *)
@@ -789,9 +788,9 @@ let run_in_scope state scope parse =
 
 let in_scope state scope parse = fst (run_in_scope state scope parse)
 
-(* A block item or external declaration as read. A type declaration is
-   complete only where the scope that holds it closes, which gives it the
-   last token of the scope (design 10.1 rule 6). *)
+(* A block item or external declaration as read. One that holds a type
+   declaration is complete only where the scope that holds it closes,
+   which gives it the last token of the scope (design 10.1 rule 6). *)
 type 'item scoped = Complete of 'item | Until_scope_end of (int -> 'item)
 
 (* The items of a scope that closes at [scope_end], from [read], the
@@ -2626,9 +2625,8 @@ and declaration_of_start state = function
       expect state P.Semicolon "`;` after a declaration";
       finish state start (Declaration { specifiers; declarators })
 
-(* At the [type] that [begins_type_declaration] recognises. The
-   declaration is complete where its scope closes. *)
-and type_declaration state : int -> type_declaration =
+(* At the [type] that [begins_type_declaration] recognises. *)
+and type_declaration state : type_declaration =
   let start = state.position in
   let type_keyword = state.grammar.(start).index in
   advance state;
@@ -2647,9 +2645,7 @@ and type_declaration state : int -> type_declaration =
       declared_definition
     end
   in
-  let declaration_span = counted state (span_from state start) in
-  fun scope_end ->
-    Spanned.make declaration_span { name; declared; definition; scope_end }
+  finish state start { name; declared; definition }
 
 and incomplete_variant state checked =
   let name = (checked :> identifier) in
@@ -2769,14 +2765,14 @@ and pattern_test state keyword =
   let start = state.position in
   advance state;
   let words = pattern_words state in
-  let pattern_span = counted state (span_from state start) in
+  let pattern_span = span_from state start in
   expect state P.Equal "`=` after the pattern of a single-pattern test";
   let operand = expression state in
   expect state P.Right_paren
     (Printf.sprintf "`)` after the operand of the test of `%s`" keyword);
   fun () ->
-    let pattern = Spanned.make pattern_span (bound_pattern state words) in
-    Pattern_test { pattern; operand }
+    Pattern_test
+      { pattern_span; pattern = bound_pattern state words; operand }
 
 (* The controlling expression of a [do] after [keyword], in the
    disputed scope of the loop [disputed]. *)
@@ -3231,7 +3227,7 @@ and block_item state =
   else if begins_type_declaration state then
     let declaration = type_declaration state in
     Until_scope_end
-      (fun scope_end -> Block_type_declaration (declaration scope_end))
+      (fun scope_end -> Block_type_declaration { declaration; scope_end })
   (* Before a declaration: where [match] is a typedef name, the tokens of
      a match would otherwise begin a declaration (design 2.2). *)
   else if begins_match state then Complete (Block_statement (statement state))
@@ -3344,7 +3340,8 @@ let c_external_declaration state =
 let external_declaration state =
   if begins_type_declaration state then
     let declaration = type_declaration state in
-    Until_scope_end (fun scope_end -> Type_declaration (declaration scope_end))
+    Until_scope_end
+      (fun scope_end -> Type_declaration { declaration; scope_end })
   else Complete (c_external_declaration state)
 
 (* File scope closes with the text, whose last token may be a pragma

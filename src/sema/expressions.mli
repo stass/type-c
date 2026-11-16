@@ -282,7 +282,7 @@ type context = {
   overloaded : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
-  type_declaration : Tree.type_declaration -> unit;
+  type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
 }

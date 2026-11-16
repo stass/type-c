@@ -20,7 +20,7 @@ let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let span_of = function
   | Tree.External_declaration declaration -> declaration.span
-  | Tree.Type_declaration declaration -> declaration.span
+  | Tree.Type_declaration { declaration; _ } -> declaration.span
   | Tree.Function_definition definition -> definition.span
   | Tree.Top_level_asm assembler -> assembler.span
   | Tree.Empty_declaration span -> span
@@ -61,7 +61,7 @@ let describe = function
   | Tree.Function_definition { node = { declarator; _ }; _ } ->
       "function "
       ^ Option.value (Tree.declared_name declarator) ~default:"?"
-  | Tree.Type_declaration { node = { name; _ }; _ } ->
+  | Tree.Type_declaration { declaration = { node = { name; _ }; _ }; _ } ->
       "type " ^ (name.node :> string)
   | Tree.Top_level_asm _ -> "assembler"
   | Tree.Empty_declaration _ -> "empty declaration"

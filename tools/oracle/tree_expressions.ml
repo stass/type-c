@@ -226,7 +226,8 @@ and block_items visit items =
   List.iter
     (function
       | Block_declaration d -> declaration visit d
-      | Block_type_declaration d -> type_declaration visit d
+      | Block_type_declaration { declaration; _ } ->
+          type_declaration visit declaration
       | Block_statement s -> statement visit s)
     items
 
@@ -267,7 +268,7 @@ let function_definition visit (definition : function_definition) =
 
 let external_declaration visit = function
   | External_declaration d -> declaration visit d
-  | Type_declaration d -> type_declaration visit d
+  | Type_declaration { declaration; _ } -> type_declaration visit declaration
   | Function_definition definition -> function_definition visit definition
   | Top_level_asm code -> assembler visit code.node
   | Empty_declaration _ -> ()
