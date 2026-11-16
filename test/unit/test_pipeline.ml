@@ -113,6 +113,9 @@ let planned ?emit_c words =
   | Ok plan -> plan
   | Error error -> failwith (Pipeline.error_message error)
 
+(* A command for GCC, for which no option is added to the user's. *)
+let for_gcc = Option.map (fun (command : Pipeline.command) -> command Gcc)
+
 let only_translation (plan : Pipeline.t) =
   match plan.translations with
   | [ translation ] -> translation
@@ -130,7 +133,7 @@ let () =
         "-x"; "c"; "x.tc";
       ]);
   check "-c -o: compile"
-    (translation.compile
+    (for_gcc translation.compile
     = Some
         [
           "cc"; "-std=gnu11"; quiet; "-O2"; "-c"; "-o"; "out/x.o";
@@ -141,8 +144,8 @@ let () =
     && translation.preprocessed = "/T/1/preprocessed.i"
     && translation.emitted = File "/T/1/x.c");
   check "-c -o: target options are the compile step's"
-    (translation.target_options = [ "-std=gnu11"; quiet; "-O2" ]);
-  check "-c -o: no final command" (plan.final = None)
+    (plan.target_options = [ "-std=gnu11"; quiet; "-O2" ]);
+  check "-c -o: no final command" (Option.is_none plan.final)
 
 (* The compile step reads typec's output, which is UTF-8 whatever the
    source's encoding. *)
@@ -151,7 +154,7 @@ let () =
   let translation = only_translation (planned [ charset; "-c"; "x.tc" ]) in
   check "-finput-charset: preprocess" (List.mem charset translation.preprocess);
   check "-finput-charset: not compile"
-    (translation.compile
+    (for_gcc translation.compile
     = Some
         [
           "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
@@ -159,7 +162,7 @@ let () =
         ])
 
 let () =
-  let compile words = (only_translation (planned words)).compile in
+  let compile words = for_gcc (only_translation (planned words)).compile in
   check "-c without -o"
     (compile [ "-c"; "dir/x.tc" ]
     = Some
@@ -185,10 +188,10 @@ let () =
 let () =
   let plan = planned [ "x.tc"; "-Iinc"; "y.c"; "-o"; "prog"; "-lm" ] in
   check "link with a .c input"
-    (plan.final
+    (for_gcc plan.final
     = Some [ "cc"; "/T/1.o"; "-Iinc"; "y.c"; "-o"; "prog"; "-lm" ]);
   check "link: compile to the temporary object"
-    ((only_translation plan).compile
+    (for_gcc (only_translation plan).compile
     = Some
         [
           "cc"; "-std=gnu11"; quiet; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
@@ -196,7 +199,7 @@ let () =
         ]);
   let plan = planned [ "-Iinc"; "-MD"; "a.tc"; "b.tc"; "-lm" ] in
   check "link .tc inputs only: the final command compiles"
-    (plan.final
+    (for_gcc plan.final
     = Some
         [
           "cc"; "-std=gnu11"; quiet; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
@@ -204,7 +207,7 @@ let () =
         ]);
   check "link .tc inputs only: no compile step"
     (List.for_all
-       (fun (t : Pipeline.translation) -> t.compile = None)
+       (fun (t : Pipeline.translation) -> Option.is_none t.compile)
        plan.translations);
   check "link .tc inputs only: a directory each"
     (List.map (fun (t : Pipeline.translation) -> t.directory) plan.translations
@@ -213,8 +216,33 @@ let () =
     (List.map (fun (t : Pipeline.translation) -> t.source) plan.translations
     = [ "a.tc"; "b.tc" ]);
   check "-c with a .c input"
-    ((planned [ "-c"; "x.tc"; "y.c"; "-O2" ]).final
+    (for_gcc (planned [ "-c"; "x.tc"; "y.c"; "-O2" ]).final
     = Some [ "cc"; "-c"; "y.c"; "-O2" ])
+
+(* Clang reads no trigraph in the emitted C, after the user's options;
+   GCC reads none there and refuses the option (design 13.2). *)
+let () =
+  let for_clang =
+    Option.map (fun (command : Pipeline.command) -> command Clang)
+  in
+  let plan = planned [ "-trigraphs"; "-c"; "x.tc" ] in
+  check "Clang: compile without trigraphs"
+    (for_clang (only_translation plan).compile
+    = Some
+        [
+          "cc"; "-std=gnu11"; quiet; "-trigraphs"; "-c"; "-o"; "x.o"; "-x";
+          "cpp-output"; "/T/1/x.c"; quiet_markers; "-fno-trigraphs";
+        ]);
+  check "Clang: the final command compiles without trigraphs"
+    (for_clang (planned [ "x.tc" ]).final
+    = Some
+        [
+          "cc"; "-std=gnu11"; quiet; "-x"; "cpp-output"; "/T/1/x.c";
+          quiet_markers; "-fno-trigraphs";
+        ]);
+  let plan = planned [ "x.tc"; "y.c" ] in
+  check "Clang: the final command that links objects is the same"
+    (for_clang plan.final = for_gcc plan.final)
 
 let () =
   let preprocess words = (only_translation (planned words)).preprocess in
@@ -251,10 +279,10 @@ let () =
   check "--emit-c to -o" (emitted [ "x.tc"; "-o"; "x.c" ] = File "x.c");
   check "--emit-c compiles nothing"
     (let plan = planned ~emit_c:true [ "x.tc" ] in
-     (only_translation plan).compile = None && plan.final = None);
+     Option.is_none (only_translation plan).compile
+     && Option.is_none plan.final);
   check "--emit-c target options"
-    ((only_translation (planned ~emit_c:true [ "-m32"; "-std=c11"; "x.tc" ]))
-       .target_options
+    ((planned ~emit_c:true [ "-m32"; "-std=c11"; "x.tc" ]).target_options
     = [ quiet; "-m32"; "-std=c11" ])
 
 let () =

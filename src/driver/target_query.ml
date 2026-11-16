@@ -5,7 +5,7 @@ module Target = Typec_sema.Target
 
 type error =
   | Exited of int
-  | Ended_by_signal
+  | Ended_by_signal of int
   | Output_too_long
   | Invalid_macros of Target.error
 
@@ -52,7 +52,9 @@ let start program arguments =
 let check_status = function
   | Unix.WEXITED 0 -> ()
   | Unix.WEXITED status -> raise (Failed (Exited status))
-  | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> raise (Failed Ended_by_signal)
+  | Unix.WSIGNALED signal -> raise (Failed (Ended_by_signal signal))
+  | Unix.WSTOPPED _ ->
+      failwith "Target_query: waitpid reported the backend stopped"
 
 (* The backend's stderr is not a pipe, so its stdout is the only channel
    to drain and the read cannot deadlock. Every path closes the pipe and
@@ -90,7 +92,7 @@ let error_message ~program = function
         "the C compiler %S exited with status %d listing its \
          predefined macros"
         program status
-  | Ended_by_signal ->
+  | Ended_by_signal _ ->
       Printf.sprintf
         "the C compiler %S was ended by a signal listing its \
          predefined macros"

@@ -32,8 +32,14 @@
 (** Where the emitted C goes. *)
 type destination = File of string | Standard_output
 
-(** The commands for one [.tc] input. Each command is an argument vector
-    whose first element is the backend. *)
+(** A backend command: the argument vector, whose first element is the
+    backend, for the compiler that {!Target_query.query} finds the
+    backend to be. It depends on the compiler because a command that
+    compiles emitted C turns Clang's trigraphs off, which typec's reader
+    does not read (design 13.2). *)
+type command = Typec_sema.Target.compiler -> string list
+
+(** The commands for one [.tc] input. *)
 type translation = {
   source : string;  (** the input, as given *)
   directory : string;
@@ -43,21 +49,24 @@ type translation = {
       (** writes the preprocessed text on stdout, which goes to
           [preprocessed] *)
   preprocessed : string;
-  target_options : string list;
-      (** the options of the compile step, without its inputs and
-          outputs, for {!Target_query.query}: the target model is that of
-          the compilation *)
   dialect : Typec_syntax.Keyword_set.dialect;
       (** the dialect of the keywords that the backend reads the text
           with: that of [-std=], unless [-fasm] or [-fno-asm] says
           otherwise *)
   emitted : destination;
-  compile : string list option;
+  compile : command option;
       (** [None] with [--emit-c] and when the final command compiles the
           emitted C *)
 }
 
-type t = { translations : translation list; final : string list option }
+type t = {
+  target_options : string list;
+      (** the options of the compile step, without its inputs and
+          outputs, for {!Target_query.query}: the target model is that of
+          the compilation *)
+  translations : translation list;
+  final : command option;
+}
 
 (** Why a command line with a [.tc] input has no pipeline. *)
 type error =

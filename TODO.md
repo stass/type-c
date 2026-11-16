@@ -19,15 +19,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
-- [High] Under `-std=c11` or `-std=c17`, which typec passes to every
-  step, Clang 21 reads trigraphs in its `-x cpp-output` compile, which
-  the reader does not: `#define Q ?` then `Q?=pragma pack(1)` makes
-  `clang -E` write `??=pragma pack(1)`, and the compile packs what
-  follows while typec reads `? ? =` and no pragma (a system header's
-  body, which typec passes through unread, gets it to the backend).
-  `??/` splices a line the same way. GCC 16 reads no trigraph there.
-  Pass `-fno-trigraphs` to Clang's compile step, so that the backend
-  reads the text as the reader does.
 - [Low] `Target_query.query` starts and waits for the backend itself,
   so in a compilation it hands the backend `typec`'s stdin, not
   `/dev/null`, and does not pass on a caught signal as `Process.wait`
@@ -148,9 +139,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   writes one only in a line marker of GCC's for a file name that holds
   it, and GCC then refuses its own output. Refuse such a carriage
   return, so that the lines of the reader are always the backend's.
-- [Low] The reader refuses a `#` or `%:` outside a directive, so the
-  `Punctuator Hash` arm of `Emitter.token` and the sentence of
-  `emitter.mli` on it are dead; delete them.
 - [Low] `#ident` and `#sccs`, which `cc -E` passes through, are refused
   as unsupported directives. Pass them through like a pragma if a corpus
   uses them.
@@ -986,6 +974,13 @@ types (design 13.3).
   written out in `tools/hosts/corpus-in-container.sh`,
   `tools/hosts/freebsd.sh` and the README's example; `run.sh` and
   `freebsd.sh` could share one script that runs it.
+- [Low] The reference compile of `tools/corpus/corpus.ml`
+  (`compile_unit`) writes typec's steps out by hand, and its compile of
+  the `-E` text lacks the `-fno-trigraphs` that typec gives Clang: under
+  a recipe's `-std=c11` a trigraph that a macro builds is read by the
+  reference only, and the comparison reports a difference where typec
+  is right. Build the reference commands from `Pipeline`, as
+  `tools/oracle/typec_unit.ml` builds its plan.
 - [Low] `debian-amd64` and `alpine-amd64` write their corpus records to
   the same `runs/linux-x86_64/` and their logs to the same
   `CACHE/build/linux-x86_64/`, since the runner names a host by

@@ -6,7 +6,7 @@
 (** Why the backend gave no target model. *)
 type error =
   | Exited of int  (** The backend exited with this non-zero status. *)
-  | Ended_by_signal
+  | Ended_by_signal of int  (** The signal that ended the backend. *)
   | Output_too_long  (** More output than any macro dump has. *)
   | Invalid_macros of Typec_sema.Target.error
 

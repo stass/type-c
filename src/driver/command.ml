@@ -88,10 +88,13 @@ let read_preprocessed (translation : Pipeline.translation) =
   | Error error ->
       stop Exit_status.Refused (Typec_cpp.Reader.error_message error)
 
-(* A signal that interrupts the query ends the pipeline by that signal. *)
-let query_target ~program (translation : Pipeline.translation) =
+(* A signal that interrupts the query ends the pipeline by that signal.
+   The query is the first step, and a backend that fails it, as one
+   that rejects an option of the command line does, ends the pipeline
+   as a failed step does, after the backend's own message. *)
+let query_target ~program options =
   let model =
-    try Target_query.query ~program translation.target_options
+    try Target_query.query ~program options
     with Unix.Unix_error (error, _, _) ->
       stop_if_caught ();
       stop Exit_status.Environment (cannot_run program error)
@@ -99,7 +102,9 @@ let query_target ~program (translation : Pipeline.translation) =
   stop_if_caught ();
   match model with
   | Ok target -> target
-  | Error error ->
+  | Error (Exited status) -> raise (Stopped (Exit status))
+  | Error (Ended_by_signal signal) -> raise (Stopped (Signal signal))
+  | Error ((Output_too_long | Invalid_macros _) as error) ->
       stop Exit_status.Environment (Target_query.error_message ~program error)
 
 let lower dialect target text =
@@ -126,22 +131,31 @@ let make_directory path =
     stop Exit_status.Environment
       ("cannot create a temporary directory: " ^ message)
 
-(* Each translation queries its own target model, which is simpler than
-   sharing one between translations whose options are the same. *)
-let translate ~program ~null (translation : Pipeline.translation) =
+let translate ~null (target : Target.t) (translation : Pipeline.translation)
+    =
   make_directory translation.directory;
   preprocess ~null translation;
   let text = read_preprocessed translation in
-  let target = query_target ~program translation in
   let lowered = lower translation.dialect target text in
   write_emitted translation.emitted (Typec_emit.Emitter.emit text lowered);
-  Option.iter (run_step ~stdin:null ~stdout:Unix.stdout) translation.compile
+  Option.iter
+    (fun compile ->
+      run_step ~stdin:null ~stdout:Unix.stdout
+        (compile target.backend.compiler))
+    translation.compile
 
-(* The final command reads typec's stdin, which an input "-" names. *)
+(* One target model serves every translation, as they share the options
+   of the compile step, and names the compiler that the commands are for.
+   The final command reads typec's stdin, which an input "-" names. *)
 let run_plan ~program (plan : Pipeline.t) =
+  let target = query_target ~program plan.target_options in
   with_file "/dev/null" [ Unix.O_RDONLY ] (fun null ->
-      List.iter (translate ~program ~null) plan.translations);
-  Option.iter (run_step ~stdin:Unix.stdin ~stdout:Unix.stdout) plan.final
+      List.iter (translate ~null target) plan.translations);
+  Option.iter
+    (fun final ->
+      run_step ~stdin:Unix.stdin ~stdout:Unix.stdout
+        (final target.backend.compiler))
+    plan.final
 
 let run_pipeline (invocation : Invocation.t) temp_dir =
   let emit_c = invocation.action = Invocation.Emit_c in

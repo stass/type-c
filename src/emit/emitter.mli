@@ -20,9 +20,8 @@ type piece
 val token : Typec_cpp.Reader.t -> int -> piece option
 (** [token unit index] is the token [index] of [unit] at its own
     location, wherever lowering writes it, or None where the token is a
-    pragma line, or a [#], which Clang reads in preprocessed text as the
-    start of a directive where it begins a line; such a token cannot be
-    moved, and its definition is refused rather than moved without it.
+    pragma line; such a token cannot be moved, and its definition is
+    refused rather than moved without it.
     An identifier is written as its name ({!Typec_cpp.Reader.spelling}),
     in UTF-8 where universal character names spell it, which names the
     same identifier. *)

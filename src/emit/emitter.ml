@@ -9,7 +9,7 @@ type piece = { text : string; location : Location.t }
 let token (unit : Reader.t) index =
   let token = unit.tokens.(index) in
   match token.kind with
-  | Pragma _ | Typec_pragma | Punctuator Hash -> None
+  | Pragma _ | Typec_pragma -> None
   | Identifier _ | Number | Character _ | String _ | Punctuator _ ->
       Some { text = Reader.spelling unit token; location = token.location }
 

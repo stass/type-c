@@ -2492,6 +2492,20 @@ language is defined here and not by the tool.
   reach the preprocessor, are refused. Without the markers every token,
   those of system headers included, would count as the input's own and
   so as Type-C text (2.1).
+- The backend reads the emitted C as the reader did, which reads no
+  trigraph. Under `-std=c11`, `-std=c17` or `-trigraphs` the `-E` step
+  translates the trigraphs of the source, but one that a macro builds
+  reaches its output: after `#define Q ?`, `Q?=pragma pack(1)` gives
+  `??=pragma pack(1)`, which Clang 21 reads in `-x cpp-output` input
+  under the same options as a pragma that `typec` never read, and `??/`
+  as a line splice. The commands that compile emitted C therefore give
+  Clang `-fno-trigraphs`, after the user's options so that `-trigraphs`
+  does not turn trigraphs back on. GCC 16 reads no trigraph in
+  preprocessed input under any option and refuses `-fno-trigraphs`, so
+  it gets none. The commands depend on which compiler the backend is,
+  which the target model names (13.3), so `typec` reads the model once,
+  as the first step. `-Xclang -ftrigraphs` still reaches Clang's
+  front end after the option, as any `-Xclang` option reaches it.
 - `--emit-c` stops after emission and writes the C. `--emit-c-header` is
   described in 9.3.
 - With a `.tc` input, `-fpack-struct` without a value is refused as an
@@ -2529,7 +2543,8 @@ language is defined here and not by the tool.
   test runner tells them from the backend's without reading stderr: 80
   when `typec` refuses the program (a diagnostic about the source), 81
   for an error of its environment (the command line, a backend it cannot
-  start or that gives no target model, a file it cannot read or write)
+  start or whose output is no target model, a file it cannot read or
+  write)
   and 82 for an internal error, which is a bug in `typec`. *Provisional
   (P22).* The values assume that no backend exits with them, apart from
   a `typec` that a backend runs again, which refuses with 81: GCC and
@@ -3514,8 +3529,8 @@ structures of the packing probe that ends one (10.3), one of each.
   names.
 - `--emit-c` shows what any construct became. Its output is the file
   that the compile step reads, preprocessed output with GNU line markers
-  (13.4): compiling it by hand takes `-x cpp-output`, and under
-  `-pedantic` on Clang also `-Wno-gnu-line-marker` (2.4).
+  (13.4): compiling it by hand takes `-x cpp-output` and the options
+  that the compile step adds to the user's (2.4, 13.2).
 
 ### 13.7 Implementation
 

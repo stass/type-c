@@ -1,20 +1,27 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
+module Target = Typec_sema.Target
+
 type destination = File of string | Standard_output
+
+type command = Target.compiler -> string list
 
 type translation = {
   source : string;
   directory : string;
   preprocess : string list;
   preprocessed : string;
-  target_options : string list;
   dialect : Typec_syntax.Keyword_set.dialect;
   emitted : destination;
-  compile : string list option;
+  compile : command option;
 }
 
-type t = { translations : translation list; final : string list option }
+type t = {
+  target_options : string list;
+  translations : translation list;
+  final : command option;
+}
 
 type error =
   | Refused_option of { option : string; reason : string }
@@ -267,12 +274,26 @@ let compile_options shape arguments =
    options so that their -Wgnu does not turn that back on (design 2.4). *)
 let quiet_line_markers = "-Wno-gnu-line-marker"
 
+(* Under -std=c11, -std=c17 or -trigraphs, Clang 21 reads a trigraph in
+   preprocessed input, which typec's reader does not, and a macro can
+   build one that the -E step leaves. -fno-trigraphs follows the user's
+   options, so that their -trigraphs does not turn trigraphs back on.
+   GCC 16 reads no trigraph there whatever its options, and refuses
+   -fno-trigraphs (design 13.2). *)
+let without_trigraphs : Target.compiler -> string list = function
+  | Clang -> [ "-fno-trigraphs" ]
+  | Gcc -> []
+
 let as_preprocessed file = [ "-x"; "cpp-output"; file ]
 
 (* A backend command that compiles emitted C: [words] are its options
-   and inputs. *)
-let emitted_c_command shape words =
-  (shape.program :: words) @ [ quiet_line_markers ]
+   and inputs, and the backend reads the C as typec's reader did. *)
+let emitted_c_command shape words compiler =
+  (shape.program :: words)
+  @ (quiet_line_markers :: without_trigraphs compiler)
+
+(* A backend command that reads no emitted C. *)
+let same_for_every_compiler words (_ : Target.compiler) = words
 
 let compile_command shape arguments ~linked_object source emitted_file =
   emitted_c_command shape
@@ -306,7 +327,6 @@ let translation shape arguments ~linked_object index source =
     directory;
     preprocess;
     preprocessed = Filename.concat directory "preprocessed.i";
-    target_options = compile_options shape arguments;
     dialect = shape.dialect;
     emitted;
     compile;
@@ -358,9 +378,11 @@ let final_command shape ~objects ~emitted_files arguments =
         Some (emitted_c_command shape (with_standard shape compiled))
     | Linked ->
         let objects = List.map (fun file -> [ file ]) objects in
-        Some (shape.program :: with_replaced_inputs objects linked)
+        let words = with_replaced_inputs objects linked in
+        Some (same_for_every_compiler (shape.program :: words))
     | Stopped _ when other_inputs ->
-        Some (shape.program :: Command_line.words others)
+        let words = Command_line.words others in
+        Some (same_for_every_compiler (shape.program :: words))
     | Stopped _ -> None
 
 let plan ~program ~emit_c ~temp_dir arguments =
@@ -412,6 +434,7 @@ let plan ~program ~emit_c ~temp_dir arguments =
     in
     Ok
       {
+        target_options = compile_options shape arguments;
         translations;
         final = final_command shape ~objects ~emitted_files arguments;
       }

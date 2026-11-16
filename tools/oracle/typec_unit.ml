@@ -15,8 +15,8 @@ let model ~cc options =
   | Error error -> failwith (Pipeline.error_message error)
   | Ok { translations = []; _ } | Ok { translations = _ :: _ :: _; _ } ->
       failwith "the options name inputs"
-  | Ok { translations = [ translation ]; _ } -> (
-      match Target_query.query ~program:cc translation.target_options with
+  | Ok { translations = [ translation ]; target_options; _ } -> (
+      match Target_query.query ~program:cc target_options with
       | Ok target -> (translation.dialect, target)
       | Error error -> failwith (Target_query.error_message ~program:cc error))
 

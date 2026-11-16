@@ -224,8 +224,10 @@ A backend step that fails ends typec with the status of the step, text
 that the reader refuses ends it with 80, the status of a refused program
 (src/driver/exit_status.ml), and the temporary directory is removed on
 every path: a backend that fails to preprocess or to compile, text that
-the reader refuses, and a backend ended by a signal. fails-compile fails
-the compile step with a status of its own, which typec passes on. A
+the reader refuses, and a backend ended by a signal. The first step is
+the target query, where a backend that rejects an option fails, as a
+direct compile would. fails-compile fails the compile step with a
+status of its own, which typec passes on. A
 backend that cannot be started, because it is missing, not executable or
 a directory, ends typec with 81, while one that runs and exits with 127,
 the status a shell gives a command it cannot start, ends it with 127.
@@ -234,6 +236,10 @@ started without and the backend writes to /dev/null instead. Clang
 aborts when it cannot write a warning to its stderr, so warns.c also
 shows that the backend can write there.
 
+  $ typec --cc=$clang -fno-such-option -c x.tc 2>/dev/null
+  [1]
+  $ typec --cc=$gcc -fno-such-option -c x.tc 2>/dev/null
+  [1]
   $ printf '#error stop\n' > bad-cpp.tc
   $ typec --cc=$clang -c bad-cpp.tc 2>/dev/null
   [1]
