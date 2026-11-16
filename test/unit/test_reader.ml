@@ -240,6 +240,12 @@ let pragma_cases =
       "#pragma typec 'x\n#pragma typecx 'y\n"
       "typec-pragma #pragma typec 'x \
        | pragma not tokens: unterminated literal";
+    case "the first word of a #pragma typec line is a whole identifier"
+      "#pragma typec\xc3\xa9 x\n#pragma typec\\u00e9\n#pragma typec\xcc\x80\n\
+       #pragma typec\xe2\x80\x94\n"
+      "pragma [typec\xc3\xa9 x] | pragma [typec\xc3\xa9] \
+       | pragma [typec\xcc\x80] \
+       | pragma not tokens: character U+2014 cannot be part of an identifier";
   ]
 
 (* "spelling = written" for each token: the name of an identifier

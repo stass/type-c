@@ -457,12 +457,25 @@ let pragma_text state =
   | names -> Token.Identifiers names
   | exception Failed { message; _ } -> Token.Not_tokens message
 
+(* A [#pragma typec] line is one whose first token is the identifier
+   [typec], read as any other identifier, so that a longer name such as
+   [typec\u00e9] is none. A first part that is no token makes no such
+   line. *)
+let begins_typec_pragma state =
+  match peek state 0 with
+  | None | Some '\n' -> false
+  | Some _ -> (
+      match scan_token state with
+      | Token.Identifier "typec" -> true
+      | _ -> false
+      | exception Failed _ -> false)
+
 (* The whole line is the token, so that it can be passed through. *)
 let read_pragma state hash =
   skip_while state is_blank;
   let text_start = state.pos in
   let kind =
-    if read_word state = "typec" then Token.Typec_pragma
+    if begins_typec_pragma state then Token.Typec_pragma
     else begin
       state.pos <- text_start;
       Token.Pragma (pragma_text state)

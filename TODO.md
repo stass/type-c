@@ -109,10 +109,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   which Clang and GCC accept in gnu11, are misread: as an identifier and
   a string, as an unterminated literal, or with their inner lines taken
   as directives. Lex them, counting their newlines.
-- [Low] `read_pragma` takes a line for `#pragma typec` when its first
-  word, read as ASCII identifier bytes, is `typec`, so `#pragma typecé x`
-  is one. Decide by the first token that the pragma's text reads as
-  (`Identifier "typec"`).
 - [Low] Diagnostics of later stages print names and spellings from the
   text, and file names from line markers (`Expressions.needing`), where
   a crafted name can hold control bytes or a fake `[TC0018]`; route them
