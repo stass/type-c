@@ -823,8 +823,10 @@ and other_type state span (specifier : Tree.type_specifier) =
       let attribute = first_unrecorded_attribute attributes in
       obscured state attribute (Ctype.record record)
   | Enum { tag; enumerators; underlying; attributes } ->
-      let attribute = first_unrecorded_attribute attributes in
       let fixed = Option.map (fixed_type state span) underlying in
+      let attribute =
+        first_unrecorded_attribute (enum_attributes ~fixed attributes)
+      in
       let enum = enum_type state span ~attribute ~fixed tag enumerators in
       obscured state attribute (Ctype.enum enum)
   | Typeof_type type_name -> read_type_name state type_name
@@ -918,14 +920,33 @@ and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
   in
   (match (fixed, enumerators) with
   | Some fixed, _ ->
-      let integer = attributed_integer state attribute fixed in
-      fix_enum state span enum integer;
+      let stated = attributed_integer state attribute fixed in
+      let listed = enumerators <> None in
+      let recorded =
+        checked state span (Ctype.fix_enum state.tags enum stated ~listed)
+      in
+      (* An attribute applies to the list it stands with: Clang gives the
+         enumerators the type that [mode] makes even after a declaration
+         without it. *)
+      let integer = if attribute = None then recorded else stated in
       Option.iter (define_fixed_enum state span enum integer) enumerators
-  | None, Some _ when Ctype.enum_integer state.tags enum <> None ->
-      fail state span (Rule.c_text (Ctype.error_message Ctype.Redefinition))
-  | None, Some enumerators -> define_enum state span ~attribute enum enumerators
+  | None, Some enumerators ->
+      checked state span (Ctype.check_unfixed_list state.tags enum);
+      define_enum state span ~attribute enum enumerators
   | None, None -> ());
   enum
+
+(* [packed] narrows the integer type of an enumeration to the narrowest
+   that holds its values; a fixed type leaves it nothing to narrow, and
+   GCC and Clang ignore it there. *)
+and enum_attributes ~fixed attributes =
+  match fixed with
+  | None -> attributes
+  | Some _ ->
+      List.filter
+        (fun (attribute : Tree.attribute) ->
+          attribute.node.name.node <> "packed")
+        attributes
 
 (* The integer type of an enumeration, unknown where an attribute that
    typec does not know may change it, as [packed] and [mode] do. *)
@@ -950,17 +971,6 @@ and fixed_type state span specifiers : Integer.t Unknown.answer =
         (Rule.c_text
            "the fixed type of an enumeration is not an integer type (C23 \
             6.7.2.2)")
-
-(* An enumeration with a fixed type is complete from its type on, and each
-   of its declarations repeats the type (C23 6.7.2.2). *)
-and fix_enum state span enum integer =
-  match (Ctype.enum_integer state.tags enum, integer) with
-  | None, _ -> checked state span (Ctype.define_enum state.tags enum integer)
-  | Some (Answer before), Answer fixed when before <> fixed ->
-      fail state span
-        (Rule.c_text
-           "an enumeration is declared with another fixed type (C23 6.7.2.2)")
-  | Some (Answer _ | Depends_on _), (Answer _ | Depends_on _) -> ()
 
 (* Members (6.7.2.1) *)
 

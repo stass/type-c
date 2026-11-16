@@ -1610,8 +1610,9 @@ let address_kind context operand =
   | Integer_expression _ | Unevaluable _ | Not_integer _ -> Backend_constant
 
 (* Applies [compute] to the integer type that typing gives an operation on
-   integer constant expressions. An operand of unknown type makes that
-   type unknown, and the value is then unevaluable at [span]. *)
+   integer constant expressions. No integer constant has an unknown type,
+   as the declarations give an enumerator one only with its value; were
+   one to, the value would be unevaluable at [span], a safe refusal. *)
 let with_result_type context span (typed : typed) compute =
   match Ctype.as_arithmetic context.tags typed.expression_type with
   | Answer (Some (Integer result)) -> compute result

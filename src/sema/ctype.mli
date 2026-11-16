@@ -159,6 +159,11 @@ type error =
   | Function_returning_function  (** 6.7.6.3p1. *)
   | Void_parameter  (** 6.7.6.3p10: [void] only as [(void)]. *)
   | Redefinition  (** A tag defined twice (6.7.2.3p1). *)
+  | Fixed_and_unfixed
+      (** An enumeration declared both with and without a fixed type (C23
+          6.7.2.2). *)
+  | Another_fixed_type
+      (** An enumeration declared with two fixed types (C23 6.7.2.2). *)
   | Duplicate_member of string  (** 6.7.2.1p13 with 6.7.2.3. *)
   | Incomplete_member
       (** 6.7.2.1p3: of incomplete or function type, other than a flexible
@@ -268,11 +273,28 @@ val privacy : tags -> t -> privacy
 (** The privacy of a variant that is complete here or of a distinct type,
     qualified or not; [Public] for any other type. *)
 
+val check_unfixed_list : tags -> enum_tag -> (unit, error) result
+(** Whether the list of an enumeration without a fixed type may be read
+    here: not where the type has a fixed type or a list already. *)
+
 val define_enum :
   tags -> enum_tag -> Integer.t Unknown.answer -> (unit, error) result
-(** Completes an enumerated type with its compatible integer type (see
-    {!Arithmetic.enum_compatible_type}), or with the unknown type that
-    decides it: a fixed type or an attribute that typec does not know. *)
+(** Completes an enumerated type without a fixed type at its list, as
+    {!check_unfixed_list} allows, with its compatible integer type (see
+    {!Arithmetic.enum_compatible_type}). The type is unknown where an
+    attribute that typec does not know decides it. *)
+
+val fix_enum :
+  tags ->
+  enum_tag ->
+  Integer.t Unknown.answer ->
+  listed:bool ->
+  (Integer.t Unknown.answer, error) result
+(** A declaration of an enumerated type with this fixed type (C23
+    6.7.2.2), and its list where [listed]. The first completes the type
+    with its fixed type, which every later one repeats; the result is that
+    type, the one its enumerators take. A known type that differs from the
+    first is an error; an unknown one is not, as it may be any. *)
 
 val record_members : tags -> record_tag -> member list option
 (** The members of a complete structure or union, in order. *)

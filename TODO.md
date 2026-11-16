@@ -476,21 +476,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   where the known one, which must be the same (6.7p3), would keep more.
 - [Low] The location of an unknown `_Float16` or `typeof` is that of the
   first specifier of its declaration, not of its own token.
-- [Low] An enumeration with a fixed type whose list is given twice, or
-  that has a fixed type in one declaration and none in another with the
-  same compatible type, is not reported, and `enum e : int; enum e {
-  A };` is reported as a tag defined twice; the backend reports each.
-  Recording in the tags whether the type is fixed and whether the list
-  was read would report them. `enum e : int x;`, a fixed type outside
-  `enum e : int;` alone, which C23 and Clang refuse, is accepted.
-- [Medium] `fix_enum` keeps the unknown type of an enumeration whose
-  first declaration has an attribute outside the table, while a later
-  declaration with a fixed type gives its enumerators that type: in
-  `enum __attribute__((packed)) E : int; enum E : int { A, B = -A };`,
-  `A` is typed as the unknown enumerated type but has an `int` value, so
-  `-A` is unevaluable where the backend accepts it. Let `fix_enum`
-  record the stated fixed type in the tags, so that the type and value
-  of an enumerator agree, or refuse the fixed declaration.
+- [Low] `enum e;` before `enum e : int;`, which GCC and Clang refuse,
+  is accepted, as is `enum e : int x;`, a fixed type outside
+  `enum e : int;` alone, which C23 and Clang refuse; the backend reports
+  each.
 - [Medium] `__real__` and `__imag__` of an integer constant are integer
   constant expressions in GCC and Clang; the constant evaluator of
   `Declarations` calls them not constant.

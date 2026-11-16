@@ -75,6 +75,14 @@ type constructor = {
   fields : member list;
 }
 
+(* An enumeration with a fixed type is complete from the first
+   declaration that states the type (C23 6.7.2.2); [listed] says whether
+   its list has been read. One without a fixed type is complete at its
+   list. *)
+type enum_definition =
+  | Fixed of { fixed : Integer.t Unknown.answer; listed : bool }
+  | Unfixed of Integer.t Unknown.answer
+
 (* What the definition of a variant adds to its structure. *)
 type variant_definition = {
   privacy : privacy;
@@ -85,7 +93,7 @@ type variant_definition = {
 type tags = {
   mutable next_id : int;
   records : (int, record_definition) Hashtbl.t;
-  enums : (int, Integer.t Unknown.answer) Hashtbl.t;
+  enums : (int, enum_definition) Hashtbl.t;
   variants : (int, variant_definition) Hashtbl.t;
   mutable has_distinct : bool;
 }
@@ -103,6 +111,8 @@ type error =
   | Function_returning_function
   | Void_parameter
   | Redefinition
+  | Fixed_and_unfixed
+  | Another_fixed_type
   | Duplicate_member of string
   | Incomplete_member
   | Misplaced_flexible_array
@@ -386,7 +396,11 @@ and replace_in_parameters = function
 (* A type with no distinct type in it stays the same value. *)
 let representation t = if mentions_distinct t then replace_distinct t else t
 
-let enum_integer tags tag = Hashtbl.find_opt tags.enums tag.enum_id
+let enum_integer tags tag =
+  match Hashtbl.find_opt tags.enums tag.enum_id with
+  | Some (Fixed { fixed; listed = _ }) -> Some fixed
+  | Some (Unfixed integer) -> Some integer
+  | None -> None
 
 let record_definition tags tag = Hashtbl.find_opt tags.records tag.record_id
 
@@ -438,11 +452,34 @@ let rec is_variably_modified t =
   | Unknown_type unknown -> Depends_on unknown
   | Void | Arithmetic _ | Enum _ | Record _ | Va_list -> Answer false
 
+let check_unfixed_list tags tag =
+  match Hashtbl.find_opt tags.enums tag.enum_id with
+  | Some (Fixed _) -> Error Fixed_and_unfixed
+  | Some (Unfixed _) -> Error Redefinition
+  | None -> Ok ()
+
 let define_enum tags tag integer =
-  if Hashtbl.mem tags.enums tag.enum_id then Error Redefinition
-  else (
-    Hashtbl.replace tags.enums tag.enum_id integer;
-    Ok ())
+  Result.map
+    (fun () -> Hashtbl.replace tags.enums tag.enum_id (Unfixed integer))
+    (check_unfixed_list tags tag)
+
+(* The first fixed type stays: a later fixed type that typec does not
+   know may be any integer type, so only the backend, which knows both,
+   can tell them apart, and both backends refuse a different one. *)
+let fix_enum tags tag stated ~listed =
+  let record fixed listed =
+    Hashtbl.replace tags.enums tag.enum_id (Fixed { fixed; listed });
+    Ok fixed
+  in
+  match (Hashtbl.find_opt tags.enums tag.enum_id, stated) with
+  | None, _ -> record stated listed
+  | Some (Unfixed _), _ -> Error Fixed_and_unfixed
+  | Some (Fixed { fixed = Answer before; _ }), Answer now when before <> now
+    ->
+      Error Another_fixed_type
+  | Some (Fixed { listed = true; _ }), _ when listed -> Error Redefinition
+  | Some (Fixed { fixed; listed = was_listed }), _ ->
+      record fixed (was_listed || listed)
 
 (* Classification *)
 
@@ -931,6 +968,11 @@ let error_message = function
   | Function_returning_array -> "function returns an array"
   | Function_returning_function -> "function returns a function"
   | Redefinition -> "tag is defined twice"
+  | Fixed_and_unfixed ->
+      "an enumeration is declared both with and without a fixed type (C23 \
+       6.7.2.2)"
+  | Another_fixed_type ->
+      "an enumeration is declared with another fixed type (C23 6.7.2.2)"
   | Duplicate_member name -> Printf.sprintf "duplicate member %S" name
   | Incomplete_member -> "member has an incomplete or function type"
   | Misplaced_flexible_array ->

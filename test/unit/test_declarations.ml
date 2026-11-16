@@ -533,12 +533,6 @@ let constant_expressions () =
   evaluates_int "(1 ? -1 : 0u) > 0" "1";
   evaluates_int "(0 ? 0u : -1L) < 0" "1";
   evaluates_int ~target:ilp32 "(0 ? 0u : -1L) < 0" "0";
-  (* Typing gives [-A] the unknown type of the enumeration (TODO.md), so
-     its value is unknown too. *)
-  let packed = "enum __attribute__((packed)) E : int; enum E : int { A, " in
-  let needs_packed = "the value of the operation depends on the attribute" in
-  rejects (packed ^ "B = -A };") needs_packed;
-  rejects (packed ^ "B = 1 ? A : 2 };") needs_packed;
   evaluates_int ~target:ilp32 "sizeof(int) - 5 > 0" "1";
   evaluates_int "sizeof(int) - 5 > 0" "1";
   rejects "enum { V = 2147483647 + 1 };" "6.6p4";
@@ -828,7 +822,31 @@ let fixed_enumerations () =
   rejects "enum e : unsigned char { A = 255, B };" "not representable";
   rejects "enum e : unsigned char { A = -1 };" "not representable";
   rejects "enum e : int; enum e : long;" "another fixed type";
-  rejects "enum e : int { A }; enum e { B };" "defined twice";
+  rejects "enum e : int { A }; enum e { B };" "with and without a fixed type";
+  rejects "enum e : int; enum e { A };" "with and without a fixed type";
+  rejects "enum e { A = -1 }; enum e : int;" "with and without a fixed type";
+  rejects "enum __attribute__((packed)) e { A }; enum e : int;"
+    "with and without a fixed type";
+  rejects "enum e : int { A }; enum e : int { B };" "defined twice";
+  (* GCC takes a later [enum e;] for the tag, where Clang refuses it. *)
+  accepts "enum e : int; enum e;";
+  (* A fixed type leaves [packed] nothing to narrow: GCC and Clang ignore
+     it there, wherever it stands. *)
+  declares "enum __attribute__((packed)) e : int; enum e : int { A, B = -A };"
+    "B" "enumerator enum e = 0";
+  enum_integer_of "enum e : unsigned char { A } __attribute__((__packed__));"
+    "e" "unsigned char";
+  declares "enum __attribute__((packed)) e : short { A } x;" "x"
+    "object enum e external static";
+  (* The first fixed type decides the type of the enumerators and their
+     values alike: Clang gives [e] the type [mode] makes, and GCC int. *)
+  rejects "enum __attribute__((mode(QI))) e : int; enum e : int { A };"
+    "the value of each enumerator depends on the attribute 'mode'";
+  rejects "enum e : int; enum __attribute__((mode(QI))) e : int { A };"
+    "the value of each enumerator depends on the attribute 'mode'";
+  rejects "enum e { A }; enum e { A };" "defined twice";
+  rejects "enum e : int { A }; enum e { B = sizeof(int[-1]) };"
+    "with and without a fixed type";
   rejects "enum e : float { A };" "not an integer type";
   (* A fixed type that typec does not know leaves the integer type unknown,
      so the enumerators, which need it, are an error. *)
