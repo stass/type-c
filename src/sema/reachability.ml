@@ -151,6 +151,12 @@ and block_item walk = function
   | Block_type_declaration { declaration; _ } ->
       type_declaration_flow walk declaration
   | Block_statement statement -> statement_flow walk statement
+  (* The statement runs at the exits of the scope, not here (design 6
+     rule 1), and holds no label of the function (rule 9); the walk reads
+     it for the jumps into its statement expressions. *)
+  | Block_defer { statement; _ } ->
+      ignore (statement_flow walk statement);
+      completes
 
 and declaration_flow walk (declaration : Tree.declaration) =
   match declaration.node with

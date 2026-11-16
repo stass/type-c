@@ -40,8 +40,8 @@ unread, and `_Defer` there is refused too.
   [1]
 
 The parser reads the body of a block literal, which typing does not, so
-a `_Defer` statement there is refused as a statement until work package
-2.5 builds `defer`, and by the scan of the literal after.
+a `_Defer` statement there is read as a statement and refused by the
+scan of the literal after.
 
   $ cat > defer_block.tc <<'EOF'
   > # 1 "defer_block.tc"
@@ -50,7 +50,7 @@ a `_Defer` statement there is refused as a statement until work package
   > # 2 "defer_block.tc" 2
   > EOF
   $ ./golden.exe defer_block.tc
-  block.h:1: `_Defer` is not implemented yet (design 6; work package 2.5) [TC0023]
+  block.h:1: `_Defer` in a block literal, which typing does not read, begins a construct of Type-C that would reach the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]
   [1]
 
 The words `defer` and `try` of Type-C text are refused in an attribute

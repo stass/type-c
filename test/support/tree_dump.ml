@@ -637,6 +637,8 @@ and block_item reader = function
   | Block_type_declaration { declaration; _ } ->
       type_declaration reader declaration
   | Block_statement s -> statement reader s
+  | Block_defer { keyword; statement = s } ->
+      node { keyword with last = s.span.last } "defer" [ statement reader s ]
 
 (* A type declaration as [(type N definition)], or
    [(type N (parameters T ...) definition)] for a generic type; the tag

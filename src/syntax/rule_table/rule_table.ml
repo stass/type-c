@@ -136,10 +136,11 @@ let rows =
          [_]; and a field whose name C reserves for any use." };
     Live { name = "Disputed_jump"; code = 26; clause = Some "design 4.4";
       meaning =
-        "A [break] or [continue] in Type-C text in a statement \
-         expression in the condition of a loop or the step of a [for], \
-         outside every loop, [switch] and match within it, which GCC and \
-         Clang take to leave different statements." };
+        "A [break] or [continue] in a statement expression in the \
+         condition of a loop or the step of a [for], outside every loop, \
+         [switch] and match within it, which GCC and Clang take to leave \
+         different statements: in Type-C text, and in a deferred \
+         statement in any text (design 6 rule 10)." };
     Live { name = "Break_outside"; code = 27;
       clause = Some "C11 6.8.6.3p1, design 4.3 rule 2";
       meaning =
@@ -214,8 +215,9 @@ let rows =
          which is file scope (design 3.5 rule 8)." };
     Live { name = "Pragma_tokens"; code = 40; clause = Some "design 13.5";
       meaning =
-        "A [#pragma] line in Type-C text whose text after [pragma] is no \
-         sequence of preprocessing tokens." };
+        "A [#pragma] line whose text after [pragma] is no sequence of \
+         preprocessing tokens, in Type-C text or in a deferred statement \
+         (design 6), which is moved text." };
     Live { name = "Type_argument"; code = 41;
       clause = Some "design 3.5 rule 2";
       meaning =
@@ -298,7 +300,8 @@ let rows =
         "A [try] that is not the whole of an expression statement, the \
          whole right operand of a simple assignment that is one, or the \
          whole initialiser of the one declarator of a declaration that \
-         is a block item." };
+         is a block item; so also a [try] in a statement expression or in \
+         a deferred statement (design 5.1 rule 4)." };
     Live { name = "Try_declaration"; code = 55;
       clause = Some "design 5.1 rule 3";
       meaning =
@@ -308,6 +311,30 @@ let rows =
       meaning =
         "A [try] in a statement or declaration that holds a pragma line \
          or directly follows one, its C labels included." };
+    Live { name = "Defer_position"; code = 57;
+      clause = Some "design 6 rule 11";
+      meaning =
+        "A [defer] statement that is no block item of a compound \
+         statement or a match arm in a function body: the substatement \
+         of a statement, the statement of a label, [case] or [default], \
+         the deferred statement of another, a block item of the compound \
+         statement of a statement expression, or outside every function \
+         body." };
+    Live { name = "Deferred_exit"; code = 58;
+      clause = Some "design 6 rule 4";
+      meaning =
+        "A deferred statement that holds a [return], a [goto], a GNU \
+         computed [goto *] or an [asm goto], or a [break] or [continue] \
+         that leaves it; a [try] in one is refused as [Try_position]." };
+    Live { name = "Deferred_declaration"; code = 59;
+      clause = Some "design 6 rule 9, 13.5";
+      meaning =
+        "A deferred statement that holds an identifier label, a GNU \
+         [__label__] declaration, the definition of an object with static \
+         or thread storage duration, a structure, union or enumeration \
+         specifier that has a body or declares its tag, a type \
+         declaration or a block literal, which each copy of the statement \
+         would define again." };
   ]
 
 let () =

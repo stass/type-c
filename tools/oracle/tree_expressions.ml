@@ -231,7 +231,8 @@ and block_items visit items =
       | Block_declaration d -> declaration visit d
       | Block_type_declaration { declaration; _ } ->
           type_declaration visit declaration
-      | Block_statement s -> statement visit s)
+      | Block_statement s | Block_defer { statement = s; _ } ->
+          statement visit s)
     items
 
 and type_declaration visit (d : type_declaration) =

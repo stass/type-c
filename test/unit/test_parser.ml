@@ -66,7 +66,8 @@ let universe_token_count (reader : Reader.t) =
 let scope_ends ?(file = type_c_file) text =
   let rec item reader = function
     | Tree.Block_type_declaration declaration -> declared reader declaration
-    | Block_statement statement -> in_statement reader statement
+    | Block_statement statement | Block_defer { statement; _ } ->
+        in_statement reader statement
     | Block_declaration _ -> []
   and in_statement reader (statement : Tree.statement) =
     match statement.node with
@@ -135,7 +136,8 @@ let jump_targets ?(file = type_c_file) text =
   in
   let rec items reader = List.concat_map (item reader)
   and item reader = function
-    | Tree.Block_statement statement -> in_statement reader statement
+    | Tree.Block_statement statement | Block_defer { statement; _ } ->
+        in_statement reader statement
     | Block_declaration _ | Block_type_declaration _ -> []
   and value reader (expression : Tree.expression) =
     match expression.node with
@@ -199,6 +201,10 @@ let jump_target_cases =
   in
   let jumps name body expected = case name (in_function body) expected in
   [
+    jumps "a loop and a switch in the statement of a defer"
+      "for (;;) {\ndefer {\nwhile (n) {\nswitch (n) {\ncase 1:\n\
+       continue;\n}\nbreak;\n}\n}\nbreak;\n}"
+      "continue->while:4 break->while:4 break->for:2";
     jumps "a loop in a match arm in a switch"
       "switch (n) {\ncase 1:\nmatch (v) {\ncase A:\n\
        for (;;) { break; continue; }\nbreak;\ndefault:\nbreak;\n}\n\
@@ -2098,13 +2104,26 @@ let type_c_error_cases =
        that a system header opens, which typing does not read, but the \
        generic `option` claims every name that begins with its own name and \
        `__` for its instances (design 10.1 rule 6) [TC0004]";
-    case "a defer statement is not implemented"
-      "void f(void) { defer f(); }"
-      "error: in.tc:1: `defer` is not implemented yet (design 6; work package \
-       2.5) [TC0023]";
+    case "a defer statement" "void f(void) { defer f(); }"
+      "(define (void) (function f (void)) (block (defer (expr (call f)))))";
     case "_Defer is defer" "void f(void) { _Defer f(); }"
-      "error: in.tc:1: `_Defer` is not implemented yet (design 6; work \
-       package 2.5) [TC0023]";
+      "(define (void) (function f (void)) (block (defer (expr (call f)))))";
+    case "a defer of a null statement" "void f(void) { defer; }"
+      "(define (void) (function f (void)) (block (defer ;)))";
+    case "a defer in a defer" "void f(void) { defer { defer f(); f(); } }"
+      "(define (void) (function f (void)) (block (defer (block (defer (expr \
+       (call f))) (expr (call f))))))";
+    case "a defer after the labels of an arm"
+      "type t = | A | B;\nvoid f(t v) { match (v) { case A: defer f(v); \
+       break; default: break; } }"
+      "(type t claims claims A B) | (define (void) (function f (t v)) (block \
+       (match v (arm (case A) (defer (expr (call f v))) break) (arm default \
+       break))))";
+    case "a declaration is no statement of a defer"
+      "void f(void) { defer int x = 0; }"
+      "error: in.tc:1: expected an expression, found `int`";
+    case "defer in an operand" "int f(int x) { return x + defer; }"
+      "error: in.tc:1: expected an expression, found `defer`";
     case "a generated name" "int __tc_x;"
       "error: in.tc:1: `__tc_x` begins with `__tc_`, which is reserved for \
        the names that typec generates (design 2.3) [TC0001]";

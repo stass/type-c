@@ -427,7 +427,7 @@ implements them.
 
   $ printf 'void f(void) { defer f(); }\n' > defer.tc
   $ ./golden.exe defer.tc
-  defer.tc:1: `defer` is not implemented yet (design 6; work package 2.5) [TC0023]
+  defer.tc:1: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
   [1]
   $ printf 'str s;\n' > universe.tc
   $ ./golden.exe universe.tc

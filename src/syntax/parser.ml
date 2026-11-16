@@ -121,6 +121,9 @@ type jump_scope =
       (* The condition of a [loop] or its step if a for, outside every
          loop, switch and match within it, where Clang leaves the loop
          and GCC reads the scope [around] the loop (design 4.4). *)
+  | Deferred_statement
+      (* the statement of a defer, which no break or continue leaves
+         (design 6 rule 4) *)
 
 (* The innermost match arm around the cursor: the match it belongs to,
    and the breaks in Type-C text read in it so far that leave that
@@ -169,6 +172,9 @@ type state = {
           read: where lowering writes the operand of a [try] that the
           statement or declaration holds (design 5.1 rule 3) *)
   mutable jumps : jump_scope;
+  mutable in_deferred : bool;
+      (** inside the statement of a defer, which lowering copies to each
+          exit of its scope (design 6 rules 4 and 9) *)
   mutable arm : arm_breaks option;
   mutable labels : body_labels option;  (** [None] outside every body *)
   mutable generic : generic_place option;
@@ -415,6 +421,15 @@ let refuse_undefined_jump state labels =
             6.8.6.1p1)")
   | None -> ()
 
+(* Runs [parse], the statement of a defer, which no break or continue
+   leaves (design 6 rule 4). *)
+let as_deferred state parse =
+  let around = state.in_deferred in
+  state.in_deferred <- true;
+  let result = with_jumps state Deferred_statement parse in
+  state.in_deferred <- around;
+  result
+
 (* Runs [parse], a function body or a block literal: a function of its
    own, whose labels are its own and which no break or continue in it
    leaves. *)
@@ -424,7 +439,10 @@ let as_function state parse =
     { function_labels = Names.empty; local_labels = Names.empty; gotos = [] }
   in
   state.labels <- Some labels;
+  let around = state.in_deferred in
+  state.in_deferred <- false;
   let result = with_jumps state Function_body parse in
+  state.in_deferred <- around;
   refuse_undefined_jump state labels;
   state.labels <- saved;
   result
@@ -452,40 +470,54 @@ let is_system_c_text_at state index =
    there to leave the loop, and GCC reads the scope around the loop. *)
 type reading = Clang_reading | Gcc_reading
 
-(* The statement that a break in [jumps] leaves on [reading], if any. *)
+(* What a break or continue finds on one reading: the statement that it
+   leaves, none, or the statement of a defer, which it may not leave. *)
+type departure = Leaves of jump_target | Leaves_nothing | Leaves_deferred
+
+(* What a break in [jumps] leaves on [reading]. *)
 let rec break_leaves reading = function
-  | Loop target | Switch_or_match { target; _ } -> Some target
+  | Loop target | Switch_or_match { target; _ } -> Leaves target
   | Disputed { loop; around } -> (
       match reading with
-      | Clang_reading -> Some loop
+      | Clang_reading -> Leaves loop
       | Gcc_reading -> break_leaves reading around)
-  | Function_body -> None
+  | Deferred_statement -> Leaves_deferred
+  | Function_body -> Leaves_nothing
 
-(* The loop that a continue in [jumps] continues on [reading], if any:
-   the innermost loop, through any switch or match inside it. *)
+(* What a continue in [jumps] continues on [reading]: the innermost loop,
+   through any switch or match inside it. *)
 let rec continue_leaves reading = function
-  | Loop target -> Some target
+  | Loop target -> Leaves target
   | Switch_or_match { around; _ } -> continue_leaves reading around
   | Disputed { loop; around } -> (
       match reading with
-      | Clang_reading -> Some loop
+      | Clang_reading -> Leaves loop
       | Gcc_reading -> continue_leaves reading around)
-  | Function_body -> None
+  | Deferred_statement -> Leaves_deferred
+  | Function_body -> Leaves_nothing
 
 (* What the [keyword] at [start] leaves, by [leaves]. The two readings
    differ only where the jump is in a disputed scope, which Type-C text
-   refuses and C text leaves to the backend; where Clang finds nothing,
-   GCC does not either, as no disputed scope is in the way. *)
+   and a deferred statement refuse and other C text leaves to the
+   backend; where Clang finds nothing or the deferred statement, GCC
+   does too, as no disputed scope is in the way. *)
 let jump_targets state start keyword leaves ~no_target =
   match (leaves Clang_reading state.jumps, leaves Gcc_reading state.jumps) with
-  | None, _ -> fail_jump state start no_target
-  | Some clang, Some gcc when clang = gcc -> Only clang
-  | Some loop, gcc -> (
-      if is_type_c_text_at state (first_token state start) then
-        fail_disputed_jump state start keyword;
+  | Leaves_nothing, _ -> fail_jump state start no_target
+  | Leaves_deferred, _ ->
+      fail_jump state start
+        (Rule.message Deferred_exit
+           (Printf.sprintf "a `%s` that leaves the statement of a defer"
+              keyword))
+  | Leaves clang, Leaves gcc when clang = gcc -> Only clang
+  | Leaves loop, gcc -> (
+      if is_type_c_text_at state (first_token state start) || state.in_deferred
+      then fail_disputed_jump state start keyword;
       match gcc with
-      | None -> Only loop (* GCC refuses it *)
-      | Some around -> Either { loop; around })
+      (* GCC refuses it, and none leaves a deferred statement here, as
+         one in it was refused above. *)
+      | Leaves_nothing | Leaves_deferred -> Only loop
+      | Leaves around -> Either { loop; around })
 
 (* Notes the break at [start], which leaves [leaves], for design 4.3
    rule 5 if it is Type-C text that leaves the match of the arm around
@@ -522,7 +554,9 @@ let tail_breaks (items : block_item list) =
   let last_statement items =
     match List.rev items with
     | Block_statement last :: _ -> [ last ]
-    | (Block_declaration _ | Block_type_declaration _) :: _ | [] -> []
+    | (Block_declaration _ | Block_type_declaration _ | Block_defer _) :: _
+    | [] ->
+        []
   in
   let rec visit found = function
     | [] -> found
@@ -589,9 +623,10 @@ let refuse_generated_names state =
 (* A rule looks at the identifiers of every pragma in Type-C text (design
    13.5), so there a pragma line needs some: one that is no sequence of
    tokens is refused. In C text it passes on whole. *)
-let refuse_pragma_without_tokens state index (token : Token.t) =
+let refuse_pragma_without_tokens state ~moved index (token : Token.t) =
   match token.kind with
-  | Token.Pragma (Not_tokens reason) when is_type_c_text_at state index ->
+  | Token.Pragma (Not_tokens reason) when moved || is_type_c_text_at state index
+    ->
       fail_at_token state index
         (Rule.message Pragma_tokens
            ("a `#pragma` line whose text is no sequence of preprocessing \
@@ -601,7 +636,15 @@ let refuse_pragma_without_tokens state index (token : Token.t) =
       ()
 
 let refuse_pragmas_without_tokens state =
-  Array.iteri (refuse_pragma_without_tokens state) state.reader.tokens
+  Array.iteri (refuse_pragma_without_tokens state ~moved:false)
+    state.reader.tokens
+
+(* Moved text in any text is held to the same rule (design 13.5). *)
+let refuse_moved_pragmas state (span : span) =
+  for index = span.first to span.last do
+    refuse_pragma_without_tokens state ~moved:true index
+      state.reader.tokens.(index)
+  done
 
 (* A construct that a later work package implements, at the cursor. *)
 let fail_not_implemented state ~section ~package text =
@@ -877,10 +920,33 @@ let refuse_universe_name state name =
         (quoted name ^ " is a universe name that typec does not implement yet")
   | Some { meaning = Generic; _ } | None -> ()
 
-(* At [defer] or [_Defer], which the cursor has not passed. *)
-let fail_defer state =
-  fail_not_implemented state ~section:"6" ~package:"2.5"
-    (quoted (next_spelling state) ^ " is not implemented yet")
+(* Lowering copies the statement of a defer to each exit of its scope
+   (design 6 rules 4 and 9), so a jump out of it would skip the rest of
+   the exit, and a definition in it would be made once for each copy.
+   [what] at the token [at] is one such. *)
+let refuse_deferred_exit state ~at what =
+  if state.in_deferred then
+    fail_at_token state at
+      (Rule.message Deferred_exit
+         (what
+        ^ " in the statement of a defer, which control leaves only at its \
+           end"))
+
+(* At a defer statement that stands in [where], which is no block item of
+   a compound statement or a match arm in a function body. *)
+let fail_defer_position state where =
+  fail state
+    (Rule.message Defer_position
+       ("a `defer` statement is a block item of a compound statement or a \
+         match arm in a function body, not " ^ where))
+
+let refuse_deferred_definition state ~at what =
+  if state.in_deferred then
+    fail_at_token state at
+      (Rule.message Deferred_declaration
+         (what
+        ^ " in the statement of a defer, which lowering copies to each exit \
+           of its scope, where each copy would define it again"))
 
 (* The identifiers that are words of Type-C text where no declaration
    hides them (design 2.3). *)
@@ -891,15 +957,21 @@ let type_c_word = function
   | "defer" -> Some Defer
   | _ -> None
 
-(* Whether the word at the cursor is Type-C's [try]: in Type-C text,
+(* Whether the word at the cursor is Type-C's [word]: in Type-C text,
    where no declaration of the same identifier hides it, as one hides a
    universe name (design 2.3). *)
-let begins_try state =
+let begins_word state word =
   match peek state with
-  | Identifier_token name when type_c_word name = Some Try ->
+  | Identifier_token name when type_c_word name = Some word ->
       is_type_c_text_at state state.grammar.(state.position).index
       && Option.is_none (visible state name)
   | _ -> false
+
+let begins_try state = begins_word state Try
+
+(* [_Defer] is the statement in every text (design 6 rule 10). *)
+let begins_defer state =
+  peek state = Keyword_token Keyword.Defer || begins_word state Defer
 
 (* Runs [read] with [state.place] at the scope in front of what it
    reads, and restores the place around it after. *)
@@ -920,14 +992,6 @@ let try_prefix state =
   let scope = scope_depth state in
   advance state;
   fun operand -> Tree.Try { operand; scope }
-
-(* In Type-C text, [defer] where no declaration of the same identifier
-   hides it is the statement of Type-C (design 2.3). *)
-let refuse_defer_word state name =
-  if
-    is_type_c_text_at state state.grammar.(state.position).index
-    && type_c_word name = Some Defer
-  then fail_defer state
 
 (* A variant declares its enumerators for C clients (design 10.1 rule
    6), so Type-C text cannot name them. *)
@@ -952,7 +1016,8 @@ let resolve state name =
       (* A cast-expression reads an unhidden [try] before it would read
          a primary-expression, the one place that resolves a name. *)
       if begins_try state then invalid_arg "Parser: a try read as a name";
-      refuse_defer_word state name;
+      (* A defer statement begins a block item, never an operand. *)
+      if begins_defer state then fail_expected state "an expression";
       refuse_universe_name state name;
       Undeclared
 
@@ -975,6 +1040,8 @@ let refuse_argument_tag state (name : identifier) =
    (design 10.1 rule 6). *)
 let declare_tag state (name : identifier) ~implicit =
   let id = Tag_at (token_of name) in
+  refuse_deferred_definition state ~at:(token_of name)
+    ("the declaration of the tag " ^ quoted name.node);
   refuse_argument_tag state name;
   if claims_tag state name.node then
     fail_claimed state name "tag" "is declared again";
@@ -1174,6 +1241,11 @@ let read_alignment_operand state parse =
     Option.map (fun place -> { place with in_alignment = true }) state.generic
   in
   with_generic state generic parse
+
+(* Where a compound statement stands, which decides whether a defer
+   statement may be one of its block items: not in a statement
+   expression, whose last item gives its value (design 6 rule 11). *)
+type compound_place = Plain_block | Statement_expression_body
 
 (* A block item or external declaration as read. One that holds a type
    declaration is complete only where the scope that holds it closes,
@@ -1894,7 +1966,10 @@ let asm_qualifiers state =
       match peek state with
       | Keyword_token Keyword.Volatile -> Some Asm_volatile
       | Keyword_token Keyword.Inline -> Some Asm_inline
-      | Keyword_token Keyword.Goto -> Some Asm_goto
+      | Keyword_token Keyword.Goto ->
+          refuse_deferred_exit state ~at:(first_token state start)
+            "`asm goto`";
+          Some Asm_goto
       | _ -> None
     in
     match qualifier with
@@ -2427,6 +2502,22 @@ let in_definition state head ~bodies_allowed parse =
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
 
+(* A declaration with [extern] defines no object (design 6 rule 9). *)
+let refuse_deferred_storage state (specifiers : specifiers) =
+  let is_extern (specifier : declaration_specifier spanned) =
+    specifier.node = Storage_class Extern
+  in
+  let is_static (specifier : declaration_specifier spanned) =
+    specifier.node = Storage_class Static
+    || specifier.node = Storage_class Thread_local
+  in
+  match List.find_opt is_static specifiers with
+  | Some specifier when not (List.exists is_extern specifiers) ->
+      refuse_deferred_definition state ~at:specifier.span.first
+        "a declaration with static or thread storage duration and no \
+         `extern`"
+  | Some _ | None -> ()
+
 (* [only_attributes] holds while every specifier read is attributes, so
    that a tag specifier can tell whether it is alone in its declaration. *)
 let rec specifiers state context =
@@ -2448,7 +2539,11 @@ let rec specifiers state context =
           (specifier :: specifiers)
     | None -> List.rev specifiers
   in
-  leading @ loop ~seen_type_specifier:false ~only_attributes:true []
+  let read =
+    leading @ loop ~seen_type_specifier:false ~only_attributes:true []
+  in
+  refuse_deferred_storage state read;
+  read
 
 (* [alone] says that only attributes come before the specifier in the
    specifiers of a declaration, for {!ends_alone}. *)
@@ -2559,7 +2654,11 @@ and record_specifier state kind ~alone ~claimed_by =
   let leading = attributes state in
   let tag_name = optional_identifier state in
   let has_body = peek state = Punctuator_token P.Left_brace in
-  if has_body then refuse_generic_body state ~tag_name;
+  if has_body then begin
+    refuse_deferred_definition state ~at:(first_token state state.position)
+      "a structure or union with a body";
+    refuse_generic_body state ~tag_name
+  end;
   let declares = has_body || ends_alone state ~alone in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   if tag = None then Option.iter (claim_own_tag state) claimed_by;
@@ -2645,7 +2744,11 @@ and enum_specifier state ~alone =
   in
   let after_type = if underlying = None then [] else attributes state in
   let has_body = peek state = Punctuator_token P.Left_brace in
-  if has_body then refuse_generic_enumerators state;
+  if has_body then begin
+    refuse_deferred_definition state ~at:(first_token state state.position)
+      "an enumeration with a body";
+    refuse_generic_enumerators state
+  end;
   let declares = has_body || (underlying <> None && ends_alone state ~alone) in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   let enumerators =
@@ -3264,7 +3367,7 @@ and primary_expression state =
   | Punctuator_token P.Left_paren
     when peek_at state 1 = Punctuator_token P.Left_brace ->
       advance state;
-      let body = block state in
+      let body = statement_expression_body state in
       expect state P.Right_paren "`)` after a statement expression";
       finish state start (Statement_expression body)
   | Punctuator_token P.Left_paren ->
@@ -3290,7 +3393,6 @@ and primary_expression state =
   | Punctuator_token P.Caret ->
       advance state;
       block_literal state start
-  | Keyword_token Keyword.Defer -> fail_defer state
   | _ -> fail_expected state "an expression"
 
 (* After the [__builtin_va_arg]. *)
@@ -3337,6 +3439,8 @@ and choose state start =
 (* After the [^]: the body, after the parameters if it has them. The
    body continues their scope, as a function's does (6.2.1p4). *)
 and block_literal state start =
+  refuse_deferred_definition state ~at:(first_token state start)
+    "a block literal";
   (* The literal is a function of its own, from its parameters to the end
      of its body. *)
   let literal = as_function state (fun () -> literal_after_caret state start) in
@@ -3469,6 +3573,7 @@ and declaration_of_start state = function
 and type_declaration state : type_declaration =
   let start = state.position in
   let type_keyword = state.grammar.(start).index in
+  refuse_deferred_definition state ~at:type_keyword "a type declaration";
   advance state;
   let name =
     checked_type_name state (identifier state "the name of a type declaration")
@@ -3708,6 +3813,8 @@ and label state =
     end
     else begin
       let name = identifier state "a label" in
+      refuse_deferred_definition state ~at:name.span.first
+        ("the label " ^ quoted name.node);
       expect state P.Colon "`:` after a label";
       let label = define_label state name in
       let attributes = attributes state in
@@ -3752,6 +3859,9 @@ and open_statements state opened =
       (open_statements [@tailcall]) state
         ({ start; outer = None; outer_jumps; kind = Open_labeled label }
         :: opened)
+  (* A block item reaches here only after a label, as [read_block_item]
+     reads a defer itself. *)
+  | _ when begins_defer state -> fail_defer_position state (unopened opened)
   | Keyword_token Keyword.If ->
       advance state;
       open_block_statement ~body_jumps:outer_jumps (fun () ->
@@ -3794,6 +3904,16 @@ and open_statements state opened =
   | _ ->
       let statement = simple_statement state in
       (close_statements [@tailcall]) state opened statement
+
+(* Where a defer that [open_statements] meets stands, inside [opened];
+   each is no block item, so it wants braces around it. *)
+and unopened opened =
+  match opened with
+  | [] -> "the statement of a `defer`; write it in a compound statement"
+  | { kind = Open_labeled _; _ } :: _ ->
+      "the statement of a label; write it in a compound statement"
+  | _ :: _ ->
+      "the substatement of a statement; write it in a compound statement"
 
 (* Whether the substatement about to be read is the statement of a
    single-pattern test, whose bindings and compound statement are one
@@ -3875,17 +3995,21 @@ and read_simple_statement state =
   | Punctuator_token P.Left_bracket when opens_standard_attributes state 0 ->
       attribute_statement state start
   | Keyword_token Keyword.Goto ->
+      let at = first_token state start in
       advance state;
       if accept state P.Star then begin
+        refuse_deferred_exit state ~at "`goto *`";
         let target = expression state in
         expect state P.Semicolon "`;` after `goto *`";
         finish state start (Computed_goto target)
       end
-      else
+      else begin
+        refuse_deferred_exit state ~at "`goto`";
         let name = identifier state "a label after `goto`" in
         let target = jump_label state name in
         expect state P.Semicolon "`;` after `goto`";
         finish state start (Goto target)
+      end
   | Keyword_token Keyword.Continue ->
       advance state;
       let loop = continue_target state start in
@@ -3897,6 +4021,7 @@ and read_simple_statement state =
       expect state P.Semicolon "`;` after `break`";
       finish state start (Break { leaves })
   | Keyword_token Keyword.Return ->
+      refuse_deferred_exit state ~at:(first_token state start) "`return`";
       advance state;
       let value =
         optional_expression state P.Semicolon "`;` after `return`"
@@ -3968,7 +4093,7 @@ and arm_body state start =
       let rec items read =
         if begins_arm_label state || peek state = Punctuator_token P.Right_brace
         then read
-        else items (block_item state :: read)
+        else items (block_item state Plain_block :: read)
       in
       match items [] with
       | [] ->
@@ -4063,15 +4188,21 @@ and asm_operand state =
 and block state =
   in_scope state (inner_scope state) (fun () -> compound_statement state)
 
+and statement_expression_body state =
+  in_scope state (inner_scope state) (fun () ->
+      compound_in state Statement_expression_body)
+
 (* From the [{] to the [}], in the current scope: the body of a function
    definition is in the block scope of its parameters (6.2.1p4), so that
    a declaration in it cannot hide one of them (6.7p3). *)
-and compound_statement state =
+and compound_statement state = compound_in state Plain_block
+
+and compound_in state place =
   let start = state.position in
   expect state P.Left_brace "`{`";
   in_local_label_scope state (fun () ->
       let local_labels = local_label_declarations state in
-      let items = block_items state in
+      let items = block_items state place in
       finish state start { local_labels; items })
 
 and local_label_declarations state =
@@ -4081,33 +4212,37 @@ and local_label_declarations state =
   in
   let rec loop declarations =
     let start = state.position in
-    if accept_keyword state Keyword.Label then
+    if accept_keyword state Keyword.Label then begin
+      refuse_deferred_definition state ~at:(first_token state start)
+        "`__label__`";
       let labels = one_or_more state local_label in
       expect state P.Semicolon "`;` after the labels of `__label__`";
       loop (finish state start labels :: declarations)
+    end
     else List.rev declarations
   in
   loop []
 
 (* After the [{], up to and including the [}], which closes the scope. *)
-and block_items state =
+and block_items state place =
   let rec loop read =
     match peek state with
     | Punctuator_token P.Right_brace ->
         advance state;
         close_scope ~scope_end:(last_read state) read
     | End_of_input -> fail_expected state "`}` to end a compound statement"
-    | _ -> loop (block_item state :: read)
+    | _ -> loop (block_item state place :: read)
   in
   loop []
 
-and block_item state = in_place state read_block_item
+and block_item state place = in_place state (read_block_item place)
 
 (* A label comes first: [T:] begins one where [T] is a typedef name. Then
    attributes before a [;], which begin a declaration elsewhere. *)
-and read_block_item state =
+and read_block_item place state =
   if begins_label state || begins_attribute_statement state then
     Complete (Block_statement (statement state))
+  else if begins_defer state then Complete (defer_statement state place)
   else if begins_type_declaration state then
     let declaration = type_declaration state in
     Until_scope_end
@@ -4118,6 +4253,33 @@ and read_block_item state =
   else if begins_declaration state then
     Complete (Block_declaration (block_declaration state))
   else Complete (Block_statement (statement state))
+
+(* Design section 6: at the [defer] or [_Defer] that [begins_defer]
+   recognises. The statement is a block of its own (rule 8), and moved
+   text, whose pragma lines need identifiers (13.5). *)
+and defer_statement state place =
+  let keyword = first_token state state.position in
+  refuse_defer_place state place;
+  advance state;
+  let statement =
+    as_deferred state (fun () ->
+        in_scope state (inner_scope state) (fun () -> statement state))
+  in
+  refuse_moved_pragmas state { first = keyword; last = statement.span.last };
+  Block_defer { keyword = { first = keyword; last = keyword }; statement }
+
+(* At a defer statement that is a block item of a compound statement in
+   [place] (design 6 rule 11). Only a function body holds statements
+   that run, as a block outside one stands in a statement expression. *)
+and refuse_defer_place state place =
+  match place with
+  | Statement_expression_body ->
+      fail_defer_position state
+        "a block item of the compound statement of a statement expression, \
+         whose last item gives its value"
+  | Plain_block when Option.is_none state.labels ->
+      fail_defer_position state "outside every function body"
+  | Plain_block -> ()
 
 (* GCC's nested functions are outside the profile, as Clang has none; a
    [{] after the first declarator names them rather than the [;]. *)
@@ -4337,6 +4499,7 @@ let parse_with_scopes ~keywords reader =
       scope = Scope.file;
       place = Scope.file;
       jumps = Function_body;
+      in_deferred = false;
       arm = None;
       labels = None;
       generic = None;

@@ -171,10 +171,17 @@ is [type-c-language-design.md](type-c-language-design.md).
   after the word (`expected ; after return, found f`), which does not
   say that a declaration hides the word or where it is. A hidden
   universe name gets no such note either. Add a note naming the
-  declaration if the pilot shows the error confusing. Until work
-  package 2.5, a bare unhidden `defer` in operand position (`x +
-  defer`) says the construct is not implemented rather than that it is
-  a syntax error.
+  declaration if the pilot shows the error confusing.
+- [High] Design 6 rule 5 is not checked yet: a `case` or `default`
+  label in the statement of a defer that belongs to a `switch` outside
+  it (`case 0: defer case 1: f();`), and the address of a label in the
+  scope of a defer, are not refused. Reachability walks the statement
+  and drops its `has_case_label`; refuse there before lowering of
+  package 2.5 accepts any defer, which typing refuses until then.
+- [Medium] Lowering of a defer (package 2.5) copies the pragma lines of
+  its statement; a `#pragma typec` line of C text there is ignored and
+  must not be copied (design 13.5), and one of Type-C text stands
+  inside a function body, which Stage 5 refuses (11.1 rule 1).
 - [Low] GNU `__extension__` makes no node, so `__extension__ try f();`
   has the tree of `try f();`, and the position rule of design 5.1 rule
   3 would take a `try` that Appendix A does not derive there. Decide in

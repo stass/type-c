@@ -75,7 +75,19 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   [1]
   $ printf 'void f(int try) { defer f(try); }\n' > defer.tc
   $ ./golden.exe defer.tc
-  defer.tc:1: `defer` is not implemented yet (design 6; work package 2.5) [TC0023]
+  defer.tc:1: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+  $ printf 'void g(void);\nvoid f(void) { { int defer = 0; defer++; } defer g(); }\n' > ended.tc
+  $ ./golden.exe ended.tc
+  ended.tc:2: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+A `defer` statement is a block item, so an unhidden `defer` in an
+operand begins nothing there.
+
+  $ printf 'int f(int x) { return x + defer; }\n' > bare_defer.tc
+  $ ./golden.exe bare_defer.tc
+  bare_defer.tc:1: expected an expression, found `defer`
   [1]
 
 The parser reads a `try` wherever it stands, in an operand as well,
@@ -105,7 +117,7 @@ A `try` takes an operand.
 
   $ printf 'void f(void) { int defer = 0; _Defer f(); }\n' > spelling.tc
   $ ./golden.exe spelling.tc
-  spelling.tc:1: `_Defer` is not implemented yet (design 6; work package 2.5) [TC0023]
+  spelling.tc:1: lowering of `defer` is not implemented yet (design 13.5; work package 2.5) [TC0023]
   [1]
 
 C text, here a header that the Type-C file includes, may declare `try`,

@@ -642,6 +642,10 @@ and block_item =
   | Block_declaration of declaration
   | Block_type_declaration of scoped_type_declaration
   | Block_statement of statement
+  | Block_defer of { keyword : span; statement : statement }
+      (** [defer S] or [_Defer S] (design section 6, Appendix A): [keyword]
+          is the one token of the word, which identifies the statement,
+          and [statement] is [S], read in a block scope of its own *)
 
 (** A type declaration (design 3.1): [type], the name, which is in scope
     from the end of its identifier as a typedef name, the type parameters

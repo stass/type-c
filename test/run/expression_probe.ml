@@ -71,7 +71,8 @@ let rec block_insertions contents text result (block : Tree.block) =
     (function
       | Tree.Block_statement statement ->
           statement_insertions contents text result statement
-      | Block_declaration _ | Block_type_declaration _ -> [])
+      (* Typing refuses every defer, so a probed unit holds none. *)
+      | Block_declaration _ | Block_type_declaration _ | Block_defer _ -> [])
     block.node.items
 
 and statement_insertions contents text result (statement : Tree.statement) =

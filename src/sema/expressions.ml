@@ -3128,7 +3128,8 @@ and statement_expression_items context (block : Tree.block) =
   | Block_statement last :: before ->
       items context (List.rev before);
       statement_value context last
-  | (Block_declaration _ | Block_type_declaration _) :: _ | [] ->
+  | (Block_declaration _ | Block_type_declaration _ | Block_defer _) :: _
+  | [] ->
       block_items context block;
       Ctype.void
 
@@ -3291,7 +3292,22 @@ and items context =
     | Block_type_declaration declaration ->
         context.type_declaration declaration
     | Block_statement statement ->
-        standing_statement context Block_item None statement)
+        standing_statement context Block_item None statement
+    | Block_defer { keyword; statement } ->
+        deferred_statement context statement;
+        context.fail keyword
+          (Rule.message Not_implemented
+             "lowering of `defer` is not implemented yet (design 13.5; work \
+              package 2.5)"))
+
+(* No try stands in the statement of a defer (design 5.1 rule 4), whose
+   statements this gives no positions. Every defer is refused once its
+   statement is typed, so that none reaches lowering. *)
+and deferred_statement context statement =
+  let enclosing =
+    { context.typed.enclosing with try_positions = No_positions }
+  in
+  within context enclosing (fun () -> typed_statement context statement)
 
 (* A block-item declaration gives a try the position of design 5.1 rule
    3 that its initialiser confirms. *)
