@@ -110,10 +110,14 @@ type error = Reader.error = { location : Location.t; message : string }
    and [*] only in a parameter list that is not that of a definition. *)
 type place = At_file_scope | In_prototype | In_definition | In_block
 
-(* A generic type: its latest declaration, and whether it is an alias
-   whose text is inexact (design 3.5 rule 2), read where the definition
-   stands, as nothing later changes what the text names there. *)
-type generic = { declaration : Tree.type_declaration; inexact : bool }
+(* A generic type: its latest declaration, and the spelling of its text
+   if it is an alias (design 3.5 rule 2, 13.5), read where the
+   definition stands, as nothing later changes what the text names
+   there. *)
+type generic = {
+  declaration : Tree.type_declaration;
+  spelling : Entity.spelling;
+}
 
 (* The reader follows the links that the parser records in the tree
    (design 13.3): [entities] holds what each declaration that it has read
@@ -494,9 +498,9 @@ let bind_entity state name (declared : Tree.declared) entity =
 (* An overload (design 13.3) is a new entity, which is not linked under
    its name, and stands beside what a declaration in its place would
    redeclare. *)
-let bind_overload state span name (declared : Tree.declared) ~inexact next =
+let bind_overload state span name (declared : Tree.declared) ~spelling next =
   let entity =
-    { name; entity = fresh_entity state; declared = next; inexact }
+    { name; entity = fresh_entity state; declared = next; spelling }
   in
   let reference = Tree.In_tree declared.id in
   bind_entity state name declared entity;
@@ -519,36 +523,43 @@ let record state name (declared : Tree.declared) entity =
     Hashtbl.replace state.linked name entity;
   entity
 
+(* The spelling of a text made of two: inexact if either is, and written
+   through the typedef names of both. *)
+let join_spelling (first : Entity.spelling) (second : Entity.spelling) =
+  { inexact = first.inexact || second.inexact;
+    written_through = first.written_through @ second.written_through }
+
 (* Records what [declared] declares [name] as: a new entity, or [prior],
    the visible declaration it redeclares, with the composite of their
-   types. [inexact] is the declaration's own; after an inexact [prior]
-   the entity stays inexact, as the backend may keep an attribute that
-   a later declaration does not repeat. *)
-let bind_to state span name (declared : Tree.declared) prior ~inexact next =
-  if is_overload next then bind_overload state span name declared ~inexact next
+   types. [spelling] is the declaration's own; the entity keeps that of
+   [prior], as the backend may keep an attribute that a later
+   declaration does not repeat. *)
+let bind_to state span name (declared : Tree.declared) prior ~spelling next =
+  if is_overload next then
+    bind_overload state span name declared ~spelling next
   else
     let entity =
       match prior with
-      | None -> { name; entity = fresh_entity state; declared = next; inexact }
+      | None -> { name; entity = fresh_entity state; declared = next; spelling }
       | Some prior ->
           { prior with
             declared = redeclared state span name prior.declared next;
-            inexact = prior.inexact || inexact }
+            spelling = join_spelling spelling prior.spelling }
     in
     record state name declared entity
 
 (* [bind_to] the declaration before [declared] in its scope. *)
-let bind state span name declared ~inexact next =
+let bind state span name declared ~spelling next =
   bind_to state span name declared (earlier_entity state span name declared)
-    ~inexact next
+    ~spelling next
 
 (* A declaration with linkage of a name whose declarations with linkage
    it does not see, as one in a block of another function: the same
    entity (6.2.2p4, p5), of a compatible type (6.2.7p2), with its own
    type, as no declaration in scope composes with it (6.2.7p4). *)
-let bind_unseen state span name declared (other : entity) ~inexact next =
+let bind_unseen state span name declared (other : entity) ~spelling next =
   ignore (redeclared state span name other.declared next);
-  record state name declared { other with declared = next; inexact }
+  record state name declared { other with declared = next; spelling }
 
 (* Where a declaration of an ordinary identifier stands, for its linkage
    and storage duration (6.2.2, 6.2.4). *)
@@ -601,8 +612,8 @@ type specified = {
       (** The type specifier is a structure, union or enumeration specifier
           without a tag, which a typedef declarator names (design 3.5 rule
           2). *)
-  inexact : bool;
-      (** The specifiers are inexact ([specifiers_are_inexact]);
+  spelling : Entity.spelling;
+      (** That of the specifiers ([specifiers_spelling]);
           [for_declarator] adds its declarator's. *)
 }
 
@@ -1048,9 +1059,9 @@ let declare_in state scope span specified declared (derived : derived) =
         declared_as state scope span specified name declared derived
       in
       let has_linkage = has_linkage next in
-      let inexact = specified.inexact in
+      let spelling = specified.spelling in
       let bind_after prior =
-        bind_to state span name declared prior ~inexact next
+        bind_to state span name declared prior ~spelling next
       in
       let entity =
         match (earlier_entity state span name declared, scope) with
@@ -1061,7 +1072,7 @@ let declare_in state scope span specified declared (derived : derived) =
         | None, (File_scope | Block_scope) -> (
             match Hashtbl.find_opt state.linked name with
             | Some other ->
-                bind_unseen state span name declared other ~inexact next
+                bind_unseen state span name declared other ~spelling next
             | None -> bind_after None)
       in
       note_at_file_scope state scope entity;
@@ -1099,49 +1110,63 @@ let parameter_declarator (parameter : Tree.parameter_declarator) =
   | Named_parameter { declarator; declared = _ } -> Some declarator
   | Abstract_parameter declarator -> declarator
 
-(* Whether the text that spells a type is inexact: it holds an attribute
+(* The spelling of a text that names no typedef name. *)
+let inexact_if inexact = { Entity.exact with inexact }
+
+(* The spelling of a text made of [items]; each item is joined in front
+   of the rest, so that the walk copies no list it has built. *)
+let spelling_of_all spelling_of items =
+  List.fold_left
+    (fun spelled item -> join_spelling (spelling_of item) spelled)
+    Entity.exact items
+
+(* The spelling of the text of a type: inexact when it holds an attribute
    or a [__typeof__] of an expression at the depth of design 3.5 rule 2,
-   where a typedef name's entity records its own. typec's types carry no
-   attribute, and the backend gives an expression the type of the
-   typedef that declared it, attribute included. *)
-let rec specifiers_are_inexact state (specifiers : Tree.specifiers) =
-  List.exists
+   where a typedef name's entity records its own, and written through
+   the typedef names at that depth. typec's types carry no attribute,
+   and the backend gives an expression the type of the typedef that
+   declared it, attribute included. *)
+let rec specifiers_spelling state (specifiers : Tree.specifiers) =
+  spelling_of_all
     (fun (specifier : Tree.declaration_specifier Tree.spanned) ->
-      specifier_is_inexact state specifier.node)
+      specifier_spelling state specifier.node)
     specifiers
 
-and specifier_is_inexact state : Tree.declaration_specifier -> bool =
+and specifier_spelling state : Tree.declaration_specifier -> Entity.spelling =
   function
-  | Attributes attributes -> attributes <> []
-  | Type_qualifier qualifier -> is_nullability qualifier
-  | Type_specifier specifier -> type_specifier_is_inexact state specifier
-  | Storage_class _ | Function_specifier _ | Alignment_specifier _ -> false
+  | Attributes attributes -> inexact_if (attributes <> [])
+  | Type_qualifier qualifier -> inexact_if (is_nullability qualifier)
+  | Type_specifier specifier -> type_specifier_spelling state specifier
+  | Storage_class _ | Function_specifier _ | Alignment_specifier _ ->
+      Entity.exact
 
-and type_specifier_is_inexact state : Tree.type_specifier -> bool =
+and type_specifier_spelling state : Tree.type_specifier -> Entity.spelling =
   function
   | Atomic_type type_name | Typeof_type type_name ->
-      type_name_is_inexact state type_name
+      type_name_spelling state type_name
   | Typedef_name { declaration; name = _ } -> (
       match Hashtbl.find_opt state.entities declaration with
-      | Some { declared = Typedef _; inexact; _ } -> inexact
-      | Some _ | None -> false)
+      | Some { declared = Typedef _; spelling; _ } ->
+          { inexact = spelling.inexact; written_through = [ declaration ] }
+      | Some _ | None -> Entity.exact)
   | Application { generic = reference; name = _; arguments = _ } -> (
       match Hashtbl.find_opt state.generics reference with
-      | Some { inexact; declaration = _ } -> inexact
-      | None -> false)
-  | Typeof_expression _ -> true
-  | Basic _ | Struct_or_union _ | Enum _ -> false
+      | Some { spelling; declaration = _ } -> spelling
+      | None -> Entity.exact)
+  | Typeof_expression _ -> inexact_if true
+  | Basic _ | Struct_or_union _ | Enum _ -> Entity.exact
 
-and type_name_is_inexact state (type_name : Tree.type_name) =
+and type_name_spelling state (type_name : Tree.type_name) =
   let { Tree.specifier_qualifiers; abstract } = type_name.node in
-  specifiers_are_inexact state specifier_qualifiers
-  || optional_declarator_is_inexact state abstract
+  join_spelling
+    (specifiers_spelling state specifier_qualifiers)
+    (optional_declarator_spelling state abstract)
 
-and optional_declarator_is_inexact state = function
-  | Some declarator -> declarator_is_inexact state declarator
-  | None -> false
+and optional_declarator_spelling state = function
+  | Some declarator -> declarator_spelling state declarator
+  | None -> Entity.exact
 
-and declarator_is_inexact state (declarator : Tree.declarator) =
+and declarator_spelling state (declarator : Tree.declarator) =
   let holds_nullability qualifiers =
     List.exists
       (fun (qualifier : Tree.type_qualifier Tree.spanned) ->
@@ -1149,53 +1174,64 @@ and declarator_is_inexact state (declarator : Tree.declarator) =
       qualifiers
   in
   match declarator.node with
-  | Name _ -> false
+  | Name _ -> Entity.exact
   | Parenthesized_declarator { attributes; inner } ->
-      attributes <> [] || declarator_is_inexact state inner
+      join_spelling
+        (inexact_if (attributes <> []))
+        (declarator_spelling state inner)
   | Pointer { qualifiers; attributes; inner }
   | Block_pointer { qualifiers; attributes; inner } ->
-      attributes <> []
-      || holds_nullability qualifiers
-      || optional_declarator_is_inexact state inner
+      join_spelling
+        (inexact_if (attributes <> [] || holds_nullability qualifiers))
+        (optional_declarator_spelling state inner)
   | Array { inner; qualifiers; size = _ } ->
-      holds_nullability qualifiers
-      || optional_declarator_is_inexact state inner
+      join_spelling
+        (inexact_if (holds_nullability qualifiers))
+        (optional_declarator_spelling state inner)
   | Function { inner; parameters } ->
-      optional_declarator_is_inexact state inner
-      || parameters_are_inexact state parameters
+      join_spelling
+        (optional_declarator_spelling state inner)
+        (parameters_spelling state parameters)
 
-and parameters_are_inexact state : Tree.parameters -> bool = function
+and parameters_spelling state : Tree.parameters -> Entity.spelling = function
   | Prototype { parameters; variadic = _ } ->
-      List.exists (parameter_is_inexact state) parameters
-  | Identifier_list _ -> false
+      spelling_of_all (parameter_spelling state) parameters
+  | Identifier_list _ -> Entity.exact
 
-and parameter_is_inexact state (parameter : Tree.parameter) =
+and parameter_spelling state (parameter : Tree.parameter) =
   let ({ specifiers; declarator; attributes } : Tree.parameter_node) =
     parameter.node
   in
-  attributes <> []
-  || specifiers_are_inexact state specifiers
-  || optional_declarator_is_inexact state (parameter_declarator declarator)
+  spelling_of_all Fun.id
+    [ inexact_if (attributes <> []);
+      specifiers_spelling state specifiers;
+      optional_declarator_spelling state (parameter_declarator declarator) ]
 
-(* Whether a generic's definition is an alias whose text is inexact. The
-   parser lets a definition name only generics read before it, whose
-   fact is then recorded; a type parameter in it adds nothing, as its
-   argument is checked where the application is read. *)
-let definition_is_inexact state (declaration : Tree.type_declaration) =
+let type_name_is_inexact state type_name =
+  (type_name_spelling state type_name).inexact
+
+(* The spelling of a generic's definition, that of its text if it is an
+   alias. The parser lets a definition name only generics read before
+   it, whose spelling is then recorded; a type parameter in it adds
+   nothing, as its argument is checked where the application is read. *)
+let definition_spelling state (declaration : Tree.type_declaration) =
   match declaration.node.definition with
-  | Alias type_name -> type_name_is_inexact state type_name
-  | Incomplete_variant | Variant _ | Distinct _ | Record_alias _ -> false
+  | Alias type_name -> type_name_spelling state type_name
+  | Incomplete_variant | Variant _ | Distinct _ | Record_alias _ ->
+      Entity.exact
 
 (* The specifiers as they apply to one declarator, which [attributes]
-   follow: a declaration is inexact when its specifiers, its declarator
-   or these attributes are. *)
+   follow: the spelling of the declaration joins those of its
+   specifiers, its declarator and these attributes. *)
 let for_declarator state specified attributes declarator =
   let onto = specified.attributed in
   { specified with
     attributed = read_attributes ~onto attributes;
-    inexact =
-      specified.inexact || attributes <> []
-      || optional_declarator_is_inexact state declarator }
+    spelling =
+      spelling_of_all Fun.id
+        [ specified.spelling;
+          inexact_if (attributes <> []);
+          optional_declarator_spelling state declarator ] }
 
 let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
@@ -1221,7 +1257,7 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
       | (first, _) :: _ -> Some first);
     attributed;
     untagged = is_untagged sorted.others;
-    inexact = specifiers_are_inexact state specifiers;
+    spelling = specifiers_spelling state specifiers;
   }
 
 and base_type state span sorted =
@@ -1641,7 +1677,7 @@ and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
     (* An enumerator holds only the attributes of the table, which change
        no type ([check_enumerator_attributes]). *)
     let entity =
-      bind state name.span name.node declared ~inexact:false
+      bind state name.span name.node declared ~spelling:Entity.exact
         (Enumerator { enumerator_type; value = constant })
     in
     (Some typed, (declared.id, entity, value) :: read)
@@ -1690,7 +1726,9 @@ and define_fixed_enum state span enum (integer : Integer.t Unknown.answer)
     in
     let enumerator = Enumerator { enumerator_type = Ctype.enum enum; value } in
     (* As in [define_enum], the attributes change no type. *)
-    ignore (bind state name.span name.node declared ~inexact:false enumerator);
+    ignore
+      (bind state name.span name.node declared ~spelling:Entity.exact
+         enumerator);
     Some value
   in
   ignore (List.fold_left declare None enumerators)
@@ -2067,7 +2105,7 @@ and declare_parameter state span specified derived name declared =
         register;
       }
   in
-  ignore (bind state span name declared ~inexact:specified.inexact parameter);
+  ignore (bind state span name declared ~spelling:specified.spelling parameter);
   object_type
 
 (* Design P20: a va_list parameter is adjusted as the target's va_list
@@ -2306,12 +2344,12 @@ and read_named_type state
   let { Tree.name = checked; declared; definition; _ } = declaration.node in
   let name = (checked :> Tree.identifier) in
   (* The name as a typedef name of the type that it defines. *)
-  let bind_spelled ~inexact typedef_type =
+  let bind_spelled ~spelling typedef_type =
     record state name.node declared
       { name = name.node; entity = fresh_entity state;
-        declared = Typedef { typedef_type }; inexact }
+        declared = Typedef { typedef_type }; spelling }
   in
-  let bind = bind_spelled ~inexact:false in
+  let bind = bind_spelled ~spelling:Entity.exact in
   match definition with
   | Incomplete_variant ->
       let record = variant_record state checked.node declared in
@@ -2323,7 +2361,7 @@ and read_named_type state
       read_variant state declaration privacy ~scope constructors bind
   | Alias type_name ->
       let t = read_type_name state type_name in
-      bind_spelled ~inexact:(type_name_is_inexact state type_name) t
+      bind_spelled ~spelling:(type_name_spelling state type_name) t
   | Distinct { is_private; representation } ->
       let privacy = privacy state declaration ~is_private in
       bind (distinct_type state name.node privacy representation)
@@ -2463,7 +2501,7 @@ and declare_tag_enumerators state span variant constructors ~scope =
       (record state name declared
          (* A constructor's tag spells no type. *)
          { name; entity = fresh_entity state; declared = declared_as;
-           inexact = false })
+           spelling = Entity.exact })
   in
   List.iteri declare constructors
 
@@ -2589,7 +2627,7 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
   let { Tree.declared; type_parameters; _ } = declaration.node in
   refuse_unmovable state declaration.span;
   let generic =
-    { declaration; inexact = definition_is_inexact state declaration }
+    { declaration; spelling = definition_spelling state declaration }
   in
   Hashtbl.replace state.generics (Tree.In_tree declared.id) generic;
   Hashtbl.replace state.definition_views declared.id
@@ -2683,7 +2721,7 @@ and refuse_inexact state (written : Tree.type_name) (_, t) =
    variant that completes an incomplete one, once read. *)
 and generic_declaration state span name reference =
   match Hashtbl.find_opt state.generics reference with
-  | Some { declaration; inexact = _ } -> declaration
+  | Some { declaration; spelling = _ } -> declaration
   | None -> not_read state span name
 
 (* The latest application of each instance, where an error of its
@@ -2903,7 +2941,7 @@ and instance_type state (declaration : Tree.type_declaration) instance
    instance derives its names from its instance name (design 10.3);
    typing declares none of them, as Type-C text names none. *)
 and variant_instance state generic instance reading record =
-  let { declaration; inexact = _ } = Hashtbl.find state.generics generic in
+  let { declaration; spelling = _ } = Hashtbl.find state.generics generic in
   let define privacy constructors () =
     let span = declaration.span in
     let variant = Encoding.variant_name (Applied instance) in
@@ -2936,7 +2974,7 @@ and with_arguments :
       (* [applied_type] has refused an inexact argument. *)
       { name = parameter.name.node; entity = fresh_entity state;
         declared =
-          Typedef { typedef_type = argument }; inexact = false };
+          Typedef { typedef_type = argument }; spelling = Entity.exact };
     (reference, saved)
   in
   let restore (reference, saved) =
@@ -3256,7 +3294,8 @@ and bind_binding state (name : Tree.identifier) declared object_type =
   let earlier = earlier_entity state name.span name.node declared in
   (* A binding spells no type, so nothing in it is inexact. *)
   ignore
-    (bind_to state name.span name.node declared earlier ~inexact:false next)
+    (bind_to state name.span name.node declared earlier ~spelling:Entity.exact
+       next)
 
 (* External declarations (6.9) *)
 
@@ -3415,7 +3454,7 @@ let declare_builtin_typedefs state =
         (* No source text spells the type, the target's own. *)
         let entity =
           { name; entity = fresh_entity state;
-            declared = Typedef { typedef_type = t }; inexact = false }
+            declared = Typedef { typedef_type = t }; spelling = Entity.exact }
         in
         Hashtbl.replace state.entities (Builtin name) entity
     | Error error -> invalid_arg (Ctype.error_message error)

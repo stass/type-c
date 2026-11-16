@@ -2871,6 +2871,45 @@ let generic_resolution () =
     added;
   accepts ~file
     (typed_wide ^ "int *f(void); " ^ reads_f ^ "int *f(void); g(int) x;");
+  (* So does a typedef name that the declaration is written through, at
+     any depth, declared again with an attribute between the text and
+     the place: GCC changes the typedef in place. One declared again
+     before the text, or without an attribute, changes nothing there. *)
+  let plain = "typedef int plain; " in
+  let widened = "typedef int plain __attribute__((aligned(16))); " in
+  rejects ~file
+    (plain ^ "extern plain obj; " ^ reads_obj ^ widened ^ "g(int) x;")
+    added;
+  accepts ~file
+    (plain ^ "extern plain obj; " ^ reads_obj ^ "g(int) early; " ^ widened
+   ^ "g(int) x;");
+  accepts ~file
+    (plain ^ "extern plain obj; " ^ widened ^ reads_obj ^ "g(int) x;");
+  accepts ~file
+    (plain ^ "extern plain obj; " ^ reads_obj ^ plain ^ "g(int) x;");
+  rejects ~file
+    (plain ^ "typedef plain mid; extern mid *obj[2]; " ^ reads_obj ^ widened
+   ^ "g(int) x;")
+    added;
+  rejects ~file
+    (plain ^ "plain *f(void); " ^ reads_f ^ widened ^ "g(int) x;")
+    added;
+  rejects ~file
+    (plain ^ "typedef plain plain; extern plain obj; " ^ reads_obj ^ widened
+   ^ "g(int) x;")
+    added;
+  rejects ~file
+    (plain ^ "type a(T) = plain *; extern a(int) obj; \
+              type g(T) = struct { __typeof__(*obj) v; T t; }; " ^ widened
+   ^ "g(int) x;")
+    added;
+  (* GCC copies the type of [q] at its declaration, so [q] keeps its
+     alignment, but typec does not tell which types the backend copies
+     and follows every typedef name. *)
+  rejects ~file
+    (plain ^ "typedef plain q; type g(T) = struct { q v; T t; }; " ^ widened
+   ^ "g(int) x;")
+    added;
   (* A definition is inexact as a declaration is; a declaration in a
      block that file scope does not see leaves the entity there exact. *)
   rejects ~file

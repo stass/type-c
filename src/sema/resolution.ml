@@ -194,7 +194,7 @@ let check_same_type context span name ~declaration (used : Entity.t) there =
    this. A declaration after an inexact one is inexact too, so this
    refuses as well one that drops the attribute. *)
 let check_same_attributes context span name ~cited (there : Entity.t) =
-  if there.inexact then
+  if there.spelling.inexact then
     refuse span Moved_text
       (Printf.sprintf
          "the declaration of %s at %s, between the text and a place where \
@@ -252,8 +252,81 @@ let check_name context place (use : name) =
       check_ordinary context place use.span use.name reference
   | Tag tag -> check_tag context place use.span use.name tag
 
+(* [check] of each declaration of a typedef name that [declared] is
+   written through, at any depth, once however many paths reach it.
+   Each declaration is written through names declared before it, so the
+   walk ends. *)
+let iter_written_through context (declared : Entity.t) check =
+  let seen = Hashtbl.create 16 in
+  let rec visit reference =
+    if not (Hashtbl.mem seen reference) then (
+      Hashtbl.replace seen reference ();
+      check reference;
+      match context.entity reference with
+      | Some typedef -> List.iter visit typedef.spelling.written_through
+      | None -> ())
+  in
+  List.iter visit declared.spelling.written_through
+
+(* The declaration of the typedef name [typedef] in [view], if the name
+   denotes that entity there. *)
+let typedef_in context view (typedef : Entity.t) =
+  match Parser.View.find view typedef.name with
+  | Some { declaration; _ } -> (
+      match context.entity declaration with
+      | Some found when found.entity = typedef.entity -> Some declaration
+      | Some _ | None -> None)
+  | None -> None
+
+(* The backend reads a typedef name that the use's declaration is
+   written through as it is declared where the text is written: GCC
+   changes a typedef name declared again with an attribute in place, and
+   each entity written through it with it. So the declaration of each
+   at the place is that at the text's own place, or exact. Where the
+   name does not denote the typedef at the place, no declaration of it
+   stands between the two places: a typedef name is declared again only
+   in its own scope, which holds a generic's places at file scope, and
+   the operand of a [try] and its place in one block. *)
+let check_through context text place (use : name) reference =
+  match context.entity reference with
+  | Some typedef -> (
+      let own = typedef_in context text.own_place typedef in
+      match typedef_in context place.view typedef with
+      | Some there when Some there <> own -> (
+          match context.entity there with
+          | Some declared when declared.spelling.inexact ->
+              refuse use.span Moved_text
+                (Printf.sprintf
+                   "the declaration of %s at %s, between the text and a \
+                    place where lowering writes it, gives it a type that \
+                    may hold an attribute or `typeof` of an expression, \
+                    and the declaration of %s is written through %s, which \
+                    may change the type that the text uses"
+                   (quote typedef.name)
+                   (declared_at context (Ordinary there))
+                   (quote use.name) (quote typedef.name))
+          | Some _ | None -> ())
+      | Some _ | None -> ())
+  | None -> ()
+
+(* The second check of a use, after [check_name] has found that its name
+   denotes at the place the entity it denotes at the text's own place:
+   each typedef name that the entity's declaration there is written
+   through reads alike at both places. *)
+let check_written_through context text place (use : name) =
+  match (use.declaration, Parser.View.find place.view use.name) with
+  | Ordinary _, Some { declaration; _ } ->
+      Option.iter
+        (fun there ->
+          iter_written_through context there
+            (check_through context text place use))
+        (context.entity declaration)
+  | Ordinary _, None | Tag _, _ -> ()
+
 let check_use context text place (use : name) =
-  if is_outside text use.declaration then check_name context place use
+  if is_outside text use.declaration then (
+    check_name context place use;
+    check_written_through context text place use)
 
 (* The second half: a name that the text declares for itself is read as
    a declarator, so it must not become a typedef name of the scope
@@ -349,7 +422,7 @@ let check_exact context place (use : name) =
   match Parser.View.find place.view use.name with
   | Some { declaration; _ } -> (
       match context.entity declaration with
-      | Some there when there.inexact ->
+      | Some there when there.spelling.inexact ->
           refuse use.span Moved_text
             (Printf.sprintf
                "the declaration of %s at %s gives it a type that may hold an \

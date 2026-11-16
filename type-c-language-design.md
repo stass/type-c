@@ -3720,9 +3720,13 @@ each. A third clause covers the text around it.
   attribute or a `__typeof__` of an expression at the depth of 3.5
   rule 2, or through a typedef name declared with one, or after such a
   declaration, may have another type for the backend, which reads the
-  attribute that typec's types lack and cannot compare: Clang gives
-  `__typeof__(obj)` the alignment of `extern wide obj;` after
-  `extern int obj;`, where `wide` is an `int` aligned to 16. Such a
+  attribute that typec's types lack and cannot compare, and so may one
+  whose declaration is written through a typedef name, at that depth
+  and through each typedef name in turn, that is declared so again:
+  Clang gives `__typeof__(obj)` the alignment of `extern wide obj;`
+  after `extern int obj;`, where `wide` is an `int` aligned to 16, and
+  GCC that of `typedef int t __attribute__((aligned(16)));` after
+  `typedef int t; extern t obj;`, as it changes `t` in place. Such a
   declaration is an error as one that changes the type is. The
   exactness of a type argument, which 3.5 rule 2 reads from the text of
   an alias at its own place, so holds at each place where lowering

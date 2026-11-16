@@ -504,6 +504,18 @@ between the text and the place where an instance first stands gives
   function.tc:5: in the instance 'g__i' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
   [1]
 
+So does a typedef name that the declaration of the object is written
+through, declared again with an attribute between the two, as GCC
+changes the typedef in place.
+
+  $ printf '%s\n' 'typedef int plain;' 'extern plain obj;' \
+  >   'type g(T) = struct { __typeof__(obj) v; T t; };' \
+  >   'typedef int plain __attribute__((aligned(16)));' 'g(int) x;' \
+  >   > widened.tc
+  $ ./golden.exe widened.tc
+  widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, and the declaration of 'obj' is written through 'plain', which may change the type that the text uses (design 13.5) [TC0044]
+  [1]
+
 An argument holds no `__typeof__` of an expression at the same depth,
 as the backend gives the expression the type of the typedef that
 declared it, attribute included (design 3.5 rule 2). `__typeof__` of a

@@ -189,26 +189,21 @@ read a(int) as aligned and box(a(int)) as box(int).
   typec: late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
   [80]
 
-An instance that stands before that declaration, and a typedef name
-declared through the first declaration, keep the type that typec reads,
-so the argument is exact on both backends.
+An instance that stands before that declaration keeps the type that
+typec reads, so the argument is exact on both backends.
 
   $ cat > early.tc <<'EOF'
   > typedef int p;
-  > typedef p q;
   > type a(T) = p;
-  > type b(T) = q;
   > type box(T) = struct { T value; };
   > type g(T) = struct { p v; T t; };
   > a(int) early_a;
   > g(int) early_g;
   > typedef int p __attribute__((aligned(16)));
   > box(a(int)) x;
-  > box(b(int)) y;
   > g(int) z;
   > _Static_assert(_Alignof(p) == 16, "p");
   > _Static_assert(_Alignof(a(int)) == _Alignof(__typeof__(x.value)), "a");
-  > _Static_assert(_Alignof(b(int)) == _Alignof(__typeof__(y.value)), "b");
   > _Static_assert(_Alignof(g(int)) == _Alignof(int), "g");
   > EOF
   $ for cc in $clang $gcc; do
@@ -250,6 +245,42 @@ definition does, on both backends.
   > EOF
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -fsyntax-only object_early.tc || echo "$cc"
+  > done
+
+A typedef name that the declaration of such an object is written
+through, declared again with an attribute after the generic, gives the
+text another type too (design 13.5): GCC changes the typedef in place,
+so it aligns g(int) as 16 there, where the definition gives 4.
+
+  $ cat > widened.tc <<'EOF'
+  > typedef int plain;
+  > extern plain obj;
+  > type g(T) = struct { __typeof__(obj) v; T t; };
+  > typedef int plain __attribute__((aligned(16)));
+  > g(int) x;
+  > _Static_assert(_Alignof(g(int)) == _Alignof(int), "g");
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -fsyntax-only widened.tc
+  > done
+  typec: widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, and the declaration of 'obj' is written through 'plain', which may change the type that the text uses (design 13.5) [TC0044]
+  typec: widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, and the declaration of 'obj' is written through 'plain', which may change the type that the text uses (design 13.5) [TC0044]
+  [80]
+
+An instance that stands before the typedef's declaration reads obj as
+the definition does, on both backends.
+
+  $ cat > widened_early.tc <<'EOF'
+  > typedef int plain;
+  > extern plain obj;
+  > type g(T) = struct { __typeof__(obj) v; T t; };
+  > g(int) early;
+  > typedef int plain __attribute__((aligned(16)));
+  > g(int) x;
+  > _Static_assert(_Alignof(g(int)) == _Alignof(int), "g");
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -fsyntax-only widened_early.tc || echo "$cc"
   > done
 
 A declaration in a block cannot hide a name of an instance that

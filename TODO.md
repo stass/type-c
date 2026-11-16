@@ -582,23 +582,24 @@ is [type-c-language-design.md](type-c-language-design.md).
 ## Declarations
 
 - [Medium] Whether the text of a type holds an attribute or a
-  `__typeof__` of an expression at the depth of design 3.5 rule 2 is
-  computed by a walk of the tree of its own
-  (`Declarations.specifiers_are_inexact` and the functions after it),
+  `__typeof__` of an expression at the depth of design 3.5 rule 2, and
+  the typedef names that it is written through, are computed by a walk
+  of the tree of its own
+  (`Declarations.specifiers_spelling` and the functions after it),
   which must agree with the reader on what it visits. Have the reader
   return the fact with the type that it reads. `for_declarator` runs the
   walk for every declarator, members and nested parameters included,
   which nothing reads there and which costs depth times size.
-- [Medium] The moved-text check (design 13.5,
-  `Resolution.check_same_attributes`) compares the declarations of the
-  names that a text reads, not those of the typedef names that their
-  declarations write: after `typedef int t; extern t obj;` and a generic
-  whose body holds `__typeof__(obj) v;`, `typedef int t
-  __attribute__((aligned(16)));` gives the instance alignment 16 on GCC,
-  which changes the typedef in place, and 4 on Clang, and typec accepts
-  it. Decide between refusing a typedef redeclaration that changes its
-  exactness (a C program that both backends accept) and extending 13.5
-  to the typedef names that a declaration writes.
+- [Medium] The moved-text check (design 13.5) follows the typedef
+  names that a declaration is written through, but not those of the
+  members of a structure or union: after `typedef int plain; struct t
+  { plain m; };` and a generic whose body holds `__typeof__(((struct t
+  *)0)->m) v;`, `typedef int plain __attribute__((aligned(16)));` gives
+  the instance alignment 16 on GCC, which changes the member's type in
+  place, and 4 on Clang, and typec accepts it. Either record the
+  spelling of each member and follow a tag's members too, or refuse at
+  the check any inexact declaration, between the two places, of a
+  typedef name visible at the text's own place, which needs no record.
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it
