@@ -102,9 +102,6 @@ let temp_dir = "/T"
 (* What every step gets before the options of the command line. *)
 let quiet = "-Wno-unused-command-line-argument"
 
-(* What the compile step gets in front of its preprocessed input. *)
-let quiet_markers = "-Wno-gnu-line-marker"
-
 let plan ?(emit_c = false) words =
   Pipeline.plan ~program:"cc" ~emit_c ~temp_dir (Command_line.read words)
 
@@ -137,7 +134,7 @@ let () =
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-O2"; "-c"; "-o"; "out/x.o";
-          "-x"; "cpp-output"; "/T/1/x.c"; quiet_markers;
+          "-x"; "cpp-output"; "/T/1/x.c";
         ]);
   check "-c -o: files"
     (translation.directory = "/T/1"
@@ -158,7 +155,7 @@ let () =
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
-          "/T/1/x.c"; quiet_markers;
+          "/T/1/x.c";
         ])
 
 let () =
@@ -168,21 +165,21 @@ let () =
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
-          "/T/1/x.c"; quiet_markers;
+          "/T/1/x.c";
         ]);
   check "-S"
     (compile [ "-S"; "-c"; "x.tc"; "-std=c17" ]
     = Some
         [
           "cc"; quiet; "-std=c17"; "-S"; "-o"; "x.s"; "-x"; "cpp-output";
-          "/T/1/x.c"; quiet_markers;
+          "/T/1/x.c";
         ]);
   check "-fsyntax-only"
     (compile [ "-fsyntax-only"; "x.tc"; "-o"; "x" ]
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-fsyntax-only"; "-x"; "cpp-output";
-          "/T/1/x.c"; quiet_markers;
+          "/T/1/x.c";
         ])
 
 let () =
@@ -195,7 +192,7 @@ let () =
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-c"; "-o"; "/T/1.o"; "-x"; "cpp-output";
-          "/T/1/x.c"; quiet_markers;
+          "/T/1/x.c";
         ]);
   let plan = planned [ "-Iinc"; "-MD"; "a.tc"; "b.tc"; "-lm" ] in
   check "link .tc inputs only: the final command compiles"
@@ -203,7 +200,7 @@ let () =
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
-          "cpp-output"; "/T/2/b.c"; "-lm"; quiet_markers;
+          "cpp-output"; "/T/2/b.c"; "-lm";
         ]);
   check "link .tc inputs only: no compile step"
     (List.for_all
@@ -231,14 +228,14 @@ let () =
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-trigraphs"; "-c"; "-o"; "x.o"; "-x";
-          "cpp-output"; "/T/1/x.c"; quiet_markers; "-fno-trigraphs";
+          "cpp-output"; "/T/1/x.c"; "-fno-trigraphs";
         ]);
   check "Clang: the final command compiles without trigraphs"
     (for_clang (planned [ "x.tc" ]).final
     = Some
         [
           "cc"; "-std=gnu17"; quiet; "-x"; "cpp-output"; "/T/1/x.c";
-          quiet_markers; "-fno-trigraphs";
+          "-fno-trigraphs";
         ]);
   let plan = planned [ "x.tc"; "y.c" ] in
   check "Clang: the final command that links objects is the same"

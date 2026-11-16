@@ -271,11 +271,6 @@ let with_standard shape options =
 let compile_options shape arguments =
   with_standard shape (options_where compiling_role arguments)
 
-(* Clang 20 calls the line markers of preprocessed input, which no user
-   wrote, a GNU extension under -pedantic; the option follows the user's
-   options so that their -Wgnu does not turn that back on (design 2.4). *)
-let quiet_line_markers = "-Wno-gnu-line-marker"
-
 (* Under -std=c11, -std=c17 or -trigraphs, Clang 21 reads a trigraph in
    preprocessed input, which typec's reader does not, and a macro can
    build one that the -E step leaves. -fno-trigraphs follows the user's
@@ -291,8 +286,7 @@ let as_preprocessed file = [ "-x"; "cpp-output"; file ]
 (* A backend command that compiles emitted C: [words] are its options
    and inputs, and the backend reads the C as typec's reader did. *)
 let emitted_c_command shape words compiler =
-  (shape.program :: words)
-  @ (quiet_line_markers :: without_trigraphs compiler)
+  (shape.program :: words) @ without_trigraphs compiler
 
 (* A backend command that reads no emitted C. *)
 let same_for_every_compiler words (_ : Target.compiler) = words
@@ -353,9 +347,9 @@ let without_type_c_inputs arguments =
    of C sources does, so that the backend leaves what that build leaves:
    the side outputs of the compilation, named as there, and on macOS the
    debug information that it runs dsymutil for, from objects that it
-   removes after. The -std= and -Wno-gnu-line-marker that the emitted C
-   needs would apply to another input too, so a command line with
-   another input compiles each .tc input to an object first. *)
+   removes after. The -std= and -fno-trigraphs that the emitted C needs
+   would apply to another input too, so a command line with another
+   input compiles each .tc input to an object first. *)
 let final_compiles ~emit_c ~goal arguments =
   (not emit_c) && goal = Linked
   && input_count (without_type_c_inputs arguments) = 0

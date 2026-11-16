@@ -228,13 +228,11 @@ The emitted file is preprocessed output, with line markers, and is
 compiled as such (`-x cpp-output`). So the output dialect is the input
 dialect and nothing newer. Its line markers are the toolchain's text, not
 the user's, and are no part of the dialect: they take the GNU form
-(13.4), which Clang 20 calls an extension under `-pedantic` even in
-preprocessed input (Clang 21 and 22 do not). The compile step therefore
-gets `-Wno-gnu-line-marker`, after the user's options so that `-Wgnu`
-does not turn it back on. GCC ignores the option, naming it in a note
-only when it reports another diagnostic. A line marker that the
-user writes is still diagnosed, when the backend preprocesses the source
-under the user's options.
+(13.4). GCC 14 and 16, Clang 21 to 23 and Apple Clang 21 read them in
+preprocessed input without a diagnostic under `-pedantic-errors`, and
+Clang does so also under `-Wgnu-line-marker`, so the compile step adds
+no option for them. A line marker that the user writes is still diagnosed, when the
+backend preprocesses the source under the user's options.
 
 ## 3. Types
 

@@ -989,13 +989,15 @@ before it, goes through three steps:
    refuses stops `typec` with one message, `FILE:LINE: MESSAGE`. With no
    Type-C construct the emitted text is the preprocessed text, byte for
    byte;
-3. `BACKEND -std=gnu17 OPTIONS -c -o OUTPUT -x cpp-output EMITTED
-   -Wno-gnu-line-marker`, with `-fno-trigraphs` last on Clang, or `-S`,
-   or `-fsyntax-only`, as the command line asks. The first option keeps
-   Clang 20 from calling the line markers of EMITTED, which no user
-   wrote, a GNU extension under `-pedantic` (design 2.4); the second
-   makes Clang read EMITTED without trigraphs, as `typec` read it
-   (design 13.2).
+3. `BACKEND -std=gnu17 OPTIONS -c -o OUTPUT -x cpp-output EMITTED`,
+   with `-S` in place of `-c`, or `-fsyntax-only` in place of `-c -o
+   OUTPUT`, as the command line asks, and with `-fno-trigraphs` last on
+   Clang, which makes Clang read EMITTED without trigraphs, as `typec`
+   read it (design 13.2).
+
+Steps 1 and 3 also get `-Wno-unused-command-line-argument` before
+OPTIONS, so that Clang does not warn about an option of the command
+line that the step does not use.
 
 `-std=gnu17` is left out when the command line gives `-std=` for C11 or
 C17 (`c11`, `c17`, `c18`, `gnu11`, `gnu17`, `gnu18`, `c1x`, `gnu1x`,

@@ -69,16 +69,13 @@ backends_report() {
 
 # compile_emitted CC FILE OPTION...: checks the preprocessed text in FILE
 # with backend CC under the strictest user options and OPTION..., reading
-# it as typec's compile step reads emitted C: as -x cpp-output, with
-# -Wno-gnu-line-marker last, so that Clang 20 does not call the line
-# markers, which no user wrote, a GNU extension under -pedantic (design
-# 2.4). GCC ignores the option and names it in a note only beside
-# another diagnostic. The step's -fno-trigraphs for Clang is left out,
-# as no input of these tests holds a trigraph. The subshell keeps the
-# variables out of the test.
+# it as typec's compile step reads emitted C: as -x cpp-output (design
+# 2.4). The step's -fno-trigraphs for Clang is left out, as no input of
+# these tests holds a trigraph. The subshell keeps the variables out of
+# the test.
 compile_emitted() (
   emitted_cc=$1 emitted_file=$2
   shift 2
   "$emitted_cc" -Wall -Wextra -pedantic-errors -Werror "$@" -fsyntax-only \
-    -x cpp-output "$emitted_file" -Wno-gnu-line-marker
+    -x cpp-output "$emitted_file"
 )

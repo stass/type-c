@@ -7,7 +7,10 @@ design 2.4 asks of everything Type-C lowers to.
 
 typec gives the backend the emitted file as preprocessed output, so the
 backend checks it as it is, and its line markers keep the system headers
-exempt.
+exempt. The backend reads those markers, which no user wrote, without a
+diagnostic, so typec adds no option to quiet them; the last command
+shows it for Clang with -Wgnu-line-marker, which of the Clang releases
+only Clang 20, below the minimum, applies to preprocessed input.
 
 The forms are those of a variant with a union and one without (10.1),
 one declared before it is completed, constructors bare and qualified,
@@ -98,3 +101,8 @@ test names its own program.
   3 3
   3 6 4 6 10 1
   3 3
+  $ typec --cc="$clang" --emit-c -std=c11 forms.tc | grep -q '^# [0-9]' &&
+  >   echo markers
+  markers
+  $ typec --cc="$clang" -std=c11 -pedantic-errors -Wgnu-line-marker -Werror \
+  >   -fsyntax-only forms.tc

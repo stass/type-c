@@ -46,15 +46,17 @@ is [type-c-language-design.md](type-c-language-design.md).
   `-fcallgraph-info` files. A link of `.tc` inputs alone compiles the
   emitted C in its final command and keeps them. Doing that always
   would give the other inputs the `-std=gnu17` (when the command line
-  has no `-std=`) and `-Wno-gnu-line-marker` that the emitted C needs.
-  Decide whether that is acceptable, and then delete the object path,
-  or keep the path for those command lines.
+  has no `-std=`) and, on Clang, the `-fno-trigraphs` that the emitted C
+  needs. Decide whether that is acceptable, and then delete the object
+  path, or keep the path for those command lines.
 - [Low] The steps of the pipeline get `-Wno-unused-command-line-argument`
   so that Clang does not warn about the options of the whole command
   line that a step does not use; GCC ignores it, but adds a note that
-  names it to any diagnostic of that step, as it does for the
-  `-Wno-gnu-line-marker` of the compile step. Pass them to Clang only
-  once the driver knows the backend's family.
+  names it to any diagnostic of that step. The target query names the
+  backend's family before any step runs, so pass the option only to
+  Clang in each step, which makes `translation.preprocess` a
+  `Pipeline.command` like `compile`; the target query, which runs
+  before the family is known, still gets it.
 - [Low] A backend's diagnostic on a line that holds a lowered construct
   quotes a fragment of the emitted text, not the source line: for a
   call that passes a `list(double)` where a `list(int)` is wanted,
@@ -79,14 +81,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] `Unix.execvp` hands an executable without a `#!` line to
   `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
   a backend works on some hosts only. Document it or decide one behaviour.
-- [Medium] The compile step's `-Wno-gnu-line-marker` (design 2.4,
-  `Pipeline.quiet_line_markers`) and its copy in test/run/backends.sh
-  serve Clang 20 only: Clang 21 and 23 and Apple Clang 21 do not call
-  the line markers of `-x cpp-output` input a GNU extension under
-  `-pedantic`, and Clang 20 is below the minimum. Drop the option, its
-  paragraph in design 2.4 and README step 3, unless a supported release
-  is found that needs it: meanwhile design 2.4 justifies it by Clang 20
-  alone.
 
 ## Target model
 
