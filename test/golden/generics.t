@@ -399,12 +399,12 @@ own, and a tag declared before the definition is named by it.
   $ printf 'type link(T) = struct { struct node *next; T v; };\n' \
   >   > first_mention.tc
   $ ./golden.exe first_mention.tc
-  first_mention.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0044]
+  first_mention.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0071]
   [1]
   $ printf 'type step(T) = | Done | Next(struct node *n, T v);\n' \
   >   > first_mention_field.tc
   $ ./golden.exe first_mention_field.tc
-  first_mention_field.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0044]
+  first_mention_field.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0071]
   [1]
 
 Nor does it declare an object or a function with linkage, even in a
@@ -414,7 +414,7 @@ block of its own, which declares an entity that file scope sees.
   > type g(T) = struct { T t; int a[sizeof(({ extern int o; o; }))]; };
   > EOF
   $ ./golden.exe linked.tc
-  linked.tc:1: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 13.5) [TC0044]
+  linked.tc:1: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 13.5) [TC0071]
   [1]
 
 Nor does it hold, in the arguments of an attribute, which typing does
@@ -428,7 +428,7 @@ is visible is named.
   > };
   > EOF
   $ ./golden.exe unread_brace.tc
-  unread_brace.tc:2: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0044]
+  unread_brace.tc:2: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0071]
   [1]
   $ cat > unread_tag.tc <<'EOF'
   > type g(T) = struct {
@@ -436,7 +436,7 @@ is visible is named.
   > };
   > EOF
   $ ./golden.exe unread_tag.tc
-  unread_tag.tc:2: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0044]
+  unread_tag.tc:2: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0071]
   [1]
   $ cat > unread_visible_tag.tc <<'EOF'
   > struct q;
@@ -516,7 +516,7 @@ refused.
   >   'type box(T) = struct { T value; };' \
   >   'typedef int p __attribute__((aligned(16)));' 'box(a(int)) x;' > late.tc
   $ ./golden.exe late.tc
-  late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0044]
+  late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
   [1]
   $ printf '%s\n' 'typedef int p;' \
   >   'typedef int p __attribute__((aligned(16)));' 'type a(T) = p;' \
@@ -535,13 +535,13 @@ between the text and the place where an instance first stands gives
   >   'typedef int wide __attribute__((aligned(16)));' 'extern wide obj;' \
   >   'g(int) x;' > object.tc
   $ ./golden.exe object.tc
-  object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
   [1]
   $ printf '%s\n' 'typedef int wide __attribute__((aligned(16)));' \
   >   'int *f(void);' 'type g(T) = struct { __typeof__(*f()) v; T t; };' \
   >   'wide *f(void);' 'g(int) x;' > function.tc
   $ ./golden.exe function.tc
-  function.tc:5: in the instance 'g__i' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0044]
+  function.tc:5: in the instance 'g__i' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
   [1]
 
 So does a typedef name that the declaration of the object is written
@@ -553,7 +553,7 @@ changes the typedef in place.
   >   'typedef int plain __attribute__((aligned(16)));' 'g(int) x;' \
   >   > widened.tc
   $ ./golden.exe widened.tc
-  widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0044]
+  widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
   [1]
 
 An argument holds no `__typeof__` of an expression at the same depth,
@@ -631,7 +631,7 @@ spelling C declares there.
   > handler(int) h;
   > EOF
   $ ./golden.exe handler.tc
-  handler.tc:3: in the instance 'handler__i' that this application names, at handler.tc:1: the text declares the tag 'ctx' in a scope of its own, but where lowering writes it the tag is the one declared at handler.tc:2 (design 13.5) [TC0044]
+  handler.tc:3: in the instance 'handler__i' that this application names, at handler.tc:1: the text declares the tag 'ctx' in a scope of its own, but where lowering writes it the tag is the one declared at handler.tc:2 (design 13.5) [TC0071]
   [1]
 
   $ cat > dot.tc <<'EOF'
@@ -652,7 +652,7 @@ spelling C declares there.
   > g(int) x;
   > EOF
   $ ./golden.exe aligned.tc
-  aligned.tc:2: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 (design 13.5) [TC0044]
+  aligned.tc:2: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 (design 13.5) [TC0071]
   [1]
 
 Type-C text names no generic and no universe name in the arguments of an
@@ -793,7 +793,7 @@ though the argument's own declaration is exact.
   > option(p) o;
   > EOF
   $ ./golden.exe spelled.tc
-  spelled.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:3 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
+  spelled.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:3 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
   [1]
 
 The one name is that of the first declarator that gives it, as a later
@@ -804,7 +804,7 @@ one in the same declaration may add an attribute.
   > option(q) o;
   > EOF
   $ ./golden.exe spelled_twice.tc
-  spelled_twice.tc:2: in `typedef n *__tc_arg__P1n;`, which lowering writes for this application: the declaration of 'n' at spelled_twice.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
+  spelled_twice.tc:2: in `typedef n *__tc_arg__P1n;`, which lowering writes for this application: the declaration of 'n' at spelled_twice.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
   [1]
 
 The declarator that gives the one name may hold the attribute itself,
@@ -815,5 +815,5 @@ which no declaration of the argument shows.
   > option(p) o;
   > EOF
   $ ./golden.exe spelled_own.tc
-  spelled_own.tc:2: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0044]
+  spelled_own.tc:2: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
   [1]

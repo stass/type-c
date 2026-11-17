@@ -2804,7 +2804,7 @@ let generic_resolution () =
   rejects ~file ("extern int a[]; " ^ uses ^ " int a[3]; g(int) x;")
     "changes the type that the text uses";
   rejects ~file ("int a(); " ^ uses ^ " int a(int); g(int) x;")
-    "changes the type that the text uses (design 13.5) [TC0044]";
+    "changes the type that the text uses (design 13.5) [TC0071]";
   accepts ~file ("extern int a[2]; " ^ uses ^ " extern int a[2]; g(int) x;");
   accepts ~file ("int a(int); " ^ uses ^ " int a(int); g(int) x;");
   accepts ~file ("extern int a[]; " ^ uses ^ " g(int) x; int a[3];");
@@ -2840,8 +2840,8 @@ let generic_resolution () =
   (* An attribute that the text has already may change, and typec does
      not compare attributes, so any declaration with one is refused. *)
   let narrow = "typedef int p __attribute__((aligned(8))); " in
-  rejects ~file (narrow ^ holder ^ wide ^ " g(int) y;") "[TC0044]";
-  rejects ~file (narrow ^ holder ^ " typedef int p; g(int) y;") "[TC0044]";
+  rejects ~file (narrow ^ holder ^ wide ^ " g(int) y;") "[TC0071]";
+  rejects ~file (narrow ^ holder ^ " typedef int p; g(int) y;") "[TC0071]";
   (* Declared again before the alias, the typedef name makes the alias
      inexact at its own place, and the argument is refused there. *)
   rejects ~file (plain ^ wide ^ " " ^ alias ^ " box(a(int)) x;") "[TC0041]";
@@ -2879,7 +2879,7 @@ let generic_resolution () =
     added;
   rejects ~file
     (typed_wide ^ "extern wide obj; " ^ reads_obj ^ "extern int obj; g(int) x;")
-    "[TC0044]";
+    "[TC0071]";
   rejects ~file
     (typed_wide ^ "int *f(void); " ^ reads_f ^ "wide *f(void); g(int) x;")
     added;

@@ -238,17 +238,14 @@ let rows =
          external declaration that holds it: a type that they name or \
          need complete is not ready there, or the forward declaration of \
          a tag that they write would change a mention before it." };
-    Live { name = "Generic_moved"; code = 44; clause = Some "design 13.5";
+    Retired { name = "Moved_text"; code = 44;
       meaning =
-        "The definition of a generic, or the one name of an untagged \
-         type that the typedef of a type argument spells, where it breaks \
-         a clause of the resolution property on a fact that typec knows: \
-         a name of the text reads otherwise where lowering writes it, as \
-         another entity or tag, an entity of another type, or a typedef \
-         name or tag of the scope around it in place of a name that the \
-         text declares for itself, or the text declares a name that is in \
-         scope after it, such as a tag that the definition of a generic \
-         type is the first to mention in file scope (design 3.5 rule 8)." };
+        "A declaration between moved text and a place where lowering \
+         writes it that makes a name of the text read otherwise there: a \
+         name that the text uses denotes another entity or tag, or an \
+         entity of another type, as a typedef name declared again with \
+         an attribute may be, or a name that the text declares for \
+         itself is a typedef name or a tag of the scope around it." };
     Live { name = "Moved_text_unknown"; code = 45;
       clause = Some "design 13.5, P21";
       meaning =
@@ -417,6 +414,17 @@ let rows =
         "A [return e;] in the scope of a defer statement, in a function \
          that returns void, where [e] is not a void expression or has a \
          type that typec does not know (design 13.3)." };
+    Live { name = "Generic_moved"; code = 71; clause = Some "design 13.5";
+      meaning =
+        "The definition of a generic, or the one name of an untagged \
+         type that the typedef of a type argument spells, where it breaks \
+         a clause of the resolution property on a fact that typec knows: \
+         a name of the text reads otherwise where lowering writes it, as \
+         another entity or tag, an entity of another type, or a typedef \
+         name or tag of the scope around it in place of a name that the \
+         text declares for itself, or the text declares a name that is in \
+         scope after it, such as a tag that the definition of a generic \
+         type is the first to mention in file scope (design 3.5 rule 8)." };
   ]
 
 let () =
