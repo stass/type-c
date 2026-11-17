@@ -665,7 +665,7 @@ needed a cast settles it, and it carries to Stage 4. **Release 0.3.**
 
 | | Package |
 | --- | --- |
-| 4.1 | `--emit-c-header`, with three decisions (design 9.3): whether a Type-C translation unit may include an emitted header; whether an emitted header carries the type assertions of design 13.4, which it does not by default because they would assert the options of the client's compile; and whether `--emit-c-header` refuses the options that change one of those types, as the driver does for a `.tc` input (design 13.2). |
+| 4.1 | `--emit-c-header` (design 9.3): the header that redirects a Type-C unit to the `.tci` under `__TYPEC__` and gives a C unit the lowered text; the includes of the `.tci`, read from the `-E -dI` step, with a `.tci` name written as its `.h`; the instances that the interface names, under guards; the enumeration assertion of design 13.4 where the header defines a variant's tags; and the refusals of a `.tc` input (design 13.2) by the same table. |
 | 4.2 | Review of diagnostic quality on the pilots; columns where they can be recovered. |
 | 4.3 | Build integration: documented rules for make, ninja and cmake; dependency files. |
 | 4.4 | A language reference and a tutorial for users. |

@@ -3800,17 +3800,41 @@ the types of each module stand in that module's own `.tci`.
 
 ### 9.3 C clients
 
-`typec --emit-c-header M.tci` writes `M.h`, the lowered form (section
-10) of the declarations in `M.tci`, for C compilers: variants as tagged
-structs, distinct types as typedefs, and function prototypes. An
-`#include` of another `.tci` becomes an `#include` of its `.h`. Generic
+`typec --emit-c-header M.tci` writes `M.h` beside `M.tci`, or the file
+that `-o` names, and compiles nothing. Its one input is a `.tci`; a
+second input, an input of another suffix, and `-c`, `-S`, `-E` or
+`--emit-c` with it are errors of the command line. `M.h` is a build
+output: a hand-written `M.h` beside `M.tci` is overwritten, so a
+hand-written C header beside an interface takes another name.
+The header holds the lowered form (section 10) of the declarations in
+`M.tci`, for C compilers: variants as tagged structs, distinct types
+as typedefs, and function prototypes. An `#include` of another `.tci`
+becomes an `#include` of its `.h`, by the rule for includes below. Generic
 declarations are omitted. An instance that `M.tci` names is written as
 10.3 writes it in a translation unit, by the same code: the forward
 declarations of the tags that its arguments name, the typedefs of its
 arguments, and its declaration and definition inside the packing
 bracket. A C client and a Type-C unit therefore see one layout.
 
-The header differs from a translation unit in three respects.
+The header's skeleton, in order:
+
+```c
+#ifndef __tc_module__M          /* the guard of the header (13.5) */
+#define __tc_module__M
+#ifdef __TYPEC__
+#include "M.tci"
+#else
+/* the lowered declarations of M.tci, with its #include lines in place */
+/* the instances that it defines at its end, each under its own guard */
+/* the enumeration assertion, where it defines the tags of a variant */
+/* the probe of 10.3, where it holds a packing bracket */
+#endif
+#endif
+```
+
+The header differs from a translation unit in the three respects that
+follow, and in its redirect, its includes, its macros and its
+assertions, which the paragraphs after them state.
 
 - The whole header stands between `#ifndef M`, `#define M` and `#endif`,
   where the macro `M` is the include guard of the header, so a client
@@ -3876,17 +3900,151 @@ A guard of the instance name alone would skip the second definition,
 and the client would call the functions of the second module with the
 layout of the first, with no message.
 
-*Provisional.* An emitted header is written for C translation units.
-Whether a Type-C unit may include one, as it does when it shares a C
-header that includes one, is open. The guards are macros and do not
-survive preprocessing, so what reaches the unit is the header's text
-without them: names that begin with `__tc_`, which are errors in a
-Type-C unit (2.3), names of instances, which their generics claim
-(10.3), and definitions of instances that lowering would write again.
-Package 4.1 of the plan settles it, either by keeping the
-refusal, so that a Type-C unit includes the `.tci`, or by having
-lowering take an instance that the header's text defines as defined.
-The default is the refusal of 2.3.
+A Type-C unit reads the interface and a C unit the lowered text: the
+redirect of the skeleton. `typec` defines `__TYPEC__` while it
+preprocesses a Type-C unit and no C unit (2.1), so a Type-C unit that
+reaches `M.h`, directly or through a C header that it shares with C
+units, reads `M.tci` itself, with its variants, constructors and
+`private` declarations (9.2). No lowered text thus reaches a Type-C
+unit: not its names that begin with `__tc_`, which are errors there
+(2.3), not the names of instances, which their generics claim (10.3),
+and not a definition of an instance that lowering would write again.
+`M.tci` keeps its own include guard (3.1 rule 5), since a Type-C unit
+may reach it both through `M.h` and directly. Clang's
+`-Wreserved-macro-identifier`, which `-Weverything` turns on, reports
+the guard of `M.h` in the `-E` step of a Type-C unit as it does in a C
+client (below).
+
+The redirect names the interface by the last component of its path. A
+last component that holds a byte other than an ASCII letter, a digit,
+`.`, `_`, `-` or `+` is an error of the command line: in a quoted
+header name `'`, `\`, `//` and `/*` are undefined (C11 6.4.7p3), and a
+`"` or a newline would end the name and write other text into the
+header.
+
+A C header shared by both kinds of unit must name what `M.tci`
+declares by the names that `M.tci` gives it, as `expr *` for a variant
+`expr`, so that it reads the same in each. It must name an instance
+through a typedef that `M.tci` declares, as `typedef pair(int, int)
+int_pair;`: the C name of the instance, `pair__ii` (10.3), is claimed
+by its generic in a Type-C unit, which refuses the header.
+
+Rationale. A header that adapts to the language that includes it is
+the C idiom of `extern "C"` under `__cplusplus`, and `__TYPEC__` exists
+for it (2.1). The alternative, that lowering takes an instance whose
+definition a header's text holds as defined, would have the front end
+recognize generated text, exempt it from 2.3 and from the claims of
+10.3, and so let C text forge the definition of an instance; and a unit
+that included both `M.h` and `M.tci` would still meet each variant
+twice, once as a plain C structure.
+
+The header is written from one `-E` step whose main file is `M.tci`,
+run as that of a `.tc` input (13.2): `M.tci` is Type-C text (2.1), so
+the unit is a Type-C unit, with the universe text and `__TYPEC__`. The
+step also gets `-dI`, which the user cannot give (13.2). Under it GCC
+and Clang write each `#include` that they process as a line of the
+output, in the text of the file that holds it, and still expand it.
+The output differs from that of `-E` alone in those lines and in line
+markers, and in no token.
+
+The *text of `M.tci`* is what the output holds while the main file is
+the current file at the bottom of the include stack. The reader passes
+over deeper text, and the lines of `-dI` in it, since a client reaches
+that text through the includes of the header.
+
+As a main file, `M.tci` draws from GCC and Clang the warning "#pragma
+once in main file" for a `#pragma once`, an error under `-Werror`,
+which GCC 14 has no option to turn off. An interface that has a header
+therefore guards itself with `#ifndef`, as 3.1 rule 5 asks of headers.
+Naming `M.tci` by `-include` with an empty main file would avoid the
+warning, but the main file would then decide that the unit is C, and
+`M.tci` would follow the user's `-include` files in an order of the
+driver's choosing and could be skipped by a guard that one of them
+sets first.
+
+An *include line* is read exactly: `#` in the first column, the
+directive `include`, `include_next` or `import`, one space, a header
+name between `"` and `"` or `<` and `>`, ended as C11 6.4.7 ends one,
+then the end of the line, or ` /* clang -E -dI */` and the end of the
+line. Any other line of the text of `M.tci` that has `#` in its first
+column and is neither a line marker nor a pragma is an error of the
+backend's output. A directive that a macro of `M.tci` builds starts
+with a space in the output of both families, and is read as tokens,
+as in a unit.
+
+The header writes the include lines of the text of `M.tci`, each where
+it stands, and not the text that they bring.
+
+- A line is written as its directive and its header name with its
+  delimiters, without Clang's comment. A name that a macro gives or
+  that a `\` splices is written as `M.tci` included it, and
+  `<stdint.h>` stays `<stdint.h>`, which the client's compiler finds
+  among its own headers.
+- A name that ends in `.tci` is written to end in `.h`, so a client
+  finds the header of another interface by the path through which
+  `M.tci` finds that interface.
+- An include line stands between two external declarations of
+  `M.tci`. One inside a declaration, as a list of fields included into
+  the body of a structure or of constructors into a variant, is an
+  error of `M.tci`: the header would hold the declaration without the
+  text that the line brings, and the line where nothing can be
+  included.
+- `#include_next` is an error of `M.tci`: a client would search on
+  from the place of `M.h` in its include path, not from that of
+  `M.tci`.
+- An `#include` that an `#if` of `M.tci` skips is in neither the
+  output nor the header. One whose file a guard or `#pragma once`
+  skips is in both, and a C client's guards skip it as well.
+- A file that the user's `-include` names stands outside the text of
+  `M.tci`, and the header does not include it.
+
+GCC 14.2 and 16.2, Clang 21.1, 22.1 and 23.1 and Apple Clang 21, the
+oldest and newest supported releases of both families (13.3), write
+the include lines alike, but for Clang's comment.
+
+A quoted `#include` searches the directory of the file that holds it
+first. A header beside its interface thus finds `M.tci` and the quoted
+names of `M.tci` where `M.tci` finds them. A header that `-o` writes
+elsewhere finds them through the client's include path alone, after a
+file of the same name beside the header; and it finds the `.h` that it
+names for another interface only where that header stands at the path
+relative to it that the interfaces have. A program that writes its
+headers away from its interfaces therefore keeps the layout of their
+directories and gives its clients the interfaces' directories in their
+include path.
+
+`-M` and `-MM` are errors of the command line with `--emit-c-header`,
+since they print a rule in place of the text that the header is
+written from. `-MD` and `-MMD` reach the step as they reach that of a
+`.tc` input, with the header standing as its output: unless the user
+gives `-MT` or `-MQ`, `typec` adds `-MQ` with the path of the header,
+and unless the user gives `-MF`, `-MF` with the path of the header
+without its suffix and with `.d`, as for a `.tc` input. The rule then names the header
+as its target and `M.tci` and every file that it includes as its
+prerequisites.
+
+The header carries the declarations of `M.tci` and not its macros.
+`-E` drops the definition of each macro and expands it where `M.tci`
+uses it, and the lowered text holds the expansion. A macro of a `.tci`
+may hold Type-C, such as a `match` in its body, and lowering never
+reads a definition, only what an expansion gives; carrying the
+definitions would hand that text to C compilers. A macro that a C
+client needs, such as a constant or an accessor, is therefore defined
+in a plain `.h` that `M.tci` includes, and the header includes that
+`.h` where `M.tci` does. Each conditional of `M.tci` is likewise
+decided when the header is written, with `__TYPEC__` defined as for
+every Type-C unit and under the options of that command line.
+
+A C client therefore reads each include of the header without the
+macros that `M.tci` defines before it and without `__TYPEC__`, and the
+header that it includes may then declare otherwise than it did for the
+Type-C units. A macro that changes what an included header declares,
+as `_FILE_OFFSET_BITS` changes `off_t` in glibc, is defined in a plain
+`.h` that `M.tci` includes first, which the header includes as well,
+or on the command line of every compile; and a plain `.h` that adapts
+under `__TYPEC__` (2.1) gives both branches one layout. That is a
+limitation: `typec` sees neither in the client's compile and checks
+neither (section 14).
 
 The header is C11, as lowered code is (2.4), and a client compiles it as
 C11 or later: C99 does not let a typedef be declared again. Its names
@@ -3898,8 +4056,10 @@ is what keeps a client's names from them (2.3). Clang reports them under
 `-Weverything` also reports the padding of the probe's two structures
 under `-Wpadded`, which GCC 16 has as well, outside `-Wall` and
 `-Wextra`, and the `_Static_assert` and `_Alignof` of the probe under
-`-Wpre-c11-compat`. The two structures are padded by design: a `char`
-before an `int` is what makes a packing show in the alignment.
+`-Wpre-c11-compat`, as it reports the `_Static_assert` and `_Generic`
+of the enumeration assertion below. The two structures are padded by
+design: a `char` before an `int` is what makes a packing show in the
+alignment.
 
 The header is specific to the target and configuration it was generated
 for, and assumes that a client includes it as the command line of that
@@ -3907,19 +4067,46 @@ configuration leaves the compiler: with the same options that change a
 layout, and outside the region of every `#pragma pack` and of every
 other pragma that changes one (13.5). The bracket keeps a client's
 `#pragma pack` from an instance and from nothing else in the header,
-and it assumes the reading of `#pragma pack()` that 10.3 states; a
-header that holds a bracket ends, inside its guard, with the probe of
+and it assumes the reading of `#pragma pack()` that 10.3 states; the
+lowered text of a header that holds a bracket ends with the probe of
 that reading (10.3), so a client whose compiler reads the line
-otherwise fails to compile. `typec` does not see a client's compile and
+otherwise fails to compile.
+
+The layout of a variant rests as well on the size of its tag, whose
+type is the enumeration that `typec` generates (10.1 rule 2), not text
+of the user's. A header that defines the enumeration of the tags of a
+variant, of `M.tci` or of an instance, therefore ends its lowered text
+with the enumeration assertion of 13.4, after the definitions of
+instances and before the probe, outside the guard of every instance:
+the assertion holds for the whole client, whichever header defines an
+instance. Its enumerator is named for the header (13.5), since a
+client that includes two such headers would otherwise declare the
+enumerator twice, which C refuses. Under `-fshort-enums` a tag takes
+fewer bytes, and GCC's manual calls the code that the option gives
+not binary compatible with code compiled without it. A client compiled
+with it thus fails to compile, with the message that names the
+option; without the assertion it would read every variant at offsets
+that the Type-C units do not use. The assertion is one enumeration
+standing for all, provisional as 13.4 states. The other two
+assertions of 13.4 are not written. They protect the typing of the
+front end, which a client's compile does not have, and neither
+the signedness of a plain `int` bit-field nor the type of an unsuffixed
+floating constant changes the layout of anything that `typec` writes:
+the bit-fields and constants of `M.tci` are the user's C, with C's
+exposure to those options. `typec` does not see a client's compile and
 checks nothing else of this.
 
-*Provisional.* The three type assertions that end a lowered unit (13.4)
-are not written into an emitted header. In a header they would assert
-the options of the client's compile, and what a header requires of its
-client is for package 4.1 of the plan to decide. The same package
-decides whether `--emit-c-header` refuses the options that change one
-of those types, which the driver refuses for a `.tc` input (13.2). The
-default is a header without the assertions and no such refusal.
+`--emit-c-header` refuses every option that the driver refuses with a
+`.tc` input, by the same table (13.2): among them the options that
+change one of the three types of 13.4 and `-fpack-struct` without a
+value. The header describes the layout of the configuration that it is
+generated for, and the driver builds no Type-C unit under a
+configuration that it refuses, so a header generated under one would
+describe a layout that no Type-C object has, and the front end would
+type `M.tci` under assumptions that the backend contradicts. With one
+table the configurations of headers and of units are one set, and the
+enumeration rule that the header asserts of its client is the rule of
+the configuration that generated it.
 
 C clients can read and write everything the header exposes, and no
 Type-C rule binds them.
@@ -4360,9 +4547,9 @@ _Static_assert(_Alignof(struct __tc_pack_probe_1)
                "-fxl-pragma-pack?)");
 ```
 
-among the assertions of 13.4, and an emitted header that holds one ends
-with the same text inside its guard, the two structures named for the
-header (9.3, 13.5). Each structure stands in a bracket, written as
+among the assertions of 13.4, and the lowered text of an emitted header
+that holds one ends with the same text, the two structures named for
+the header (9.3, 13.5). Each structure stands in a bracket, written as
 every bracket is: the first inside a region that the probe packs to 1,
 the second inside one that it packs to 2. Under the assumed reading
 both have the packing of the command line, whatever it is, and are
@@ -4756,7 +4943,10 @@ language is defined here and not by the tool.
   as the first step. `-Xclang -ftrigraphs` still reaches Clang's
   front end after the option, as any `-Xclang` option reaches it.
 - `--emit-c` stops after emission and writes the C. `--emit-c-header` is
-  described in 9.3.
+  described in 9.3. Its `.tci` input is a `.tc` input to the table of
+  options and to every refusal of this section, so it refuses and
+  passes the options that a `.tc` input does, by the same table; 9.3
+  states what it does with the dependency options.
 - `--stats` prints on stderr what each `.tc` unit counts against the
   translation limits of 3.5 rule 7: the bytes of the preprocessed unit,
   those charged to the instance budget and to the output limit, the
@@ -5396,8 +5586,11 @@ reads `#pragma pack()` and no type. The message of each of the four
 names the options known to break it. The driver refuses those of the
 three types as well, and none for the probe (13.2). A unit without
 Type-C constructs gets none of this, since its text is the backend's
-own. An emitted header ends with the probe where it holds a bracket and
-carries none of the three type assertions (9.3).
+own. The lowered text of an emitted header ends with the enumeration
+assertion where it defines the enumeration of the tags of a variant,
+with its enumerator named for the header (13.5), and with the probe
+where it holds a bracket; it carries neither of the other two type
+assertions (9.3).
 
 Two properties follow by construction:
 
@@ -7475,7 +7668,10 @@ the others of its kind:
   `option(int)`;
 - the two structures of the packing probe of an emitted header (10.3):
   `pack_probe_1` or `pack_probe_2`, then the module of the header, as
-  in `__tc_pack_probe_1__ir_5fexpr`.
+  in `__tc_pack_probe_1__ir_5fexpr`;
+- the enumerator of the enumeration assertion of an emitted header
+  (9.3, 13.4): `enum_probe`, then the module of the header, as in
+  `__tc_enum_probe__ir_5fexpr`.
 
 No kind word holds a `__` or ends in `_`, so the first `__` after the
 prefix ends the word, and names of different kinds differ: the guard of
@@ -7616,7 +7812,7 @@ a crash.
 | The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure, the bits of each unnamed bit-field and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect and zeroes an unnamed bit-field, which C leaves indeterminate (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | The C text that `typec` writes for a unit is at most its output limit, and what the front end reads for its instances at most the instance budget | Every unit and every byte of its C text but the fixed static assertions that end it, instances, copies, temporaries and line markers alike: emission charges each piece and edit as it makes it, with no list of constructs, and the front end counts the copies of deferred statements against the output limit as it finds their exits (3.5 rule 7) | Nothing; a unit past either bound is refused and nothing is written. The work of the parser and of the front end outside its readings for instances and its count of copies is not counted |
-| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
+| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. The headers that the header includes declare for the client what they declared for the Type-C units, without the macros that the `.tci` defines before them and without `__TYPEC__` (9.3). `typec` does not see a client's compile: the header's enumeration assertion and probe (9.3) fail a client whose rule for enumerations or reading of `#pragma pack()` differs from the assumed one, and nothing else of this is checked |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
 | A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length. No full expression that holds an index, a `slice_sub` or a conversion of a slice is resumed, by a call that returns a second time (`setjmp`, `sigsetjmp`, `getcontext`, `vfork`, `__builtin_setjmp`, a function declared with the GNU attribute `returns_twice`), after the same call of its function has begun to evaluate it again: the values that it held are then indeterminate, as C11 7.13.2.1p3 has the objects of a function after a `longjmp`, and the test does not protect the access (section 8 rule 10). Measured: under GCC 16 at `-O2` such an index passes its test and points beyond the end of a slice whose array is live, and under both backends a call stores through the address of an element that it held across such a call in another argument, into an array that is freed, as C does with `&a[i]` there. `typec` does not refuse such an expression (13.5) |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |

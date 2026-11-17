@@ -1468,18 +1468,6 @@ types (design 13.3).
   which is the unit nearest a limit. If package 3.6 or the pilot wants
   the counts of a refused unit, carry them in the error.
 
-- [High] Package 4.1 decides whether a Type-C translation unit may
-  include an emitted header (design 9.3). The include guards are macros
-  and do not survive `-E`, so what reaches a Type-C unit is the header's
-  text without them: the typedefs of arguments under `__tc_` names, and
-  the declarations and definitions of instances. Design 2.3 makes a
-  `__tc_` name an error in a Type-C unit, C text included, and an
-  instance that the unit also uses would be defined twice, by the
-  header's text and by lowering. Either keep the refusal and say in 9.3
-  that a Type-C unit includes the `.tci`, or have lowering take an
-  instance that an emitted header's text defines as defined. Until then
-  a C header that includes an emitted header cannot be shared with
-  Type-C units.
 - [Medium] Pilot B (plan, Stage 2) counts the label addresses that
   design 4.4's reading of `&&L` refuses though no `goto *` is ever
   given them, such as the kernel's `_THIS_IP_` (`({ __label__ __here;
