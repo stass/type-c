@@ -359,6 +359,34 @@ is [type-c-language-design.md](type-c-language-design.md).
   backends pick a pragma by its first tokens, which makes that line an
   unknown pragma; have the reader keep the leading run of identifiers
   and match the list against it, so that such a line is refused.
+- [Medium] The places where lowering writes the copies of a deferred
+  statement, and a trap, are coded three times: `Lowering.exit_places`
+  and `trap_edits`, `Declarations.exit_places`, and
+  `Scope_pragma.placement_refusals`, which is sound only because each
+  place lies inside the span of its exit or at the `}` of the scope.
+  Have `Reachability` give each site's places as token indices once,
+  read by all three; the pragma rule then refuses a pragma line directly
+  before a place or before an annotated statement that holds one.
+- [Low] `Scope_pragma.placement_refusals` tests every exit of a site
+  against every annotated statement, quadratic in one scope with many
+  of each (as `record_exit` already is in defers and exits). Sort the
+  exits by first token once and search for the first at or after the
+  statement: spans nest, so that one decides.
+- [Low] Whether a token is a pragma line is matched in `Parser`,
+  `Lowering`, `Resolution`, `Expressions` and `Scope_pragma`, and
+  "a pragma line directly before token i" in four places; add
+  `Token.is_pragma` beside `Token.is_movable` and one helper.
+- [Low] `Scope_pragma` refuses a `#pragma typec` line in the scope of
+  a `_Defer` of C text, where design 11.1 says the line is ignored;
+  exempt it there or say so in 11.1.
+- [Low] A pragma of C11 7.12.2 in the deferred statement of a defer in
+  a block literal that stands in the scope of an outer function's defer
+  is refused by the outer scope's rule: the outer function does not
+  know the block literal's defer sites.
+- [Low] The golden tests of the pragma rule of design 6 rule 9 in a
+  scope have no case of a defer in a match arm, of a loop pragma before
+  the `}` of a block that cannot complete, before a labelled statement
+  that holds an exit, or between `S` and the first item.
 - [Low] The TC0074 message names neither the pragma it refuses nor the
   ones allowed; add the line's first identifiers and point to the
   list of design 13.5.

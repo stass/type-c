@@ -3732,7 +3732,10 @@ and non_zero_constant context condition =
 
 and reachability_facts context =
   { Reachability.noreturn = calls_noreturn context;
-    non_zero = non_zero_constant context }
+    non_zero = non_zero_constant context;
+    pragma_before =
+      (fun index -> index > 0 && is_pragma context.text.tokens.(index - 1))
+  }
 
 (* Design 4.3 rule 1, asked of each arm once typing has read it, so that
    every match that typing reads, and lowering emits, is checked. An arm

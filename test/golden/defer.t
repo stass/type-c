@@ -1225,6 +1225,204 @@ end of that block, and each copy writes S in a block of its own.
   __builtin_trap();
   } }
 
+A copy of S is compiled under the pragmas in force at its exit, so the
+scope of a defer statement holds only the pragmas that annotate the
+loop after them. Here the copy at the `return` would be contracted to
+an FMA under `-mfma` and the one at the end of the block would not.
+
+  $ cat > scope_fp_contract.tc <<'EOF'
+  > double r;
+  > void f(double x, double y, double z, int c) {
+  > #pragma clang fp contract(off)
+  >   ;
+  >   defer r = x * y + z;
+  >   if (c) {
+  > #pragma clang fp contract(on)
+  >     return;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe scope_fp_contract.tc
+  scope_fp_contract.tc:7: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  [1]
+
+A pragma of C11 7.12.2 is in force to the end of its block, here one
+that holds an exit, so the scope holds none, at any depth.
+
+  $ cat > scope_stdc.tc <<'EOF'
+  > double r;
+  > void f(double x, double y, int c) {
+  >   defer r = x * y + 1;
+  >   while (c--) {
+  >     {
+  > #pragma STDC FP_CONTRACT ON
+  >       if (c == 3)
+  >         return;
+  >     }
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe scope_stdc.tc
+  scope_stdc.tc:6: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  [1]
+  $ cat > scope_pack.tc <<'EOF'
+  > struct s { char c; int i; };
+  > void use(int);
+  > void f(int c) {
+  >   defer use(sizeof(struct s));
+  > #pragma pack(push, 1)
+  >   use(c);
+  > #pragma pack(pop)
+  > }
+  > EOF
+  $ ./golden.exe scope_pack.tc
+  scope_pack.tc:5: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  [1]
+
+C text is held to the rule too.
+
+  $ cat > scope_c.tc <<'EOF'
+  > # 1 "scope_c.tc"
+  > # 1 "c.h" 1
+  > void g(void);
+  > void f(void) {
+  >   _Defer g();
+  > #pragma GCC optimize("O3")
+  >   g();
+  > }
+  > # 2 "scope_c.tc" 2
+  > EOF
+  $ ./golden.exe scope_c.tc
+  c.h:4: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  [1]
+
+A loop pragma in the scope stands before no exit, before the end of
+the block, or before a statement that holds an exit, where lowering
+writes a copy that the pragma would reach. A loop holds a `return` in
+its body, and the copy at the `return` would be part of the loop it
+annotates.
+
+  $ cat > scope_before_break.tc <<'EOF'
+  > void use(int);
+  > void f(int c) {
+  >   while (c) {
+  >     defer use(c);
+  > #pragma GCC unroll 2
+  >     break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe scope_before_break.tc
+  scope_before_break.tc:5: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  [1]
+  $ cat > scope_loop_return.tc <<'EOF'
+  > void use(int);
+  > void f(int n) {
+  >   defer use(n);
+  > #pragma GCC unroll 2
+  >   for (int i = 0; i < n; i++)
+  >     if (i == 5)
+  >       return;
+  > }
+  > EOF
+  $ ./golden.exe scope_loop_return.tc
+  scope_loop_return.tc:4: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  [1]
+  $ cat > scope_before_end.tc <<'EOF'
+  > void use(int);
+  > void f(int n) {
+  >   defer use(n);
+  >   use(0);
+  > #pragma unroll
+  > }
+  > EOF
+  $ ./golden.exe scope_before_end.tc
+  scope_before_end.tc:5: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  [1]
+
+A `goto` that leaves the inner scope alone and the error path of a
+try are exits as well.
+
+  $ cat > scope_nested_goto.tc <<'EOF'
+  > void use(int);
+  > void f(int c) {
+  >   defer use(0);
+  >   {
+  >     defer use(1);
+  > #pragma GCC unroll 2
+  >     for (int i = 0; i < c; i++)
+  >       if (i == 3)
+  >         goto out;
+  >   }
+  > out:;
+  > }
+  > EOF
+  $ ./golden.exe scope_nested_goto.tc
+  scope_nested_goto.tc:6: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  [1]
+  $ cat > scope_loop_try.tc <<'EOF'
+  > type r = result(int, int);
+  > r g(int);
+  > void use(int);
+  > r f(int n) {
+  >   defer use(n);
+  > #pragma GCC unroll 2
+  >   for (int i = 0; i < n; i++)
+  >     try g(i);
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe scope_loop_try.tc
+  scope_loop_try.tc:6: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  [1]
+
+The pragma lines of a later deferred statement in the scope are held
+to the rule on deferred statements, which allows a pragma of C11
+7.12.2: each copy is a block of its own.
+
+  $ cat > scope_moved_stdc.tc <<'EOF'
+  > double r;
+  > double f(double a, double b, double c) {
+  >   defer r = 0;
+  >   defer {
+  > #pragma STDC FP_CONTRACT OFF
+  >     r = a * b + c;
+  >   }
+  >   return a * b + c;
+  > }
+  > EOF
+  $ ./golden.exe scope_moved_stdc.tc > /dev/null
+
+A loop that holds a `break` of its own leaves no scope by it, so a loop
+pragma may stand before it; and a pragma before the defer statement's
+block, or before the defer statement with a `;` between them, is
+outside the scope.
+
+  $ cat > scope_loop.tc <<'EOF'
+  > void use(int);
+  > void f(int n) {
+  > #pragma STDC FP_CONTRACT OFF
+  >   ;
+  >   defer use(n);
+  > #pragma GCC unroll 2
+  >   for (int i = 0; i < n; i++)
+  >     if (i == 5)
+  >       break;
+  > }
+  > EOF
+  $ ./golden.exe scope_loop.tc | grep -v '^# ' | grep .
+  void use(int);
+  void f(int n) {
+  #pragma STDC FP_CONTRACT OFF
+    ;
+    
+  #pragma GCC unroll 2
+    for (int i = 0; i < n; i++)
+      if (i == 5)
+        break;
+  { use ( n ) ; }
+  }
+
 The name of a label whose address S takes reads, at an exit, the GNU
 local label of its name that a block around the exit declares: such a
 `__label__` is an error where the block holds an exit, and allowed where

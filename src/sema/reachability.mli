@@ -14,7 +14,8 @@
 
 open Typec_syntax
 
-(** What typing knows that the rules of 4.4 read. *)
+(** What typing knows that the rules of 4.4 read, and what the reader
+    knows that the scopes of defer statements record. *)
 type facts = {
   noreturn : Tree.expression -> bool;
       (** whether a callee designates a function declared [_Noreturn] or
@@ -22,6 +23,9 @@ type facts = {
   non_zero : Tree.expression -> bool;
       (** whether a typed condition is an integer constant expression
           whose value is not zero *)
+  pragma_before : int -> bool;
+      (** whether a [#pragma] line stands directly before the token at
+          the index *)
 }
 
 type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
@@ -44,12 +48,20 @@ type ending = Completes of int | Cannot_complete of int | Arm_end
 (** A defer statement: its keyword, its statement [S], where its scope
     ends, and the jumps that leave the scope. A [goto] leaves it if its
     label is outside the scope, including one before the defer
-    statement. *)
+    statement. [scope_tokens] is the tokens after [S] to the end of the
+    scope, pragma lines included:
+    to the [}] of a block, which it does not hold, or to the end of the
+    last item of a match arm; it is empty where nothing follows [S].
+    [annotated] is the statements and block items that a [#pragma] line
+    stands directly before ({!facts}[.pragma_before]) in the scope and
+    in no scope of a later defer statement inside it, in no order. *)
 type defer_site = {
   keyword : Tree.span;
   deferred : Tree.span;
   ending : ending;
   exits : exit list;
+  scope_tokens : Tree.span;
+  annotated : Tree.span list;
 }
 
 (** Both walk a tree that the parser has bounded in depth

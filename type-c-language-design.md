@@ -1581,7 +1581,37 @@ defer fclose(f);
    `#pragma` line stands directly before it: a `#pragma GCC ivdep`
    there would apply to the statement after the `defer`, a loop that
    the source does not annotate. A `;` between them keeps the pragma
-   on a statement of its own.
+   on a statement of its own. Each copy is compiled under the pragmas
+   in force at its exit, and those must be the pragmas in force at the
+   `defer` statement. With
+
+   ```c
+   double r;
+   void f(double x, double y, double z, int c) {
+   #pragma clang fp contract(off)
+     ;
+     defer r = x * y + z;
+     if (c) {
+   #pragma clang fp contract(on)
+       return;
+     }
+   }
+   ```
+
+   Clang at `-O2 -mfma` contracts the copy at the `return` to an FMA
+   and the copy at the end of the block not. So the scope of a `defer`
+   statement, from it to the end of its block or match arm, nested
+   blocks included, holds only the pragmas that annotate the loop after
+   them, which 13.5 lists. The pragmas there that are in force to the end of their block
+   are left out, since a copy at a later exit of that block would be
+   compiled under them. A loop pragma in the scope also stands directly
+   before no exit, no end of the block and no statement or declaration
+   that holds an exit, since the pragma would reach the copy that
+   lowering writes there. A loop that holds an exit holds the copy at
+   it. A `break` or `continue` that leaves only a loop or switch inside
+   the scope is no exit, so a loop pragma may annotate that loop. The
+   pragma lines of `S` are held to the rule on `S` above, and those
+   before the `defer` statement are outside its scope.
 10. Within the scope of a `defer` statement there is no GNU computed
     `goto *e` and no `asm goto`. Both are jumps to labels (4.4) that no
     deferred statement can precede: the first chooses its target when
@@ -4033,6 +4063,16 @@ matches the leading identifiers of the line; a line whose first tokens
 are not those identifiers alone holds a pragma that neither backend
 knows. A `#pragma` line that is no sequence of tokens is refused first,
 under its own code.
+
+The scope of a defer statement holds pragmas of the list as well, the
+six that annotate a loop alone, and none of those directly before an
+exit, the end of its block or a statement that holds an exit (section
+6 rule 9). A copy is then compiled under the pragmas in force at the
+`defer` statement. Typing decides this once per function, in
+`Scope_pragma`, from the scopes and exits that reachability finds:
+every other pragma line there is an error, in Type-C text and C text
+alike, among them `clang fp`, `STDC FP_CONTRACT`, `GCC optimize`,
+`float_control`, `fenv_access` and `pack`.
 
 Three rules carry the property into unread text.
 

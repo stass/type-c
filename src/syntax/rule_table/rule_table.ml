@@ -444,7 +444,13 @@ let rows =
          exit of its scope, and a pragma that sets state for the rest of \
          the text would be in force once per copy. Or a [#pragma] line \
          directly before a defer statement, which lowering removes, so \
-         that the pragma would apply to the statement after it." };
+         that the pragma would apply to the statement after it. Or a \
+         [#pragma] line in the scope of a defer statement that is not one \
+         of the pragmas that annotate only the loop after them, or that \
+         stands directly before an exit of the scope, the end of its \
+         block or a statement or declaration that holds an exit: a copy \
+         of the deferred statement would be compiled under other pragmas \
+         than the defer statement." };
   ]
 
 let () =

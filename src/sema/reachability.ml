@@ -6,6 +6,7 @@ open Typec_syntax
 type facts = {
   noreturn : Tree.expression -> bool;
   non_zero : Tree.expression -> bool;
+  pragma_before : int -> bool;
 }
 
 type refusal = { span : Tree.span; diagnostic : Rule.diagnostic }
@@ -22,6 +23,8 @@ type defer_site = {
   deferred : Tree.span;
   ending : ending;
   exits : exit list;
+  scope_tokens : Tree.span;
+  annotated : Tree.span list;
 }
 
 exception Refused of refusal
@@ -116,19 +119,30 @@ type jump = {
    3), the statement of a single-pattern test, which only a successful
    test enters (4.6 rule 6), or the scope of a defer statement, the
    items after it in its block (6 rules 1 and 5), with the exits of the
-   scope that the walk has read. *)
+   scope and the statements and items in it with a pragma line directly
+   before them that the walk has read. *)
 type guarded =
   | Arm of Tree.span
   | Tested of Tree.span
-  | Defer_scope of { scope : Tree.span; scope_exits : exit Queue.t }
+  | Defer_scope of {
+      scope : Tree.span;
+      scope_exits : exit Queue.t;
+      scope_annotated : Tree.span Queue.t;
+    }
 
-(* A defer statement that a sequence of items holds, with the exits of
-   its scope, which fill as the walk reads the items after it. *)
+(* A defer statement that a sequence of items holds, with the exits and
+   the annotated statements and items of its scope, which fill as the
+   walk reads the items after it. *)
 type read_defer = {
   defer_keyword : Tree.span;
   defer_statement : Tree.span;
   defer_exits : exit Queue.t;
+  defer_annotated : Tree.span Queue.t;
 }
+
+(* A defer statement whose scope the walk has read: where the scope
+   ends, and its tokens after the deferred statement. *)
+type read_scope = { read : read_defer; ending : ending; tokens : Tree.span }
 
 (* A goto statement, after its labels, with the guarded statements and
    scopes around it, the innermost first. It leaves the defer scopes
@@ -157,7 +171,7 @@ type definition = {
    [definitions] and [jumps] hold the labelled statements and the
    jumps, [gotos] the goto statements, [breaches] the refusals of
    design 6 rules 10 and 12, and [defers] the defer statements whose
-   scopes the walk has read, with where each ends. [operands] are the
+   scopes the walk has read. [operands] are the
    operands of the returns in the scope of a defer statement around the
    walk, which no jump leaves (design 6 rule 12). *)
 type walk = {
@@ -169,7 +183,7 @@ type walk = {
   jumps : jump Queue.t;
   gotos : goto Queue.t;
   breaches : refusal Queue.t;
-  defers : (read_defer * ending) Queue.t;
+  defers : read_scope Queue.t;
 }
 
 (* The walk inside the guarded statement or scope [guard]. *)
@@ -182,6 +196,22 @@ let in_defer_scope walk =
   List.exists
     (function Defer_scope _ -> true | Arm _ | Tested _ -> false)
     walk.guards
+
+(* Records the statement or item at [span] in the innermost defer scope
+   around the walk if a pragma line stands directly before it. A jump
+   that leaves an outer scope from inside the statement leaves the
+   innermost one too, which the outer holds. *)
+let note_annotated walk (span : Tree.span) =
+  let innermost_scope =
+    List.find_opt
+      (function Defer_scope _ -> true | Arm _ | Tested _ -> false)
+      walk.guards
+  in
+  match innermost_scope with
+  | Some (Defer_scope { scope_annotated; _ })
+    when walk.facts.pragma_before span.first ->
+      Queue.add span scope_annotated
+  | Some (Defer_scope _ | Arm _ | Tested _) | None -> ()
 
 (* Records the refusal of a jump that design 6 rule 10 forbids, if the
    walk is in the scope of a defer statement: lowering could not tell
@@ -254,7 +284,8 @@ let item_span : Tree.block_item -> Tree.span = function
 let record_exit guards exit ~leaves =
   List.iter
     (function
-      | Defer_scope { scope; scope_exits } when leaves scope ->
+      | Defer_scope { scope; scope_exits; scope_annotated = _ }
+        when leaves scope ->
           Queue.add exit scope_exits
       | Defer_scope _ | Arm _ | Tested _ -> ())
     guards
@@ -317,9 +348,20 @@ and sequence walk items ~ending =
   let reaching, flow, defers = step walk (true, completes, []) items in
   let flow = { flow with completes = reaching } in
   let scope_ending = ending flow in
-  List.iter
-    (fun read -> Queue.add (read, scope_ending) walk.defers)
-    (List.rev defers);
+  (* The last token of each scope: before the [}] of a block, so that a
+     pragma line there is in the scope, or the last of an arm's items. *)
+  let scope_last =
+    match scope_ending with
+    | Completes closing | Cannot_complete closing -> closing - 1
+    | Arm_end -> scope_end
+  in
+  let add read =
+    let tokens =
+      { Tree.first = read.defer_statement.last + 1; last = scope_last }
+    in
+    Queue.add { read; ending = scope_ending; tokens } walk.defers
+  in
+  List.iter add (List.rev defers);
   flow
 
 (* The walk of the items [rest] that follow [item], which are the scope
@@ -330,7 +372,7 @@ and after_item walk item rest ~scope_end defers =
   | Tree.Block_defer { keyword; statement } ->
       let read =
         { defer_keyword = keyword; defer_statement = statement.span;
-          defer_exits = Queue.create () }
+          defer_exits = Queue.create (); defer_annotated = Queue.create () }
       in
       (in_scope walk read rest ~scope_end, read :: defers)
   | Block_declaration _ | Block_type_declaration _ | Block_statement _ ->
@@ -341,12 +383,19 @@ and in_scope walk read rest ~scope_end =
   match rest with
   | first :: _ ->
       let scope = { Tree.first = (item_span first).first; last = scope_end } in
-      guarded_by (Defer_scope { scope; scope_exits = read.defer_exits }) walk
+      guarded_by
+        (Defer_scope
+           { scope; scope_exits = read.defer_exits;
+             scope_annotated = read.defer_annotated })
+        walk
   | [] -> walk
 
 and block_item walk = function
-  | Tree.Block_declaration declaration -> declaration_flow walk declaration
+  | Tree.Block_declaration declaration ->
+      note_annotated walk declaration.span;
+      declaration_flow walk declaration
   | Block_type_declaration { declaration; _ } ->
+      note_annotated walk declaration.span;
       type_declaration_flow walk declaration
   | Block_statement statement -> statement_flow walk statement
   (* The statement runs at the exits of the scope, not here (design 6
@@ -397,6 +446,7 @@ and designators_flow walk designators =
   all designator designators
 
 and statement_flow walk (statement : Tree.statement) =
+  note_annotated walk statement.span;
   (* What a break or continue names, if [statement] is one it leaves. *)
   let target = Tree.jump_target_of statement in
   match statement.node with
@@ -849,10 +899,12 @@ let arm_refusal facts (matched : Tree.arm) =
   else None
 
 (* The labels and jumps that a walk records do not depend on the facts,
-   which decide only whether a statement completes, so this walk, which
-   reads no flow, needs none, and a body may be checked before typing
-   has read it. *)
-let no_facts = { noreturn = (fun _ -> false); non_zero = (fun _ -> false) }
+   which decide only whether a statement completes and which statements
+   of a defer scope are annotated, so this walk, which reads neither,
+   needs none, and a body may be checked before typing has read it. *)
+let no_facts =
+  { noreturn = (fun _ -> false); non_zero = (fun _ -> false);
+    pragma_before = (fun _ -> false) }
 
 (* The first jump of the walk, in source order, that enters what it may
    not. *)
@@ -909,13 +961,15 @@ let record_gotos walk =
   in
   Queue.iter record walk.gotos
 
-let defer_site ((read : read_defer), ending) =
+let defer_site { read; ending; tokens } =
   { keyword = read.defer_keyword; deferred = read.defer_statement; ending;
-    exits = List.of_seq (Queue.to_seq read.defer_exits) }
+    exits = List.of_seq (Queue.to_seq read.defer_exits);
+    scope_tokens = tokens;
+    annotated = List.of_seq (Queue.to_seq read.defer_annotated) }
 
 let defers facts body =
   let walk = start facts in
   ignore (block walk body);
   record_gotos walk;
-  let keyword ((read : read_defer), _) = read.defer_keyword in
+  let keyword { read; _ } = read.defer_keyword in
   List.map defer_site (in_source_order keyword walk.defers)

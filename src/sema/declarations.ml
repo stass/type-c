@@ -3350,7 +3350,11 @@ and type_moved_operand state (views : Parser.try_views) ~scope operand
    in such a scope, whatever the function returns. *)
 and check_deferred state (defers : Expressions.function_defers) =
   List.iter (check_deferred_statement state) defers.sites;
-  List.iter (check_return_operand state) (returns_in_scopes defers.sites)
+  List.iter (check_return_operand state) (returns_in_scopes defers.sites);
+  match Scope_pragma.refusal state.text.tokens defers.sites with
+  | Some (index, diagnostic) ->
+      fail state { first = index; last = index } diagnostic
+  | None -> ()
 
 (* What the reading of the moved text at [span] found, as [Resolution]
    reads it, of the [kind]. *)
