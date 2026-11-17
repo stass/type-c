@@ -946,7 +946,13 @@ let type_parameters_of = function
   | Generic_function_name ->
       0
 
-let is_generic kind = type_parameters_of kind > 0
+let is_generic_type kind = type_parameters_of kind > 0
+
+(* Whether a name of [kind] is that of a generic type or function, which
+   claims the names of its instances (design 10.3). *)
+let names_generic = function
+  | Generic_function_name -> true
+  | kind -> is_generic_type kind
 
 (* The declaration of the ordinary identifier [name] that is visible at
    the cursor, which may be one of the universe scope (design 2.3). *)
@@ -1012,12 +1018,26 @@ let refuse_instance_name state index name ~what ~use =
               what (quoted name) use (quoted generic)))
   | None -> ()
 
-(* The claim of the generic [name] also refuses a name of its space that
-   its scope declares before it. A generic is declared at file scope or
-   in the universe scope only, and no scope that ended before it can hold
-   a use of it. *)
-let claim_instance_space state (name : identifier) =
-  match Scope.first_in_space state.scope name.node with
+(* No generic outside the universe text has a universe name: one named as
+   a universe generic would share its instance names, and the rule covers
+   every universe name so that it lists none (design 3.6). *)
+let refuse_universe_name state (name : identifier) =
+  if
+    Universe.find name.node <> None
+    && not (is_universe_text_at state (token_of name))
+  then
+    fail_at_token state (token_of name)
+      (Rule.message Generic_universe_name
+         (quoted name.node ^ " is a universe name, which no generic has"))
+
+(* The claim of the generic [name] that [scope] declares, which every
+   generic makes, also refuses a name of its space that the scope
+   declares before it. A generic is declared at file scope or in the
+   universe scope only, and no scope that ended before it can hold a use
+   of it. *)
+let claim_instance_space state scope (name : identifier) =
+  refuse_universe_name state name;
+  match Scope.first_in_space scope name.node with
   | Some taken ->
       fail_at_token state (token_of name)
         (Rule.message Claimed_name
@@ -1074,9 +1094,9 @@ let declare_in state ~outside ~kind (name : identifier) =
   refuse_instance_name state (token_of name) name.node ~what:"the name"
     ~use:"declared";
   let declaring = if outside then Scope.outer state.scope else state.scope in
+  if names_generic kind then claim_instance_space state declaring name;
   let earlier = Scope.find_in_innermost declaring name.node in
   refuse_second_definition state name kind earlier;
-  if is_generic kind then claim_instance_space state name;
   let binding = { declaration = In_tree id; kind } in
   state.scope <-
     (if outside then Scope.declare_outside state.scope name.node binding
@@ -1938,7 +1958,7 @@ let past_group state opener offset =
 let begins_qualified_constructor state offset (ordinary : ordinary) =
   let after_name = offset + 1 in
   let after_type_name =
-    if is_generic ordinary.kind then
+    if is_generic_type ordinary.kind then
       past_group state P.Left_paren after_name
     else after_name
   in
@@ -3099,8 +3119,7 @@ let with_parameter_scope state parse =
   result
 
 (* At the [(] after the name of a generic type, which is declared at file
-   scope only, where its instances are emitted (design 3.1), and has no
-   universe name (3.6) unless the universe text declares it: its type
+   scope only, where its instances are emitted (design 3.1): its type
    parameters, which a scope of their own declares. *)
 let generic_head state (checked : Spelling.type_name spanned) =
   let name = (checked :> identifier) in
@@ -3111,13 +3130,6 @@ let generic_head state (checked : Spelling.type_name spanned) =
             "the generic type %s is declared in a block; a generic type is \
              declared at file scope only"
             (quoted name.node)));
-  if
-    Universe.find name.node <> None
-    && not (is_universe_text_at state (token_of name))
-  then
-    fail_at_token state (token_of name)
-      (Rule.message Generic_universe_name
-         (quoted name.node ^ " is a universe name, which no generic type has"));
   advance state;
   let parameter_names, parameter_frame =
     run_in_scope state (inner_scope state) (fun () ->
@@ -4040,7 +4052,7 @@ and typedef_name_operand state name (ordinary : ordinary) =
   | Declared_type { stage = Defining; _ } -> fail_own_name state ~at name
   | _ when begins_qualified_constructor state 0 ordinary ->
       qualified_constructor state name ordinary
-  | kind when is_generic kind ->
+  | kind when is_generic_type kind ->
       if peek_at state 1 = Punctuator_token P.Left_paren then
         fail_type_name state "an expression" name
       else fail_bare_generic state ~at name
@@ -5289,16 +5301,14 @@ let generic_form state =
 
 (* The function's name, which is declared at file scope, meets the rules
    of a type name there, as its instances are named as those of a
-   generic type are (design 7.1 rule 1, 3.1 rules 6 and 7), and claims
-   the names of its instances (10.3). *)
+   generic type are (design 7.1 rule 1, 3.1 rules 6 and 7). *)
 let check_generic_name state declarator =
   match Tree.declared_identifier declarator with
   | None -> fail_one_function state (first_token state state.position)
   | Some name ->
       ignore
         (checked_spelling state ~at_file_scope:true name
-           ~what:"generic function");
-      claim_instance_space state name
+           ~what:"generic function")
 
 (* [read ()], and the braced initialiser lists that it reads, in order. *)
 let with_initialiser_lists state read =

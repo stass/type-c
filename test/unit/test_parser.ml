@@ -2499,16 +2499,37 @@ let universe_cases =
        application, `result(...)` [generic-type-use]";
     case "a generic type with a universe name"
       "type option(T) = | None | Some(T value);"
-      "in.tc:1: error: `option` is a universe name, which no generic type \
-       has [generic-universe-name]";
+      "in.tc:1: error: `option` is a universe name, which no generic has \
+       [generic-universe-name]";
     case "a generic type with a universe name that a declaration hides"
       "int result; type result(T, E) = | Err(E error) | Ok(T value);"
-      "in.tc:1: error: `result` is a universe name, which no generic type \
+      "in.tc:1: error: `result` is a universe name, which no generic has \
+       [generic-universe-name]";
+    case "a generic function with a universe name"
+      "generic(T) static T option(T *p) { return *p; }"
+      "in.tc:1: error: `option` is a universe name, which no generic has \
+       [generic-universe-name]";
+    case "a generic prototype with the name of a slice operation"
+      "generic(T) static void slice_sub(T *p);"
+      "in.tc:1: error: `slice_sub` is a universe name, which no generic \
        has [generic-universe-name]";
+    case "a generic function with a universe name that its body uses"
+      "generic(T) static void option(T *p) { option(int) x; }"
+      "in.tc:1: error: `option` is a universe name, which no generic has \
+       [generic-universe-name]";
+    case "a generic function's body declares a name its instances claim"
+      "generic(T) static void f(T *p) { int f__y; }"
+      "in.tc:1: error: the name `f__y` is declared, but the generic `f` \
+       claims every name that begins with its own name and `__` for its \
+       instances [claimed-name]";
+    case "a generic function with a universe name that a declaration hides"
+      "int option; generic(T) static void option(T *p);"
+      "in.tc:1: error: `option` is a universe name, which no generic has \
+       [generic-universe-name]";
     case "text that a line marker names <universe> is not the universe"
       "# 1 \"<universe>\" 1\ntype option(T) = | None | Some(T value);\n"
       "<universe>:1: error: `option` is a universe name, which no generic \
-       type has [generic-universe-name]";
+       has [generic-universe-name]";
     case "a universe generic in the arguments of an attribute"
       "int y __attribute__((aligned(_Alignof(option(int)))));"
       "in.tc:1: error: `option` in the arguments of an attribute denotes a \

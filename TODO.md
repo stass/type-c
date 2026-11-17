@@ -1618,11 +1618,12 @@ types (design 13.3).
   attribute arguments over a parameter, an enumeration with a body, a
   structure body under a declarator), provisional P26, and the
   translation limits of design 3.5 rule 7 and 4.7 rule 10.
-- [Medium] Design 3.6 refuses a generic function with a universe name,
-  but `typec` accepts `generic(T) static T option(T *p)` and
-  `generic(T) static void slice_sub(T *p);`, and the rule
-  `[generic-universe-name]` covers only generic types. Refuse both
-  under that rule.
+- [Medium] `Parser.own_name` gives `Own_generic` for a generic type
+  only, so a generic function's name in the arguments of an attribute
+  is not refused: `generic(T) static void f(T *p) { }` then
+  `int x __attribute__((cleanup(f)));` is accepted and lowered with
+  `cleanup(f)`, which names no C declaration. Treat a generic
+  function as a generic there.
 
 ## Design questions with a gate
 

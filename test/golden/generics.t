@@ -282,7 +282,7 @@ declaration hides it.
   $ printf 'int option;\ntype option(T) = | None | Some(T value);\n' \
   >   > universe.tc
   $ ./golden.exe universe.tc
-  universe.tc:2: error: `option` is a universe name, which no generic type has [generic-universe-name]
+  universe.tc:2: error: `option` is a universe name, which no generic has [generic-universe-name]
   [1]
 
 The name of a generic type alone is not a type, and an application has

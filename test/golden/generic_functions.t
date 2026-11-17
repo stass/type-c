@@ -916,6 +916,24 @@ assignment, an argument, an equality and the integer branch of ?:.
   designator_index.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
+No generic function has a universe name (design 3.6), the name of a
+slice operation no more than that of a universe type, while a function
+that is not generic may take one.
+
+  $ printf 'generic(T) static T option(T *p) { return *p; }\n' \
+  >   > universe_definition.tc
+  $ ./golden.exe universe_definition.tc
+  universe_definition.tc:1: error: `option` is a universe name, which no generic has [generic-universe-name]
+  [1]
+
+  $ printf 'generic(T) static void slice_sub(T *p);\n' > universe_prototype.tc
+  $ ./golden.exe universe_prototype.tc
+  universe_prototype.tc:1: error: `slice_sub` is a universe name, which no generic has [generic-universe-name]
+  [1]
+
+  $ printf 'static int slice_sub(int *p) { return *p; }\n' > universe_plain.tc
+  $ ./golden.exe universe_plain.tc > /dev/null
+
 Design 7.1 rule 6: what follows generic( ) is one function, which its
 instances are written from. It has a prototype; static is its only
 storage class, and inline, _Noreturn and attributes stand on the

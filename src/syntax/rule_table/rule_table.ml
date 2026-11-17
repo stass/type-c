@@ -216,7 +216,7 @@ let rows =
       name = "generic-universe-name";
       clause = "design 3.6";
       meaning =
-        "A type declaration with type parameters whose name is a universe \
+        "A generic type or generic function whose name is a universe \
          name." };
     Live { constructor = "Generic_name"; name = "generic-type-use";
       clause = "design 3.5 rule 1";
