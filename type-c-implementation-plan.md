@@ -319,6 +319,33 @@ stay under Clang at each level and, under GCC 16, 0 at `-O0` and 4 at
 under GCC 16, in the places the file names. The record of design
 section 8 rule 10 is `resume.csv`.
 
+**Measurements of 3.10.** The raw data and the numbers are in the data
+repository, at `/Volumes/Optaine/type-c-corpus/measure/3.10/2026-11-17-darwin-x86_64/`
+(its README, commit 771a1f6), from Type-C commit `413f91c`.
+Six matchers, each a Type-C unit and a twin of nested `switch`
+statements, on Clang 21 and GCC 16 (P31): the objects of Type-C hold at
+`-O2` from 0 to 8 bytes more code than the twins' on Clang and from 25
+fewer to 22 more on GCC (whole programs 4204 against 4188 and 3645
+against 3638); at `-O0` they are 1.2 to 1.9 times as large (whole
+programs 6608 against 5570 and 6923 against 5864). Time of Type-C against
+the twins is 0.91 to 1.07 at `-O2` on Clang and 0.97 to 1.04 on GCC, 1.09 to
+1.22 at `-O0` on Clang and 1.02 to 1.32 on GCC. The most steps, nodes
+and depth of the selection tree of one match or test (P32): 8, 1 and 1
+in the container library and in Pilot B; 28, 3 and 3 in the tests (752
+`.tc` units of the cram tests, 483 of them refused on purpose); 19, 2
+and 2 in the README; 635, 127 and 127 for a tree at the depth bound,
+which both backends compile at `-O0` and `-O2`. A scrutinee that is a
+member, copied by `typec`, against the twin that switches on the member
+in place: equal code size at `-O2` on both backends, time 0.96 to 1.04
+(Clang) and 1.00 to 1.01 (GCC) at `-O2`, 1.09 to 1.16 and 1.02 to 1.25
+at `-O0`, for a variant of 8 bytes and one of 56 bytes. Read through a
+pointer to an `aligned(1)` typedef, the code is equal in size at `-O2`
+on x86-64, and the clang assembly for ARMv5, which has no unaligned
+loads, has 33 and 66 instructions against 19 and 21 for the copy and
+the twin at `-O2` (at `-O0`, 59 and 86 against 53 and 66 for the copy
+and 43 and 40 for the twin); no code ran on a target that requires
+alignment.
+
 **Exit gate**
 
 1. The library compiles in separate translation units and runs with
