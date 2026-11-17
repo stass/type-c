@@ -363,8 +363,6 @@ smtpd.tc:329: error: 'from' is not declared (C11 6.5.1p2)
 | lines of code, without comments and blank lines | 372 | 384 |
 | functions | 16 | 16 |
 | places that test the state | 6 | 6 |
-| largest stack frame, Clang `-O2` | 28,152 B | 54,408 B |
-| largest stack frame, Clang `-O0` | 26,104 B | 103,672 B |
 
 The lines of code are those that
 `gcc -fpreprocessed -dD -E -P -x c FILE` prints that are not blank. The
@@ -379,18 +377,37 @@ about 26 KB in `Mail`, most of it the list of 100 recipients of 255
 bytes each, and the original keeps the same data in the session. A
 binding is a copy that cannot change (design 4.1), and Type-C has no
 binding by reference (design 12). So to add a recipient, `rcpt` copies
-the list, appends to the copy, and builds the state again from it,
-where the original appends in place. Each `match` and test also takes
-a copy of the whole state before it reads the tag, which Clang removes
-at `-O2` but keeps at `-O0`, where `serve` copies the state for each
-line it reads. The copies cost time in proportion to what the client
-sends, a few times 26 KB a command at most; the stack frames, measured
-with `-fstack-usage`, are where the port is clearly worse. At `-O2`
-Clang inlines every function into `main`, whose frame is twice the
-original's. At `-O0` `rcpt` alone takes 104 KB, and `main`, `serve`,
-`command` and `rcpt` together about 210 KB, where the original's
-deepest path takes about 27 KB. A target with a small stack would hold
-the state behind a pointer.
+the list into its binding, appends to a second copy, and builds the
+state again from that in a third, where the original appends in place.
+A `match` or test on `s->state` reads the state in place, through a
+pointer to the session (design 13.5). The copies cost time in
+proportion to what the client sends, a few times 26 KB a command at
+most; the stack, measured with `-fstack-usage`, is where the port is
+clearly worse. At `-Os` and `-O2` every function is inlined into
+`main`, so its frame is the deepest path; at `-O0` the path is `main`,
+`serve`, `command` and the largest of `rcpt`, `mail`, `data` and
+`rset`. GCC is GCC 16, and ARM is arm-none-eabi-gcc 14.2 with
+`-mcpu=cortex-m3 -mthumb -fno-short-enums`:
+
+| deepest stack path | `original/smtpd.c` | `smtpd.tc` | payload behind a pointer |
+|---|---:|---:|---:|
+| Clang `-O2` | 28,152 B | 54,408 B | 29,960 B |
+| GCC `-O2` | 28,144 B | 54,000 B | 29,744 B |
+| ARM `-Os` | 28,096 B | 79,392 B | 29,392 B |
+| Clang `-O0` | 27,776 B | 132,832 B | 30,832 B |
+
+The last column is the idiom that design 4.1 gives for a payload of
+kilobytes that arms update: `struct session` holds the recipients as
+`rcpts`, and `Mail` holds a pointer to them, `Mail(struct domain
+client, struct address from, struct recipients *to)`. `mail` empties
+`s->rcpts` and stores `Mail(client, cmd->address, &s->rcpts)`, `rcpt`
+appends through `to` as the original does, without building the state
+again, and `data` reads the list through `to`; the locals that held
+the copies go. That brings every optimizing compiler to within 2 KB of
+the original. It costs part of what the variant gives: `s->rcpts` can
+be named in every state, though through the payload it is reached in
+`Mail` only, and keeping `to` valid is the program's job, as for any C
+pointer. The port keeps the value form, to show what it costs.
 
 ## What Type-C does not check here
 
