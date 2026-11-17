@@ -138,19 +138,19 @@ and parameter_list ~named = function
   | Unspecified | Old_style _ -> ""
 
 (* How a diagnostic names a structure, union, enumeration or distinct
-   type: by its tag, or by the name of its declaration. An instance whose
-   arguments mention a type parameter is named by its application, as
-   its instance name encodes the parameter by a number (design 10.3). *)
+   type: by its tag, or by the name of its declaration. An instance is
+   named by its application, with typedef names expanded, not by the C
+   name that it lowers to (design 10.3). *)
 let rec shown_name t =
   match t.shape with
   | Enum tag -> tag_name "enum" tag.enum_name
   (* A type parameter is named as the generic names it. *)
   | Record { record_name = Opaque_name name; _ } -> name
-  | Record
-      { record_name = Instance_name instance | Variant_name (Applied instance);
-        _ }
-  | Distinct { distinct_instance = Some instance; _ }
-    when instance.mentions_parameter ->
+  (* A type declaration's structure is named as the declaration names it. *)
+  | Record { record_name = Alias_name name; _ } -> name
+  | Record { record_name = Variant_name name; _ } -> of_variant name
+  | Record { record_name = Instance_name instance; _ }
+  | Distinct { distinct_instance = Some instance; _ } ->
       application_text instance
   | Record tag ->
       tag_name (record_keyword tag.kind) (record_tag_name tag.record_name)
@@ -166,11 +166,12 @@ and application_text (instance : Ctype.instance) =
   ^ String.concat ", " (List.map argument instance.argument_types)
   ^ ")"
 
-let of_variant (name : Ctype.variant_name) =
+and of_variant (name : Ctype.variant_name) =
   match name with
   | Declared declared -> (declared :> string)
   | Applied instance -> application_text instance
 
+let of_instance = application_text
 let declaration t name = declared ~named:shown_name t name
 let of_ctype t = declaration t ""
 

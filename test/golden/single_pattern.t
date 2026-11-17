@@ -205,7 +205,7 @@ closing parenthesis, so a test joined with && is refused.
   > }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:3: error: the operand of a single-pattern test is not of a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
+  operand.tc:3: error: the operand of a single-pattern test is of type 'const list *', not a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
   [1]
 
   $ cat > joined.tc <<'EOF'
@@ -217,7 +217,7 @@ closing parenthesis, so a test joined with && is refused.
   > }
   > EOF
   $ ./golden.exe joined.tc
-  joined.tc:3: error: the operand of a single-pattern test is not of a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
+  joined.tc:3: error: the operand of a single-pattern test is of type 'int', not a variant type [match-scrutinee]
   [1]
 
 The pattern is that of a case label (4.1 rule 3): a constructor of the

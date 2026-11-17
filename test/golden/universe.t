@@ -169,7 +169,7 @@ application, citing the line of the universe text that needs it.
 
   $ printf 'struct s;\noption(struct s) o;\n' > incomplete.tc
   $ ./golden.exe incomplete.tc
-  incomplete.tc:2: error: in the instance 'option__T1s' that this application names, at <universe>:1: the field 'value' of 'Some' is not a complete object type, so it is not a value type [field-type]
+  incomplete.tc:2: error: in the instance 'option(struct s)' that this application names, at <universe>:1: the field 'value' of 'Some' is not a value type: it is not a complete object type [field-type]
   [1]
 
 A generic that uses option in its definition reads it where the

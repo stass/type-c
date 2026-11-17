@@ -137,7 +137,7 @@ a function body, read or passed through unread.
   > void f(int *p) { clear(p); }
   > EOF
   $ ./golden.exe pragma.tc
-  pragma.tc:3: error: the instance 'clear__i' is written before this external declaration, and the `#pragma` line at pragma.tc:2, which sets state, stands between that place and the definition of its generic, whose pragmas the instance is compiled under [instance-pragma]
+  pragma.tc:3: error: the instance 'clear(int)' is written before this external declaration, and the `#pragma` line at pragma.tc:2, which sets state, stands between that place and the definition of its generic, whose pragmas the instance is compiled under [instance-pragma]
   [1]
   $ cat > skipped.tc <<'EOF'
   > # 1 "skipped.tc"
@@ -187,7 +187,7 @@ chain is refused at the call in the definition, with no use of `deep`.
   > generic(T) void deep(T *p) { deep(&p); }
   > EOF
   $ ./golden.exe deep.tc
-  deep.tc:1: error: the use would define the instance 'deep__PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP...' after a chain of 64 instances that each define the next, which the use at deep.tc:1 began; a chain holds at most 64 [instance-nesting]
+  deep.tc:1: error: the use would define the instance 'deep(T *********************************************************...' after a chain of 64 instances that each define the next, which the use at deep.tc:1 began; a chain holds at most 64 [instance-nesting]
   [1]
   $ cat > same.tc <<'EOF'
   > generic(T) void same(T *p) { same(p); }
@@ -217,7 +217,7 @@ check would not end within the time bound.
   $ { chain 25; echo 'int x; void use(void) { g0(&x); }'; } > chain25.tc
   $ (ulimit -t 20; ./golden.exe chain25.tc > chain25.err 2>&1)
   [1]
-  $ sed -E 's/tc:[0-9]+/tc:N/g; s/g[0-9]+__[A-Za-z0-9_]*/g.../' chain25.err
+  $ sed -E "s/tc:[0-9]+/tc:N/g; s/'g[0-9]+\\([^']*\\)'/'g...'/" chain25.err
   chain25.tc:N: error: the use would define the instance 'g...', whose reading would pass the instance budget of typec, 16777216 bytes of text for the instances of the unit, those that definition checks read included, in a chain of instances that the use at chain25.tc:N began
   $ grep -oE 'tc:[0-9]+' chain25.err | cut -d: -f2 | awk '$1 > 25'
 
@@ -233,8 +233,8 @@ cites the use that began the chain (line 51).
   >   printf 'void use(void) {'; k=1; while [ $k -le 40 ]; do
   >     printf ' g0(&x%d);' $k; k=$((k + 1)); done; echo ' }'
   > } > uses.tc
-  $ ./golden.exe uses.tc 2>&1 | sed -E 's/__[A-Za-z0-9_]*/__.../'
-  uses.tc:3: error: the use would define the instance 'g8__...', whose reading would pass the instance budget of typec, 16777216 bytes of text for the instances of the unit, those that definition checks read included, in a chain of instances that the use at uses.tc:51 began
+  $ ./golden.exe uses.tc 2>&1 | sed -E "s/'g([0-9]+)\\([^']*\\)'/'g\\1(...)'/"
+  uses.tc:3: error: the use would define the instance 'g8(...)', whose reading would pass the instance budget of typec, 16777216 bytes of text for the instances of the unit, those that definition checks read included, in a chain of instances that the use at uses.tc:51 began
 
 The error stands at the call that defines the instance, not at a later
 call of the same instance: each instance of `big` is charged its 16385
@@ -248,8 +248,9 @@ tokens, and the 32nd passes the budget at its first call (line 74).
   >     while [ $k -le 40 ]; do echo "big(&x$k);"; k=$((k + 1)); done
   >   done; echo '}'
   > } > again.tc
-  $ ./golden.exe again.tc 2>&1 | sed -E 's/__[A-Za-z0-9_]*/__.../'
-  again.tc:74: error: the use would define the instance 'big__...', whose reading would pass the instance budget of typec, 16777216 bytes of text for the instances of the unit, those that definition checks read included, in a chain of instances that the use at again.tc:74 began
+  $ ./golden.exe again.tc 2>&1
+  again.tc:74: error: the use would define the instance 'big(struct s32)', whose reading would pass the instance budget of typec, 16777216 bytes of text for the instances of the unit, those that definition checks read included, in a chain of instances that the use at again.tc:74 began
+  [1]
 
 A definition check reads each instance once: a ladder of 40 generic
 functions that each call the next twice with one type defines 40
@@ -456,14 +457,14 @@ makes of it (6.7.4p7).
   > inline void wipe(int *p) { clear(p); }
   > EOF
   $ ./golden.exe inline.tc
-  inline.tc:2: error: an inline definition of a function with external linkage uses the instance 'clear__i', which has internal linkage (C11 6.7.4p3) [instance-in-inline]
+  inline.tc:2: error: an inline definition of a function with external linkage uses the instance 'clear(int)', which has internal linkage (C11 6.7.4p3) [instance-in-inline]
   [1]
   $ cat > inline_head.tc <<'EOF'
   > generic(T) int one(T x) { return 1; }
   > inline int count(int a[sizeof(one(0))]) { return 0; }
   > EOF
   $ ./golden.exe inline_head.tc
-  inline_head.tc:2: error: an inline definition of a function with external linkage uses the instance 'one__i', which has internal linkage (C11 6.7.4p3) [instance-in-inline]
+  inline_head.tc:2: error: an inline definition of a function with external linkage uses the instance 'one(int)', which has internal linkage (C11 6.7.4p3) [instance-in-inline]
   [1]
   $ cat > extern_inline.tc <<'EOF'
   > generic(T) void clear(T *p) { }

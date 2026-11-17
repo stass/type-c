@@ -51,7 +51,7 @@ A field list left out at depth: a test takes it, a label refuses it.
   > }
   > EOF
   $ ./golden.exe omitted.tc
-  omitted.tc:7: error: the case label 'Num' omits the field list of a constructor with 1 field(s), which only a single-pattern test may [match-pattern]
+  omitted.tc:7: error: the case label 'Num' omits the field list of a constructor with 1 field(s); write 'Num(_)' to ignore the fields [match-pattern]
   [1]
 
 A binding at depth is in the scope of the statement, which may not

@@ -259,14 +259,14 @@ messages name it by its instance name (design 10.3).
   > }
   > EOF
   $ ./golden.exe uncovered.tc
-  uncovered.tc:3: error: the match does not cover the constructor 'Cons' of the variant 'list__i' [match-coverage]
+  uncovered.tc:3: error: the match does not cover the constructor 'Cons' of the variant 'list(int)' [match-coverage]
   [1]
   $ cat > opened.tc <<'EOF'
   > type list(T) = | Nil | Cons(T head, list(T) *tail);
   > int tag(list(int) l) { return l.tag; }
   > EOF
   $ ./golden.exe opened.tc
-  opened.tc:2: error: the variant 'list__i' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  opened.tc:2: error: the variant 'list(int)' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [1]
 
 A generic type is declared at file scope only (design 3.1).
@@ -459,7 +459,7 @@ application (design 3.5 rule 5).
   > struct holder { box(struct s) b; };
   > EOF
   $ ./golden.exe incomplete.tc
-  incomplete.tc:3: error: in the instance 'box__T1s' that this application names, at incomplete.tc:1: member has an incomplete or function type
+  incomplete.tc:3: error: in the instance 'box(struct s)' that this application names, at incomplete.tc:1: member has an incomplete or function type
   [1]
 
 A type argument has a row in the table of design 10.3 for every type in
@@ -517,7 +517,7 @@ refused.
   >   'type box(T) = struct { T value; };' \
   >   'typedef int p __attribute__((aligned(16)));' 'box(a(int)) x;' > late.tc
   $ ./golden.exe late.tc
-  late.tc:5: error: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
+  late.tc:5: error: in the instance 'a(int)' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
   [1]
   $ printf '%s\n' 'typedef int p;' \
   >   'typedef int p __attribute__((aligned(16)));' 'type a(T) = p;' \
@@ -536,13 +536,13 @@ between the text and the place where an instance first stands gives
   >   'typedef int wide __attribute__((aligned(16)));' 'extern wide obj;' \
   >   'g(int) x;' > object.tc
   $ ./golden.exe object.tc
-  object.tc:5: error: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
+  object.tc:5: error: in the instance 'g(int)' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
   [1]
   $ printf '%s\n' 'typedef int wide __attribute__((aligned(16)));' \
   >   'int *f(void);' 'type g(T) = struct { __typeof__(*f()) v; T t; };' \
   >   'wide *f(void);' 'g(int) x;' > function.tc
   $ ./golden.exe function.tc
-  function.tc:5: error: in the instance 'g__i' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
+  function.tc:5: error: in the instance 'g(int)' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
   [1]
 
 So does a typedef name that the declaration of the object is written
@@ -554,7 +554,7 @@ changes the typedef in place.
   >   'typedef int plain __attribute__((aligned(16)));' 'g(int) x;' \
   >   > widened.tc
   $ ./golden.exe widened.tc
-  widened.tc:5: error: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
+  widened.tc:5: error: in the instance 'g(int)' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
   [1]
 
 An argument holds no `__typeof__` of an expression at the same depth,
@@ -592,7 +592,7 @@ A chain of instances that each define the next holds at most 64
   $ printf 'type box(T) = struct { T value; };\nstruct w { %sint%s deep; };\n' \
   >   "$(printf 'box(%.0s' $(seq 65))" "$(printf ')%.0s' $(seq 65))" > deep.tc
   $ ./golden.exe deep.tc
-  deep.tc:2: error: the application would define the instance 'box__i' after a chain of 64 instances that each define the next, which the application at deep.tc:2 began; a chain holds at most 64 [instance-nesting]
+  deep.tc:2: error: the application would define the instance 'box(int)' after a chain of 64 instances that each define the next, which the application at deep.tc:2 began; a chain holds at most 64 [instance-nesting]
   [1]
 
 The texts of an instance stand before the external declaration of its
@@ -602,7 +602,7 @@ first use, so what they need complete is complete before it (design
   $ printf 'type a2(T) = T[2];\nstruct s { int a; } *f(a2(struct s) *p);\n' \
   >   > early.tc
   $ ./golden.exe early.tc
-  early.tc:2: error: the instance 'a2__T1s' needs 'struct s' complete where its text stands, before the external declaration that completes it at early.tc:2; complete it in an earlier one [instance-placement]
+  early.tc:2: error: the instance 'a2(struct s)' needs 'struct s' complete where its text stands, before the external declaration that completes it at early.tc:2; complete it in an earlier one [instance-placement]
   [1]
 
 The definition is checked once with each type parameter an opaque value
@@ -632,7 +632,7 @@ spelling C declares there.
   > handler(int) h;
   > EOF
   $ ./golden.exe handler.tc
-  handler.tc:3: error: in the instance 'handler__i' that this application names, at handler.tc:1: the text declares the tag 'ctx' in a scope of its own, but where lowering writes it the tag is the one declared at handler.tc:2 [generic-name-capture]
+  handler.tc:3: error: in the instance 'handler(int)' that this application names, at handler.tc:1: the text declares the tag 'ctx' in a scope of its own, but where lowering writes it the tag is the one declared at handler.tc:2 [generic-name-capture]
   [1]
 
   $ cat > dot.tc <<'EOF'
@@ -642,7 +642,7 @@ spelling C declares there.
   > g(int) x;
   > EOF
   $ ./golden.exe dot.tc
-  dot.tc:4: error: in the instance 'g__i' that this application names, at dot.tc:2: the declaration of 'dot' at dot.tc:3, between the text and a place where lowering writes it, may change the type that the text uses: that depends on '_Float16', whose type typec does not compute [name-capture-unknown]
+  dot.tc:4: error: in the instance 'g(int)' that this application names, at dot.tc:2: the declaration of 'dot' at dot.tc:3, between the text and a place where lowering writes it, may change the type that the text uses: that depends on '_Float16', whose type typec does not compute [name-capture-unknown]
   [1]
 
   $ cat > aligned.tc <<'EOF'
@@ -653,7 +653,7 @@ spelling C declares there.
   > g(int) x;
   > EOF
   $ ./golden.exe aligned.tc
-  aligned.tc:2: error: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 [generic-name-capture]
+  aligned.tc:2: error: in the instance 'g(int)' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 [generic-name-capture]
   [1]
 
 Type-C text names no generic and no universe name in the arguments of an

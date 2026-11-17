@@ -197,7 +197,7 @@ An instance of another generic, or of other arguments, does not match.
   > void f(void) { vector_push(&l, 0); }
   > EOF
   $ ./golden.exe applied_refused.tc
-  applied_refused.tc:5: error: the argument's type does not match its parameter's: it has 'struct list__l' where the parameter type has 'vector(T)' [deduction-mismatch]
+  applied_refused.tc:5: error: the argument's type does not match its parameter's: it has 'list(long)' where the parameter type has 'vector(T)' [deduction-mismatch]
   [1]
 
   $ cat > applied_twice.tc <<'EOF'
@@ -217,7 +217,7 @@ Rule 3: every type parameter is deduced by the end of the arguments.
   > void f(void) { make(); }
   > EOF
   $ ./golden.exe undeduced.tc
-  undeduced.tc:2: error: no argument deduces the type parameter 'T'; an explicit instance names it [undeduced-type-parameter]
+  undeduced.tc:2: error: no argument deduces the type parameter 'T' of 'make'; give it its type arguments in an explicit instance [undeduced-type-parameter]
   [1]
 
 Rule 4: an explicit instance is a function designator, called or taken
@@ -268,7 +268,7 @@ Rule 5: a type argument, deduced or explicit, is a value type.
   > const int *f(const int *p) { return first(p); }
   > EOF
   $ ./golden.exe deduced_const.tc
-  deduced_const.tc:2: error: the type argument 'const int' is qualified, no value type [type-argument]
+  deduced_const.tc:2: error: the type argument 'const int' is not a value type: it is qualified [type-argument]
   [1]
 
   $ cat > deduced_void.tc <<'EOF'
@@ -276,7 +276,7 @@ Rule 5: a type argument, deduced or explicit, is a value type.
   > void f(void *p) { clear(p); }
   > EOF
   $ ./golden.exe deduced_void.tc
-  deduced_void.tc:2: error: the type argument 'void' is not a complete object type, no value type [type-argument]
+  deduced_void.tc:2: error: the type argument 'void' is not a value type: it is not a complete object type [type-argument]
   [1]
 
   $ cat > explicit_array.tc <<'EOF'
@@ -284,7 +284,7 @@ Rule 5: a type argument, deduced or explicit, is a value type.
   > void f(void) { make(int[2])(); }
   > EOF
   $ ./golden.exe explicit_array.tc
-  explicit_array.tc:2: error: the type argument 'int[2]' is an array, which a struct can wrap, no value type [type-argument]
+  explicit_array.tc:2: error: the type argument 'int[2]' is not a value type: it is an array; wrap it in a struct, which is one [type-argument]
   [1]
 
 A deduced type argument is placed as a written one is: a forward

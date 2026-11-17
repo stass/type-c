@@ -100,7 +100,7 @@ removed.
   > }
   > EOF
   $ ./golden.exe label.tc
-  label.tc:4: error: the case label 'Two' omits the field list of a constructor with 1 field(s), which only a single-pattern test may (in this instance the type void removes the field(s) 'a') [match-pattern]
+  label.tc:4: error: the case label 'Two' omits the field list of a constructor with 1 field(s); write 'Two(_)' to ignore the fields (in this instance the type void removes the field(s) 'a') [match-pattern]
   [1]
   $ cat > pattern.tc <<'EOF'
   > type opt(T) = | No | Yes(T value);
@@ -121,9 +121,9 @@ argument is an error.
 
   $ printf 'type bad(T) = | Bad(void x, T y);\n' > literal.tc
   $ ./golden.exe literal.tc
-  literal.tc:1: error: the field 'x' of 'Bad' is not a complete object type, so it is not a value type [field-type]
+  literal.tc:1: error: the field 'x' of 'Bad' is not a value type: it is not a complete object type [field-type]
   [1]
   $ printf 'type arr(T) = | Arr(T a[2]);\narr(void) a;\n' > array.tc
   $ ./golden.exe array.tc
-  array.tc:1: error: the field 'a' of 'Arr' is an array, which a struct can wrap, so it is not a value type [field-type]
+  array.tc:1: error: the field 'a' of 'Arr' is not a value type: it is an array; wrap it in a struct, which is one [field-type]
   [1]

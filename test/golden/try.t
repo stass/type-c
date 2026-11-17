@@ -1027,7 +1027,7 @@ neither.
   > }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:2: error: the operand of try is of no result type [try-operand]
+  operand.tc:2: error: the operand of try is of type 'int', not a result type [try-operand]
   [1]
 
   $ cat > return_type.tc <<'EOF'
@@ -1038,7 +1038,7 @@ neither.
   > }
   > EOF
   $ ./golden.exe return_type.tc
-  return_type.tc:3: error: try stands in a function that returns no result type [try-operand]
+  return_type.tc:3: error: try is in a function that returns 'int', not a result type [try-operand]
   [1]
 
   $ cat > error_type.tc <<'EOF'
@@ -1075,7 +1075,7 @@ void (rule 2).
   > }
   > EOF
   $ ./golden.exe void_value.tc
-  void_value.tc:4: error: the value of try is void, which stands only where a value is discarded or cast to void [try-void]
+  void_value.tc:4: error: this try has no value, as the Ok of its result holds void; use it as a statement or cast it to void [try-void]
   [1]
 
 A try stands under any operator of C that evaluates its operand as a

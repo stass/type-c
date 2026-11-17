@@ -1416,15 +1416,15 @@ let type_declarations () =
   declares ~file "type id = unsigned int;" "id" "typedef unsigned int";
   declares ~file "type handler = void (*)(int);" "handler"
     "typedef void (*)(int)";
-  declares ~file "type node;" "node" "typedef struct node";
+  declares ~file "type node;" "node" "typedef node";
   declares ~file "type node; node *p;" "p"
-    "object struct node * external static";
+    "object node * external static";
   declares ~file "type pair = struct { int a; pair *next; };" "pair"
-    "typedef struct pair";
+    "typedef pair";
   declares ~file "type list = struct node { list *next; };" "list"
     "typedef struct node";
   declares ~file "type u = union { int i; u *p; }; u v;" "v"
-    "object union u external static";
+    "object u external static";
   (* An alias is the type it names, not a new one. *)
   accepts ~file
     "type id = unsigned int; \
@@ -1456,10 +1456,10 @@ let doubling_structures depth last =
 (* Variants (design 3.2) are the structures they lower to (10.1). *)
 let variants () =
   let file = "in.tc" in
-  declares ~file "type e = | A | B;" "e" "typedef struct e";
+  declares ~file "type e = | A | B;" "e" "typedef e";
   declares ~file "type e = | A | B;" "e_B" "enumerator int = 1";
   declares ~file "type e; type e = | A(int x); e v;" "v"
-    "object struct e external static";
+    "object e external static";
   accepts ~file
     "type expr = | Number(long value) | Add(expr *left, expr *right); \
      expr x = {0};";
@@ -1469,14 +1469,15 @@ let variants () =
   (* A field type is a value type (rule 4); a variant holds itself only
      through a pointer (rule 5). *)
   rejects ~file "type e = | A(e inner);"
-    "the field 'inner' of 'A' is not a complete object type, so it is not \
-     a value type [field-type]";
+    "the field 'inner' of 'A' is not a value type: it is not a complete \
+     object type [field-type]";
   rejects ~file "type e; type e = | A(e inner);" "not a complete object";
   rejects ~file "type e = | A(struct { e x; } s);" "incomplete";
   rejects ~file "struct s; type e = | A(struct s v);" "not a complete object";
   rejects ~file "type e = | A(void f(void));" "not a complete object";
-  rejects ~file "type e = | A(int a[2]);" "is an array, which a struct";
-  rejects ~file "type e = | A(const int x);" "'x' of 'A' is qualified";
+  rejects ~file "type e = | A(int a[2]);" "is an array; wrap it in a struct";
+  rejects ~file "type e = | A(const int x);"
+    "'x' of 'A' is not a value type: it is qualified";
   rejects ~file "type e = | A(int *restrict p);" "is qualified";
   rejects ~file "type e = | A(_Atomic int x);" "is atomic";
   rejects ~file "void f(int n) { type e = | A(int (*p)[n]); }"
@@ -1541,10 +1542,11 @@ let matching () =
   match_error "match (v) { case B(x, x): break; default: break; }"
     "'x'";
   match_error "match (n) { default: break; }"
-    "the scrutinee of a match is not of a variant type; a pointer is not \
-     dereferenced implicitly [match-scrutinee]";
+    "the scrutinee of a match is of type 'int', not a variant type \
+     [match-scrutinee]";
   match_error "match (p) { default: break; }"
-    "the scrutinee of a match is not of a variant type";
+    "the scrutinee of a match is of type 'const e *', not a variant type; \
+     a pointer is not dereferenced implicitly [match-scrutinee]";
   rejects ~file
     "type t; void g(t *q) { match (*q) { default: break; } }"
     "the scrutinee of a match is of the incomplete variant 't', whose \
@@ -1553,8 +1555,7 @@ let matching () =
     "'D' names no constructor of the variant 'e' [match-pattern]";
   match_error "match (v) { case C: break; default: break; }"
     "the case label 'C' omits the field list of a constructor with 1 \
-     field(s), which only a single-pattern test may \
-     [match-pattern]";
+     field(s); write 'C(_)' to ignore the fields [match-pattern]";
   match_error "match (v) { case A: break; case C: case B: break; }"
     "the case label 'C' omits the field list";
   match_error "match (v) { case A: break; case B(_, _): case C: break; }"
@@ -1838,9 +1839,9 @@ let constructors () =
   constructor_error "return B(1);"
     "the constructor 'B' takes one argument for each of its 2 fields";
   constructor_error "s w = S(1); return v;"
-    "the argument for the field 'v' of 'S' does not have its type";
+    "the argument for the field 'v' of 'S' is of type 'int', not 'e'";
   constructor_error "return B(v, 0);"
-    "the argument for the field 'i' of 'B' does not have its type";
+    "the argument for the field 'i' of 'B' is of type 'e', not 'int'";
   rejects ~file (variant ^ "type t; void g(void) { (void)t.A; }")
     "the variant 't' is incomplete here";
   rejects ~file (variant ^ "typedef int i; int x = i.A;")
@@ -2178,8 +2179,9 @@ let single_pattern_test () =
   refused "while (case B(i) = v) { i++; }" "modifiable lvalue";
   (* 4.1 rules 1 and 3 hold for the operand and the pattern. *)
   refused "if (case A = p) return 1;"
-    "the operand of a single-pattern test is not of a variant type; a \
-     pointer is not dereferenced implicitly [match-scrutinee]";
+    "the operand of a single-pattern test is of type 'const e *', not a \
+     variant type; a pointer is not dereferenced implicitly \
+     [match-scrutinee]";
   refused "if (case A = n && n) return 1;" "[match-scrutinee]";
   refused "if (case A = v && n) return 1;" "[variant-operation]";
   refused "while (case D = v) break;"
@@ -2268,7 +2270,7 @@ let generic_identity () =
   accepts ~file (asserts ~holds:false ids (same "id(expr)" "id(stmt)"));
   accepts ~file (asserts ~holds:false ids (same "id(expr)" "unsigned int"));
   rejects ~file (ids ^ " id(expr) e; id(stmt) s; void f(void) { e = s; }")
-    "'id__4stmt' does not convert to 'id__4expr'";
+    "'id(stmt)' does not convert to 'id(expr)'";
   accepts ~file (ids ^ " id(expr) e; id(expr) e2; void f(void) { e = e2; }");
   (* A transparent alias is the type it stands for: fp(const int) is
      fp(int), and fr(const int) is not fr(int). *)
@@ -2300,7 +2302,7 @@ let generic_instances () =
      instance is needed complete, and the error is at the application. *)
   accepts ~file (box ^ " struct s; box(struct s) *p;");
   rejects ~file (box ^ " struct s; struct w { box(struct s) b; };")
-    "in the instance 'box__T1s'";
+    "in the instance 'box(struct s)'";
   accepts ~file (box ^ " box(const int) c = { 1 };");
   (* The nesting limit is exact: 64 instances that each need the next. *)
   let member depth = box ^ " struct w { " ^ boxed depth ^ " deep; };" in
@@ -2400,7 +2402,7 @@ let generic_variants () =
   (* Exhaustiveness (4.2 rule 1). *)
   rejects ~file (in_function "match (v) { case Nil: break; }")
     "the match does not cover the constructor 'Cons' of the variant \
-     'list__i' [match-coverage]";
+     'list(int)' [match-coverage]";
   rejects ~file
     (in_function
        "match (v) { case Nil: break; case Cons(_, _): break; \
@@ -2422,16 +2424,16 @@ let generic_variants () =
      int g(lst(int) x) { x = Cons(1, p); match (x) { case No: return 0; \
      case Cons(h, _): return h; } }";
   (* Design 3.2 rule 6: only constructors and matching open it. *)
-  let refused = "the variant 'list__i' takes no such operation" in
+  let refused = "the variant 'list(int)' takes no such operation" in
   rejects ~file (in_function "(void)v.tag;") refused;
   rejects ~file (in_function "(void)p->u;") refused;
   rejects ~file (in_function "(void)(v == v);") refused;
   rejects ~file (in_function "list(int) x = { 1 }; (void)x;")
-    "an initialiser reaches into the variant 'list__i'";
+    "an initialiser reaches into the variant 'list(int)'";
   (* An instance of a variant not complete yet has no constructors. *)
   rejects ~file
     "type lst(T); void g(lst(int) *p) { match (*p) { default: break; } }"
-    "the scrutinee of a match is of the incomplete variant 'lst__i'"
+    "the scrutinee of a match is of the incomplete variant 'lst(int)'"
 
 let generic_arguments () =
   let file = "in.tc" in
@@ -2607,7 +2609,7 @@ let generic_checks () =
      type wrap(T) = struct { box(T) b; };\n\
      struct s;\n\
      struct w { wrap(struct s) x; };"
-    "in the instance 'wrap__T1s'"
+    "in the instance 'wrap(struct s)'"
 
 (* Design 10.3: every point that needs a type complete defines the
    instances that it needs, and where an instance's texts would stand
@@ -2618,11 +2620,11 @@ let generic_placement () =
   (* A block object (C11 6.7p7) and a tentative definition need their
      instances complete; a declaration with [extern] does not. *)
   rejects ~file (box ^ " struct s; void f(void) { box(struct s) b; }")
-    "in the instance 'box__T1s'";
+    "in the instance 'box(struct s)'";
   rejects ~file (box ^ " struct s; box(struct s) b;")
-    "in the instance 'box__T1s'";
+    "in the instance 'box(struct s)'";
   rejects ~file (box ^ " struct s; static box(struct s) b;")
-    "in the instance 'box__T1s'";
+    "in the instance 'box(struct s)'";
   accepts ~file (box ^ " struct s; extern box(struct s) b;");
   accepts ~file (box ^ " struct s; extern box(struct s) b; \
                         struct s { int a; }; box(struct s) b;");
@@ -2632,7 +2634,7 @@ let generic_placement () =
     box ^ " struct s; box(struct s) *p; " ^ point
   in
   List.iter
-    (fun point -> rejects ~file (needs point) "in the instance 'box__T1s'")
+    (fun point -> rejects ~file (needs point) "in the instance 'box(struct s)'")
     [ "int n = sizeof(box(struct s));";
       "int n = _Alignof(box(struct s));";
       "_Alignas(box(struct s)) char c;";
@@ -2907,7 +2909,7 @@ let generic_resolution () =
   rejects ~file
     "type handler(T) = struct { void (*call)(struct ctx *c, T value); }; \
      struct ctx { int depth; }; handler(int) h;"
-    "in the instance 'handler__i' that this application names";
+    "in the instance 'handler(int)' that this application names";
   rejects ~file
     "type handler(T) = struct { void (*call)(struct ctx *c, T value); }; \
      struct ctx { int depth; }; handler(int) h;"
@@ -2962,7 +2964,7 @@ let generic_resolution () =
   rejects ~file (plain ^ alias ^ wide ^ " box(a(int)) x;") added;
   rejects ~file
     (plain ^ alias ^ " a(int) early;" ^ wide ^ " box(a(int)) x;")
-    "in the instance 'box__i'";
+    "in the instance 'box(int)'";
   accepts ~file
     (plain ^ alias ^ " box(a(int)) early;" ^ wide ^ " box(a(int)) x;");
   rejects ~file (plain ^ holder ^ wide ^ " g(int) y;") added;

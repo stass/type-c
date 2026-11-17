@@ -62,7 +62,7 @@ let refuse_variant_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
            (Printf.sprintf
               "an initialiser reaches into the variant '%s'; the only braced \
                initialisers of a variant are {0} and {}"
-              (Encoding.variant_name name :> string)))
+              (Type_name.of_variant name)))
   | Some _ | None -> ()
 
 (* Design 7.1 rule 3: which subobject an initialiser reaches inside a

@@ -295,15 +295,15 @@ Derived names, field types and constructor names are checked.
   $ ./golden.exe usable.tc > usable.c
   $ printf 'type e = | A(e inner);\n' > recursive.tc
   $ ./golden.exe recursive.tc
-  recursive.tc:1: error: the field 'inner' of 'A' is not a complete object type, so it is not a value type [field-type]
+  recursive.tc:1: error: the field 'inner' of 'A' is not a value type: it is not a complete object type [field-type]
   [1]
   $ printf 'type e = | A(int values[4]);\n' > array.tc
   $ ./golden.exe array.tc
-  array.tc:1: error: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type [field-type]
+  array.tc:1: error: the field 'values' of 'A' is not a value type: it is an array; wrap it in a struct, which is one [field-type]
   [1]
   $ printf 'type e = | A(__builtin_va_list ap);\n' > va_list.tc
   $ ./golden.exe va_list.tc
-  va_list.tc:1: error: the field 'ap' of 'A' is a va_list, which is an array on some targets, so it is not a value type [field-type]
+  va_list.tc:1: error: the field 'ap' of 'A' is not a value type: it is a va_list, which is an array on some targets [field-type]
   [1]
 
 Type-C text takes a variant only whole (design 3.2 rule 6): no member

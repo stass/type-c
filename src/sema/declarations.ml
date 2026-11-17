@@ -442,12 +442,12 @@ let declaration_state tags (anchor : Tree.anchor option) view =
     texts_at = { view; before; typedef_names = []; tags = [] };
     instance_uses = [] }
 
-(* An instance name is at most [Encoding.max_length] bytes; a message
-   shows at most this many of them, cut at a character. *)
+(* An application can be long, so its name is cut to this many bytes,
+   at a character, before a message quotes it. *)
 let max_shown_name = 200
 
 let shown_instance instance =
-  let name = Encoding.instance_name instance in
+  let name = Type_name.of_instance instance in
   let is_continuation index = Char.code name.[index] land 0xC0 = 0x80 in
   let rec cut length =
     if length > 0 && is_continuation length then cut (length - 1)
@@ -3072,7 +3072,7 @@ and check_field_type state (field : Tree.field) subject (derived : derived) =
   | Answer (Some problem) ->
       fail state field.span
         (Rule.message Field_type
-           (Printf.sprintf "%s %s, so it is not a value type" subject
+           (Printf.sprintf "%s is not a value type: it %s" subject
               (Value_type.describe problem)))
   | Depends_on unknown ->
       fail_needing state field.span ("whether " ^ subject ^ " is a value type")
@@ -3902,11 +3902,11 @@ and check_type_argument state span (argument : Expressions.type_argument) =
   (match Value_type.problem state.tags t with
   | Answer None -> ()
   | Answer (Some problem) ->
-      refuse (Value_type.describe problem ^ ", no value type")
+      refuse ("is not a value type: it " ^ Value_type.describe problem)
   | Depends_on unknown ->
       refuse
         (Printf.sprintf
-           "may be no value type, as that depends on %s, whose type \
+           "may not be a value type, as that depends on %s, whose type \
             typec does not compute"
            unknown.construct));
   match Encoding.encode state.tags t with

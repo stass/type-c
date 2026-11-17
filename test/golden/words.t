@@ -63,7 +63,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int g(void) { { int try = 0; try++; } return try f(); }
   > EOF
   $ ./golden.exe block.tc
-  block.tc:2: error: the operand of try is of no result type [try-operand]
+  block.tc:2: error: the operand of try is of type 'int', not a result type [try-operand]
   [1]
   $ cat > before.tc <<'EOF'
   > int f(void);
@@ -71,7 +71,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int try;
   > EOF
   $ ./golden.exe before.tc
-  before.tc:2: error: the operand of try is of no result type [try-operand]
+  before.tc:2: error: the operand of try is of type 'int', not a result type [try-operand]
   [1]
   $ printf 'void f(int try) { defer f(try); }\n' > defer.tc
   $ ./golden.exe defer.tc
@@ -116,7 +116,7 @@ A `try` takes an operand.
   > int g(void) { int n = 1; n = n + try f(); return n; }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:2: error: the operand of try is of no result type [try-operand]
+  operand.tc:2: error: the operand of try is of type 'int', not a result type [try-operand]
   [1]
   $ cat > measured.tc <<'EOF'
   > int f(void);

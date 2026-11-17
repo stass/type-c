@@ -418,6 +418,27 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
+- [Medium] Diagnostics that need more than wording to read well
+  (cases in `/Volumes/Optaine/diag-review/review.md`):
+  - A result, option or other instance that converts to a C type
+    (`int r = f();`, `return 0;` in a function returning a result, a
+    call result assigned to `char *` without `try`), and a mismatched
+    argument of a generic call, reach the backend, whose message
+    spells C encodings (`result__v15container_error`, `__tc_arg__...`)
+    and quotes lowered C. typec knows both types: refuse the conversion
+    in the user's names, with "use try" where the source is a result.
+  - An assignment between slices of different element types is not
+    refused at the assignment; the first wrong use fails, lines later.
+  - A constructor of `result` or `option` where no such type is
+    expected reads "'Err' is not declared": name the constructor and
+    the type that the place expects.
+  - `switch` on a variant and `==` on a variant could point to `match`
+    and the single-pattern test.
+  - Messages print types without their typedef names: `str` as
+    `slice(const char)`, `size_t` as `unsigned long`.
+  - The parser quotes names with backticks, the typing stages with
+    single quotes as GCC and Clang do; pick one, in `Parser.quoted`
+    and the parser's literal backticks (about 260 golden lines).
 - [Medium] The `Unknown_type` arm of `Expressions.generic_call` types
   no callee at all and may be unreachable, as `generic-function-form`
   refuses the function types that could reach it: show it reachable
@@ -621,7 +642,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Declarations.shown_instance` at 200 bytes on a character boundary;
   the variant message of `Initialiser.refuse_opening` cuts none, and an
   instance name may be thousands of bytes long. Use one cut, on a
-  character boundary, everywhere a name is quoted.
+  character boundary, everywhere a name is quoted. `Type_name.of_ctype`
+  also builds the whole spelling before `quote` cuts it, and an
+  instance is spelled by its application, several times its encoding:
+  a crafted type of 4096 nodes, each an instance of 800 arguments,
+  takes about 290 MB to name in a message. Give `Type_name` a capped
+  buffer, as `Encoding.add` has, so every message is bounded at once.
 - [Medium] Two guarantees of the names derived from an instance rest on
   callers, not on types: `Spelling.instance` takes the encodings of the
   arguments as plain strings, and `Ctype.instance` is a public record,

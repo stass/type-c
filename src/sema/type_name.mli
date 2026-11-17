@@ -4,7 +4,9 @@
 (** Types spelled as C type names (C11 6.7.7), for diagnostics and for C
     that is compared with a backend, such as ["int (*)[3]"] or
     ["void (*(*)(int))(void)"]. (The quotes keep the OCaml comment
-    closed.) *)
+    closed.) A Type-C type is spelled as Type-C writes it: a variant or
+    a type declaration by its name, an instance by its application, such
+    as ["option(int)"], which is not C. *)
 
 val of_ctype : Ctype.t -> string
 (** Qualifiers are spelled [const volatile restrict _Atomic] before the
@@ -12,6 +14,9 @@ val of_ctype : Ctype.t -> string
     structure, union or enumeration is spelled [struct <anonymous>], and an
     opaque array length [[<constant>]] and a type that typec does not know
     by its construct between [<] and [>], which are not C. *)
+
+val of_instance : Ctype.instance -> string
+(** An application as Type-C writes it, such as ["option(int)"]. *)
 
 val of_variant : Ctype.variant_name -> string
 (** The name of a variant as Type-C writes it: its name, or the

@@ -282,7 +282,7 @@ let quote text =
   if String.length text <= max_quoted then "'" ^ text ^ "'"
   else "'" ^ String.sub text 0 max_quoted ^ "...'"
 
-let quoted_variant name = quote (Encoding.variant_name name :> string)
+let quoted_variant name = quote (Type_name.of_variant name)
 
 (* The sites that lowering replaces with the names that their variant
    derives (design 3.3, 4.1 rule 1). Those names denote the variant only
@@ -3285,6 +3285,23 @@ let void_fields_note (constructor : Ctype.constructor) =
         " (in this instance the type void removes the field(s) %s)"
         (String.concat ", " (List.map quote names))
 
+(* The pattern that matches every value of [constructor], to suggest
+   where a case label leaves its field list out. *)
+let ignoring_pattern (constructor : Ctype.constructor) =
+  let wildcards = List.map (fun _ -> "_") constructor.fields in
+  (constructor.constructor_name :> string)
+  ^ "(" ^ String.concat ", " wildcards ^ ")"
+
+(* For a scrutinee that is not a variant: the remedy when it points to
+   one, since matching never dereferences. *)
+let pointer_note (t : Ctype.t) =
+  match t.shape with
+  | Pointer referenced when Ctype.as_variant referenced <> None ->
+      "; a pointer is not dereferenced implicitly"
+  | Pointer _ | Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+  | Array _ | Function _ | Unknown_type _ ->
+      ""
+
 (* The variant of [t] that names its constructors, unqualified. *)
 let named_in t constructors name =
   match (Ctype.as_variant t, find_constructor constructors name) with
@@ -3618,22 +3635,26 @@ let operand_result context span operand_type =
   | Some instance -> instance
   | None ->
       context.fail span
-        (Rule.message Try_operand "the operand of try is of no result type")
+        (Rule.message Try_operand
+           (Printf.sprintf "the operand of try is of type %s, not a result type"
+              (quote (Type_name.of_ctype operand_type))))
 
 let return_result context span =
   let need = "whether the function that holds try returns a result" in
-  let returned =
+  let return_type =
     match context.typed.enclosing.return_type with
-    | Some (Answer t) -> try_result context span ~need t
+    | Some (Answer t) -> t
     | Some (Depends_on unknown) -> context.fail span (needing need unknown)
     | None -> invalid_arg "Expressions: a try placed outside a function"
   in
-  match returned with
+  match try_result context span ~need return_type with
   | Some instance -> instance
   | None ->
       context.fail span
         (Rule.message Try_operand
-           "try stands in a function that returns no result type")
+           (Printf.sprintf
+              "try is in a function that returns %s, not a result type"
+              (quote (Type_name.of_ctype return_type))))
 
 (* The encoding of the error type of an instance of result, which says
    whether two error types are one, qualifiers at every level included
@@ -3678,8 +3699,8 @@ let try_value context span position ok_field =
   | None, (Untargeted | Targeted _) ->
       context.fail span
         (Rule.message Try_void
-           "the value of try is void, which stands only where a value is \
-            discarded or cast to void")
+           "this try has no value, as the Ok of its result holds void; use \
+            it as a statement or cast it to void")
 
 (* The first of [arguments] take [positions], those past them none. *)
 let rec zip_positions positions arguments =
@@ -4091,9 +4112,11 @@ and constructor_argument context named (field : Ctype.member) argument =
         context.fail argument.span
           (constructor_message
              (Printf.sprintf
-                "the argument for the field %s of %s does not have its type"
+                "the argument for the field %s of %s is of type %s, not %s"
                 (quote (Option.value field.member_name ~default:""))
-                (quote (named.chosen.constructor_name :> string))))
+                (quote (named.chosen.constructor_name :> string))
+                (quote (Type_name.of_ctype argument_type))
+                (quote (Type_name.of_ctype field_type))))
 
 (* The arguments of a call of a builtin that moves a value of the object
    that its first argument points to have the target types that the
@@ -4244,9 +4267,10 @@ and instance_designator context span ~written reference bindings function_type
       context.fail span
         (Rule.message Undeduced_type_parameter
            (Printf.sprintf
-              "no argument deduces the type parameter %s; an explicit \
-               instance names it"
-              parameter))
+              "no argument deduces the type parameter %s of %s; give it \
+               its type arguments in an explicit instance"
+              parameter
+              (quote (excerpt context written))))
   | Ok type_arguments ->
       context.use_instance span ~written reference type_arguments;
       let instance_type = substituted context span bindings function_type in
@@ -5390,9 +5414,9 @@ and scrutinee_variant context ~what span t =
   | None, _ ->
       context.fail span
         (Rule.message Match_scrutinee
-           (what
-          ^ " is not of a variant type; a pointer is not dereferenced \
-             implicitly"))
+           (Printf.sprintf "%s is of type %s, not a variant type%s" what
+              (quote (Type_name.of_ctype t))
+              (pointer_note t)))
 
 (* The variant [name] of type [t] with its [constructors] indexed, once
    for each variant that the patterns of [reading] name. *)
@@ -5652,8 +5676,9 @@ and sub_pattern_fields context ~site label (pattern : Tree.pattern)
       refuse
         (Printf.sprintf
            "the case label %s omits the field list of a constructor with \
-            %d field(s), which only a single-pattern test may"
-           name fields)
+            %d field(s); write %s to ignore the fields"
+           name fields
+           (quote (ignoring_pattern constructor)))
   | None, _ -> []
   | Some sub_patterns, _ when List.length sub_patterns <> fields ->
       refuse

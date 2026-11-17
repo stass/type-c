@@ -187,11 +187,11 @@ a constructor at an integer.
   > }
   > EOF
   $ ./golden.exe forgotten.tc
-  forgotten.tc:7: error: the sub-pattern 'Num(a)' stands at a field of type 'const struct expr *', which takes `_`, a binding or `*` and a constructor pattern [match-pattern]
+  forgotten.tc:7: error: the sub-pattern 'Num(a)' stands at a field of type 'const expr *', which takes `_`, a binding or `*` and a constructor pattern [match-pattern]
   [1]
   $ sed 's/case Add(Num(a), _)/case Add(*Num(a), *Num)/' forgotten.tc > fields.tc
   $ ./golden.exe fields.tc
-  fields.tc:7: error: the case label 'Num' omits the field list of a constructor with 1 field(s), which only a single-pattern test may [match-pattern]
+  fields.tc:7: error: the case label 'Num' omits the field list of a constructor with 1 field(s); write 'Num(_)' to ignore the fields [match-pattern]
   [1]
   $ cat types.h - > star.tc <<'EOF'
   > int f(res r) {
@@ -204,7 +204,7 @@ a constructor at an integer.
   > }
   > EOF
   $ ./golden.exe star.tc
-  star.tc:7: error: the sub-pattern '*DivByZero' stands at a field of type 'struct eval_error', which takes `_`, a constructor pattern or a typed binding [match-pattern]
+  star.tc:7: error: the sub-pattern '*DivByZero' stands at a field of type 'eval_error', which takes `_`, a constructor pattern or a typed binding [match-pattern]
   [1]
   $ sed 's/Err(\*DivByZero)/Ok(DivByZero(x))/' star.tc > integer.tc
   $ ./golden.exe integer.tc

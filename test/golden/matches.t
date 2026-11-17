@@ -179,7 +179,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe scrutinee.tc
-  scrutinee.tc:3: error: the scrutinee of a match is not of a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
+  scrutinee.tc:3: error: the scrutinee of a match is of type 'e *', not a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
   [1]
 
 The bindings and the items of an arm are one scope (design 4.1 rules 4
@@ -250,7 +250,7 @@ refused: only a single-pattern test may (design 4.1 rule 3, 4.6 rule 2).
   > }
   > EOF
   $ ./golden.exe label_fields.tc
-  label_fields.tc:4: error: the case label 'Cons' omits the field list of a constructor with 2 field(s), which only a single-pattern test may [match-pattern]
+  label_fields.tc:4: error: the case label 'Cons' omits the field list of a constructor with 2 field(s); write 'Cons(_, _)' to ignore the fields [match-pattern]
   [1]
 
 A match has at most one `default`, and that one covers a constructor

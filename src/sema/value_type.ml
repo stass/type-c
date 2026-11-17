@@ -11,7 +11,7 @@ type problem =
   | Holds of Ctype.held
 
 let describe = function
-  | Array -> "is an array, which a struct can wrap"
+  | Array -> "is an array; wrap it in a struct, which is one"
   | Va_list -> "is a va_list, which is an array on some targets"
   | Variably_modified -> "is variably modified"
   | Atomic -> "is atomic"
