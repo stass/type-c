@@ -16,13 +16,18 @@ type exit =
   | Value_return of { statement : Tree.span; operand : Tree.span }
   | Error_path of Tree.span
 
-type ending = Completes of int | Cannot_complete of int | Arm_end
+type place = Block_end of int | Trap of int | Left_by of exit
+
+let place_token = function
+  | Block_end closing | Trap closing -> closing
+  | Left_by (Jump statement) -> statement.first
+  | Left_by (Value_return { statement; operand = _ }) -> statement.first
+  | Left_by (Error_path try_span) -> try_span.first
 
 type defer_site = {
   keyword : Tree.span;
   deferred : Tree.span;
-  ending : ending;
-  exits : exit list;
+  places : place list;
   scope_tokens : Tree.span;
   annotated : Tree.span list;
 }
@@ -140,13 +145,19 @@ type read_defer = {
   defer_annotated : Tree.span Queue.t;
 }
 
+(* Where the scope of a defer statement ends: at the [}], token
+   [closing], of a block that can complete, which is an exit; of one
+   that cannot, which is none (design 6 rule 1); or at the end of a
+   match arm, which cannot complete (4.3 rule 1) and holds no [}]. *)
+type ending = Completes of int | Cannot_complete of int | Arm_end
+
 (* A defer statement whose scope the walk has read: where the scope
    ends, and its tokens after the deferred statement. *)
 type read_scope = { read : read_defer; ending : ending; tokens : Tree.span }
 
 (* A goto statement, after its labels, with the guarded statements and
-   scopes around it, the innermost first. It leaves the defer scopes
-   among them that do not hold its label; the label may come later in
+   scopes around it, the innermost first, and the operands around it. It
+   leaves those that do not hold its label; the label may come later in
    the source, so this is decided once the walk has read every label. *)
 type goto = {
   goto_statement : Tree.span;
@@ -253,20 +264,6 @@ let in_operand walk (value : Tree.expression option) =
       { walk with operands = operand.span :: walk.operands }
   | Some _ | None -> walk
 
-(* A break or continue leaves the operands that begin after the keyword
-   of the statement it leaves. A disputed one is refused in the scope of
-   a defer statement, which holds every such operand (design 6 rule
-   10). *)
-let refuse_leaving_operand walk (statement : Tree.statement) keyword =
-  function
-  | Tree.Only (Statement_at target) ->
-      let leaves (operand : Tree.span) = target < operand.first in
-      if List.exists leaves walk.operands then
-        Queue.add
-          (operand_jump statement.span (Printf.sprintf "a `%s`" keyword))
-          walk.breaches
-  | Either _ -> ()
-
 let record_jump walk kind ({ name; label } : Tree.label_name) =
   Queue.add
     { target = label; site = name.span; kind; jump_context = walk.context }
@@ -279,25 +276,59 @@ let item_span : Tree.block_item -> Tree.span = function
   | Block_defer { keyword; statement } ->
       { first = keyword.first; last = statement.span.last }
 
-(* Records [exit] in the scopes of the defer statements among [guards]
-   that it leaves, which [leaves] says of the span of each. *)
-let record_exit guards exit ~leaves =
+(* An exit and where it goes: out of the function, as a return and
+   the error path of a try do, or a jump, named by its [keyword], to the
+   token [target]: the label that a goto names, or the first token of
+   the statement that a break or continue leaves, which lies in a
+   region around the jump if and only if that statement does. *)
+type leaving =
+  | Returns of exit
+  | Jumps of { statement : Tree.span; keyword : string; target : int }
+
+(* Whether [leaving] leaves [region], a defer scope or an operand. *)
+let leaves leaving (region : Tree.span) =
+  match leaving with
+  | Returns _ -> true
+  | Jumps { target; statement = _; keyword = _ } ->
+      target < region.first || region.last < target
+
+let exit_of = function
+  | Returns exit -> exit
+  | Jumps { statement; keyword = _; target = _ } -> Jump statement
+
+(* The one funnel that decides what an exit leaves: it records the exit
+   in the scopes of the defer statements among [guards] that it leaves,
+   and adds to [breaches] a jump that leaves one of [operands] (design 6
+   rule 12). A return in an operand leaves the function, and is no such
+   jump. *)
+let record_exit ~guards ~operands breaches leaving =
   List.iter
     (function
       | Defer_scope { scope; scope_exits; scope_annotated = _ }
-        when leaves scope ->
-          Queue.add exit scope_exits
+        when leaves leaving scope ->
+          Queue.add (exit_of leaving) scope_exits
       | Defer_scope _ | Arm _ | Tested _ -> ())
-    guards
+    guards;
+  match leaving with
+  | Jumps { statement; keyword; target = _ }
+    when List.exists (leaves leaving) operands ->
+      Queue.add
+        (operand_jump statement (Printf.sprintf "a `%s`" keyword))
+        breaches
+  | Jumps _ | Returns _ -> ()
 
-(* A break or continue leaves the scopes that begin after the keyword
-   of the statement it leaves: that statement holds their blocks, as
-   the jump stands inside it and in the scope. A disputed one is refused
-   in a scope (design 6 rule 10). *)
-let record_leaving walk (statement : Tree.statement) = function
+(* An exit from where the walk is. *)
+let record_exit_here walk leaving =
+  record_exit ~guards:walk.guards ~operands:walk.operands walk.breaches
+    leaving
+
+(* A break or continue leaves for the statement that the parser resolved
+   it to. A disputed one is refused in a defer scope (design 6 rule 10),
+   which holds every operand that it could leave. *)
+let record_leaving walk (statement : Tree.statement) keyword = function
   | Tree.Only (Statement_at target) ->
-      record_exit walk.guards (Jump statement.span) ~leaves:(fun scope ->
-          target < scope.Tree.first)
+      record_exit_here walk
+        (Jumps { statement = statement.span; keyword; target })
   | Either _ -> ()
 
 (* A return leaves every scope around it (design 6 rule 1). *)
@@ -308,12 +339,7 @@ let record_return walk (statement : Tree.statement) value =
         Value_return { statement = statement.span; operand = operand.span }
     | None -> Jump statement.span
   in
-  record_exit walk.guards exit ~leaves:(fun _ -> true)
-
-(* The error path of a try returns, so it leaves every scope around it
-   (design 6 rule 1). *)
-let record_try walk (value : Tree.expression) =
-  record_exit walk.guards (Error_path value.span) ~leaves:(fun _ -> true)
+  record_exit_here walk (Returns exit)
 
 (* A jump may enter a statement at a label it carries or contains. *)
 let enterable flow = flow.has_named_label || flow.has_case_label
@@ -485,13 +511,11 @@ and statement_flow walk (statement : Tree.statement) =
       { (expression walk target) with completes = false }
   | Continue { loop } ->
       disputed_jump walk statement.span "continue" loop;
-      refuse_leaving_operand walk statement "continue" loop;
-      record_leaving walk statement loop;
+      record_leaving walk statement "continue" loop;
       { stops with continues = targets loop }
   | Break { leaves } ->
       disputed_jump walk statement.span "break" leaves;
-      refuse_leaving_operand walk statement "break" leaves;
-      record_leaving walk statement leaves;
+      record_leaving walk statement "break" leaves;
       { stops with breaks = targets leaves }
   | Return value ->
       record_return walk statement value;
@@ -639,7 +663,9 @@ and expression walk (value : Tree.expression) =
   | Statement_expression b -> block (entering walk b) b
   | Parenthesized inner -> expression walk inner
   | Try { operand; scope = _ } ->
-      record_try walk value;
+      (* The error path returns, so it leaves every scope around it
+         (design 6 rule 1). *)
+      record_exit_here walk (Returns (Error_path value.span));
       { (expression walk operand) with completes = true }
   | Call { callee; arguments } ->
       { (operands (callee :: arguments)) with
@@ -917,20 +943,23 @@ let entry_refusal walk definitions =
   | () -> None
   | exception Refused refusal -> Some refusal
 
-(* Design 6 rule 12 for each goto, which leaves an operand around it that
-   does not hold its label. The parser resolves every goto to a label
+(* Records each goto as an exit, once the walk has read every label: it
+   leaves the scopes and operands around it that do not hold its label
+   (design 6 rules 1 and 12). The parser resolves every goto to a label
    that a statement in its scope defines, and the walk reads every
    statement. *)
-let refuse_leaving_operands walk definitions =
-  let refuse goto =
-    let leaves (operand : Tree.span) =
-      let definition = Hashtbl.find definitions goto.goto_target in
-      not (encloses operand definition.site)
-    in
-    if List.exists leaves goto.goto_operands then
-      Queue.add (operand_jump goto.goto_statement "a `goto`") walk.breaches
+let record_gotos walk definitions =
+  let record goto =
+    match Hashtbl.find_opt definitions goto.goto_target with
+    | Some (definition : definition) ->
+        record_exit ~guards:goto.goto_guards ~operands:goto.goto_operands
+          walk.breaches
+          (Jumps
+             { statement = goto.goto_statement; keyword = "goto";
+               target = definition.site.first })
+    | None -> invalid_arg "Reachability.record_gotos: a label that none defines"
   in
-  Queue.iter refuse walk.gotos
+  Queue.iter record walk.gotos
 
 (* The first refusal in source order, of an entry or of design 6 rules
    10 and 12, as GCC and Clang name the first error. *)
@@ -938,7 +967,7 @@ let label_refusal body =
   let walk = start no_facts in
   ignore (block walk body);
   let definitions = by_label walk.definitions in
-  refuse_leaving_operands walk definitions;
+  record_gotos walk definitions;
   let refusals = Queue.copy walk.breaches in
   Option.iter
     (fun entry -> Queue.add entry refusals)
@@ -948,28 +977,31 @@ let label_refusal body =
   | first :: _ -> Some first
   | [] -> None
 
-(* Records each goto in the scopes that it leaves, those around it that
-   do not hold its label (design 6 rule 1), once the walk has read every
-   label. The parser resolves every goto to a label that a statement in
-   its scope defines, and the walk reads every statement. *)
-let record_gotos walk =
-  let definitions = by_label walk.definitions in
-  let record goto =
-    let definition = Hashtbl.find definitions goto.goto_target in
-    record_exit goto.goto_guards (Jump goto.goto_statement)
-      ~leaves:(fun scope -> not (encloses scope definition.site))
-  in
-  Queue.iter record walk.gotos
+(* The place of the end of a scope, none at the end of a match arm. *)
+let end_places = function
+  | Completes closing -> [ Block_end closing ]
+  | Cannot_complete closing -> [ Trap closing ]
+  | Arm_end -> []
 
 let defer_site { read; ending; tokens } =
-  { keyword = read.defer_keyword; deferred = read.defer_statement; ending;
-    exits = List.of_seq (Queue.to_seq read.defer_exits);
+  let exits = List.of_seq (Queue.to_seq read.defer_exits) in
+  { keyword = read.defer_keyword; deferred = read.defer_statement;
+    places = List.map (fun exit -> Left_by exit) exits @ end_places ending;
     scope_tokens = tokens;
     annotated = List.of_seq (Queue.to_seq read.defer_annotated) }
 
 let defers facts body =
   let walk = start facts in
   ignore (block walk body);
-  record_gotos walk;
+  record_gotos walk (by_label walk.definitions);
   let keyword { read; _ } = read.defer_keyword in
   List.map defer_site (in_source_order keyword walk.defers)
+
+let value_returns sites =
+  let value_return = function
+    | Left_by (Value_return { statement; operand }) -> Some (statement, operand)
+    | Block_end _ | Trap _ | Left_by (Jump _ | Error_path _) -> None
+  in
+  List.concat_map (fun site -> List.filter_map value_return site.places) sites
+  |> List.sort_uniq (fun ((a : Tree.span), _) ((b : Tree.span), _) ->
+         Int.compare a.first b.first)

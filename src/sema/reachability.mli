@@ -39,30 +39,43 @@ type exit =
   | Value_return of { statement : Tree.span; operand : Tree.span }
   | Error_path of Tree.span
 
-(** Where the scope of a defer statement ends: at the [}], token
-    [closing], of a block that can complete, which is an exit; of one
-    that cannot, which is none (design 6 rule 1); or at the end of a
-    match arm, which cannot complete (4.3 rule 1) and holds no [}]. *)
-type ending = Completes of int | Cannot_complete of int | Arm_end
+(** A place where lowering writes for the defer statements whose scopes
+    it ends or leaves (design 13.5): the [}], by its token index, of a
+    block that can complete, before which the copies run; that of a
+    block that cannot, before which a trap stands, as its end is no exit
+    (6 rule 1); or an exit. The end of a match arm, which cannot
+    complete (4.3 rule 1), holds no [}] and gets the arm's own trap, so
+    it is no place. *)
+type place = Block_end of int | Trap of int | Left_by of exit
 
-(** A defer statement: its keyword, its statement [S], where its scope
-    ends, and the jumps that leave the scope. A [goto] leaves it if its
-    label is outside the scope, including one before the defer
+val place_token : place -> int
+(** The token where [place] stands: the [}] of its block, or the first
+    token of its exit. Text that lowering drops takes the place with it,
+    and a statement holds the place if it holds the token. *)
+
+(** A defer statement: its keyword, its statement [S], and the places of
+    its scope: the exits that leave the scope, in the order of the walk,
+    which reads a loop's body before its condition and a goto after
+    every other exit, then the end of its block. A [goto] leaves the
+    scope if its label is outside it, including one before the defer
     statement. [scope_tokens] is the tokens after [S] to the end of the
-    scope, pragma lines included:
-    to the [}] of a block, which it does not hold, or to the end of the
-    last item of a match arm; it is empty where nothing follows [S].
-    [annotated] is the statements and block items that a [#pragma] line
-    stands directly before ({!facts}[.pragma_before]) in the scope and
-    in no scope of a later defer statement inside it, in no order. *)
+    scope, pragma lines included: to the [}] of a block, which it does
+    not hold, or to the end of the last item of a match arm; it is empty
+    where nothing follows [S]. [annotated] is the statements and block
+    items that a [#pragma] line stands directly before
+    ({!facts}[.pragma_before]) in the scope and in no scope of a later
+    defer statement inside it, in no order. *)
 type defer_site = {
   keyword : Tree.span;
   deferred : Tree.span;
-  ending : ending;
-  exits : exit list;
+  places : place list;
   scope_tokens : Tree.span;
   annotated : Tree.span list;
 }
+
+val value_returns : defer_site list -> (Tree.span * Tree.span) list
+(** Each [return e;] that leaves a scope of [sites], once though it
+    leaves several, in source order: the statement and its operand. *)
 
 (** Both walk a tree that the parser has bounded in depth
     ({!Typec_syntax.Parser.max_depth}), so their recursion is bounded

@@ -353,37 +353,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   the claimed form that unread text holds, and refuse them where a
   generic is declared, if a pilot meets one.
 
-- [Medium] `Reachability` tests "does this jump leave the span" twice
-  for the operand of a `return` in a defer scope (design 6 rule 12):
-  `refuse_leaving_operands` for a goto, against the label's definition,
-  and the operand check of a break or continue (`target <
-  operand.first`), beside the same tests that `record_exit` makes for
-  defer scopes. Make the operand a kind of `guarded` region, so that
-  one funnel decides what every jump leaves.
-- [Low] `Reachability.refuse_leaving_operands` looks up the label's
-  definition (`Hashtbl.find`) once per operand inside `leaves`, and
-  raises `Not_found` should the walk ever miss a label, where
-  `check_jump` uses `find_opt`. Carry the label's site on the goto
-  record, so that no lookup is needed.
 - [Low] `Statement_pragma` matches the first identifiers among all the
   tokens of a pragma line (`Token.Identifiers` drops the others), so
   `#pragma GCC 4 unroll` passes as `GCC unroll`. Safe while both
   backends pick a pragma by its first tokens, which makes that line an
   unknown pragma; have the reader keep the leading run of identifiers
   and match the list against it, so that such a line is refused.
-- [Medium] The places where lowering writes the copies of a deferred
-  statement, and a trap, are coded three times: `Lowering.exit_places`
-  and `trap_edits`, `Declarations.exit_places`, and
-  `Scope_pragma.placement_refusals`, which is sound only because each
-  place lies inside the span of its exit or at the `}` of the scope.
-  Have `Reachability` give each site's places as token indices once,
-  read by all three; the pragma rule then refuses a pragma line directly
-  before a place or before an annotated statement that holds one.
-- [Low] `Scope_pragma.placement_refusals` tests every exit of a site
+- [Low] `Scope_pragma.placement_refusals` tests every place of a site
   against every annotated statement, quadratic in one scope with many
-  of each (as `record_exit` already is in defers and exits). Sort the
-  exits by first token once and search for the first at or after the
-  statement: spans nest, so that one decides.
+  of each. If it is reported slow, sort the places' tokens once and
+  search for the first at or after the statement.
 - [Low] Whether a token is a pragma line is matched in `Parser`,
   `Lowering`, `Resolution`, `Expressions` and `Scope_pragma`, and
   "a pragma line directly before token i" in four places; add

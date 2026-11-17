@@ -78,31 +78,25 @@ let state_refusals tokens sites =
   |> List.filter refused
   |> List.map (fun index -> (index, state_pragma))
 
-let exit_span : Reachability.exit -> Tree.span = function
-  | Jump statement | Value_return { statement; operand = _ } -> statement
-  | Error_path try_span -> try_span
-
 (* The pragma line directly before the end of the block of [site], where
    lowering writes the copies or a trap, and those directly before the
-   statements and items of its scope that hold one of its exits. A jump
-   that leaves an outer scope leaves this one too, so the exits of the
+   statements and items of its scope that hold a place of [site]. A jump
+   that leaves an outer scope leaves this one too, so the places of the
    innermost scope around a statement are all that it can hold. *)
 let placement_refusals tokens (site : Reachability.defer_site) =
   let holds (statement : Tree.span) =
     List.exists
-      (fun exit ->
-        let span = exit_span exit in
-        statement.first <= span.first && span.last <= statement.last)
-      site.exits
+      (fun place ->
+        let token = Reachability.place_token place in
+        statement.first <= token && token <= statement.last)
+      site.places
   in
-  let before_end =
-    match site.ending with
-    | Completes closing | Cannot_complete closing
+  let before_end : Reachability.place -> int option = function
+    | (Block_end closing | Trap closing)
       when closing - 1 >= site.scope_tokens.first
-           && is_pragma tokens.(closing - 1)
-      ->
-        [ closing - 1 ]
-    | Completes _ | Cannot_complete _ | Arm_end -> []
+           && is_pragma tokens.(closing - 1) ->
+        Some (closing - 1)
+    | Block_end _ | Trap _ | Left_by _ -> None
   in
   let before_holders =
     List.filter holds site.annotated
@@ -110,7 +104,7 @@ let placement_refusals tokens (site : Reachability.defer_site) =
   in
   List.map
     (fun index -> (index, pragma_before_exit))
-    (before_end @ before_holders)
+    (List.filter_map before_end site.places @ before_holders)
 
 let refusal tokens sites =
   let refusals =

@@ -17,21 +17,6 @@ type definition = {
 
 let form = "the form of a `return e;` in the scope of a `defer` statement"
 
-(* Each [return e;] in the scope of a defer statement once, in source
-   order: the statement and its operand. A return in the scopes of two
-   defer statements is an exit of each. *)
-let value_returns (defers : Expressions.function_defers) =
-  let value_return : Reachability.exit -> _ = function
-    | Value_return { statement; operand } -> Some (statement, operand)
-    | Jump _ | Error_path _ -> None
-  in
-  let site_returns (site : Reachability.defer_site) =
-    List.filter_map value_return site.exits
-  in
-  List.concat_map site_returns defers.sites
-  |> List.sort_uniq (fun ((a : Tree.span), _) ((b : Tree.span), _) ->
-         compare a.first b.first)
-
 (* Design 13.5: in a function that returns void, [return e;] becomes
    [{ e; copies return; }], which C's diagnostic of a value returned
    from it would not reach. *)
@@ -221,7 +206,7 @@ let value_refusal definition =
       (fun () -> redeclared_refusal parameter_owns body_owns) ]
 
 let refusal typed definition =
-  match value_returns definition.defers with
+  match Reachability.value_returns definition.defers.sites with
   | [] -> None
   | (first, _) :: _ as returns -> (
       match definition.defers.returns with

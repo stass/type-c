@@ -3350,7 +3350,8 @@ and type_moved_operand state (views : Parser.try_views) ~scope operand
    in such a scope, whatever the function returns. *)
 and check_deferred state (defers : Expressions.function_defers) =
   List.iter (check_deferred_statement state) defers.sites;
-  List.iter (check_return_operand state) (returns_in_scopes defers.sites);
+  List.iter (check_return_operand state)
+    (Reachability.value_returns defers.sites);
   match Scope_pragma.refusal state.text.tokens defers.sites with
   | Some (index, diagnostic) ->
       fail state { first = index; last = index } diagnostic
@@ -3396,18 +3397,15 @@ and check_deferred_statement state (site : Reachability.defer_site) =
    try, in front of the statement or declaration that holds the try,
    where its operand and test stand. *)
 and exit_places state (site : Reachability.defer_site) =
-  let place : Reachability.exit -> Resolution.place = function
-    | Jump statement -> place_before state statement.first
-    | Value_return { statement; operand } ->
-        after_operand state statement operand
-    | Error_path try_span -> error_path_place state try_span
+  let place : Reachability.place -> Resolution.place option = function
+    | Block_end closing -> Some (place_before state closing)
+    | Left_by (Jump statement) -> Some (place_before state statement.first)
+    | Left_by (Value_return { statement; operand }) ->
+        Some (after_operand state statement operand)
+    | Left_by (Error_path try_span) -> Some (error_path_place state try_span)
+    | Trap _ -> None
   in
-  let ending =
-    match site.ending with
-    | Completes closing -> [ place_before state closing ]
-    | Cannot_complete _ | Arm_end -> []
-  in
-  List.map place site.exits @ ending
+  List.filter_map place site.places
 
 (* Lowering declares nothing at a place of writing that the source
    does not: [__tc_r] is reserved (design 2.3). *)
@@ -3428,20 +3426,6 @@ and error_path_place state (try_span : Tree.span) : Resolution.place =
       { view = views.place; before = views.place_before;
         typedef_names = []; tags = [] }
   | None -> invalid_arg "Declarations.error_path_place: no view at the try"
-
-(* Each return with an operand in the scope of a defer, once though it
-   leaves several. *)
-and returns_in_scopes sites =
-  let value_return : Reachability.exit -> _ = function
-    | Value_return { statement; operand } -> Some (statement, operand)
-    | Jump _ | Error_path _ -> None
-  in
-  List.concat_map
-    (fun (site : Reachability.defer_site) ->
-      List.filter_map value_return site.exits)
-    sites
-  |> List.sort_uniq (fun ((a : Tree.span), _) ((b : Tree.span), _) ->
-         Int.compare a.first b.first)
 
 (* Lowering writes the return as a block that holds its operand (design
    6 rule 12), which stays at its own place: the third clause alone. *)

@@ -881,24 +881,13 @@ let return_temporary = "__tc_r"
 let defer_span (site : Reachability.defer_site) =
   { Tree.first = site.keyword.first; last = site.deferred.last }
 
-(* A place that runs the copies of the scopes it leaves: the end of a
-   block that can complete, by the token of its [}], or a jump. *)
-type exit_place = Block_end of int | Left_by of Reachability.exit
-
-let exit_places (site : Reachability.defer_site) =
-  let ending =
-    match site.ending with
-    | Completes closing -> [ Block_end closing ]
-    | Cannot_complete _ | Arm_end -> []
-  in
-  ending @ List.map (fun exit -> Left_by exit) site.exits
-
-(* Each place of [sites] with the sites whose scopes it leaves, in the
-   order their copies run, the latest first. *)
+(* Each place of [sites] with the sites whose scopes it ends or leaves,
+   the latest first, the order in which their copies run. *)
 let places (sites : Reachability.defer_site list) =
   let pairs =
     List.concat_map
-      (fun site -> List.map (fun place -> (place, site)) (exit_places site))
+      (fun (site : Reachability.defer_site) ->
+        List.map (fun place -> (place, site)) site.places)
       sites
   in
   let sorted = List.stable_sort (fun (a, _) (b, _) -> compare a b) pairs in
@@ -909,17 +898,6 @@ let places (sites : Reachability.defer_site list) =
     | _ -> (place, [ site ]) :: grouped
   in
   List.rev (List.fold_left group [] sorted)
-
-(* The trap at the end of a block that cannot complete, once for each
-   block however many defers it holds. *)
-let trap_edits (text : Reader.t) (sites : Reachability.defer_site list) =
-  let closing (site : Reachability.defer_site) =
-    match site.ending with
-    | Cannot_complete closing -> Some closing
-    | Completes _ | Arm_end -> None
-  in
-  List.sort_uniq Int.compare (List.filter_map closing sites)
-  |> List.map (fun closing -> insert text.tokens ~before:closing trap)
 
 let defer_piece location text = Emitter.Piece (Emitter.generated location text)
 
@@ -954,25 +932,28 @@ let return_form : Typec_sema.Expressions.returns -> return_form = function
       { value_opening = "{"; value_closing = ";"; returned = "return; }" }
 
 (* The edits of one place of a function that [returns], which runs the
-   copies of [leaving]. *)
+   copies of [leaving]; a trap stands once at the end of a block however
+   many defers it holds. *)
 let place_edits (text : Reader.t) base returns (place, leaving) =
   let tokens = text.tokens in
-  let copies = List.concat_map (copy text base) leaving in
+  (* A trap and the error path of a try write no copies here. *)
+  let copies () = List.concat_map (copy text base) leaving in
   let at index = tokens.(index).location in
   let insertion index = Reader.range tokens ~first:index ~count:0 in
   let token index = Reader.range tokens ~first:index ~count:1 in
-  match place with
-  | Block_end closing -> [ Emitter.moved (insertion closing) copies ]
+  match (place : Reachability.place) with
+  | Block_end closing -> [ Emitter.moved (insertion closing) (copies ()) ]
+  | Trap closing -> [ insert tokens ~before:closing trap ]
   | Left_by (Jump jump) ->
       [ Emitter.moved (insertion jump.first)
-          (defer_piece (at jump.first) "{" :: copies);
+          (defer_piece (at jump.first) "{" :: copies ());
         Emitter.code (token jump.last) ~location:(at jump.last) "; }" ]
   | Left_by (Value_return { statement; operand = _ }) ->
       let form = return_form returns in
       [ Emitter.code (token statement.first) ~location:(at statement.first)
           form.value_opening;
         Emitter.moved (token statement.last)
-          ((defer_piece (at statement.last) form.value_closing :: copies)
+          ((defer_piece (at statement.last) form.value_closing :: copies ())
           @ [ defer_piece (at statement.last) form.returned ]) ]
   | Left_by (Error_path _) -> []
 
@@ -1024,17 +1005,9 @@ let return_type_edits (text : Reader.t)
       (Reader.range tokens ~first:body.last ~count:1)
       ~location:tokens.(body.last).location "} }" ]
 
-(* The token where [place] stands, which goes with any text that
-   lowering drops around it. *)
-let place_token = function
-  | Block_end closing -> closing
-  | Left_by (Jump jump) -> jump.first
-  | Left_by (Value_return { statement; operand = _ }) -> statement.first
-  | Left_by (Error_path try_span) -> try_span.first
-
-let is_value_return = function
+let is_value_return : Reachability.place -> bool = function
   | Left_by (Value_return _) -> true
-  | Block_end _ | Left_by (Jump _ | Error_path _) -> false
+  | Block_end _ | Trap _ | Left_by (Jump _ | Error_path _) -> false
 
 (* The edits of a function with its defers lowered: the copies at each
    exit, the traps, and [__tc_ret] where a [return e;] that runs copies
@@ -1053,7 +1026,8 @@ let function_edits (text : Reader.t) base ~dropped
     (defers : Typec_sema.Expressions.function_defers) =
   let kept_places =
     List.filter
-      (fun (place, _) -> kept_token dropped (place_token place))
+      (fun (place, _) ->
+        kept_token dropped (Reachability.place_token place))
       (places defers.sites)
   in
   let kept_sites = kept_sites dropped defers.sites in
@@ -1073,7 +1047,6 @@ let function_edits (text : Reader.t) base ~dropped
     |> replace text.tokens ~location:text.tokens.(span.first).location ""
   in
   List.concat_map (place_edits text base defers.returns) kept_places
-  @ trap_edits text kept_sites
   @ List.concat_map removal kept_sites
   @ return_type
 
@@ -1085,10 +1058,10 @@ let function_edits (text : Reader.t) base ~dropped
 let error_path_cleanups (text : Reader.t) base
     (functions : Typec_sema.Expressions.function_defers list) =
   let leaving = Hashtbl.create 16 in
-  let index (place, sites) =
+  let index ((place : Reachability.place), sites) =
     match place with
     | Left_by (Error_path try_span) -> Hashtbl.replace leaving try_span sites
-    | Block_end _ | Left_by (Jump _ | Value_return _) -> ()
+    | Block_end _ | Trap _ | Left_by (Jump _ | Value_return _) -> ()
   in
   List.iter
     (fun (defers : Typec_sema.Expressions.function_defers) ->

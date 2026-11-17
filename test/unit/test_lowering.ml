@@ -15,8 +15,8 @@ open Typec_test_support
 
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
-(* The text that [source] is read to, its tree and its edits. *)
-let lowered source =
+(* The text that [source] is read to, its tree and its declarations. *)
+let read source =
   let text =
     let preprocessed = Preprocessed.text ~name:"in.tc" source in
     match Reader.read ~name:"in.tc" preprocessed with
@@ -31,10 +31,13 @@ let lowered source =
   in
   let unit = List.map fst scopes.declarations in
   match Declarations.read lp64 text scopes with
-  | Ok declarations ->
-      let edits = Lowering.edits text declarations in
-      (text, unit, edits)
+  | Ok declarations -> (text, unit, declarations)
   | Error error -> failwith (Reader.error_message error)
+
+(* The text that [source] is read to, its tree and its edits. *)
+let lowered source =
+  let text, unit, declarations = read source in
+  (text, unit, Lowering.edits text declarations)
 
 let emitted source =
   let text, _, edits = lowered source in
@@ -512,6 +515,56 @@ let goto_defers () =
    ^ " } case e_B: { return; " ^ trap ^ " } default: " ^ trap
    ^ " } } L: ; }")
 
+(* The places of each defer site of [source] (Reachability.place), which
+   lowering, the check of the moved text and the pragma rule all read:
+   the site's deferred statement, then each place in the order that
+   Declarations checks them, by its kind and its tokens, or the line of
+   its [}]. *)
+let defer_places source =
+  let text, _, declarations = read source in
+  let spelled (span : Tree.span) =
+    List.init (span.last - span.first + 1) (fun offset ->
+        Reader.spelling text text.tokens.(span.first + offset))
+    |> String.concat " "
+  in
+  let line index = string_of_int text.tokens.(index).location.line in
+  let place : Reachability.place -> string = function
+    | Block_end closing -> "end at line " ^ line closing
+    | Trap closing -> "trap at line " ^ line closing
+    | Left_by (Jump statement) -> "jump " ^ spelled statement
+    | Left_by (Value_return { statement; operand = _ }) ->
+        "return " ^ spelled statement
+    | Left_by (Error_path try_span) -> "try " ^ spelled try_span
+  in
+  let site (site : Reachability.defer_site) =
+    spelled site.deferred ^ ": "
+    ^ String.concat ", " (List.map place site.places)
+  in
+  Expressions.defers (Declarations.typed declarations)
+  |> List.concat_map (fun (defers : Expressions.function_defers) ->
+         List.map site defers.sites)
+  |> String.concat "; "
+
+(* Design 6 rule 1 and 13.5: each scope has the exits that leave it and
+   the end of its block, a trap where the block cannot complete and
+   nothing at the end of a match arm. A break leaves the scope only if
+   the loop it leaves holds the scope. *)
+let places () =
+  compares "the places of nested scopes, an arm, a jump and a try"
+    (defer_places
+       "type r = result(int, int); type e = | A | B; r g(int); void a(void);\n\
+        void b(void); r f(e v, int c) {\n\
+        defer a();\n\
+        { defer b(); if (c) goto out; int x = try g(c); }\n\
+        match (v) { case A: defer b(); return Ok(1); case B: return Ok(2); }\n\
+        while (c) { defer b(); while (c) break; if (c) break; }\n\
+        out: { defer b(); for (;;) ; }\n\
+        }")
+    "a ( ) ;: try try g ( c ), return return Ok ( 1 ) ;, return return Ok \
+     ( 2 ) ;, trap at line 8; b ( ) ;: try try g ( c ), jump goto out ;, \
+     end at line 4; b ( ) ;: return return Ok ( 1 ) ;; b ( ) ;: jump break \
+     ;, end at line 6; b ( ) ;: trap at line 7"
+
 (* Design 13.5, the [try] row: the error path of a try runs the copies
    of the scopes it stands in, innermost first, before its return. *)
 let try_defers () =
@@ -618,5 +671,6 @@ let () =
   many_defers ();
   defers ();
   goto_defers ();
+  places ();
   try_defers ();
   if !failures > 0 then exit 1
