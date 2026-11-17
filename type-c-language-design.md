@@ -2267,24 +2267,34 @@ str greeting = "hello";                             /* len 5    */
 2. `slice_from_array(a)` takes an lvalue of array type `T[N]` and yields a
    `slice(T)` of length `N`. A pointer is not accepted. The length is
    the backend's: lowering writes the operand a second time, as the
-   operand of a `sizeof` (13.5), and `a` is still evaluated once. Three
+   operand of a `sizeof` (13.5), and `a` is still evaluated once. Four
    limits follow:
    * the array type is complete and not variably modified. C evaluates
      the operand of `sizeof` where it is a variable length array (C11
      6.5.3.4p2), so such an `a` would be evaluated twice. A variable
      length array and an array of unknown bound become slices through
      `slice_unchecked`, with the count that the program holds;
-   * the operand declares no tag and no enumeration constant in the
-     scope around it, which is the third clause of the resolution
+   * the operand declares no name whose scope reaches beyond it: no
+     tag and no enumeration constant in the scope around it, and no
+     label of the function. That is the third clause of the resolution
      property of 13.5 on the operand. In
      `slice_from_array(rows[sizeof(enum { K = 1 })])` the second
-     writing would declare `K` again;
+     writing would declare `K` again, and a label in a statement
+     expression of the operand would be defined twice. A label that
+     the statement expression declares with `__label__` is in scope in
+     its block alone and is allowed;
    * the operand holds no `#pragma` line, which the second writing
-     would repeat.
+     would repeat;
+   * the size of an element is not 0. The length is the size of the
+     array over the size of an element, and the GNU profile has types
+     of size 0: a structure without members, an array of length 0. The
+     size of a type is the backend's alone (13.3, P16), so the refusal
+     is the backend's too, with a message that lowering writes (13.5).
 3. `slice_sub(s, lo, hi)` yields the elements `[lo, hi)` of `s`. `lo` and
    `hi` have the types that an index may have (rule 1) and are
    converted to `size_t`, and it traps unless `lo <= hi` and
-   `hi <= s.len`. Each operand is evaluated once.
+   `hi <= s.len`. Each operand is evaluated once. Where C does not
+   evaluate it there is nothing to test, as for an index (rule 9).
 4. `slice_unchecked(p, n)` makes a slice from a pointer and a count that the
    compiler cannot verify.
 5. `slice(T)` converts implicitly to `slice(const T)`, as `T *` converts to
@@ -2310,16 +2320,19 @@ str greeting = "hello";                             /* len 5    */
    C has it (C11 6.5.2.5p5): `slice_from_array((int[]){ 1, 2, 3 })[i]`
    reads a live object. A name that an operand declares is in scope
    after the index, as it is after a subscript of C. The function
-   declares the temporaries, and one limit follows: a `slice_sub`, and
-   an index that C evaluates, stand in a function body. Outside one,
+   declares the temporaries, and one limit follows: an index and a
+   `slice_sub` that C evaluates stand in a function body. Outside one,
    in the definition of a generic type (3.5), in the head of a
    function, generic (section 7) or not, and in any other declaration
    of file scope, each is an error, as a `defer` statement is (section
-   6 rule 11): no function is there to declare the temporaries. An
-   index that C does not evaluate has no test and no temporary (13.5)
-   and stands wherever an expression does: `sizeof(s[0])` is the size
-   of an element in the size of an array of file scope as in a function
-   body.
+   6 rule 11): no function is there to declare the temporaries. One
+   that C does not evaluate has no test and no temporary (13.5) and
+   stands wherever an expression does: `sizeof(s[0])` is the size of
+   an element in the size of an array of file scope as in a function
+   body. Whether C evaluates one is a judgement of `typec`, and no
+   judgement lets an index reach an element without its test: where C
+   evaluates what `typec` took it to leave alone, the program traps
+   before it evaluates an operand (13.5).
 
 `slice` is a universe generic type with one piece of syntax, `[]`. The three
 functions are universe names that the compiler implements at each use; they
@@ -3823,7 +3836,7 @@ Two properties follow by construction:
 | Construct | Lowered form |
 | --- | --- |
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
-| Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. Inside an initialiser, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. |
+| Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. As the initialiser of an object, or of a member or an element of one, that is declared with the variant's type, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. An object that takes its type from its initialiser, as one declared with `__auto_type` does, has no type for a braced list, and its initialiser is the compound literal. |
 | `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
@@ -3832,8 +3845,8 @@ Two properties follow by construction:
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. A statement `try e;` reads no field: nothing is written after its test, as said below the table. It is the one position of a `try` whose `T` is `void` (5.1 rule 2), where `Ok` has no field (3.5 rule 6). Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
 | `defer` | The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
-| Slice index, `slice_sub` | An expression at the use, and no call: a comma expression of ISO C that assigns the value of each operand to a temporary of the function, tests, traps (10.5) and then indexes, as said below the table ("The check of a slice"). An index is `(*(assignments, test, &element))`, an lvalue. An index that C does not evaluate is `(s).data[(i)]`. |
-| `slice_from_array`, `slice_unchecked` | A compound literal of the instance, at the use. As an initialiser, the braced list alone, as for a constructor. Neither holds a test. The length of a `slice_from_array` is a `sizeof` of its operand over the size of an element. |
+| Slice index, `slice_sub` | An expression at the use, and no call: a comma expression of ISO C that assigns the value of each operand to a temporary of the function, tests, traps (10.5) and then indexes, as said below the table ("The check of a slice"). An index is `(*(assignments, test, &element))`, an lvalue. Where C does not evaluate one, it has no test and no temporary: it is the trap and then its operands, each written once, `(*((void)__builtin_trap(), &(s).data[(i)]))` for an index, so that it traps where C evaluates it after all. |
+| `slice_from_array`, `slice_unchecked` | A compound literal of the instance, at the use. As the initialiser of an object, member or element that is declared with the type of the instance, the braced list alone, as for a constructor. Neither holds a test. The length of a `slice_from_array` is a `sizeof` of its operand over the size of an element, with a static assertion that this size is not 0. |
 | Checked-mode checks | Inline tests that trap. |
 
 A constructor passed by value to a function that the backend inlines,
@@ -4728,10 +4741,11 @@ says of an index follows from that and needs no rule for any place:
   assigns none that the outer one holds, two tests that C leaves
   unsequenced, as in `f(s[i], t[j])`, assign different objects, and no
   name hides another under `-Wshadow`. Each call of the function has
-  temporaries of its own.
+  temporaries of its own. An index or a `slice_sub` that C does not
+  evaluate holds no test and takes no number (below).
 
 Measured on Apple Clang 21 and GCC 16, in the ISO and the GNU form of
-C11 and of C17: the two forms and the plain form below compile without
+C11 and of C17: the two forms compile without
 a diagnostic under `-pedantic-errors -Wall -Wextra -Wshadow
 -Wconversion -Wsign-conversion` in the header of a `for`, the
 condition of a `while`, an initialiser and a statement expression,
@@ -4741,43 +4755,115 @@ that declares a variable length array. At `-O0` and at `-O2`,
 `slice_sub` of such a slice reads its elements, and a pointer that an
 index stores, as in `s[(p = (int[]){ 42 }, 0)]`, reads 42 after it.
 
-**An index that C does not evaluate.** C evaluates neither the operand
-of `sizeof`, `_Alignof` or `__typeof__`, unless its type is variably
-modified (C11 6.5.3.4p2), nor the controlling expression of `_Generic`
-(C11 6.5.1.1p3). An index that stands in such an operand, at any depth,
-has no value to test, and lowering writes it plain, with no temporary:
-`(s).data[(i)]`. It so needs no function, and section 8 rule 9 lets it
-stand anywhere. Both backends take `sizeof(s[0])` in that form as the
-size of an array of file scope, in a `_Static_assert` there and in the
-size of an array parameter.
+**An index or a `slice_sub` that C does not evaluate.** C leaves four
+operands alone, each by a rule of its own:
 
-The plain form is needed and not only shorter. The assignments of the
-test are side effects, and Apple Clang 21 reports them in three of the
-four operands under `-Wunevaluated-expression`, which it has on without
-an option: once for `sizeof(s[0])`, once for `__alignof__(s[i])`, once
-for a type-generic macro whose `_Generic` is given `s[i]`, and twice
-for `isnan(s[i])` with the `<math.h>` of macOS, whose macro takes
-`sizeof` of its argument. GCC 16 reports none of them, and neither
-backend reports the plain form.
+- the operand of `sizeof`, unless its type is a variable length array
+  (C11 6.5.3.4p2). An operand whose type is variably modified and no
+  such array, as a pointer to one is, is not evaluated;
+- the operand of `__typeof__`, unless its type is variably modified.
+  C23 says so of `typeof` (6.7.2.5p4), and both backends do so for
+  `__typeof__` in C11 and in C17;
+- the operand of `_Alignof`, always. ISO C gives it a type name alone
+  (C11 6.5.3.4p1), and both backends leave the expression of the GNU
+  `__alignof__` alone as well, also one whose type is a variable
+  length array;
+- the controlling expression of `_Generic`, always (C11 6.5.1.1p3).
 
-The plain form holds no test, so this is the one place where what
-`typec` takes C to evaluate decides whether an index is tested. The
-judgement errs to one side. Lowering writes the plain form in the four
-operands above and nowhere else, and in the three that go by a type
-only where typing has the type of the operand and that type is not
-variably modified; an operand of unknown type (13.3, P21) counts as
-evaluated. Every other index gets the test, also where a backend
+Apple Clang 21 and GCC 16 agree on each. With a call in the bound of
+an array type, `sizeof(*(int (*)[g()])p)` calls `g` and
+`sizeof((int (*)[g()])p)` does not, `__typeof__((int (*)[g()])p)`
+calls it, and `__alignof__(*(int (*)[g()])p)` and a `_Generic` on that
+operand do not.
+
+An index or a `slice_sub` that stands in such an operand, at any
+depth, has no value to test. Lowering writes it as the trap followed
+by its operands, with no test and no temporary:
+
+```c
+(*((void)__builtin_trap(), &(s).data[(i)]))
+
+((void)__builtin_trap(), (void)(s), (void)(lo), (void)(hi),
+ (struct R){ 0 })
+```
+
+Each has the type of the form that is evaluated: the first is an
+lvalue of the element type, the second a `struct R`. Each operand is
+written once, in the order of the source, so what an operand declares
+is declared once and the form sets no limit on what an operand holds.
+Neither form names anything of a function, so section 8 rule 9 lets
+both stand anywhere. The trap is the builtin alone, also where the
+command line names a trap function (10.5). That function reports the
+failures of the program, and this trap marks a defect of `typec`
+(below); without the call, the form names nothing beyond its operands
+and their instance, so no unit and no emitted header (9.3) has a
+declaration to place before it.
+
+The trap is what makes the form safe to choose. Whether C evaluates an
+operand follows from the type that the backend gives it, and `typec`
+judges by the type that its own typing gives it. Where the two agree,
+nothing of the form is executed, the trap included. Where C evaluates
+an operand that `typec` took it to leave alone, the trap is the first
+thing evaluated: the program ends there, before it evaluates an
+operand and before it reaches an element, at an index in range as at
+one out of range. So no judgement of `typec` yields an index that is
+executed without its test, and none evaluates an operand twice. Two
+smaller forms do not give that:
+
+- The subscript alone, `(s).data[(i)]`, is an access without a test
+  wherever the judgement is wrong. In
+  `sizeof(*(c ? (int (*)[s[i] = 5])p : (void *)(sizeof(int) - 4)))`
+  the third operand is a null pointer constant because a layout
+  constant has the value 0, which `typec` does not compute (13.3,
+  P16). The conditional so has the type of its second operand, the
+  operand of the `sizeof` is a variable length array, and C evaluates
+  it: with the subscript alone both backends store through an index
+  out of range, which AddressSanitizer reports as a write beyond a
+  heap object. Every type that rests on a layout constant can mislead
+  the judgement so, as the choice of `__builtin_choose_expr` on a
+  layout condition does. The trap leaves no such case to find.
+- A test written over the operands,
+  `(*((size_t)(i) < (s).len ? &(s).data[(i)] : ...))`, evaluates the
+  index once for the test and once for the element. With `s[n++]` in
+  that operand it tests one index and reaches the next: under both
+  backends at `-O0` the store goes beyond the heap object. A test
+  reads the value of the index twice, so it needs a temporary.
+
+The form that is evaluated cannot stand in these operands either. Its
+temporaries need a function, and its assignments are side effects:
+Apple Clang 21 reports them in three of the four operands under
+`-Wunevaluated-expression`, which it has on without an option: once
+for `sizeof(s[0])`, once for `__alignof__(s[i])`, once for a
+type-generic macro whose `_Generic` is given `s[i]`, and twice for
+`isnan(s[i])` with the `<math.h>` of macOS, whose macro takes `sizeof`
+of its argument. GCC 16 reports none of them.
+
+Measured on Apple Clang 21 and GCC 16, in the ISO and the GNU form of
+C11 and of C17, at `-O0` and at `-O2`: the two forms draw no
+diagnostic under `-pedantic-errors
+-Wall -Wextra -Wshadow -Wconversion -Wsign-conversion` in the operand
+of `sizeof`, of `__alignof__` and of `__typeof__`, in the controlling
+expression of `_Generic` and in `isnan`, with a signed index, an index
+of an index and an index of a `slice_sub`, and at file scope in the
+size of an array, the width of a bit-field, the value of an
+enumerator, a `_Static_assert`, an initialiser and the size of an
+array parameter. Copied into an operand that C evaluates, each traps
+under both backends, at `-O0` and at `-O2`, before it evaluates an
+operand.
+
+The judgement errs to the side of the test. Lowering writes the form
+above in the four operands and nowhere else: in the operand of
+`_Alignof` and in the controlling expression of `_Generic` always,
+and in the operand of `sizeof` and of `__typeof__` only where typing
+has the type of the operand and that type is not variably modified.
+An operand of unknown type (13.3, P21) counts as evaluated. The one
+question serves both operators, so a pointer to a variable length
+array in a `sizeof` counts as evaluated, though C leaves it alone.
+Every other index and `slice_sub` gets the test, also where a backend
 evaluates nothing: in an association of a `_Generic` that is not
-selected, and in an argument of `__builtin_constant_p`. A test that
-is not evaluated costs nothing, and an index that is evaluated without
-one would read out of bounds.
-
-A `slice_sub` has no plain form and is written with its test wherever
-it stands. Nothing reads more of one that is not evaluated than its
-type, which is the type of `s`, and its value without the test,
-`{ s.data + lo, hi - lo }`, would write `lo` twice. In an operand that
-C does not evaluate it needs a function body, as elsewhere, and Apple
-Clang 21 reports it there as it reports the test of an index.
+selected, and in an argument of `__builtin_constant_p`. A test that is
+not evaluated costs nothing, and neither backend reports one in an
+operand of variably modified type.
 
 **The forms set aside.** The test is text of its use, so it has the
 state of its use, as `s.data[i]` has, and no place of a first use
@@ -4815,14 +4901,17 @@ GNU form of lowered code (2.4).
 
 **The cost of the expression.** The expression has three costs.
 
-- A `slice_sub`, and an index that C evaluates, stand in a function
-  body alone (section 8 rule 9). At file scope and in the definition of
+- An index and a `slice_sub` that C evaluates stand in a function body
+  alone (section 8 rule 9). At file scope and in the definition of
   a generic type C evaluates constant expressions only, which neither
   is, so the rule refuses there what the backend would. In the head of
   a function it refuses what C takes with a pointer: an index in the
   size of an array parameter, `void f(slice(int) s, int a[s[0]])`.
-- Whether an index is tested rests, in the operands that C does not
-  evaluate, on the judgement of `typec` (above).
+- In the operands that C does not evaluate, the judgement of `typec`
+  decides between the test and the trap (above). A wrong judgement
+  leaves no access without a test and evaluates nothing twice; it ends
+  a program that C defines, at an index in range as at any other, and
+  is a defect of `typec`, to be repaired in its typing.
 - Without optimisation the test is repeated at each use, where a call
   would stand, and each test keeps its temporaries in the frame of its
   function. On a sample of 20 tests in 13 functions, compiled for
@@ -4830,7 +4919,10 @@ GNU form of lowered code (2.4).
   bytes against 1297) and 23% larger under GCC 16 (1815 against 1478),
   and the locals of the function of four tests reach 140 bytes below
   the frame pointer under Apple Clang 21 and 144 under GCC 16, against
-  44 and 64. With optimisation the two forms cost the same: at `-O1`
+  44 and 64. The frame grows in proportion to the tests of the
+  function, whichever of them run, since no two share a temporary;
+  that function holds the most tests of the sample. With optimisation
+  the two forms cost the same: at `-O1`
   and at `-O2` both backends write the same instructions for the
   expression as for the function (609 and 422 bytes at `-O2`), at
   `-Os` Apple Clang 21 does so too, and GCC 16 writes 4 bytes fewer.
@@ -4841,8 +4933,10 @@ GNU form of lowered code (2.4).
 These measurements are of a sample written by hand in the lowered
 form, on one target and two backends. The sample is in no repository:
 it is at `/Volumes/Optaine/design-fix/slice` on the owner's machine, as
-it was measured, and `comma/measure.sh` there repeats the measurements
-of the expression that this part cites. Stage 3 settles the form
+it was measured. `comma/measure.sh` there repeats the measurements
+of the expression that this part cites, and `uneval/measure.sh` those
+of the operands that C does not evaluate and of `slice_from_array`.
+Stage 3 settles the form
 (package 3.6): the cost of the tests in the container library and the
 pilot, without optimisation as well as with it, the refusals of rule 9
 of section 8, read from its code, and the indexes and `slice_sub`
@@ -4854,19 +4948,26 @@ finding against it the expression stays.
 `slice_from_array(a)` is, for an array of `int`,
 
 ```c
-(struct R){ (a), sizeof(a) / sizeof(__tc_arg__i) }
+(struct R){ (a), sizeof(a) / sizeof(__tc_arg__i)
+    + 0 * sizeof(struct { _Static_assert(sizeof(__tc_arg__i) != 0,
+        "typec: slice_from_array of elements of size 0"); char c; }) }
 ```
 
 where `__tc_arg__i` is the typedef of the instance's argument (10.3),
 the type of an element. As the initialiser of an object, or of a member
-or an element of one, each is the braced list alone,
-`{ (a), sizeof(a) / sizeof(__tc_arg__i) }`, as a constructor is there
-(the constructor row), so that the initialiser of an object of static
+or an element of one, that is declared with the type of the instance,
+each is the braced list alone, `{ (a), ... }` with the same length,
+as a constructor is there (the constructor row), so that the
+initialiser of an object of static
 storage remains constant. GCC 16 refuses the compound literal at file
 scope under `-pedantic-errors` ("initializer element is not constant"),
 where Apple Clang 21 takes it, and both take the braced list. So
 `slice(uint8_t) bytes = slice_from_array(buffer);` stands at file
-scope, as section 8 has it.
+scope, as section 8 has it. An object that takes its type from its
+initialiser, as one declared with `__auto_type` does, has no type for
+a braced list, which both backends refuse there, and its initialiser
+is the compound literal. Where such an object has static storage,
+GCC 16 under `-pedantic-errors` refuses it, as it does in C.
 
 The length is the quotient that the backend computes, and no number
 that `typec` writes. `typec` holds the size of an array as an opaque
@@ -4881,16 +4982,46 @@ told from the first:
 
 - one of variable length array type, which the `sizeof` evaluates: a
   side effect in such an operand happens twice under both backends;
-- one that declares a tag or an enumeration constant in the scope
-  around it, which both backends refuse as a redefinition. The check of
-  the resolution property refuses it first, with the code of this kind
-  of text (above);
+- one that declares a name whose scope reaches beyond it. A tag or an
+  enumeration constant in the scope around it, and a label of the
+  function in a statement expression, are all that an expression can
+  declare so: every other declaration in one stands in a block or a
+  parameter list of its own, where its scope ends (C11 6.2.1p4), and
+  a label is the one name of function scope (6.2.1p3). Both backends
+  refuse each as a redefinition, and take a label that the statement
+  expression declares with `__label__`, which each writing has for
+  itself. The check of the resolution property refuses the operand
+  first, with the code of this kind of text (above);
 - one that holds a `#pragma` line.
 
 An operand of fixed length is evaluated once, whatever it holds. Where
 it holds an increment or an assignment, as in
 `slice_from_array(rows[n++])`, Apple Clang 21 reports the second
 writing under `-Wunevaluated-expression`; GCC 16 does not.
+
+The second writing is the operand of a `sizeof` and no variable length
+array, so an index or a `slice_sub` in it is written as one that C
+does not evaluate (above): it holds no test, needs no temporary and
+takes no number. The tests of the operand are those of its first
+writing.
+
+The second term of the length is the last limit of rule 2 and adds 0.
+A quotient by the size of an element has no value where that size is
+0, as it is in the GNU profile for a structure without members and
+for an array of length 0. In a block both backends take the quotient
+alone with a warning and no error: Apple Clang 21 then yields a length
+that is no count of elements, and the code of GCC 16 ends the program
+with a division fault. The size of a type is the backend's alone (13.3, P16).
+What `typec` reads of a type shows a structure without members, and
+not an array whose length is a layout constant that has the value 0,
+as `int[sizeof(int) - 4]`. So the backend makes the refusal, for every
+such type, from text that lowering writes: a static assertion, which
+C11 takes among the members of a structure (6.7.2.1p1), in a
+structure that the term declares for nothing else. Both backends
+refuse an element of size 0 with that message, in a block and at file
+scope, and take every other `slice_from_array` without a diagnostic
+under the options of the measurements above. The line marker of the
+use (13.4) puts the message at the `slice_from_array`.
 
 The identifiers that the compiler invents begin with `__tc_`, which
 keeps them from every name in the text (2.3). One that is declared at
@@ -5006,7 +5137,7 @@ a crash.
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
-| A slice access stays in bounds | `s[i]` where C evaluates it, `slice_sub` | The slice describes live storage of its length |
+| A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |
 
 Not guaranteed anywhere: object lifetimes, freedom from data races,

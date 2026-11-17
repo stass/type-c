@@ -304,15 +304,30 @@ record of what it found.
    - an index and a `slice_sub` whose operand holds a compound literal
      read its elements after the expression; the partner indexes one
      past the literal and traps;
-   - `sizeof(s[0])` sizes an array of file scope and draws no
-     diagnostic; the partner, an index out of range in a `sizeof` whose
-     operand is a variable length array, traps;
+   - `sizeof(s[0])` and `sizeof(slice_sub(s, 0, 1))` size arrays of
+     file scope and draw no diagnostic; the partner, an index out of
+     range in a `sizeof` whose operand is a variable length array,
+     traps;
+   - an index in range stores once where C evaluates the operand of a
+     `sizeof` by the value of a layout constant alone,
+     `sizeof(*(c ? (int (*)[s[i] = 5])p : (void *)(sizeof(int) - 4)))`;
+     the partner, the same index out of range, traps and stores
+     nothing;
+   - the form of an index and of a `slice_sub` that C does not
+     evaluate, taken from the lowered text and compiled in an operand
+     that C evaluates, traps before it evaluates an operand; the
+     partner, the same text without its trap, evaluates them;
    - operands that count their evaluations are evaluated once in an
      index, a `slice_sub` and a `slice_from_array`; the partner, a
      `slice_from_array` of a variable length array, is refused;
    - `slice_from_array` initialises an object of file scope under
      `-pedantic-errors`; the partner, an index that C evaluates in the
-     head of a function, is refused.
+     head of a function, is refused;
+   - `slice_from_array` of an array of `int` compiles without a
+     diagnostic; the partner, one of an array whose elements have size
+     0, a structure without members and `int[sizeof(int) - 4]`, is
+     refused by both backends with the message of design 13.5, in a
+     block and at file scope.
 4. The measurements of 3.6 are written up.
 
 **Decided at the gate:** P11 to P14, P23, P27, P28, and whether the

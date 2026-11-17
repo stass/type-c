@@ -1539,12 +1539,24 @@ types (design 13.3).
 - [Low] P10 was decided on instance names read in lldb (design 15).
   Read them under gdb on a GCC build as well: an instance, its tags by
   name, and a value of it.
-- [Low] `slice_from_array(a)` divides the size of `a` by the size of
-  an element (design 13.5). Where the element has size 0, a structure
-  without members in the GNU profile, both backends refuse the lowered
-  code for a division by zero, and `typec` computes no layout to see
-  it (design 13.3, P16). Give the refusal a message of `typec`'s own,
-  or state the limit in design section 8 rule 2.
+- [Medium] Design 13.5 ("An index or a `slice_sub` that C does not
+  evaluate") judges whether C evaluates the operand of a `sizeof` or
+  of a `__typeof__` by the type that typing gives the operand. Design
+  13.3 does not say what type an expression has where C takes the type
+  from the value of a layout constant, which `typec` holds opaque
+  (P16): a conditional whose arm is a null pointer constant only where
+  `sizeof(int) - 4` is 0, the choice of `__builtin_choose_expr` on
+  such a condition. A wrong type there makes a wrong judgement, which
+  traps at an index in range. State in 13.3 that such a type is
+  unknown (P21), so that the operand counts as evaluated; the gate of
+  Stage 3 tests the conditional.
+- [Low] Design section 8 rule 2 refuses a label of the function in the
+  operand of a `slice_from_array`, as the third clause of the
+  resolution property on a name in scope after the text (design 13.5,
+  "Moved text"). Rule 3 of design 5.1 names a tag and an enumeration
+  constant alone for the operand of a `try`, which is written once.
+  Say in "Moved text" whether the clause takes a label for such a
+  name where the text is written once.
 - [Low] Design 10.5 gives a backend without `__builtin_trap` an
   endless loop after the trap function, which is a statement. The test
   of a slice writes its trap as an expression (design 13.5), and both
