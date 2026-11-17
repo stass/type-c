@@ -36,47 +36,67 @@ this README is checked by its tests.
 #include <stdio.h>
 
 type expr =
-  | Num(int value)
-  | Add(const expr *l, const expr *r)
-  | Mul(const expr *l, const expr *r)
-  | Div(const expr *l, const expr *r);
+    | Num(int value)
+    | Add(const expr *l, const expr *r)
+    | Mul(const expr *l, const expr *r)
+    | Div(const expr *l, const expr *r);
 
 type eval_error = | DivByZero | Overflow;
 
 /* With a 32-bit int, long long holds every sum, product and quotient. */
-static result(int, eval_error) fit(long long n) {
-  if (n < INT_MIN || n > INT_MAX)
-    return Err(Overflow);
-  return Ok((int)n);
+static result(int, eval_error)
+fit(long long n)
+{
+	if (n < INT_MIN || n > INT_MAX)
+		return (Err(Overflow));
+	return (Ok((int)n));
 }
 
-static result(int, eval_error) eval(const expr *e) {
-  match (*e) {
-  case Num(value): return Ok(value);
-  case Add(l, r):  return fit((long long)try eval(l) + try eval(r));
-  case Mul(l, r):  return fit((long long)try eval(l) * try eval(r));
-  case Div(l, r):
-    int d = try eval(r);
-    if (d == 0)
-      return Err(DivByZero);
-    return fit((long long)try eval(l) / d);
-  }
+static result(int, eval_error)
+eval(const expr *e)
+{
+	int d;
+
+	match (*e) {
+	case Num(value):
+		return (Ok(value));
+	case Add(l, r):
+		return (fit((long long)try eval(l) + try eval(r)));
+	case Mul(l, r):
+		return (fit((long long)try eval(l) * try eval(r)));
+	case Div(l, r):
+		d = try eval(r);
+		if (d == 0)
+			return (Err(DivByZero));
+		return (fit((long long)try eval(l) / d));
+	}
 }
 
-static void show(const expr *e) {
-  match (eval(e)) {
-  case Ok(value):      printf("%d\n", value); break;
-  case Err(DivByZero): printf("division by zero\n"); break;
-  case Err(Overflow):  printf("overflow\n"); break;
-  }
+static void
+show(const expr *e)
+{
+	match (eval(e)) {
+	case Ok(value):
+		printf("%d\n", value);
+		break;
+	case Err(DivByZero):
+		printf("division by zero\n");
+		break;
+	case Err(Overflow):
+		printf("overflow\n");
+		break;
+	}
 }
 
-int main(void) {
-  expr two = Num(2), three = Num(3), four = Num(4), zero = Num(0);
-  expr sum = Add(&three, &four), ratio = Div(&sum, &zero);
-  expr good = Mul(&two, &sum), bad = Mul(&two, &ratio);
-  show(&good);  /* 2 * (3 + 4) */
-  show(&bad);   /* 2 * ((3 + 4) / 0) */
+int
+main(void)
+{
+	expr two = Num(2), three = Num(3), four = Num(4), zero = Num(0);
+	expr sum = Add(&three, &four), ratio = Div(&sum, &zero);
+	expr good = Mul(&two, &sum), bad = Mul(&two, &ratio);
+
+	show(&good);	/* 2 * (3 + 4) */
+	show(&bad);	/* 2 * ((3 + 4) / 0) */
 }
 ```
 
@@ -107,7 +127,7 @@ What it shows:
   through the `Mul` above it to `show`
   ([`result` and `try`](#result-and-try)). Today `try` stands only as a
   whole statement, assignment or initialiser, as in
-  `int d = try eval(r);`; inside an expression, as in
+  `d = try eval(r);`; inside an expression, as in
   `try eval(l) + try eval(r)`, it is planned.
 - **No runtime.** `typec` writes C: a variant becomes a structure of a
   tag and a union of the fields of its cases, a `match` a `switch` on
@@ -176,23 +196,25 @@ A tagged union in C, with two bugs:
 enum shape_kind { CIRCLE, RECT, TRIANGLE };
 
 struct shape {
-  enum shape_kind kind;
-  union {
-    struct { double r; } circle;
-    struct { double w, h; } rect;
-    struct { double b, h; } triangle;
-  } u;
+	enum shape_kind	kind;
+	union {
+		struct { double r; } circle;
+		struct { double w, h; } rect;
+		struct { double b, h; } triangle;
+	} u;
 };
 
-double area(struct shape s) {
-  switch (s.kind) {
-  case CIRCLE:
-    return 3.14159 * s.u.circle.r * s.u.circle.r;
-  case RECT:
-    return s.u.rect.w * s.u.circle.r;  /* wrong member */
-  default:                              /* TRIANGLE forgotten */
-    return 0;
-  }
+double
+area(struct shape s)
+{
+	switch (s.kind) {
+	case CIRCLE:
+		return (3.14159 * s.u.circle.r * s.u.circle.r);
+	case RECT:
+		return (s.u.rect.w * s.u.circle.r);	/* wrong member */
+	default:					/* TRIANGLE forgotten */
+		return (0);
+	}
 }
 ```
 
@@ -206,23 +228,25 @@ read cannot be written, and the forgotten case stops the build:
 <!-- file: area.tc -->
 ```c
 type shape =
-  | Circle(double r)
-  | Rect(double w, double h)
-  | Triangle(double b, double h);
+    | Circle(double r)
+    | Rect(double w, double h)
+    | Triangle(double b, double h);
 
-double area(shape s) {
-  match (s) {
-  case Circle(r):
-    return 3.14159 * r * r;
-  case Rect(w, h):
-    return w * h;
-  }
+double
+area(shape s)
+{
+	match (s) {
+	case Circle(r):
+		return (3.14159 * r * r);
+	case Rect(w, h):
+		return (w * h);
+	}
 }
 ```
 
 ```console
 $ typec -std=c11 -Wall -Wextra -c area.tc
-area.tc:7: error: the match does not cover the constructor 'Triangle' of the variant 'shape' [match-coverage]
+area.tc:9: error: the match does not cover the constructor 'Triangle' of the variant 'shape' [match-coverage]
 [80]
 ```
 
@@ -245,10 +269,12 @@ Type-C code cannot name a field at all:
 ```c
 type token = | Number(long value) | Name(const char *text);
 
-long number_value(token t) {
-  if (case Number(value) = t)
-    return value;
-  return 0;
+long
+number_value(token t)
+{
+	if (case Number(value) = t)
+		return (value);
+	return (0);
 }
 ```
 
@@ -258,15 +284,17 @@ A field read as C reads a member of the union:
 ```c
 type token = | Number(long value) | Name(const char *text);
 
-long number_value(token t) {
-  return t.u.Number.value;
+long
+number_value(token t)
+{
+	return (t.u.Number.value);
 }
 ```
 
 ```console
 $ typec -c token.tc
 $ typec -c peek.tc
-peek.tc:4: error: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+peek.tc:6: error: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
 [80]
 ```
 
@@ -280,22 +308,25 @@ return.
 ```c
 type op = | Load(int address) | Add(int operands);
 
-int cost(op o) {
-  int c = 0;
-  match (o) {
-  case Load(_):
-    c = 2;
-  case Add(n):
-    c += n;
-    break;
-  }
-  return c;
+int
+cost(op o)
+{
+	int c = 0;
+
+	match (o) {
+	case Load(_):
+		c = 2;
+	case Add(n):
+		c += n;
+		break;
+	}
+	return (c);
 }
 ```
 
 ```console
 $ typec -c cost.tc
-cost.tc:6: error: the end of the match arm can be reached [match-arm-end]
+cost.tc:9: error: the end of the match arm can be reached [match-arm-end]
 [80]
 ```
 
@@ -315,14 +346,16 @@ type group_id = distinct unsigned;
 
 int is_member(user_id u, group_id g);
 
-int may_read(user_id u, group_id g) {
-  return is_member(g, u);  /* swapped */
+int
+may_read(user_id u, group_id g)
+{
+	return (is_member(g, u));	/* swapped */
 }
 ```
 
 ```console
 $ typec -c ids.tc
-ids.tc:7: error: a value of type 'group_id' does not convert to 'user_id' without a cast [distinct-conversion]
+ids.tc:9: error: a value of type 'group_id' does not convert to 'user_id' without a cast [distinct-conversion]
 [80]
 ```
 
@@ -336,8 +369,10 @@ typedef unsigned group_id;
 
 int is_member(user_id u, group_id g);
 
-int may_read(user_id u, group_id g) {
-  return is_member(g, u);  /* swapped */
+int
+may_read(user_id u, group_id g)
+{
+	return (is_member(g, u));	/* swapped */
 }
 ```
 
@@ -360,7 +395,7 @@ the zero value, `{0}`, comes from `port_parse`.
 
 type port = private distinct uint16_t;
 
-port port_parse(const char *text);  /* {0} when text is no port */
+port port_parse(const char *text);	/* {0} when text is no port */
 ```
 
 <!-- file: port.tc -->
@@ -368,12 +403,15 @@ port port_parse(const char *text);  /* {0} when text is no port */
 #include <stdlib.h>
 #include "port.tci"
 
-port port_parse(const char *text) {
-  char *end;
-  long n = strtol(text, &end, 10);
-  if (end == text || *end != '\0' || n < 1 || n > 65535)
-    return (port){0};
-  return (port)n;
+port
+port_parse(const char *text)
+{
+	char *end;
+	long n = strtol(text, &end, 10);
+
+	if (end == text || *end != '\0' || n < 1 || n > 65535)
+		return ((port){0});
+	return ((port)n);
 }
 ```
 
@@ -382,15 +420,17 @@ port port_parse(const char *text) {
 #include <stdlib.h>
 #include "port.tci"
 
-port port_from_argument(const char *argument) {
-  return (port)atoi(argument);  /* skips the check */
+port
+port_from_argument(const char *argument)
+{
+	return ((port)atoi(argument));	/* skips the check */
 }
 ```
 
 ```console
 $ typec -Iinclude -c port.tc
 $ typec -Iinclude -c server.tc
-server.tc:5: error: the distinct type 'port' is private to 'include/port.tci', so only the text of its owner creates its values [private-creation]
+server.tc:7: error: the distinct type 'port' is private to 'include/port.tci', so only the text of its owner creates its values [private-creation]
 [80]
 ```
 
@@ -400,7 +440,7 @@ In C, the rule is a comment:
 ```c
 #include <stdint.h>
 
-typedef uint16_t port;  /* make one with port_parse only */
+typedef uint16_t port;	/* make one with port_parse only */
 
 port port_parse(const char *text);
 ```
@@ -410,8 +450,10 @@ port port_parse(const char *text);
 #include <stdlib.h>
 #include "port.h"
 
-port port_from_argument(const char *argument) {
-  return atoi(argument);  /* skips the check */
+port
+port_from_argument(const char *argument)
+{
+	return (atoi(argument));	/* skips the check */
 }
 ```
 
@@ -430,17 +472,22 @@ same type, wherever it is written.
 ```c
 type list(T) = | Nil | Cons(T head, list(T) *tail);
 
-int sum(list(int) l) {
-  int total = 0;
-  while (case Cons(head, tail) = l) {
-    total += head;
-    l = *tail;
-  }
-  return total;
+int
+sum(list(int) l)
+{
+	int total = 0;
+
+	while (case Cons(head, tail) = l) {
+		total += head;
+		l = *tail;
+	}
+	return (total);
 }
 
-int sum_prices(list(double) prices) {
-  return sum(prices);
+int
+sum_prices(list(double) prices)
+{
+	return (sum(prices));
 }
 ```
 
@@ -452,11 +499,11 @@ Clang says (it quotes a fragment of the line, which
 <!-- console: clang -->
 ```console
 $ typec -c list.tc
-list.tc:13:14: error: passing 'list__d' (aka 'struct list__d') to parameter of incompatible type 'list__i' (aka 'struct list__i')
-   13 |   return sum(prices);
+list.tc:18:14: error: passing 'list__d' (aka 'struct list__d') to parameter of incompatible type 'list__i' (aka 'struct list__i')
+   18 |  return (sum(prices));
       |              ^~~~~~
-list.tc:3:2: note: passing argument to parameter 'l' here
-    3 |  l) {
+list.tc:4:2: note: passing argument to parameter 'l' here
+    4 |  l)
       |  ^
 1 error generated.
 [1]
@@ -466,20 +513,27 @@ The C list of `void *` takes any element:
 
 <!-- file: list.c -->
 ```c
+#include <stddef.h>
+
 struct list {
-  void *head;
-  struct list *tail;
+	void		*head;
+	struct list	*tail;
 };
 
-int sum(struct list l) {
-  int total = 0;
-  for (struct list *p = &l; p; p = p->tail)
-    total += *(int *)p->head;
-  return total;
+int
+sum(struct list l)
+{
+	int total = 0;
+
+	for (struct list *p = &l; p != NULL; p = p->tail)
+		total += *(int *)p->head;
+	return (total);
 }
 
-int sum_prices(struct list prices) {
-  return sum(prices);  /* a list of doubles */
+int
+sum_prices(struct list prices)
+{
+	return (sum(prices));	/* a list of doubles */
 }
 ```
 
@@ -497,17 +551,21 @@ found", which a caller can forget to test:
 ```c
 #include <stddef.h>
 
-option(size_t) find(const int *items, size_t n, int wanted) {
-  for (size_t i = 0; i < n; i++)
-    if (items[i] == wanted)
-      return Some(i);
-  return None;
+option(size_t)
+find(const int *items, size_t n, int wanted)
+{
+	for (size_t i = 0; i < n; i++)
+		if (items[i] == wanted)
+			return (Some(i));
+	return (None);
 }
 
-size_t index_or_end(const int *items, size_t n, int wanted) {
-  if (case Some(i) = find(items, n, wanted))
-    return i;
-  return n;
+size_t
+index_or_end(const int *items, size_t n, int wanted)
+{
+	if (case Some(i) = find(items, n, wanted))
+		return (i);
+	return (n);
 }
 ```
 
@@ -528,41 +586,50 @@ error from the function at once:
 #include <stdlib.h>
 
 type setting_error =
-  | Missing(const char *name)
-  | NotANumber(const char *name);
+    | Missing(const char *name)
+    | NotANumber(const char *name);
 
-static result(long, setting_error) setting(const char *name) {
-  const char *text = getenv(name);
-  if (!text)
-    return Err(Missing(name));
-  char *end;
-  long n = strtol(text, &end, 10);
-  if (end == text || *end != '\0')
-    return Err(NotANumber(name));
-  return Ok(n);
+static result(long, setting_error)
+setting(const char *name)
+{
+	const char *text = getenv(name);
+	char *end;
+	long n;
+
+	if (text == NULL)
+		return (Err(Missing(name)));
+	n = strtol(text, &end, 10);
+	if (end == text || *end != '\0')
+		return (Err(NotANumber(name)));
+	return (Ok(n));
 }
 
-static result(long, setting_error) area(void) {
-  long width = try setting("WIDTH");
-  long height = try setting("HEIGHT");
-  return Ok(width * height);
+static result(long, setting_error)
+area(void)
+{
+	long width = try setting("WIDTH");
+	long height = try setting("HEIGHT");
+
+	return (Ok(width * height));
 }
 
-int main(void) {
-  match (area()) {
-  case Ok(n):
-    printf("%ld\n", n);
-    return 0;
-  case Err(error):
-    match (error) {
-    case Missing(name):
-      fprintf(stderr, "%s is not set\n", name);
-      return 1;
-    case NotANumber(name):
-      fprintf(stderr, "%s is not a number\n", name);
-      return 1;
-    }
-  }
+int
+main(void)
+{
+	match (area()) {
+	case Ok(n):
+		printf("%ld\n", n);
+		return (0);
+	case Err(error):
+		match (error) {
+		case Missing(name):
+			fprintf(stderr, "%s is not set\n", name);
+			return (1);
+		case NotANumber(name):
+			fprintf(stderr, "%s is not a number\n", name);
+			return (1);
+		}
+	}
 }
 ```
 
@@ -588,14 +655,16 @@ type copy_error = | CannotOpen | CannotRead | CannotWrite;
 
 result(void, copy_error) copy_file(const char *from, const char *to);
 
-void backup(void) {
-  copy_file("notes.txt", "notes.bak");
+void
+backup(void)
+{
+	copy_file("notes.txt", "notes.bak");
 }
 ```
 
 ```console
 $ typec -c backup.tc
-backup.tc:6: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
+backup.tc:8: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
 [80]
 ```
 
@@ -611,29 +680,32 @@ here an error path written later returns past it:
 ```c
 #include <stdio.h>
 
-int copy_file(const char *from, const char *to) {
-  int status = -1;
-  FILE *out = NULL;
-  FILE *in = fopen(from, "rb");
-  if (!in)
-    goto done;
-  out = fopen(to, "wb");
-  if (!out)
-    goto done;
-  char buffer[4096];
-  size_t n;
-  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
-    if (fwrite(buffer, 1, n, out) != n)
-      return -1;  /* leaks in and out */
-  if (ferror(in) || fflush(out) != 0)
-    goto done;
-  status = 0;
+int
+copy_file(const char *from, const char *to)
+{
+	int status = -1;
+	FILE *out = NULL;
+	FILE *in = fopen(from, "rb");
+	char buffer[4096];
+	size_t n;
+
+	if (in == NULL)
+		goto done;
+	out = fopen(to, "wb");
+	if (out == NULL)
+		goto done;
+	while ((n = fread(buffer, 1, sizeof(buffer), in)) > 0)
+		if (fwrite(buffer, 1, n, out) != n)
+			return (-1);	/* leaks in and out */
+	if (ferror(in) || fflush(out) != 0)
+		goto done;
+	status = 0;
 done:
-  if (out)
-    fclose(out);
-  if (in)
-    fclose(in);
-  return status;
+	if (out != NULL)
+		fclose(out);
+	if (in != NULL)
+		fclose(in);
+	return (status);
 }
 ```
 
@@ -653,29 +725,35 @@ function flushes `out` itself before its last exit:
 
 type copy_error = | CannotOpen | CannotRead | CannotWrite;
 
-static result(FILE *, copy_error) open_file(const char *path,
-                                            const char *mode) {
-  FILE *f = fopen(path, mode);
-  if (!f)
-    return Err(CannotOpen);
-  return Ok(f);
+static result(FILE *, copy_error)
+open_file(const char *path, const char *mode)
+{
+	FILE *f = fopen(path, mode);
+
+	if (f == NULL)
+		return (Err(CannotOpen));
+	return (Ok(f));
 }
 
-result(void, copy_error) copy_file(const char *from, const char *to) {
-  FILE *in = try open_file(from, "rb");
-  defer fclose(in);
-  FILE *out = try open_file(to, "wb");
-  defer fclose(out);
-  char buffer[4096];
-  size_t n;
-  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
-    if (fwrite(buffer, 1, n, out) != n)
-      return Err(CannotWrite);
-  if (ferror(in))
-    return Err(CannotRead);
-  if (fflush(out) != 0)
-    return Err(CannotWrite);
-  return Ok;
+result(void, copy_error)
+copy_file(const char *from, const char *to)
+{
+	FILE *in, *out;
+	char buffer[4096];
+	size_t n;
+
+	in = try open_file(from, "rb");
+	defer fclose(in);
+	out = try open_file(to, "wb");
+	defer fclose(out);
+	while ((n = fread(buffer, 1, sizeof(buffer), in)) > 0)
+		if (fwrite(buffer, 1, n, out) != n)
+			return (Err(CannotWrite));
+	if (ferror(in))
+		return (Err(CannotRead));
+	if (fflush(out) != 0)
+		return (Err(CannotWrite));
+	return (Ok);
 }
 ```
 
@@ -714,8 +792,10 @@ Type-C enters a program one file at a time. Take a small C program:
 
 <!-- file: calc.h -->
 ```c
-/* Applies a line such as "add 5" or "neg" to *total: 0 when it
-   knows the line, else -1. */
+/*
+ * Applies a line such as "add 5" or "neg" to *total: 0 when it knows
+ * the line, else -1.
+ */
 int calc_apply(const char *line, long *total);
 ```
 
@@ -724,14 +804,17 @@ int calc_apply(const char *line, long *total);
 #include <stdio.h>
 #include "calc.h"
 
-int main(void) {
-  const char *lines[] = {"add 5", "neg", "add 2", "mul 3"};
-  long total = 0;
-  for (int i = 0; i < 4; i++)
-    if (calc_apply(lines[i], &total) != 0)
-      printf("unknown: %s\n", lines[i]);
-  printf("%ld\n", total);
-  return 0;
+int
+main(void)
+{
+	const char *lines[] = {"add 5", "neg", "add 2", "mul 3"};
+	long total = 0;
+
+	for (int i = 0; i < 4; i++)
+		if (calc_apply(lines[i], &total) != 0)
+			printf("unknown: %s\n", lines[i]);
+	printf("%ld\n", total);
+	return (0);
 }
 ```
 
@@ -741,16 +824,18 @@ int main(void) {
 #include <string.h>
 #include "calc.h"
 
-int calc_apply(const char *line, long *total) {
-  if (strncmp(line, "add ", 4) == 0) {
-    *total += strtol(line + 4, NULL, 10);
-    return 0;
-  }
-  if (strcmp(line, "neg") == 0) {
-    *total = -*total;
-    return 0;
-  }
-  return -1;
+int
+calc_apply(const char *line, long *total)
+{
+	if (strncmp(line, "add ", 4) == 0) {
+		*total += strtol(line + 4, NULL, 10);
+		return (0);
+	}
+	if (strcmp(line, "neg") == 0) {
+		*total = -*total;
+		return (0);
+	}
+	return (-1);
 }
 ```
 
@@ -774,25 +859,29 @@ type, so `main.c` and `calc.h` do not change:
 
 type command = | Add(long n) | Neg | Unknown;
 
-static command parse(const char *line) {
-  if (strncmp(line, "add ", 4) == 0)
-    return Add(strtol(line + 4, NULL, 10));
-  if (strcmp(line, "neg") == 0)
-    return Neg;
-  return Unknown;
+static command
+parse(const char *line)
+{
+	if (strncmp(line, "add ", 4) == 0)
+		return (Add(strtol(line + 4, NULL, 10)));
+	if (strcmp(line, "neg") == 0)
+		return (Neg);
+	return (Unknown);
 }
 
-int calc_apply(const char *line, long *total) {
-  match (parse(line)) {
-  case Add(n):
-    *total += n;
-    return 0;
-  case Neg:
-    *total = -*total;
-    return 0;
-  case Unknown:
-    return -1;
-  }
+int
+calc_apply(const char *line, long *total)
+{
+	match (parse(line)) {
+	case Add(n):
+		*total += n;
+		return (0);
+	case Neg:
+		*total = -*total;
+		return (0);
+	case Unknown:
+		return (-1);
+	}
 }
 ```
 
@@ -920,19 +1009,21 @@ text that uses no Type-C construct is written out as it was read.
 <!-- file: shape.tc -->
 ```c
 type shape =
-  | Circle(double r)
-  | Rect(double w, double h)
-  | Triangle(double b, double h);
+    | Circle(double r)
+    | Rect(double w, double h)
+    | Triangle(double b, double h);
 
-double area(shape s) {
-  match (s) {
-  case Circle(r):
-    return 3.14159 * r * r;
-  case Rect(w, h):
-    return w * h;
-  case Triangle(b, h):
-    return b * h / 2;
-  }
+double
+area(shape s)
+{
+	match (s) {
+	case Circle(r):
+		return (3.14159 * r * r);
+	case Rect(w, h):
+		return (w * h);
+	case Triangle(b, h):
+		return (b * h / 2);
+	}
 }
 ```
 
@@ -952,14 +1043,16 @@ struct shape {
   } u;
 };
 
-double area(shape s) {
+double
+area(shape s)
+{
   {
     const struct shape *const __tc_match = &(s);
     switch (__tc_match->tag) {
     case shape_Circle: {
       const __typeof__(__tc_match->u.Circle.r) r = __tc_match->u.Circle.r;
       {
-        return 3.14159 * r * r;
+        return (3.14159 * r * r);
       }
       __builtin_trap();
     }
@@ -967,7 +1060,7 @@ double area(shape s) {
       const __typeof__(__tc_match->u.Rect.w) w = __tc_match->u.Rect.w;
       const __typeof__(__tc_match->u.Rect.h) h = __tc_match->u.Rect.h;
       {
-        return w * h;
+        return (w * h);
       }
       __builtin_trap();
     }
@@ -977,7 +1070,7 @@ double area(shape s) {
       const __typeof__(__tc_match->u.Triangle.h) h =
           __tc_match->u.Triangle.h;
       {
-        return b * h / 2;
+        return (b * h / 2);
       }
       __builtin_trap();
     }
@@ -1012,12 +1105,16 @@ result(int, error) acquire(int id);
 void release(int handle);
 result(void, error) join(int a, int b);
 
-result(void, error) pair(void) {
-  int a = try acquire(1);
-  defer release(a);
-  int b = try acquire(2);
-  defer release(b);
-  return join(a, b);
+result(void, error)
+pair(void)
+{
+	int a, b;
+
+	a = try acquire(1);
+	defer release(a);
+	b = try acquire(2);
+	defer release(b);
+	return (join(a, b));
 }
 ```
 
@@ -1058,9 +1155,13 @@ struct result__i5error {
   } u;
 };
 
-result__v5error pair(void) {
+result__v5error
+pair(void)
+{
   typedef __typeof__(((__typeof__(pair) *)0)()) __tc_ret;
   {
+    int a, b;
+
     const struct result__i5error __tc_t0 = acquire(1);
     if (__tc_t0.tag != result__i5error_Ok) {
       if (__tc_t0.tag != result__i5error_Err)
@@ -1068,7 +1169,7 @@ result__v5error pair(void) {
       return ((struct result__v5error){
           .tag = result__v5error_Err, .u.Err = { __tc_t0.u.Err.error } });
     }
-    int a = __tc_t0.u.Ok.value;
+    a = __tc_t0.u.Ok.value;
 
     const struct result__i5error __tc_t1 = acquire(2);
     if (__tc_t1.tag != result__i5error_Ok) {
@@ -1078,10 +1179,10 @@ result__v5error pair(void) {
       return ((struct result__v5error){
           .tag = result__v5error_Err, .u.Err = { __tc_t1.u.Err.error } });
     }
-    int b = __tc_t1.u.Ok.value;
+    b = __tc_t1.u.Ok.value;
 
     {
-      __tc_ret __tc_r = (join(a, b));
+      __tc_ret __tc_r = ((join(a, b)));
       { release(b); }
       { release(a); }
       return __tc_r;
@@ -1127,9 +1228,9 @@ side gets the check:
 <!-- file: user.h -->
 ```c
 #ifdef __TYPEC__
-type user_id = distinct unsigned;  /* in .tc files */
+type user_id = distinct unsigned;	/* in .tc files */
 #else
-typedef unsigned user_id;          /* in .c files */
+typedef unsigned user_id;		/* in .c files */
 #endif
 
 int user_is_root(user_id u);
@@ -1139,8 +1240,10 @@ int user_is_root(user_id u);
 ```c
 #include "user.h"
 
-int user_is_root(user_id u) {
-  return u == (user_id)0;
+int
+user_is_root(user_id u)
+{
+	return (u == (user_id)0);
 }
 ```
 
@@ -1149,9 +1252,11 @@ int user_is_root(user_id u) {
 #include <stdio.h>
 #include "user.h"
 
-int main(void) {
-  printf("%d\n", user_is_root(0));
-  return 0;
+int
+main(void)
+{
+	printf("%d\n", user_is_root(0));
+	return (0);
 }
 ```
 
