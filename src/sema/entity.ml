@@ -42,6 +42,12 @@ type declared =
       linkage : linkage;
       inline : bool;  (** [inline] in some declaration *)
       noreturn : bool;  (** [_Noreturn] in some declaration *)
+      inline_definition : bool;
+          (** Every file-scope declaration so far says [inline] without
+              [extern], so that a definition is an inline definition
+              (C11 6.7.4p7), which 6.7.4p3 constrains where the function
+              has external linkage. The GNU89 rule of [gnu_inline] is not
+              followed. *)
       gnu_inline : bool;
           (** The attribute [gnu_inline] in some [inline] declaration: the
               GNU89 rule decides whether the inline definition is external,

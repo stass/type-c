@@ -63,3 +63,12 @@ let is_loop_pragma names = is_among loop_pragmas names
 
 let is_statement_scoped names =
   is_loop_pragma names || is_among block_pragmas names
+
+(* Design 13.5: the pragmas that set no state that an instance of a
+   generic function is compiled under. Every text of an instance stands
+   in the packing bracket of design 10.3, and a diagnostic line changes
+   the messages of the backend and no code. *)
+let instance_free_pragmas =
+  [ [ "pack" ]; [ "GCC"; "diagnostic" ]; [ "clang"; "diagnostic" ] ]
+
+let is_instance_free names = is_among instance_free_pragmas names

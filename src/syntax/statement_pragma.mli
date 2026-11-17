@@ -13,3 +13,8 @@ val is_statement_scoped : string list -> bool
     annotates the loop after it and nothing else: the one kind that the
     scope of a defer statement may hold. *)
 val is_loop_pragma : string list -> bool
+
+(** Whether a pragma line whose identifiers are [names], in order, sets
+    no state that a function instance is compiled under wherever it
+    stands (design 7.3 rule 4, 13.5): a [pack] or a diagnostic line. *)
+val is_instance_free : string list -> bool

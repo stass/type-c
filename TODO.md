@@ -394,18 +394,10 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [High] Package 3.3: a function instance gets none of the first-use
-  checks that `note_application` runs for a type instance
-  (`refuse_undeclared_argument`, the argument typedefs, the spelled-name
-  check): `enum e3 { C } v3, w3 = sizeof(f(v3));` is accepted where
-  `box(enum e3)` is refused, and the backend would reject `f__...`
-  placed before that external declaration. Route function instances
-  through the same first-use funnel when 3.3 places them.
-- [Medium] Package 3.3: in `(max)(1, 2)` only the identifier of a
-  generic callee is typed (`generic_callee`), so the `Parenthesized`
-  nodes have no entry in the typed tables that lowering reads; the
-  `Unknown_type` arm of `generic_call` types no callee at all and may be
-  unreachable (`generic-function-form` refuses the function types that could reach it).
+- [Medium] The `Unknown_type` arm of `Expressions.generic_call` types
+  no callee at all and may be unreachable, as `generic-function-form`
+  refuses the function types that could reach it: show it reachable
+  with a test or make it unrepresentable.
 - [Low] `Tree.Instance` holds its generic as an expression that is
   always an identifier (`invalid_arg` in `explicit_instance`); a
   `{ name; reference }` field would make that unrepresentable. The
@@ -665,6 +657,25 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
+- [Medium] A `#pragma pack` line in force at the definition of a
+  generic (function or type) is not carried to its instances: every
+  instance stands in the bracket of design 10.3 and has the packing of
+  the command line, so `#pragma pack(1)` before a generic function whose
+  body declares a structure changes the layout that the check saw
+  (`_Static_assert(sizeof s == 5)` passes the check and fails in
+  `sz__i`). Refuse a generic defined under a `pack` line other than the
+  command line's, or write the line into the bracket.
+- [Medium] Definition checks re-read the closure of the generic
+  functions that each body calls, and charge the instance budget for
+  each reading (design 3.5 rule 7), so a library of many generic
+  functions over shared helpers may use up the budget with no use of
+  any of them. Package 3.6 measures it; if a real header passes the
+  budget, charge a check once per callee, or not at all.
+- [Low] A function instance that a unit names only in the operand of
+  `sizeof` is defined and never called, which Clang reports under
+  `-Wunneeded-internal-declaration`. Mark instances
+  `__attribute__((unused))` if the profile admits the attribute on
+  both backends, or define only instances whose names are evaluated.
 - [Medium] Whether the text of a type holds an attribute, an alignment
   specifier or a `__typeof__` of an expression at the depth of design
   3.5 rule 2 is computed by a walk of the tree of its own
@@ -1476,7 +1487,7 @@ types (design 13.3).
 - [Low] Generic functions, readability: `dependent_objects` stores a
   span that nothing reads; the message of `parameter_dependent` and the
   meaning of `type-parameter-constant` name too few sources of dependence; "in a generic
-  function" is held both in `Declarations.state.in_generic_function`
+  function" is held both in `Declarations.state.generic_part`
   and in `Expressions.enclosing.in_generic`.
 - [Medium] GCC 16 warns of `unused` in a type name on a structure
   (`sizeof(struct s __attribute__((unused)))`, "ignoring attributes
@@ -1602,7 +1613,7 @@ types (design 13.3).
   (`Parser.check_generic_prototype`) says that `_Noreturn` and
   attributes stand on the definition; C refuses the specifier there.
 - [Low] Generic functions, readability and representation:
-  `in_generic_function` is an ambient flag that `earlier_entity` and
+  `generic_part` is ambient state that `earlier_entity` and
   `declare_in` read; pass the fact explicitly from
   `read_generic_function`. `generic_function` could hold its function
   type, recorded after reading, removing `generic_function_type`'s
@@ -1730,13 +1741,6 @@ types (design 13.3).
   the lowered forms for such values and state one rule of that shape
   for all of them in section 14, with rule 10 of section 8 as its case
   for slices.
-- [High] Package 3.3: the body of a generic function is typed in the
-  unit's own typed view (`Declarations.read_generic_function`), so the
-  slice checks and makings that it records (`Expressions.slice_checks`,
-  `slice_makings`) would be lowered into the unit's text once generic
-  functions stop being refused (`not-implemented`). When 3.3 writes
-  instances, type each body in views of its own, as `in_own_views`
-  does for a generic type, and drop the definition's records.
 - [Medium] Typing takes a compound literal that a constructor or a
   slice making writes for a constant wherever its operands are, but C
   takes it for one only as the braced initialiser of a whole object

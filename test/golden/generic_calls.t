@@ -3,8 +3,9 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 Calls of generic functions (design 7.2): the type arguments are deduced
 from the arguments, from left to right, or written in an explicit
-instance. Instances are not written yet, so a unit whose calls are
-valid stops at the sentinel of its first generic function (not-implemented).
+instance. A unit whose calls are valid is accepted;
+test/golden/function_instances.t shows the instances that it writes
+(design 7.3).
 
 Rule 1: the first argument that mentions a type parameter deduces it,
 and a later argument converts to the substituted parameter type, as a
@@ -15,9 +16,7 @@ call of `int max(int, int)` converts `n`.
   > unsigned long n;
   > int f(void) { return max(0, n); }
   > EOF
-  $ ./golden.exe first.tc
-  first.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe first.tc > /dev/null
 
 The call has the instance's return type: `max(0, n)` is an `int`.
 
@@ -26,9 +25,7 @@ The call has the instance's return type: `max(0, n)` is an `int`.
   > unsigned long n;
   > _Static_assert(_Generic(max(0, n), int: 1, default: 0), "int");
   > EOF
-  $ ./golden.exe return_type.tc
-  return_type.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe return_type.tc > /dev/null
 
   $ cat > return_type_refused.tc <<'EOF'
   > generic(T) T max(T a, T b) { return a; }
@@ -47,9 +44,7 @@ promotion.
   > char c;
   > _Static_assert(_Generic(id(c), char: 1, default: 0), "char");
   > EOF
-  $ ./golden.exe exact.tc
-  exact.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe exact.tc > /dev/null
 
   $ cat > exact_refused.tc <<'EOF'
   > generic(T) T id(T t) { return t; }
@@ -73,9 +68,7 @@ enumerated type deduces that type.
   > _Static_assert(_Generic(id(GREEN), int: 1, default: 0), "enumerator");
   > _Static_assert(_Generic(id(c), enum colour: 1, default: 0), "enum");
   > EOF
-  $ ./golden.exe typedefs.tc
-  typedefs.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe typedefs.tc > /dev/null
 
   $ cat > enumerator_refused.tc <<'EOF'
   > enum colour { RED, GREEN };
@@ -109,9 +102,7 @@ An array and a function decay, and an lvalue loses its qualifiers.
   > long g(void) { return id(c); }
   > int (*k(void))(int) { return id(h); }
   > EOF
-  $ ./golden.exe decay.tc
-  decay.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe decay.tc > /dev/null
 
 Rule 2: a pointer parameter may add qualifiers to the pointed-to type, as
 C assignment allows.
@@ -121,9 +112,7 @@ C assignment allows.
   > int f(int *p) { return get(p); }
   > int g(const int *p) { return get(p); }
   > EOF
-  $ ./golden.exe adds.tc
-  adds.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe adds.tc > /dev/null
 
 Below the pointed-to type the match is exact, as C assignment does not
 add a qualifier there.
@@ -140,13 +129,11 @@ A type parameter that occurs twice in one parameter type matches identical
 types.
 
   $ cat > twice.tc <<'EOF'
-  > generic(T) void apply(T (*fn)(T));
+  > generic(T) void apply(T (*fn)(T)) { }
   > long same(long);
   > void f(void) { apply(same); }
   > EOF
-  $ ./golden.exe twice.tc
-  twice.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe twice.tc > /dev/null
 
   $ cat > twice_refused.tc <<'EOF'
   > generic(T) void apply(T (*fn)(T));
@@ -175,10 +162,10 @@ arguments, as `vector_push(&v, 0)` deduces `long` and converts `0`.
   $ cat > applied.tc <<'EOF'
   > type vector(T) = struct { T *data; unsigned long len; };
   > type id(T) = distinct unsigned;
-  > generic(T) void vector_push(vector(T) *v, T x);
+  > generic(T) void vector_push(vector(T) *v, T x) { }
   > generic(T) vector(T) *self(vector(T) *v) { return v; }
-  > generic(T) vector(T *) *pointers(T *p);
-  > generic(T) T *lookup(id(T) key);
+  > generic(T) vector(T *) *pointers(T *p) { return 0; }
+  > generic(T) T *lookup(id(T) key) { return 0; }
   > vector(long) v;
   > id(int) k;
   > void f(void) { vector_push(&v, 0); }
@@ -187,9 +174,7 @@ arguments, as `vector_push(&v, 0)` deduces `long` and converts `0`.
   >                         default: 0), "pointers");
   > _Static_assert(_Generic(lookup(k), int *: 1, default: 0), "lookup");
   > EOF
-  $ ./golden.exe applied.tc
-  applied.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe applied.tc > /dev/null
 
 An instance that the substitution puts in an array is completed first,
 as a declarator completes the element of an array.
@@ -200,9 +185,7 @@ as a declarator completes the element of an array.
   > long l;
   > void g(void) { f(&l, 0); }
   > EOF
-  $ ./golden.exe applied_array.tc
-  applied_array.tc:2: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe applied_array.tc > /dev/null
 
 An instance of another generic, or of other arguments, does not match.
 
@@ -241,15 +224,13 @@ Rule 4: an explicit instance is a function designator, called or taken
 the address of.
 
   $ cat > explicit.tc <<'EOF'
-  > generic(T) T *make(void);
+  > generic(T) T *make(void) { return 0; }
   > generic(T) T max(T a, T b) { return a; }
   > int *f(void) { return make(int)(); }
   > int (*p)(int, int) = max(int);
   > long (*q)(long, long) = &max(long);
   > EOF
-  $ ./golden.exe explicit.tc
-  explicit.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe explicit.tc > /dev/null
 
 The instance has the instance's type.
 
@@ -259,9 +240,7 @@ The instance has the instance's type.
   >                "long");
   > _Static_assert(_Generic(max(long)(1, 2), long: 1, default: 0), "call");
   > EOF
-  $ ./golden.exe explicit_type.tc
-  explicit_type.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe explicit_type.tc > /dev/null
 
   $ cat > explicit_type_refused.tc <<'EOF'
   > generic(T) T max(T a, T b) { return a; }
@@ -335,9 +314,7 @@ is no function. Parentheses around the called name are no other use.
   > generic(T) T max(T a, T b) { return a; }
   > int f(void) { return (max)(1, 2); }
   > EOF
-  $ ./golden.exe parenthesized.tc
-  parenthesized.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe parenthesized.tc > /dev/null
 
 A generic function calls itself and other generic functions: a type
 parameter is deduced as a type parameter of the caller.
@@ -346,6 +323,4 @@ parameter is deduced as a type parameter of the caller.
   > generic(T) T *first(T *p) { return p; }
   > generic(T) T *walk(T *p, int n) { return n ? walk(p, n - 1) : first(p); }
   > EOF
-  $ ./golden.exe recursion.tc
-  recursion.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe recursion.tc > /dev/null

@@ -1535,28 +1535,76 @@ let named (span, name) = { span; text = name }
    anchor that its placement names, in a packing bracket; the texts at
    one anchor share one bracket, in the order of the placements. *)
 
-(* The generic's definition under the instance's name, with each type
-   parameter and application written as the name that the reading
-   found for it, from token [first] to its end. It stands in a bracket,
-   which holds no pragma line: the front end refuses a generic whose
-   definition holds one (design 10.3). *)
-let instance_definition output instance ~first
-    (reading : Typec_sema.Declarations.instance_text) =
-  let lowered = Typec_sema.Encoding.variant_name (Applied instance) in
-  let edits =
-    text_edits output
-      ~declarations:[ (lowered, reading.generic) ]
-      ~void_field_spans:reading.void_field_spans
-      ~replaced:(List.map named reading.names)
-      reading.typed
-  in
+(* The tokens of a generic's definition from [first] to [last] under
+   [edits]. They stand in a bracket, which holds no pragma line: the
+   front end refuses a generic whose definition holds one (design 10.3,
+   P25). *)
+let generic_text output edits ~first ~last =
   let bracketed : Emitter.moved_piece -> Emitter.piece = function
     | Piece piece -> piece
     | Pragma_line _ -> invalid_arg "Lowering: a pragma line in a generic"
   in
-  moved_text output (order_edits edits) ~first
-    ~last:reading.generic.span.last
-  |> List.map bracketed
+  moved_text output (order_edits edits) ~first ~last |> List.map bracketed
+
+(* The generic type's definition under the instance's name, with each
+   type parameter and application written as the name that the reading
+   found for it, from token [first] to its end. *)
+let instance_definition output instance ~first
+    (reading : Typec_sema.Declarations.instance_text) =
+  match reading.generic with
+  | Type_generic generic ->
+      let lowered = Typec_sema.Encoding.variant_name (Applied instance) in
+      let edits =
+        text_edits output
+          ~declarations:[ (lowered, generic) ]
+          ~void_field_spans:reading.void_field_spans
+          ~replaced:(List.map named reading.names)
+          reading.typed
+      in
+      generic_text output edits ~first ~last:generic.span.last
+  | Function_generic _ -> invalid_arg "Lowering: a function as a type"
+
+(* Every instance is static (design 7.3 rule 1): a [static] that the
+   definition holds stays (7.1 rule 6), and one is written in front of
+   the first specifier of a definition without it that is no attribute,
+   as C23 6.7p1 puts an attribute that begins a declaration before its
+   specifiers. *)
+let added_static output (definition : Tree.function_definition) =
+  let { Tree.specifiers; declarator; _ } = definition.node in
+  let is_static (specifier : Tree.declaration_specifier Tree.spanned) =
+    specifier.node = Storage_class Static
+  in
+  let is_attribute (specifier : Tree.declaration_specifier Tree.spanned) =
+    match specifier.node with Attributes _ -> true | _ -> false
+  in
+  let before =
+    match List.find_opt (fun s -> not (is_attribute s)) specifiers with
+    | Some first -> first.span.first
+    | None -> declarator.span.first
+  in
+  if List.exists is_static specifiers then []
+  else [ insert output ~before "static" ]
+
+(* A function instance (design 7.3, 10.3): the generic function's
+   definition, without [generic(T)], as a [static] function under the
+   instance's name, from its first token to [last], after which [ending]
+   follows: the prototype ends before the body. *)
+let function_instance output location instance ~last ~ending
+    (reading : Typec_sema.Declarations.instance_text)
+    (definition : Tree.function_definition) =
+  let (Ordinary_at name_token) = definition.node.declared.id in
+  let name =
+    { span = { first = name_token; last = name_token };
+      text = Typec_sema.Encoding.instance_name instance }
+  in
+  let edits =
+    added_static output definition
+    @ text_edits output ~declarations:[] ~void_field_spans:[]
+        ~replaced:(name :: List.map named reading.names)
+        reading.typed
+  in
+  generic_text output edits ~first:definition.span.first ~last
+  @ List.map (Emitter.generated output location) ending
 
 (* What the texts of the placements are written from: the output of the
    unit and what its reading found. *)
@@ -1580,6 +1628,13 @@ let reading context instance =
   | Some reading -> reading
   | None -> invalid_arg "Lowering: an instance text without its reading"
 
+let function_definition context instance =
+  match reading context instance with
+  | { generic = Function_generic { definition; _ }; _ } as reading -> (
+      definition, reading)
+  | { generic = Type_generic _; _ } ->
+      invalid_arg "Lowering: a type as a function"
+
 (* Step 1: [struct I; typedef struct I I;] for a structure, union or
    variant, whose definition follows where it is needed; the whole
    typedef of 10.2 for an alias or a distinct generic. *)
@@ -1595,15 +1650,33 @@ let instance_declaration context location instance
   | Record_alias specifier -> forward specifier.node.kind
   | Alias _ | Distinct _ ->
       let reading = reading context instance in
-      instance_definition context.output instance
-        ~first:reading.generic.span.first reading
+      instance_definition context.output instance ~first:generic.span.first
+        reading
 
-(* Step 2: the rest of 10.1 or 10.2, after the forward declaration. *)
-let instance_rest context instance =
+(* Step 1 of a function instance: its prototype, the head of the
+   generic's definition. *)
+let function_prototype context location instance =
+  let definition, reading = function_definition context instance in
+  let body_first =
+    match definition.node.body with
+    | Parsed block -> block.span.first
+    | Skipped span -> span.first
+  in
+  function_instance context.output location instance ~last:(body_first - 1)
+    ~ending:[ ";" ] reading definition
+
+(* Step 2: the rest of 10.1 or 10.2, after the forward declaration, or
+   the whole definition of a function instance. *)
+let instance_rest context location instance =
   let reading = reading context instance in
-  match Tree.forward_declaration_end reading.generic with
-  | Some first -> instance_definition context.output instance ~first reading
-  | None -> invalid_arg "Lowering.instance_rest: a typedef instance"
+  match reading.generic with
+  | Type_generic generic -> (
+      match Tree.forward_declaration_end generic with
+      | Some first -> instance_definition context.output instance ~first reading
+      | None -> invalid_arg "Lowering.instance_rest: a typedef instance")
+  | Function_generic { definition; _ } ->
+      function_instance context.output location instance
+        ~last:definition.span.last ~ending:[] reading definition
 
 let application_location context
     (placement : Typec_sema.Declarations.placement) =
@@ -1618,7 +1691,12 @@ let placement_text context (placement : Typec_sema.Declarations.placement) =
       instance_declaration context
         (application_location context placement)
         placement.instance generic
-  | Defined -> instance_rest context placement.instance
+  | Prototype ->
+      function_prototype context (application_location context placement)
+        placement.instance
+  | Defined ->
+      instance_rest context (application_location context placement)
+        placement.instance
 
 (* The placements in runs that share an anchor, each run in order. *)
 let by_anchor placements =
@@ -1644,10 +1722,22 @@ let instance_brackets context =
   List.map bracket
     (by_anchor (Typec_sema.Declarations.placements context.declarations))
 
+(* The declarations of generic functions, which only their instances
+   write (design 7.3 rule 1). *)
+let generic_functions declarations =
+  let generic_function : Typec_sema.Declarations.item -> dropped option =
+    function
+    | Generic_function_declaration span -> Some { span; text = "" }
+    | Declaration _ | Static_assertion | Function_definition _
+    | Type_declaration _ | Generic_declaration ->
+        None
+  in
+  List.filter_map generic_function (Typec_sema.Declarations.items declarations)
+
 (* The unit's own text: each type declaration that is no generic under
    its own name, each generic's definition removed, as only its
-   instances write it, and each application replaced by the name of its
-   instance. *)
+   instances write it, and each application and use of a function
+   instance replaced by the name of its instance. *)
 let unit_edits output declarations =
   let split (declaration : Tree.type_declaration) =
     match declaration.node.type_parameters with
@@ -1663,6 +1753,7 @@ let unit_edits output declarations =
   text_edits output ~declarations:own ~void_field_spans:[]
     ~replaced:
       (generics
+      @ generic_functions declarations
       @ List.map named (Typec_sema.Declarations.instance_names declarations))
     (Typec_sema.Declarations.typed declarations)
 

@@ -47,9 +47,10 @@ type item =
   | Type_declaration of entity  (** a typedef name (design 3.1) *)
   | Generic_declaration
       (** a generic type (design 3.5), whose name alone is no type *)
-  | Generic_function_declaration
+  | Generic_function_declaration of Tree.span
       (** a generic function (design 7.1), whose name alone is no
-          function *)
+          function, with the span of its text, which only its instances
+          write (design 7.3) *)
 
 (** The typedef [name] of an argument (design 10.3), written as [line],
     after the lines that declare the tags it names. *)
@@ -67,7 +68,11 @@ type argument_typedef = {
 type step =
   | Typedefs of argument_typedef list
   | Declared of { generic : Tree.type_declaration }
+  | Prototype
+      (** of a function instance, at its first use *)
   | Defined
+      (** of a function instance, after what its reading puts at its
+          first use *)
 
 (** Where lowering places a text of an instance (design 10.3): at the
     anchor [at], in front of the external declaration whose use or need
@@ -81,6 +86,18 @@ type placement = {
   application : Tree.span;
 }
 
+(** The definition of a generic that an instance writes: a generic
+    type's declaration, or a generic function's definition with its
+    type parameters, and the [span] of the generic function's text from
+    [generic], which declares them and which readings read. *)
+type generic_definition =
+  | Type_generic of Tree.type_declaration
+  | Function_generic of {
+      span : Tree.span;
+      type_parameters : Tree.parameter_name list;
+      definition : Tree.function_definition;
+    }
+
 (** The definition of an instance as lowering writes it (design 10.3):
     the declaration of the [generic] whose definition it is, the name
     that lowering writes for the tokens of each span in it, a use of a
@@ -89,7 +106,8 @@ type placement = {
     its constructs [typed] with the instance's arguments. Spans of names
     may nest, as an application's arguments do. *)
 type instance_text = {
-  generic : Tree.type_declaration;
+  generic : generic_definition;
+
   names : (Tree.span * string) list;
   void_field_spans : Tree.span list;
   typed : Expressions.t;

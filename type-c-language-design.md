@@ -733,7 +733,16 @@ id(stmt) s;                             /* e = s is an error */
    still refused where its own chain, which begins at an instance that
    the definition needs, would hold a 65th instance (the limit below),
    even if a later application would find part of that chain defined
-   already. The needs of a definition are visited in the order of its
+   already. The check of the definition of a generic function (7.1)
+   follows its chain the same way: each call in the body reads the
+   definition of the callee's instance over the opaque types of the
+   check, as a trial that defines no instance and writes no text, and
+   the calls within that reading share what the trial has read. So a
+   chain that no instance could end, as that of `f` below, is refused
+   at the call in the definition, whether or not `f` is used. A callee
+   whose generic is defined after the definition is not followed:
+   each of its instances is read at its first use (7.3 rule 2). The
+   needs of a definition are visited in the order of its
    text, and what one of them causes is defined whole, with all that it
    causes in turn, before the next is visited.
    Instantiation *nests* along a chain of instances in which each
@@ -3124,7 +3133,16 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
 8. Lowering writes a generic function only as its instances (3.5 rule 8,
    10.3). Neither its definition nor a declaration of it leaves text at
    its own place, so a generic function that the unit does not use is
-   checked and leaves nothing in the lowered C (7.3 rule 1).
+   checked and leaves nothing in the lowered C (7.3 rule 1). An instance
+   of a generic type that the type of the function applies to types
+   that mention no type parameter, as `box(int)` in
+   `generic(T) box(int) count(T x);`, is used at the declaration, as in
+   that of a function that is not generic, so that every declaration
+   and every call names the one instance.
+9. A generic function is not defined in a system header. Its body there
+   is C text that `typec` passes through unread (13.3), while each
+   instance reads the definition again under its type arguments, so
+   such a definition is an error.
 
 Because of rules 2 to 4, an instance of a checked generic function is
 valid C for every value type. Instantiation fails only where a chain of
@@ -3197,13 +3215,29 @@ convert, is weighed with P11.
    no code. Rule 7 of 3.5 bounds what a use causes: a chain of
    instances by the nesting limit, and what the instances of the unit
    cost by the instance budget and the output limit.
+   As an instance has internal linkage, an inline definition of a
+   function with external linkage uses none in its head or its body
+   (C11 6.7.4p3): such a use is an error. typec refuses it itself, as
+   GCC and Clang report the constraint violation only as a warning,
+   which Clang (`-Wstatic-in-inline`) gives in the main file only under
+   `-pedantic`. Whether a definition is an inline definition follows
+   from the declarations before its end (6.7.4p7): every file-scope one
+   says `inline` without `extern`. A later declaration that says
+   `extern` would make it an external definition, which may use an
+   instance, but the use is refused where the definition stands.
 2. The definition of a generic function precedes the first use of each
    of its instances, since the instance is defined there (10.3): generic
    functions are defined in headers. A declaration that is not a
    definition lets generic functions call each other, provided both are
    defined before an instance of either is used. Rule 6 of 7.1 says
    what such a declaration holds besides the type, and rule 7 when it
-   agrees with the definition.
+   agrees with the definition. The definition of a generic type and
+   the head of a generic function use no generic function: 10.3 writes
+   the text of a type instance, and the prototype of a function
+   instance, before the prototypes of the function instances that the
+   reading of its definition causes, so the instance that such a use
+   names would stand before its prototype. Nothing needs such a use; a
+   body or an initializer holds it instead.
 3. Rule 8 of 3.5 binds the whole definition, its body included, from the
    definition to each instance. In
 
@@ -3855,8 +3889,15 @@ the steps.
    holds the first point that needs the type complete; one that no point
    needs complete is not defined. A function instance is defined before
    the external declaration that holds its first use, which the
-   definition of its generic precedes (7.3 rule 2). The type instances
-   that a definition needs complete are defined before it.
+   definition of its generic precedes (7.3 rule 2). A use that is not
+   evaluated, in the operand of `sizeof` or in an association of
+   `_Generic`, is a use all the same: lowering writes the instance's
+   name there, so the instance is defined before it. The type instances
+   that a definition needs complete are defined before it. The function
+   instances that one external declaration uses, and those that their
+   definitions use in turn, have their prototypes first, each after the
+   type instances its head needs, and then their definitions, so that
+   instances that call each other each see the other's prototype.
 
 A point *needs a type complete* where typing requires a complete type
 of the construct that stands there, and a Type-C construct needs what
@@ -5875,10 +5916,18 @@ each. A third clause covers the text around it.
   declaration is seen to keep the type.
 - Every other name that lowering writes there is its own: the name of
   what a type application, a universe name, a constructor or a type
-  parameter denotes (10.1, 10.3), or a name that it invents. Each is
-  claimed (10.1, 10.3) or reserved (2.3), so no declaration hides one:
-  not in a block, not in a copy of a deferred statement and not in an
-  instance. A declaration that hides a universe name or a constructor
+  parameter denotes (10.1, 10.3), the name of the instance that a call
+  or a use of a generic function names, or a name that it invents. Each
+  is claimed (10.1, 10.3) or reserved (2.3), so no declaration hides
+  one: not in a block, not in a copy of a deferred statement and not in
+  an instance. The check leaves out the use of a generic function in
+  the body of another, since the name that lowering writes for it is
+  declared before each place of writing by construction: the first use
+  of the instance whose body holds it causes the instance it names, and
+  10.3 writes that one's prototype before the definition of the first.
+  Only a body holds such a use in moved text, as the definition of a
+  generic type and the head of a generic function hold none (7.3
+  rule 2). A declaration that hides a universe name or a constructor
   from the source therefore changes no moved text.
 - Moved text declares no name that is in scope after it. The text does
   not stay at its own place, so what follows it there would lose the

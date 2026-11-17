@@ -404,7 +404,8 @@ type type_argument =
     (design 7.1); [type_argument] refuses a type argument of a generic
     function that is not valid (design 7.2 rule 5), and [use_instance]
     is told of each use of an instance of one, with its type arguments
-    (design 7.3); [apply_generic] applies a generic type to the types
+    and the tokens that lowering writes as the instance's name (design
+    7.3); [apply_generic] applies a generic type to the types
     that a substitution makes of the arguments of one of its instances,
     at the call at the span (design 7.2); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
@@ -434,7 +435,8 @@ type context = {
   overloaded : Tree.reference -> bool;
   generic_function : Tree.reference -> Ctype.record_tag list option;
   type_argument : Tree.span -> type_argument -> unit;
-  use_instance : Tree.span -> Tree.reference -> Ctype.t list -> unit;
+  use_instance :
+    Tree.span -> written:Tree.span -> Tree.reference -> Ctype.t list -> unit;
   apply_generic :
     Tree.span -> Typec_syntax.Spelling.type_name -> Ctype.t list -> Ctype.t;
   type_name : Tree.type_name -> Ctype.t;

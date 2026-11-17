@@ -138,7 +138,7 @@ pragma (design 10.3, P25).
   > };
   > EOF
   $ ./golden.exe pragma.tc
-  pragma.tc:2: error: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold [generic-pragma]
+  pragma.tc:2: error: the definition of a generic holds a pragma or a `#`, which the text of its instances cannot hold [generic-pragma]
   [1]
 
 An instance of a generic variant is a variant (design 3.5 rule 3): its

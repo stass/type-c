@@ -119,7 +119,7 @@ preprocessor makes a pragma line, is refused (design 10.3, P25).
   > type box(T) = struct { _Pragma("pack(1)") T value; };
   > EOF
   $ typec --cc=$clang -fsyntax-only pragma.tc
-  pragma.tc:1: error: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold [generic-pragma]
+  pragma.tc:1: error: the definition of a generic holds a pragma or a `#`, which the text of its instances cannot hold [generic-pragma]
   [80]
 
 An argument is spelled through the one name of an untagged type, which

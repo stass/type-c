@@ -2,12 +2,12 @@ SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 Generic functions (design 7.1): the definition is read once against an
-opaque value type for each type parameter. Instances are not written
-yet, so a unit that holds a generic function stops after its check
-(not-implemented), and so does a use of its name (design 7.2).
+opaque value type for each type parameter. A unit whose generic
+functions pass the check is accepted; test/golden/function_instances.t
+shows the instances that it writes (design 7.3).
 
 A definition that uses its type parameters only as every value type
-allows is checked and stops at the sentinel.
+allows is checked and accepted.
 
   $ cat > last.tc <<'EOF'
   > generic(T)
@@ -18,9 +18,7 @@ allows is checked and stops at the sentinel.
   > }
   > generic(K, V) void put(K *key, V *value);
   > EOF
-  $ ./golden.exe last.tc
-  last.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe last.tc > /dev/null
 
 Design 7.1 rule 3: a value of a type parameter is used only as C uses a
 structure, and as every value type gives the same meaning.
@@ -36,9 +34,7 @@ with __typeof__, and yielded by a comma.
   >     i++, *p = u;
   > }
   > EOF
-  $ ./golden.exe discard.tc
-  discard.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe discard.tc > /dev/null
 
 A cast of a value of a type parameter, other than to void, is refused,
 and so is a cast to a type parameter.
@@ -185,9 +181,7 @@ ARRAY_SIZE.
   >         + __builtin_types_compatible_p(T (*)(int), int (*)(long));
   > }
   > EOF
-  $ ./golden.exe compared.tc
-  compared.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe compared.tc > /dev/null
 
 The argument decides wherever a type parameter enters the comparison,
 not only as a bare parameter: in an instance of a generic type, against
@@ -247,9 +241,7 @@ different tags, though both hold a type parameter.
   >     return _Generic(u, struct b: 1, default: 0);
   > }
   > EOF
-  $ ./golden.exe tags.tc
-  tags.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe tags.tc > /dev/null
 
   $ cat > apart.tc <<'EOF'
   > type vector(T) = struct { T *data; unsigned long length; };
@@ -259,9 +251,7 @@ different tags, though both hold a type parameter.
   >                vector(T) *, vector(T) **)]);
   > }
   > EOF
-  $ ./golden.exe apart.tc
-  apart.tc:2: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe apart.tc > /dev/null
 
 No declaration in the body gives its identifier linkage, whatever its
 type, as every instance would declare the one object or function again,
@@ -277,9 +267,7 @@ object and a pointer to a function have no linkage, and stand.
   >     return &cache;
   > }
   > EOF
-  $ ./golden.exe linked.tc
-  linked.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe linked.tc > /dev/null
 
   $ cat > extern_int.tc <<'EOF'
   > generic(T) void f(T t)
@@ -353,9 +341,7 @@ initialises it whole.
   >     (void)w; (void)z; (void)y; (void)x; (void)r;
   > }
   > EOF
-  $ ./golden.exe zeroed.tc
-  zeroed.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe zeroed.tc > /dev/null
 
 Any other initialiser that reaches a type parameter is for one of its
 members, in its own braces or through elided ones, and is an error.
@@ -439,9 +425,7 @@ initialise a value of one.
   >     return malloc(n * sizeof(T));
   > }
   > EOF
-  $ ./golden.exe sizes.tc
-  sizes.tc:2: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe sizes.tc > /dev/null
 
 An expression that holds the size, alignment or offset of a type that
 mentions a type parameter is no constant expression: not an array
@@ -712,9 +696,7 @@ asks for no layout.
   >     return first;
   > }
   > EOF
-  $ ./golden.exe plain_addresses.tc
-  plain_addresses.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe plain_addresses.tc > /dev/null
 
 A builtin depends unless the values of its arguments alone decide it.
 
@@ -735,9 +717,7 @@ A builtin depends unless the values of its arguments alone decide it.
   > }
   > void g(int t) { char b[__builtin_classify_type(t) == 1 ? 1 : -1]; }
   > EOF
-  $ ./golden.exe value_builtins.tc
-  value_builtins.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe value_builtins.tc > /dev/null
 
 A `const` object carries the dependence of its initialiser, which the
 backends read as a constant; an object that is not `const` is a
@@ -774,9 +754,7 @@ constant to neither, so its use declares a variable length array.
   >     (void)fixed;
   > }
   > EOF
-  $ ./golden.exe variable_bound.tc
-  variable_bound.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe variable_bound.tc > /dev/null
 
 Whether an expression that depends is a null pointer constant, which
 of two operands __builtin_choose_expr selects, and the index of a
@@ -797,9 +775,7 @@ designator differ between arguments.
   >     return c ? p : (void *)(sizeof(int) > 1000);
   > }
   > EOF
-  $ ./golden.exe plain_null_pointer.tc
-  plain_null_pointer.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe plain_null_pointer.tc > /dev/null
 
 An integer converts to a pointer only as a null pointer constant, so
 each conversion of one that depends refuses it: an initialiser, an
@@ -896,9 +872,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   >     return q == r && r != (sizeof(int) > 1000) && sizeof(T) > 4;
   > }
   > EOF
-  $ ./golden.exe null_plain.tc
-  null_plain.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe null_plain.tc > /dev/null
   $ cat > choose.tc <<'EOF'
   > generic(T) unsigned long f(T t)
   > {
@@ -928,9 +902,7 @@ definition.
   > generic(T) static inline _Noreturn __attribute__((cold)) void put(T *p, T t) { *p = t; for (;;) {} }
   > generic(T) void none(void);
   > EOF
-  $ ./golden.exe forms.tc
-  forms.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe forms.tc > /dev/null
 
   $ cat > empty_list.tc <<'EOF'
   > generic(T) void f();
@@ -980,9 +952,7 @@ No parameter has a variably modified type once C has adjusted it, so
   $ cat > adjusted.tc <<'EOF'
   > generic(T) void f(unsigned long n, T a[n], T b[][4], T c[static 4]);
   > EOF
-  $ ./golden.exe adjusted.tc
-  adjusted.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe adjusted.tc > /dev/null
 
 A parameter of a type that typec does not compute is left to rule 7,
 which agrees it with no other declaration.
@@ -990,9 +960,7 @@ which agrees it with no other declaration.
   $ cat > unknown_parameter.tc <<'EOF'
   > generic(T) void f(T *t, _Complex int z) { (void)t; (void)z; }
   > EOF
-  $ ./golden.exe unknown_parameter.tc
-  unknown_parameter.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe unknown_parameter.tc > /dev/null
 
   $ cat > variable_pointer.tc <<'EOF'
   > generic(T) void f(unsigned long n, T (*m)[n]);
@@ -1053,9 +1021,7 @@ scope of the parameter list or at file scope, and is refused too.
   >     return 0;
   > }
   > EOF
-  $ ./golden.exe named_tags.tc
-  named_tags.tc:2: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe named_tags.tc > /dev/null
 
   $ cat > two.tc <<'EOF'
   > generic(T) void f(T *p), g(T *p);
@@ -1097,9 +1063,7 @@ type parameter as those of a `const` object would.
   >     puts_name(__FUNCTION__ + 1);
   > }
   > EOF
-  $ ./golden.exe func_pointer.tc
-  func_pointer.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe func_pointer.tc > /dev/null
   $ cat > func_size.tc <<'EOF'
   > generic(T) unsigned long f(T t) { return sizeof __func__; }
   > EOF
@@ -1135,9 +1099,7 @@ type parameter as those of a `const` object would.
   > unsigned long h(void) { return sizeof __func__; }
   > generic(T) void f(T t);
   > EOF
-  $ ./golden.exe plain_name.tc
-  plain_name.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe plain_name.tc > /dev/null
 
 A declaration in a block hides the name.
 
@@ -1146,9 +1108,7 @@ A declaration in a block hides the name.
   > generic(U) void f(U *q, U u) { *q = u; }
   > void g(void) { int f = 0; (void)f; }
   > EOF
-  $ ./golden.exe agree.tc
-  agree.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe agree.tc > /dev/null
 
   $ cat > count.tc <<'EOF'
   > generic(T) void f(T *p);
@@ -1276,9 +1236,7 @@ stands.
   >     (void)o;
   > }
   > EOF
-  $ ./golden.exe stand_alike.tc
-  stand_alike.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe stand_alike.tc > /dev/null
   $ cat > stand_other.tc <<'EOF'
   > struct s;
   > void close_s(struct s **);
@@ -1290,9 +1248,7 @@ stands.
   >     (void)p; (void)h;
   > }
   > EOF
-  $ ./golden.exe stand_other.tc
-  stand_other.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe stand_other.tc > /dev/null
   $ cat > member.tc <<'EOF'
   > generic(T) void f(T *p) { struct { T v __attribute__((aligned(8))); } x; }
   > EOF
@@ -1437,6 +1393,4 @@ while one that the values of its arguments decide stands.
   $ cat > decided_builtin.tc <<'EOF'
   > generic(T) void f(T *p) { (void)p; char b[__builtin_popcount(3)]; (void)b; }
   > EOF
-  $ ./golden.exe decided_builtin.tc
-  decided_builtin.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
-  [1]
+  $ ./golden.exe decided_builtin.tc > /dev/null

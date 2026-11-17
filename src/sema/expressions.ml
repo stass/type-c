@@ -448,7 +448,8 @@ type context = {
   overloaded : Tree.reference -> bool;
   generic_function : Tree.reference -> Ctype.record_tag list option;
   type_argument : Tree.span -> type_argument -> unit;
-  use_instance : Tree.span -> Tree.reference -> Ctype.t list -> unit;
+  use_instance :
+    Tree.span -> written:Tree.span -> Tree.reference -> Ctype.t list -> unit;
   apply_generic :
     Tree.span -> Typec_syntax.Spelling.type_name -> Ctype.t list -> Ctype.t;
   type_name : Tree.type_name -> Ctype.t;
@@ -3715,7 +3716,8 @@ and generic_call context span (callee, name, reference, parameters)
           arguments
       in
       let callee_typed =
-        instance_designator context span reference bindings function_type
+        instance_designator context span ~written:callee.span reference
+          bindings function_type
       in
       note_typed context callee callee_typed;
       value (call_type context span callee_typed (List.length arguments))
@@ -3767,7 +3769,8 @@ and deducing_argument context bindings parameter (first : Tree.expression) =
 (* The function designator of the instance whose type arguments
    [bindings] holds, used at [span], once every one is deduced (rule
    3). *)
-and instance_designator context span reference bindings function_type =
+and instance_designator context span ~written reference bindings function_type
+    =
   match Deduction.arguments bindings with
   | Error (record : Ctype.record_tag) ->
       let parameter =
@@ -3782,7 +3785,7 @@ and instance_designator context span reference bindings function_type =
                instance names it"
               parameter))
   | Ok type_arguments ->
-      context.use_instance span reference type_arguments;
+      context.use_instance span ~written reference type_arguments;
       let instance_type = substituted context span bindings function_type in
       value
         (function_designator context span ~old_style_definition:false
@@ -3816,7 +3819,8 @@ and explicit_instance context span (generic : Tree.expression) type_arguments
   in
   let function_type = generic_type context generic.span name reference in
   let designator =
-    instance_designator context span reference bindings function_type
+    instance_designator context span ~written:span reference bindings
+      function_type
   in
   note_typed context generic designator;
   designator

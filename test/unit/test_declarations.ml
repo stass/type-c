@@ -65,6 +65,7 @@ let describe (declared : Entity.declared) =
         function_type;
         linkage;
         inline;
+        inline_definition = _;
         noreturn;
         gnu_inline;
         overload;
@@ -2749,6 +2750,7 @@ let placements source =
           | Typedefs typedefs ->
               String.concat " " (List.concat_map typedef typedefs)
           | Declared _ -> "declared"
+          | Prototype -> "prototype"
           | Defined -> "defined"
         in
         (Encoding.instance_name placement.instance, step,

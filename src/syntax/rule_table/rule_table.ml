@@ -142,8 +142,7 @@ let rows =
         "A jump into a match arm or the statement of a single-pattern \
          test (design 4.6 rule 6) from outside it, or the address of a \
          label inside one." };
-    Live { constructor = "Not_implemented"; name = "not-implemented";
-      clause = "implementation plan";
+    Retired { name = "not-implemented";
       meaning =
         "A construct that a later work package of the plan implements; \
          the text names the package." };
@@ -611,6 +610,35 @@ let rows =
          second time as the operand of [sizeof], where it declares a tag \
          or an enumeration constant in the scope around it, or defines a \
          label whose scope reaches beyond it." };
+    Live { constructor = "Instance_pragma"; name = "instance-pragma";
+      clause = "design 7.3 rule 4, P27";
+      meaning =
+        "The first use of a function instance where a [#pragma] line \
+         that sets state stands between the definition of its generic \
+         and the place where the instance is written." };
+    Live { constructor = "Instance_in_inline"; name = "instance-in-inline";
+      clause = "design 7.3 rule 1";
+      meaning =
+        "A use of a function instance in the head or the body of an \
+         inline definition of a function with external linkage, which \
+         C11 6.7.4p3 forbids, as the instance has internal linkage." };
+    Live { constructor = "Generic_system_body";
+      name = "generic-system-body";
+      clause = "design 7.1 rule 9";
+      meaning =
+        "A generic function whose body is C text of a system header, \
+         which typec passes through unread." };
+    Live { constructor = "Function_instance_place";
+      name = "function-instance-place";
+      clause = "design 7.3 rule 2";
+      meaning =
+        "A use of a generic function in the definition of a generic type \
+         or in the head of a generic function." };
+    Live { constructor = "Generic_undefined"; name = "generic-undefined";
+      clause = "design 7.3 rule 2";
+      meaning =
+        "The first use of an instance of a generic function that is not \
+         defined before it." };
   ]
 
 let () =
