@@ -46,7 +46,7 @@ bytes and 256 for each byte of the unit.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc --stats -c counted.tc 2> stats || cat stats
   >   sed 's/^typec: stats: counted.tc: //' stats | tr ' ' '\n' > fields
-  >   grep -v '^unit_bytes=\|^output_bytes=\|^output_limit=' fields
+  >   grep -v '^unit_bytes=\|^output_bytes=\|^output_limit=\|^slice_' fields
   >   eval "$(grep '^unit_bytes=\|^output_bytes=\|^output_limit=' fields)"
   >   [ "$output_limit" -eq $((33554432 + 256 * unit_bytes)) ] &&
   >     [ "$output_bytes" -ge "$unit_bytes" ] &&
@@ -69,3 +69,42 @@ writes is the same with it.
   >   typec --cc=$clang --stats --emit-c counted.tc > counted.c 2> stats &&
   >   cmp plain.c counted.c && grep -c '^typec: stats: counted.tc: ' stats
   1
+
+The slice tests that lowering writes are counted by form: an index, a
+`slice_sub` and a conversion that C evaluates, and so tested; those
+that C does not evaluate, wherever they stand; and, among the indexes
+and `slice_sub`s that are tested, those that hold a call or a statement
+expression in an operand after the first (design section 8 rule 10).
+Each instance of a generic function counts its own tests, and the
+slice itself is the first operand, so a call that makes it counts for
+no test.
+
+  $ cat > slices.tc <<'EOF'
+  > #include <stddef.h>
+  > extern slice(int) global;
+  > int sized[sizeof(global[0])];
+  > size_t next(void);
+  > slice(int) make(void);
+  > generic(T) T
+  > at(slice(T) s, size_t i)
+  > {
+  >   return (s[i]);
+  > }
+  > int
+  > use(slice(int) s, slice(long) l, size_t i)
+  > {
+  >   slice(const int) c = s;
+  >   slice(int) part = slice_sub(s, i, i + 1);
+  >   long width = sizeof(s[3]) + sizeof(slice_sub(s, 1, 2));
+  >   return (make()[i] + s[next()] + at(s, i) + at(l, i)
+  >       + part[__extension__ ({ i; })] + c[i]
+  >       + slice_sub(s, next(), 3).len + slice_sub(s, 0, next()).len);
+  > }
+  > EOF
+  $ typec --cc=$clang --stats -c slices.tc 2> stats || cat stats
+  $ tr ' ' '\n' < stats | grep '^slice_'
+  slice_indexes=6
+  slice_subs=3
+  slice_conversions=1
+  slice_untested=3
+  slice_late_calls=4

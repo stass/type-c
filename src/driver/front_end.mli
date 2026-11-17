@@ -6,6 +6,29 @@
     each function body where its definition stands, then lowering. This
     is the one place where [typec] chains them. *)
 
+(** The slice tests that lowering writes (design section 8 rule 9, P28),
+    each source site once, however many copies of a deferred statement
+    hold it; an instance of a generic function counts its own. *)
+type slice_counts = {
+  indexes : int;
+      (** the indexes of a slice that C evaluates, which lowering
+          writes with a test *)
+  subs : int;  (** the same for [slice_sub] *)
+  conversions : int;
+      (** the same for a conversion of a slice to one of const elements *)
+  untested : int;
+      (** the indexes, [slice_sub]s and conversions that C does not
+          evaluate, which have no test and stand wherever an expression
+          does *)
+  late_calls : int;
+      (** the tested indexes and [slice_sub]s with a call or a statement
+          expression in an operand after the first, which a call that
+          returns twice may resume (section 8 rule 10); a bound, since
+          the operands are read as written, so that one C does not
+          evaluate counts and a bound of a variable length array does
+          not *)
+}
+
 (** What a unit counts against the translation limits of design 3.5
     rule 7, which [--stats] reports for measurement (design P30). *)
 type counts = {
@@ -26,6 +49,8 @@ type counts = {
   longest_name : int;
       (** the bytes of the longest name of a type declaration or a
           generic function, those of the universe text included *)
+  slices : slice_counts;
+      (** the slice tests of the unit and of each instance it uses *)
 }
 
 val lower :

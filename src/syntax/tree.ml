@@ -835,6 +835,62 @@ let slice_operands = function
   | Slice_sub { slice; low; high } -> [ slice; low; high ]
   | Slice_unchecked { pointer; count } -> [ pointer; count ]
 
+(** Whether evaluating [expression] runs a call or a statement
+    expression, which may return a second time (design section 8 rule
+    10), read from the expression as written: an operand that C does not
+    evaluate, as of [sizeof], counts, an upper bound. The expressions in
+    its type names and the subscripts of an [__builtin_offsetof] are not
+    looked at, which a call in a variable length array bound or in a
+    non-constant subscript would need. *)
+let rec holds_call (expression : expression) =
+  match expression.node with
+  | Call _ | Statement_expression _ -> true
+  | Identifier _ | Constant _ | Character _ | String _ | Label_address _
+  | Sizeof_type _ | Alignof _ | Qualified_constructor _ | Offsetof _
+  | Types_compatible _ | Block_literal _ ->
+      false
+  | Parenthesized operand
+  | Post_increment operand
+  | Post_decrement operand
+  | Unary (_, operand)
+  | Sizeof_expression operand
+  | Alignof_expression operand
+  | Member { operand; _ }
+  | Pointer_member { operand; _ }
+  | Try { operand; _ }
+  | Cast { operand; _ }
+  | Instance { generic = operand; _ }
+  | Va_arg { list = operand; _ } ->
+      holds_call operand
+  | Subscript { operand = left; index = right }
+  | Binary (_, left, right)
+  | Assignment (_, left, right)
+  | Comma (left, right) ->
+      holds_call left || holds_call right
+  | Conditional { condition; if_true; if_false } ->
+      List.exists holds_call
+        (condition :: if_false :: Option.to_list if_true)
+  | Choose { condition; first; second } ->
+      List.exists holds_call [ condition; first; second ]
+  | Slice_operation operation ->
+      List.exists holds_call (slice_operands operation)
+  | Generic { controlling; associations } ->
+      let value (association : generic_association) =
+        match association.node with
+        | Association (_, value) | Default_association value -> value
+      in
+      holds_call controlling
+      || List.exists (fun a -> holds_call (value a)) associations
+  | Compound_literal { values; _ } -> initialiser_list_holds_call values
+
+and initialiser_list_holds_call (values : initialiser_list) =
+  let holds (value : designated_initialiser) =
+    match value.node.initialiser with
+    | Expression_initialiser value -> holds_call value
+    | Braced nested -> initialiser_list_holds_call nested
+  in
+  List.exists holds values.node
+
 (** The expression that a condition evaluates: the controlling
     expression, or the operand of a test. *)
 let condition_value = function

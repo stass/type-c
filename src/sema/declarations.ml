@@ -117,6 +117,15 @@ let zero_initialisers result (definition : Tree.function_definition) =
 let instance_text result instance =
   Ctype.Instances.find_opt instance result.placements.readings
 
+let slice_checks result =
+  let instances =
+    Ctype.Instances.fold
+      (fun _ (reading : instance_text) checks ->
+        Expressions.slice_checks reading.typed @ checks)
+      result.placements.readings []
+  in
+  Expressions.slice_checks result.typed @ instances
+
 let type_declarations result =
   Hashtbl.to_seq_values result.type_declarations
   |> List.of_seq

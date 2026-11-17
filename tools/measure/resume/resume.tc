@@ -1,0 +1,89 @@
+/* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
+
+/* A slice index of Type-C whose full expression is resumed after its
+   function has evaluated it again (design section 8 rule 10).
+
+   The index cur()[OPERAND] reads the slice that cur() returns. The
+   first evaluation reads the static array A; the program then makes
+   cur() return the heap array B, evaluates the index again, frees B,
+   makes cur() return A and resumes the first evaluation. A program
+   that keeps the values of the first evaluation reads A[0], 10; one
+   that keeps those of the later evaluation reads the freed B.
+
+   ROUTE_SE   setjmp in a statement expression (GNU profile)
+   ROUTE_GC   getcontext, a plain call
+   ROUTE_BSJ  __builtin_setjmp, a plain call
+
+   ONCE leaves out the second evaluation: the defined partner. */
+#define _XOPEN_SOURCE 700
+#include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ucontext.h>
+
+static int a_store[4] = { 10, 11, 12, 13 };
+static slice(int) s;
+static int phase;
+static jmp_buf env;
+static ucontext_t ctx;
+static void *benv[5];
+
+__attribute__((noinline)) static void
+resume(void)
+{
+#if defined(ROUTE_SE)
+	longjmp(env, 1);
+#elif defined(ROUTE_GC)
+	setcontext(&ctx);
+#else
+	__builtin_longjmp(benv, 1);
+#endif
+}
+
+/* Yields 0; at phase 0 it marks the place that resume() returns to,
+   and phase is 2 after that return. */
+#if defined(ROUTE_SE)
+#define OPERAND __extension__ ({ \
+	if (!phase) { if (setjmp(env)) phase = 2; } 0; })
+#elif defined(ROUTE_GC)
+#define OPERAND (phase ? 0 : (getcontext(&ctx), phase = phase ? 2 : 0, 0))
+#else
+#define OPERAND (phase ? 0 : (__builtin_setjmp(benv) ? (phase = 2, 0) : 0))
+#endif
+
+__attribute__((noinline)) static slice(int)
+cur(void)
+{
+	return s;
+}
+
+int
+main(void)
+{
+	int *b = malloc(4 * sizeof *b);
+
+	if (!b)
+		return 2;
+	b[0] = 20;
+	s = slice_from_array(a_store);
+	for (;;) {
+		int v = cur()[OPERAND];
+
+		printf("phase %d reads %d\n", phase, v);
+		fflush(stdout);
+		if (phase == 2)
+			return v == 10 ? 0 : 1;
+#ifdef ONCE
+		phase = 1;
+#endif
+		if (phase == 0) {
+			phase = 1;
+			s = slice_unchecked(b, 4);
+			continue;
+		}
+		free(b);
+		s = slice_from_array(a_store);
+		resume();
+	}
+}

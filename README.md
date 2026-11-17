@@ -1613,7 +1613,13 @@ of the code of one instance, its generic's name and the encodings of its
 arguments, that the bound on encodings holds) and `longest_name` (of a
 type declaration or a generic function, the universe text included),
 each as `name=value`: the counts of design 3.5 rule 7 that the
-measurements of P30 read. A unit that typec refuses reports none.
+measurements of P30 read. Then come the slice tests of the unit and of
+each instance that it uses, which the measurements of P28 read:
+`slice_indexes`, `slice_subs` and `slice_conversions` (those that C
+evaluates, which lowering writes with a test), `slice_untested` (those
+that C does not evaluate) and `slice_late_calls` (the tested indexes and
+`slice_sub`s with a call or a statement expression in an operand after
+the first). A unit that typec refuses reports none.
 
 A `.tc` input refuses the options that stop the backend at
 preprocessing (`-E`, `-M`, `-MM`), that change the preprocessed text

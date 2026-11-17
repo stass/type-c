@@ -94,6 +94,19 @@ is [type-c-language-design.md](type-c-language-design.md).
   gives `toml.tc` flags of its own. Decide whether a `.tc` input takes
   the option, and what the backend is then given, or the refusal stays
   and the README says how such a build switches a file.
+- [Medium] The measure scripts `containers.sh`, `unit_stats.sh` and
+  `resume.sh` each repeat the check that OUT lies outside the
+  repository, the revision lookup, the build of typec, the CSV `row`
+  function and (the first two) the parser of the `--stats` line, and
+  the checks have drifted apart. Move them into one sourced
+  `tools/measure/common.sh`.
+- [Low] `slice_late_calls` of `--stats` reads the operands as written
+  (`Tree.holds_call`): it counts a call in an operand that C does not
+  evaluate (`sizeof`, the unselected arm of `_Generic`) and misses one
+  in a bound of a variable length array or in a subscript of
+  `__builtin_offsetof`. Recording call sites in the typed view, where
+  `leave_untested` already clears what C does not evaluate, would make
+  the count exact and delete the walker.
 
 ## Target model
 

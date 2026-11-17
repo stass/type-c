@@ -279,8 +279,15 @@ val tries : t -> try_site list
     (rule 3) or a conversion to a slice of const elements (rule 5): its
     whole, the claimed tag of the instance that it reads, the
     [struct R] of design 13.5, and its operands, or for a conversion
-    the claimed tag of the instance that it makes, the [struct C]. *)
-type slice_check = { whole : Tree.span; instance : string; check : check }
+    the claimed tag of the instance that it makes, the [struct C].
+    [late_call] is whether an operand after the first holds a call or a
+    statement expression, which may return a second time (rule 10). *)
+type slice_check = {
+  whole : Tree.span;
+  instance : string;
+  check : check;
+  late_call : bool;
+}
 
 and check =
   | Index of { slice : Tree.span; index : Tree.span }

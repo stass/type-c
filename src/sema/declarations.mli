@@ -178,6 +178,11 @@ val typed : t -> Expressions.t
     outside the definitions of generics: those whose constructs lowering
     replaces (design 13.5). *)
 
+val slice_checks : t -> (Expressions.slice_check * Expressions.slice_form) list
+(** The slice indexes, [slice_sub]s and conversions typed in the unit's
+    own text and in the definition of each instance that it uses, each
+    with its form ({!Expressions.slice_checks}). *)
+
 val instance_bytes : t -> int
 (** The bytes that the readings for the unit's instances charged the
     instance budget (design 3.5 rule 7). *)

@@ -81,7 +81,15 @@ type try_site = {
   converted_to : string option;
 }
 
-type slice_check = { whole : Tree.span; instance : string; check : check }
+(* [late_call] is whether an operand after the first holds a call or a
+   statement expression, which may return a second time (section 8 rule
+   10). *)
+type slice_check = {
+  whole : Tree.span;
+  instance : string;
+  check : check;
+  late_call : bool;
+}
 
 and check =
   | Index of { slice : Tree.span; index : Tree.span }
@@ -1461,12 +1469,15 @@ let record_check context checked =
     :: view.slice_sites
 
 (* Design section 8 rule 1: [s[i]] is an lvalue of the element type. *)
-let slice_index context span ~instance ~slice ~index element
-    (index_typed : typed) =
-  refuse_slice_index context index ~what:"the index of a slice" index_typed;
+let slice_index context span ~instance ~slice ~(index : Tree.expression)
+    element (index_typed : typed) =
+  refuse_slice_index context index.span ~what:"the index of a slice"
+    index_typed;
   context.needs_complete element;
   record_check context
-    { whole = span; instance; check = Index { slice; index } };
+    { whole = span; instance;
+      check = Index { slice; index = index.span };
+      late_call = Tree.holds_call index };
   lvalue element
 
 (* Design section 8 rule 3: [slice_sub(s, lo, hi)] is a slice of the
@@ -1482,7 +1493,9 @@ let slice_sub context span ~(slice : Tree.expression) (sliced : typed)
       let check =
         Sub { slice = slice.span; low = low.span; high = high.span }
       in
-      record_check context { whole = span; instance; check };
+      record_check context
+        { whole = span; instance; check;
+          late_call = Tree.holds_call low || Tree.holds_call high };
       value (Ctype.unqualified sliced.expression_type)
   | None ->
       context.fail slice.span
@@ -3376,8 +3389,8 @@ and expression_node context position (whole : Tree.expression) =
       let index_typed = typed index in
       match slice_of context array.expression_type with
       | Some (instance, element) ->
-          slice_index context span ~instance ~slice:operand.span
-            ~index:index.span element index_typed
+          slice_index context span ~instance ~slice:operand.span ~index
+            element index_typed
       | None -> subscript context span array index_typed)
   | Slice_operation (Slice_sub { slice; low; high }) ->
       let sliced = typed slice in
@@ -4376,7 +4389,7 @@ and convert_value context (expression : Tree.expression) ~instance
   | _ ->
       record_check context
         { whole = expression.span; instance;
-          check = Conversion { converted_to } }
+          check = Conversion { converted_to }; late_call = false }
 
 (* A string literal that rule 6 of section 8 lets denote a [str]: plain
    or UTF-8 characters, whose elements C writes as [char]. *)

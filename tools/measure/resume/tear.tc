@@ -1,0 +1,116 @@
+/* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
+
+/* Whether a resumed slice index can test the length of one slice and
+   reach the elements of another (design section 8 rule 10).
+
+   The source indexes the slice that cur() returns, the array A of 4
+   elements at the first and at the resumed evaluation. Between the two
+   the index is evaluated over the array B of 64 elements. Both arrays
+   live to the end. The resumed evaluation has the index WANT, 40
+   unless given, so the source traps. The program prints where the
+   resumed evaluation points:
+     "B[40]"  the pair of the later evaluation, in bounds of B;
+     "A[40]"  the pointer of A under the length of B: out of bounds of
+              an array that is live, with no array freed;
+   and it dies of the trap where the evaluation kept its own pair.
+   ONCE leaves out the evaluation in between, which C defines: the
+   resumed evaluation tests its index against A, so it prints "A[2]"
+   with WANT=2 and traps with WANT=40.
+
+   ROUTE_SE   setjmp in a statement expression (GNU profile)
+   ROUTE_GC   getcontext, a plain call
+   ROUTE_BSJ  __builtin_setjmp, a plain call
+   FIRST      puts the call that returns twice into the first operand,
+              as an argument of a call that yields the slice
+   SWAP       makes it the second argument of that call */
+#define _XOPEN_SOURCE 700
+#include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ucontext.h>
+
+#ifndef WANT
+#define WANT 40
+#endif
+
+static int a_store[4];
+static int b_store[64];
+static slice(int) s;
+static int phase;
+static jmp_buf env;
+static ucontext_t ctx;
+static void *benv[5];
+
+__attribute__((noinline)) static void
+resume(void)
+{
+#if defined(ROUTE_SE)
+	longjmp(env, 1);
+#elif defined(ROUTE_GC)
+	setcontext(&ctx);
+#else
+	__builtin_longjmp(benv, 1);
+#endif
+}
+
+#if defined(ROUTE_SE)
+#define OPERAND __extension__ ({ \
+	if (!phase) { if (setjmp(env)) phase = 2; } phase == 2 ? WANT : 0; })
+#elif defined(ROUTE_GC)
+#define OPERAND (phase ? 0 : (getcontext(&ctx), phase = phase ? 2 : 0, \
+	phase == 2 ? WANT : 0))
+#else
+#define OPERAND (phase ? 0 : (__builtin_setjmp(benv) ? (phase = 2, WANT) : 0))
+#endif
+
+__attribute__((noinline)) static slice(int)
+cur(void)
+{
+	return s;
+}
+
+#ifdef SWAP
+#define PICK(v, index) pick((index), (v))
+__attribute__((noinline)) static slice(int)
+pick(int index, slice(int) v)
+#else
+#define PICK(v, index) pick((v), (index))
+__attribute__((noinline)) static slice(int)
+pick(slice(int) v, int index)
+#endif
+{
+	(void)index;
+	return v;
+}
+
+int
+main(void)
+{
+	s = slice_from_array(a_store);
+	for (;;) {
+#ifdef FIRST
+		int *p = &PICK(cur(), OPERAND)[phase == 2 ? WANT : 0];
+#else
+		int *p = &cur()[OPERAND];
+#endif
+
+		if (phase == 2) {
+			if (p >= b_store && p < b_store + 64)
+				printf("B[%d]\n", (int)(p - b_store));
+			else
+				printf("A[%d]\n", (int)(p - a_store));
+			return 0;
+		}
+#ifndef ONCE
+		if (phase == 0) {
+			phase = 1;
+			s = slice_from_array(b_store);
+			continue;
+		}
+#endif
+		phase = 1;
+		s = slice_from_array(a_store);
+		resume();
+	}
+}

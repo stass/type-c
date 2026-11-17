@@ -1,0 +1,113 @@
+/* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> */
+
+/* The address of an element that a slice index has reached, held as one
+   argument of a call while another argument holds a call that returns
+   twice (design section 8 rule 10). The index stands in no operand of
+   that call. A loop evaluates put(&cur()[idx()], RHS) over a static
+   array of 4 and then over a heap array of 64; the program frees the
+   heap array and resumes the first evaluation, which stores 777. The
+   program prints own[J] where the store reached element J of the
+   static array, and AddressSanitizer reports a write to the freed heap
+   array where it reached that.
+
+   ROUTE_SE   setjmp in a statement expression (GNU profile)
+   ROUTE_GC   getcontext, a plain call
+   ROUTE_BSJ  __builtin_setjmp, a plain call
+   SWAP       the arguments of put in the other order
+   PLAINC     C's own *(p() + i) in place of the index */
+#define _XOPEN_SOURCE 700
+#include <setjmp.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ucontext.h>
+
+static int *heap;
+static int arena[4];
+static slice(int) s;
+static int phase;
+static jmp_buf env;
+static ucontext_t ctx;
+static void *benv[5];
+
+__attribute__((noinline)) static void
+resume(void)
+{
+#if defined(ROUTE_SE)
+	longjmp(env, 1);
+#elif defined(ROUTE_GC)
+	setcontext(&ctx);
+#else
+	__builtin_longjmp(benv, 1);
+#endif
+}
+
+#if defined(ROUTE_SE)
+#define RHS __extension__ ({ \
+	if (!phase) { if (setjmp(env)) phase = 2; } phase == 2 ? 777 : 5; })
+#elif defined(ROUTE_GC)
+#define RHS (phase ? 5 : (getcontext(&ctx), phase = phase ? 2 : 0, \
+	phase == 2 ? 777 : 5))
+#else
+#define RHS (phase ? 5 : (__builtin_setjmp(benv) ? (phase = 2, 777) : 5))
+#endif
+
+__attribute__((noinline)) static slice(int)
+cur(void)
+{
+	return s;
+}
+
+__attribute__((noinline)) static int
+idx(void)
+{
+	return phase ? 40 : 2;
+}
+
+#ifdef PLAINC
+#define ELEMENT (*(cur().data + idx()))
+#else
+#define ELEMENT cur()[idx()]
+#endif
+
+#ifdef SWAP
+__attribute__((noinline)) static void
+put(int v, int *p)
+{
+	*p = v;
+}
+#else
+__attribute__((noinline)) static void
+put(int *p, int v)
+{
+	*p = v;
+}
+#endif
+
+int
+main(void)
+{
+	s = slice_from_array(arena);
+	for (;;) {
+#ifdef SWAP
+		put(RHS, &ELEMENT);
+#else
+		put(&ELEMENT, RHS);
+#endif
+		if (phase == 2) {
+			for (int j = 0; j < 4; j++)
+				if (arena[j] == 777)
+					printf("own[%d]\n", j);
+			return 0;
+		}
+		if (phase == 0) {
+			phase = 1;
+			heap = calloc(64, sizeof *heap);
+			s = slice_unchecked(heap, 64);
+			continue;
+		}
+		s = slice_from_array(arena);
+		free(heap);
+		resume();
+	}
+}

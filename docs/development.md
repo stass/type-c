@@ -599,3 +599,30 @@ ELF hosts with `size -A`.
 ```sh
 tools/measure/containers.sh /Volumes/Optaine/measure-3.6/run/results.csv
 ```
+
+`tools/measure/unit_stats.sh OUT SIDE CC [-I DIR]... -- UNIT...` writes
+the same rows for the `--stats` fields of any `.tc` units, for a program
+that is not the library, with a row for each of the refusals of design
+7.3 rule 4 (`refusal_instance_pragma`) and of section 8 rule 9
+(`refusal_slice_check_place`): 1 where the unit's first error names it,
+0 where the unit has none. `containers.sh` stops at a unit that `typec`
+refuses, so each unit that it measures has none.
+
+```sh
+tools/measure/unit_stats.sh /Volumes/Optaine/measure-3.6/run/pilot.csv \
+  pilot-b /usr/bin/clang -- /Volumes/Optaine/type-c-pilot-b/toml.tc
+```
+
+`tools/measure/resume.sh OUT [CC...]` builds the programs of
+`tools/measure/resume/` with `typec` on each backend at `-O0` and `-O2`
+and writes one row for each run to `OUT`: what a slice index, and the
+address of an element that a call holds across another argument,
+reach when the full expression that holds them is resumed after the
+same function has begun to evaluate it again (design section 8 rule
+10), for `setjmp` in a statement expression, `getcontext` and
+`__builtin_setjmp`, with the partners that C defines. It is a record,
+not a test.
+
+```sh
+tools/measure/resume.sh /Volumes/Optaine/measure-3.6/run/resume.csv
+```

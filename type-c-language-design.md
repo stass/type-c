@@ -4646,7 +4646,12 @@ language is defined here and not by the tool.
   limit, the longest code of one instance and the longest name of a
   type declaration or generic function. P30 is settled by these
   counts, so `typec` reports them itself rather than leaving a
-  measurement to reconstruct them.
+  measurement to reconstruct them. It also prints how many slice
+  indexes, `slice_sub` expressions and conversions the unit and each of
+  its instances hold with a test and without (section 8 rule 9), and
+  how many of the tested indexes and `slice_sub`s hold a call or a
+  statement expression in an operand after the first (rule 10): the
+  counts that P28 reads.
 - With a `.tc` input, `-fpack-struct` without a value is refused as an
   error of the command line: under it GCC ignores the three lines of
   the bracket that 10.3 writes around an instance and warns of each,
