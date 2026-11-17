@@ -112,17 +112,18 @@ struct session {
 
 Nothing but those comments ties `s->from` to `STATE_MAIL`. The port
 moves each field into the constructor of the states where it is valid,
-and keeps in the session only what every state shares:
+and keeps in the session what every state shares, and the recipients:
 
 ```c
 type state =
     | Init				/* before HELO or EHLO */
     | Greeted(struct domain client)	/* after HELO, between messages */
-    | Mail(struct domain client, struct address from, struct recipients to)
+    | Mail(struct domain client, struct address from, struct recipients *to)
     | Data(struct domain client, FILE *spool);	/* reading the text */
 
 struct session {
 	state		state;
+	struct recipients rcpts;		/* what Mail's to points to */
 	FILE		*mailbox;
 	unsigned	queued;			/* messages accepted */
 };
@@ -132,12 +133,19 @@ A field of a variant cannot be an array (design 3.2, rule 4), so the
 port adds three structures, `struct domain`, `struct address` and
 `struct recipients`, each of which wraps an array of the original.
 
+The recipients are 25 KB that `rcpt` appends to, and a binding is a
+copy that cannot change (design 4.1), so in `Mail` itself every RCPT
+would copy them out, append to the copy and build the state again from
+it. They stay in the session, and `Mail` holds a pointer to them, the
+idiom of design 4.1 for a large payload that arms update; what that
+saves and what it gives up is in [What it costs](#what-it-costs).
+
 ### A transition is a match, and the data comes with it
 
 `mail` switches on the state, as in the original, and its `match`
 binds the client's name only in the arm of `Greeted`, the one state
-that has it. The new state is built whole, so the list of recipients
-that a new transaction starts with is written where it begins:
+that has it. The new state is built whole, from that name, the sender
+and the list of recipients, which `mail` empties as the original does:
 
 ```c
 	switch (s->state) {
@@ -154,8 +162,8 @@ that a new transaction starts with is written where it begins:
 	match (s->state) {
 	...
 	case Greeted(client):
-		memset(&none, 0, sizeof(none));
-		s->state = Mail(client, cmd->address, none);
+		s->rcpts.nrcpt = 0;
+		s->state = Mail(client, cmd->address, &s->rcpts);
 		reply("250 Ok");
 		break;
 ```
@@ -237,7 +245,7 @@ compilers where it must be handled:
 ```diff
      | Greeted(struct domain client)	/* after HELO, between messages */
 +    | Auth(struct domain client)	/* after AUTH, reading credentials */
-     | Mail(struct domain client, struct address from, struct recipients to)
+     | Mail(struct domain client, struct address from, struct recipients *to)
 ```
 
 Clang and GCC report the one `switch` on the state, in `mail`, and build
@@ -273,9 +281,9 @@ build at a time: `mail`, and once `mail` handles `Auth`, `serve`:
 
 ```console
 $ typec -Wall -Wextra -c smtpd.tc
-smtpd.tc:262: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
+smtpd.tc:265: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
 $ typec -Wall -Wextra -c smtpd.tc       # with Auth in mail's match
-smtpd.tc:459: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
+smtpd.tc:457: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
 ```
 
 With `Auth` in both matches the port builds again, and those are all
@@ -323,28 +331,29 @@ To <dave@smtpd.example>
 for dave only
 ```
 
-In the port the list is a field of `Mail`, and a `Mail` cannot be built
-without one. Delete the line that clears `none` and leave the list out
-of the constructor:
+The port keeps the list in the session, for the sake of its stack
+([What it costs](#what-it-costs)), so it has the same line,
+`s->rcpts.nrcpt = 0`, and deleting it brings the same bug. `typec`
+builds it without a warning; built with `-O2`, the server crashes at
+the first RCPT, and built with AddressSanitizer it sends Carol's
+message to Bob, as the original does. What the variant still checks is
+that a `Mail` is given a pointer to a list: leave the pointer out of the
+constructor, and `typec` refuses the program:
 
 ```diff
  	case Greeted(client):
--		memset(&none, 0, sizeof(none));
--		s->state = Mail(client, cmd->address, none);
+ 		s->rcpts.nrcpt = 0;
+-		s->state = Mail(client, cmd->address, &s->rcpts);
 +		s->state = Mail(client, cmd->address);
 ```
 
 ```console
 $ typec -Wall -Wextra -c smtpd.tc
-smtpd.tc:266: error: the constructor 'Mail' takes one argument for each of its 3 fields [constructor-expression]
+smtpd.tc:270: error: the constructor 'Mail' takes one argument for each of its 3 fields [constructor-expression]
 ```
 
-What the list holds is still the port's to get right: delete only the
-`memset`, and `none` holds whatever the stack held. The C compiler's
-`-Wall` reports that, Clang's `-Wuninitialized` at any level and GCC's
-`-Wmaybe-uninitialized` at `-O2`; Type-C adds nothing to it.
-
-The same holds for reading a field. `reply("250 Ok, <%s> forgotten",
+The sender is a field of `Mail` by value, and for it the port keeps
+what the variant gives. `reply("250 Ok, <%s> forgotten",
 s->from)` in the original's `rset` compiles without a warning and, in
 any state but `Mail`, prints a sender that is stale or was never set.
 The port has no `s->from` to write: the sender is a binding of the arm
@@ -352,68 +361,89 @@ or the test that matched `Mail`, and nowhere else is it in scope:
 
 ```console
 $ typec -Wall -Wextra -c smtpd.tc       # from.text in rset, outside the test
-smtpd.tc:329: error: 'from' is not declared (C11 6.5.1p2)
+smtpd.tc:327: error: 'from' is not declared (C11 6.5.1p2)
 ```
 
 ## What it costs
 
 | | `original/smtpd.c` | `smtpd.tc` |
 |---|---:|---:|
-| lines | 463 | 491 |
-| lines of code, without comments and blank lines | 372 | 384 |
+| lines | 463 | 489 |
+| lines of code, without comments and blank lines | 372 | 381 |
 | functions | 16 | 16 |
 | places that test the state | 6 | 6 |
 
 The lines of code are those that
 `gcc -fpreprocessed -dD -E -P -x c FILE` prints that are not blank. The
-port is 12 lines of code longer: the three structures that wrap the
+port is 9 lines of code longer: the three structures that wrap the
 arrays of the states, and the arms of the `match` in `mail` and `serve`
 that name states with nothing to do there. The `match` in `mail` names
 `Data`, though no command arrives in DATA; the original's `switch` names
 it too, as `-Wswitch` asks.
 
-The port copies more, and its stack is larger. The state is a value of
-about 26 KB in `Mail`, most of it the list of 100 recipients of 255
-bytes each, and the original keeps the same data in the session. A
-binding is a copy that cannot change (design 4.1), and Type-C has no
-binding by reference (design 12). So to add a recipient, `rcpt` copies
-the list into its binding, appends to a second copy, and builds the
-state again from that in a third, where the original appends in place.
-A `match` or test on `s->state` reads the state in place, through a
-pointer to the session (design 13.5). The copies cost time in
-proportion to what the client sends, a few times 26 KB a command at
-most; the stack, measured with `-fstack-usage`, is where the port is
-clearly worse. At `-Os` and `-O2` every function is inlined into
-`main`, so its frame is the deepest path; at `-O0` the path is `main`,
-`serve`, `command` and the largest of `rcpt`, `mail`, `data` and
-`rset`. GCC is GCC 16, and ARM is arm-none-eabi-gcc 14.2 with
-`-mcpu=cortex-m3 -mthumb -fno-short-enums`:
+The session is about 26 KB in both programs, most of it the list of
+100 recipients of 255 bytes each. The port holds that list in the
+session, and `Mail` a pointer to it, the idiom that design 4.1 gives
+for a payload of kilobytes that arms update: `mail` empties `s->rcpts`
+and stores `Mail(client, cmd->address, &s->rcpts)`, `rcpt` appends
+through `to` as the original appends to `s->rcpt`, and `data` reads the
+list through `to`.
 
-| deepest stack path | `original/smtpd.c` | `smtpd.tc` | payload behind a pointer |
+The value form shows what the idiom saves. There `Mail(struct domain
+client, struct address from, struct recipients to)` holds the list
+itself, a binding is a copy that cannot change (design 4.1), and Type-C
+has no binding by reference (design 12). So to add a recipient, `rcpt`
+copies the list into its binding, appends to a second copy, and builds
+the state again from that in a third, where the original appends in
+place. The copies cost time in proportion to what the client sends, a
+few times 26 KB a command at most, and they cost stack. The table gives
+the deepest path from `main` through the calls among each program's own
+functions, summing the frames that `-fstack-usage` reports; the C
+library's frames are not counted. At `-Os` and `-O2` most functions are
+inlined into `main`, whose frame is nearly all of the path. GCC is
+GCC 16, and ARM is arm-none-eabi-gcc 14.2 with `-mcpu=cortex-m3 -mthumb
+-fno-short-enums`; the value form is `smtpd.tc` at commit `d48cd49`:
+
+| deepest stack path | `original/smtpd.c` | `smtpd.tc` | value form |
 |---|---:|---:|---:|
-| Clang `-O2` | 28,152 B | 54,408 B | 29,960 B |
-| GCC `-O2` | 28,144 B | 54,000 B | 29,744 B |
-| ARM `-Os` | 28,096 B | 79,392 B | 29,392 B |
-| Clang `-O0` | 27,776 B | 132,832 B | 30,832 B |
+| Clang `-O0` | 28,504 B | 31,440 B | 133,080 B |
+| GCC `-O0` | 28,512 B | 32,176 B | 107,504 B |
+| ARM `-O0` | 28,168 B | 31,920 B | 107,056 B |
+| Clang `-Os` | 28,384 B | 30,272 B | 54,704 B |
+| GCC `-Os` | 28,352 B | 30,040 B | 54,296 B |
+| ARM `-Os` | 28,128 B | 29,680 B | 79,680 B |
+| Clang `-O2` | 28,368 B | 30,272 B | 54,720 B |
+| GCC `-O2` | 28,368 B | 30,048 B | 54,304 B |
+| ARM `-O2` | 28,112 B | 29,680 B | 79,688 B |
 
-The last column is the idiom that design 4.1 gives for a payload of
-kilobytes that arms update: `struct session` holds the recipients as
-`rcpts`, and `Mail` holds a pointer to them, `Mail(struct domain
-client, struct address from, struct recipients *to)`. `mail` empties
-`s->rcpts` and stores `Mail(client, cmd->address, &s->rcpts)`, `rcpt`
-appends through `to` as the original does, without building the state
-again, and `data` reads the list through `to`; the locals that held
-the copies go. That brings every optimizing compiler to within 2 KB of
-the original. It costs part of what the variant gives: `s->rcpts` can
-be named in every state, though through the payload it is reached in
-`Mail` only, and keeping `to` valid is the program's job, as for any C
-pointer. The port keeps the value form, to show what it costs.
+The port is within 2 KB of the original under every optimizing
+compiler, and within 3.8 KB at `-O0`. The rest is copies of payloads
+of a few hundred bytes, the client's name, the sender and the parsed
+command, that bindings, constructors and `try` make; at `-O0` the
+deepest path goes through `parse_command`, which holds the command and
+the results of the parsers it calls. The value form takes about twice
+the original's stack under Clang and GCC at `-Os` and `-O2`, nearly
+three times under ARM, and nearly four times under GCC and ARM and
+nearly five under Clang at `-O0`.
+
+The idiom gives up part of what the variant gives. `s->rcpts` can be
+named in every state, though through the payload it is reached in
+`Mail` only: a command can read or change a list that belongs to no
+transaction, and forgetting to empty it is the original's bug again
+([A field in the wrong state](#a-field-in-the-wrong-state)). And the
+list lives as long as the session, not as long as `Mail`: that `to`
+points to a live list is the program's to keep true, as for any C
+pointer. Here it holds because every `to` is `&s->rcpts` of the session
+that holds the state.
 
 ## What Type-C does not check here
 
 - `text` and `deliver` take the spool, and `text` the client's name, as
   parameters. That they come from the `Data` state is true because
   `serve` passes them from its arm, not because the type says so.
+- The recipients are the session's, and `Mail` points to them. That
+  only `Mail` uses them, and that its `to` points to them, holds because
+  the program is written so ([What it costs](#what-it-costs)).
 - A test on one state, like a `default`, takes a state added later
   without a word (design 4.2, rule 3); the port relies on its tests
   being right for every other state, as the original relies on its

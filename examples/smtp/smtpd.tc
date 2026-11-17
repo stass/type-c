@@ -45,15 +45,20 @@ struct recipients {
 	size_t		nrcpt;
 };
 
-/* Where the session is, with the data that is valid there. */
+/*
+ * Where the session is, with the data that is valid there.  Mail points
+ * to the recipients, which are the session's: rcpt appends to them in
+ * place, where a binding is a copy that cannot change (design 4.1).
+ */
 type state =
     | Init				/* before HELO or EHLO */
     | Greeted(struct domain client)	/* after HELO, between messages */
-    | Mail(struct domain client, struct address from, struct recipients to)
+    | Mail(struct domain client, struct address from, struct recipients *to)
     | Data(struct domain client, FILE *spool);	/* reading the text */
 
 struct session {
 	state		state;
+	struct recipients rcpts;		/* what Mail's to points to */
 	FILE		*mailbox;
 	unsigned	queued;			/* messages accepted */
 };
@@ -256,15 +261,13 @@ helo(struct session *s, const struct command *cmd)
 static void
 mail(struct session *s, const struct command *cmd)
 {
-	struct recipients none;
-
 	match (s->state) {
 	case Init:
 		reply("503 Send HELO first");
 		break;
 	case Greeted(client):
-		memset(&none, 0, sizeof(none));
-		s->state = Mail(client, cmd->address, none);
+		s->rcpts.nrcpt = 0;
+		s->state = Mail(client, cmd->address, &s->rcpts);
 		reply("250 Ok");
 		break;
 	case Mail(_, _, _):
@@ -277,17 +280,12 @@ mail(struct session *s, const struct command *cmd)
 static void
 rcpt(struct session *s, const struct command *cmd)
 {
-	struct recipients more;
-
-	if (case Mail(client, from, to) = s->state) {
-		if (to.nrcpt == MAX_RCPT) {
+	if (case Mail(_, _, to) = s->state) {
+		if (to->nrcpt == MAX_RCPT) {
 			reply("452 Too many recipients");
 			return;
 		}
-		/* A binding is a copy that cannot change (design 4.1). */
-		more = to;
-		more.rcpt[more.nrcpt++] = cmd->address;
-		s->state = Mail(client, from, more);
+		to->rcpt[to->nrcpt++] = cmd->address;
 		reply("250 Ok");
 	} else
 		reply("503 Need MAIL first");
@@ -304,15 +302,15 @@ data(struct session *s)
 	size_t i;
 
 	if (case Mail(client, from, to) = s->state) {
-		if (to.nrcpt == 0) {
+		if (to->nrcpt == 0) {
 			reply("554 No valid recipients");
 			return;
 		}
 		if ((spool = tmpfile()) == NULL)
 			err(1, "tmpfile");
 		fprintf(spool, "From <%s> via %s\n", from.text, client.name);
-		for (i = 0; i < to.nrcpt; i++)
-			fprintf(spool, "To <%s>\n", to.rcpt[i].text);
+		for (i = 0; i < to->nrcpt; i++)
+			fprintf(spool, "To <%s>\n", to->rcpt[i].text);
 		putc('\n', spool);
 		s->state = Data(client, spool);
 		reply("354 End data with <CR><LF>.<CR><LF>");
