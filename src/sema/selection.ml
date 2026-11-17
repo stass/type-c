@@ -29,7 +29,16 @@ type tree =
 
 and branch = { constructors : Ctype.constructor list; subtree : tree }
 
-type t = { scrutinee : branch list; labels : int; default : bool }
+(* What building one tree took, for the measurements of rule 10: the
+   steps, the nodes and the nodes on the deepest path. *)
+type size = { steps : int; nodes : int; depth : int }
+
+type t = {
+  scrutinee : branch list;
+  labels : int;
+  default : bool;
+  size : size;
+}
 
 (* 2^22, provisional (P32): a match without nested patterns takes about
    four steps per label, so one of 2^20 labels fits, while a refusal
@@ -140,8 +149,14 @@ let candidate slots scrutinee label (pattern : constructor_pattern) =
 type held = One of int | Unnamed
 
 (* The state of one call of [select]: the steps of selection taken so
-   far (rule 10) and whether the match has a [default]. *)
-type building = { mutable steps : int; with_default : bool }
+   far (rule 10), the nodes made below the root and the greatest depth
+   of one, and whether the match has a [default]. *)
+type building = {
+  mutable steps : int;
+  mutable nodes : int;
+  mutable deepest : int;
+  with_default : bool;
+}
 
 (* The two bounds of rule 10 are checked here. Every step of selection
    is taken through [take], so the step bound holds the work of building
@@ -152,7 +167,10 @@ let take building steps =
   building.steps <- building.steps + steps;
   if building.steps > max_steps then raise (Refused Too_many_steps)
 
-let deepen depth = if depth > max_depth then raise (Refused Too_deep)
+let deepen building depth =
+  if depth > max_depth then raise (Refused Too_deep);
+  building.nodes <- building.nodes + 1;
+  building.deepest <- max building.deepest depth
 
 (* [candidate] past the tests that the tags [reads] pass, or [None]
    where its next test reads a tag that holds another constructor: the
@@ -211,7 +229,7 @@ let rec choose building ~depth candidates reads =
   | [] -> Leaf (if building.with_default then Default else Nothing)
   | { label; remaining = []; _ } :: _ -> Leaf (Label label)
   | { remaining = test :: _; _ } :: _ ->
-      deepen depth;
+      deepen building depth;
       Node
         { position = test.place.position;
           branches =
@@ -253,7 +271,9 @@ and branches building ~depth candidates reads place variant =
   | others -> own @ [ branch others Unnamed elsewhere ]
 
 let select scrutinee labels ~default =
-  let building = { steps = 0; with_default = default } in
+  let building =
+    { steps = 0; nodes = 0; deepest = 1; with_default = default }
+  in
   let slots = { given = Below.empty; count = 0 } in
   let candidates = List.mapi (candidate slots scrutinee) labels in
   match
@@ -261,7 +281,12 @@ let select scrutinee labels ~default =
       scrutinee
   with
   | root_branches ->
-      Ok { scrutinee = root_branches; labels = List.length labels; default }
+      let size =
+        { steps = building.steps; nodes = building.nodes + 1;
+          depth = building.deepest }
+      in
+      Ok { scrutinee = root_branches; labels = List.length labels; default;
+           size }
   | exception Refused refusal -> Error refusal
 
 (* [visit] applied to each leaf below [branches], in time linear in the

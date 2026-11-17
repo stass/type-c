@@ -46,7 +46,8 @@ bytes and 256 for each byte of the unit.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc --stats -c counted.tc 2> stats || cat stats
   >   sed 's/^typec: stats: counted.tc: //' stats | tr ' ' '\n' > fields
-  >   grep -v '^unit_bytes=\|^output_bytes=\|^output_limit=\|^slice_' fields
+  >   grep -v '^unit_bytes=\|^output_bytes=\|^output_limit=' fields |
+  >     grep -v '^slice_\|^selection_'
   >   eval "$(grep '^unit_bytes=\|^output_bytes=\|^output_limit=' fields)"
   >   [ "$output_limit" -eq $((33554432 + 256 * unit_bytes)) ] &&
   >     [ "$output_bytes" -ge "$unit_bytes" ] &&
@@ -108,3 +109,69 @@ no test.
   slice_conversions=1
   slice_untested=3
   slice_late_calls=4
+
+The selection of a match or a test is counted by what building its tree
+took (design 4.7 rule 10, P32): the steps of selection, the nodes of the
+tree and the nodes on its deepest path, each the most over the matches
+and tests of the unit and of each instance it uses, and zero where it
+has none. A match on the tags of a variant, with two labels, takes eight
+steps and is one node. A match with a label that follows a pointer takes
+ten steps to a tree of two nodes, one under the other, and an instance
+of a generic function counts its own.
+
+  $ cat > flat.tc <<'EOF'
+  > type list = | Nil | Cons(int head, const list *tail);
+  > int flat(const list *l)
+  > {
+  >   match (*l) {
+  >   case Nil:
+  >     return 0;
+  >   case Cons(h, t):
+  >     return h;
+  >   }
+  > }
+  > EOF
+  $ cat > deep.tc <<'EOF'
+  > type list = | Nil | Cons(int head, const list *tail);
+  > int deep(const list *l)
+  > {
+  >   match (*l) {
+  >   case Cons(_, *Nil):
+  >     return 1;
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ cat > bare.tc <<'EOF'
+  > int none(void)
+  > {
+  >   return 0;
+  > }
+  > EOF
+  $ cat > inst.tc <<'EOF'
+  > type list = | Nil | Cons(int head, const list *tail);
+  > generic(T) int
+  > deep(T x, const list *l)
+  > {
+  >   match (*l) {
+  >   case Cons(_, *Nil):
+  >     return 1;
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > int use(const list *l)
+  > {
+  >   return deep(1, l);
+  > }
+  > EOF
+  $ for unit in flat deep bare inst; do
+  >   typec --cc=$clang --stats -c $unit.tc 2> stats || cat stats
+  >   tr ' ' '\n' < stats | grep '^selection_' | tr '\n' ' '
+  >   echo
+  > done
+  selection_steps=8 selection_nodes=1 selection_depth=1 
+  selection_steps=10 selection_nodes=2 selection_depth=2 
+  selection_steps=0 selection_nodes=0 selection_depth=0 
+  selection_steps=10 selection_nodes=2 selection_depth=2 

@@ -1699,7 +1699,11 @@ each instance that it uses, which the measurements of P28 read:
 evaluates, which lowering writes with a test), `slice_untested` (those
 that C does not evaluate) and `slice_late_calls` (the tested indexes and
 `slice_sub`s with a call or a statement expression in an operand after
-the first). A unit that typec refuses reports none.
+the first). Last come the most steps (`selection_steps`), nodes
+(`selection_nodes`) and nodes on one path (`selection_depth`) that
+building the selection tree of one match or test of the unit or of an
+instance took, which the measurements of P32 read, each the most over
+all of them. A unit that typec refuses reports none.
 
 A `.tc` input refuses the option that stops the backend at
 preprocessing (`-E`), the options that change the preprocessed text

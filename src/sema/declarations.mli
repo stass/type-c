@@ -183,6 +183,11 @@ val slice_checks : t -> (Expressions.slice_check * Expressions.slice_form) list
     own text and in the definition of each instance that it uses, each
     with its form ({!Expressions.slice_checks}). *)
 
+val selection_sizes : t -> Selection.size list
+(** What building the selection tree of each match and test took, in the
+    unit's own text and in the definition of each instance that it uses
+    ({!Expressions.selection_sizes}). *)
+
 val instance_bytes : t -> int
 (** The bytes that the readings for the unit's instances charged the
     instance budget (design 3.5 rule 7). *)

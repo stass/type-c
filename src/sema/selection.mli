@@ -61,11 +61,21 @@ type tree =
 
 and branch = { constructors : Ctype.constructor list; subtree : tree }
 
+(** What building one tree took, which the bounds of rule 10 limit: the
+    steps of selection ({!max_steps}), the nodes, and the nodes on the
+    deepest path, the root counted ({!max_depth}). *)
+type size = { steps : int; nodes : int; depth : int }
+
 (** The tree of a match. Its root reads the tag of the scrutinee, which
     every match checks (4.5), so [scrutinee] holds the root's branches.
-    [labels] counts the case labels and [default] says whether there is
-    a [default]. *)
-type t = private { scrutinee : branch list; labels : int; default : bool }
+    [labels] counts the case labels, [default] says whether there is
+    a [default] and [size] what building the tree took. *)
+type t = private {
+  scrutinee : branch list;
+  labels : int;
+  default : bool;
+  size : size;
+}
 
 val max_steps : int
 (** The most steps of selection in building one tree: each label that a

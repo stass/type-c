@@ -224,8 +224,14 @@ type test = {
   bindings : binding list;
   controlled : Tree.span;
   nested : nested option;
+  size : Selection.size;
 }
-type arms = { matched : matched_arm list; nested : nested option }
+
+type arms = {
+  matched : matched_arm list;
+  nested : nested option;
+  size : Selection.size;
+}
 type selection = Arms of arms | Test of test
 
 type 'selects matching_of = {
@@ -591,6 +597,15 @@ let selection view (expression : Tree.expression) =
 
 let constructions view = Sites.constructions view.sites
 let matchings view = Sites.matchings view.sites
+
+let selection_sizes view =
+  List.map
+    (fun matching ->
+      match matching.selects with
+      | Arms arms -> arms.size
+      | Test test -> test.size)
+    (matchings view)
+
 let tries view = List.rev view.tries
 let defers view = List.rev view.defers
 let zero_initialisers view = List.rev view.zero_initialisers
@@ -4951,7 +4966,7 @@ and tested context reading root ~pattern_span (pattern : Tree.pattern)
     constructor_pattern context reading root ~position:[]
       ~reached:scrutinee_reach pattern_span pattern
   in
-  let nested = test_tree context ~pattern_span reading root checked in
+  let size, nested = test_tree context ~pattern_span reading root checked in
   let bindings = List.map (declare_binding context) checked.bindings in
   let enclosing =
     { context.typed.enclosing with case_labels = Test_statement }
@@ -4959,7 +4974,7 @@ and tested context reading root ~pattern_span (pattern : Tree.pattern)
   within context enclosing (fun () -> typed_statement context controlled);
   { form; constructor = checked.constructor.constructor_name;
     constructors = List.map constructor_name (Array.to_list root.constructors);
-    bindings; controlled = controlled.span; nested }
+    bindings; controlled = controlled.span; nested; size }
 
 (* Design 4.7 rule 9: a test selects as a match of its one label would,
    under the bounds of rule 10, and needs no check of 4.2. Its tree is
@@ -4979,7 +4994,7 @@ and test_tree context ~pattern_span reading root
         | Nothing -> 0
         | Default -> invalid_arg "Expressions.test_tree: a default"
       in
-      nested_of reading root ~arm_of_leaf tree
+      (tree.size, nested_of reading root ~arm_of_leaf tree)
 
 (* The arms of a match of the variant [root]: their labels, the coverage
    of its values and the items of each arm, and the selection tree that
@@ -5001,7 +5016,8 @@ and typed_arms context ~(statement : Tree.statement) reading root arms =
       (List.combine arms labelled)
   in
   let arm_of_leaf = arm_of_match_leaf (List.combine matched labelled) in
-  { matched; nested = nested_of reading root ~arm_of_leaf tree }
+  { matched; nested = nested_of reading root ~arm_of_leaf tree;
+    size = tree.size }
 
 (* Design 4.4: a callee that designates a function declared [_Noreturn]
    or with the GNU [noreturn], or a builtin that is; an undeclared name

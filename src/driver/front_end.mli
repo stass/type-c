@@ -51,6 +51,12 @@ type counts = {
           generic function, those of the universe text included *)
   slices : slice_counts;
       (** the slice tests of the unit and of each instance it uses *)
+  selection : Typec_sema.Selection.size;
+      (** the most steps, nodes and depth that building the selection
+          tree of one match or test of the unit or of an instance took
+          (design 4.7 rule 10, P32), each the most over all of them, so
+          that the three need not be of one tree; zeros where there is
+          none *)
 }
 
 val lower :

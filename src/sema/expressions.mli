@@ -253,7 +253,7 @@ type nested = { locals : pointer_local list; tree : selection_tree }
     the valid ones (4.5), its bindings in order, the span of its
     statement, and its selection tree where the tree has more than one
     node (4.7 rule 9), whose leaf of the pattern is 1 and every other
-    leaf 0. *)
+    leaf 0, and what building the tree took ({!Selection.size}). *)
 type test = {
   form : test_form;
   constructor : Spelling.constructor;
@@ -261,12 +261,18 @@ type test = {
   bindings : binding list;
   controlled : Tree.span;
   nested : nested option;
+  size : Selection.size;
 }
 
 (** The arms of a match, and its selection tree where the tree has more
     than one node (design 4.7 rule 6); a tree of one node is the [switch]
-    on the scrutinee's tag that [matched] gives. *)
-type arms = { matched : matched_arm list; nested : nested option }
+    on the scrutinee's tag that [matched] gives, and what building the
+    tree took ({!Selection.size}). *)
+type arms = {
+  matched : matched_arm list;
+  nested : nested option;
+  size : Selection.size;
+}
 
 (** What a matching selects with the tag of its scrutinee: the arms of a
     match statement, or the one constructor of a single-pattern test. *)
@@ -290,6 +296,10 @@ type matching = selection matching_of
 val matchings : t -> matching list
 (** The match statements and single-pattern tests typed, in source
     order. *)
+
+val selection_sizes : t -> Selection.size list
+(** What building the selection tree of each match and test of
+    {!matchings} took. *)
 
 (** Where a statement stands: as a block item, or as the substatement of
     another statement. *)

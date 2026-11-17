@@ -126,6 +126,12 @@ let slice_checks result =
   in
   Expressions.slice_checks result.typed @ instances
 
+let selection_sizes result =
+  Ctype.Instances.fold
+    (fun _ (reading : instance_text) sizes ->
+      Expressions.selection_sizes reading.typed @ sizes)
+    result.placements.readings (Expressions.selection_sizes result.typed)
+
 let type_declarations result =
   Hashtbl.to_seq_values result.type_declarations
   |> List.of_seq
