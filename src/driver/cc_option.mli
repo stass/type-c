@@ -38,6 +38,7 @@ type typec_option =
   | Print_target  (** [--print-target] *)
   | Emit_c  (** [--emit-c] *)
   | Stats  (** [--stats] *)
+  | Trap_function  (** [--trap-function=NAME] *)
 
 (** What an option is to the pipeline of a [.tc] input. *)
 type role =

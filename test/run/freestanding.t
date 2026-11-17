@@ -8,11 +8,12 @@ traps or copies: a slice index and `slice_sub`, string literals as
 corrupts, a single-pattern test, `try`, `defer`, a generic function
 with two instances and a zero initialiser of its type parameter. Each
 backend compiles it at -O0 and -O2 with -ffreestanding -nostdlib
--fno-builtin.
+-fno-builtin, without and with --trap-function=stop.
 
 The expected names are those the program declares with `extern`: put
-and input, which its environment supplies, and memcpy, memmove, memset
-and memcmp, which GCC and Clang require of every freestanding
+and input, which its environment supplies; stop, the trap function,
+which only the build with --trap-function calls; and memcpy, memmove,
+memset and memcmp, which GCC and Clang require of every freestanding
 environment (design 10.4). Clang at -O0 calls memset here, for the
 padding of a compound literal, as it does for C.
 
@@ -26,13 +27,17 @@ linking it: with -nostdlib nothing else is linked, so they are what
 such a link leaves unresolved, while the entry point and start-up code
 of a -nostdlib executable differ by host and macOS has no static
 executables. Each build must also show put and input, so that an nm
-output the check cannot read fails it. The object is then linked with a
-hosted harness that supplies put and input, and runs: the corrupted tag
-and the index out of range trap (design 10.5), so -O2 kept them.
+output the check cannot read fails it, and stop exactly where it is
+built with --trap-function. The object is then linked with a hosted
+harness that supplies put, input and stop, and runs: the corrupted tag
+and the index out of range trap (design 10.5), so -O2 kept them. Under
+--trap-function they call stop, which exits with 3, also in evaluate,
+whose local named stop hides the function where its match traps.
+-Wredundant-decls checks that the program may declare stop itself.
 
   $ . ./backends.sh
   $ export LC_ALL=C
-  $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Werror"
+  $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Wredundant-decls -Werror"
   $ freestanding="-ffreestanding -nostdlib -fno-builtin -fno-stack-protector"
   $ cat > corrupt.h <<'EOF'
   > static void corrupt(expr *e) { e->tag = (enum expr_tag)7; }
@@ -41,6 +46,7 @@ and the index out of range trap (design 10.5), so -O2 kept them.
   > #include <stddef.h>
   > extern void put(long value);
   > extern long input(int which);
+  > extern _Noreturn void stop(void);
   > extern void *memcpy(void *to, const void *from, size_t n);
   > extern void *memmove(void *to, const void *from, size_t n);
   > extern void *memset(void *s, int c, size_t n);
@@ -58,9 +64,10 @@ and the index out of range trap (design 10.5), so -O2 kept them.
   >   return p;
   > }
   > static long evaluate(const expr *e) {
+  >   long stop = 0;
   >   match (*e) {
   >   case Add(*Num(a), *Num(b)):
-  >     return a + b;
+  >     return a + b + stop;
   >   case Add(l, r):
   >     return evaluate(l) + evaluate(r);
   >   case Neg(*Neg(inner)):
@@ -109,6 +116,7 @@ and the index out of range trap (design 10.5), so -O2 kept them.
   > long run(int how);
   > void put(long value) { printf("%ld\n", value); }
   > long input(int which) { return which; }
+  > _Noreturn void stop(void) { exit(3); }
   > int main(int argc, char **argv) {
   >   if (argc != 2)
   >     return 2;
@@ -128,6 +136,7 @@ The names the program declares:
   memmove
   memset
   put
+  stop
 
 undefined CC OBJECT prints the undefined symbols of OBJECT without the
 prefix that CC's target gives a C name, one per line, sorted; `w` and `v` are
@@ -149,16 +158,19 @@ Each build leaves no undefined name outside the declared ones, and runs.
 
   $ for cc in $clang $gcc; do
   >   for level in -O0 -O2; do
-  >     typec --cc=$cc $flags $freestanding $level -c program.tc &&
-  >     undefined $cc program.o > found && comm -23 found declared &&
-  >     grep -x -e input -e put found &&
-  >     $cc $flags harness.c program.o -o program && ./program 0 &&
-  >     for how in 1 2; do
-  >       sh -c "ulimit -c 0; ./program $how; exit \$?" >/dev/null 2>&1
-  >       case $? in
-  >       132 | 133) echo "$how trapped" ;;
-  >       *) echo "$how did not trap" ;;
-  >       esac
+  >     for trap in '' --trap-function=stop; do
+  >       typec --cc=$cc $flags $freestanding $level $trap -c program.tc &&
+  >       undefined $cc program.o > found && comm -23 found declared &&
+  >       grep -x -e input -e put -e stop found &&
+  >       $cc $flags harness.c program.o -o program && ./program 0 &&
+  >       for how in 1 2; do
+  >         sh -c "ulimit -c 0; ./program $how; exit \$?" >/dev/null 2>&1
+  >         case $? in
+  >         132 | 133) echo "$how trapped" ;;
+  >         3) echo "$how called stop" ;;
+  >         *) echo "$how did not trap" ;;
+  >         esac
+  >       done
   >     done
   >   done
   > done
@@ -173,13 +185,14 @@ Each build leaves no undefined name outside the declared ones, and runs.
   2 trapped
   input
   put
+  stop
   -3
   8
   4
   1
   run 5
-  1 trapped
-  2 trapped
+  1 called stop
+  2 called stop
   input
   put
   -3
@@ -191,6 +204,16 @@ Each build leaves no undefined name outside the declared ones, and runs.
   2 trapped
   input
   put
+  stop
+  -3
+  8
+  4
+  1
+  run 5
+  1 called stop
+  2 called stop
+  input
+  put
   -3
   8
   4
@@ -198,6 +221,51 @@ Each build leaves no undefined name outside the declared ones, and runs.
   run 5
   1 trapped
   2 trapped
+  input
+  put
+  stop
+  -3
+  8
+  4
+  1
+  run 5
+  1 called stop
+  2 called stop
+  input
+  put
+  -3
+  8
+  4
+  1
+  run 5
+  1 trapped
+  2 trapped
+  input
+  put
+  stop
+  -3
+  8
+  4
+  1
+  run 5
+  1 called stop
+  2 called stop
+
+A unit whose lowering writes no trap leaves __tc_trap unused, which
+Clang reports under -Wunused-function outside a system header. Its
+declarations stand under typec's own marker (design 10.5), so both
+backends take the unit with -Werror, and its object refers to no stop.
+
+  $ cat > no_trap.tc <<'EOF'
+  > type flag = | On | Off;
+  > flag on(void) { return On; }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   for level in -O0 -O2; do
+  >     typec --cc=$cc $flags $freestanding $level --trap-function=stop \
+  >       -c no_trap.tc && undefined $cc no_trap.o
+  >   done
+  > done
 
 The check finds a name that the lowering would introduce: the same C
 with each trap written as a call of abort leaves abort undefined.

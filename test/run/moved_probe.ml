@@ -49,5 +49,8 @@ let () =
     in
     [ deleted; moved ]
   in
-  let edits, _ = Result.get_ok (Emitter.limited unit edits) in
-  print_string (Emitter.emit unit { edits; assertions = [] })
+  let edits, _ =
+    Result.get_ok (Emitter.limited unit ~trap:Trap.builtin edits)
+  in
+  print_string
+    (Emitter.emit unit { trap = Trap.builtin; edits; assertions = [] })

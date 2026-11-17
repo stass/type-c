@@ -62,15 +62,18 @@ type counts = {
 val lower :
   Typec_syntax.Keyword_set.dialect ->
   Typec_sema.Target.t ->
+  trap:Typec_emit.Trap.t ->
   Typec_cpp.Reader.t ->
   (Typec_emit.Emitter.lowered * counts, Typec_cpp.Reader.error) result
-(** [lower dialect target text] parses [text] with the keywords that the
-    backend of [target] reads in [dialect], reads its declarations and
-    types its expressions for [target], and gives the edits that lower
-    its Type-C constructs with the assertions of the types of [target]
-    that they assume ({!Typec_emit.Assumptions}), and the unit's counts,
-    or the first error of either stage. A text without Type-C constructs
-    has no edits and no assertions. It has no effects. *)
+(** [lower dialect target ~trap text] parses [text] with the keywords
+    that the backend of [target] reads in [dialect], and reads its
+    declarations and types its expressions for [target]. It gives the
+    edits that lower its Type-C constructs, whose traps call as [trap]
+    does, with [trap] and with the assertions of the types of [target]
+    that the edits assume ({!Typec_emit.Assumptions}); and the unit's
+    counts. Or it gives the first error of either stage. A text without
+    Type-C constructs has no edits and no assertions. It has no
+    effects. *)
 
 val counts_line : counts -> string
 (** The counts as one line of [name=value] fields, in the order of

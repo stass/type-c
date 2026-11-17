@@ -4435,7 +4435,43 @@ to the failing code. By default it is `__builtin_trap()` on GNU-compatible
 compilers. `--trap-function=name` calls `_Noreturn void name(void)`, which
 the program supplies, before the builtin; freestanding targets use this to
 report the failure. Where the compiler has no such builtin, the call is
-followed by an endless loop. The traps are: an invalid tag in `match`,
+followed by an endless loop.
+
+`name` is a C identifier of ASCII letters, digits and underscores; the
+driver refuses any other text, which would reach the C unquoted. A
+declaration in a block may hide `name` where a trap stands, so a trap
+does not call it there. It calls `__tc_trap`, a name reserved to typec
+that nothing hides (13.5). A unit with a Type-C construct declares it
+at file scope in front of its own text and defines it after that text,
+both under the marker of typec's text (13.4):
+
+```c
+static inline _Noreturn void __tc_trap(void);
+/* the unit's own text */
+static inline _Noreturn void __tc_trap(void) { _Noreturn void name(void); name(); __builtin_trap(); }
+```
+
+`name` is declared in the body, after the unit's own text, rather than
+at file scope in front of it: there it would make the program's own
+declaration of `name` redundant, which GCC reports under
+`-Wredundant-decls` at the program's line. The declaration in the body
+states the type that the call relies on, so a declaration of `name` in
+the unit with another type is an error that the backend reports at
+typec's text. One with internal linkage gives the call that linkage
+(C11 6.2.2p4), so the trap calls the unit's own function. The
+definition reads the pragmas in effect at the end of the unit: a
+`#pragma GCC poison` of `name` is an error at typec's text, and a
+`#pragma GCC visibility push` left open applies to the reference to
+`name`.
+
+A unit that writes no trap leaves `__tc_trap` unused: the marker exempts
+it from the warning of an unused function, and GCC 16 and Clang 21 emit
+no code for it, also at `-O0`, so the object refers to `name` only where
+the unit traps (10.4); `test/run/freestanding.t` checks this. The
+builtin follows a call that does not return, and GCC 16 and Clang 21
+emit no code for it at `-O0` either on x86-64, where it was tried.
+
+The traps are: an invalid tag in `match`,
 in a single-pattern test (4.5) or in `try` (5.1 rule 2), the end of a
 match arm, the end of a block that holds a `defer` statement and cannot
 complete (section 6 rule 1), a slice index or sub-slice out of range,
@@ -7430,7 +7466,9 @@ so on are the temporaries of the `try` expressions of a function,
 braced list, each with the number of its `try`, and
 `__tc_c0` and so on those of the first operands that a prelude
 evaluates (above); they share its blocks and take the number that
-tells them apart. `__tc_s0`,
+tells them apart. `__tc_trap` is the function that every trap calls
+under `--trap-function` (10.5), declared once in front of a unit's own
+text and defined once after it. `__tc_s0`,
 `__tc_i0`, `__tc_lo0` and `__tc_hi0` and so on are the temporaries of
 the test and of the conversion of a slice (above), declared where
 `__tc_ret` is, with the number of their test or conversion. `__tc_bits`

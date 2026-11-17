@@ -25,9 +25,9 @@ type piece
     unit's own text is charged in full first. The pieces of a {!moved}
     edit are made when first forced, and they and the edit are charged
     then; {!limited} forces every one before it returns. So the charge
-    covers all that {!emit} writes for the unit but the static
-    assertions that end it, a fixed text of typec's. Only {!limited}
-    makes an output.
+    covers all that {!emit} writes for the unit but the trap's
+    declarations and the static assertions, fixed texts of typec's
+    around the name of a trap function. Only {!limited} makes an output.
 
     The charge holds only if lowering puts each piece it makes into one
     edit. A copy of moved text is made afresh: the pieces of a moved
@@ -37,21 +37,26 @@ type output
 
 val limited :
   Typec_cpp.Reader.t ->
+  trap:Trap.t ->
   (output -> 'a) ->
   ('a * int, Typec_cpp.Reader.error) result
-(** [limited unit make] is [make output] for an output of [unit] with the
-    bytes charged for it, which are at most the limit, or the error at
-    the location of the first piece, edit or {!joined} text whose charge
-    would pass the output limit of [unit], after which nothing more is
-    made. The pieces of every {!moved} edit are forced, in the order the
-    edits were made, after [make] returns and before the charge is
-    read.
+(** [limited unit ~trap make] is [make output] for an output of [unit]
+    that traps with [trap], with the bytes charged for it, which are at
+    most the limit, or the error at the location of the first piece,
+    edit or {!joined} text whose charge would pass the output limit of
+    [unit], after which nothing more is made. The pieces of every
+    {!moved} edit are forced, in the order the edits were made, after
+    [make] returns and before the charge is read.
     [output] belongs to [make] alone: one that escapes it would raise
     past this function, and edits of two outputs are each held to a
     limit of their own. *)
 
 val unit : output -> Typec_cpp.Reader.t
 (** [unit output] is the unit that [output] is made from. *)
+
+val trap : output -> Trap.t
+(** [trap output] is how every trap that lowering writes for [output]
+    traps (design 10.5). *)
 
 val token : output -> int -> piece option
 (** [token output index] is the token [index] of the unit at its own
@@ -217,16 +222,23 @@ val in_order : edit list -> edit list
     edits of one range and owner in the order of the list. Their owners
     follow the same order. *)
 
-(** What lowering makes of a unit: its edits, and the declarations that
+(** What lowering makes of a unit: how its edits trap, the trap of the
+    output they were made for; its edits; and the declarations that
     follow its text, the static assertions of {!Assumptions}. *)
-type lowered = { edits : edit list; assertions : string list }
+type lowered = { trap : Trap.t; edits : edit list; assertions : string list }
 
 val emit : Typec_cpp.Reader.t -> lowered -> string
-(** [emit unit { edits; assertions }] is the text of [unit] with each
-    edit applied, then, where there are [assertions] or a bracketed
-    edit, a line marker for line 1 of the file ["<typec>"] with flag 3,
-    each assertion on a line of its own, and, where an edit is
-    bracketed, the packing probe of design 10.3. The probe declares
+(** [emit unit { trap; edits; assertions }] is the text of [unit] with
+    each edit applied and, where there are edits, the declarations that
+    [trap] needs around it. Its prototype ({!Trap.prototype}) stands in
+    front of the first token of the unit's own text, after a line marker
+    for line 1 of the file ["<typec>"] with flag 3 and before a marker
+    for the location of that token. Its definition ({!Trap.definition})
+    follows the text with the assertions. Where there are [assertions],
+    a definition or a bracketed edit, the text is followed by a line
+    marker for line 1 of the file ["<typec>"] with flag 3, each
+    assertion and the definition on a line of its own, and, where an
+    edit is bracketed, the packing probe of design 10.3. The probe declares
     [struct __tc_pack_probe_1] and [struct __tc_pack_probe_2], each in a
     bracket, inside regions of [#pragma pack(1)] and [#pragma pack(2)],
     and asserts ({!Assumptions.assertion}) that they are aligned alike,

@@ -115,8 +115,8 @@ let query_target ~program options =
   | Error ((Output_too_long | Invalid_macros _) as error) ->
       stop Exit_status.Environment (Target_query.error_message ~program error)
 
-let lower dialect target text =
-  match Front_end.lower dialect target text with
+let lower dialect target ~trap text =
+  match Front_end.lower dialect target ~trap text with
   | Ok lowered -> lowered
   | Error error -> refuse error
 
@@ -144,12 +144,12 @@ let report_counts (translation : Pipeline.translation) counts =
     (Printf.sprintf "typec: stats: %s: %s" translation.source
        (Front_end.counts_line counts))
 
-let translate ~null ~stats (target : Target.t)
+let translate ~null ~stats ~trap (target : Target.t)
     (translation : Pipeline.translation) =
   make_directory translation.directory;
   preprocess ~null target.backend.compiler translation;
   let text = read_preprocessed translation in
-  let lowered, counts = lower translation.dialect target text in
+  let lowered, counts = lower translation.dialect target ~trap text in
   if stats then report_counts translation counts;
   write_emitted translation.emitted (Typec_emit.Emitter.emit text lowered);
   Option.iter
@@ -161,10 +161,10 @@ let translate ~null ~stats (target : Target.t)
 (* One target model serves every translation, as they share the options
    of the compile step, and names the compiler that the commands are for.
    The final command reads typec's stdin, which an input "-" names. *)
-let run_plan ~program ~stats (plan : Pipeline.t) =
+let run_plan ~program ~stats ~trap (plan : Pipeline.t) =
   let target = query_target ~program plan.target_options in
   with_file "/dev/null" [ Unix.O_RDONLY ] (fun null ->
-      List.iter (translate ~null ~stats target) plan.translations);
+      List.iter (translate ~null ~stats ~trap target) plan.translations);
   List.iter
     (fun final ->
       run_step ~stdin:Unix.stdin ~stdout:Unix.stdout
@@ -182,7 +182,8 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
       Exit (Exit_status.code Exit_status.Environment)
   | Ok plan -> (
       try
-        run_plan ~program:invocation.program ~stats:invocation.stats plan;
+        run_plan ~program:invocation.program ~stats:invocation.stats
+          ~trap:invocation.trap plan;
         Exit 0
       with
       | Stopped outcome -> outcome

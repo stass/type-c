@@ -1580,9 +1580,10 @@ line, and passes only when `ocamlc` rejects it with that text.
 The backend is the program named by the last `--cc=PATH` option, else by
 the `TYPEC_CC` environment variable when it is set and not empty, else
 `cc`. A name without a slash is looked up in `PATH`. `typec` consumes
-`--cc=`, `--print-target`, `--emit-c` and `--stats` where an option can
-stand (the value of `-o` is never one) and forwards every other argument, `--cc`
-without `=` included, in its original order. The backend is run with an
+`--cc=`, `--print-target`, `--emit-c`, `--stats` and `--trap-function=`
+where an option can stand (the value of `-o` is never one) and forwards
+every other argument, `--cc` without `=` included, in its original
+order. The backend is run with an
 argument vector, never through a shell, so `TYPEC_CC` names one program:
 it cannot carry extra arguments such as `ccache gcc`.
 
@@ -1602,8 +1603,9 @@ older one with a message naming the oldest supported releases.
 
 Without a `.tc` input `typec` replaces itself with the backend. Exit
 status: the backend's own; a backend ended by a signal ends `typec`
-with the same signal. `typec` exits with 81 when `--cc=` has no path, the
-backend cannot be started or the backend runs `typec` again, after one
+with the same signal. `typec` exits with 81 when `--cc=` has no path,
+`--trap-function=` names no C identifier, the backend cannot be started
+or the backend runs `typec` again, after one
 message on stderr (with `--print-target`, a second says that the backend
 gave no target model).
 
@@ -1675,6 +1677,17 @@ without the `.tc` inputs, when other inputs remain, to print theirs.
 
 `--emit-c` stops after step 2 and writes the C to the `-o` file, or to
 stdout; the command line then has exactly one input, a `.tc` file.
+
+`--trap-function=NAME` makes every trap of the emitted C (a corrupted
+tag, a slice index out of range) call `_Noreturn void NAME(void)`, which
+the program supplies, instead of executing `__builtin_trap()` alone; a
+freestanding program uses it to report the failure (design 10.5). NAME
+is a C identifier of ASCII letters, digits and underscores, and the last
+`--trap-function=` wins. NAME is the name the program defines, not a
+macro: the emitted C is already preprocessed, so `-DNAME=...` does not
+change it. A `.tc` unit that holds a Type-C construct declares NAME
+after its own text, so a declaration of NAME in the program with
+another type is a backend error reported at typec's text (`<typec>`).
 
 `--stats` prints on stderr, for each `.tc` input, one line
 `typec: stats: FILE: ` and the fields `unit_bytes` (the preprocessed

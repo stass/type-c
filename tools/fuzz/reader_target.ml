@@ -26,7 +26,7 @@ let check_accepted text (result : Reader.t) =
   if not (Spans.gaps_are_layout text result) then
     violated "the gaps hold only white space and line markers";
   let unchanged : Typec_emit.Emitter.lowered =
-    { edits = []; assertions = [] }
+    { trap = Typec_emit.Trap.builtin; edits = []; assertions = [] }
   in
   if Typec_emit.Emitter.emit result unchanged <> text then
     violated "a unit without edits is emitted as it was read";

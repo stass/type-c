@@ -28,7 +28,8 @@ let () =
         Result.map
           (fun ((lowered : Typec_emit.Emitter.lowered), _) ->
             Typec_emit.Emitter.emit text { lowered with assertions = [] })
-          (Typec_driver.Front_end.lower Gnu target text))
+          (Typec_driver.Front_end.lower Gnu target
+             ~trap:Typec_emit.Trap.builtin text))
   in
   match lowered with
   | Ok c -> print_string c

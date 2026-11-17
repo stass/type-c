@@ -37,13 +37,13 @@ let read source =
 (* The text that [source] is read to, its tree and its edits. *)
 let lowered source =
   let text, unit, declarations = read source in
-  match Lowering.edits text declarations with
+  match Lowering.edits text ~trap:Trap.builtin declarations with
   | Ok (edits, _) -> (text, unit, edits)
   | Error error -> failwith (Reader.error_message error)
 
 let emitted source =
   let text, _, edits = lowered source in
-  Emitter.emit text { edits; assertions = [] }
+  Emitter.emit text { trap = Trap.builtin; edits; assertions = [] }
 
 let is_marker line = String.starts_with ~prefix:"# " line
 
@@ -144,8 +144,13 @@ let bracketed_after_forward source =
     Emitter.bracketed output ~at ~location
       [ Emitter.generated output location "struct s { int i; };" ]
   in
-  let edits = fst (Result.get_ok (Emitter.limited text bracket)) :: edits in
-  words (before_typec_text (Emitter.emit text { edits; assertions = [] }))
+  let edits =
+    fst (Result.get_ok (Emitter.limited text ~trap:Trap.builtin bracket))
+    :: edits
+  in
+  words
+    (before_typec_text
+       (Emitter.emit text { trap = Trap.builtin; edits; assertions = [] }))
 
 let bracket =
   "#pragma pack(push) #pragma pack() struct s { int i; }; #pragma pack(pop)"
@@ -647,7 +652,7 @@ let holds text part =
    count passes, where its C text would pass the output limit. *)
 let over_limit name source =
   let text, _, declarations = read source in
-  match Lowering.edits text declarations with
+  match Lowering.edits text ~trap:Trap.builtin declarations with
   | Ok _ -> fails name "lowered"
   | Error { message; _ } ->
       if not (holds message "would pass the output limit of typec") then
@@ -656,7 +661,7 @@ let over_limit name source =
 (* The partner of a source that [over_limit] refuses lowers. *)
 let under_limit name source =
   let text, _, declarations = read source in
-  match Lowering.edits text declarations with
+  match Lowering.edits text ~trap:Trap.builtin declarations with
   | Ok _ -> ()
   | Error error -> fails name (Reader.error_message error)
 
@@ -714,7 +719,7 @@ let deep_patterns () =
     read (Budget_probes.deep_pattern ~length:100_000 120)
   in
   let before = Gc.allocated_bytes () in
-  ignore (Lowering.edits text declarations);
+  ignore (Lowering.edits text ~trap:Trap.builtin declarations);
   let allocated = Gc.allocated_bytes () -. before in
   if allocated > deep_pattern_allocation then
     fails "the allocation of lowering a deep pattern over a long field"

@@ -31,10 +31,12 @@ let unit = read source
 let at line : Location.t = { file = "a.c"; line; flags = No_flags }
 
 (* The text with [edits] and no assertions. *)
-let emit unit edits = Emitter.emit unit { edits; assertions = [] }
+let emit unit edits =
+  Emitter.emit unit { trap = Trap.builtin; edits; assertions = [] }
 
 (* What [make] makes for an output of [unit], under the output limit. *)
-let made unit make = fst (Result.get_ok (Emitter.limited unit make))
+let made unit make =
+  fst (Result.get_ok (Emitter.limited unit ~trap:Trap.builtin make))
 
 let edit (unit : Reader.t) ~first ~count location text =
   made unit (fun output ->
@@ -292,7 +294,9 @@ let () =
        int z;\n");
   check "assertions follow the text under a marker of their own"
     (Emitter.emit unit
-       { edits = [ replacement ]; assertions = [ "int a;"; "int b;" ] }
+       { trap = Trap.builtin;
+         edits = [ replacement ];
+         assertions = [ "int a;"; "int b;" ] }
     = "# 1 \"a.c\"\n\
        int \n\
        # 1 \"a.c\"\n\
@@ -366,10 +370,12 @@ let () =
      # 1 \"<typec>\" 3\n"
   in
   check "a bracketed text, then the assertions and the probe"
-    (Emitter.emit unit { edits = [ bracketed ]; assertions = [ "int a;" ] }
+    (Emitter.emit unit
+       { trap = Trap.builtin; edits = [ bracketed ]; assertions = [ "int a;" ] }
     = text ^ "int a;\n" ^ probe);
   check "the probe without assertions"
-    (Emitter.emit unit { edits = [ bracketed ]; assertions = [] }
+    (Emitter.emit unit
+       { trap = Trap.builtin; edits = [ bracketed ]; assertions = [] }
     = text ^ probe)
 
 (* Tokens: struct box { int value ; } ; (g.h, lines 1 to 3) |
@@ -403,7 +409,9 @@ let moved =
         @ [ Emitter.generated output (own 1) "box__i" ]
         @ pieces output ~first:2 ~count:6))
 
-let moved_text = Emitter.emit moving { edits = [ moved ]; assertions = [] }
+let moved_text =
+  Emitter.emit moving
+    { trap = Trap.builtin; edits = [ moved ]; assertions = [] }
 
 let () =
   check "moved text keeps the lines of its tokens"
@@ -493,6 +501,62 @@ let () =
        (fun () -> edit unit ~first:2 ~count:0 (at 1) "#pragma pack(push)")
        "Emitter.code: \"#pragma pack(push)\" holds a byte that typec's \
         text never does")
+
+(* Where there are edits, the prototype of a trap function stands in
+   front of the first token of the unit's own text, after the universe
+   text, under a marker of typec's, and the marker after it restores the
+   location of that token; its definition follows the text. A unit
+   without edits calls no trap and gets neither. *)
+let () =
+  let trap = Option.get (Trap.calling "stop") in
+  let prototype = "static inline _Noreturn void __tc_trap(void);" in
+  let definition =
+    "static inline _Noreturn void __tc_trap(void) \
+     { _Noreturn void stop(void); stop(); __builtin_trap(); }"
+  in
+  let own = read "# 1 \"a.tc\"\nint x;\n" in
+  let x = Array.length own.tokens - 2 in
+  let renamed =
+    made own (fun output ->
+        Emitter.code output
+          (Reader.range own.tokens ~first:x ~count:1)
+          ~location:{ file = "a.tc"; line = 1; flags = No_flags } "y")
+  in
+  check "the trap around a unit's own text"
+    (Emitter.emit own { trap; edits = [ renamed ]; assertions = [] }
+    = "# 1 \"a.tc\"\n\
+       \n\
+       # 1 \"<typec>\" 3\n" ^ prototype ^ "\n\
+       # 1 \"a.tc\"\n\
+       int \n\
+       # 1 \"a.tc\"\n\
+       y\n\
+       # 1 \"a.tc\"\n\
+       ;\n\
+       \n\
+       # 1 \"<typec>\" 3\n" ^ definition ^ "\n");
+  let first_insertion = edit unit ~first:0 ~count:0 (at 1) "int v;" in
+  check "the prototype before an edit at the first token"
+    (Emitter.emit unit
+       { trap; edits = [ first_insertion ]; assertions = [ "int a;" ] }
+    = "# 1 \"a.c\"\n\
+       \n\
+       # 1 \"<typec>\" 3\n" ^ prototype ^ "\n\
+       # 1 \"a.c\"\n\
+       \n\
+       # 1 \"a.c\"\n\
+       int v;\n\
+       # 1 \"a.c\"\n\
+       int x = 1;\n\
+       # 1 \"h.h\" 1 3\n\
+       int y;\n\
+       # 2 \"a.c\" 2\n\
+       int z;\n\
+       \n\
+       # 1 \"<typec>\" 3\n\
+       int a;\n" ^ definition ^ "\n");
+  check "no trap without edits"
+    (Emitter.emit unit { trap; edits = []; assertions = [] } = source)
 
 (* A token of the universe text (design 3.6) is a piece at its own place
    in the universe, under flag 3 as typec's own text (design 13.4), and
@@ -647,11 +711,11 @@ let () =
     |> Emitter.generated output (at 3)
   in
   check "edits are charged the bytes they write, and the charge reported"
-    (match Emitter.limited unit (filled 0) with
+    (match Emitter.limited unit ~trap:Trap.builtin (filled 0) with
      | Ok (_, charged) -> charged = limit
      | Error _ -> false);
   check "a byte past the limit is refused at the moved text, charged last"
-    (match Emitter.limited unit (filled 1) with
+    (match Emitter.limited unit ~trap:Trap.builtin (filled 1) with
      | Error { location; message } ->
          location = at 2
          && String.starts_with
@@ -666,8 +730,9 @@ let () =
     Emitter.generated output (at 2) "a"
   in
   check "a short piece is charged the least charge"
-    (Result.is_ok (Emitter.limited unit (with_short 0))
-    && Result.is_error (Emitter.limited unit (with_short 1)));
+    (Result.is_ok (Emitter.limited unit ~trap:Trap.builtin (with_short 0))
+    && Result.is_error
+         (Emitter.limited unit ~trap:Trap.builtin (with_short 1)));
   (* A joined text is refused as soon as its parts would pass the limit,
      before it is built, and charged nowhere else. *)
   let megabyte _ = String.make 1048576 'a' in
@@ -680,8 +745,8 @@ let () =
          Emitter.joined output (at 1) ~separator:", " string_of_int [ 1; 2 ])
     = "1, 2");
   check "a joined text within the limit"
-    (Result.is_ok (Emitter.limited unit (joined 31)));
+    (Result.is_ok (Emitter.limited unit ~trap:Trap.builtin (joined 31)));
   check "a joined text past the limit"
-    (Result.is_error (Emitter.limited unit (joined 40)))
+    (Result.is_error (Emitter.limited unit ~trap:Trap.builtin (joined 40)))
 
 let () = if !failures > 0 then exit 1

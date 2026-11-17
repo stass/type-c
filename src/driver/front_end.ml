@@ -62,11 +62,13 @@ let assertions target = function
   | [] -> []
   | _ :: _ -> Typec_emit.Assumptions.assertions target
 
-let lower dialect target text =
+let lower dialect target ~trap text =
   let keywords = Typec_sema.Target.keywords target dialect in
   let* _unit, scopes = Typec_syntax.Parser.parse_with_scopes ~keywords text in
   let* declarations = Declarations.read target text scopes in
-  let* edits, output_bytes = Typec_emit.Lowering.edits text declarations in
+  let* edits, output_bytes =
+    Typec_emit.Lowering.edits text ~trap declarations
+  in
   let slices = count_slice_checks (Declarations.slice_checks declarations) in
   let counts =
     {
@@ -82,8 +84,10 @@ let lower dialect target text =
         largest_selection (Declarations.selection_sizes declarations);
     }
   in
-  Ok
-    ({ Typec_emit.Emitter.edits; assertions = assertions target edits }, counts)
+  let lowered : Typec_emit.Emitter.lowered =
+    { trap; edits; assertions = assertions target edits }
+  in
+  Ok (lowered, counts)
 
 let counts_line counts =
   Printf.sprintf

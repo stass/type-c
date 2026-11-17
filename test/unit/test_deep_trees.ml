@@ -25,7 +25,8 @@ let lowered file text =
   Result.bind (Reader.read ~name:file preprocessed) (fun reader ->
       Result.map
         (fun (lowered, _) -> Typec_emit.Emitter.emit reader lowered)
-        (Typec_driver.Front_end.lower Gnu lp64 reader))
+        (Typec_driver.Front_end.lower Gnu lp64
+           ~trap:Typec_emit.Trap.builtin reader))
 
 (* The failure of [chain], if it has one. *)
 let failure ({ name; file; text; lowers } : Chains.chain) =

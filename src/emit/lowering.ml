@@ -372,8 +372,11 @@ let construction_head (tokens : Token.t array)
    operand in the same way. The scrutinee and the block items keep their
    tokens. *)
 
-(* The trap of design 10.5 on a GNU-compatible compiler. *)
-let trap = "__builtin_trap();"
+(* The trap of design 10.5 as an expression of type void, which every
+   trap that lowering writes is, and as a statement. *)
+let trap output = Trap.call (Emitter.trap output)
+
+let trap_statement output = trap output ^ ";"
 
 let scrutinee_pointer = "__tc_match"
 let scrutinee_copy = "__tc_copy"
@@ -428,7 +431,7 @@ let case_label ~variant constructor =
   Printf.sprintf "case %s:" (Tree.enumerator_name ~variant constructor)
 
 (* The [default] that only a tag that is no constructor's reaches. *)
-let invalid_tag = Printf.sprintf "default: %s" trap
+let invalid_tag output = "default: " ^ trap_statement output
 
 (* The text that opens the block of an arm and the text that closes it
    after the last item. An arm that binds holds its items in a block of
@@ -439,11 +442,12 @@ let invalid_tag = Printf.sprintf "default: %s" trap
    since typec refuses it in the one scope of an arm (4.1 rule 5). *)
 let arm_block output location
     (bindings : Typec_sema.Expressions.binding list) =
+  let arm_end = trap_statement output in
   match bindings with
-  | [] -> ("{", " " ^ trap ^ " }")
+  | [] -> ("{", " " ^ arm_end ^ " }")
   | _ ->
       ( "{" ^ binding_declarations output location bindings ^ " {",
-        " } " ^ trap ^ " }" )
+        " } " ^ arm_end ^ " }" )
 
 (* The labels of an arm become the [case] labels that [cases] gives and
    open its block; a trap closes the block after its last item. *)
@@ -504,20 +508,21 @@ let read_tag (at : Typec_sema.Expressions.read_at) =
 (* The statements of [tree], each added through [add]: a node under a
    [*] points the local of its position at the object there, then each
    node switches on its tag. *)
-let rec write_selection add (tree : Typec_sema.Expressions.selection_tree) =
+let rec write_selection add ~invalid_tag
+    (tree : Typec_sema.Expressions.selection_tree) =
   match tree with
   | Arm arm -> add (Printf.sprintf "%s = %d;" arm_local arm)
   | Read { at; branches } ->
       point_local add at;
       let variant, tag = read_tag at in
-      write_switch add ~variant ~tag branches
+      write_switch add ~invalid_tag ~variant ~tag branches
 
-and write_switch add ~variant ~tag branches =
+and write_switch add ~invalid_tag ~variant ~tag branches =
   let variant = Typec_sema.Encoding.variant_name variant in
   let write_branch (constructors, subtree) =
     List.iter (fun constructor -> add (case_label ~variant constructor))
       constructors;
-    write_selection add subtree;
+    write_selection add ~invalid_tag subtree;
     add "break;"
   in
   add (Printf.sprintf "switch (%s) {" tag);
@@ -537,7 +542,7 @@ let nested_selection output location ~reader
   Emitter.assembled output location ~separator:" " (fun add ->
       add (Printf.sprintf "unsigned %s;" arm_local);
       List.iter (fun local -> add (local_declaration local)) locals;
-      write_selection add tree;
+      write_selection add ~invalid_tag:(invalid_tag output) tree;
       add reader)
 
 (* The [switch] that holds the arms, and the [case] labels of an arm. *)
@@ -570,7 +575,7 @@ let match_statement output matching (arms : Typec_sema.Expressions.arms) =
   @ List.concat_map (matched_arm output ~cases) arms.matched
   @ replace output
       ~location:tokens.(statement.last).location
-      (Printf.sprintf "%s } }" invalid_tag)
+      (Printf.sprintf "%s } }" (invalid_tag output))
       [ statement.last ]
 
 (* Design 13.5: a single-pattern test becomes the block of a match that
@@ -602,7 +607,7 @@ let tag_check output location ~variant constructors =
   Printf.sprintf "switch (%s) { %s break; %s } " tag_local
     (Emitter.joined output location ~separator:" " (case_label ~variant)
        constructors)
-    invalid_tag
+    (invalid_tag output)
 
 (* The text from the held operand to the [{] of the true branch, and the
    check of the tag on the false branch. *)
@@ -1034,7 +1039,7 @@ let error_path output ~location ~variant
   let trap_unless_err =
     Printf.sprintf "if (%s) %s"
       (tag_differs ~temporary ~variant err_constructor)
-      trap
+      (trap_statement output)
   in
   let return =
     Printf.sprintf "return %s; }"
@@ -1486,7 +1491,7 @@ let place_edits output lowered returns (place, leaving) =
           ~extent:{ first = closing; last = closing } (lazy (copies ())) ]
   | Trap closing ->
       [ insert output ~before:closing
-          ~extent:{ first = closing; last = closing } trap ]
+          ~extent:{ first = closing; last = closing } (trap_statement output) ]
   | Left_by (Jump jump) ->
       [ insert_moved output ~before:jump.first ~extent:jump
           (lazy (piece jump.first "{" :: copies ()));
@@ -1628,9 +1633,6 @@ let defer_edits output lowered ~dropped
 
 module Expressions = Typec_sema.Expressions
 
-(* The trap of design 10.5 as an expression of type void. *)
-let slice_trap = "__builtin_trap()"
-
 (* The order that numbers the temporaries of a function's tests: by the
    first token of each, the outer one first where two begin at one
    token. Edits that insert before one token apply in the same order. A
@@ -1668,7 +1670,7 @@ let tested_index output n ~(whole : Tree.span) ~slice ~(index : Tree.span) =
   @ replace output ~location
       (Printf.sprintf
          ")), (void)(%s < %s.len ? (void)0 : %s), &%s.data[%s]))" i s
-         slice_trap s i)
+         (trap output) s i)
       [ whole.last ]
 
 (* [slice_sub(s, lo, hi)] as the expression that holds its test and
@@ -1692,7 +1694,7 @@ let tested_sub output n ~(whole : Tree.span) ~instance ~(slice : Tree.span)
       (Printf.sprintf
          ")), (void)(%s <= %s && %s <= %s.len ? (void)0 : %s), (struct %s){ \
           %s.data + %s, %s - %s })"
-         lo hi hi s slice_trap instance s lo hi lo)
+         lo hi hi s (trap output) instance s lo hi lo)
       [ whole.last ]
 
 (* A check where C does not evaluate it: the trap, then its operands,
@@ -1705,12 +1707,13 @@ let untested output ((checked : Expressions.slice_check), _) =
   match checked.check with
   | Index { slice; index } ->
       insert output ~before:whole.first ~extent:whole
-        "(*((void)__builtin_trap(), &("
+        (Printf.sprintf "(*((void)%s, &(" (trap output))
       :: replace output ~location ").data[+("
            (between tokens ~after:slice index)
       @ replace output ~location ")]))" [ whole.last ]
   | Sub { slice; low; high } ->
-      replace output ~location "((void)__builtin_trap(), (void)("
+      replace output ~location
+        (Printf.sprintf "((void)%s, (void)(" (trap output))
         (grammar_tokens tokens whole.first (slice.first - 1))
       @ replace output ~location "), (void)(" (between tokens ~after:slice low)
       @ replace output ~location "), (void)(" (between tokens ~after:low high)
@@ -1719,7 +1722,7 @@ let untested output ((checked : Expressions.slice_check), _) =
           [ whole.last ]
   | Conversion { converted_to } ->
       [ insert output ~before:whole.first ~extent:whole
-          "((void)__builtin_trap(), (void)(";
+          (Printf.sprintf "((void)%s, (void)(" (trap output));
         close output ~after:whole.last ~extent:whole
           (Printf.sprintf "), (struct %s){ 0 })" converted_to) ]
 
@@ -2322,7 +2325,7 @@ let unit_edits output declarations =
     ~zero_initialisers:[]
     (Typec_sema.Declarations.typed declarations)
 
-let edits (text : Reader.t) declarations =
-  Emitter.limited text (fun output ->
+let edits (text : Reader.t) ~trap declarations =
+  Emitter.limited text ~trap (fun output ->
       let brackets = instance_brackets { output; declarations } in
       brackets @ unit_edits output declarations)

@@ -46,9 +46,10 @@ print with a pid.
   $ { typec --cc=sh -c 'kill -s KILL $$'; } 2>/dev/null
   [137]
 
-A backend that cannot be started and a --cc= without a path each give one
-message and 81, the status of typec's environment errors
-(src/driver/exit_status.ml).
+A backend that cannot be started, a --cc= without a path and a
+--trap-function= that names no C identifier, which would go into the C
+text unquoted (design 10.5), each give one message and 81, the status
+of typec's environment errors (src/driver/exit_status.ml).
 
   $ typec --cc=./no-such-cc -c hello.c
   typec: cannot run the C compiler "./no-such-cc": No such file or directory
@@ -60,6 +61,9 @@ message and 81, the status of typec's environment errors
   [81]
   $ typec --cc= -c hello.c
   typec: --cc= needs the path of a C compiler
+  [81]
+  $ typec --trap-function='stop(); exit' -c hello.c
+  typec: --trap-function= needs an ASCII C identifier, not "stop(); exit"
   [81]
 
 A C compiler that runs typec again, such as a cc first on PATH that is a

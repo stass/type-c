@@ -21,6 +21,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
+- [Low] `--trap-function=` takes a C keyword (`int`, `_Bool`) or a name
+  reserved to typec (`__tc_trap`), which then fails as a backend error at
+  `<typec>` rather than as a refusal of the option. Refusing them needs
+  the keyword sets of the dialect and the `__tc_` prefix, which
+  `src/syntax/parser.ml` keeps private, in one place the driver reads.
+- [Low] `Front_end.lower` hands the same trap to `Lowering.edits` and to
+  the `lowered` record that `Emitter.emit` writes its definition from;
+  another builder of `lowered` could pair edits with another trap. Have
+  `Emitter.limited` give the output's trap back with the edits.
 - [Low] The tests of the build rules (`make_rule.t`, `ninja_rule.t`,
   `cmake_rule.t`) run only where the host has the tool: the Alpine image
   has no make, and no host image has ninja or CMake. Add them to the
@@ -1123,18 +1132,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   member or element of one, as `bit_field` is recorded; then `address`
   refuses it, and `access_of` in `src/sema/expressions.ml` reads that
   fact and `lvalue` instead of walking the syntax in `addressable`.
-- [Medium] `--trap-function=name` (design 10.5) is not implemented: a
-  trap is `__builtin_trap()` alone. Add the option to the driver and
-  pass the name to lowering, with a run test on both backends, and
-  build `test/run/freestanding.t` with it, the trap function declared
-  `extern` in its program like the other names it expects. Lowering
-  spells the trap in five places (`trap`, `slice_trap` and three
-  literals in `src/emit/lowering.ml`); make them one before the option
-  changes it. The name
-  is the program's, so a block may hide it where a trap is written,
-  against design 13.5 (every name lowering writes is claimed or
-  reserved): say in 10.5 how the call reaches it, for example through
-  one `__tc_` function defined at file scope.
 - [Low] `case A: L: case B:` in a match is refused under design 4.3
   rule 3; the rule it breaks is 4.1 rule 2 (a label of the match stands
   directly in its body). Give the label under a named label its own

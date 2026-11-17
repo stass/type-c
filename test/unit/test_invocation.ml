@@ -136,7 +136,50 @@ let outcome case =
            Command_line.words invocation.arguments,
            invocation.action ))
 
+(* A command line and the definition that its trap writes after a unit,
+   or the error it gives: the trap is seen through what it writes. *)
+let trap_cases =
+  let calling name =
+    Ok
+      [ "static inline _Noreturn void __tc_trap(void) { _Noreturn void "
+        ^ name ^ "(void); " ^ name ^ "(); __builtin_trap(); }" ]
+  in
+  [
+    ("no --trap-function", [ "-c"; "x.tc" ], Ok []);
+    ("--trap-function=", [ "--trap-function=stop"; "x.tc" ], calling "stop");
+    ( "the last --trap-function= wins",
+      [ "--trap-function=first"; "--trap-function=_Stop9" ],
+      calling "_Stop9" );
+    ( "an invalid --trap-function= before a valid one",
+      [ "--trap-function=1x"; "--trap-function=stop" ],
+      Error (Invocation.Invalid_trap_function "1x") );
+    ( "a name with a leading digit",
+      [ "--trap-function=1x" ],
+      Error (Invocation.Invalid_trap_function "1x") );
+    ( "a name with other text",
+      [ "--trap-function=f(); g" ],
+      Error (Invocation.Invalid_trap_function "f(); g") );
+    ( "a name outside ASCII",
+      [ "--trap-function=caf\xc3\xa9" ],
+      Error (Invocation.Invalid_trap_function "caf\xc3\xa9") );
+    ( "no name",
+      [ "--trap-function=" ],
+      Error (Invocation.Invalid_trap_function "") );
+  ]
+
+let trap_outcome arguments =
+  Invocation.of_command_line ~env_cc:None arguments
+  |> Result.map (fun (invocation : Invocation.t) ->
+         Typec_emit.Trap.definition invocation.trap)
+
 let () =
   let failed = List.filter (fun case -> outcome case <> case.expected) cases in
   List.iter (fun case -> Printf.eprintf "FAIL: %s\n" case.name) failed;
-  if failed <> [] then exit 1
+  let failed_traps =
+    List.filter
+      (fun (_, arguments, expected) -> trap_outcome arguments <> expected)
+      trap_cases
+  in
+  List.iter (fun (name, _, _) -> Printf.eprintf "FAIL: %s\n" name)
+    failed_traps;
+  if failed <> [] || failed_traps <> [] then exit 1

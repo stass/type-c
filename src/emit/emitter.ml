@@ -16,12 +16,14 @@ type moved_piece = Piece of piece | Pragma_line of pragma_line
 (* The pieces of a moved edit, made and charged when first forced. *)
 type moved_pieces = moved_piece list Lazy.t
 
-(* The output of a unit as lowering makes it: the bytes charged so far,
-   which only [charge] raises, the limit they are held to, and the
-   pieces of each moved edit, latest first, which [limited] forces so
-   that every edit is charged before the charge is read. *)
+(* The output of a unit as lowering makes it: how it traps; the bytes
+   charged so far, which only [charge] raises, and the limit they are
+   held to; and the pieces of each moved edit, latest first, which
+   [limited] forces so that every edit is charged before the charge is
+   read. *)
 type output = {
   unit : Reader.t;
+  trap : Trap.t;
   limit : int;
   mutable charged : int;
   mutable moved : moved_pieces list;
@@ -43,10 +45,14 @@ let over_limit output location : Reader.error =
 
 (* The text of the unit outside its edits is at most the unit's own, so
    that is charged before anything is made. *)
-let limited unit make =
+let limited unit ~trap make =
   let size = Reader.length unit in
   let output =
-    { unit; limit = Output_limit.of_unit unit; charged = size; moved = [] }
+    { unit;
+      trap;
+      limit = Output_limit.of_unit unit;
+      charged = size;
+      moved = [] }
   in
   (* Forcing pieces may make more moved edits, which are forced in
      turn, until none is left unmade. *)
@@ -68,6 +74,8 @@ let limited unit make =
   | exception Over_limit location -> Error (over_limit output location)
 
 let unit output = output.unit
+
+let trap output = output.trap
 
 (* A piece is written on the line of its run (see [moved_lines]). *)
 let made_piece output piece =
@@ -388,7 +396,7 @@ let extended edit ~(extent : Tree.span) =
 
 let enclosing edit ~extent = { (extended edit ~extent) with encloses = true }
 
-type lowered = { edits : edit list; assertions : string list }
+type lowered = { trap : Trap.t; edits : edit list; assertions : string list }
 
 (* The assertions are typec's own text, so their marker names no file of
    the unit, and a failure reads as typec's. Flag 3 exempts them from the
@@ -459,9 +467,40 @@ let in_order edits =
   in
   List.stable_sort order edits
 
+(* The first token of the unit's own text, after the universe text. *)
+let first_own_token (tokens : Token.t array) =
+  Array.find_index (fun (token : Token.t) -> not (File.is_universe token.owner))
+    tokens
+
+(* The trap's prototype stands in front of the first token of the
+   unit's own text, where no edit begins before it, and is typec's text
+   as the assertions are; the marker after it restores the presumed
+   location of that token. Edits stand at the unit's own tokens, so
+   there is one wherever an edit calls the trap. *)
+let prototype_replacement (tokens : Token.t array) prototype =
+  match (prototype, first_own_token tokens) with
+  | [], _ | _, None -> []
+  | _ :: _, Some first ->
+      let text =
+        marker assertions_location
+        ^ String.concat "\n" prototype
+        ^ marker tokens.(first).location
+      in
+      [ { Reader.range = Reader.range tokens ~first ~count:0; text } ]
+
+(* The trap is a fact that the edits rest on, as the probe is, so
+   emission writes its prototype and definition where there are edits. *)
+let trap_lines trap edits =
+  match edits with
+  | [] -> ([], [])
+  | _ :: _ -> (Trap.prototype trap, Trap.definition trap)
+
 (* Reader.rewrite checks that the ranges do not overlap. *)
-let emit (unit : Reader.t) { edits; assertions } =
+let emit (unit : Reader.t) { trap; edits; assertions } =
   let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;
-  Reader.rewrite unit (List.map (replacement unit.tokens) edits)
-  ^ assertion_block (assertions @ probes edits)
+  let prototype, definition = trap_lines trap edits in
+  Reader.rewrite unit
+    (prototype_replacement unit.tokens prototype
+    @ List.map (replacement unit.tokens) edits)
+  ^ assertion_block (assertions @ definition @ probes edits)

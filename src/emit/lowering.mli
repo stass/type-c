@@ -24,17 +24,18 @@
 
 val edits :
   Typec_cpp.Reader.t ->
+  trap:Trap.t ->
   Typec_sema.Declarations.t ->
   (Emitter.edit list * int, Typec_cpp.Reader.error) result
-(** [edits text declarations] lowers the unit [text] that [declarations]
-    read: its type declarations, constructor expressions, match
-    statements, single-pattern tests and answered constructs, and the
-    instances that it uses. An answered [__builtin_types_compatible_p]
-    becomes its answer. An answered generic selection keeps its tokens,
-    but the type names of its associations become types that steer the
-    backend to typec's answer, and its controlling expression is wrapped
-    to have the selected one; the edits of the tokens dropped are
-    discarded.
+(** [edits text ~trap declarations] lowers the unit [text] that
+    [declarations] read: its type declarations, constructor expressions,
+    match statements, single-pattern tests and answered constructs, and
+    the instances that it uses. Every trap is {!Trap.call} of [trap]. An
+    answered [__builtin_types_compatible_p] becomes its answer. An
+    answered generic selection keeps its tokens, but the type names of its
+    associations become types that steer the backend to typec's answer,
+    and its controlling expression is wrapped to have the selected one;
+    the edits of the tokens dropped are discarded.
 
     Every piece and edit is made for one {!Emitter.output}, so the
     lowered text is held to the output limit of design 3.5 rule 7 as it
