@@ -12,13 +12,15 @@
   test_types
   test_declarations
   test_expressions
-  test_encoding)
+  test_encoding
+  test_selection)
  (modules
   test_target
   test_types
   test_declarations
   test_expressions
-  test_encoding)
+  test_encoding
+  test_selection)
  (libraries typec_cpp typec_syntax typec_sema typec_test_support))
 
 (test

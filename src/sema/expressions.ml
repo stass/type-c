@@ -4659,14 +4659,6 @@ and case_value context value =
 
 (* Matching (design 4) *)
 
-(* The constructors that no label names, in declaration order: what a
-   [default] covers, or what a match without one misses (4.2 rule 1). *)
-and uncovered (constructors : Ctype.constructor list) named =
-  List.filter
-    (fun (constructor : Ctype.constructor) ->
-      not (List.mem constructor.constructor_name named))
-    constructors
-
 and match_statement context (statement : Tree.statement) scrutinee arms =
   let typed = expression context scrutinee in
   let t = typed.expression_type in
@@ -4870,57 +4862,117 @@ and labelled_constructors context variant constructors (arm : Tree.arm) =
           (label, Some checked))
     arm.node.labels
 
-(* 4.2 rules 1 and 2 over the labels of a match, in order: each
-   constructor is covered once, by a label or by the one [default], which
-   covers at least one. The result is what the [default] covers. *)
+(* 4.2 rules 1 and 2, read from the selection tree of the labels of a
+   match (4.7 rule 6): every case label and the one [default] are
+   selected for some value, and every value is taken. The result is the
+   constructors of the scrutinee that the [default] takes. *)
 and coverage context ~statement variant constructors labelled =
-  let rec named seen defaults = function
-    | [] -> (seen, defaults)
+  let cases = List.filter_map snd labelled in
+  let has_default =
+    List.exists (fun (_, checked) -> Option.is_none checked) labelled
+  in
+  match
+    Selection.select constructors
+      (List.map (selection_pattern constructors) cases)
+      ~default:has_default
+  with
+  | Error Too_large ->
+      context.fail statement
+        (Rule.c_text
+           (Printf.sprintf
+              "the match needs a selection tree of more than %d nodes and \
+               leaves, the most that typec takes (a translation limit, C11 \
+               5.2.4.1)"
+              Selection.max_size))
+  | Ok tree ->
+      refuse_unselected_labels context tree labelled;
+      refuse_missing context ~statement variant tree;
+      refuse_unselected_default context tree labelled;
+      Selection.defaulted tree
+
+(* The pattern of a case label as selection reads it. Its sub-patterns
+   are [_] and bindings, which read no tag. *)
+and selection_pattern constructors (checked : checked_pattern) :
+    Selection.constructor_pattern =
+  { variant = constructors;
+    constructor = checked.constructor;
+    fields = List.map (fun _ -> Selection.Any) checked.sub_fields }
+
+(* In source order: a second [default] (4.2 rule 2), and a case label
+   that is no leaf of [tree], since the labels before it match all that
+   it matches (rule 1). Without nested patterns that is a constructor
+   named twice, which is how the error names it. *)
+and refuse_unselected_labels context tree labelled =
+  let never = Selection.never_selected tree in
+  let rec walk case_index ~after_default = function
+    | [] -> ()
     | ((label : Tree.arm_label), None) :: rest ->
-        if defaults <> [] then
+        if after_default then
           context.fail label.span
             (Rule.message Default_arm "a match has a second `default`");
-        named seen (label :: defaults) rest
+        walk case_index ~after_default:true rest
     | (label, Some { constructor; _ }) :: rest ->
-        let name = constructor.constructor_name in
-        if List.mem name seen then
+        if List.mem case_index never then
           context.fail label.span
             (Rule.message Exhaustiveness
                (Printf.sprintf "the constructor %s is covered twice"
-                  (quote (name :> string))));
-        named (name :: seen) defaults rest
+                  (quote (constructor.constructor_name :> string))));
+        walk (case_index + 1) ~after_default rest
   in
-  let seen, defaults = named [] [] labelled in
-  let missing = uncovered constructors seen in
-  match (defaults, missing) with
-  | [], [] -> []
-  | [], _ :: _ ->
-      context.fail statement
-        (Rule.message Exhaustiveness
-           (Printf.sprintf "the match does not cover %s of the variant %s"
-              (constructor_list (List.map constructor_name missing))
-              (quoted_variant variant)))
-  | (default : Tree.arm_label) :: _, [] ->
-      context.fail default.span
-        (Rule.message Default_arm
-           "the `default` of a match covers no constructor")
-  | _ :: _, _ :: _ -> missing
+  walk 0 ~after_default:false labelled
+
+(* The first leaf of nothing (4.2 rule 1). A constructor of the scrutinee
+   below which selection reads nothing is named as a constructor of the
+   variant; a deeper value is named as a pattern (4.7 rule 6). *)
+and refuse_missing context ~statement variant tree =
+  let refuse text =
+    context.fail statement (Rule.message Exhaustiveness text)
+  in
+  match Selection.missing tree with
+  | Nothing_missing -> ()
+  | Scrutinee_constructors constructors ->
+      refuse
+        (Printf.sprintf "the match does not cover %s of the variant %s"
+           (constructor_list (List.map constructor_name constructors))
+           (quoted_variant variant))
+  | Values values -> refuse ("the match does not cover " ^ value_list values)
+
+(* 4.2 rule 2: a [default] takes at least one value. *)
+and refuse_unselected_default context tree labelled =
+  if Selection.default_never_selected tree then
+    match
+      List.find_opt (fun (_, checked) -> Option.is_none checked) labelled
+    with
+    | Some ((default : Tree.arm_label), _) ->
+        context.fail default.span
+          (Rule.message Default_arm
+             "the `default` of a match covers no constructor")
+    | None -> ()
+
 
 and constructor_name (constructor : Ctype.constructor) =
   constructor.constructor_name
 
 (* What a diagnostic calls the constructors [names]. *)
 and constructor_list names =
-  let quoted =
-    List.map (fun (name : Spelling.constructor) -> quote (name :> string)) names
-  in
+  listed ~one:"the constructor" ~several:"the constructors"
+    (List.map (fun (name : Spelling.constructor) -> quote (name :> string))
+       names)
+
+(* What a diagnostic calls the values [values], written as patterns. *)
+and value_list values =
+  listed ~one:"the value" ~several:"the values"
+    (List.map (fun value -> quote (Selection.spelling value)) values)
+
+(* The quoted names [quoted], after the noun [one] or [several]. *)
+and listed ~one ~several quoted =
   match List.rev quoted with
-  | [ one ] -> "the constructor " ^ one
+  | [ only ] -> one ^ " " ^ only
   | last :: before ->
-      Printf.sprintf "the constructors %s and %s"
+      Printf.sprintf "%s %s and %s" several
         (String.concat ", " (List.rev before))
         last
-  | [] -> invalid_arg "Expressions.constructor_list: no constructor"
+  | [] -> invalid_arg "Expressions.listed: nothing to name"
 
 (* An arm and its bindings, which only an arm of one label may declare
    (4.1 rule 6). A binding is a non-modifiable object of its field's

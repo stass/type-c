@@ -1832,8 +1832,22 @@ types (design 13.3).
   Package 3.12 adds the script under `tools/measure`; have the design
   cite it.
 - [High] Build nested patterns, as in `case Err(DivByZero):` (owner: the
-  README's first example uses them): design 4.7, plan packages 3.7 to
+  README's first example uses them): design 4.7, plan packages 3.8 to
   3.10.
+- [High] Design 4.7 rule 10 says the count of nodes and leaves bounds
+  the work of building the selection tree; `Selection.select` does work
+  of about nodes times labels, since each node scans every label still
+  possible. With nested labels (3.8), 13 labels whose tree doubles and
+  4000 more that the tree keeps possible take 9.6 s under the bound,
+  linear in the extra labels. Decide before 3.8 parses nested patterns:
+  restate the bound as one on the steps of selection (each label looked
+  at and each tag test), counted in the same place, or build the tree
+  so that a node's work does not grow with the labels.
+- [Medium] With nested patterns (3.8) the errors of
+  `Expressions.coverage` keep their flat wording: a never-selected
+  label is "the constructor 'Err' is covered twice" and a `default`
+  that takes nothing "covers no constructor". Word them for a label and
+  for values, and give each a golden test.
 - [Medium] Design 4.7 cites counts of the bindings and fields of Pilots
   A and B that no script in either pilot's repository reproduces: add
   the script there and cite the commit that holds it.
