@@ -89,6 +89,13 @@ type error =
   | Emit_c_rules  (** [--emit-c] with [-M] or [-MM] *)
   | Several_architectures of string list
       (** the distinct [-arch] names, in order, when there are several *)
+  | Header_inputs
+      (** [--emit-c-header] without exactly one input, a [.tci] *)
+  | Header_stops  (** [--emit-c-header] with [-c], [-S] or [-fsyntax-only] *)
+  | Header_dependencies  (** [--emit-c-header] with a dependency option *)
+  | Header_name of string
+      (** the path of an interface whose last component the header's
+          redirect cannot name ({!Typec_emit.Header.name_of_path}) *)
 
 val has_type_c_input : Command_line.argument list -> bool
 
@@ -103,5 +110,26 @@ val plan :
     whose intermediate files are in [temp_dir]. With [emit_c] the
     command line has one input, a [.tc] file; its C goes to the [-o]
     file, else to stdout, and nothing is compiled. *)
+
+(** The command of [--emit-c-header] (design 9.3): the target options
+    and the [-E] step of the one [.tci] input, as for a [.tc] input but
+    with [-dI] and, after the user's options, [-Wno-unused-macros]; the
+    header's destination, [emitted], beside the interface with the suffix
+    [.h], the [-o] file, or stdout under [-o -]; and the interface's name
+    for the header's redirect. [compile] is [None]. *)
+type header = {
+  header_target_options : string list;
+  interface : translation;
+  name : Typec_emit.Header.name;
+}
+
+val plan_header :
+  program:string ->
+  temp_dir:string ->
+  Command_line.argument list ->
+  (header, error) result
+(** [plan_header ~program ~temp_dir arguments] is the command of
+    [--emit-c-header] for the backend arguments of a command line. It
+    refuses every option that {!plan} refuses, by the same table. *)
 
 val error_message : error -> string

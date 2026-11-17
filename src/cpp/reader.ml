@@ -15,6 +15,18 @@ type t = { text : text; tokens : Token.t array; macros : Macros.t }
 type range = { first : int; count : int }
 type replacement = { range : range; text : string }
 type error = { location : Location.t; message : string }
+type include_line = {
+  next_token : int;
+  directive : string;
+  header_name : string;
+  location : Location.t;
+}
+
+type interface = {
+  unit : t;
+  includes : include_line list;
+  holds_text : bool;
+}
 
 (* The largest line number a line marker or #line may give (C11 6.10.4);
    it also keeps the number far from overflow while it is read. *)
@@ -43,6 +55,13 @@ type state = {
   mutable token_count : int;  (** the length of [tokens] *)
   mutable macro_lines : Macros.line list;  (** in reverse *)
   mutable definition_lines : (int * int) list;  (** in reverse *)
+  interface : bool;
+      (** the text is the output of the -E -dI step of an interface whose
+          header is written (design 9.3) *)
+  mutable includes : include_line list;  (** in reverse *)
+  mutable holds_text : bool;
+      (** a token or a directive line other than a line marker stood in
+          the text of the interface *)
 }
 
 (* Raised at the first part of the text that is not cc -E output. *)
@@ -140,7 +159,22 @@ let current_owner state =
         "token before the first line marker, as when an option such as \
          -P removes the line markers"
 
+(* The text of the interface is what the output holds while its main file
+   is the current file at the bottom of the include stack, told by the
+   last component of the presumed file name, as 9.2 rule 2 compares
+   files: GCC changes the presumed name without entering a file for its
+   predefined macros (design 9.3). *)
+let in_interface_text state =
+  state.interface
+  &&
+  match state.include_stack with
+  | [ main ] ->
+      main.origin = File.Main
+      && Filename.basename state.presumed.file = Filename.basename main.name
+  | _ -> false
+
 let add_token state kind start =
+  if in_interface_text state then state.holds_text <- true;
   let token =
     {
       Token.kind;
@@ -588,19 +622,93 @@ let read_undefinition state ~line_start =
   end_directive state;
   record_change state ~line_start name Undefined
 
+(* The delimiter that ends a header name that starts at the cursor: it
+   ends at the first one on its line (C11 6.4.7). *)
+let header_name_closing state =
+  match peek state 0 with
+  | Some '"' -> Some '"'
+  | Some '<' -> Some '>'
+  | Some _ | None -> None
+
+(* The index of the last byte of the header name at the cursor. *)
+let header_name_end state =
+  match header_name_closing state with
+  | None -> None
+  | Some closing -> (
+      match String.index_from_opt state.text (state.pos + 1) closing with
+      | Some stop when stop < line_end state -> Some stop
+      | Some _ | None -> None)
+
+(* Clang ends the lines of -dI with this comment, and GCC does not. *)
+let clang_include_comment = " /* clang -E -dI */"
+
+(* An include line of -dI is read exactly (design 9.3): the directive
+   right after the '#' of the first column, one space, the header name
+   and the end of the line or Clang's comment. *)
+let read_include_line state ~hash directive =
+  let malformed () =
+    fail state
+      (Printf.sprintf "malformed #%s line in the output of -dI" directive)
+  in
+  if state.pos <> hash + 1 + String.length directive then malformed ();
+  if peek state 0 <> Some ' ' then malformed ();
+  advance state 1;
+  let start = state.pos in
+  let stop =
+    match header_name_end state with
+    | Some stop -> stop
+    | None -> malformed ()
+  in
+  state.pos <- stop + 1;
+  let name = String.sub state.text start (state.pos - start) in
+  if looking_at state clang_include_comment then
+    advance state (String.length clang_include_comment);
+  if state.pos <> line_end state then malformed ();
+  let line =
+    {
+      next_token = state.token_count;
+      directive;
+      header_name = name;
+      location = state.presumed;
+    }
+  in
+  state.includes <- line :: state.includes
+
+(* In the text of an interface whose header is written, an include line
+   is read and every other directive that no unit reads is refused,
+   since the header carries none; deeper text reaches no header, and its
+   lines are passed over (design 9.3). *)
+let read_other_directive state ~hash name =
+  if not state.interface then
+    fail state (Printf.sprintf "unsupported directive #%s" name)
+  else if not (in_interface_text state) then skip_to_line_end state
+  else
+    match name with
+    | "include" | "include_next" | "import" ->
+        read_include_line state ~hash name
+    | _ ->
+        fail state
+          (Printf.sprintf
+             "#%s in an interface whose header is written: the header \
+              carries no directive of the interface but its include lines \
+              and pragmas"
+             name)
+
 let read_directive state =
   let hash = state.pos in
   advance state 1;
   skip_while state is_blank;
   if next_is state is_digit then
     read_line_marker state
-  else
+  else begin
+    if in_interface_text state then state.holds_text <- true;
     match read_word state with
     | "line" -> read_line_directive state
     | "pragma" -> read_pragma state hash
     | "define" -> read_definition state ~line_start:hash
     | "undef" -> read_undefinition state ~line_start:hash
-    | name -> fail state (Printf.sprintf "unsupported directive #%s" name)
+    | name -> read_other_directive state ~hash name
+  end
 
 (* The text. *)
 
@@ -653,8 +761,11 @@ let read_part state ~stop ~first ~include_stack =
     read_next state
   done
 
-let initial_state ~name text =
+let initial_state ~interface ~name text =
   {
+    interface;
+    includes = [];
+    holds_text = false;
     text;
     pos = 0;
     presumed = first_line name;
@@ -672,7 +783,7 @@ let initial_state ~name text =
    such marker, or fails before it, is a C unit here, and its full read
    then reports the same failure, at the same place. *)
 let is_type_c_unit ~name text =
-  let state = initial_state ~name text in
+  let state = initial_state ~interface:false ~name text in
   match
     while state.pos < String.length text && state.include_stack = [] do
       read_next state
@@ -687,10 +798,10 @@ let is_type_c_unit ~name text =
 (* The universe text needs no line marker: its owner is on the stack from
    its first byte. The unit's own text then starts afresh, as if it were
    read alone. *)
-let read_after ~universe ~name text =
+let read_after ~interface ~universe ~name text =
   let bytes = universe ^ text in
   let own_start = String.length universe in
-  let state = initial_state ~name bytes in
+  let state = initial_state ~interface ~name bytes in
   match
     read_part state ~stop:own_start ~first:universe_first_line
       ~include_stack:[ File.universe ];
@@ -701,16 +812,31 @@ let read_after ~universe ~name text =
       let tokens = Array.of_list (List.rev state.tokens) in
       let definition_lines = List.rev state.definition_lines in
       let macros = Macros.of_lines (List.rev state.macro_lines) in
-      Ok { text = { bytes; own_start; definition_lines }; tokens; macros }
+      let unit =
+        { text = { bytes; own_start; definition_lines }; tokens; macros }
+      in
+      Ok
+        {
+          unit;
+          includes = List.rev state.includes;
+          holds_text = state.holds_text;
+        }
   | exception Failed error -> Error error
 
 (* A C unit has no universe text, so its first part is empty and reads
    nothing. *)
-let read ~name text =
+let read_any ~interface ~name text =
   let universe =
     if is_type_c_unit ~name text then File.universe_text else ""
   in
-  read_after ~universe ~name text
+  read_after ~interface ~universe ~name text
+
+let read ~name text =
+  Result.map
+    (fun (read : interface) -> read.unit)
+    (read_any ~interface:false ~name text)
+
+let read_interface ~name text = read_any ~interface:true ~name text
 
 let spelling (result : t) (token : Token.t) =
   match token.kind with
@@ -833,7 +959,7 @@ let escape text =
   done;
   Buffer.contents buffer
 
-let error_message error =
+let error_message (error : error) =
   escape
     (Printf.sprintf "%s:%d: error: %s" error.location.file
        error.location.line error.message)

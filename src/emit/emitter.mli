@@ -265,3 +265,10 @@ val emit : Typec_cpp.Reader.t -> lowered -> string
     tokens an edit replaces belong to one file, so it never drops a
     marker that enters or leaves a file without its partner; [emit]
     raises [Invalid_argument] otherwise. *)
+
+val applied : Typec_cpp.Reader.t -> edit list -> string
+(** [applied unit edits] is the text of [unit] with each edit applied, as
+    {!emit} writes it, without the declarations of the trap, the
+    assertions or the packing probe around it: the lowered text that a
+    header of an interface takes its runs from (design 9.3).
+    [Invalid_argument] as for {!emit}. *)

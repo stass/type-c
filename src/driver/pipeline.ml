@@ -31,6 +31,10 @@ type error =
   | Emit_c_inputs
   | Emit_c_rules
   | Several_architectures of string list
+  | Header_inputs
+  | Header_stops
+  | Header_dependencies
+  | Header_name of string
 
 (* Raised at the first reason the command line has no pipeline and
    caught in plan. *)
@@ -506,6 +510,97 @@ let plan ~program ~emit_c ~temp_dir arguments =
     else Ok (compilation_plan shape arguments)
   with Failed error -> Error error
 
+(* The header of an interface (design 9.3). *)
+
+type header = {
+  header_target_options : string list;
+  interface : translation;
+  name : Typec_emit.Header.name;
+}
+
+let interface_input arguments =
+  let inputs =
+    List.filter_map
+      (function Command_line.Input { path; _ } -> Some path | _ -> None)
+      arguments
+  in
+  match inputs with
+  | [ path ] when Filename.check_suffix path Typec_cpp.File.interface_suffix
+    ->
+      path
+  | _ -> raise (Failed Header_inputs)
+
+let is_dependency_option = function
+  | Command_line.Option { role = Dependency _; _ } -> true
+  | _ -> false
+
+(* The header goes beside its interface unless -o names another path,
+   and "-o -" is stdout as for cc. *)
+let header_destination ~output source =
+  match output with
+  | Some "-" -> Standard_output
+  | Some path -> File path
+  | None ->
+      File
+        (Filename.chop_suffix source Typec_cpp.File.interface_suffix ^ ".h")
+
+(* -dI writes each #include in place, which the header copies; the
+   interface's own guard, as a main file, draws -Wunused-macros, which no
+   unit that includes it draws, so the option follows the user's. *)
+let header_preprocess_command shape arguments source =
+  preprocessing_command shape arguments source
+    ~own_options:[ "-dD"; "-dI"; "-Wno-unused-macros" ]
+
+let plan_header ~program ~temp_dir arguments =
+  try
+    refuse_unusable_options arguments;
+    refuse_several_architectures arguments;
+    let source = interface_input arguments in
+    if goal_of arguments <> Linked then raise (Failed Header_stops);
+    if List.exists is_dependency_option arguments then
+      raise (Failed Header_dependencies);
+    let name =
+      match Typec_emit.Header.name_of_path source with
+      | Some name -> name
+      | None -> raise (Failed (Header_name source))
+    in
+    let dialect = dialect_of arguments in
+    let output = last_value Output arguments in
+    let standard =
+      if has_role Dialect arguments then [] else [ "-std=" ^ default_standard ]
+    in
+    let shape =
+      {
+        program;
+        emit_c = true;
+        temp_dir;
+        goal = Linked;
+        output;
+        final_compiles = false;
+        standard;
+        dialect;
+      }
+    in
+    let directory = translation_directory temp_dir 0 in
+    let interface =
+      {
+        source;
+        directory;
+        preprocess = header_preprocess_command shape arguments source;
+        preprocessed = Filename.concat directory "preprocessed.i";
+        dialect;
+        emitted = header_destination ~output source;
+        compile = None;
+      }
+    in
+    Ok
+      {
+        header_target_options = target_options shape arguments;
+        interface;
+        name;
+      }
+  with Failed error -> Error error
+
 let error_message = function
   | Refused_option { option; reason } ->
       Printf.sprintf "%s cannot be used with a .tc input: %s" option reason
@@ -520,6 +615,19 @@ let error_message = function
   | Emit_c_inputs -> "--emit-c needs exactly one input, a .tc file"
   | Emit_c_rules ->
       "--emit-c cannot be used with -M or -MM: it writes the C, not a rule"
+  | Header_inputs -> "--emit-c-header needs exactly one input, a .tci file"
+  | Header_stops ->
+      "--emit-c-header cannot be used with -c, -S or -fsyntax-only: it \
+       writes a header and compiles nothing"
+  | Header_dependencies ->
+      "--emit-c-header cannot be used with a dependency option (-M, -MM, \
+       -MD, -MMD, -MF, -MT, -MQ, -MP, -MG, -MV)"
+  | Header_name path ->
+      Printf.sprintf
+        "%s cannot have a header: the last component of its path may hold \
+         only ASCII letters, digits, '.', '_', '-' and '+', since the \
+         header names it in an #include"
+        path
   | Several_architectures names ->
       Printf.sprintf
         "-arch cannot name several architectures (%s) with a .tc input: \

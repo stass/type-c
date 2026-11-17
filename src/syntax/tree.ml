@@ -1012,14 +1012,17 @@ type translation_unit = external_declaration item list
 let external_declarations (unit : translation_unit) =
   List.map (fun (item : _ item) -> item.declaration) unit
 
+(** The tokens of an external declaration. *)
+let external_span = function
+  | External_declaration declaration -> declaration.span
+  | Type_declaration { declaration; _ } -> declaration.span
+  | Function_definition definition -> definition.span
+  | Generic_function generic -> generic.span
+  | Top_level_asm assembler -> assembler.span
+  | Empty_declaration span -> span
+
 (** The token that an external declaration begins with. *)
-let first_token = function
-  | External_declaration declaration -> declaration.span.first
-  | Type_declaration { declaration; _ } -> declaration.span.first
-  | Function_definition definition -> definition.span.first
-  | Generic_function generic -> generic.span.first
-  | Top_level_asm assembler -> assembler.span.first
-  | Empty_declaration span -> span.first
+let first_token declaration = (external_span declaration).first
 
 (** The anchor in front of an external declaration. *)
 let anchor (item : external_declaration item) =

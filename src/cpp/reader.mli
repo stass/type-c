@@ -79,6 +79,40 @@ val read : name:string -> string -> (t, error) result
     kind of the unit: the name in the marker that opens the main file
     does, which is the source path that [cc -E] was given. *)
 
+(** An include line of the text of an interface, read in the output of
+    [cc -E -dI] (design 9.3): its [directive], as ["include"], and its
+    [header_name] with its delimiters, as ["\"a.tci\""] or
+    ["<stdint.h>"]; [next_token] is the index of the token that follows it
+    in the output, which may belong to the file it includes. *)
+type include_line = {
+  next_token : int;
+  directive : string;
+  header_name : string;
+  location : Location.t;
+}
+
+(** The output of the [-E -dI] step of an interface whose header is
+    written: the unit, the include lines of the text of the interface in
+    order, and whether that text holds a token or a directive line other
+    than a line marker. The text of the interface is what the output
+    holds while the main file is the current file at the bottom of the
+    include stack and the presumed file has the main file's last
+    component. *)
+type interface = private {
+  unit : t;
+  includes : include_line list;
+  holds_text : bool;
+}
+
+val read_interface : name:string -> string -> (interface, error) result
+(** [read_interface ~name text] is {!read} of the output of the [-E -dI]
+    step of an interface. In the text of the interface it reads each
+    [#include], [#include_next] and [#import] line exactly, as [-dI]
+    writes it, and refuses every other directive that {!read} refuses; in
+    deeper text it passes over every line that {!read} would refuse as a
+    directive, since none reaches the header. The bytes of the lines it
+    reads or passes over stay in the text, so {!rewrite} copies them. *)
+
 val spelling : t -> Token.t -> string
 (** [spelling result token] is what [token] means: the name that an
     identifier carries, in UTF-8, and the bytes of any other token. *)

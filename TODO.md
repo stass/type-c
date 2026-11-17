@@ -131,6 +131,66 @@ is [type-c-language-design.md](type-c-language-design.md).
   `leave_untested` already clears what C does not evaluate, would make
   the count exact and delete the walker.
 
+## C headers (plan package 4.1)
+
+`typec --emit-c-header` writes the redirect, the guard, the macro probe
+and the runs of the interface's own lowered text in macro brackets
+between its include lines (design 9.3). The rest of the package, in
+the order of its commits:
+
+- [High] Instances: define at the end of the header every instance that
+  an application in the declarations of the interface names and that
+  can be defined there, each under its `__tc_instance__` guard, and
+  declare the others; end a header that holds a packing bracket with the
+  packing probe of 10.3 named for the header (`__tc_pack_probe_1__M`).
+  A run now holds the instances that lowering writes in front of a
+  declaration, unguarded, and no probe, so two headers that name one
+  instance clash in a client. The lowered body of an inline function
+  that traps also needs the trap's declarations in the header.
+- [High] Layout typedefs: the `__tc_layout__` typedef of each declared
+  instance, pointing to the `__tc_digest__` tag of the BLAKE2b-128
+  digest of its definition's tokens (9.3, 13.5). Waits on the
+  short-enum design, which changes the text that is digested.
+- [High] Dependency options: `-MQ` with the header's path by default,
+  `M.h.d` for `-MD` and `-MMD` without `-MF`, `-M` and `-MM` printing
+  the rule and writing no header, `-o` with them refused, and `-o -`
+  needing `-MT` or `-MQ` (and `-MF`). `--emit-c-header` refuses every
+  dependency option until then.
+- [High] The output limit and `--stats`: charge the lines of the
+  header, the macro brackets and the macro probe among them, to the
+  unit's output limit and count them in `--stats` (3.5 rule 7);
+  `--stats` reports the counts of the unit's lowering alone.
+- [High] The enumeration assertion of 13.4, named for the header
+  (`__tc_enum_probe__M`), where the header defines the tags of a
+  variant. Waits on the short-enum design, which changes it.
+- [Medium] Two predicates decide the text of the interface: the reader's
+  (`in_interface_text`: the main file at the bottom of the stack and
+  the presumed name's last component) for include lines, refused
+  directives and the empty-text check, and the writer's (the token's
+  owner is the main file) for runs. A `#line 1 "gen.tci"` in `M.tci`
+  makes the two disagree: its later include lines are passed over while
+  its tokens reach a run, and a leading one empties the text. Decide the
+  text once, in the reader, for tokens and directives alike, and refuse
+  a marker without flags that names another file inside the text of the
+  interface (GCC's `<built-in>` marker comes before the main file's
+  `# 1`); design 9.3 needs a sentence for the case.
+- [Low] `Header_file`: the new file is created with `0666` less the
+  umask and only then given the mode of the header it replaces, so a
+  `0600` header is readable by others for a moment; the check of the
+  path and the rename are not atomic (a `link` would close the window
+  for a new header), and no `fsync` precedes the rename. A message
+  echoes the `-o` path and a refused interface path unescaped; an
+  unreadable header of typec's is reported as one typec did not write.
+- [Low] `Command.read_interface` repeats the file reading of
+  `read_preprocessed`, `Pipeline.plan_header` fills a `shape` with
+  values of a translation to reuse its helpers, and `Invocation` defines
+  `given` twice: factor them.
+- [Medium] The writer reads the lowered text of the interface again
+  (`Reader.read_interface` of `Emitter.applied`) to meet each token
+  that it writes as a token, since the text of an edit is a string.
+  Edits that carried their tokens would let the writer take them
+  directly; weigh that against the second read once instances land.
+
 ## Target model
 
 - [Medium] Package 4.6's freestanding check must allow the compiler's

@@ -37,6 +37,7 @@ type typec_option =
   | Cc  (** [--cc=PATH] *)
   | Print_target  (** [--print-target] *)
   | Emit_c  (** [--emit-c] *)
+  | Emit_c_header  (** [--emit-c-header] *)
   | Stats  (** [--stats] *)
   | Trap_function  (** [--trap-function=NAME] *)
 

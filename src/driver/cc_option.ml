@@ -10,7 +10,13 @@ type dependency =
   | Dependency_target
   | Dependency_detail
 
-type typec_option = Cc | Print_target | Emit_c | Stats | Trap_function
+type typec_option =
+  | Cc
+  | Print_target
+  | Emit_c
+  | Emit_c_header
+  | Stats
+  | Trap_function
 
 type role =
   | Preprocess
@@ -117,6 +123,7 @@ let table =
       long_joined_entries (Typec Cc) [ "--cc" ];
       entries (Typec Print_target) Flag [ "--print-target" ];
       entries (Typec Emit_c) Flag [ "--emit-c" ];
+      entries (Typec Emit_c_header) Flag [ "--emit-c-header" ];
       entries (Typec Stats) Flag [ "--stats" ];
       long_joined_entries (Typec Trap_function) [ "--trap-function" ];
       (* What the command line makes and of what. *)

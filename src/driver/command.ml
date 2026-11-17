@@ -158,6 +158,66 @@ let translate ~null ~stats ~trap (target : Target.t)
         (compile target.backend.compiler))
     translation.compile
 
+(* The header of an interface (design 9.3). *)
+
+let read_interface (translation : Pipeline.translation) =
+  let text =
+    try In_channel.with_open_bin translation.preprocessed In_channel.input_all
+    with Sys_error message ->
+      stop Exit_status.Environment
+        ("cannot read the preprocessed text: " ^ message)
+  in
+  match Typec_cpp.Reader.read_interface ~name:translation.source text with
+  | Ok read -> read
+  | Error error -> refuse error
+
+let refuse_on_error = function Ok value -> value | Error error -> refuse error
+
+(* The lowered text is emission's own output, so a failure to read it
+   again is a bug of typec's. *)
+let read_lowered (translation : Pipeline.translation) text =
+  match Typec_cpp.Reader.read_interface ~name:translation.source text with
+  | Ok read -> read
+  | Error error ->
+      stop Exit_status.Internal
+        ("internal error, a bug in typec: the lowered text of the \
+          interface does not read: "
+        ^ Typec_cpp.Reader.error_message error)
+
+let write_header (destination : Pipeline.destination) text =
+  match destination with
+  | Pipeline.Standard_output -> write_emitted destination text
+  | Pipeline.File path -> (
+      match
+        Header_file.write ~first_line:Typec_emit.Header.first_line ~path text
+      with
+      | Ok () -> ()
+      | Error message -> stop Exit_status.Environment message)
+
+(* The header is written from the lowered text of the interface, read
+   again so that the writer meets each token it writes as a token. *)
+let emit_header ~null ~stats ~trap (target : Target.t)
+    (plan : Pipeline.header) =
+  let translation = plan.interface in
+  make_directory translation.directory;
+  preprocess ~null target.backend.compiler translation;
+  let read = read_interface translation in
+  let tree, scopes =
+    refuse_on_error (Front_end.parse translation.dialect target read.unit)
+  in
+  refuse_on_error
+    (Typec_emit.Header.check_interface ~source:translation.source read tree);
+  let lowered, counts =
+    refuse_on_error (Front_end.lower_parsed target ~trap read.unit scopes)
+  in
+  if stats then report_counts translation counts;
+  let lowered_read =
+    read_lowered translation
+      (Typec_emit.Emitter.applied read.unit lowered.edits)
+  in
+  write_header translation.emitted
+    (refuse_on_error (Typec_emit.Header.write plan.name lowered_read))
+
 (* One target model serves every translation, as they share the options
    of the compile step, and names the compiler that the commands are for.
    The final command reads typec's stdin, which an input "-" names. *)
@@ -171,19 +231,21 @@ let run_plan ~program ~stats ~trap (plan : Pipeline.t) =
         (final target.backend.compiler))
     plan.finals
 
-let run_pipeline (invocation : Invocation.t) temp_dir =
-  let emit_c = invocation.action = Invocation.Emit_c in
-  match
-    Pipeline.plan ~program:invocation.program ~emit_c ~temp_dir
-      invocation.arguments
-  with
+let run_header ~program ~stats ~trap (plan : Pipeline.header) =
+  let target = query_target ~program plan.header_target_options in
+  with_file "/dev/null" [ Unix.O_RDONLY ] (fun null ->
+      emit_header ~null ~stats ~trap target plan)
+
+(* [run] performs a plan that [planned] gives, or reports why there is
+   none. *)
+let run_planned planned run =
+  match planned with
   | Error error ->
       report (Pipeline.error_message error);
       Exit (Exit_status.code Exit_status.Environment)
   | Ok plan -> (
       try
-        run_plan ~program:invocation.program ~stats:invocation.stats
-          ~trap:invocation.trap plan;
+        run plan;
         Exit 0
       with
       | Stopped outcome -> outcome
@@ -191,6 +253,19 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
           report
             (Printf.sprintf "%s %s: %s" call path (Unix.error_message error));
           Exit (Exit_status.code Exit_status.Environment))
+
+let run_pipeline (invocation : Invocation.t) temp_dir =
+  let { Invocation.program; arguments; stats; trap; _ } = invocation in
+  match invocation.action with
+  | Invocation.Emit_c_header ->
+      run_planned
+        (Pipeline.plan_header ~program ~temp_dir arguments)
+        (run_header ~program ~stats ~trap)
+  | Invocation.Compile | Invocation.Emit_c | Invocation.Print_target ->
+      let emit_c = invocation.action = Invocation.Emit_c in
+      run_planned
+        (Pipeline.plan ~program ~emit_c ~temp_dir arguments)
+        (run_plan ~program ~stats ~trap)
 
 (* A signal caught at any point, the removal included, ends typec by it
    once the directory is gone. *)
@@ -217,7 +292,8 @@ let compile_through_pipeline invocation =
 let perform (invocation : Invocation.t) =
   match invocation.action with
   | Invocation.Print_target -> print_target invocation
-  | Invocation.Emit_c -> compile_through_pipeline invocation
+  | Invocation.Emit_c | Invocation.Emit_c_header ->
+      compile_through_pipeline invocation
   | Invocation.Compile when Pipeline.has_type_c_input invocation.arguments ->
       compile_through_pipeline invocation
   | Invocation.Compile -> exec invocation

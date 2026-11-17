@@ -496,6 +496,11 @@ let trap_lines trap edits =
   | _ :: _ -> (Trap.prototype trap, Trap.definition trap)
 
 (* Reader.rewrite checks that the ranges do not overlap. *)
+let applied (unit : Reader.t) edits =
+  let edits = in_order edits in
+  List.iter (check_one_file unit.tokens) edits;
+  Reader.rewrite unit (List.map (replacement unit.tokens) edits)
+
 let emit (unit : Reader.t) { trap; edits; assertions } =
   let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;

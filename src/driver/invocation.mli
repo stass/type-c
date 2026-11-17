@@ -3,7 +3,8 @@
 
 (** The backend command that a [typec] command line asks for.
 
-    [typec] owns five options, [--cc=PATH], [--print-target], [--emit-c],
+    [typec] owns six options, [--cc=PATH], [--print-target], [--emit-c],
+    [--emit-c-header],
     [--stats] and [--trap-function=NAME]; every other argument belongs to
     the backend and keeps its position. The command line is read with
     {!Command_line.read}, so an option of [typec] is one only where an
@@ -15,6 +16,9 @@ type action =
       (** Run the backend with the arguments, through the pipeline of
           {!Pipeline} when an input is a [.tc] file. *)
   | Emit_c  (** Write the C of the one [.tc] input ([--emit-c]). *)
+  | Emit_c_header
+      (** Write the C header of the one [.tci] input ([--emit-c-header],
+          design 9.3). *)
   | Print_target
       (** Print the target model that the backend reports when it is run
           with the arguments as options ([--print-target]). *)
@@ -38,14 +42,19 @@ type error =
   | Invalid_trap_function of string
       (** A [--trap-function=], the first such, names no C identifier
           ({!Typec_emit.Trap.calling}); an empty [--cc=] goes first. *)
+  | Emit_c_with_header
+      (** [--emit-c] and [--emit-c-header] are both given; an empty
+          [--cc=] goes first. *)
 
 val of_command_line :
   env_cc:string option -> string list -> (t, error) result
 (** [of_command_line ~env_cc arguments] takes the backend from the last
     [--cc=PATH] in [arguments], else from [env_cc] (the value of
     [TYPEC_CC]) when it is set and not empty, else ["cc"]. The action is
-    [Print_target] when [--print-target] appears anywhere, else [Emit_c]
-    when [--emit-c] does, else [Compile]; [stats] is whether [--stats]
+    [Print_target] when [--print-target] appears anywhere, else
+    [Emit_c_header] when [--emit-c-header] does, else [Emit_c] when
+    [--emit-c] does, else [Compile]; [--emit-c] with [--emit-c-header] is
+    an error; [stats] is whether [--stats]
     appears; [trap] calls the function that the last
     [--trap-function=NAME] names, else is {!Typec_emit.Trap.builtin}.
     The [typec] options are removed and every other argument is kept in

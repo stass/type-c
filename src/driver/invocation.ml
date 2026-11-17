@@ -1,7 +1,7 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type action = Compile | Emit_c | Print_target
+type action = Compile | Emit_c | Emit_c_header | Print_target
 
 type t = {
   program : string;
@@ -11,7 +11,10 @@ type t = {
   trap : Typec_emit.Trap.t;
 }
 
-type error = Empty_cc_option | Invalid_trap_function of string
+type error =
+  | Empty_cc_option
+  | Invalid_trap_function of string
+  | Emit_c_with_header
 
 (* The backend when neither the command line nor TYPEC_CC names one. *)
 let default_program = "cc"
@@ -46,6 +49,7 @@ let choose_trap typec_options =
 let choose_action typec_options =
   let given option = List.mem_assoc option typec_options in
   if given Cc_option.Print_target then Print_target
+  else if given Cc_option.Emit_c_header then Emit_c_header
   else if given Cc_option.Emit_c then Emit_c
   else Compile
 
@@ -61,7 +65,10 @@ let of_command_line ~env_cc words =
         if option = Cc_option.Cc then Some value else None)
       typec_options
   in
+  let given option = List.mem_assoc option typec_options in
   if List.mem "" cc_paths then Error Empty_cc_option
+  else if given Cc_option.Emit_c && given Cc_option.Emit_c_header then
+    Error Emit_c_with_header
   else
     match choose_trap typec_options with
     | Error error -> Error error
@@ -79,6 +86,9 @@ let of_command_line ~env_cc words =
    reach the terminal as a control sequence. *)
 let error_message = function
   | Empty_cc_option -> "--cc= needs the path of a C compiler"
+  | Emit_c_with_header ->
+      "--emit-c cannot be used with --emit-c-header: one writes the C of a \
+       .tc unit, the other the header of a .tci interface"
   | Invalid_trap_function name ->
       Printf.sprintf "--trap-function= needs an ASCII C identifier, not %S"
         name
