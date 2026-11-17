@@ -1559,8 +1559,11 @@ a stable name in the one table `src/syntax/rule_table/rule_table.ml`,
 which generates the module `Rule` and the catalogue
 `_build/default/docs/diagnostics.md` (`dune build docs/diagnostics.md`);
 `test/golden/coverage.ml` fails while some rule's name appears in no
-golden output, so a new rule needs a golden case. `test/run` holds cram
-tests that run `typec` and the backends;
+golden output, so a new rule needs a golden case, and
+`test/golden/citations.ml` fails while an expected output of a golden
+or run test says the word "design": a diagnostic says what is wrong in
+the terms of the user's text, and its rule name is the reference.
+`test/run` holds cram tests that run `typec` and the backends;
 `types.t` and `declarations.t` compile static assertions of what typec
 computes, so a backend that disagrees fails to compile them.
 `test/misuse` holds OCaml that an interface must refuse; each file names

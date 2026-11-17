@@ -123,7 +123,7 @@ A `try` takes an operand.
   > unsigned long g(void) { return sizeof try f(); }
   > EOF
   $ ./golden.exe measured.tc
-  measured.tc:2: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  measured.tc:2: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
   $ printf 'void f(void) { try; }\n' > bare.tc
   $ ./golden.exe bare.tc

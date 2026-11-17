@@ -17,8 +17,21 @@
 (test
  (name coverage)
  (modules coverage)
- (libraries typec_syntax)
+ (libraries typec_syntax typec_test_support)
  (deps
   (glob_files *.t))
+ (action
+  (run %{test} %{deps})))
+
+; No expected output, of a golden or a run test, cites the design: a
+; diagnostic's reference is its rule name.
+
+(test
+ (name citations)
+ (modules citations)
+ (libraries typec_test_support)
+ (deps
+  (glob_files *.t)
+  (glob_files_rec ../run/*.t))
  (action
   (run %{test} %{deps})))

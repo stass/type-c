@@ -1629,7 +1629,7 @@ operand of ?: without its second.
   > }
   > EOF
   $ ./golden.exe sizeof.tc
-  sizeof.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  sizeof.tc:3: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > inspected.tc <<'EOF'
@@ -1640,7 +1640,7 @@ operand of ?: without its second.
   > }
   > EOF
   $ ./golden.exe inspected.tc
-  inspected.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  inspected.tc:3: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > omitted.tc <<'EOF'
@@ -1651,7 +1651,7 @@ operand of ?: without its second.
   > }
   > EOF
   $ ./golden.exe omitted.tc
-  omitted.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  omitted.tc:3: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
 
 Nor do the clauses of a for, a statement expression, a declaration of
@@ -1677,7 +1677,7 @@ more than one declarator, or file scope.
   > }
   > EOF
   $ ./golden.exe statement_expression.tc
-  statement_expression.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  statement_expression.tc:3: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > declarators.tc <<'EOF'
@@ -1688,7 +1688,7 @@ more than one declarator, or file scope.
   > }
   > EOF
   $ ./golden.exe declarators.tc
-  declarators.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  declarators.tc:3: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > file_scope.tc <<'EOF'
@@ -1696,7 +1696,7 @@ more than one declarator, or file scope.
   > int x = try f();
   > EOF
   $ ./golden.exe file_scope.tc
-  file_scope.tc:2: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  file_scope.tc:2: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
 
 A declaration that holds a try declares an automatic object, whose type

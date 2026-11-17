@@ -272,7 +272,7 @@ which would otherwise jump without the qualifier.
   > void f(void) { defer try g(); }
   > EOF
   $ ./golden.exe try.tc
-  try.tc:1: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  try.tc:1: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > disputed.tc <<'EOF'

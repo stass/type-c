@@ -172,11 +172,11 @@ belongs to. C text names no constructor, so its message does not.
 
   $ printf 'void f(void) { (void)Err(1); }\n' > untargeted_err.tc
   $ ./golden.exe untargeted_err.tc
-  untargeted_err.tc:1: error: 'Err' is not declared (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified (design 3.3)
+  untargeted_err.tc:1: error: 'Err' is not declared (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified
   [1]
   $ printf 'int n = None;\n' > untargeted_none.tc
   $ ./golden.exe untargeted_none.tc
-  untargeted_none.tc:1: error: 'None' is not declared (C11 6.5.1p2); a constructor such as that of 'option(T)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified (design 3.3)
+  untargeted_none.tc:1: error: 'None' is not declared (C11 6.5.1p2); a constructor such as that of 'option(T)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified
   [1]
   $ printf '# 1 "c.h" 1\nint n = None;\n' > c_text_none.tc
   $ ./golden.exe c_text_none.tc

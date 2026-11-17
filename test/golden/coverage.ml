@@ -34,17 +34,8 @@ let names_of_line names line =
   | Some name -> Names.add name names
   | None -> names
 
-(* In a cram test, an output line is indented by two spaces and is neither
-   a command ("  $ ") nor its continuation ("  > "). *)
-let is_output line =
-  String.starts_with ~prefix:"  " line
-  && not
-       (String.starts_with ~prefix:"  $ " line
-       || String.starts_with ~prefix:"  > " line)
-
 let names_of_file names path =
-  In_channel.with_open_bin path In_channel.input_lines
-  |> List.filter is_output
+  Typec_test_support.Cram.output_lines path
   |> List.fold_left names_of_line names
 
 let report heading names =

@@ -872,7 +872,7 @@ let refuse_variant ?(remedy = "") context (span : Tree.span) (t : Ctype.t) =
 let switch_remedy context span (t : Ctype.t) =
   match Ctype.as_variant t with
   | Some _ when is_type_c_text context span ->
-      "; a variant is taken apart with match (design 4)"
+      "; a variant is taken apart with match"
   | Some _ | None -> ""
 
 (* The step that likely replaces [op] on a variant: an equality asks
@@ -881,7 +881,7 @@ let variant_remedy (op : Tree.binary_operator) =
   match op with
   | Equal_to | Not_equal_to ->
       "; a single-pattern test, 'if (case Pattern = value)', tells \
-       which constructor made it (design 4.6)"
+       which constructor made it"
   | Multiply | Divide | Remainder | Add | Subtract | Shift_left
   | Shift_right | Less_than | Greater_than | Less_or_equal
   | Greater_or_equal | Bitwise_and | Bitwise_xor | Bitwise_or
@@ -1561,7 +1561,7 @@ let undeclared context span name =
         Printf.sprintf
           "; a constructor such as that of %s is named alone only where \
            the target type is a variant with a constructor of that name, \
-           and elsewhere is written qualified (design 3.3)"
+           and elsewhere is written qualified"
           (quote constructor.variant_head)
     | Some _ | None -> ""
   in
@@ -3503,9 +3503,10 @@ let constructor_expression context position (whole : Tree.expression) =
 let not_held =
   Not_held
     ( Try_position,
-      "try stands in no holder, or under an operator or in a place that \
-       design 5.1 rule 3 does not name; give it a statement or \
-       declaration of its own" )
+      "try stands outside an expression statement, a declaration of one \
+       object, a return, or the condition of an if, switch or match, or in \
+       an operand that C does not evaluate as a value, such as that of \
+       sizeof; give it a statement or declaration of its own" )
 
 let in_loop_clause =
   Not_held

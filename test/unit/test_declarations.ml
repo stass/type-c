@@ -2130,7 +2130,7 @@ let variant_operations () =
   let compared =
     refused_as
       "; a single-pattern test, 'if (case Pattern = value)', tells which \
-       constructor made it (design 4.6)"
+       constructor made it"
   in
   accepts ~file
     (in_function
