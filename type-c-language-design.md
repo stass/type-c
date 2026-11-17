@@ -1764,28 +1764,99 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    file scope. Each `Ti` is a type name for the rest of that declaration.
    The function's name meets what 3.1 rules 6 and 7 require of a type
    name declared at file scope, since its instance names are built as
-   those of a generic type are (10.3).
-2. Inside, `Ti` is an opaque value type (3.2).
+   those of a generic type are (10.3). Rule 6 says what the declaration
+   holds, and rule 7 when two declarations of one name agree.
+2. Inside, `Ti` is an opaque value type (3.2): the check types it as C
+   types a structure whose members are not known.
 3. The body is checked once, against the opaque types, when the definition
-   is read. It may use a value of type `Ti` only in ways that are valid for
-   every value type:
+   is read, and an instance is the same text with each `Ti` naming its
+   argument (10.3). A use of a type parameter is therefore valid only
+   where, for every value type, the instance is valid C and gives each
+   expression the type that the check gave it, with the argument in the
+   place of `Ti`. Typing `Ti` as a structure allows a value of the type
+   to be used in these ways:
 
-   - declare objects of the type, including with the initialiser `{0}` or `{}`;
+   - declare objects of the type, including with the initialiser `{0}` or
+     `{}`, the two initialiser lists that are valid for every value type:
+     `T u = { t };` is valid where `T` is `short` and an error where it
+     is a structure;
    - initialise, assign, pass to a parameter of a prototype, and return;
-   - apply unary `&`, `sizeof` and `_Alignof`;
+   - discard it, as an expression statement, as the left operand of a
+     comma or under a cast to `void`, and yield it as the right operand of
+     a comma;
+   - apply unary `&`, `sizeof`, `_Alignof` and `__typeof__`;
    - do everything C allows with a `Ti *`: dereference, arithmetic,
      subscripting, comparison, casts to and from other object pointers;
    - use `Ti` as a type argument and in derived types.
 
-   Arithmetic, comparison, conversion and casts of a `Ti` value, member
-   access, calls, truth tests, and `_Generic` on a type that depends on
-   `Ti` are errors. So is passing a `Ti` value through `...` or to a
-   function without a prototype: the default argument promotions (C11
-   6.5.2.2p6) would convert the values of some types and not of others.
-4. An expression whose value depends on a type parameter, such as
-   `sizeof(T)`, is not a constant expression. It cannot be an array bound, a
-   `case` value or a static initialiser, and a type parameter cannot be the
-   operand of `_Alignas`.
+   What C refuses of a structure is an error: arithmetic, comparison,
+   conversion, member access, calls, truth tests, and every cast of a `Ti`
+   value but the cast to `void`. C allows that cast of every value (C11
+   6.5.4p2), and it is how C marks a parameter as unused. A cast to `Ti`
+   is an error like the others: C allows it of a scalar alone, and the
+   backends take a cast of a structure to its own type only as an
+   extension (Apple Clang 21 and GCC 16 refuse it under
+   `-pedantic-errors`).
+
+   Three things that C allows of a structure are errors too, because
+   another value type gives them another type or another meaning:
+
+   - What applies the default argument promotions (C11 6.5.2.2p6), which
+     convert the values of some types and not of others: passing a `Ti`
+     value through `...` or to a function without a prototype, and
+     `va_arg` with the type `Ti`, which is undefined where the argument
+     is `short` or `float` (7.16.1.1p2). For the same reason a function
+     type with a parameter of type `Ti` is compatible with no function
+     type without a prototype (6.7.6.3p15): `void (*old)() = take;` with
+     `void take(T t)` is an error in the instances for `short` and
+     `float` and valid for a structure (Apple Clang 21, GCC 16).
+   - *Provisional.* The conditional operator with a `Ti` value as its
+     second or third operand. C gives it the type of the usual arithmetic
+     conversions (6.5.15p5), so `c ? a : b` has the type `int` where `Ti`
+     is `short`: `sizeof(c ? a : b)` is 4 in that instance and 2 for a
+     structure that holds one `short`, and
+     `__typeof__(c ? a : b) *p = &a;` is an error in that instance alone
+     (GCC 16; Apple Clang 21 warns). An `if` statement selects the value
+     instead. A count of the conditional operators that the generic
+     functions of Pilot B or the corpus apply to such values settles it:
+     if they are common, the operator is allowed where its value is
+     converted to `Ti` at once, by an initialisation, an assignment, an
+     argument or a `return`. The refusal stays if that cannot settle it.
+   - A construct that asks whether two types are compatible, `_Generic`
+     and `__builtin_types_compatible_p` (13.5), where a type in it
+     mentions a type parameter (rule 4): the type of the controlling
+     expression, the type name of an association, or either type name of
+     the built-in. Its answer would be that of the argument: with
+     `int x`, `_Generic(x, T: 1, default: 0)` is 1 where `T` is `int`
+     and 0 where it is `long`, and `_Generic(x, T: 1, int: 2)` is not
+     valid C where `T` is `int`, as two of its associations are
+     compatible (Apple Clang 21, GCC 16). `__typeof__` asks nothing: it
+     names the type that the check gave its operand, which is that type
+     in every instance.
+4. A type *mentions* a type parameter where it is one, is derived from a
+   type that mentions one, is a type application with an argument that
+   mentions one, or is a structure or union with a member whose type
+   mentions one. The test reads the structure of the type and asks
+   nothing of its layout, which the front end does not compute (13.3,
+   P16): `T *` and `vector(T)` mention `T`. An expression *depends on a
+   type parameter* where it holds, evaluated or not, the size or the
+   alignment of a type that mentions one, or the offset of a member of
+   such a type: a `sizeof`, an `_Alignof` or an `offsetof` whose operand
+   is such a type or has one. So `sizeof(T)` and `sizeof(T *)` both
+   depend on `T`.
+
+   An expression that depends on a type parameter is not a constant
+   expression. It cannot be an array bound, where it is not read as the
+   bound of a variable length array either, a `case` value, a static
+   initialiser, the width of a bit-field, the value of an enumerator or
+   the operand of `_Static_assert`; and a type that mentions a type
+   parameter cannot be the operand of `_Alignas`, which stands for the
+   alignment of that type (C11 6.7.5p6). Each of them can be valid for
+   some arguments and not for others, as `char pad[sizeof(T) - 4]` is.
+   The test refuses `sizeof(T *)` there as well: C does not promise one
+   size for all object pointers (6.2.5p28), and `sizeof(void *)` says
+   what is meant. Storage for a `T` is declared as a `T` and not as
+   `char buf[sizeof(T)]`.
 5. Type parameters have no constraints. An operation that is not valid for
    every type, such as hashing, equality or ordering, is passed as an
    ordinary function pointer, as `qsort` takes its comparison:
@@ -1797,6 +1868,63 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
        /* ... */
    };
    ```
+6. After `generic(...)` stands one function: a function definition, or a
+   declaration with exactly one declarator, which declares a function. A
+   second function is a second `generic`. An instance is written from
+   the head of the definition alone, as its prototype and again at its
+   definition, under a name of its own and with internal linkage (7.3,
+   10.3), and each rule here keeps one fact about it:
+
+   - The function has a prototype: `(void)` where it takes no argument,
+     and neither `()` nor an identifier list. Deduction reads the types
+     of the parameters (7.2), and an identifier list cannot stand in the
+     prototype of an instance (C11 6.7.6.3p3).
+   - `static` is the only storage-class specifier, on a definition or on
+     a declaration, and it changes nothing: an instance has internal
+     linkage whatever is written. `extern` is an error, since it would
+     promise an external definition that no translation unit holds.
+   - `inline`, `_Noreturn` and attributes stand on the definition, and
+     every instance carries them where its head is written. A
+     declaration that is not a definition gives the check a type and
+     writes nothing into an instance, so `_Noreturn` or an attribute on
+     it is an error: the check would know what the backend is never
+     told. `inline` may stand on it and asks nothing there: for a
+     function with internal linkage it is a hint that changes no meaning
+     (6.7.4p6), and an instance is `inline` where the definition is.
+   - An attribute means on an instance what the backend makes of it on a
+     `static` function, and the backend refuses one that such a function
+     cannot carry, as `weak` (Apple Clang 21, GCC 16). Its arguments
+     name no type parameter (3.5 rule 4, 13.5).
+   - No assembler label follows the declarator. `__asm__("name")` would
+     give every instance the one name: with two instances so labelled,
+     GCC 16 stops at the assembler, and Apple Clang 21 compiles the unit
+     without a message and sends the calls of one instance to the body
+     of the other.
+7. A generic function may be declared more than once at file scope and is
+   defined at most once. Two declarations agree where they have the same
+   number of type parameters and, with each type parameter of one read
+   as the type parameter at the same position of the other, declare the
+   same type, as two definitions of one typedef name must (C11 6.7p3).
+   The names of the type parameters and of the parameters may differ.
+   Types that are compatible and not the same do not agree, so the
+   declarations of a generic function form no composite type, and a use
+   is checked against one type whichever of them it follows. The
+   function types `void (int)` and `void (const int)` are the same, and
+   so are `void (int[])` and `void (int *)`; `void (int (*)[])` and
+   `void (int (*)[4])` are compatible and not the same (Apple Clang 21,
+   GCC 16, as two definitions of a typedef name).
+
+   The name of a generic function denotes nothing else at file scope: any
+   other declaration of it there, of a function, an object, a typedef
+   name, a type or an enumeration constant, before it or after it, is an
+   error. A name that was both a generic and an ordinary function would
+   make `f(x)` a choice between the two, which is overloading (principle
+   6). A declaration in a block or a parameter list hides the name as it
+   hides any name of file scope.
+8. Lowering writes a generic function only as its instances (3.5 rule 8,
+   10.3). Neither its definition nor a declaration of it leaves text at
+   its own place, so a generic function that the unit does not use is
+   checked and leaves nothing in the lowered C (7.3 rule 1).
 
 Because of rules 2 to 4, an instance of a checked generic function is
 valid C for every value type. Instantiation fails only where a chain of
@@ -1850,8 +1978,9 @@ convert, is weighed with P11.
    of its instances, since the instance is defined there (10.3): generic
    functions are defined in headers. A declaration that is not a
    definition lets generic functions call each other, provided both are
-   defined before an instance of either is used. A generic function may
-   be declared `static` or `inline` but not `extern`.
+   defined before an instance of either is used. Rule 6 of 7.1 says
+   what such a declaration holds besides the type, and rule 7 when it
+   agrees with the definition.
 3. Rule 8 of 3.5 binds the whole definition, its body included, from the
    definition to each instance. In
 
