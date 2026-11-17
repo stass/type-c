@@ -1820,12 +1820,17 @@ types (design 13.3).
   first example uses it): design 5.1 rule 3 and 13.5, plan packages
   3.11 and 3.12.
 - [Medium] Design 5.1 (the rationale for the order) and 13.5 ("The
-  statement that holds a `try`", "The cost of a prelude") cite
-  measurements of hand-written samples that no script in the
-  repository reproduces: the order of two failing operands under a
-  statement expression, the diagnostics of the prelude and its size
-  against hand-written C. Package 3.12 adds the script under
-  `tools/measure`; have the design cite it.
+  statement that holds a `try`", "The objects and the order of a
+  prelude", "The cost of a prelude") cite measurements of hand-written
+  samples that no script in the repository reproduces: the order of
+  two failing operands under a statement expression, the diagnostics
+  of the prelude, its size against hand-written C, and the three
+  forms that `try-lifetime` and `try-list` refuse, lowered by hand: a
+  compound literal under the `if` of a prelude, a temporary object
+  read after its hoisted operand (under the address sanitizer as
+  well), and a braced list whose initialiser the order divides.
+  Package 3.12 adds the script under `tools/measure`; have the design
+  cite it.
 - [High] Build nested patterns, as in `case Err(DivByZero):` (owner: the
   README's first example uses them): design 4.7, plan packages 3.7 to
   3.10.

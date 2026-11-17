@@ -1789,8 +1789,10 @@ result(uint32_t, parse_error) read_number(reader *r)
    operand C evaluates as a value: the postfix, unary, cast and binary
    operators of C11 6.5.2 to 6.5.17, `sizeof` and `_Alignof` excepted,
    with the conditional, assignment and comma operators among them;
-   parentheses; the initialisers of a braced list or of a compound
-   literal; the arguments of a constructor expression (3.3) and the
+   parentheses; the braces of an initialiser list, of a declaration
+   or of a compound literal, where the initialiser that holds the
+   `try` is itself a `try` expression (`try-list`, below);
+   the arguments of a constructor expression (3.3) and the
    operands of a slice operation (section 8); `__extension__`; and
    the arguments of a builtin function
    whose result the values of its arguments alone decide, which is the
@@ -1826,11 +1828,25 @@ result(uint32_t, parse_error) read_number(reader *r)
      operands fail, the function returns the error of the one that the
      source writes first, under every backend.
    * It is one of the orders that C allows for the same expression
-     with a call in place of each `try`: C leaves the operands of an
+     with a call in place of each `try`. C leaves the operands of an
      operator and the arguments of a call unsequenced (C11 6.5p3,
-     6.5.2.2p10) and the initialisers of a list indeterminately
-     sequenced (6.7.9p23). An expression that is right in every
-     order of C is right in this one.
+     6.5.2.2p10): their parts may be evaluated in any order that
+     keeps what C does sequence, which is of three kinds. An operand
+     is evaluated before the operator that reads its value, and the
+     arguments of a call before the call (6.5p1, 6.5.2.2p10): a
+     `try` is evaluated before everything that reads it. The first
+     operand of one of the four operators above is evaluated before
+     its other operands: the four keep their order. And two things
+     are evaluated whole, with nothing else of the function between
+     their parts. One is the body of a called function (6.5.2.2p10),
+     which the lowered code calls as the source does: in
+     `f(g(), try h())` the order is `h`, `g`, `f`, which C allows
+     whatever `g` and `h` do. The other is an initialiser of a
+     braced list, which C evaluates before or after each other one
+     of the list (6.7.9p23): an initialiser that holds a `try` is
+     itself a `try` expression (`try-list`, below), which is
+     evaluated whole, so the order divides none. An expression that
+     is right in every order of C is right in this one.
    * It is not the order of reading: `g(x) + try f()` calls `f` first.
      A holder that needs `g` first has a declaration for its value
      before it, as C code does that needs `g` before a second call.
@@ -1841,7 +1857,7 @@ result(uint32_t, parse_error) read_number(reader *r)
    what the two lists above do not name. No place that holds an
    expression has a check of its own, so none can be missing, and an
    operator that the lists do not name is refused until it is added to
-   them. The refusals have three names.
+   them. The refusals have four names.
    * `try-loop`, *provisional (P34)*: the condition of a `while`, a
      `do` or a `for`, a single-pattern test that is the condition of a
      `while`, and the first and third clause of a `for`. A loop
@@ -1852,6 +1868,32 @@ result(uint32_t, parse_error) read_number(reader *r)
    * `try-declaration`: the initialiser of an object of static or
      thread storage duration, which is a constant expression, and a
      declaration of a variably modified type.
+   * `try-list`, *provisional (P35)*: an initialiser of a braced
+     list, of a declaration or of a compound literal, that holds a
+     `try` and is not itself a `try` expression, in parentheses or
+     not. In a list, a `try` is a whole initialiser or stands in the
+     operand of one that is. C evaluates the initialisers of a list
+     one whole after another, in an order that it leaves open (C11
+     6.7.9p23, 5.1.2.3p3). An initialiser that is a `try` expression
+     is evaluated whole with the `try` expressions of the holder, and
+     every other one whole after them, which is such an order:
+     `struct point p = { try coord(r), try coord(r) };` reads two
+     coordinates in the order of the source. An initialiser that
+     holds a `try` beside something else would be evaluated in two
+     parts, with the `try` expressions of the later initialisers
+     between them. Where `x` is 0, `set_two` stores 2
+     in `x` and `read_x` returns it,
+     `int a[2] = { (try set_two(), x = 1), try read_x() };` would
+     leave 2 in `a[1]`, where the same list with a call in place of
+     each `try` leaves 1, or 0 if the second initialiser is evaluated
+     first. One `try` in the list is enough: after the `try` of
+     `{ (try set_two(), x = 1), read_x() }` the backend chooses the
+     order of `x = 1` and `read_x()`, and C allows no order that
+     calls `read_x` between `set_two` and `x = 1`. The rule asks
+     nothing about what else the initialiser holds, so it also
+     refuses a conversion of the value, as in
+     `{ .len = (size_t)try read_u32(r) }`, where the order divides
+     nothing that has an effect. P35 counts those.
    * `try-position`: every other place. Outside a function body. In a
      declaration of more than one declarator, where C sequences an
      earlier initialiser before the `try` (C11 6.8p4). In what C does
@@ -1900,6 +1942,50 @@ result(uint32_t, parse_error) read_number(reader *r)
    where the operand has not yet declared one, and the lowered code
    would read the operand's, and store to `a[5]`.
 
+   **What a hoisted operand makes.** An expression of C makes objects
+   of two kinds, and C ends the life of each with a unit that
+   lowering changes for a hoisted operand (13.5). A compound literal
+   lives until the block that encloses it ends (C11 6.5.2.5p5), and a
+   hoisted operand that is evaluated under a condition is written in
+   a block of its own. A structure or union value that is no lvalue
+   and holds an array, as the value of a call may, lives in a
+   temporary object until the full expression ends (6.2.4p8), and
+   every hoisted operand is written as a full expression of its own.
+   The rest of the holder may read either object through a pointer
+   that the operand hands on, in its value or in an object that it
+   assigns. So a hoisted operand holds neither where the lowered code
+   would end its life before the source does (`try-lifetime`).
+   * A hoisted operand that is evaluated under a condition holds no
+     compound literal. It is one that stands, at any depth, in the
+     second operand of `&&` or `||` or in the second or third operand
+     of a conditional operator. In
+     `consume(c ? try wrap((int[]){7}) : NULL);`, where `wrap`
+     returns `Ok` of its argument, the array lives in the source
+     until the block that holds the statement ends, and in the
+     lowered code until the `if` of the prelude does, before
+     `consume` is called: GCC 16 at `-O2` then reads another value
+     through the pointer (13.5). Under no condition, a hoisted
+     operand is written in the block of its holder. A compound
+     literal lives there as long as in the source, and longer where
+     the holder is itself a block, as an `if` and a `switch` are
+     (C11 6.8.4p3): `consume(try wrap((int[]){7}));` and
+     `try send(s, &(struct msg){ .kind = Ping });` stand.
+   * No hoisted operand holds an expression of array type that is no
+     lvalue, a member of the value of a `try` excepted. Such an array
+     is part of a temporary object, and its conversion to a pointer
+     (C11 6.3.2.1p3) is the only way to a pointer into one, since `&`
+     takes an lvalue. In `consume(try wrap(make().a));` and in
+     `(p = make().a, try read_value(p));`, where `make` returns a
+     structure that holds the array `a`, the source keeps the
+     temporary object until the statement ends, and the lowered code
+     until the hoisted operand does, before `consume` or `read_value`
+     reads it (13.5). The array of a declared object stands:
+     `struct s m = make();` before the holder, and `m.a` in it. The
+     value of a `try` is in no temporary object of C: the prelude
+     holds it in an object of the holder's block (13.5), so an array
+     member of it stands in a hoisted operand as it does in the rest
+     of the holder, `try g((try f()).name)`.
+
    **Pragmas.** No `try` stands in a holder that holds or directly
    follows a pragma line (`try-pragma`). A `try` is an error where a
    `#pragma` line, which is also how a `_Pragma` operator reaches
@@ -1936,8 +2022,10 @@ result(uint32_t, parse_error) read_number(reader *r)
 5. *Provisional (P21).* A `try` is an error where one of these rules
    asks something of an unknown type (13.3): whether the type of the
    operand or the return type of the function is a `result`, and of
-   which arguments, or whether the type that a declaration holding the
-   `try` declares is variably modified, which no unknown type says.
+   which arguments, whether the type that a declaration holding the
+   `try` declares is variably modified, or whether a member of a
+   value that is no lvalue, in a hoisted operand, is an array
+   (`try-lifetime`), which no unknown type says.
    Each is a point that needs the answer. Taking the type for one that
    passes would guess it, and the backend cannot make the check
    instead: it reads the lowered C, where the operand already stands
@@ -1951,8 +2039,9 @@ orders were weighed.
 
 - C's own order, each `try` lowered where it stands as a statement
   expression of the GNU profile that returns on `Err`. Nothing moves,
-  so the rules on what a hoisted operand names and on pragmas would go,
-  and a loop could hold a `try`. But the order is then the backend's,
+  so the rules on what a hoisted operand names and makes, on a braced
+  list and on pragmas would go, and a loop could hold a `try`. But the
+  order is then the backend's,
   and the backends differ. With each `try` written so by hand, where
   `a` and `b` both fail, `two(try a(), try b())` returns the error of
   `a` under Apple Clang 21 and that of `b` under GCC 16, and
@@ -1994,6 +2083,37 @@ clause of a `for` are where `continue` jumps to, and evaluating a `try`
 there takes a label and a rewrite of each `continue` of the loop. The
 refusal costs one line in the loop, and relaxing it breaks no program
 that it accepts.
+
+Rationale for the lifetimes. A prelude is several full expressions,
+and a condition of it is an `if`, whose branch C makes a block in
+braces or without them (C11 6.8.4p3). Two forms would keep the objects
+that `try-lifetime` refuses. A prelude without an `if` writes an
+operand under a condition as an expression statement of the holder's
+block, `__tc_c0 ? (void)(__tc_t0 = (e)) : (void)0;`, and tests it
+under the same condition, `if (__tc_c0 && __tc_t0.tag != R_Ok)`. A
+compound literal then lives as in the source, and the prelude is no
+longer the C that is written by hand, which P33 measures it against.
+For a temporary object C has no such form: it lives to the end of its
+full expression, so lowering would hold the structure in an object of
+the holder's block, a temporary whose type it must write, with the
+forms and refusals that the order of reading needs (above). Each
+refusal costs a declaration, in a statement that makes such an object
+beside a `try`. Neither refusal is provisional: one of these forms
+lifts it and no measurement does, and lifting it breaks no program
+that it accepts.
+
+Rationale for the list. *Provisional (P35).* Three rules keep C's
+order in a braced list. A list holds no `try`: it refuses
+`{ try coord(r), try coord(r) }`, which reads a structure member by
+member. An initialiser that holds a `try` is itself a `try`
+expression: the rule asks nothing about the rest of the initialiser,
+since there is none. An initialiser
+that holds a `try` holds nothing else that has an effect: it admits
+`(size_t)try read_u32(r)`, and takes a definition of what has an
+effect, which a call, an assignment, a volatile object, a slice test
+that traps (section 8) and a conversion that raises a floating-point
+exception all do. The second is the design, and P35 says what would
+widen it.
 
 ### 5.2 Results are not dropped
 
@@ -5261,6 +5381,56 @@ type `void`, compiles without a diagnostic under `-pedantic-errors
 temporaries that have no initialiser, and evaluates its operands in
 the order of 5.1 under both backends.
 
+**The objects and the order of a prelude.** Each form is a full
+expression of its own, and what stands under an `if` of a prelude is
+in a block of its own, in braces or without them (C11 6.8.4p3).
+Lowering has no form that carries an object of a hoisted operand past
+the end of either: 5.1 rule 3 refuses the operand that makes one
+(`try-lifetime`), and three facts about every prelude follow.
+
+- A compound literal of the source stands in a prelude outside its
+  `if` statements only, and so in the block of the holder. That is the
+  block of the literal in the source where the holder is a block item
+  or a substatement, which is a block with braces as without them. It
+  is the block around the literal's own where the holder is itself a
+  block, as an `if` and a `switch` are: the object then lives longer
+  than in the source, and a program that reads it only while the
+  source keeps it reads the same.
+- No hoisted operand forms a pointer into a temporary object of C
+  (C11 6.2.4p8), so none is read after the full expression that made
+  it.
+- The compound literals that lowering itself writes, for a
+  constructor expression, a `slice_from_array`, a `slice_unchecked`
+  and a `str` literal (the table above), stand under an `if` as
+  anywhere. Each is a value in the source (3.3, section 8): the
+  source has no lvalue of it to take the address of, and the members
+  that it reads of one, the pointer and the length of a slice, are no
+  arrays.
+
+In a braced list an initialiser that holds a `try` is itself a `try`
+expression (`try-list`), so a prelude evaluates whole initialisers,
+the holder evaluates the others, and lowering has no form for the
+order of a list.
+
+The refusals rest on the forms that they refuse, lowered by hand and
+measured with Apple Clang 21 and GCC 16 on x86-64 at `-O0` and at
+`-O2`. In `consume(c ? try wrap((int[]){7}) : NULL);` GCC 16 at
+`-O2` leaves out the store of 7 and jumps to `consume` with the frame
+of the caller released, so a `consume` that writes automatic objects
+of its own reads one of them through the pointer; it reads 7 in the
+three other builds, and in all four where the operand stands under no
+`if`. In
+`consume(try wrap(make().a));` and in
+`(p = make().a, try read_value(p));` every build reads the element,
+and the address sanitizer of Apple Clang 21 (`-fsanitize=address` at
+`-O1`) reports a use of the temporary object after its scope in both,
+where it reports nothing in the same expressions with a call in place
+of each `try`; that of GCC 16 reports nothing in either. The lowered
+code reads an object whose life has ended, whatever a build makes of
+it (C11 6.2.4p2).
+`int a[2] = { (try set_two(), x = 1), try read_x() };` leaves 2 in
+`a[1]` in every build, and 1 with a call in place of each `try`.
+
 **The cost of a prelude.** *Provisional (P33).* A prelude is the C
 that a programmer writes for a fallible call inside an expression: a
 declaration and a test for the call, an `if` where the call is under a
@@ -6974,6 +7144,7 @@ with the scripts that reproduce them (`make size-split`,
 | P32 | The selection tree of a match holds at most 65536 nodes and leaves (4.7 rule 10) | Stage 3, package 3.10: the largest tree in the container library, the pilot and the tests. The bound is at least sixteen times the largest | 65536 |
 | P33 | The `try` expressions of a holder are evaluated before the rest of it, in the order of the source, and not in the order of reading; the prelude that does so is ISO C and costs what the same code written by hand costs (5.1 rule 3, 13.5) | Stage 3, package 3.12: each holder in the container library, the pilot and the README that holds, before a `try`, an operand with a side effect that C leaves unsequenced with it, found by reading the holders, and whether the order of reading was meant there; size and speed of the preludes against the same code with each `try` in a declaration of its own, on both backends at `-O0` and at `-O2`. If such holders are common and mean the order of reading: the operands before a `try` are hoisted with it, with the forms and refusals that the rationale of 5.1 lists | The order stays |
 | P34 | No `try` stands in the condition or in a clause of a loop (5.1 rule 3) | Stage 3, package 3.12: how often `try-loop` refuses in the container library, the pilot and the README, read from the rule's name, and what each loop became. If loops that test a fallible call are common: the condition of a `while` and of a `for` is lowered as a test and a `break` that begin the body | The refusal stays |
+| P35 | In a braced list an initialiser that holds a `try` is itself a `try` expression (5.1 rule 3) | Stage 3, package 3.12: how often `try-list` refuses in the container library, the pilot and the README, read from the rule's name, and what each refused initialiser holds beside its `try`. If most hold a conversion of the value and nothing else: the design names the operators over a `try` that have no effect, and an initialiser may hold them | The refusal stays |
 
 ## 16. Non-goals
 

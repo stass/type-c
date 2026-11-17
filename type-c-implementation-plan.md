@@ -299,8 +299,8 @@ a generic function is lowered in an instance of package 3.3.
 | 3.8 | Nested patterns in `match` (design 4.7): the grammar, sub-patterns typed by their position, typed bindings, `*`, bindings at any depth, and the lowering of selection (design 13.5). A negative golden test for each rule. A bare identifier that binds a field of variant type is refused from this package on (design 4.7 rule 3), so the tests that hold one take the typed form. In the README, the `case Err(error):` of the `result` section and the second `match` in its arm become the nested labels `case Err(Missing(name)):` and `case Err(NotANumber(name)):`; the first example, whose `show` writes `case Err(DivByZero):`, and Status say that nested patterns are built. |
 | 3.9 | Nested patterns in the single-pattern test (design 4.6, 4.7 rule 9), in `if` and in `while`: typing, the field list left out at any depth, lowering. |
 | 3.10 | Measurements of nested patterns: selection against hand-written nested `switch` statements, size and speed, on both backends at `-O0` and at `-O2` (P31); the largest selection tree in the container library, the pilot and the tests (P32). |
-| 3.11 | `try` inside expressions (design 5.1 rule 3, 13.5), after packages 3.3 and 3.4: `try` as a unary operator; one function of the typed tree from a `try` to its holder and the operators between them, which gives every refusal of place; one function from a holder to its prelude and its edits, in the order of 5.1; the hoisted operands passed through the one check of the resolution property (package 2.1) and the pragma stretch, with no check of their own; `try-lvalue` and `try-loop`, and `try-void` by the discarded positions of design 5.2. A negative golden test for each refusal, and the tests of package 2.4 that refuse a `try` for its place take the places that stay refused. Before a `try` in a generic function is lowered so, the TODO item on `Moved` edits in the definition of a generic is closed. In the README, the first example and Status say that `try` inside an expression is built. |
-| 3.12 | Measurements of `try` inside expressions, from a script under `tools/measure`: the preludes of the container library, the pilot and the README against the same code with each `try` in a declaration of its own, size and speed, on both backends at `-O0` and at `-O2`, and the holders that hold a side effect before a `try` which C leaves unsequenced with it (P33); the refusals of `try-loop` and what each loop became (P34); the refusals of `try-pragma` (P8). |
+| 3.11 | `try` inside expressions (design 5.1 rule 3, 13.5), after packages 3.3 and 3.4: `try` as a unary operator; one function of the typed tree from a `try` to its holder and the operators between them, which gives every refusal of place, `try-list` among them; one function from a holder to its prelude and its edits, in the order of 5.1; the hoisted operands passed through the one check of the resolution property (package 2.1) and the pragma stretch, and through one walk of their own for `try-lifetime`: a compound literal in an operand under a condition, and an array that is no lvalue in any; `try-lvalue` and `try-loop`, and `try-void` by the discarded positions of design 5.2. A negative golden test for each refusal, and the tests of package 2.4 that refuse a `try` for its place take the places that stay refused. Before a `try` in a generic function is lowered so, the TODO item on `Moved` edits in the definition of a generic is closed. In the README, the first example and Status say that `try` inside an expression is built. |
+| 3.12 | Measurements of `try` inside expressions, from a script under `tools/measure`: the preludes of the container library, the pilot and the README against the same code with each `try` in a declaration of its own, size and speed, on both backends at `-O0` and at `-O2`, and the holders that hold a side effect before a `try` which C leaves unsequenced with it (P33); the refusals of `try-loop` and what each loop became (P34); the refusals of `try-list` and what each refused initialiser holds beside its `try` (P35); the refusals of `try-pragma` (P8). |
 
 **Exit gate**
 
@@ -479,10 +479,25 @@ a generic function is lowered in an instance of package 3.3.
      `c ? try v() : try w();`;
      `sizeof(enum { K = 5 }) + try g(K)` (`try-name-capture`) and
      the same with the enumeration declared before the statement;
+     `consume(c ? try wrap((int[]){7}) : NULL)` (`try-lifetime`),
+     where `wrap` returns `Ok` of its argument, and
+     `consume(try wrap((int[]){7}))`, where `consume` reads 7;
+     `consume(try wrap(make().a))` and
+     `(p = make().a, try read_value(p))` (`try-lifetime`), where
+     `make` returns a structure that holds the array `a`, and the
+     same two with `m.a` after `struct s m = make();`, which read
+     the element, and `try g((try f()).name)`, where `name` is an
+     array member of the value of a `try`;
+     `int a[2] = { (try set_two(), x = 1), try read_x() };` and
+     `int a[2] = { (try set_two(), x = 1), read_x() };`
+     (`try-list`), where `set_two` stores 2 in `x` and `read_x`
+     returns it, and `int a[2] = { try set_two(), try read_x() };`,
+     which leaves 2 in `a[1]`, also where the list is that of a
+     compound literal;
    - the fuzzing of the parser and the checker (Tests) starts from a
      corpus that holds `try` inside expressions.
 
-**Decided at the gate:** P11 to P14, P23, P27, P28, P30 to P34, and whether the
+**Decided at the gate:** P11 to P14, P23, P27, P28, P30 to P35, and whether the
 measured cost of function-pointer operations is evidence for constraints
 (design section 12). **Release 0.3.**
 
