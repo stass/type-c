@@ -856,16 +856,37 @@ let fail_operands context span clause =
 let is_type_c_text context (span : Tree.span) =
   File.is_type_c_text context.text.tokens.(span.first).owner
 
-let refuse_variant context (span : Tree.span) (t : Ctype.t) =
+let refuse_variant ?(remedy = "") context (span : Tree.span) (t : Ctype.t) =
   match Ctype.as_variant t with
   | Some name when is_type_c_text context span ->
       context.fail span
         (Rule.message Variant_operation
            (Printf.sprintf
               "the variant %s takes no such operation; Type-C text reaches \
-               its tag and fields only through constructors and matching"
-              (quoted_variant name)))
+               its tag and fields only through constructors and matching%s"
+              (quoted_variant name) remedy))
   | Some _ | None -> ()
+
+(* What a switch on a value of type [t] likely meant in Type-C text: a
+   variant is taken apart by a match (design 4). *)
+let switch_remedy context span (t : Ctype.t) =
+  match Ctype.as_variant t with
+  | Some _ when is_type_c_text context span ->
+      "; a variant is taken apart with match (design 4)"
+  | Some _ | None -> ""
+
+(* The step that likely replaces [op] on a variant: an equality asks
+   which constructor made it, which a test answers. *)
+let variant_remedy (op : Tree.binary_operator) =
+  match op with
+  | Equal_to | Not_equal_to ->
+      "; a single-pattern test, 'if (case Pattern = value)', tells \
+       which constructor made it (design 4.6)"
+  | Multiply | Divide | Remainder | Add | Subtract | Shift_left
+  | Shift_right | Less_than | Greater_than | Less_or_equal
+  | Greater_or_equal | Bitwise_and | Bitwise_xor | Bitwise_or
+  | Logical_and | Logical_or ->
+      ""
 
 (* Design 7.1 rule 3: an instance of a generic function is its text with
    each type parameter naming its argument, so a use of a type parameter
@@ -1529,6 +1550,25 @@ let string_type context (literal : Tree.string_literal) =
 
 (* Identifiers (6.5.1p2, 6.4.2.2) *)
 
+(* 6.5.1p2. A name of a constructor of a universe variant, written alone
+   where the target type is no variant with a constructor of that name,
+   names nothing (design 3.3); the note says so, as the user likely meant
+   the constructor. *)
+let undeclared context span name =
+  let constructor_note =
+    match Universe.find_constructor name with
+    | Some constructor when is_type_c_text context span ->
+        Printf.sprintf
+          "; a constructor such as that of %s is named alone only where \
+           the target type is a variant with a constructor of that name, \
+           and elsewhere is written qualified (design 3.3)"
+          (quote constructor.variant_head)
+    | Some _ | None -> ""
+  in
+  context.fail span
+    (Rule.c_text
+       (quote name ^ " is not declared (C11 6.5.1p2)" ^ constructor_note))
+
 (* An undeclared identifier may name a builtin function of the backend
    (design 13.3). One with a prototype has its function type; one that a
    rule types has a type only where it is called, and one whose type
@@ -1557,9 +1597,7 @@ let builtin context span name =
            ^ ", the backend, on this target's architecture ("
            ^ Target.architecture_name target.architecture
            ^ ")"))
-  | Not_builtin ->
-      context.fail span
-        (Rule.c_text (quote name ^ " is not declared (C11 6.5.1p2)"))
+  | Not_builtin -> undeclared context span name
 
 let const_char context span =
   let const = { Qualifiers.none with const = true } in
@@ -3896,9 +3934,9 @@ and expression_node context position (whole : Tree.expression) =
   (* Any other operand, which the operation reaches into, so it may not
      be a variant; it reads a distinct value only where the table of
      design 3.4 says so. *)
-  let typed operand =
+  let typed ?remedy operand =
     let operand_typed = whole_value context operand in
-    refuse_variant context span operand_typed.expression_type;
+    refuse_variant ?remedy context span operand_typed.expression_type;
     read_operand context span ~reads:(reads_distinct whole.node) operand_typed
   in
   match whole.node with
@@ -3996,8 +4034,9 @@ and expression_node context position (whole : Tree.expression) =
       context.needs_complete cast_operand.expression_type;
       value (call_or_cast_type context span cast_type)
   | Binary (op, left, right) ->
-      let left_typed = typed left in
-      let right_typed = typed right in
+      let remedy = variant_remedy op in
+      let left_typed = typed ~remedy left in
+      let right_typed = typed ~remedy right in
       equality_operands context op (left, left_typed) (right, right_typed);
       value (binary_type context span op left_typed right_typed)
   | Conditional { condition; if_true; if_false } ->
@@ -5258,14 +5297,16 @@ and for_clause context (clause : Tree.for_clause) =
 
 (* 6.8.4.2p1. *)
 and switch_controlling context controlling =
-  match operand context (expression context controlling) with
+  let typed = expression context controlling in
+  match operand context typed with
   | Arithmetic_operand { arithmetic = Integer _; _ } | Unknown_operand _ -> ()
   | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
   | Other_operand _ ->
       context.fail controlling.span
         (Rule.c_text
-           "the controlling expression of a switch is not an integer (C11 \
-            6.8.4.2p1)")
+           ("the controlling expression of a switch is not an integer \
+             (C11 6.8.4.2p1)"
+           ^ switch_remedy context controlling.span (value_type typed)))
 
 (* 6.8.1p2: case and default labels only in a switch. *)
 and label_of context (label : Tree.label) =

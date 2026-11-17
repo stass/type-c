@@ -315,8 +315,17 @@ access, no comparison and no cast to or from one.
   [1]
   $ printf 'type e = | A;\nint f(e v, e w) { return v == w; }\n' > equal.tc
   $ ./golden.exe equal.tc
-  equal.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  equal.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching; a single-pattern test, 'if (case Pattern = value)', tells which constructor made it (design 4.6) [variant-operation]
   [1]
+  $ printf 'type e = | A;\nint f(e v) { switch (v) { default: return 0; } }\n' > switch.tc
+  $ ./golden.exe switch.tc
+  switch.tc:2: error: the controlling expression of a switch is not an integer (C11 6.8.4.2p1); a variant is taken apart with match (design 4)
+  [1]
+  $ cat > tested.tc <<'EOF'
+  > type e = | A | B(int x);
+  > int f(e v) { if (case A = v) return 1; match (v) { case A: return 2; case B(x): return x; } }
+  > EOF
+  $ ./golden.exe tested.tc > /dev/null
   $ printf 'type e = | A;\nvoid f(e v) { (void)(long)v; }\n' > cast.tc
   $ ./golden.exe cast.tc
   cast.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]

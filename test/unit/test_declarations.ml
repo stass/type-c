@@ -2120,11 +2120,17 @@ let variant_operations () =
   let file = "in.tc" in
   let variant = "type e = | A | B(int i); " in
   let in_function body = variant ^ "e f(e v, e w, e *p) { " ^ body ^ " }" in
-  let refused body =
+  let refused_as remedy body =
     rejects ~file (in_function body)
-      "the variant 'e' takes no such operation; Type-C text reaches its tag \
-       and fields only through constructors and matching \
-       [variant-operation]"
+      ("the variant 'e' takes no such operation; Type-C text reaches its \
+        tag and fields only through constructors and matching" ^ remedy
+     ^ " [variant-operation]")
+  in
+  let refused = refused_as "" in
+  let compared =
+    refused_as
+      "; a single-pattern test, 'if (case Pattern = value)', tells which \
+       constructor made it (design 4.6)"
   in
   accepts ~file
     (in_function
@@ -2138,8 +2144,8 @@ let variant_operations () =
   refused "(void)(*p).u; return v;";
   refused "(void)f(v, w, p).tag; return v;";
   refused "(void)sizeof(v.tag); return v;";
-  refused "(void)(v == w); return v;";
-  refused "(void)(v != w); return v;";
+  compared "(void)(v == w); return v;";
+  compared "(void)(v != w); return v;";
   refused "(void)!v; return v;";
   refused "v += w; return v;";
   refused "(void)(int)v; return v;";

@@ -438,11 +438,17 @@ is [type-c-language-design.md](type-c-language-design.md).
     to make one where `*p` was meant. Decide by what the variant holds:
     a constructor whose field the source converts to, an Ok whose type
     converts to the target.
-  - A constructor of `result` or `option` where no such type is
-    expected reads "'Err' is not declared": name the constructor and
-    the type that the place expects.
-  - `switch` on a variant and `==` on a variant could point to `match`
-    and the single-pattern test.
+  - A constructor of the unit's own variant written alone where no
+    variant of it is expected reads "'A' is not declared"; only the
+    universe's constructors get a note (`Expressions.undeclared`).
+    Looking the name up among the constructors of the visible variants
+    would cover both and could replace `Universe.constructors`, which
+    reads the universe text a second time beside the parser, as
+    `Ctype.result_ok` and `result_err` spell two of its names a third
+    time (`test_naming` pins the three together).
+  - `if (v)` and `while (v)` on a variant get no hint towards
+    `if (case P = v)`, and `switch` on a variant is a C refusal without
+    the `[variant-operation]` name that `==` on one carries.
   - Messages print types without their typedef names: `str` as
     `slice(const char)`, `size_t` as `unsigned long`.
   - The parser quotes names with backticks, the typing stages with

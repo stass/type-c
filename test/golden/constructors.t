@@ -166,6 +166,28 @@ Constructors are refused where they do not fit.
   untargeted.tc:2: error: 'A' is not declared (C11 6.5.1p2)
   [1]
 
+A constructor of `option` or `result` alone where no instance of it is
+expected names nothing either; the message says which variant it
+belongs to. C text names no constructor, so its message does not.
+
+  $ printf 'void f(void) { (void)Err(1); }\n' > untargeted_err.tc
+  $ ./golden.exe untargeted_err.tc
+  untargeted_err.tc:1: error: 'Err' is not declared (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified (design 3.3)
+  [1]
+  $ printf 'int n = None;\n' > untargeted_none.tc
+  $ ./golden.exe untargeted_none.tc
+  untargeted_none.tc:1: error: 'None' is not declared (C11 6.5.1p2); a constructor such as that of 'option(T)' is named alone only where the target type is a variant with a constructor of that name, and elsewhere is written qualified (design 3.3)
+  [1]
+  $ printf '# 1 "c.h" 1\nint n = None;\n' > c_text_none.tc
+  $ ./golden.exe c_text_none.tc
+  c.h:1: error: 'None' is not declared (C11 6.5.1p2)
+  [1]
+  $ cat > targeted_none.tc <<'EOF'
+  > option(int) o = None;
+  > void f(void) { (void)result(int, int).Err(1); }
+  > EOF
+  $ ./golden.exe targeted_none.tc > /dev/null
+
 A type name followed by `.` is a constructor in Type-C text only.
 
   $ printf 'type e = | A;\n# 1 "c.h" 1\ne x = e.A;\n' > c_text.tc

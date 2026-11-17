@@ -543,6 +543,27 @@ let check_invented_names () =
   in
   List.iter check_universe Universe.names
 
+(* The constructors that the universe text declares, as diagnostics name
+   them; [Ctype.result_ok] and [Ctype.result_err] spell two of them. *)
+let check_universe_constructors () =
+  let read =
+    List.map
+      (fun ({ constructor_name; variant_head } : Universe.constructor) ->
+        constructor_name ^ " of " ^ variant_head)
+      Universe.constructors
+  in
+  let expected =
+    [ "None of option(T)"; "Some of option(T)"; "Err of result(T, E)";
+      "Ok of result(T, E)" ]
+  in
+  if read <> expected then
+    fail "the universe constructors" (String.concat ", " read);
+  List.iter
+    (fun name ->
+      if Universe.find_constructor name = None then
+        fail "a constructor of result missing from the universe" name)
+    [ Typec_sema.Ctype.result_ok; Typec_sema.Ctype.result_err ]
+
 let () =
   check_prefix_free ();
   check_names_split ();
@@ -550,5 +571,6 @@ let () =
   check_generic_ends_at_first_underscores ();
   check_derived_names ();
   check_declared_names ();
+  check_universe_constructors ();
   check_invented_names ();
   if !failures > 0 then exit 1
