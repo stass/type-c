@@ -762,11 +762,11 @@ $ typec -std=c11 -Wall -Wextra -c copy.tc
 `typec` writes a copy of each deferred statement at each exit
 ([What the C looks like](#what-the-c-looks-like)). An analyzer finds
 some leaks of C by following paths: GCC's `-fanalyzer` reports both of
-`copy.c`.
+`copy.c`, in either order.
 
 <!-- console: gcc -->
 ```console
-$ cc -std=c11 -fanalyzer -c copy.c 2>&1 | grep -o "leak of FILE '[a-z]*'"
+$ cc -std=c11 -fanalyzer -c copy.c 2>&1 | grep -o "leak of FILE '[a-z]*'" | sort
 leak of FILE 'in'
 leak of FILE 'out'
 ```
