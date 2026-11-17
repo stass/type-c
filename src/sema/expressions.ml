@@ -435,11 +435,15 @@ end
    [Discarded_branch] is a branch of a conditional that stands where its
    value is discarded: its value is discarded too, but a try there reads
    its value, as C gives both branches of a conditional one type
-   (6.5.15p3, design 13.5). A [Listed] position is that of a value in
-   a braced initialiser; its target type is the subobject at its place.
-   The value may instead initialise a member of that subobject through
-   elided braces (6.7.9p20), so the initialiser checks its conversion
-   where it places it. *)
+   (6.5.15p3, design 13.5). A [Listed] position has a target type whose
+   conversion as if by assignment the construct around it checks: that
+   of a value in a braced initialiser, whose target type is the
+   subobject at its place, which the value may instead initialise a
+   member of through elided braces (6.7.9p20), so the initialiser checks
+   its conversion where it places it; and that of a branch of a
+   conditional, whose value converts as the composite type of both
+   branches does (6.5.15p6), which the conditional's own position
+   checks. *)
 type position =
   | Untargeted
   | Targeted of Ctype.t
@@ -460,7 +464,8 @@ let value_position = function
 (* The position of a branch of a conditional that stands in [position]. *)
 let branch_position = function
   | Discarded | Discarded_branch -> Discarded_branch
-  | (Untargeted | Targeted _ | Listed _) as position -> position
+  | Targeted target | Listed target -> Listed target
+  | Untargeted -> Untargeted
 
 (* Where a pattern stands, which decides whether it may omit the field
    list of a constructor with fields: only a test may (design 4.1 rule 3,
@@ -1131,11 +1136,12 @@ type pointer_gap =
           which sees U for D, does not even warn, so typec decides in
           Type-C text. *)
   | Record_gap
-      (** C11 6.5.16.1p1, 6.5.6p3, 6.5.8p2, 6.5.9p2, 6.5.15p3: pointers
-          to incompatible types where a variant or an instance is part of
-          one, as of [list(int) *] and [list(double) *]. GNU C only warns
-          of most, naming the C encodings, so typec refuses them as C
-          does, in any text. *)
+      (** C11 6.5.6p3, 6.5.8p2, 6.5.9p2, 6.5.15p3: pointers to
+          incompatible types where a variant or an instance is part of
+          one, as of [list(int) *] and [list(double) *], that an operation
+          relates. GNU C only warns of most, naming the C encodings, so
+          typec refuses them as C does, in any text. A conversion leaves
+          the gap to [refuse_unassignable], which checks it in full. *)
   | Parameter_gap of string
       (** Design 7.1 rule 3: pointers to incompatible types where one
           mentions a type parameter are compatible for some arguments
@@ -1273,6 +1279,23 @@ let record_conversion_hint ~source ~target =
   | true, false -> opening_hint source
   | false, true -> making_hint target
 
+(* C11 6.5.16.1p1: a value of type [source] does not convert to
+   [target] as by assignment; [hint] says what likely makes it. *)
+let refuse_assignment context span ~target ~source ~hint =
+  context.fail span
+    (Rule.c_text
+       (Printf.sprintf "a value of type %s does not convert to %s%s \
+                        (C11 6.5.16.1p1)"
+          (quote (Type_name.of_ctype source))
+          (quote (Type_name.of_ctype target))
+          hint))
+
+(* A cast converts a scalar to a scalar (6.5.4p2), so a refusal between
+   two of them says so. *)
+let cast_hint ~(target : Ctype.t) ~(source : Ctype.t) =
+  let is_scalar t = Ctype.is_scalar t = Answer true in
+  if is_scalar target && is_scalar source then " without a cast" else ""
+
 (* Design 5, C11 6.5.16.1p1: a value of a variant or an instance converts
    to no other type, as a structure does not. The backend would refuse it
    too, naming both types by their C encodings; typec names them as
@@ -1280,13 +1303,8 @@ let record_conversion_hint ~source ~target =
    unless a type argument decides it (design 7.1 rule 4). *)
 let refuse_record_conversion context span ~target ~source =
   let refuse () =
-    context.fail span
-      (Rule.c_text
-         (Printf.sprintf "a value of type %s does not convert to %s%s \
-                          (C11 6.5.16.1p1)"
-            (quote (Type_name.of_ctype source))
-            (quote (Type_name.of_ctype target))
-            (record_conversion_hint ~source ~target)))
+    refuse_assignment context span ~target ~source
+      ~hint:(record_conversion_hint ~source ~target)
   in
   if is_type_c_record source || is_type_c_record target then
     match
@@ -1305,73 +1323,38 @@ let refuse_record_conversion context span ~target ~source =
            are compatible or not"
     | Every_argument (Answer true | Depends_on _) -> ()
 
-(* C11 6.5.16.1p1: a pointer to a variant or an instance converts to a
-   pointer only as C lets it, which GNU C only warns of, naming the C
-   encodings. *)
-let refuse_pointer_conversion context span ~target ~source =
-  context.fail span
-    (Rule.c_text
-       (Printf.sprintf
-          "a value of type %s does not convert to %s without a cast \
-           (C11 6.5.16.1p1)"
-          (quote (Type_name.of_ctype source))
-          (quote (Type_name.of_ctype target))))
-
-(* C11 6.5.16.1p1: the type that a converted pointer points to has every
-   qualifier of the one that the value points to. [pointers_differ]
-   compares the types without qualifiers, so the qualifiers are checked
-   here, where a variant or an instance is part of either. *)
-let drops_qualifiers ~(target : Ctype.t) ~(source : Ctype.t) =
-  match (target.shape, source.shape) with
-  | Pointer t, Pointer s ->
-      (mentions_type_c_record t || mentions_type_c_record s)
-      && Qualifiers.union t.qualifiers s.qualifiers <> t.qualifiers
-  | _ -> false
-
-(* Design 3.4: Type-C text converts no value implicitly to or from a
-   distinct type, nor a pointer but as [pointers_differ] allows. The
-   backend sees a distinct type as its representation (design 10.2), so
-   it cannot refuse these conversions; the others are its own, which
-   typec refuses where a variant or an instance would make the backend
-   name a C encoding. C text sees the representations as the backend
-   does, so every rule below decides on the types as seen, and in C text
-   no distinct type is left to cross; messages name the types as
-   written. The record rule reads the written types, which are the seen
-   ones wherever it applies, as no distinct type is a record (design
-   3.4), so its message names the types as written too. *)
-let refuse_conversion context span target (typed : typed) =
-  let target = Ctype.unqualified target in
-  let source = value_type typed in
-  let seen_target = type_as_seen context span target in
-  let seen_source = type_as_seen context span source in
-  refuse_record_conversion context span ~target ~source;
-  if drops_qualifiers ~target:seen_target ~source:seen_source then
-    refuse_pointer_conversion context span ~target ~source;
-  let crosses =
-    match (seen_target.shape, seen_source.shape) with
-    | Pointer t, Pointer s -> (
-        match pointers_differ context span t s with
-        | Some (Parameter_gap use) -> refuse_type_parameter context span use
-        | Some Record_gap ->
-            refuse_pointer_conversion context span ~target ~source
-        | Some Distinct_gap -> true
-        | None -> false)
-    | (Record _ | Array _), _ -> false
-    | _ ->
-        (Ctype.as_distinct seen_target <> None
-        || Ctype.as_distinct seen_source <> None)
-        && differs context span seen_target seen_source
+(* C11 6.5.16.1p1: whether a pointer to [source] converts to a pointer
+   to [target] as by assignment: [target] has every qualifier of
+   [source], and the two are compatible or one is void. _Atomic is no
+   qualifier here (6.2.5p27): compatibility compares it. A void * meets a
+   pointer to a function too, as GNU C and POSIX (dlsym) let it. What
+   typec cannot tell converts, as the backend decides it: the qualifiers
+   of a type that typec does not compute are unknown too. *)
+let pointer_assignable context span ~(target : Ctype.t) ~(source : Ctype.t) =
+  let is_unknown (t : Ctype.t) =
+    match t.shape with
+    | Unknown_type _ -> true
+    | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _
+    | Va_list | Array _ | Function _ ->
+        false
   in
-  if crosses then
-    context.fail span
-      (Rule.message Distinct_conversion
-         (Printf.sprintf
-            "a value of type %s does not convert to %s without a cast"
-            (quote (Type_name.of_ctype source))
-            (quote (Type_name.of_ctype target))));
-  refuse_dependent_null context span ~target:seen_target seen_source;
-  refuse_type_parameter_conversion context span ~target:seen_target
-    ~source:seen_source
+  let keeps_qualifiers =
+    Qualifiers.union target.qualifiers source.qualifiers = target.qualifiers
+  in
+  let without_qualifiers (t : Ctype.t) =
+    let atomic = { Qualifiers.none with atomic = t.qualifiers.atomic } in
+    Ctype.qualify atomic (Ctype.unqualified t)
+  in
+  let may_be_compatible =
+    match (without_qualifiers target, without_qualifiers source) with
+    | Ok target, Ok source ->
+        compatible context span target source <> Answer false
+    | Error _, _ | _, Error _ -> true
+  in
+  let is_void t = Ctype.is_void t = Answer true in
+  is_unknown target || is_unknown source
+  || keeps_qualifiers
+     && (is_void target || is_void source || may_be_compatible)
 
 (* Design 13.5: typec answers a construct whose [types], as its text sees
    them, have a distinct type in them, which only Type-C text sees, and
@@ -4073,8 +4056,94 @@ and positioned context position (expression : Tree.expression) =
    recurses through deep trees, so that its frame stays small. *)
 and assigned context expression ~target typed =
   let converted = listed_value context expression ~target typed in
-  refuse_conversion context expression.span target converted;
+  refuse_conversion context expression target converted;
   converted
+
+(* Design 3.4: Type-C text converts no value implicitly to or from a
+   distinct type, nor a pointer to one but as [pointers_differ] allows.
+   The backend sees a distinct type as its representation (design 10.2), so
+   it cannot refuse these conversions. C text sees the representations
+   as the backend does, so every rule below decides on the types as
+   seen, and in C text no distinct type is left to cross; messages name
+   the types as written. The record rule reads the written types, which
+   are the seen ones wherever it applies, as no distinct type is a record
+   (design 3.4), so its message names the types as written too. What is
+   left is C's own rule, which [refuse_unassignable] applies. *)
+and refuse_conversion context (converted : Tree.expression) target
+    (typed : typed) =
+  let span = converted.span in
+  let target = Ctype.unqualified target in
+  let source = value_type typed in
+  let seen_target = type_as_seen context span target in
+  let seen_source = type_as_seen context span source in
+  refuse_record_conversion context span ~target ~source;
+  let crosses =
+    match (seen_target.shape, seen_source.shape) with
+    | Pointer t, Pointer s -> (
+        match pointers_differ context span t s with
+        | Some (Parameter_gap use) -> refuse_type_parameter context span use
+        | Some Distinct_gap -> true
+        | Some Record_gap | None -> false)
+    | (Record _ | Array _), _ -> false
+    | _ ->
+        (Ctype.as_distinct seen_target <> None
+        || Ctype.as_distinct seen_source <> None)
+        && differs context span seen_target seen_source
+  in
+  if crosses then
+    context.fail span
+      (Rule.message Distinct_conversion
+         (Printf.sprintf
+            "a value of type %s does not convert to %s without a cast"
+            (quote (Type_name.of_ctype source))
+            (quote (Type_name.of_ctype target))));
+  refuse_dependent_null context span ~target:seen_target seen_source;
+  refuse_type_parameter_conversion context span ~target:seen_target
+    ~source:seen_source;
+  refuse_unassignable context converted ~target ~source ~seen_target
+    ~seen_source
+
+(* Design 5: C11 6.5.16.1p1 in full, in Type-C text and wherever a
+   variant or an instance is part of either type. GNU C only warns of
+   much that C refuses, as a pointer to a type that differs in signedness
+   or that drops a qualifier, and its messages spell a type that an
+   instance writes through a type argument by its encoding; C text that a
+   unit includes keeps the rules that the backend applies to it. *)
+and refuse_unassignable context (converted : Tree.expression) ~target ~source
+    ~seen_target ~seen_source =
+  let checked =
+    is_type_c_text context converted.span
+    || mentions_type_c_record seen_target
+    || mentions_type_c_record seen_source
+  in
+  let converts () =
+    assignable context converted ~target:seen_target ~source:seen_source
+  in
+  if checked && not (converts ()) then
+    refuse_assignment context converted.span ~target ~source
+      ~hint:(cast_hint ~target ~source)
+
+(* Whether the value of [converted], of type [source], converts to
+   [target] as by assignment (C11 6.5.16.1p1). Whether it is a null
+   pointer constant is asked only where a pointer takes an integer, as
+   asking refuses one that depends on a type parameter. *)
+and assignable context (converted : Tree.expression) ~(target : Ctype.t)
+    ~(source : Ctype.t) =
+  let span = converted.span in
+  match (target.shape, source.shape) with
+  | Unknown_type _, _ | _, Unknown_type _ -> true
+  | (Arithmetic _ | Enum _), (Arithmetic _ | Enum _) -> true
+  | Arithmetic (Integer Bool), Pointer _ -> true
+  | Pointer referenced, Pointer source_referenced ->
+      pointer_assignable context span ~target:referenced
+        ~source:source_referenced
+  | Pointer _, _ ->
+      Ctype.is_integer source = Answer true
+      && null_pointer_constant context converted <> Not_null
+  | ( ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+      | Array _ | Function _ ),
+      _ ) ->
+      compatible context span target (Ctype.unqualified source) <> Answer false
 
 (* [typed], the value of [expression] in a braced initialiser, made a
    slice where [target] is one (design section 8 rule 5); the
@@ -4374,8 +4443,8 @@ and called_name (whole : Tree.expression) =
    constructor lowers to. Where the field or the argument is a structure
    or union, a value of another type would initialise its first member
    through elided braces instead (C11 6.7.9p13), so the types must be
-   compatible (6.5.16.1p1); the other conversions are the backend's, as
-   for any assignment. *)
+   compatible (6.5.16.1p1), in C text too, where the other conversions
+   are the backend's (design 5). *)
 and constructor_argument context named (field : Ctype.member) argument =
   let field_type = field.member_type in
   let argument_type =
@@ -4527,7 +4596,7 @@ and deducing_argument context bindings parameter (first : Tree.expression) =
     (Deduction.newly_deduced ~before:bindings ~after:deduced);
   let target = substituted context first.span deduced parameter in
   context.needs_complete typed.expression_type;
-  refuse_conversion context first.span target typed;
+  refuse_conversion context first target typed;
   deduced
 
 (* The function designator of the instance whose type arguments
@@ -5201,7 +5270,7 @@ and initialiser context ~holder ~constant t initialiser =
   (* The tries of the list that [converts] gave an object, by span. *)
   let placed_tries = Hashtbl.create 4 in
   let converts scalar initialising =
-    refuse_conversion context initialising.Tree.span scalar
+    refuse_conversion context initialising scalar
       (operand_typed context initialising);
     if is_try initialising then begin
       Hashtbl.replace placed_tries initialising.span ();

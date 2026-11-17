@@ -1003,10 +1003,10 @@ let tries () =
   accepts "{ int n = try read_into(&x); }";
   accepts "x = try from(({ int y = 1; struct inner { int m; } i = { y }; \
            i.m; }))";
-  accepts "x = try at(&&done); done: ;";
+  accepts "void *w = try at(&&done); (void)w; done: ;";
   accepts "x = try from((wide)n)";
   accepts "x = try from(aligned)";
-  accepts "struct s *u = 0; x = try at(u)";
+  accepts "struct s *u = 0; void *w = try at(u); (void)w";
   (* The definition of an instance that the operand applies is moved
      text of its own, whose names are not the operand's. *)
   accepts "x = try from(sizeof(box(short)))";

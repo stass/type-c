@@ -107,7 +107,11 @@ with a token sequence that C rejects:
 | Unqualified constructor, `str` literal | Selected by a target type that is a Type-C type (3.3) | No C expression has such a target type. |
 
 The consequence for adoption: a C file can be renamed to `.tc` and compiled
-before any Type-C construct is used in it.
+before any Type-C construct is used in it. A file that GNU C compiles
+only with a warning of a conversion that C11 refuses, such as a
+`char *` given for an `unsigned char *`, needs that conversion cast
+first: Type-C text checks every conversion as if by assignment in full
+(section 5).
 
 ### 2.3 Words
 
@@ -1803,16 +1807,52 @@ cast says. A slice is made by initialising one, as in
 `str s = "text";` (section 8), or by `slice_from_array`, and a variant
 by a constructor.
 
-A pointer to a type that a variant or an instance is part of converts
-implicitly only as C11 6.5.16.1p1 lets a pointer convert: to a pointer
-to a compatible type or to `void`, qualified at least as the type it
-pointed to. `list(int) *p = &d;` with `d` a `list(double)` is an error,
-and so is `==`, `-`, a relational operator or a conditional whose two
-pointers point to incompatible types (C11 6.5.6p3, 6.5.8p2, 6.5.9p2,
-6.5.15p3). GNU C only warns of most of these, naming the C encodings
-of the types, so `typec` refuses them as C does, in any text; in C
-text a distinct type is its representation (10.2), as the backend
-reads it. An explicit cast converts such a pointer, as in C.
+In Type-C text every conversion as if by assignment - an assignment, an
+initialiser and each member of a braced one, an argument for a
+prototyped parameter, for a constructor's field (3.3) or for a builtin
+that stores a value, and a returned value - converts only as C11
+6.5.16.1p1 lets it, and `typec` refuses one that does not, naming the
+types as Type-C writes them. A conditional converts as one value, of
+the composite type of its branches (C11 6.5.15p6), so `k ? v : c` with
+a `void *v` and a `char *c` converts to an `int *`. The check includes
+what GNU C only warns of: a pointer to a type that differs in
+signedness alone (`unsigned char *` for `char *`), a pointer that drops
+a qualifier of the type it points to (`const char *` for `char *`), a
+pointer to another incompatible type, an integer that is no null
+pointer constant for a pointer, and a pointer for an integer type other
+than `_Bool`. What C allows stays: a null pointer constant, a `void *`
+to or from a pointer to an object, a pointer that adds qualifiers and
+the arithmetic conversions; a `void *` also converts to and from a
+pointer to a function, as GNU C and POSIX (`dlsym`) let it.
+
+The reason is the instances: a type that an instance spells through a
+type argument reaches the backend as an encoding (10.3), so a mistake
+with `bx.v = p;` for a `box(int) bx` and an `int *p` would be a
+warning, or a C error, in names the user never wrote. Checking every
+conversion is one rule where marking the types spelled through a type
+argument would be a second kind of type, and new code loses nothing by
+it, since a cast states each such conversion. C text that a unit
+includes keeps C's rules as the backend applies them, so a header that
+leans on a warning still compiles, except where a variant or an
+instance is part of either type, whose encoding the backend would name:
+those conversions are checked in full in any text.
+
+*Provisional:* the rule is C11's, not a later revision's, as the
+accepted dialects are C11 and C17 (2.4): a pointer to an array of `int`
+does not convert to a pointer to an array of `const int` (C11 6.7.3p9),
+though C23 lets it and Clang takes it without a warning. Code that
+passes a `double m[2][3]` for a `const double m[][3]` parameter, an
+idiom of numeric code, would settle it for C23's rule; until such code
+is met, C11's stands.
+
+So `list(int) *p = &d;` with `d` a `list(double)` is an error in any
+text, and so is `==`, `-`, a relational operator or a conditional whose
+two pointers point to incompatible types that a variant or an instance
+is part of (C11 6.5.6p3, 6.5.8p2, 6.5.9p2, 6.5.15p3). GNU C only warns
+of most of these, naming the C encodings of the types, so `typec`
+refuses them as C does; in C text a distinct type is its
+representation (10.2), as the backend reads it. An explicit cast
+converts such a pointer, as in C.
 
 ### 5.1 `try`
 

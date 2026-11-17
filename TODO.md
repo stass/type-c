@@ -560,15 +560,6 @@ the order of its commits:
     `Parser.quoted` also cuts at 40 bytes, which may split a UTF-8
     sequence, where the typing stages cut with `Shown.cut`; one cut
     goes with the one quoting.
-- [High] A call of a generic function does not check an argument
-  whose parameter is already deduced against the substituted type
-  (design 7.2 rule 1): with `generic(T) void put(box(T) *b, T value)`,
-  `put(b, p)` where `b` is a `box(int) *` and `p` an `int *` passes
-  `typec` and fails only in the backend, at the lowered instance call,
-  as a C error under Clang and GCC 14 and later and as a warning under
-  older GCC. `typec` should refuse it as it refuses the same assignment
-  (C11 6.5.16.1p1). Found by the `list_insert_tail(&s->all, j)` mixup of
-  `examples/queue/README.md`.
 - [Medium] The `Unknown_type` arm of `Expressions.generic_call` types
   no callee at all and may be unreachable, as `generic-function-form`
   refuses the function types that could reach it: show it reachable
@@ -639,11 +630,25 @@ the order of its commits:
   record's definition, or refuse a variant tag in `define_record`.
 - [Low] `{0}` (design 3.2 rule 7) is read as any integer constant 0
   (`{0L}`, `{0x0}`) without a designator; say so in the design.
-- [Medium] Constructor arguments are converted to their field types by
-  the backend, except where a field or an argument is a structure or
-  union, which `Expressions` checks. A wrong scalar or pointer argument
-  is then the backend's error on lowered code; check 6.5.16.1p1 in
-  typec once typing models assignment conversions.
+- [Low] In C text a constructor argument converts to its field type as
+  the backend decides, except where a field or an argument is a
+  structure or union, which `Expressions.constructor_argument` checks,
+  so a wrong scalar or pointer argument is the backend's warning or
+  error on lowered code. Type-C text checks it in full (design 5); a
+  constructor is a Type-C construct, so checking its arguments in full
+  in any text would leave the C-text record check needless.
+- [Medium] A `transparent_union` attribute on a union specifier
+  (`union __attribute__((transparent_union)) u { ... };`) makes only
+  that specifier's type unknown, so a later `union u` parameter is a
+  plain union, and Type-C text refuses a pointer argument for it that
+  GNU C takes (C11 6.5.16.1p1 checked in full, design 5). The typedef
+  form that glibc uses is unknown and converts. Make an attribute
+  outside the table on a record specifier obscure the tag wherever it
+  is named, as for an enumeration, or record `transparent_union`.
+- [Low] An integer bit-field read converts to a pointer unrefused in
+  Type-C text (`int *p = s->b;`): `Expressions.null_pointer_constant`
+  answers that it may be a null pointer constant. The backend refuses
+  it, or warns under an older GCC.
 - [Low] `Integer_constant.binary` raises on a comparison and
   `Integer_constant.comparison` on any other operator; only the order of
   the arms of `Expressions.classify_node` routes each operator to its

@@ -2230,7 +2230,7 @@ likely step, before the backend would name their C encodings.
   [1]
   $ { cat conversions.h; printf 'option(int) k(int c) { return c ? Some(1) : 0; }\n'; } > branch.tc
   $ ./golden.exe branch.tc
-  branch.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with a constructor of 'option(int)' (C11 6.5.16.1p1)
+  branch.tc:7: error: the operands have types that the operator does not take (C11 6.5.15p3)
   [1]
 
 The partners convert nothing: try and constructors take the steps, a

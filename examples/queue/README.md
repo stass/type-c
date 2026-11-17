@@ -202,9 +202,8 @@ a 2 ready
 ```
 
 In the port the same slip passes a `struct job *` where a
-`list(struct job)` takes a `struct job`. The program does not build,
-but the error comes from the C compiler at the instance that `typec`
-lowered, not from `typec` itself:
+`list(struct job)` takes a `struct job`, and `typec` refuses the
+argument itself, as C refuses the same assignment:
 
 ```c
 		queued = list_insert_tail(&s->all, j);
@@ -212,21 +211,9 @@ lowered, not from `typec` itself:
 
 ```console
 $ typec -O2 -Wall -Wextra -Werror -c sched.tc
-sched.tc:111:11: error: passing 'struct job *' to parameter of incompatible type '__tc_arg__T3job' (aka 'struct job'); dereference with *
-  111 | (&s->all, j);
-      |           ^
-      |           *
-./list.tci:48:61: note: passing argument to parameter 'value' here
-   48 | list_insert_tail__T3job ( list__T3job * l , __tc_arg__T3job value )
-      |                                                             ^
-1 error generated.
-[1]
+sched.tc:111: error: a value of type 'struct job *' does not convert to 'struct job' (C11 6.5.16.1p1)
+[80]
 ```
-
-That is a gap in `typec`, which should refuse the argument itself as it
-refuses the same assignment; it is recorded in
-[`TODO.md`](../../TODO.md). With an `int *` passed for an `int`, a GCC
-older than 14 only warns.
 
 ### Removing during a walk
 

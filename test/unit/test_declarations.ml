@@ -1839,8 +1839,9 @@ let constructors () =
   constructor_error "return B(1);"
     "the constructor 'B' takes one argument for each of its 2 fields";
   (* An argument converts to its field as if by assignment, so a variant
-     there is refused as anywhere (design 5), and a plain structure by
-     the constructor, as C would elide its braces. *)
+     or a plain structure there is refused as anywhere in Type-C text
+     (design 5); in C text the constructor refuses the structure, as C
+     would elide its braces. *)
   rejects ~file (in_function "s w = S(1); return v;")
     "a value of type 'int' does not convert to 'e'; make one with a \
      constructor of 'e' (C11 6.5.16.1p1)";
@@ -1851,8 +1852,8 @@ let constructors () =
     (variant
    ^ "struct p { int x; }; type w = | W(struct p f); w g(void) \
       { return W(1); }")
-    "the argument for the field 'f' of 'W' is of type 'int', not \
-     'struct p' [constructor-expression]";
+    "a value of type 'int' does not convert to 'struct p' (C11 \
+     6.5.16.1p1)";
   rejects ~file (variant ^ "type t; void g(void) { (void)t.A; }")
     "the variant 't' is incomplete here";
   rejects ~file (variant ^ "typedef int i; int x = i.A;")
@@ -2398,14 +2399,14 @@ let generic_variants () =
   accepts ~file
     (in_function
        "long r = 0; match (v) { case Nil: break; case Cons(h, t): \
-        { int *q = &h; list(int) *m = t; r = *q + (m != 0); } break; } \
+        { const int *q = &h; list(int) *m = t; r = *q + (m != 0); } break; } \
         match (*p) { case Cons(_, _): break; default: break; } \
         if (case Cons(h, _) = v) { r += h; } (void)r;");
   (* Each instance has the field types of its own arguments. *)
   accepts ~file
     (in_function
        "list(char *) s = Cons(\"a\", 0); match (s) { case Cons(h, _): \
-        { char **q = &h; (void)q; } break; default: break; }");
+        { char *const *q = &h; (void)q; } break; default: break; }");
   let field_type instance field_type =
     in_function
       (Printf.sprintf

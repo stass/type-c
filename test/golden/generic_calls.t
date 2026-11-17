@@ -40,6 +40,133 @@ the types that the unit writes: an instance converts to no other type
   > EOF
   $ ./golden.exe later.tc > /dev/null
 
+A later argument converts to its parameter's type as by assignment
+(C11 6.5.16.1p1), and `typec` refuses one that does not, as it does
+every conversion in Type-C text (test/golden/assignments.t). An
+`int *` does not convert to the `int` that `put(&bx, p)` takes once
+`&bx` deduces `int`.
+
+  $ cat > pointer_for_integer.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void put(box(T) *b, T value) { b->v = value; }
+  > box(int) bx;
+  > void f(int *p) { put(&bx, p); }
+  > EOF
+  $ ./golden.exe pointer_for_integer.tc
+  pointer_for_integer.tc:4: error: a value of type 'int *' does not convert to 'int' without a cast (C11 6.5.16.1p1)
+  [1]
+
+An explicit instance takes its arguments as that call does.
+
+  $ cat > explicit_pointer_for_integer.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void put(box(T) *b, T value) { b->v = value; }
+  > box(int) bx;
+  > void f(int *p) { put(int)(&bx, p); }
+  > EOF
+  $ ./golden.exe explicit_pointer_for_integer.tc
+  explicit_pointer_for_integer.tc:4: error: a value of type 'int *' does not convert to 'int' without a cast (C11 6.5.16.1p1)
+  [1]
+
+A pointer to a structure is no structure.
+
+  $ cat > pointer_for_structure.tc <<'EOF'
+  > struct job { int n; };
+  > type box(T) = struct { T v; };
+  > generic(T) void put(box(T) *b, T value) { b->v = value; }
+  > box(struct job) bx;
+  > void f(struct job *j) { put(&bx, j); }
+  > EOF
+  $ ./golden.exe pointer_for_structure.tc
+  pointer_for_structure.tc:5: error: a value of type 'struct job *' does not convert to 'struct job' (C11 6.5.16.1p1)
+  [1]
+
+A pointer keeps the qualifiers of the type it points to, and points
+to a compatible type.
+
+  $ cat > qualifier_dropped.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void take(box(T) *b, T *at) { b->v = *at; }
+  > box(int) bx;
+  > void f(const int *p) { take(&bx, p); }
+  > EOF
+  $ ./golden.exe qualifier_dropped.tc
+  qualifier_dropped.tc:4: error: a value of type 'const int *' does not convert to 'int *' without a cast (C11 6.5.16.1p1)
+  [1]
+
+  $ cat > pointer_incompatible.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void take(box(T) *b, T *at) { b->v = *at; }
+  > box(int) bx;
+  > void f(unsigned *p) { take(&bx, p); }
+  > EOF
+  $ ./golden.exe pointer_incompatible.tc
+  pointer_incompatible.tc:4: error: a value of type 'unsigned int *' does not convert to 'int *' without a cast (C11 6.5.16.1p1)
+  [1]
+
+_Atomic is no qualifier that a pointer may add: an `int *` points to a
+type that `_Atomic int` is not compatible with.
+
+  $ cat > atomic_added.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void keep(box(T) *b, T v) { b->v = v; }
+  > box(_Atomic int *) ba;
+  > void f(int *p) { keep(&ba, p); }
+  > EOF
+  $ ./golden.exe atomic_added.tc
+  atomic_added.tc:4: error: a value of type 'int *' does not convert to '_Atomic int *' without a cast (C11 6.5.16.1p1)
+  [1]
+
+A distinct type converts to no other type (design 3.4), to a deduced
+parameter as to any.
+
+  $ cat > distinct_for_integer.tc <<'EOF'
+  > type metres = distinct int;
+  > type box(T) = struct { T v; };
+  > generic(T) void put(box(T) *b, T value) { b->v = value; }
+  > box(int) bx;
+  > void f(metres m) { put(&bx, m); }
+  > EOF
+  $ ./golden.exe distinct_for_integer.tc
+  distinct_for_integer.tc:5: error: a value of type 'metres' does not convert to 'int' without a cast [distinct-conversion]
+  [1]
+
+What assignment converts, the argument converts: a null pointer
+constant or a `void *` to a pointer to an object, a pointer to one with
+more qualifiers, any arithmetic value to an arithmetic type, and a
+pointer to `_Bool`. A `void *` converts to a pointer to a function as
+well, as GNU C and POSIX (`dlsym`) let it.
+
+  $ cat > converted.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void put(box(T) *b, T value) { b->v = value; }
+  > generic(T) void take(box(T) *b, const T *at) { b->v = *at; }
+  > box(int) bx;
+  > box(double) bd;
+  > box(_Bool) bb;
+  > box(int *) bp;
+  > box(int (*)(void)) bf;
+  > void f(int *p, void *v, long n, char c) {
+  >   take(&bx, 0);
+  >   take(&bx, (void *)0);
+  >   take(&bx, v);
+  >   take(&bx, p);
+  >   put(&bp, 0);
+  >   put(&bp, v);
+  >   put(&bx, n);
+  >   put(&bx, c);
+  >   put(&bx, 2.5);
+  >   put(&bd, n);
+  >   put(&bb, p);
+  >   put(int)(&bx, n);
+  >   (put(int))(&bx, c);
+  >   put(&bf, 0);
+  >   put(&bf, (void *)0);
+  >   put(&bf, v);
+  > }
+  > EOF
+  $ ./golden.exe converted.tc > /dev/null
+
 The call has the instance's return type: `max(0, n)` is an `int`.
 
   $ cat > return_type.tc <<'EOF'
