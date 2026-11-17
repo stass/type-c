@@ -306,7 +306,31 @@ a generic function is lowered in an instance of package 3.3.
 **Measurements of 3.6.** The raw data and the numbers are in the data
 repository, at `/Volumes/Optaine/type-c-corpus/measure/3.6/2026-11-17-darwin-x86_64/`
 (its README, commit 904a955), from Type-C commits `26e07f6dfb08`,
-`3b9eee224275` and `9497e3289a0a`. No unit of the library or of Pilot B is refused by
+`3b9eee224275` and `9497e3289a0a`. Code growth: the `__text` bytes of
+the benchmark program, Type-C against C with its functions defined once
+and C with them `static inline` in each unit, are 5192, 4920 and 4568 on
+Clang 21 and 4428, 4523 and 3950 on GCC 16 at `-O2`, and 7113, 5369 and
+5785 and 7556, 5447 and 5842 at `-O0`; the Type-C side holds three
+functions that the twins leave out. The bounds checks: the checked and
+the unchecked sum take 1.24 and 1.29 ms on Clang and 3.55 and 3.56 on
+GCC 16 at `-O2` for 10^4 elements (1.50 and 1.52, 3.46 and 3.43 for
+10^6), and 20.0 and 17.4, 21.3 and 17.3 at `-O0` for 10^4. Function
+pointers: all three sides call the map's hash and equality through
+function pointers, and at `-O2` for 10^6 elements `map_put` takes
+590.9, 654.2 and 598.3 ms on Clang and 669.3, 774.5 and 707.9 on
+GCC 16, `map_get` 396.0, 445.2 and 384.7 and 504.8, 610.0 and 585.9
+(the times are best of 5). Compile time of one unit, over the six
+Type-C units or the C units at `-O0` and `-O2`, at a resolution of
+10 ms: `typec -c` 0.18 to 0.23 s on Clang and 0.36 to 0.45 on GCC 16,
+`typec --emit-c` 0.12 to 0.14 and 0.21 to 0.23, `cc -c` of a C unit
+0.06 to 0.11 and 0.16 to 0.25. P30: the six units of the library count
+55596 to 105259 bytes for their instances, lowering charges 120821 to
+336877 bytes for the C text of the unit on Clang at `-O2`, 1.14 to 2.51
+times the unit, and their longest encoding of one instance holds 27
+bytes and their longest name 15; Pilot B's `toml.tc` counts 4979, is
+charged 249520 on Clang and 246043 on GCC 16 (1.83 and 1.86 times the
+unit), and holds 35 and 8. No unit of the library or of Pilot B is
+refused by
 `instance-pragma` or `slice-check-place`; no index or `slice_sub` of
 either stands where C does not evaluate it; the library holds 15 tested
 indexes, 2 `slice_sub`s and 2 conversions over its six units, the pilot

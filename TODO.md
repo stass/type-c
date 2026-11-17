@@ -1885,10 +1885,11 @@ types (design 13.3).
 - [Medium] Decide whether to offer an option that zeroes padding and the
   inactive part of a variant on construction, against disclosure of stale
   memory (design 10.1 rule 5).
-- [High] Build `try` inside expressions, as in
-  `fit((long long)try eval(l) + try eval(r))` (owner: the README's
-  first example uses it): design 5.1 rule 3 and 13.5, plan packages
-  3.11 and 3.12.
+- [Medium] Look at the lowered shape of a `try` prelude under `&&` and
+  in the condition of an `if`: against the same code with the `try` in
+  a declaration of its own, the single form under `&&` takes 1.135
+  times as long on Clang and 1.137 on GCC 16 at `-O2`, and the one in
+  an `if` condition 1.267 on Clang (plan, "Measurements of 3.12").
 - [Medium] Design 5.1 (the rationale for the order) and 13.5 ("The
   statement that holds a `try`", "The objects and the order of a
   prelude", "The cost of a prelude") cite measurements of hand-written
