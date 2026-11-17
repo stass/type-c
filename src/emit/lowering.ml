@@ -513,15 +513,17 @@ and write_switch add ~variant ~tag branches =
 let arm_case _location (arm : Typec_sema.Expressions.matched_arm) =
   Printf.sprintf "case %d:" arm.number
 
-(* The text before the arms of a nested match: the local of the arm and
-   the pointer locals, the tree, and the [switch] on the arm. *)
-let nested_selection output location
+(* The text of a selection tree before the statement that reads its
+   arm: the local of the arm and the pointer locals, the tree, and
+   [reader], the [switch] over the arms of a match or the [if] of a
+   test. *)
+let nested_selection output location ~reader
     ({ locals; tree } : Typec_sema.Expressions.nested) =
   Emitter.assembled output location ~separator:" " (fun add ->
       add (Printf.sprintf "unsigned %s;" arm_local);
       List.iter (fun local -> add (local_declaration local)) locals;
       write_selection add tree;
-      add (Printf.sprintf "switch (%s) {" arm_local))
+      add reader)
 
 (* The [switch] that holds the arms, and the [case] labels of an arm. *)
 let arms_switch output location ~variant
@@ -530,7 +532,9 @@ let arms_switch output location ~variant
   | None ->
       ( Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member,
         constructor_cases output ~variant )
-  | Some nested -> (nested_selection output location nested, arm_case)
+  | Some nested ->
+      let reader = Printf.sprintf "switch (%s) {" arm_local in
+      (nested_selection output location ~reader nested, arm_case)
 
 let match_statement output matching (arms : Typec_sema.Expressions.arms) =
   let tokens = tokens_of output in
@@ -555,17 +559,20 @@ let match_statement output matching (arms : Typec_sema.Expressions.arms) =
       [ statement.last ]
 
 (* Design 13.5: a single-pattern test becomes the block of a match that
-   reads the tag once into [__tc_tag] and has an [if] on it. Its true
-   branch is a block that the [)] of the test opens, which declares the
-   bindings and then holds the statement as written: a compound
-   statement still begins a block, where a pragma such as STDC
-   FENV_ACCESS must stand, a pragma before the statement still precedes
-   it, and an [if] in the statement cannot take the [else] of the false
-   branch. A declaration in a compound statement could hide a binding
-   in C, but none redeclares one, since typec refuses it in the one
-   scope of the bindings and the statement (4.6 rule 4). The false
-   branch traps on a tag that is no constructor's (4.5), with a
-   [switch] whose cases are those of a match, and then runs the [else]
+   reads the tag once into [__tc_tag] and has an [if] on it, or, where
+   its pattern is nested, that writes its selection tree and has an [if]
+   on [__tc_arm], which the leaf of the pattern sets to 1. Its true branch
+   is a block that the [)] of the test opens, which declares the bindings
+   and then holds the statement as written: a compound statement still
+   begins a block, where a pragma such as STDC FENV_ACCESS must stand, a
+   pragma before the statement still precedes it, and an [if] in the
+   statement cannot take the [else] of the false branch. A declaration in
+   a compound statement could hide a binding in C, but none redeclares
+   one, since typec refuses it in the one scope of the bindings and the
+   statement (4.6 rule 4). The false branch of a flat test traps on a tag
+   that is no constructor's (4.5), with a [switch] whose cases are those
+   of a match; that of a nested test checks nothing, since its tree has
+   checked every tag that it read. Then the false branch runs the [else]
    statement of an [if]. A [while] test is the body of an endless loop
    whose false branch ends in [break], so that the operand is evaluated
    in that loop (4.4). *)
@@ -581,6 +588,19 @@ let tag_check output location ~variant constructors =
     (Emitter.joined output location ~separator:" " (case_label ~variant)
        constructors)
     invalid_tag
+
+(* The text from the held operand to the [{] of the true branch, and the
+   check of the tag on the false branch. *)
+let test_condition output location ~variant
+    (test : Typec_sema.Expressions.test) =
+  match test.nested with
+  | None ->
+      ( Printf.sprintf "%sif (%s == %s) {" tag_declaration tag_local
+          (Tree.enumerator_name ~variant test.constructor),
+        tag_check output location ~variant test.constructors )
+  | Some nested ->
+      let reader = Printf.sprintf "if (%s == 1) {" arm_local in
+      (nested_selection output location ~reader nested, "")
 
 (* The false branch of a test of [form] after the statement that ends at
    [controlled_last]: the end of the block around that statement, the
@@ -614,17 +634,13 @@ let single_pattern_test output matching
   let close_paren = grammar_token_after tokens scrutinee.last in
   let opening, held = scrutinee_holder matching in
   let loop = match test.form with If_test _ -> "" | While_test -> "for (;;) " in
-  let selected =
-    Printf.sprintf "if (%s == %s) " tag_local
-      (Tree.enumerator_name ~variant test.constructor)
-  in
   let location = tokens.(statement.first).location in
-  let check = tag_check output location ~variant test.constructors in
   let held_location = tokens.(close_paren).location in
+  let selected, check = test_condition output location ~variant test in
   replace output ~location (loop ^ opening)
     (grammar_tokens tokens statement.first equals)
   @ replace output ~location:held_location
-      (held ^ tag_declaration ^ selected ^ "{"
+      (held ^ selected
       ^ binding_declarations output held_location test.bindings)
       [ close_paren ]
   @ false_branch output test.form ~controlled_last:test.controlled.last

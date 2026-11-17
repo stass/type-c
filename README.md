@@ -1408,9 +1408,10 @@ checked indexing are built,
 functions are not yet:
 `generic(T) T *vector_last(vector(T) *v);`.
 
-Nested patterns in `match`, such as `case Err(DivByZero):`, which
+Nested patterns, which
 [design 4.7](type-c-language-design.md#47-nested-patterns) specifies,
-are built; in a single-pattern test they are not yet.
+are built in `match`, such as `case Err(DivByZero):`, and in the
+single-pattern test, such as `while (case At(*Cons(h, t)) = c)`.
 
 Planned, and previewed by [A first look](#a-first-look): `try` inside
 any expression, which the

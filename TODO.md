@@ -1881,9 +1881,6 @@ types (design 13.3).
   initialised through a temporary of its declaring type.
   Package 3.12 adds the script under `tools/measure`; have the design
   cite it.
-- [High] Build nested patterns in the single-pattern test, as in
-  `while (case Some(Ok(v)) = next())`: design 4.6 and 4.7 rule 9, plan
-  packages 3.9 and 3.10.
 - [Medium] A match or a test copies a scrutinee that is a member, as
   `match (n->kind)`, since typec cannot tell a packed structure from
   another (design 13.5, `Expressions.access_of`), where hand-written C
@@ -1893,6 +1890,15 @@ types (design 13.3).
   declared `aligned(1)`, which both backends accept under
   `-pedantic-errors` and which deletes the list of aligned forms, after
   measuring its loads on a target that requires alignment.
+- [Medium] `Expressions.test` and `Expressions.arms` hold both forms
+  of selection: a test keeps `constructor` and `constructors`, and an arm
+  its `cases`, which lowering reads only where `nested` is `None`. Make
+  each one variant, the tag of a flat selection or its tree, so that
+  lowering cannot read the flat fields of a nested one.
+- [High] Measure nested patterns, plan package 3.10 (P31, P32):
+  selection against hand-written nested `switch` statements, and the
+  most steps of selection of one match or test in the container
+  library, the pilot and the tests.
 - [Medium] Design 4.7 rule 10 bounds the selection tree at 127 nodes
   deep so that its nested `switch` statements (13.5) fit Clang's
   default bracket depth of 256, but the nesting of the statements

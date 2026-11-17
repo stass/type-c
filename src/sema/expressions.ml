@@ -206,14 +206,6 @@ type matched_arm = {
 
 type test_form = If_test of { otherwise : Tree.span option } | While_test
 
-type test = {
-  form : test_form;
-  constructor : Spelling.constructor;
-  constructors : Spelling.constructor list;
-  bindings : binding list;
-  controlled : Tree.span;
-}
-
 type read_at = Scrutinee of Ctype.variant_name | Position of pattern_position
 
 type selection_tree =
@@ -224,6 +216,15 @@ type selection_tree =
     }
 
 type nested = { locals : pointer_local list; tree : selection_tree }
+
+type test = {
+  form : test_form;
+  constructor : Spelling.constructor;
+  constructors : Spelling.constructor list;
+  bindings : binding list;
+  controlled : Tree.span;
+  nested : nested option;
+}
 type arms = { matched : matched_arm list; nested : nested option }
 type selection = Arms of arms | Test of test
 
@@ -4940,7 +4941,8 @@ and single_pattern_test context (statement : Tree.statement) ~pattern_span
              tested context reading root ~pattern_span pattern controlled
                form) })
 
-(* The bindings of a test, then its statement, which is in their scope
+(* The selection tree of a test, its bindings, then its statement, which
+   is in their scope
    and in which no case or default label of a switch around it may stand
    (4.6 rules 4 and 6). *)
 and tested context reading root ~pattern_span (pattern : Tree.pattern)
@@ -4949,10 +4951,7 @@ and tested context reading root ~pattern_span (pattern : Tree.pattern)
     constructor_pattern context reading root ~position:[]
       ~reached:scrutinee_reach pattern_span pattern
   in
-  if reads_below checked.selection then
-    context.fail pattern_span
-      (Rule.message Pattern
-         "typec reads no nested pattern in a single-pattern test");
+  let nested = test_tree context ~pattern_span reading root checked in
   let bindings = List.map (declare_binding context) checked.bindings in
   let enclosing =
     { context.typed.enclosing with case_labels = Test_statement }
@@ -4960,7 +4959,27 @@ and tested context reading root ~pattern_span (pattern : Tree.pattern)
   within context enclosing (fun () -> typed_statement context controlled);
   { form; constructor = checked.constructor.constructor_name;
     constructors = List.map constructor_name (Array.to_list root.constructors);
-    bindings; controlled = controlled.span }
+    bindings; controlled = controlled.span; nested }
+
+(* Design 4.7 rule 9: a test selects as a match of its one label would,
+   under the bounds of rule 10, and needs no check of 4.2. Its tree is
+   lowered where it has more than one node, with the leaf of the label 1
+   and every other leaf 0 (13.5). *)
+and test_tree context ~pattern_span reading root
+    (checked : checked_pattern) =
+  match
+    Selection.select root.constructors [ checked.selection ] ~default:false
+  with
+  | Error refusal ->
+      context.fail pattern_span
+        (Rule.c_text (selection_refusal ~what:"the test" refusal))
+  | Ok tree ->
+      let arm_of_leaf : Selection.leaf -> int = function
+        | Label _ -> 1
+        | Nothing -> 0
+        | Default -> invalid_arg "Expressions.test_tree: a default"
+      in
+      nested_of reading root ~arm_of_leaf tree
 
 (* The arms of a match of the variant [root]: their labels, the coverage
    of its values and the items of each arm, and the selection tree that
@@ -4981,15 +5000,8 @@ and typed_arms context ~(statement : Tree.statement) reading root arms =
         matched)
       (List.combine arms labelled)
   in
-  let nested =
-    if is_flat tree then None
-    else
-      Some
-        { locals = named_locals reading;
-          tree =
-            lowered_tree reading root (List.combine matched labelled) tree }
-  in
-  { matched; nested }
+  let arm_of_leaf = arm_of_match_leaf (List.combine matched labelled) in
+  { matched; nested = nested_of reading root ~arm_of_leaf tree }
 
 (* Design 4.4: a callee that designates a function declared [_Noreturn]
    or with the GNU [noreturn], or a builtin that is; an undeclared name
@@ -5356,13 +5368,23 @@ and coverage context ~statement root labelled =
       ~default:has_default
   with
   | Error refusal ->
-      context.fail statement (Rule.c_text (selection_refusal refusal))
+      context.fail statement
+        (Rule.c_text (selection_refusal ~what:"the match" refusal))
   | Ok tree ->
       refuse_unselected_labels context tree labelled;
       refuse_missing context ~statement root.name tree;
       refuse_unselected_default context tree labelled
         ~flat:(not (List.exists (fun c -> reads_below c.selection) cases));
       tree
+
+(* The tree that lowering writes where it has more than one node; a tree
+   of one node is the [switch] on the scrutinee's tag (13.5). *)
+and nested_of reading root ~arm_of_leaf (tree : Selection.t) =
+  if is_flat tree then None
+  else
+    Some
+      { locals = named_locals reading;
+        tree = lowered_tree reading root ~arm_of_leaf tree }
 
 (* A tree of one node, whose root reads the scrutinee's tag alone
    (13.5). *)
@@ -5372,11 +5394,10 @@ and is_flat (tree : Selection.t) =
       match branch.subtree with Leaf _ -> true | Node _ -> false)
     tree.scrutinee
 
-(* The tree that lowering writes (13.5): each leaf the number of its arm,
-   and each node with the position of its tag. [numbered] pairs each arm
-   with its labels. A tree of a match that passed {!coverage} has no leaf
-   of nothing. *)
-and lowered_tree reading root numbered (tree : Selection.t) =
+(* The number of the arm of a match that a leaf selects (13.5). [numbered]
+   pairs each arm with its labels. A tree of a match that passed
+   {!coverage} has no leaf of nothing. *)
+and arm_of_match_leaf numbered =
   let arm_of_label = Hashtbl.create 16 and default_arm = ref None in
   List.iter
     (fun ((arm : matched_arm), labels) ->
@@ -5388,10 +5409,16 @@ and lowered_tree reading root numbered (tree : Selection.t) =
           | _, None -> default_arm := Some arm.number)
         labels)
     numbered;
+  function
+  | Selection.Label index -> Hashtbl.find arm_of_label index
+  | Default -> Option.get !default_arm
+  | Nothing -> invalid_arg "Expressions.arm_of_match_leaf: a value missed"
+
+(* The tree that lowering writes (13.5): each leaf the number that
+   [arm_of_leaf] gives it, and each node with the position of its tag. *)
+and lowered_tree reading root ~arm_of_leaf (tree : Selection.t) =
   let rec lowered : Selection.tree -> selection_tree = function
-    | Leaf (Label index) -> Arm (Hashtbl.find arm_of_label index)
-    | Leaf Default -> Arm (Option.get !default_arm)
-    | Leaf Nothing -> invalid_arg "Expressions.lowered_tree: a value missed"
+    | Leaf leaf -> Arm (arm_of_leaf leaf)
     | Node { position; branches } ->
         Read
           { at = Position (Positions.find reading.places position);
@@ -5404,17 +5431,17 @@ and lowered_tree reading root numbered (tree : Selection.t) =
 
 (* A translation limit of typec on selection (4.7 rule 10, C11
    5.2.4.1). *)
-and selection_refusal : Selection.refusal -> string = function
+and selection_refusal ~what : Selection.refusal -> string = function
   | Too_many_steps ->
       Printf.sprintf
-        "the match needs more than %d steps of selection, the most that \
-         typec takes (a translation limit, C11 5.2.4.1)"
-        Selection.max_steps
+        "%s needs more than %d steps of selection, the most that typec \
+         takes (a translation limit, C11 5.2.4.1)"
+        what Selection.max_steps
   | Too_deep ->
       Printf.sprintf
-        "the selection tree of the match is deeper than %d nodes, the most \
-         that typec takes (a translation limit, C11 5.2.4.1)"
-        Selection.max_depth
+        "the selection tree of %s is deeper than %d nodes, the most that \
+         typec takes (a translation limit, C11 5.2.4.1)"
+        what Selection.max_depth
 
 (* In source order: a second [default] (4.2 rule 2), and a case label
    that is no leaf of [tree], since the labels before it match all that

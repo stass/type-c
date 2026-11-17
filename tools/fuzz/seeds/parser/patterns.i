@@ -27,5 +27,7 @@ int report(res r, const list *l) {
     return head;
   while (case Cons(_, tail) = *l)
     l = tail;
+  if (case Cons(_, *Cons) = *l)
+    return 1;
   return 0;
 }

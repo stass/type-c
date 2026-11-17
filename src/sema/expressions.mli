@@ -228,24 +228,13 @@ type matched_arm = {
     [else] statement if it has one, or of a [while]. *)
 type test_form = If_test of { otherwise : Tree.span option } | While_test
 
-(** A single-pattern test (design 4.6): its form, the constructor that it
-    asks for, every constructor of its variant in order, whose tags are
-    the valid ones (4.5), its bindings in order, and the span of its
-    statement. *)
-type test = {
-  form : test_form;
-  constructor : Spelling.constructor;
-  constructors : Spelling.constructor list;
-  bindings : binding list;
-  controlled : Tree.span;
-}
-
 (** Where a node of a selection tree reads a tag: at the scrutinee, of
     its variant, or at a position below it. *)
 type read_at = Scrutinee of Ctype.variant_name | Position of pattern_position
 
-(** The selection tree of a match as lowering writes it (design 13.5):
-    a leaf is the number of an arm from 0 in source order; a node reads
+(** The selection tree of a match or a test as lowering writes it (design
+    13.5): a leaf is the number of an arm from 0 in source order, or in a
+    test 1 for its pattern and 0 for no match; a node reads
     the tag [at], with a branch for one or more of the constructors of
     its variant. *)
 type selection_tree =
@@ -258,6 +247,21 @@ type selection_tree =
 (** A selection tree of more than one node, and the pointer locals that
     its nodes point, in the order of their numbers. *)
 type nested = { locals : pointer_local list; tree : selection_tree }
+
+(** A single-pattern test (design 4.6): its form, the constructor that it
+    asks for, every constructor of its variant in order, whose tags are
+    the valid ones (4.5), its bindings in order, the span of its
+    statement, and its selection tree where the tree has more than one
+    node (4.7 rule 9), whose leaf of the pattern is 1 and every other
+    leaf 0. *)
+type test = {
+  form : test_form;
+  constructor : Spelling.constructor;
+  constructors : Spelling.constructor list;
+  bindings : binding list;
+  controlled : Tree.span;
+  nested : nested option;
+}
 
 (** The arms of a match, and its selection tree where the tree has more
     than one node (design 4.7 rule 6); a tree of one node is the [switch]
