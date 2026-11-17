@@ -364,8 +364,9 @@ let construction_head (tokens : Token.t array)
       { first = outer.first; last = grammar_token_after tokens callee.last }
 
 (* Design 13.5, 10.5: a match becomes a block that reaches the scrutinee
-   through [__tc_matchN], a pointer to it or to a copy of it, and a
-   [switch] on its tag. Each arm is a block after the [case] of every
+   through [__tc_matchN], a pointer to it or to a copy of it, or through
+   [__tc_baseN], a pointer to the object that holds it as a member, and
+   a [switch] on its tag. Each arm is a block after the [case] of every
    constructor it takes; the block declares the bindings and ends in a
    trap, and the [default] of the switch, which only an invalid tag
    reaches, traps (design 4.3, 4.5). A single-pattern test holds its
@@ -383,28 +384,65 @@ let trap_statement output = trap output ^ ";"
    block of another hides none of the outer one's locals. *)
 let scrutinee_pointer number = Printf.sprintf "__tc_match%d" number
 let scrutinee_copy number = Printf.sprintf "__tc_copy%d" number
+let scrutinee_base number = Printf.sprintf "__tc_base%d" number
+
+(* The text that a member of the scrutinee's variant follows to read
+   that member of the scrutinee: [__tc_matchN->], or, where the
+   scrutinee is held through its base, [__tc_baseN->] and the member
+   path from the base, as [__tc_baseN->state.]. *)
+let scrutinee_object ~number (access : Typec_sema.Expressions.access) =
+  match access with
+  | Through_pointer | Through_copy -> scrutinee_pointer number ^ "->"
+  | Through_base { members; _ } ->
+      scrutinee_base number ^ "->" ^ String.concat "." members ^ "."
 
 (* What replaces the tokens before and after the scrutinee of a match or
-   the operand of a test: the opening of the block, and the declaration
-   of the pointer around the scrutinee. *)
+   the operand of a test, or before and after the base of a scrutinee
+   held through its base: the opening of the block, and the declaration
+   of the pointer around the scrutinee or the base. The pointer to the
+   base is declared with [__auto_type], since no name of the base's type
+   that C11 can spell is sure to be visible; [__extension__] keeps it
+   from a warning under [-pedantic]. *)
 let scrutinee_holder ~number
     (matching : _ Typec_sema.Expressions.matching_of) =
   let variant = Typec_sema.Encoding.variant_name matching.variant in
   let record = "struct " ^ (variant :> string) in
   let pointer = scrutinee_pointer number and copy = scrutinee_copy number in
+  let base_pointer =
+    Printf.sprintf "{ __extension__ __auto_type const %s = "
+      (scrutinee_base number)
+  in
   match matching.access with
   | Through_pointer ->
       (Printf.sprintf "{ const %s *const %s = &(" record pointer, "); ")
+  | Through_base { base = Base_object _; _ } -> (base_pointer ^ "&(", "); ")
+  | Through_base { base = Base_pointer _; _ } -> (base_pointer ^ "(", "); ")
   | Through_copy ->
       ( Printf.sprintf "{ const %s %s = (" record copy,
         Printf.sprintf "), *const %s = &%s; " pointer copy )
 
-(* Design 13.5: the pointer local numbered [local] of the nested match
-   numbered [number], where 0 is the scrutinee's. *)
-let local_pointer ~number local =
+(* The tokens that the declaration of the pointer replaces, up to the
+   [)] after the scrutinee at [close_paren]: that [)], and before it the
+   member path of a scrutinee held through its base, which
+   {!scrutinee_object} spells. *)
+let held_tokens tokens ~close_paren
+    (matching : _ Typec_sema.Expressions.matching_of) =
+  match matching.access with
+  | Through_pointer | Through_copy -> [ close_paren ]
+  | Through_base { base = Base_object base | Base_pointer base; _ } ->
+      grammar_tokens tokens (grammar_token_after tokens base.last) close_paren
+
+(* Design 13.5: the pointer local numbered [local], from 1, of the
+   nested match numbered [number]. *)
+let local_pointer ~number local = Printf.sprintf "__tc_p%d_%d" number local
+
+(* The text that a member follows to read it in the object that local
+   [local] reaches, where 0 is the scrutinee's, which [scrutinee] reaches
+   ({!scrutinee_object}). *)
+let local_object ~number ~scrutinee_text local =
   match local with
-  | 0 -> scrutinee_pointer number
-  | _ -> Printf.sprintf "__tc_p%d_%d" number local
+  | 0 -> scrutinee_text
+  | _ -> local_pointer ~number local ^ "->"
 
 (* The member of a variant's union that holds [field], as [u.Num.value]
    (design 10.1). *)
@@ -416,22 +454,23 @@ let member_text (field : Typec_sema.Expressions.pattern_field) =
 (* The field that [reach] reaches in the match numbered [number], as
    [__tc_pN_1->u.Add.l] or [__tc_matchN->u.Err.error.u.Wrapped.inner]: a
    pointer local and the fields in place below it. *)
-let field_text ~number
+let field_text ~number ~scrutinee_text
     ({ base; path; field } : Typec_sema.Expressions.reach) =
-  local_pointer ~number base ^ "->"
+  local_object ~number ~scrutinee_text base
   ^ String.concat "." (List.map member_text (path @ [ field ]))
 
 (* The type of a binding is spelt [__typeof__] its field (design 2.4),
    because no name of the field's type that C11 can spell is sure to be
    visible, and not hidden, at the match. *)
-let binding_declaration ~number (binding : Typec_sema.Expressions.binding)
+let binding_declaration ~number ~scrutinee_text
+    (binding : Typec_sema.Expressions.binding)
     =
-  let field = field_text ~number binding.field in
+  let field = field_text ~number ~scrutinee_text binding.field in
   Printf.sprintf " const __typeof__(%s) %s = %s;" field binding.name field
 
-let binding_declarations output ~number location bindings =
+let binding_declarations output ~number ~scrutinee_text location bindings =
   Emitter.joined output location ~separator:""
-    (binding_declaration ~number)
+    (binding_declaration ~number ~scrutinee_text)
     bindings
 
 let case_label ~variant constructor =
@@ -447,22 +486,26 @@ let invalid_tag output = "default: " ^ trap_statement output
    nothing begins its block with them already. A declaration in that
    inner block could hide a binding in C, but none redeclares one,
    since typec refuses it in the one scope of an arm (4.1 rule 5). *)
-let arm_block output ~number location
+let arm_block output ~number ~scrutinee_text location
     (bindings : Typec_sema.Expressions.binding list) =
   let arm_end = trap_statement output in
   match bindings with
   | [] -> ("{", " " ^ arm_end ^ " }")
   | _ ->
-      ( "{" ^ binding_declarations output ~number location bindings ^ " {",
+      ( "{"
+        ^ binding_declarations output ~number ~scrutinee_text location bindings
+        ^ " {",
         " } " ^ arm_end ^ " }" )
 
 (* The labels of an arm become the [case] labels that [cases] gives and
    open its block; a trap closes the block after its last item. *)
-let matched_arm output ~number ~cases
+let matched_arm output ~number ~scrutinee_text ~cases
     (arm : Typec_sema.Expressions.matched_arm) =
   let tokens = tokens_of output in
   let location = tokens.(arm.labels.first).location in
-  let opening, closing = arm_block output ~number location arm.bindings in
+  let opening, closing =
+    arm_block output ~number ~scrutinee_text location arm.bindings
+  in
   let cases = cases location arm in
   replace output ~location
     (cases ^ " " ^ opening)
@@ -497,43 +540,47 @@ let local_declaration ~number
 
 (* The statement that points the local of a position under a [*] at the
    object there, before its tag is read. *)
-let point_local add ~number (at : Typec_sema.Expressions.read_at) =
+let point_local add ~number ~scrutinee_text
+    (at : Typec_sema.Expressions.read_at) =
   match at with
   | Position { position_object = Pointed_by { local; pointer }; _ } ->
       add
         (Printf.sprintf "%s = %s;"
            (local_pointer ~number local)
-           (field_text ~number pointer))
+           (field_text ~number ~scrutinee_text pointer))
   | Scrutinee _ | Position { position_object = In_place _; _ } -> ()
 
 (* The variant whose tag a node reads, and the tag. *)
-let read_tag ~number (at : Typec_sema.Expressions.read_at) =
+let read_tag ~number ~scrutinee_text (at : Typec_sema.Expressions.read_at) =
   match at with
   | Scrutinee variant ->
-      (variant, scrutinee_pointer number ^ "->" ^ Tree.tag_member)
+      (variant, scrutinee_text ^ Tree.tag_member)
   | Position { variant; position_object = In_place reach } ->
-      (variant, field_text ~number reach ^ "." ^ Tree.tag_member)
+      ( variant,
+        field_text ~number ~scrutinee_text reach ^ "." ^ Tree.tag_member )
   | Position { variant; position_object = Pointed_by { local; _ } } ->
       (variant, local_pointer ~number local ^ "->" ^ Tree.tag_member)
 
 (* The statements of [tree], each added through [add]: a node under a
    [*] points the local of its position at the object there, then each
    node switches on its tag. *)
-let rec write_selection add ~invalid_tag ~number
+let rec write_selection add ~invalid_tag ~number ~scrutinee_text
     (tree : Typec_sema.Expressions.selection_tree) =
   match tree with
   | Arm arm -> add (Printf.sprintf "%s = %d;" (arm_local number) arm)
   | Read { at; branches } ->
-      point_local add ~number at;
-      let variant, tag = read_tag ~number at in
-      write_switch add ~invalid_tag ~number ~variant ~tag branches
+      point_local add ~number ~scrutinee_text at;
+      let variant, tag = read_tag ~number ~scrutinee_text at in
+      write_switch add ~invalid_tag ~number ~scrutinee_text ~variant ~tag
+        branches
 
-and write_switch add ~invalid_tag ~number ~variant ~tag branches =
+and write_switch add ~invalid_tag ~number ~scrutinee_text ~variant ~tag
+    branches =
   let variant = Typec_sema.Encoding.variant_name variant in
   let write_branch (constructors, subtree) =
     List.iter (fun constructor -> add (case_label ~variant constructor))
       constructors;
-    write_selection add ~invalid_tag ~number subtree;
+    write_selection add ~invalid_tag ~number ~scrutinee_text subtree;
     add "break;"
   in
   add (Printf.sprintf "switch (%s) {" tag);
@@ -548,44 +595,48 @@ let arm_case _location (arm : Typec_sema.Expressions.matched_arm) =
    arm: the local of the arm and the pointer locals, the tree, and
    [reader], the [switch] over the arms of a match or the [if] of a
    test. *)
-let nested_selection output location ~number ~reader
+let nested_selection output location ~number ~scrutinee_text ~reader
     ({ locals; tree } : Typec_sema.Expressions.nested) =
   Emitter.assembled output location ~separator:" " (fun add ->
       add (Printf.sprintf "unsigned %s;" (arm_local number));
       List.iter (fun local -> add (local_declaration ~number local)) locals;
-      write_selection add ~invalid_tag:(invalid_tag output) ~number tree;
+      write_selection add ~invalid_tag:(invalid_tag output) ~number
+        ~scrutinee_text tree;
       add reader)
 
 (* The [switch] that holds the arms, and the [case] labels of an arm. *)
-let arms_switch output location ~number ~variant
+let arms_switch output location ~number ~scrutinee_text ~variant
     (arms : Typec_sema.Expressions.arms) =
   match arms.nested with
   | None ->
-      ( Printf.sprintf "switch (%s->%s) {" (scrutinee_pointer number)
-          Tree.tag_member,
+      ( Printf.sprintf "switch (%s%s) {" scrutinee_text Tree.tag_member,
         constructor_cases output ~variant )
   | Some nested ->
       let reader = Printf.sprintf "switch (%s) {" (arm_local number) in
-      (nested_selection output location ~number ~reader nested, arm_case)
+      ( nested_selection output location ~number ~scrutinee_text ~reader nested,
+        arm_case )
 
 let match_statement output ~number matching
     (arms : Typec_sema.Expressions.arms) =
   let tokens = tokens_of output in
-  let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
-    matching
-  in
+  let { Typec_sema.Expressions.statement; variant; access; _ } = matching in
   let variant = Typec_sema.Encoding.variant_name variant in
+  let scrutinee_text = scrutinee_object ~number access in
   let match_token = statement.first in
   let open_paren = grammar_token_after tokens match_token in
-  let close_paren = grammar_token_after tokens scrutinee.last in
+  let close_paren = grammar_token_after tokens matching.scrutinee.last in
   let open_brace = grammar_token_after tokens close_paren in
   let opening, held = scrutinee_holder ~number matching in
   let location = tokens.(close_paren).location in
-  let switch, cases = arms_switch output location ~number ~variant arms in
+  let switch, cases =
+    arms_switch output location ~number ~scrutinee_text ~variant arms
+  in
   replace output ~location:tokens.(match_token).location opening
     [ match_token; open_paren ]
-  @ replace output ~location (held ^ switch) [ close_paren; open_brace ]
-  @ List.concat_map (matched_arm output ~number ~cases) arms.matched
+  @ replace output ~location (held ^ switch)
+      (held_tokens tokens ~close_paren matching @ [ open_brace ])
+  @ List.concat_map (matched_arm output ~number ~scrutinee_text ~cases)
+      arms.matched
   @ replace output
       ~location:tokens.(statement.last).location
       (Printf.sprintf "%s } }" (invalid_tag output))
@@ -612,10 +663,9 @@ let match_statement output ~number matching
 
 let tag_local number = Printf.sprintf "__tc_tag%d" number
 
-let tag_declaration ~number =
-  let pointer = scrutinee_pointer number in
-  Printf.sprintf "const __typeof__(%s->%s) %s = %s->%s; " pointer
-    Tree.tag_member (tag_local number) pointer Tree.tag_member
+let tag_declaration ~number ~scrutinee_text =
+  Printf.sprintf "const __typeof__(%s%s) %s = %s%s; " scrutinee_text
+    Tree.tag_member (tag_local number) scrutinee_text Tree.tag_member
 
 let tag_check output location ~number ~variant constructors =
   Printf.sprintf "switch (%s) { %s break; %s } " (tag_local number)
@@ -625,17 +675,20 @@ let tag_check output location ~number ~variant constructors =
 
 (* The text from the held operand to the [{] of the true branch, and the
    check of the tag on the false branch. *)
-let test_condition output location ~number ~variant
+let test_condition output location ~number ~scrutinee_text ~variant
     (test : Typec_sema.Expressions.test) =
   match test.nested with
   | None ->
-      ( Printf.sprintf "%sif (%s == %s) {" (tag_declaration ~number)
+      ( Printf.sprintf "%sif (%s == %s) {"
+          (tag_declaration ~number ~scrutinee_text)
           (tag_local number)
           (Tree.enumerator_name ~variant test.constructor),
         tag_check output location ~number ~variant test.constructors )
   | Some nested ->
       let reader = Printf.sprintf "if (%s == 1) {" (arm_local number) in
-      (nested_selection output location ~number ~reader nested, "")
+      ( nested_selection output location ~number ~scrutinee_text ~reader
+          nested,
+        "" )
 
 (* The false branch of a test of [form] after the statement that ends at
    [controlled_last]: the end of the block around that statement, the
@@ -661,25 +714,25 @@ let false_branch output form ~extent ~controlled_last ~check =
 let single_pattern_test output ~number matching
     (test : Typec_sema.Expressions.test) =
   let tokens = tokens_of output in
-  let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
-    matching
-  in
+  let { Typec_sema.Expressions.statement; variant; access; _ } = matching in
   let variant = Typec_sema.Encoding.variant_name variant in
-  let equals = grammar_token_before tokens scrutinee.first in
-  let close_paren = grammar_token_after tokens scrutinee.last in
+  let scrutinee_text = scrutinee_object ~number access in
+  let equals = grammar_token_before tokens matching.scrutinee.first in
+  let close_paren = grammar_token_after tokens matching.scrutinee.last in
   let opening, held = scrutinee_holder ~number matching in
   let loop = match test.form with If_test _ -> "" | While_test -> "for (;;) " in
   let location = tokens.(statement.first).location in
   let held_location = tokens.(close_paren).location in
   let selected, check =
-    test_condition output location ~number ~variant test
+    test_condition output location ~number ~scrutinee_text ~variant test
   in
   replace output ~location (loop ^ opening)
     (grammar_tokens tokens statement.first equals)
   @ replace output ~location:held_location
       (held ^ selected
-      ^ binding_declarations output ~number held_location test.bindings)
-      [ close_paren ]
+      ^ binding_declarations output ~number ~scrutinee_text held_location
+          test.bindings)
+      (held_tokens tokens ~close_paren matching)
   @ false_branch output test.form ~extent:statement
       ~controlled_last:test.controlled.last
       ~check

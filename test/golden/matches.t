@@ -124,6 +124,72 @@ another array is reached through a pointer.
   default: __builtin_trap(); } }
   }
 
+A scrutinee that is a member, reached from its base by member
+designators only, is read through a pointer to that base where the
+base's address is aligned, so no pointer to the member is formed: the
+base of `.` is an aligned object, that of `->` a pointer read as a
+stored value. The tag, the bindings and the nodes of a selection tree
+read the member path from that pointer. A path with a subscript, or a
+base pointer formed by arithmetic, is copied.
+
+  $ cat > member.tc <<'EOF'
+  > type e = | A | B(int i);
+  > type w = | W(e x) | N;
+  > struct holder { int n; e state; e pair[2]; struct { w wrapped; } inner; };
+  > int f(struct holder *h) {
+  >   match (h->state) { case B(i): return i; default: return 0; }
+  > }
+  > int g(struct holder h) {
+  >   if (case W(B(i)) = h.inner.wrapped) return i;
+  >   return 0;
+  > }
+  > int k(struct holder *h) {
+  >   match (h->pair[1]) { default: return 1; }
+  > }
+  > int m(struct holder *h) {
+  >   match ((h + 1)->state) { default: return 1; }
+  > }
+  > EOF
+  $ ./golden.exe member.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^int f/,$p'
+  int f(struct holder *h) {
+  { __extension__ __auto_type const __tc_base0 = (
+  h
+  ); switch (__tc_base0->state.tag) {
+  case e_B: { const __typeof__(__tc_base0->state.u.B.i) i = __tc_base0->state.u.B.i; {
+   return i;
+   } __builtin_trap(); }
+  case e_A: {
+   return 0;
+   __builtin_trap(); }
+  default: __builtin_trap(); } }
+  }
+  int g(struct holder h) {
+  { __extension__ __auto_type const __tc_base1 = &(
+   h
+  ); unsigned __tc_arm1; switch (__tc_base1->inner.wrapped.tag) { case w_W: switch (__tc_base1->inner.wrapped.u.W.x.tag) { case e_B: __tc_arm1 = 1; break; case e_A: __tc_arm1 = 0; break; default: __builtin_trap(); } break; case w_N: __tc_arm1 = 0; break; default: __builtin_trap(); } if (__tc_arm1 == 1) { const __typeof__(__tc_base1->inner.wrapped.u.W.x.u.B.i) i = __tc_base1->inner.wrapped.u.W.x.u.B.i;
+   return i;
+   } else { } }
+  return 0;
+  }
+  int k(struct holder *h) {
+  { const struct e __tc_copy2 = (
+  h->pair[1]
+  ), *const __tc_match2 = &__tc_copy2; switch (__tc_match2->tag) {
+  case e_A: case e_B: {
+   return 1;
+   __builtin_trap(); }
+  default: __builtin_trap(); } }
+  }
+  int m(struct holder *h) {
+  { const struct e __tc_copy3 = (
+  (h + 1)->state
+  ), *const __tc_match3 = &__tc_copy3; switch (__tc_match3->tag) {
+  case e_A: case e_B: {
+   return 1;
+   __builtin_trap(); }
+  default: __builtin_trap(); } }
+  }
+
 Each refusal is located at the construct it concerns.
 
   $ cat > missing.tc <<'EOF'

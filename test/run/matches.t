@@ -306,3 +306,83 @@ program compiles with -std=c11 -pedantic-errors on each backend.
   >   -o gcc-copies copies.tc
   $ ./gcc-copies
   107 12 5 20 12
+
+A member scrutinee is read through a pointer to the object that holds
+it and never through a pointer to the member, so a member of a packed
+structure reads correctly and the backends see no address of a packed
+member; a member path with a subscript is copied (13.5). The base
+before `->` may be an array, which the pointer to the base takes the
+address of its first element from, or a call, which runs once.
+
+  $ cat > packed.tc <<'EOF'
+  > #include <stdio.h>
+  > type e = | A | B(long i) | C(char c, long j);
+  > type w = | W(e x) | N;
+  > #pragma pack(push, 1)
+  > struct packed {
+  >   char c;
+  >   e state;
+  >   struct { char d; w wrapped; } inner;
+  >   e pair[2];
+  > };
+  > #pragma pack(pop)
+  > static long by_pointer(const struct packed *p) {
+  >   match (p->state) {
+  >   case B(i):
+  >     return i;
+  >   case C(c, j):
+  >     return c + j;
+  >   case A:
+  >     return -1;
+  >   }
+  > }
+  > static long nested(struct packed p) {
+  >   if (case W(C(c, j)) = p.inner.wrapped)
+  >     return c * j;
+  >   return 0;
+  > }
+  > static long element(struct packed *p) {
+  >   match (p->pair[1]) {
+  >   case B(i):
+  >     return i;
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > static struct packed table[1] = { { 'z', B(5), { 'w', N }, { A, A } } };
+  > static int calls;
+  > static struct packed *first(void) {
+  >   calls++;
+  >   return table;
+  > }
+  > static long from_array(void) {
+  >   match (table->state) {
+  >   case B(i):
+  >     return i;
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > static long from_call(void) {
+  >   if (case B(i) = first()->state)
+  >     return i;
+  >   return 0;
+  > }
+  > int main(void) {
+  >   struct packed p = { 'x', B(41), { 'y', W(C(2, 21)) }, { A, B(7) } };
+  >   printf("%ld %ld %ld\n", by_pointer(&p), nested(p), element(&p));
+  >   long array = from_array(), call = from_call();
+  >   printf("%ld %ld %d\n", array, call, calls);
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang -std=c11 -pedantic-errors -Wall -Wextra -Werror \
+  >   -Waddress-of-packed-member -o clang-packed packed.tc
+  $ ./clang-packed
+  41 42 7
+  5 5 1
+  $ typec --cc=$gcc -std=c11 -pedantic-errors -Wall -Wextra -Werror \
+  >   -Waddress-of-packed-member -o gcc-packed packed.tc
+  $ ./gcc-packed
+  41 42 7
+  5 5 1

@@ -165,11 +165,23 @@ type construction = {
 val constructions : t -> construction list
 (** The constructor expressions typed, in source order. *)
 
-(** How a lowered match reaches its scrutinee (design 13.5): through a
-    pointer to it, or through a copy where the scrutinee is volatile or
-    atomic or is not an lvalue whose address typec knows C aligns for
-    its type; a member is not, since its structure may be packed. *)
-type access = Through_pointer | Through_copy
+(** The object that holds a member scrutinee (design 13.5), by the span
+    of its expression [B]: [B] itself in [B.m], or the object that [B]
+    points to in [B->m]. *)
+type base = Base_object of Tree.span | Base_pointer of Tree.span
+
+(** How a lowered match reaches its scrutinee (design 13.5). *)
+type access =
+  | Through_pointer
+      (** Through a pointer to it: its address is aligned for its type. *)
+  | Through_base of { base : base; members : string list }
+      (** Through a pointer to [base], then the member designators
+          [members]: the scrutinee is a member, whose address a packed
+          structure may misalign, of an object whose address is
+          aligned. *)
+  | Through_copy
+      (** Through a copy: it is volatile or atomic, or reached in
+          neither way above. *)
 
 (** The member [field] of the constructor [constructor] that a position
     of a pattern holds (design 4.7 rule 1). *)

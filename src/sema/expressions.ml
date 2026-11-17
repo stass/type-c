@@ -225,7 +225,13 @@ type construction = {
   braced : Tree.span option;
 }
 
-type access = Through_pointer | Through_copy
+type base = Base_object of Tree.span | Base_pointer of Tree.span
+
+type access =
+  | Through_pointer
+  | Through_base of { base : base; members : string list }
+  | Through_copy
+
 type pattern_field = { constructor : Spelling.constructor; field : string }
 
 type reach = {
@@ -6303,18 +6309,48 @@ and arm_items context (arm : Tree.arm) = items context arm.node.items
 
 (* Design 13.5: the lowered match reaches the scrutinee in place, through
    a pointer to it, unless it is volatile or atomic or its address may be
-   misaligned. Any other scrutinee is copied, which only costs time. This
-   is the one place that decides whether typec takes a variant's address. *)
+   misaligned; a member whose address may be misaligned is reached through
+   a pointer to an aligned object that holds it. Any other scrutinee is
+   copied, which only costs time. This is the one place that decides
+   whether typec takes the address of a variant or of an object that holds
+   one. *)
 and access_of context (scrutinee : Tree.expression) (t : Ctype.t) =
   if t.qualifiers.volatile || t.qualifiers.atomic then Through_copy
   else if aligned_lvalue context scrutinee then Through_pointer
-  else Through_copy
+  else member_access context scrutinee []
+
+(* The access to [e], a member reached by the designators [members] after
+   it, through the object that holds it: an aligned lvalue [B] before
+   [.], or the object of an aligned address [B] before [->]. A path
+   through anything but a member designator, as a subscript or a pair of
+   parentheses, is copied: lowering spells the path after the base. *)
+and member_access context (e : Tree.expression) members =
+  match e.node with
+  | Member { operand; member } ->
+      member_operand context operand (member.node :: members)
+  | Pointer_member { operand; member } ->
+      if aligned_address context operand then
+        Through_base
+          { base = Base_pointer operand.span; members = member.node :: members }
+      else Through_copy
+  | _ -> Through_copy
+
+(* The access through [operand], the operand of a [.] that [members]
+   follow: a further member, or the base object. *)
+and member_operand context (operand : Tree.expression) members =
+  match operand.node with
+  | Member _ | Pointer_member _ -> member_access context operand members
+  | _ ->
+      if aligned_lvalue context operand then
+        Through_base { base = Base_object operand.span; members }
+      else Through_copy
 
 (* Whether [e] is an lvalue that C lets [&] take (C11 6.5.3.2p1) and
    whose address C aligns for its type: a named object not declared
    [register], a compound literal, or the object that an address operand
    designates. A member is not, since its structure may be packed by a
-   [#pragma pack] or an attribute that typec does not read. Another
+   [#pragma pack] or an attribute that typec does not read, though the
+   object that holds it may be ({!member_access}). Another
    lvalue is taken as not, which is safe: it is copied. *)
 and aligned_lvalue context (e : Tree.expression) =
   match e.node with

@@ -1629,6 +1629,13 @@ types (design 13.3).
   write through), which needs no lifetime rule while the scrutinee is
   not assigned in the arm, or how else the copy goes.
 
+- [Medium] A member access to an `_Atomic` structure or union, which
+  C11 6.5.2.3p5 leaves undefined, is typed with the atomic qualifier
+  dropped (`member_of` in `src/sema/expressions.ml`) and not refused.
+  A `match (p->state)` on such a structure then reads the member
+  through its base several times, and GCC warns into the lowered text
+  naming `__tc_base0`, where Clang refuses it (`-Watomic-access`).
+  Refuse the access in typing, at the user's text.
 - [Medium] A generic container hashes and compares an opaque `K` only
   through function pointers it is handed, so the per-type operations
   are indirect calls unless the C compiler propagates the constant
