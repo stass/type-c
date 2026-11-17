@@ -22,9 +22,11 @@ type include_line = {
   location : Location.t;
 }
 
+type own_part = Include_line of include_line | Own_token of Token.t
+
 type interface = {
   unit : t;
-  includes : include_line list;
+  own_text : own_part list;
   holds_text : bool;
 }
 
@@ -58,7 +60,9 @@ type state = {
   interface : bool;
       (** the text is the output of the -E -dI step of an interface whose
           header is written (design 9.3) *)
-  mutable includes : include_line list;  (** in reverse *)
+  mutable main_text_begun : bool;
+      (** a line marker has placed the main file at line 1 or later *)
+  mutable own_text : own_part list;  (** in reverse *)
   mutable holds_text : bool;
       (** a token or a directive line other than a line marker stood in
           the text of the interface *)
@@ -159,22 +163,35 @@ let current_owner state =
         "token before the first line marker, as when an option such as \
          -P removes the line markers"
 
+(* The main file, where it is the current file at the bottom of the
+   include stack. *)
+let main_at_bottom stack =
+  match stack with
+  | [ (main : File.t) ] when main.origin = File.Main -> Some main
+  | _ -> None
+
 (* The text of the interface is what the output holds while its main file
-   is the current file at the bottom of the include stack, told by the
-   last component of the presumed file name, as 9.2 rule 2 compares
-   files: GCC changes the presumed name without entering a file for its
-   predefined macros (design 9.3). *)
+   is at the bottom of the include stack, from the first line marker that
+   places the main file at line 1 or later: GCC names the main file at
+   line 0 and then, at line 0 too and without entering a file, the files
+   of its predefined macros (design 9.3). From there the stack alone
+   decides, for tokens and directives alike: a marker that names another
+   file, as a #line of the interface or one that lowering writes in front
+   of an instance does, leaves the text where it is. *)
 let in_interface_text state =
-  state.interface
-  &&
-  match state.include_stack with
-  | [ main ] ->
-      main.origin = File.Main
-      && Filename.basename state.presumed.file = Filename.basename main.name
-  | _ -> false
+  state.interface && state.main_text_begun
+  && Option.is_some (main_at_bottom state.include_stack)
+
+(* A line marker or #line that names [name] at [next_line] begins the
+   text of the interface where it places the main file at line 1 or
+   later. *)
+let note_main_text_begun state name next_line =
+  match main_at_bottom state.include_stack with
+  | Some main when name = main.name && next_line >= 1 ->
+      state.main_text_begun <- true
+  | Some _ | None -> ()
 
 let add_token state kind start =
-  if in_interface_text state then state.holds_text <- true;
   let token =
     {
       Token.kind;
@@ -184,6 +201,10 @@ let add_token state kind start =
       location = state.presumed;
     }
   in
+  if in_interface_text state then begin
+    state.holds_text <- true;
+    state.own_text <- Own_token token :: state.own_text
+  end;
   state.tokens <- token :: state.tokens;
   state.token_count <- state.token_count + 1
 
@@ -489,20 +510,23 @@ let read_line_marker state =
       let motion, flags = read_flags state in
       end_directive state;
       state.include_stack <- stack_after_marker state motion name flags;
+      note_main_text_begun state name next_line;
       set_presumed state name next_line flags
   | None ->
       end_directive state;
+      note_main_text_begun state state.presumed.file next_line;
       set_presumed state state.presumed.file next_line state.presumed.flags
 
 (* #line N "file", and #line N. *)
 let read_line_directive state =
   skip_while state is_blank;
   let next_line = read_line_number state in
-  let name = read_optional_file_name state in
+  let name =
+    Option.value (read_optional_file_name state) ~default:state.presumed.file
+  in
   end_directive state;
-  set_presumed state
-    (Option.value name ~default:state.presumed.file)
-    next_line state.presumed.flags
+  note_main_text_begun state name next_line;
+  set_presumed state name next_line state.presumed.flags
 
 (* The names of the identifiers among the tokens of the rest of the
    line, in order. Raises [Failed] at the first part that is no token;
@@ -672,7 +696,7 @@ let read_include_line state ~hash directive =
       location = state.presumed;
     }
   in
-  state.includes <- line :: state.includes
+  state.own_text <- Include_line line :: state.own_text
 
 (* In the text of an interface whose header is written, an include line
    is read and every other directive that no unit reads is refused,
@@ -764,7 +788,8 @@ let read_part state ~stop ~first ~include_stack =
 let initial_state ~interface ~name text =
   {
     interface;
-    includes = [];
+    main_text_begun = false;
+    own_text = [];
     holds_text = false;
     text;
     pos = 0;
@@ -818,7 +843,7 @@ let read_after ~interface ~universe ~name text =
       Ok
         {
           unit;
-          includes = List.rev state.includes;
+          own_text = List.rev state.own_text;
           holds_text = state.holds_text;
         }
   | exception Failed error -> Error error

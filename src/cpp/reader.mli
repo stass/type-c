@@ -91,16 +91,22 @@ type include_line = {
   location : Location.t;
 }
 
+(** A part of the text of an interface: an include line, or a token of
+    the unit. *)
+type own_part = Include_line of include_line | Own_token of Token.t
+
 (** The output of the [-E -dI] step of an interface whose header is
-    written: the unit, the include lines of the text of the interface in
-    order, and whether that text holds a token or a directive line other
-    than a line marker. The text of the interface is what the output
-    holds while the main file is the current file at the bottom of the
-    include stack and the presumed file has the main file's last
-    component. *)
+    written: the unit, the include lines and tokens of the text of the
+    interface in order, and whether that text holds a token or a
+    directive line other than a line marker. The text of the interface is
+    what the output holds while the main file is the current file at the
+    bottom of the include stack, from the first line marker that places
+    the main file at line 1 or later. From there the stack alone decides:
+    a marker that names another file without entering or leaving one, as
+    a [#line] writes, leaves the text where it is. *)
 type interface = private {
   unit : t;
-  includes : include_line list;
+  own_text : own_part list;
   holds_text : bool;
 }
 

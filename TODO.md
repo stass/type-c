@@ -163,24 +163,17 @@ the order of its commits:
 - [High] The enumeration assertion of 13.4 at the end of every emitted
   header, named for the header (`__tc_enum_probe__M`), with the message
   of the model's representation (design 9.3, 13.4; plan 4.8).
-- [Medium] Two predicates decide the text of the interface: the reader's
-  (`in_interface_text`: the main file at the bottom of the stack and
-  the presumed name's last component) for include lines, refused
-  directives and the empty-text check, and the writer's (the token's
-  owner is the main file) for runs. A `#line 1 "gen.tci"` in `M.tci`
-  makes the two disagree: its later include lines are passed over while
-  its tokens reach a run, and a leading one empties the text. Decide the
-  text once, in the reader, for tokens and directives alike, and refuse
-  a marker without flags that names another file inside the text of the
-  interface (GCC's `<built-in>` marker comes before the main file's
-  `# 1`); design 9.3 needs a sentence for the case.
-- [Low] `Header_file`: the new file is created with `0666` less the
-  umask and only then given the mode of the header it replaces, so a
-  `0600` header is readable by others for a moment; the check of the
-  path and the rename are not atomic (a `link` would close the window
-  for a new header), and no `fsync` precedes the rename. A message
-  echoes the `-o` path and a refused interface path unescaped; an
-  unreadable header of typec's is reported as one typec did not write.
+- [Low] `Reader.read_interface` passes over, unchecked, a token or an
+  include line at the bottom of the main file before the text of the
+  interface begins (before the marker of its line 1). No supported
+  compiler writes one there, but a `--cc` wrapper could, and the token
+  would reach the typed unit and not the header; refuse it as a token
+  before the first marker is refused.
+- [Low] `Header_file`: the check of the path and the rename are not
+  atomic (a `link` would close the window for a new header), and no
+  `fsync` precedes the rename. A message echoes the `-o` path and a
+  refused interface path unescaped; an unreadable header of typec's is
+  reported as one typec did not write.
 - [Low] `Command.read_interface` repeats the file reading of
   `read_preprocessed`, `Pipeline.plan_header` fills a `shape` with
   values of a translation to reuse its helpers, and `Invocation` defines

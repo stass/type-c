@@ -155,6 +155,9 @@ that is not a regular file; one that typec wrote is replaced.
   $ typec -Wno-trigraphs --emit-c-header room.tci
   $ ls -l room.h | cut -c1-10
   -rw-r-----
+  $ (umask 026 && typec -Wno-trigraphs --emit-c-header room.tci -o masked.h)
+  $ ls -l masked.h | cut -c1-10
+  -rw-r-----
   $ ls -a | grep '\.tmp$'
   [1]
 
@@ -213,3 +216,20 @@ The refusals of the interface.
   $ typec --cc="$gcc" -Wno-trigraphs --emit-c-header tri.tci
   tri.tci:1: error: trigraph sequence in '#pragma weak x??=', which a C client compiled with trigraphs would replace
   [80]
+
+A #line that names another file, as a generated interface writes, leaves
+the text of the interface where it is: its include lines and its
+declarations reach the header alike.
+
+  $ printf '#line 1 "gen.y"\n#ifndef GEN_TCI\n#define GEN_TCI\n' > gen.tci
+  $ printf 'int a;\n#include <stddef.h>\nsize_t b;\n#endif\n' >> gen.tci
+  $ for cc in "$clang" "$gcc"; do
+  >   typec --cc="$cc" --emit-c-header gen.tci -o - |
+  >     grep -x 'int a ;\|#include <stddef.h>\|size_t b ;'
+  > done
+  int a ;
+  #include <stddef.h>
+  size_t b ;
+  int a ;
+  #include <stddef.h>
+  size_t b ;

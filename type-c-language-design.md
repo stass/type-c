@@ -3962,9 +3962,12 @@ first build. A symbolic link, a directory or a device fails the same
 test, without `typec` reading through the link or blocking on a FIFO.
 
 `typec` writes the header to a new file of a unique name in the
-directory of its path, created exclusively, gives it the permissions
-of the file that it replaces, or for a new header those that the umask
-leaves of `0666`, and renames it to the path. A
+directory of its path, created exclusively, and renames it to the
+path. A new header gets the permissions that a new file gets, from
+`0666` and the umask or the directory's default ACL. A file that
+replaces a header is created readable by its owner alone and then given
+the permissions of the header it replaces, so it is never readable for
+a moment by those whom they keep from it. A
 parallel build that writes one header twice thus writes two files and
 renames each whole, and a name planted in that directory beforehand is
 never opened. On a failure, which ends `typec` with a status of 13.2,
@@ -4179,9 +4182,21 @@ GCC 16 and Apple Clang 21, an error under `-Werror`, which no unit that
 includes `M.tci` draws.
 
 The *text of `M.tci`* is what the output holds while the main file is
-the current file at the bottom of the include stack. The reader passes
-over deeper text, and the lines of `-dI` in it, since a client reaches
-that text through the includes of the header. A text of `M.tci` that
+the current file at the bottom of the include stack, from the first
+line marker that places the main file at line 1 or later: GCC names
+the main file at line 0 and then, at line 0 too and without entering a
+file, `<built-in>` and `<command-line>` for its predefined macros, as
+the supported releases do (GCC 14 and later, 13.3), and Clang enters
+`<built-in>` as a file. The reader passes over deeper text, and the lines of `-dI` in it, since a client reaches
+that text through the includes of the header. From its beginning the
+stack alone tells the text, for its tokens, its include lines and its
+other directives alike: a line marker that names another file without
+entering or leaving one, as the `#line 1 "gen.y"` of a generated
+interface writes, and as lowering writes in front of the text of an
+instance, leaves the text where it is. Telling the text by the presumed
+name as well would have a generated interface's header lose the text
+after its `#line`, and the header lose its instances. A text of
+`M.tci` that
 holds no declaration gives a header with none. An `#if` within the
 guard that skips the rest of the interface gives one, as it gives the
 Type-C units no declaration; so does an interface of macros alone,
@@ -4197,9 +4212,8 @@ step's `-dD` writes the `#define` of the guard into the text of
 interface of macros alone, or of one that an `#if` within its guard
 empties, holds a directive line. Line markers and blank lines do not
 count, since Clang writes a blank line after the marker that returns
-to `M.tci` and GCC 16 does not. The line markers tell the text of
-`M.tci` by the last component of its path, as 9.2 rule 2 compares
-files, and the check needs no knowledge of the step's macros.
+to `M.tci` and GCC 16 does not. The check needs no knowledge of the
+step's macros.
 
 As a main file, `M.tci` draws from GCC and Clang the warning "#pragma
 once in main file" for a `#pragma once`, an error under `-Werror`,

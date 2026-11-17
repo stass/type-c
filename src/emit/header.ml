@@ -85,7 +85,11 @@ let check_interface ~source (read : Reader.interface) unit =
       let declarations =
         List.map Tree.external_span (Tree.external_declarations unit)
       in
-      List.iter (check_include_place declarations) read.includes)
+      let check_part : Reader.own_part -> unit = function
+        | Include_line line -> check_include_place declarations line
+        | Own_token _ -> ()
+      in
+      List.iter check_part read.own_text)
 
 (* Trigraphs (C11 5.2.1.1), which a client may compile with. *)
 
@@ -250,26 +254,6 @@ let bracketed run =
   @ List.rev run.lines
   @ List.map pop identifiers
 
-(* The interface's own text in the order of the output: each include
-   line goes in front of the token that follows it. *)
-type part = Include_line of Reader.include_line | Own_token of Token.t
-
-(* Tail-recursive, as the output may hold many tokens of deeper text. *)
-let parts (lowered : Reader.interface) =
-  let tokens = lowered.unit.tokens in
-  let rec merge includes index written =
-    match includes with
-    | (line : Reader.include_line) :: rest when line.next_token <= index ->
-        merge rest index (Include_line line :: written)
-    | _ when index = Array.length tokens -> List.rev written
-    | _ ->
-        let token = tokens.(index) in
-        if token.owner.origin = File.Main then
-          merge includes (index + 1) (Own_token token :: written)
-        else merge includes (index + 1) written
-  in
-  merge lowered.includes 0 []
-
 (* The lines between the macro probe and the guard's #endif: the include
    lines, each where it stands, and the runs between them, each in its
    macro bracket. *)
@@ -281,13 +265,13 @@ let body (lowered : Reader.interface) =
     add (bracketed !run);
     run := new_run ()
   in
-  let write = function
+  let write : Reader.own_part -> unit = function
     | Include_line line ->
         end_run ();
         add [ include_line_text line ]
     | Own_token token -> add_token lowered.unit !run token
   in
-  List.iter write (parts lowered);
+  List.iter write lowered.own_text;
   end_run ();
   List.rev !written
 

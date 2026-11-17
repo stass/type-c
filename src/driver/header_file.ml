@@ -48,19 +48,26 @@ let existing_permissions ~first_line path =
       Some st_perm
   | _ -> not_ours path
 
+(* The mode a new file is created with: [0666] for a new header, which
+   the umask or the directory's default ACL then cuts down, and for one
+   that replaces a header, its owner's alone until it is given that
+   header's permissions, so that it is never readable for a moment by
+   those whom they keep from it. *)
+let creation_mode = function None -> 0o666 | Some _ -> 0o600
+
 (* A name that no file had: one taken in the meantime is tried again
    with another, so a name planted beforehand is never opened. *)
-let rec create_new ~attempts random directory base =
+let rec create_new ~attempts ~mode random directory base =
   let name =
     Filename.concat directory
       (Printf.sprintf ".%s.%06x.tmp" base
          (Random.State.bits random land 0xffffff))
   in
   let flags = Unix.[ O_WRONLY; O_CREAT; O_EXCL; O_CLOEXEC ] in
-  match Unix.openfile name flags 0o666 with
+  match Unix.openfile name flags mode with
   | file -> (name, file)
   | exception Unix.Unix_error (Unix.EEXIST, _, _) when attempts > 1 ->
-      create_new ~attempts:(attempts - 1) random directory base
+      create_new ~attempts:(attempts - 1) ~mode random directory base
 
 (* Tries at a unique name before giving up, each failing only when
    another file took that name first. *)
@@ -77,15 +84,16 @@ let write_all file text =
 let write_new ~permissions path text =
   let random = Random.State.make_self_init () in
   let name, file =
-    create_new ~attempts:unique_name_attempts random (Filename.dirname path)
+    create_new ~attempts:unique_name_attempts
+      ~mode:(creation_mode permissions) random (Filename.dirname path)
       (Filename.basename path)
   in
   match
     Fun.protect
       ~finally:(fun () -> Unix.close file)
       (fun () ->
-        Option.iter (Unix.fchmod file) permissions;
-        write_all file text);
+        write_all file text;
+        Option.iter (Unix.fchmod file) permissions);
     Unix.rename name path
   with
   | () -> ()

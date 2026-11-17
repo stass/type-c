@@ -97,10 +97,17 @@ let clang_text =
    # 3 \"m.tci\" 2\n\
    x y;\n"
 
+let includes (read : Reader.interface) =
+  let include_line : Reader.own_part -> _ = function
+    | Include_line line -> Some line
+    | Own_token _ -> None
+  in
+  List.filter_map include_line read.own_text
+
 let test_include_lines () =
   let gcc = read_ok gcc_text in
   check "gcc: the include line of the interface's own text"
-    (match gcc.includes with
+    (match includes gcc with
     | [ { directive = "include"; header_name = "\"a.tci\""; next_token; _ } ]
       ->
         gcc.unit.tokens.(next_token).owner.name = "a.tci"
@@ -108,7 +115,7 @@ let test_include_lines () =
   check "gcc: the text holds tokens" gcc.holds_text;
   let clang = read_ok clang_text in
   check "clang: the comment is not part of the line"
-    (match clang.includes with
+    (match includes clang with
     | [ { directive = "include"; header_name = "<stdint.h>"; _ } ] -> true
     | _ -> false);
   check "an ordinary read refuses an include line"
@@ -149,6 +156,89 @@ let test_holds_text () =
     | Error error ->
         contains error.message "no #ifndef guard of its own"
     | Ok () -> false)
+
+(* The text of the interface begins where a marker places the main file
+   at line 1 or later, so GCC's predefined macros, at line 0, are not in
+   it; within it a marker that names another file, as a #line of a
+   generated interface writes, leaves the text where it is, for tokens
+   and include lines alike. *)
+let gcc_prelude =
+  "# 0 \"m.tci\"\n# 0 \"<built-in>\"\n#define __STDC__ 1\n\
+   # 0 \"<command-line>\"\n# 1 \"m.tci\"\n"
+
+let clang_prelude =
+  "# 1 \"m.tci\"\n# 1 \"<built-in>\" 1\n# 1 \"<built-in>\" 3\n\
+   #define __STDC__ 1\n# 1 \"m.tci\" 2\n"
+
+let test_line_markers () =
+  let generated = "# 1 \"gen.y\"\nint a;\n#include \"b.h\"\nint d;\n" in
+  let generated_body =
+    [
+      "#pragma push_macro(\"int\")";
+      "#undef int";
+      "#pragma push_macro(\"a\")";
+      "#undef a";
+      "int a ;";
+      "#pragma pop_macro(\"int\")";
+      "#pragma pop_macro(\"a\")";
+      "#include \"b.h\"";
+      "#pragma push_macro(\"int\")";
+      "#undef int";
+      "#pragma push_macro(\"d\")";
+      "#undef d";
+      "int d ;";
+      "#pragma pop_macro(\"int\")";
+      "#pragma pop_macro(\"d\")";
+    ]
+  in
+  check "gcc: a leading #line keeps the text"
+    (body (header (gcc_prelude ^ generated)) = generated_body);
+  check "clang: a leading #line keeps the text"
+    (body (header (clang_prelude ^ generated)) = generated_body);
+  check "a leading #line: the text holds tokens"
+    (read_ok (gcc_prelude ^ generated)).holds_text;
+  check "a #line after the guard keeps the include line"
+    (List.mem "#include \"b.h\""
+       (body (header (gcc_prelude ^ "#define M\n" ^ generated))));
+  check "GCC's predefined macros are no text"
+    (not (read_ok gcc_prelude).holds_text);
+  let own_name_text =
+    gcc_prelude ^ "int a;\n# 7 \"m.tci\"\nint b;\n# 9 \"dir/m.tci\"\nint c;\n\
+                   #include \"b.h\"\nint d;\n"
+  in
+  check "a #line of the interface's own name keeps its text"
+    (body (header own_name_text)
+    = [
+        "#pragma push_macro(\"int\")";
+        "#undef int";
+        "#pragma push_macro(\"a\")";
+        "#undef a";
+        "#pragma push_macro(\"b\")";
+        "#undef b";
+        "#pragma push_macro(\"c\")";
+        "#undef c";
+        "int a ;";
+        "int b ;";
+        "int c ;";
+        "#pragma pop_macro(\"int\")";
+        "#pragma pop_macro(\"a\")";
+        "#pragma pop_macro(\"b\")";
+        "#pragma pop_macro(\"c\")";
+        "#include \"b.h\"";
+        "#pragma push_macro(\"int\")";
+        "#undef int";
+        "#pragma push_macro(\"d\")";
+        "#undef d";
+        "int d ;";
+        "#pragma pop_macro(\"int\")";
+        "#pragma pop_macro(\"d\")";
+      ]);
+  check "GCC's markers around a macro of a system header"
+    (List.mem "void * p = ( ( void * ) 0 ) ;"
+       (body
+          (header
+             (gcc_prelude
+            ^ "void *p =\n# 1 \"m.tci\" 3\n((void *)0)\n# 1 \"m.tci\"\n;\n"))))
 
 let test_skeleton () =
   let expected =
@@ -276,6 +366,7 @@ let () =
   test_include_lines ();
   test_directives ();
   test_holds_text ();
+  test_line_markers ();
   test_skeleton ();
   test_runs ();
   test_literals ();
