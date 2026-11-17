@@ -40,7 +40,7 @@
 (test
  (name test_small_stack)
  (modules test_small_stack)
- (libraries typec_test_support))
+ (libraries compiler-libs.common typec_test_support))
 
 (test
  (name test_emitter)

@@ -1102,8 +1102,13 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   `__x86_64__`), but nothing makes them agree on another. The calls of
   `expressions.t` for AArch64 and ARMv7 cover two of the architectures;
   PowerPC, SystemZ and VE are untested.
-- [Medium] `test/unit/test_small_stack.ml` fails on both arm64 hosts
-  with `FAIL: the backtrace names the stage`. In OCaml 5.4.1 native code
+- [Medium] Report to OCaml upstream (the owner decides to file) that a
+  `Stack_overflow` raised at a stack that cannot grow carries no
+  backtrace in native code on arm64. `test_small_stack` skips its
+  assertion that the backtrace names the stage on arm64, by
+  `Config.architecture`, and prints why; the other users of
+  `Small_stack`, `test_parser` and `tools/fuzz/parser_target.ml`, get an
+  empty backtrace there. In OCaml 5.4.1 native code
   on arm64, when a stack reaches its limit the `Stack_overflow` carries
   an empty backtrace: 0 frames on the main fiber and 2 after the
   re-raise of `Small_stack.run`, where amd64, and bytecode on arm64,
@@ -1111,8 +1116,7 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   argument pair that holds the caller's `x30` and raises with `x30`
   pointing into the stack-check stub of `asmcomp/arm64/emit.mlp`, which
   has no frame descriptor, so `caml_stash_backtrace` stops at once;
-  amd64 raises with the real return address. Report it to OCaml with
-  the fix `ldr x30, [sp, 8]` before the `add sp, sp, 16` (unbuilt,
+  amd64 raises with the real return address. The fix to report is `ldr x30, [sp, 8]` before the `add sp, sp, 16` (unbuilt,
   untested). Provisional: the cause is read from the source and seen
   under qemu-user only; the path makes no system call, so native arm64
   should fail too, which one run there would settle. Reproducer: a

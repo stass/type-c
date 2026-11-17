@@ -32,7 +32,7 @@ let max_nesting = 256
    programs people wrote, 92, SQLite's shell.c, whose longest else-if
    chain has 66 links. 10000 is seventy times the deepest, and a tree
    that deep needs under 140K words (1.1 MiB) of stack in the later
-   stages, on macOS and Linux, against the runtime's default limit of
+   stages, on amd64 macOS and Linux, against the runtime's default limit of
    128M words; test_deep_trees holds them to 256K. *)
 let max_depth = 10_000
 

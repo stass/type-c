@@ -13,7 +13,8 @@ open Typec_test_support
 
 (* The comment of Parser.max_depth measures the stages after the parser
    at under 140K words of stack on a tree at the bound; the power of two
-   above it leaves room for frames a change adds. *)
+   above it leaves room for frames a change adds. Both count amd64
+   words; Small_stack scales them to the platform. *)
 let limit_words = 256 * 1024
 
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
