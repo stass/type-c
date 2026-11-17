@@ -1520,6 +1520,12 @@ types (design 13.3).
   the universe's tokens. A reader view for tests (the index of the first
   own token, the bytes the tokens index) would make them read the one
   fact instead.
+- [Low] Design 13.3 calls the universe text "the two lines of 3.6",
+  `option` and `result`, while `File.universe_text`
+  (`src/cpp/file.ml`) holds four, adding `slice` and
+  `type str = slice(const char);`, and section 8 writes `str` as
+  `typedef slice(const char) str;`. Make 13.3 and section 8 state the
+  four lines as the reader has them, or change the reader.
 
 - [Medium] Distinct types, owner decision taken by default (design
   3.4): Type-C or C text is decided by the first token of the
