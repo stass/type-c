@@ -1313,6 +1313,18 @@ types (design 13.3).
   frees what the caller owns. Count the idiom again in the next pilot
   before any change to the language, such as a `defer` that runs on
   the error exit alone.
+- [High] Design 7.1 rule 3 refuses `__func__`, `__FUNCTION__` and
+  `__PRETTY_FUNCTION__` in a generic function, and with them the
+  `assert` of `<assert.h>` wherever the library's macro names the
+  function. Apple's expands to `__assert_rtn(__func__, ...)`; read
+  the headers of glibc, musl and FreeBSD for the same. Package 3.5
+  counts how often the container library wants `assert` or the name
+  in a generic function. If it does, allow the name where C converts
+  the array to a pointer (C11 6.3.2.1p3), so that only a use of its
+  type, which is the instance's, stays refused (`sizeof`, `&`,
+  `_Alignof`, `__typeof__`), and let its contents depend as those of
+  a `const` object do (rule 4). The refusal stays if the library
+  does not want it.
 
 ## Design questions without a gate yet
 
@@ -1444,11 +1456,14 @@ types (design 13.3).
     `for`, an object whose own type is atomic. This is a security
     item: left as `{0}`, an instance for a union holds stack bytes
     under GCC 15 and later. Tests, as 13.5 states them: the lowered
-    form in each place and for each type leaves every byte zero on the
-    backend of each host, and the same test over `{0}` finds a byte
-    that is not zero under GCC 16; the lowered form compiles under
-    `-pedantic-errors` in the four dialects, and the same text without
-    `__extension__` does not.
+    form in each place and for each type leaves zero, on the backend
+    of each host, every byte that rule 3 promises, which is each byte
+    but those inside a `long double` that hold none of its value; the
+    same test over `{0}` finds a byte that is not zero under GCC 16,
+    and on x86-64 an object of the type `long double` holds one in
+    those 6 bytes after the lowered form, under both backends; the
+    lowered form compiles under `-pedantic-errors` in the four
+    dialects, and the same text without `__extension__` does not.
   - Dependence as a fact of a value (rule 4). `Integer_constant.t` has
     `Known` and `Opaque`, and `Expressions.kind` leaves a call and a
     `const` object to the backend (`Backend_constant`). Give the
@@ -1469,6 +1484,17 @@ types (design 13.3).
     associations included. Pairs: `_Generic(x, T: 1, default: 0)` is
     refused and `__builtin_types_compatible_p(__typeof__(row),
     __typeof__(&row[0]))` stands.
+  - Function names (rule 3). `__func__`, `__FUNCTION__` and
+    `__PRETTY_FUNCTION__` are refused in the definition of a generic
+    function, with TC0075 and the reason of rule 3: an instance has a
+    name of its own. `Expressions.predefined` gives `__func__` the
+    length of the definition's name, so
+    `_Static_assert(sizeof __func__ == 2, "name length");` in
+    `generic(T) void f(T *p)` passes the check and fails in the
+    instance `f__i` under both backends. Pairs: each of the three
+    names is refused in a generic body, and so is the `assert` of
+    `<assert.h>` where its macro names one; the same body without
+    `generic` stands.
   - Attributes: the item on the rule of 13.3 under "Declarations".
 - [Medium] Generic functions, from the review of package 3.1:
   attributes inside the declarator of a generic prototype

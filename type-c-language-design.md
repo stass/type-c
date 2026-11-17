@@ -218,7 +218,8 @@ length for the temporaries of its test (13.5); `__typeof_unqual__`,
 C23's `typeof_unqual`, which names an untagged type without the
 qualifiers that its one name carries (10.3); `__builtin_trap` (10.5);
 and `__extension__` before C23's empty initialiser `{}`, which zeroes
-every byte of an object, as no initialiser of ISO C11 does (13.5).
+the padding of a structure and the whole of a union with the members,
+as no initialiser of ISO C11 does (13.5).
 Lowered code also writes the three
 packing pragmas of the bracket of 10.3 and, in its probe, `#pragma
 pack(1)` and `#pragma pack(2)`. C11 6.10.6 leaves a pragma to the
@@ -363,9 +364,10 @@ type expr =
    GCC 16 zeroes `c` and leaves most of the other bytes as the stack
    held them, where Apple Clang 21 zeroes them all. Code that hands
    the representation on, to `memcmp`, to `write` or to a hash of the
-   bytes, clears the object with `memset`, as in C. Type-C gives the
-   zero initialiser every byte only where the text cannot know what
-   the members are, in an object whose type mentions a type parameter
+   bytes, clears the object with `memset`, as in C. Where the text
+   cannot know what the members are, in an object whose type mentions
+   a type parameter, Type-C makes the zero initialiser zero the
+   padding of a structure and the rest of a union as well
    (7.1 rule 3). `{0}` and the empty initialiser `{}` (GNU C, C23) are
    the only braced initialisers a variant accepts, and `{}` is its
    zero value wherever `{0}` is. `{0}` gives any object its zero
@@ -1831,10 +1833,11 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    (Apple Clang 21, GCC 16). Nothing is lost by the refusal, as `(T)t`
    says what `t` says. The empty initialiser `{}` is an extension of
    C11 as well, and the zero initialiser below needs it, since ISO C11
-   has no initialiser that zeroes every byte. That one is therefore
-   lowered: whichever of `{0}` and `{}` the definition writes, an
-   instance holds `{}` under `__extension__`, which both backends take
-   under `-pedantic-errors` in every dialect (13.5).
+   has no initialiser that zeroes the padding of a structure and the
+   rest of a union. That one is therefore lowered: whichever of `{0}`
+   and `{}` the definition writes, an instance holds `{}` under
+   `__extension__`, which both backends take under `-pedantic-errors`
+   in every dialect (13.5).
 
    No initialiser enters a `Ti` but the *zero initialiser*, `{0}` or
    `{}`. An initialiser list is read as C reads it, against the types
@@ -1845,11 +1848,16 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    left out (6.7.9p20), and it is an error, as `Ti` has no member that
    can be named. The zero initialiser names none. As the whole
    initialiser of an object or of a subobject whose type mentions a
-   type parameter (rule 4), `{0}` or `{}` gives it all-zero storage:
-   every byte of that object is zero, whatever the argument is, and
-   nothing in the list is matched against a member. The two spellings
-   mean the same. So these are valid and mean the same in every
-   instance:
+   type parameter (rule 4), `{0}` or `{}` initialises it as C
+   initialises an object of static storage that has no initialiser
+   (C11 6.7.9p10), whatever the argument is, and nothing in the list
+   is matched against a member. Every scalar in it has the value
+   zero: each member of a structure, each element of an array and the
+   first member of a union, to any depth. Every byte of it outside
+   those scalars is zero: the padding of each structure and the rest
+   of each union. The bytes inside a scalar that hold none of its
+   value are not promised (below). The two spellings mean the same.
+   So these are valid and mean the same in every instance:
 
    ```c
    T u = {0};
@@ -1862,9 +1870,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    ```
 
    The members that a list leaves out, as `a` in the last line, are
-   initialised as those of a static object are (6.7.9p21), which
-   zeroes their bytes as well (6.7.9p10; Apple Clang 21 and GCC 16,
-   for the bytes of a union and for padding).
+   initialised as those of a static object are (6.7.9p21), which is
+   the same zero (6.7.9p10; Apple Clang 21 and GCC 16, for the bytes
+   of a union and for the padding of a structure).
 
    These are errors, because what each means is the argument's to say:
 
@@ -1888,23 +1896,40 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    is `(T){0}`. `{ {0}, 5 }` is valid as well, and GCC 16 warns there
    of braces around a scalar initialiser where `T` is a scalar.
 
-   All-zero storage is the only zero that a definition can mean. It
-   names no member of `Ti`, so the bytes are all that it can read of a
-   value, through a pointer to a character type, and all that
-   `memcmp`, `write` or a hash of the representation take of one. C's
-   `{0}` promises the values of members and not the bytes (3.2 rule
-   7), which serves text that knows its type and not text that does
-   not. Left as C, `T u = {0};` would hold under GCC 16, where `T` is
-   `union { char c; long l[4]; }`, what the stack held in 24 of its 32
-   bytes without optimisation and in 31 at `-O2`, and Apple Clang 21
-   would refuse it where `T` is a structure that begins with a
-   structure without members ("initializer for aggregate with no
-   elements requires explicit braces"). The lowered form is one for
-   every type that an argument can be, a structure without members
-   among them, which is a GNU extension (13.3) of the text that
-   declares it. An object whose type mentions no type parameter keeps
-   C's initialiser as written, in a generic function as outside one:
-   untouched C is emitted verbatim (principle 8).
+   C's `{0}` does not give a definition this zero. It promises the
+   values of members and not the bytes between them (3.2 rule 7).
+   That serves text that knows its type and can name what the list
+   left, and not a definition, which names no member of `Ti`. Left as
+   C, `T u = {0};` would hold under GCC 16, where `T` is
+   `union { char c; long l[4]; }`, what the stack held in 31 of its 32
+   bytes, without optimisation and at `-O2`, and Apple Clang 21 would
+   refuse it where `T` is a structure that begins with a structure
+   without members ("initializer for aggregate with no elements
+   requires explicit braces"). The lowered form is one for every type
+   that an argument can be, a structure without members among them,
+   which is a GNU extension (13.3) of the text that declares it. An
+   object whose type mentions no type parameter keeps C's initialiser
+   as written, in a generic function as outside one: untouched C is
+   emitted verbatim (principle 8).
+
+   The promise ends at a scalar. A scalar type may hold its value in
+   fewer bytes than its size, and the others are padding inside its
+   own representation. C says nothing of those bytes, in C11 or in
+   C23, whose rule for `{}` zeroes the padding of structures and
+   unions, and a backend that stores the value leaves them as they
+   were. The `long double` of x86-64 holds its value in 10 of its 16
+   bytes, and its complex type in 20 of 32. After the zero initialiser
+   of an object of either type Apple Clang 21 leaves the other 6 and
+   12 as the stack held them, and GCC 16 leaves 6 and 12 without
+   optimisation and 4 and 8 at `-O2` (13.5). So the zero initialiser
+   does not make the bytes of a `Ti` fit to hand on. A definition
+   that gives the representation of an object to `memcmp`, to `write`
+   or to a hash of the bytes clears the object with `memset` first,
+   as C text does (3.2 rule 7). Lowering adds nothing for these
+   bytes. No form clears them in every place where an initialiser
+   stands, a `const` object, a static object and a compound literal
+   among them (13.5), and the next store to the scalar leaves them
+   unspecified again.
 
    The lowered form sets three limits. Each is an error of the check,
    since the backend would stay silent or would refuse lowered text:
@@ -1982,6 +2007,22 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    - An `__asm__` operand whose type mentions a type parameter, a `T *`
      too: its constraint asks of the operand a size and a kind, which
      differ between instances.
+   - The predefined names of the function, `__func__`, `__FUNCTION__`
+     and `__PRETTY_FUNCTION__`. Each is an array of `char` that holds
+     the name of the function it stands in (C11 6.4.2.2p1), and an
+     instance has a name of its own (10.3), which the definition does
+     not know. The array therefore has another length in each
+     instance, which is another type, and other contents. In
+     `generic(T) void f(T *p)`, `sizeof __func__` is 2 by the name of
+     the definition and 5 in the instance `f__i`:
+     `_Static_assert(sizeof __func__ == 2, "name length");` fails
+     there with both backends (Apple Clang 21, GCC 16). The refusal
+     reaches every macro that names one of the three. The `assert` of
+     `<assert.h>` is such a macro where the library's reports the
+     function, as Apple's does through `__func__`, unless `NDEBUG` is
+     defined. A definition tests without the name, by
+     `if (!ok) abort();` or by a macro of its own over `__FILE__` and
+     `__LINE__`.
 4. A type *mentions* a type parameter where it is one, is derived from a
    type that mentions one, is a type application with an argument that
    mentions one, or is a structure or union with a member whose type
@@ -4121,14 +4162,15 @@ binding can be named; it would also hide the bindings from a debugger
 under their own names (4.1).
 
 **The zero initialiser of a type parameter.** The zero initialiser of
-an object or subobject whose type mentions a type parameter means
-all-zero storage (7.1 rule 3), and one lowered form gives it for every
-type, in every dialect and in every place where the initialiser
-stands. Lowering writes `{}` for the list, `{0}` or `{}`, and puts
-`__extension__` before what holds it most closely: the compound
-literal whose list holds it, or else the declaration whose initialiser
-does. The declaration is a block item, as 7.1 rule 3 keeps the zero
-initialiser out of the first clause of a `for`.
+an object or subobject whose type mentions a type parameter gives
+every scalar in it the value zero and zeroes the padding of each
+structure and the rest of each union (7.1 rule 3), and one lowered
+form does so for every type, in every dialect and in every place
+where the initialiser stands. Lowering writes `{}` for the list, `{0}`
+or `{}`, and puts `__extension__` before what holds it most closely:
+the compound literal whose list holds it, or else the declaration
+whose initialiser does. The declaration is a block item, as 7.1 rule 3
+keeps the zero initialiser out of the first clause of a `for`.
 
 ISO C11 has no initialiser with this meaning, and no other form is one
 for every type and place:
@@ -4148,17 +4190,48 @@ for every type and place:
   compound literal.
 
 `{}` is C23's empty initialiser, which initialises an object as one of
-static storage is initialised without an initialiser, padding included
-(C23 6.7.10), and both backends give it that meaning in the dialects
-that `typec` accepts. Measured with GCC 16.2 and Apple Clang 21, at
-`-O0`, `-O2` and `-O3`, in C11 and in gnu17, every byte is zero after
-`{}`. The types were a union with a longer second member, a structure
-with padding between its members, a structure of one member with
-padding after it and a variant's structure. The places were an object,
-a `const` object, an array, a structure that begins with the type, a
-subobject of a longer list, a static object, and a compound literal
-read as a value, through its address and as the initialiser of a
-subobject. Both take `{}` for a scalar, a pointer, an enumeration, a
+static storage is initialised without an initialiser, the padding of
+structures and unions included (C23 6.7.10), and both backends give it
+that meaning in the dialects that `typec` accepts. Measured with GCC
+16.2 and Apple Clang 21 on x86-64, at `-O0`, `-O2` and `-O3`, in C11
+and in gnu17, every byte is zero after `{}` in a type that has no
+padding inside a scalar. The types were a union with a longer second
+member, a structure with padding between its members, a structure of
+one member with padding after it, a variant's structure, a `double`
+and a pointer. The places were an object, a `const` object, an array,
+a structure that begins with the type, a subobject of a longer list, a
+static object, and a compound literal read as a value, through its
+address and as the initialiser of a subobject.
+
+The padding that C23's rule zeroes is that of structures and unions.
+The bytes of a scalar that hold none of its value are no part of it,
+and the same measurement finds them left as the stack held them. On
+x86-64 a `long double` holds its value in the first 10 of its 16
+bytes, and `_Complex long double` in 20 of its 32. After `{}`, Apple
+Clang 21 leaves the other 6 and 12 at each of the three levels, and
+GCC 16.2 leaves 6 and 12 at `-O0` and 4 and 8 at `-O2` and `-O3`, in
+these places:
+
+| Type | Apple Clang 21 | GCC 16.2 |
+| --- | --- | --- |
+| `long double`, `_Complex long double` | An object, a `const` object, a compound literal read as a value and through its address | The same, and a subobject of a longer list, also where a compound literal initialises it |
+| A structure whose one member has one of the two types | A compound literal of the structure of `long double`, read through its address | An object, a `const` object, a compound literal read as a value and through its address |
+
+In every other place of these four types the bytes were zero. They
+were zero in every place of a structure that holds a `long double`
+after a `char`, before one or between two, of a structure that holds
+an array of two, and of a union that holds one as its first or as its
+second member. In all of these types every byte outside a
+`long double` was zero. Which of its bytes a backend leaves is
+therefore nothing that text can know, and 7.1 rule 3 promises none of
+them. No form zeroes them in every place. A statement after the
+declaration, `memset` or GCC's `__builtin_clear_padding`, which Apple
+Clang 21 does not have, follows none of the objects that `memset`
+cannot follow above. A copy of a static `long double` that has no
+initialiser stores the value alone, as every store to the scalar does,
+and leaves the same bytes (both backends).
+
+Both take `{}` for a scalar, a pointer, an enumeration, a
 complex type, a structure, a union, an array and a structure without
 members, with no diagnostic under `-Wall -Wextra` but one: GCC warns
 of braces around a scalar initialiser where the `{}` of a subobject
@@ -4182,10 +4255,22 @@ of the form.
 dialects it is the backends' extension, measured with GCC 16.2 and
 Apple Clang 21 alone. A test of the suite holds the assumption for the
 backend of each test host. It compiles the lowered form in each place
-above for each type above, calls each function after one that fills
-the stack with a non-zero byte, and finds every byte zero. The same
-test over `{0}` must find a byte that is not zero under GCC 15 and
-later, which shows that the test reads the bytes it claims to read. A
+above for each type above, those that hold a `long double` or its
+complex type among them, calls each function after one that fills the
+stack with a non-zero byte, and finds zero every byte that 7.1 rule 3
+promises: each byte of the object but those inside a `long double`
+that hold none of its value. They are the last 6 of its 16 on x86-64,
+and the test asserts that format by `LDBL_MANT_DIG` and the size; on
+arm64, which is not measured, the type has no such bytes and every
+byte must be zero. The same test over `{0}` must find a byte that is
+not zero under GCC 15 and later, which shows that the test reads the
+bytes it claims to read. On x86-64 the test also reads the 6 bytes
+that it passes over, in an object of the type `long double` after the
+lowered form, and must find one that is not zero under both backends
+at each of the three levels. That holds the limit of 7.1 rule 3 to what the
+backends do and shows that the test reads the bytes of a
+`long double`. A backend that zeroes them fails this part, and the
+measurement above is then taken again for it. A
 second test compiles the lowered form under `-pedantic-errors` in the
 four dialects, and the same text without `__extension__` must fail
 there. The repair for a backend that fails either test is a form of
@@ -5537,7 +5622,7 @@ a crash.
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 or 4 refuses are compile errors | Nothing |
-| The zero initialiser of an object whose type mentions a type parameter leaves every byte of that object zero | Every instance of a generic function (7.1 rule 3) | The backend gives `{}` the meaning of C23 in the selected dialect (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
+| The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
