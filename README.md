@@ -1516,7 +1516,8 @@ typec --emit-c token.tc  # print the C that typec hands to cc
 `CC=typec` and its C files compile as before. With a `.tc` input it
 refuses the few options that it cannot follow, such as `-E`, which
 stops before the C it writes, or `-fshort-enums`, which changes C's
-types. The C compiler is `cc` unless `--cc=PATH` or
+types, and the long options, spelled with `--`, that it does not
+know. The C compiler is `cc` unless `--cc=PATH` or
 `TYPEC_CC` names another ([choosing it](#choosing-the-backend)).
 
 ## Building and testing
@@ -1710,6 +1711,11 @@ preprocessing (`-E`), the options that change the preprocessed text
 (`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-dD`, `-dM` and the like,
 `-traditional-cpp`, `-fdirectives-only`), `-save-temps`, `-###`, `-ansi`,
 `--` and response files (`@FILE`), with a usage error naming the option.
+It refuses a long option, spelled with `--`, that it does not know, as
+GCC reads `--NAME` as `-fNAME` and accepts abbreviations, so that
+`--preprocess`, `--write-user-dep` or `--short-enums` cannot reach the
+backend unseen; an option that also has a form with one `-` passes
+in that form.
 It refuses the options known to change a type of C without changing a
 macro that the target model reads, which the model therefore cannot
 see: `-fshort-enums`, `-funsigned-bitfields` or `-fno-signed-bitfields`,

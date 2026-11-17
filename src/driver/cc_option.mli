@@ -6,9 +6,12 @@
 
     One table answers, for each option, how many of the next arguments
     are its values, so that a value is never taken for an input, and what
-    the option is to the pipeline. An option that is not in the table
-    takes no separate value and is passed to every step, which is right
-    for the options that select the target, the code or the warnings. *)
+    the option is to the pipeline. An option spelled with one ['-'] that
+    is not in the table takes no separate value and is passed to every
+    step, which is right for the options that select the target, the
+    code or the warnings. A long option, spelled with ["--"], that is not
+    in the table is [Refused]: GCC reads abbreviations of long options
+    and [--NAME] as [-fNAME], so its meaning cannot be known. *)
 
 (** The output a compilation stops at. *)
 type stop =
@@ -67,6 +70,7 @@ type t = { role : role; separate_values : int; joined_value : string }
 val classify : string -> t
 (** [classify argument] finds [argument] in the table: an exact spelling
     first, then the longest spelling that is a prefix of it and takes a
-    joined value. An argument that matches neither is [Common] with no
-    value. An argument that starts with ['@'] is a response file, which
-    is [Refused]: [typec] does not read the options inside it. *)
+    joined value. An argument that matches neither is [Refused] when it
+    starts with ["--"] and [Common] with no value otherwise. An argument
+    that starts with ['@'] is a response file, which is [Refused]:
+    [typec] does not read the options inside it. *)

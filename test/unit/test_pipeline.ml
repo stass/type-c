@@ -59,7 +59,27 @@ let () =
       ("-fuse-ld=lld", (Link, 0, "lld"));
       ("-O2", (Common, 0, ""));
       ("--cc=gcc", (Typec Cc, 0, "gcc"));
-      ("--cc", (Common, 0, ""));
+      (* A long option that the table lacks is refused: GCC reads an
+         abbreviation of a long option as that option and any other
+         --NAME as -fNAME. *)
+      ("--cc", (Refused "", 0, ""));
+      ("--emit", (Refused "", 0, ""));
+      ("--preprocess", (Refused "", 0, ""));
+      ("--ansi", (Refused "", 0, ""));
+      ("--write-user-dep", (Refused "", 0, ""));
+      ("--short-enums", (Refused "", 0, ""));
+      ("--syntax-only", (Refused "", 0, ""));
+      ("--output-x", (Refused "", 0, ""));
+      ("--target=x86_64-linux-gnu", (Common, 0, "x86_64-linux-gnu"));
+      ("--gcc-toolchain=/usr", (Common, 0, "/usr"));
+      ("--coverage", (Common, 0, ""));
+      ("--sysroot=/", (Common, 0, "/"));
+      ("--gcc-install-dir=/usr", (Common, 0, "/usr"));
+      ("--embed-dir=data", (Preprocess, 0, "data"));
+      ("--unwindlib=libgcc", (Link, 0, "libgcc"));
+      ("--target", (Refused "", 0, ""));
+      ("--include-dir=x", (Refused "", 0, ""));
+      ("--dump=M", (Refused "", 0, ""));
     ]
   in
   List.iter
@@ -78,6 +98,12 @@ let () =
   check "a response file is refused"
     (match Cc_option.classify "@args" with
     | { role = Refused _; _ } -> true
+    | _ -> false);
+  (* GCC reads --dump as -d, whose -dD and -dM change the preprocessed
+     text. *)
+  check "--dump is refused"
+    (match Cc_option.classify "--dump" with
+    | { role = Refused _; separate_values = 1; _ } -> true
     | _ -> false)
 
 (* Reading a command line. *)
@@ -382,6 +408,7 @@ let () =
   check "-E" (refused [ "-E"; "x.tc" ]);
   check "-P" (refused [ "x.tc"; "-P" ]);
   check "@file" (refused [ "x.tc"; "@args" ]);
+  check "--preprocess" (refused [ "--preprocess"; "x.tc" ]);
   check "-o without a value" (fails [ "x.tc"; "-o" ] (Missing_value "-o"));
   check "-o with -c and two inputs"
     (fails [ "-c"; "x.tc"; "y.c"; "-o"; "x.o" ] Output_for_several_inputs);

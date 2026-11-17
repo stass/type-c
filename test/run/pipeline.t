@@ -195,6 +195,36 @@ with a .tc input. Without one they reach the backend as they are.
   [81]
   $ typec --cc=$clang -std=c99 -c twice.c
 
+GCC reads an abbreviation of a long option as that option and any other
+--NAME as -fNAME, so with a .tc input typec refuses each long option
+that it does not know: --preprocess is -E, --write-user-dep is -MMD and
+--short-enums is -fshort-enums. A long option that typec knows, such as
+--coverage, passes, and without a .tc input every one reaches the
+backend.
+
+  $ typec --cc=$gcc --preprocess -c x.tc
+  typec: --preprocess cannot be used with a .tc input: typec does not know this long option, which GCC may read as an abbreviation of another or as -f and its name
+  [81]
+  $ typec --cc=$clang --preprocess -c x.tc
+  typec: --preprocess cannot be used with a .tc input: typec does not know this long option, which GCC may read as an abbreviation of another or as -f and its name
+  [81]
+  $ typec --cc=$clang --ansi -c x.tc
+  typec: --ansi cannot be used with a .tc input: typec does not know this long option, which GCC may read as an abbreviation of another or as -f and its name
+  [81]
+  $ mkdir long && cd long
+  $ typec --cc=$gcc --write-user-dep -c ../x.tc
+  typec: --write-user-dep cannot be used with a .tc input: typec does not know this long option, which GCC may read as an abbreviation of another or as -f and its name
+  [81]
+  $ cd .. && ls -A long
+  $ typec --cc=$gcc --short-enums -c x.tc
+  typec: --short-enums cannot be used with a .tc input: typec does not know this long option, which GCC may read as an abbreviation of another or as -f and its name
+  [81]
+  $ typec --cc=$clang --coverage -c x.tc -o out/coverage.o && ls out/*.gcno
+  out/coverage.gcno
+  $ typec --cc=$gcc --std=c17 -c x.tc
+  $ typec --cc=$clang --std c17 -c x.tc
+  $ typec --cc=$gcc --short-enums -c twice.c
+
 The options inside -Wp, and after -Xpreprocessor reach the -E step
 unseen, so the reader refuses the text they change: text without line
 markers, in which no token can be placed in its file, and text that

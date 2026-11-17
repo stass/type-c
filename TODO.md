@@ -21,13 +21,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
-- [Medium] A long option that the table lacks is Common and reaches
-  every step: `--preprocess` (GCC's `-E`) passes the refusal of `-E` and
-  compiles nothing, `--ansi` fails with a misleading message, and GCC's
-  abbreviations, such as `--write-user-dep`, leave a stray dependency
-  file of the target query. Map each long spelling to its short form
-  in `Cc_option.classify`, from one table of GCC's and Clang's aliases,
-  or refuse an unknown `--` option with a `.tc` input.
 - [Low] The tests of the build rules (`make_rule.t`, `ninja_rule.t`,
   `cmake_rule.t`) run only where the host has the tool: the Alpine image
   has no make, and no host image has ninja or CMake. Add them to the

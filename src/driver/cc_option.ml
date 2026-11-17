@@ -44,17 +44,26 @@ type entry = { spelling : string; form : form; role : role }
 let entries role form spellings =
   List.map (fun spelling -> { spelling; form; role }) spellings
 
+(* A long option joins its value after "=", which keeps its spelling
+   from matching a longer option as a prefix: --target= is no prefix of
+   --target-foo. Every Joined long entry is made here. *)
+let long_joined_entries role names =
+  entries role Joined (List.map (fun name -> name ^ "=") names)
+
 (* The long options of GCC and Clang take their value after "=" or as
    the next argument. *)
-let long_entries role spellings =
-  entries role (Separate 1) spellings
-  @ entries role Joined (List.map (fun spelling -> spelling ^ "=") spellings)
+let long_entries role names =
+  entries role (Separate 1) names @ long_joined_entries role names
 
 let stops_at_preprocessing =
   "it stops after preprocessing; --emit-c writes the C of a .tc input"
 
 let changes_preprocessed_text =
   "the preprocessed text must keep its line markers and nothing else"
+
+let dumps_by_letters =
+  "GCC reads it as -d, whose -dD and -dM change the preprocessed text; \
+   write -d and its letters"
 
 let keeps_intermediate_files =
   "typec keeps no intermediate files; --emit-c writes the C"
@@ -80,12 +89,14 @@ let pack_struct =
    supports (Target.minimum_major_version) up to GCC 16 and Clang 21,
    Apple's included, that the pipeline must tell apart or that take a
    separate value; the options of GCC's other front ends are left out.
-   A Common option needs an entry only when it takes a separate value:
-   unknown options are Common already. *)
+   An unknown option spelled with one '-' is Common, so a Common option
+   of that spelling needs an entry only when it takes a separate value.
+   An unknown long option is refused (see [classify]), so each long
+   option that passes has an entry. *)
 let table =
   List.concat
     [
-      entries (Typec Cc) Joined [ "--cc=" ];
+      long_joined_entries (Typec Cc) [ "--cc" ];
       entries (Typec Print_target) Flag [ "--print-target" ];
       entries (Typec Emit_c) Flag [ "--emit-c" ];
       entries (Typec Stats) Flag [ "--stats" ];
@@ -130,6 +141,7 @@ let table =
         Flag [ "-ansi" ];
       entries (Refused "typec does not read the inputs after it") Flag
         [ "--" ];
+      long_entries (Refused dumps_by_letters) [ "--dump" ];
       (* Options that change a type of C but no macro the target model
          reads, so the model would disagree with the backend, or that
          make the backend ignore what typec writes. Each is refused
@@ -168,6 +180,7 @@ let table =
           "--embed-directory"; "--system-header-prefix";
           "--no-system-header-prefix";
         ];
+      long_joined_entries Preprocess [ "--embed-dir" ];
       entries Preprocess Joined [ "-Wp," ];
       entries Preprocess Flag [ "-nostdinc"; "-undef"; "-H" ];
       (* The source's encoding: only the step that reads the source
@@ -202,7 +215,8 @@ let table =
           "--library-directory"; "--for-linker"; "--force-link"; "--entry";
           "--dyld-prefix"; "--rtlib";
         ];
-      entries Link Joined [ "-Wl,"; "-fuse-ld="; "--ld-path=" ];
+      entries Link Joined [ "-Wl,"; "-fuse-ld=" ];
+      long_joined_entries Link [ "--ld-path"; "--unwindlib" ];
       entries Link Joined_and_separate [ "-Xoffload-linker" ];
       (* -object would otherwise read as -o with the value "bject". *)
       entries Link Flag
@@ -242,18 +256,37 @@ let table =
       long_entries Common
         [
           "--param"; "--prefix"; "--sysroot"; "--specs"; "--config";
-          "--stdlib"; "--cstdlib"; "--dump"; "--for-assembler";
+          "--stdlib"; "--cstdlib"; "--for-assembler";
           "--print-file-name"; "--print-prog-name"; "--bootclasspath";
           "--CLASSPATH"; "--classpath"; "--encoding"; "--extdirs"; "--mhwdiv";
           "--output-class-directory"; "--resource";
         ];
       entries Common Joined_and_separate
         [ "-Xarch_"; "-Xopenmp-target="; "-Xoffload-compiler" ];
+      (* Long options of every step that have no form with one '-'
+         in both compilers, and so need an entry to pass: CMake writes
+         --target= and --gcc-toolchain= for a cross Clang, and Meson
+         and CMake projects write --coverage for coverage builds. *)
+      long_joined_entries Common
+        [ "--target"; "--gcc-toolchain"; "--gcc-install-dir"; "--gcc-triple" ];
+      entries Common Flag [ "--coverage" ];
     ]
 
 (* The response file of GCC and Clang, @FILE, holds more arguments. *)
 let response_file =
   { role = Refused "typec does not read the options in a response file";
+    separate_values = 0;
+    joined_value = "" }
+
+(* GCC reads an unambiguous abbreviation of a long option as that
+   option and any other --NAME as -fNAME (GCC 16), so a long option
+   that the table lacks may mean any option, such as -E or -MMD, and
+   no role can be given to it. *)
+let unknown_long_option =
+  { role =
+      Refused
+        "typec does not know this long option, which GCC may read as an \
+         abbreviation of another or as -f and its name";
     separate_values = 0;
     joined_value = "" }
 
@@ -295,4 +328,5 @@ let classify argument =
   else
     match longest_first with
     | (_, option) :: _ -> option
+    | [] when String.starts_with ~prefix:"--" argument -> unknown_long_option
     | [] -> unknown

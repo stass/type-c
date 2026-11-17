@@ -4722,6 +4722,24 @@ language is defined here and not by the tool.
   show. An option that changes a macro the target model reads (13.3),
   as `-funsigned-char` and `-fshort-wchar` do, reaches the model and is
   accepted.
+- With a `.tc` input, a long option, one spelled with `--`, that the
+  driver's table of options does not name is refused as an error of
+  the command line, naming the option; an option that also has a form
+  spelled with one `-` passes in that form. The table
+  gives each option it names a role: the steps it reaches, or a
+  refusal. Other options spelled with one `-` reach every step, which is
+  right for those that select the target, the code or the warnings, but
+  a long option the table lacks may mean anything: GCC 16 reads an
+  unambiguous abbreviation of a long option as that option and any
+  other `--NAME` as `-fNAME`, so `--write-user-dep` is `-MMD`,
+  `--short-enums` is `-fshort-enums` and `--syntax-only` is
+  `-fsyntax-only`, and aliases such as `--preprocess` for `-E` are many.
+  Listing every such spelling would be a list that is never complete,
+  and each one missed would reach every step unseen. The table names
+  the long options whose role it knows, such as `--output`,
+  `--include-directory` and `--target=`, and an option the table lacks
+  fails loudly rather than reaching a step whose meaning it changes.
+  Without a `.tc` input every option reaches the backend unchanged.
 - Subprocesses are started with argument vectors, never through a shell.
   Intermediate files live in a private temporary directory.
 - A backend step that fails ends `typec` with the backend's own status,
