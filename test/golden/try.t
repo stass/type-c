@@ -1495,7 +1495,7 @@ prelude, before consume reads it.
   > }
   > EOF
   $ ./golden.exe literal_conditioned.tc
-  literal_conditioned.tc:10: error: a compound literal in an operand that the prelude of try evaluates under a condition would end its life with the if of the prelude; give it a declaration before the holder [try-lifetime]
+  literal_conditioned.tc:10: error: a compound literal in an operand that is evaluated with the tries, ahead of the rest of the statement and under a condition, would end its life before the statement ends; give it a declaration before the statement or declaration that holds the try [try-lifetime]
   [1]
   $ cat lifetime.h - > literal_and.tc <<'EOF'
   > result(int, int) h(int c) {
@@ -1504,7 +1504,7 @@ prelude, before consume reads it.
   > }
   > EOF
   $ ./golden.exe literal_and.tc
-  literal_and.tc:10: error: a compound literal in an operand that the prelude of try evaluates under a condition would end its life with the if of the prelude; give it a declaration before the holder [try-lifetime]
+  literal_and.tc:10: error: a compound literal in an operand that is evaluated with the tries, ahead of the rest of the statement and under a condition, would end its life before the statement ends; give it a declaration before the statement or declaration that holds the try [try-lifetime]
   [1]
 
 Under no condition a hoisted operand is written in the block of its
@@ -1535,7 +1535,7 @@ expression of its own, under a condition or not.
   > }
   > EOF
   $ ./golden.exe array_value.tc
-  array_value.tc:10: error: an array member of a value that is no lvalue, in an operand that the prelude of try evaluates, would end its life with that operand; give the value a declaration before the holder [try-lifetime]
+  array_value.tc:10: error: an array member of a value that is no lvalue, in an operand that is evaluated with the tries, ahead of the rest of the statement, would end its life with that operand; give the value a declaration before the statement or declaration that holds the try [try-lifetime]
   [1]
   $ cat lifetime.h - > array_comma.tc <<'EOF'
   > result(int, int) h(void) {
@@ -1545,7 +1545,7 @@ expression of its own, under a condition or not.
   > }
   > EOF
   $ ./golden.exe array_comma.tc
-  array_comma.tc:11: error: an array member of a value that is no lvalue, in an operand that the prelude of try evaluates, would end its life with that operand; give the value a declaration before the holder [try-lifetime]
+  array_comma.tc:11: error: an array member of a value that is no lvalue, in an operand that is evaluated with the tries, ahead of the rest of the statement, would end its life with that operand; give the value a declaration before the statement or declaration that holds the try [try-lifetime]
   [1]
   $ cat lifetime.h - > array_conditioned.tc <<'EOF'
   > result(int, int) h(int c) {
@@ -1554,7 +1554,7 @@ expression of its own, under a condition or not.
   > }
   > EOF
   $ ./golden.exe array_conditioned.tc
-  array_conditioned.tc:10: error: an array member of a value that is no lvalue, in an operand that the prelude of try evaluates, would end its life with that operand; give the value a declaration before the holder [try-lifetime]
+  array_conditioned.tc:10: error: an array member of a value that is no lvalue, in an operand that is evaluated with the tries, ahead of the rest of the statement, would end its life with that operand; give the value a declaration before the statement or declaration that holds the try [try-lifetime]
   [1]
 
 The array of a declared object stands, and so does an array member of
@@ -1587,7 +1587,7 @@ that a type typec does not compute cannot answer (design 5.1 rule 5).
   > }
   > EOF
   $ ./golden.exe member_unknown.tc
-  member_unknown.tc:5: error: whether a member of a value that is no lvalue, in an operand that the prelude of try evaluates, is an array depends on '_Float16' at member_unknown.tc:1, which typec does not type yet [unsupported]
+  member_unknown.tc:5: error: whether a member of a value that is no lvalue, in an operand that is evaluated with the tries, ahead of the rest of the statement, is an array depends on '_Float16' at member_unknown.tc:1, which typec does not type yet [unsupported]
   [1]
 
 The value of a try is no lvalue (try-lvalue).
@@ -1614,7 +1614,7 @@ A loop evaluates its condition once for each iteration (try-loop).
   > }
   > EOF
   $ ./golden.exe loop.tc
-  loop.tc:3: error: a loop evaluates its condition and the clauses of a for once for each iteration, and the tries of a holder once before it; hold the try in the body [try-loop]
+  loop.tc:3: error: the condition of a loop and the clauses of a for hold no try, as C evaluates them apart from the statement around them, the condition on each iteration; give the try a statement or declaration of its own before the loop or in its body [try-loop]
   [1]
 
 What C does not evaluate as a value takes no try (try-position): the
@@ -1666,7 +1666,7 @@ more than one declarator, or file scope.
   > }
   > EOF
   $ ./golden.exe for_clause.tc
-  for_clause.tc:3: error: a loop evaluates its condition and the clauses of a for once for each iteration, and the tries of a holder once before it; hold the try in the body [try-loop]
+  for_clause.tc:3: error: the condition of a loop and the clauses of a for hold no try, as C evaluates them apart from the statement around them, the condition on each iteration; give the try a statement or declaration of its own before the loop or in its body [try-loop]
   [1]
 
   $ cat > statement_expression.tc <<'EOF'
@@ -1677,7 +1677,7 @@ more than one declarator, or file scope.
   > }
   > EOF
   $ ./golden.exe statement_expression.tc
-  statement_expression.tc:3: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
+  statement_expression.tc:3: error: try stands in a statement expression, from inside which its error path would return; give it a statement or declaration of its own outside the statement expression [try-position]
   [1]
 
   $ cat > declarators.tc <<'EOF'
@@ -1696,8 +1696,49 @@ more than one declarator, or file scope.
   > int x = try f();
   > EOF
   $ ./golden.exe file_scope.tc
-  file_scope.tc:2: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
+  file_scope.tc:2: error: try stands outside a function body; give it a statement or declaration of its own in a function body [try-position]
   [1]
+
+A parameter of a function definition stands outside its body too, and
+where places that hold no try nest, the message names the outermost,
+whose remedy leads out of both.
+
+  $ cat > parameter.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(int a[try f()]) { return Ok(a[0]); }
+  > EOF
+  $ ./golden.exe parameter.tc
+  parameter.tc:2: error: try stands outside a function body; give it a statement or declaration of its own in a function body [try-position]
+  [1]
+  $ cat > deferred_statement_expression.tc <<'EOF'
+  > result(int, int) f(void);
+  > void h(void) { defer ({ int y = try f(); y; }); }
+  > EOF
+  $ ./golden.exe deferred_statement_expression.tc
+  deferred_statement_expression.tc:2: error: try stands in the statement of a defer, which no return may leave; take the result apart there with match [try-position]
+  [1]
+
+The partners follow each remedy: the try of the file-scope object in a
+function, the try of a statement expression in a declaration of its
+own before it, that of a for clause before the loop, and a result in a
+deferred statement taken apart with match.
+
+  $ cat > remedies.tc <<'EOF'
+  > result(int, int) f(void);
+  > void use(int v);
+  > int x;
+  > result(int, int) h(void) {
+  >   x = try f();
+  >   int y = try f();
+  >   int z = ({ y + 1; });
+  >   int first = try f();
+  >   for (int i = first; i < 3; i++)
+  >     use(i);
+  >   defer match (f()) { case Ok(v): use(v); break; default: break; }
+  >   return Ok(z);
+  > }
+  > EOF
+  $ ./golden.exe remedies.tc > /dev/null
 
 A declaration that holds a try declares an automatic object, whose type
 is not variably modified.
@@ -1750,7 +1791,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_before.tc
-  pragma_before.tc:4: error: a pragma line stands in or directly before the holder of try; give the pragma or the try a statement of its own [try-pragma]
+  pragma_before.tc:4: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_before_label.tc <<'EOF'
@@ -1763,7 +1804,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_before_label.tc
-  pragma_before_label.tc:5: error: a pragma line stands in or directly before the holder of try; give the pragma or the try a statement of its own [try-pragma]
+  pragma_before_label.tc:5: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_inside.tc <<'EOF'
@@ -1776,7 +1817,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_inside.tc
-  pragma_inside.tc:3: error: a pragma line stands in or directly before the holder of try; give the pragma or the try a statement of its own [try-pragma]
+  pragma_inside.tc:3: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_then_null.tc <<'EOF'

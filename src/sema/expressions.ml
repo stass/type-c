@@ -157,8 +157,34 @@ type try_place = Not_held of Rule.t * string | Held of held
 
 (* Whether statements are holders (design 5.1 rule 3), as those of a
    function body are outside any statement expression and deferred
-   statement, and if so what the statement being typed says of a try. *)
-type try_positions = No_positions | Positions of try_place
+   statement, and if so what the statement being typed says of a try;
+   where they are not, the message that refuses a try there, which says
+   what to write in that place. *)
+type try_positions = No_positions of string | Positions of try_place
+
+(* The messages of [No_positions], each with a remedy that can be
+   followed from where the try stands. *)
+let try_outside_functions =
+  "try stands outside a function body; give it a statement or declaration \
+   of its own in a function body"
+
+let try_in_statement_expression =
+  "try stands in a statement expression, from inside which its error path \
+   would return; give it a statement or declaration of its own outside the \
+   statement expression"
+
+let try_in_deferred_statement =
+  "try stands in the statement of a defer, which no return may leave; take \
+   the result apart there with match"
+
+(* The positions of statements that hold no try for the reason [text],
+   unless the statements around them already hold none: the outermost
+   reason is the one whose remedy leads out of every place that holds no
+   try. *)
+let without_holders positions text =
+  match positions with
+  | No_positions _ -> positions
+  | Positions _ -> No_positions text
 
 (* What holds an initialiser most closely, for a zero initialiser of
    design 7.1 rule 3 ({!zero_initialiser}). *)
@@ -610,7 +636,8 @@ type t = {
 
 let outside_functions =
   { function_name = None; body = None; in_generic = false; return_type = None;
-    case_labels = No_switch; try_positions = No_positions }
+    case_labels = No_switch;
+    try_positions = No_positions try_outside_functions }
 
 let create () =
   { types = Hashtbl.create 16;
@@ -3635,9 +3662,10 @@ let not_held =
 let in_loop_clause =
   Not_held
     ( Try_loop,
-      "a loop evaluates its condition and the clauses of a for once for \
-       each iteration, and the tries of a holder once before it; hold the \
-       try in the body" )
+      "the condition of a loop and the clauses of a for hold no try, as C \
+       evaluates them apart from the statement around them, the condition \
+       on each iteration; give the try a statement or declaration of its \
+       own before the loop or in its body" )
 
 (* Whether [expression] is a try, in parentheses or not, as an
    initialiser of a braced list that holds one is (design 5.1 rule 3). *)
@@ -3674,21 +3702,26 @@ let refuse_short_lived context (hoisted : Try_plan.hoisted list) object_made =
   | Literal_object span ->
       if List.exists conditioned (holding span) then
         refuse span
-          "a compound literal in an operand that the prelude of try \
-           evaluates under a condition would end its life with the if of \
-           the prelude; give it a declaration before the holder"
+          "a compound literal in an operand that is evaluated with the \
+           tries, ahead of the rest of the statement and under a condition, \
+           would end its life before the statement ends; give it a \
+           declaration before the statement or declaration that holds the \
+           try"
   | Temporary_array span ->
       if holding span <> [] then
         refuse span
           "an array member of a value that is no lvalue, in an operand that \
-           the prelude of try evaluates, would end its life with that \
-           operand; give the value a declaration before the holder"
+           is evaluated with the tries, ahead of the rest of the statement, \
+           would end its life with that operand; give the value a \
+           declaration before the statement or declaration that holds the \
+           try"
   | Unknown_member (span, unknown) ->
       if holding span <> [] then
         context.fail span
           (needing
              "whether a member of a value that is no lvalue, in an operand \
-              that the prelude of try evaluates, is an array"
+              that is evaluated with the tries, ahead of the rest of the \
+              statement, is an array"
              unknown)
 
 (* Types with [type_expression] the expression of [holder], a statement or
@@ -3716,7 +3749,7 @@ let holding context ?(declaration = false) (holder : holder) ~stretch_last
   let view = context.typed in
   let enclosing = view.enclosing in
   match enclosing.try_positions with
-  | No_positions -> type_expression ()
+  | No_positions _ -> type_expression ()
   | Positions _ ->
       let plan =
         Try_plan.plan
@@ -3771,7 +3804,7 @@ let holding context ?(declaration = false) (holder : holder) ~stretch_last
 let refusing context place type_statement =
   let enclosing = context.typed.enclosing in
   match enclosing.try_positions with
-  | No_positions -> type_statement ()
+  | No_positions _ -> type_statement ()
   | Positions _ ->
       within context
         { enclosing with try_positions = Positions place }
@@ -3792,7 +3825,7 @@ let placed_try context span =
           context.fail span (Rule.message rule text)
       | None -> refuse_not_held context span not_held)
   | Positions (Not_held _ as place) -> refuse_not_held context span place
-  | No_positions -> refuse_not_held context span not_held
+  | No_positions text -> context.fail span (Rule.message Try_position text)
 
 (* Rules 3 and 5: a declaration that holds a try declares an automatic
    object whose type is not variably modified, since C evaluates the
@@ -3836,7 +3869,7 @@ let place_declared_try context ~constant t =
             Positions (Held { held with unchecked_object = false })
         }
   | Positions (Held { unchecked_object = false; _ } | Not_held _)
-  | No_positions ->
+  | No_positions _ ->
       ()
 
 (* Rule 3: no pragma line stands from directly before the holder of a
@@ -3847,8 +3880,9 @@ let refuse_try_pragma context span (held : held) =
   if Lazy.force held.pragma_in_stretch then
     context.fail span
       (Rule.message Try_pragma
-         "a pragma line stands in or directly before the holder of try; \
-          give the pragma or the try a statement of its own")
+         "a pragma line stands in or directly before the statement or \
+          declaration that holds try; give the pragma or the try a \
+          statement of its own")
 
 (* Rules 1 and 5: the instance of result that [t] is, if any, which no
    type that typec does not know answers. *)
@@ -3994,7 +4028,7 @@ let note_typed context (expression : Tree.expression) typed =
   match (view.enclosing.try_positions, short_lived expression typed) with
   | Positions (Held _), Some object_made ->
       view.holder_short_lived <- object_made :: view.holder_short_lived
-  | (No_positions | Positions (Not_held _)), _ | Positions (Held _), None ->
+  | (No_positions _ | Positions (Not_held _)), _ | Positions (Held _), None ->
       ()
 
 (* Statements (6.8) and the expressions that hold them *)
@@ -4873,8 +4907,11 @@ and assignment context span (op : Tree.assignment_operator) left right =
    value rather than discarding it (design 5.2), so it is discarded
    where the statement expression is. *)
 and statement_expression context position (block : Tree.block) =
+  let enclosing = context.typed.enclosing in
   let enclosing =
-    { context.typed.enclosing with try_positions = No_positions }
+    { enclosing with
+      try_positions =
+        without_holders enclosing.try_positions try_in_statement_expression }
   in
   within context enclosing (fun () ->
       statement_expression_items context position block)
@@ -5247,9 +5284,11 @@ and items context = function
    it belongs to a switch around it (6 rule 5). The statement is moved
    text (6 rule 8). *)
 and deferred_statement context (statement : Tree.statement) =
+  let enclosing = context.typed.enclosing in
   let enclosing =
-    { context.typed.enclosing with
-      try_positions = No_positions;
+    { enclosing with
+      try_positions =
+        without_holders enclosing.try_positions try_in_deferred_statement;
       case_labels = guarded_from_switch context Deferred_statement }
   in
   within context enclosing (fun () ->

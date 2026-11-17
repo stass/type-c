@@ -272,7 +272,7 @@ which would otherwise jump without the qualifier.
   > void f(void) { defer try g(); }
   > EOF
   $ ./golden.exe try.tc
-  try.tc:1: error: try stands outside an expression statement, a declaration of one object, a return, or the condition of an if, switch or match, or in an operand that C does not evaluate as a value, such as that of sizeof; give it a statement or declaration of its own [try-position]
+  try.tc:1: error: try stands in the statement of a defer, which no return may leave; take the result apart there with match [try-position]
   [1]
 
   $ cat > disputed.tc <<'EOF'

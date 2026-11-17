@@ -184,11 +184,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   `test/golden/citations.ml` sees a citation of the design only in a
   message that a cram test prints, and only by the word "design";
   `Rule.message` takes free text as well.
-- [Low] Messages still use design vocabulary: "holder" in the
-  `try-loop`, `try-lifetime` and moved-pragma messages. The
-  `try-position` remedy, "give it a statement or declaration of its
-  own", cannot be followed at file scope or in the statement of a
-  defer.
 - [Low] A rule's name is stable by review alone: `Rule_codegen.check`
   refuses a name used twice, but no check sees a row renamed or deleted.
   Add a step to `tools/gate.sh` that fails unless every name of
