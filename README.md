@@ -403,8 +403,8 @@ The fine print, for a `.tc` file:
 The code that you write in Type-C compiles to plain C
 ([What the C looks like](#what-the-c-looks-like)). Of the code that the
 compiler adds without the source spelling it out, the traps of matching
-are all that is built; `defer`, slice bounds checks and checked mode
-will add the rest ([principle 4](#principles)). The rest of a program
+and the cleanups of `defer` are built; slice bounds checks and checked
+mode will add the rest ([principle 4](#principles)). The rest of a program
 links as before: Type-C functions are C functions under their own
 names, with no mangling, and `typec` adds no library to the link
 ([design 10.4](type-c-language-design.md#104-functions-and-objects)).
@@ -860,15 +860,13 @@ specifies the whole language, and the
 [plan](type-c-implementation-plan.md) builds it in stages, each ending
 in a measured gate. What is built is the language of Stage 1 of the
 plan and the first packages of Stage 2: variants, `match` and `if (case ...)`, distinct
-types, `private` and interface files (`.tci`), generic types, and
-`option` and `result`.
+types, `private` and interface files (`.tci`), generic types,
+`option` and `result`, `try`, which returns the error of a `result` or
+gives its value (`uint32_t n = try read_u32(r);`), and `defer`, which
+runs a statement when its block is left (`defer fclose(f);`).
 
 Coming next, designed and **not yet implemented**:
 
-- `try`, which returns the error of a `result` or gives its value:
-  `uint32_t n = try read_u32(r);`
-- `defer`, which runs a statement when its block is left:
-  `defer fclose(f);`
 - generic functions: `generic(T) T *vector_last(vector(T) *v);`
 - slices with checked indexing:
   `slice(uint8_t) bytes = slice_from_array(buffer);`

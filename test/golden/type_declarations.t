@@ -422,13 +422,25 @@ structure that a variant lowers to (design 10.6).
   # 3 "header.tc" 2
   int f(e v) { return is_b(v); }
 
-The constructs of later work packages are refused with the package that
-implements them.
+A defer statement lowers to a copy of its statement at each exit of its
+scope (design 13.5), here the end of the body.
 
   $ printf 'void f(void) { defer f(); }\n' > defer.tc
   $ ./golden.exe defer.tc
-  defer.tc:1: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "defer.tc"
+  void f(void) { 
+  # 1 "defer.tc"
+  
+  # 1 "defer.tc"
+   
+  # 1 "defer.tc"
+  { f ( ) ; }
+  # 1 "defer.tc"
+  }
+
+The constructs of later work packages are refused with the package that
+implements them.
+
   $ printf 'str s;\n' > universe.tc
   $ ./golden.exe universe.tc
   universe.tc:1: `str` is a universe name that typec does not implement yet (design 8; work package 3.4) [TC0023]

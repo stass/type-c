@@ -3374,7 +3374,13 @@ and statement_view state index =
    so that they hold for a statement that no exit copies as well. *)
 and check_deferred_statement state (site : Reachability.defer_site) =
   let own = statement_view state site.keyword.first in
-  let text = moved_text state Deferred_statement site.deferred own in
+  let found = moved_text state Deferred_statement site.deferred own in
+  (* What typing found is keyed by [S], and the text that moves holds
+     the pragma lines in front of it as well. *)
+  let text =
+    { found with
+      span = Tree.deferred_text ~keyword:site.keyword ~statement:site.deferred }
+  in
   check_moved state text ~at:None;
   List.iter
     (fun place -> check_moved state text ~at:(Some place))

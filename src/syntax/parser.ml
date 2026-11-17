@@ -650,12 +650,45 @@ let refuse_pragmas_without_tokens state =
   Array.iteri (refuse_pragma_without_tokens state ~moved:false)
     state.reader.tokens
 
-(* Moved text in any text is held to the same rule (design 13.5). *)
+(* Lowering copies a deferred statement to each exit of its scope, so it
+   may hold only the pragmas that apply to the statement after them
+   (design 6 rule 9, 13.5). *)
+let refuse_state_pragma state index (token : Token.t) =
+  match token.kind with
+  | Token.Pragma (Identifiers names)
+    when not (Statement_pragma.is_statement_scoped names) ->
+      fail_at_token state index
+        (Rule.message Deferred_pragma
+           "a `#pragma` line in a deferred statement, which lowering \
+            copies to each exit, that is not one of the pragmas that \
+            apply only to the statement after them")
+  | Token.Pragma (Identifiers _ | Not_tokens _) | Typec_pragma | Identifier _
+  | Number | Character _ | String _ | Punctuator _ ->
+      ()
+
+(* The pragma lines of a deferred statement, which is moved text in any
+   text (design 13.5): the one place that decides which may move. *)
 let refuse_moved_pragmas state (span : span) =
   for index = span.first to span.last do
-    refuse_pragma_without_tokens state ~moved:true index
-      state.reader.tokens.(index)
+    let token = state.reader.tokens.(index) in
+    refuse_pragma_without_tokens state ~moved:true index token;
+    refuse_state_pragma state index token
   done
+
+(* Lowering removes a defer statement from its place, so a pragma line
+   directly before the keyword would apply to the statement after it
+   (design 6 rule 9). A defer has no label, so the token before the
+   keyword is a pragma exactly where one stands directly before it. *)
+let refuse_pragma_before_defer state ~keyword =
+  if keyword > 0 then
+    match state.reader.tokens.(keyword - 1).kind with
+    | Token.Pragma _ | Typec_pragma ->
+        fail_at_token state (keyword - 1)
+          (Rule.message Deferred_pragma
+             "a `#pragma` line directly before a defer statement, which \
+              lowering removes, so the pragma would apply to the \
+              statement after it; put a `;` between them")
+    | Identifier _ | Number | Character _ | String _ | Punctuator _ -> ()
 
 (* A construct that a later work package implements, at the cursor. *)
 let fail_not_implemented state ~section ~package text =
@@ -4612,9 +4645,12 @@ and defer_statement state place =
     as_deferred state (fun () ->
         in_scope state (inner_scope state) (fun () -> statement state))
   in
-  refuse_moved_pragmas state { first = keyword; last = statement.span.last };
+  refuse_pragma_before_defer state ~keyword;
+  let keyword = { first = keyword; last = keyword } in
+  refuse_moved_pragmas state
+    (Tree.deferred_text ~keyword ~statement:statement.span);
   refuse_deferred state statement;
-  Block_defer { keyword = { first = keyword; last = keyword }; statement }
+  Block_defer { keyword; statement }
 
 (* At a defer statement that is a block item of a compound statement in
    [place] (design 6 rule 11). Only a function body holds statements

@@ -803,6 +803,13 @@ let rec defined_function (declarator : declarator) =
   | Function { inner = None; _ } ->
       invalid_arg "Tree: a definition that declares no function"
 
+(** The text of a defer statement that each copy writes (design 13.5):
+    the tokens after the [keyword] to the end of the [statement] [S],
+    so that a pragma line between the two moves with [S] and is read
+    as part of it. *)
+let deferred_text ~(keyword : span) ~(statement : span) =
+  { first = keyword.last + 1; last = statement.last }
+
 (** The identity that a break or continue leaving the loop, switch or
     match [statement] names. *)
 let jump_target_of statement = Statement_at statement.span.first

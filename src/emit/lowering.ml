@@ -527,25 +527,25 @@ let edits_within (ordered : ordered_edits) ~first ~last =
 
 (* The tokens [first] to [last] of a text with the edits that they own
    in [ordered] applied, as moved text: every token at its own location,
-   and the text of each edit at the edit's. The moved text of an edit
-   inside, such as the copies that a return in the operand of a try
-   runs, moves with it. *)
+   a pragma line on a line of its own, and the text of each edit at the
+   edit's. The moved text of an edit inside, such as the copies that a
+   return in the operand of a try runs, moves with it. No [#pragma
+   typec] line moves: one of C text is ignored, and Type-C text holds
+   one only outside every function (design 13.5). *)
 let moved_text (text : Reader.t) ordered ~first ~last =
-  let moved_piece : Emitter.moved_piece -> Emitter.piece = function
-    | Piece piece -> piece
-    | Pragma_line _ -> invalid_arg "Lowering.moved_text: a pragma line"
-  in
   let written (edit : Emitter.edit) =
     match edit.text with
     | Emitter.Code { code = ""; _ } -> []
-    | Emitter.Code { location; code } -> [ Emitter.generated location code ]
+    | Emitter.Code { location; code } ->
+        [ Emitter.Piece (Emitter.generated location code) ]
     | Emitter.Bracketed _ -> invalid_arg "Lowering.moved_text: a bracket"
-    | Emitter.Moved pieces -> List.map moved_piece pieces
+    | Emitter.Moved pieces -> pieces
   in
   let token index =
-    match Emitter.token text index with
-    | Some piece -> piece
-    | None -> invalid_arg "Lowering.moved_text: an unmovable token"
+    match (text.tokens.(index).kind, Emitter.moved_token text index) with
+    | Token.Typec_pragma, _ -> []
+    | _, Some piece -> [ piece ]
+    | _, None -> invalid_arg "Lowering.moved_text: an unmovable token"
   in
   (* A closing insertion that token [last] owns stands after it, so
      the edits are done before the tokens are. *)
@@ -556,7 +556,7 @@ let moved_text (text : Reader.t) ordered ~first ~last =
     | (edit : Emitter.edit) :: _ when edit.range.first < index ->
         invalid_arg "Lowering.moved_text: overlapping edits"
     | _ when index > last -> List.concat (List.rev pieces)
-    | _ -> from (index + 1) edits ([ token index ] :: pieces)
+    | _ -> from (index + 1) edits (token index :: pieces)
   in
   from first (edits_within ordered ~first ~last) []
 
@@ -788,7 +788,7 @@ let front (text : Reader.t) ordered ~location ~cleanups
   in
   null_statement
   @ [ try_piece location declaration ]
-  @ List.map (fun piece -> Emitter.Piece piece) operand
+  @ operand
   @ [ try_piece location ";" ]
   @ error_path ~location ~variant site ~cleanups
 
@@ -926,12 +926,13 @@ let defer_piece location text = Emitter.Piece (Emitter.generated location text)
 (* The copy of the statement of [site], [{ S }], from the edits [base]
    of the text. *)
 let copy (text : Reader.t) base (site : Reachability.defer_site) =
-  let statement = site.deferred in
-  let location = text.tokens.(statement.first).location in
-  let pieces =
-    moved_text text base ~first:statement.first ~last:statement.last
+  let deferred =
+    Tree.deferred_text ~keyword:site.keyword ~statement:site.deferred
   in
-  let moved = List.map (fun piece -> Emitter.Piece piece) pieces in
+  let location = text.tokens.(site.deferred.first).location in
+  let moved =
+    moved_text text base ~first:deferred.first ~last:deferred.last
+  in
   (defer_piece location "{" :: moved) @ [ defer_piece location "}" ]
 
 (* The text of a [return e;] that runs copies: [value_opening] replaces
@@ -1040,19 +1041,22 @@ let is_value_return = function
    needs it. A defer and an exit in text that lowering drops, such as
    a statement expression in an answered type name, go with that text:
    it never runs. *)
+let kept_token dropped index = not (covers dropped ~first:index ~last:index)
+
+let kept_sites dropped (sites : Reachability.defer_site list) =
+  List.filter
+    (fun (site : Reachability.defer_site) ->
+      kept_token dropped site.keyword.first)
+    sites
+
 let function_edits (text : Reader.t) base ~dropped
     (defers : Typec_sema.Expressions.function_defers) =
-  let kept_token index = not (covers dropped ~first:index ~last:index) in
   let kept_places =
     List.filter
-      (fun (place, _) -> kept_token (place_token place))
+      (fun (place, _) -> kept_token dropped (place_token place))
       (places defers.sites)
   in
-  let kept_sites =
-    List.filter
-      (fun (site : Reachability.defer_site) -> kept_token site.keyword.first)
-      defers.sites
-  in
+  let kept_sites = kept_sites dropped defers.sites in
   let return_type =
     if
       defers.returns = Returns_value
@@ -1060,8 +1064,13 @@ let function_edits (text : Reader.t) base ~dropped
     then return_type_edits text defers
     else []
   in
+  (* Every token of [defer S] goes, its pragma lines too, which move to
+     the copies; a [#pragma typec] line, which C text ignores, goes with
+     them. *)
   let removal site =
-    dropped_edits text.tokens { span = defer_span site; text = "" }
+    let span = defer_span site in
+    List.init (span.last - span.first + 1) (fun offset -> span.first + offset)
+    |> replace text.tokens ~location:text.tokens.(span.first).location ""
   in
   List.concat_map (place_edits text base defers.returns) kept_places
   @ trap_edits text kept_sites
@@ -1087,12 +1096,13 @@ let error_path_cleanups (text : Reader.t) base
 (* The edits of a text with the defers of its functions lowered. The
    statements go, and the edits that their tokens own go with them, to
    their copies, which [base], the ordered [edits], gives. [dropped] is
-   the text that lowering drops. *)
+   the text that lowering drops, whose own edits delete a defer in it. *)
 let with_defers (text : Reader.t) edits ~base ~dropped
     (functions : Typec_sema.Expressions.function_defers list) =
   let sites =
     List.concat_map
-      (fun (defers : Typec_sema.Expressions.function_defers) -> defers.sites)
+      (fun (defers : Typec_sema.Expressions.function_defers) ->
+        kept_sites dropped defers.sites)
       functions
   in
   let removed = cover (List.map defer_span sites) in
@@ -1170,7 +1180,9 @@ let named (span, name) = { span; text = name }
 
 (* The generic's definition under the instance's name, with each type
    parameter and application written as the name that the reading
-   found for it, from token [first] to its end. *)
+   found for it, from token [first] to its end. It stands in a bracket,
+   which holds no pragma line: the front end refuses a generic whose
+   definition holds one (design 10.3). *)
 let instance_definition (text : Reader.t) instance ~first
     (reading : Typec_sema.Declarations.instance_text) =
   let lowered = Typec_sema.Encoding.variant_name (Applied instance) in
@@ -1181,8 +1193,13 @@ let instance_definition (text : Reader.t) instance ~first
       ~replaced:(List.map named reading.names)
       reading.typed
   in
+  let bracketed : Emitter.moved_piece -> Emitter.piece = function
+    | Piece piece -> piece
+    | Pragma_line _ -> invalid_arg "Lowering: a pragma line in a generic"
+  in
   moved_text text (order_edits edits) ~first
     ~last:reading.generic.span.last
+  |> List.map bracketed
 
 (* What the texts of the placements are written from: the unit and what
    its reading found. *)

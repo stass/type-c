@@ -193,23 +193,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   design 6 rule 10, as a jump there passes rule 5. No backend is known
   to evaluate an attribute argument at run time; say so in the design,
   or read the arguments, if one does.
-- [Medium] Lowering of a defer (package 2.5) copies no pragma line of
-  its statement: `Lowering.moved_text` raises on one, which the front
-  end's refusal of every defer (TC0023) keeps from users. Copy them
-  through `Emitter.moved_token`; a `#pragma typec` line of C text there
-  is ignored and must not be copied (design 13.5), and one of Type-C
-  text stands inside a function body, which Stage 5 refuses (11.1 rule
-  1).
-- [Medium] No test reaches `Lowering.with_defers` with a defer, a block
-  end or a jump in text that lowering drops (an answered
-  `__builtin_types_compatible_p` or `_Generic` type name, a replaced
-  application), which `function_edits` drops with that text. Add a
-  unit case with a statement expression in an answered type name.
-- [Medium] The TC0023 sentinel (`Front_end.refuse_defers`) sees only the
-  defers that the reachability walk records, and `Reachability.sequence`
-  leaves recording them to each caller (`block`, `arm`). Let `sequence`
-  record its own, and derive the sentinel from the parse, which sees
-  every `Block_defer`, while it stands.
 - [Low] Two places decide what the form of a `return e;` in the scope
   of a defer needs (design 13.5): `Return_form` refuses for every value
   return of the sites, `Lowering.function_edits` writes `__tc_ret` for
@@ -357,6 +340,39 @@ is [type-c-language-design.md](type-c-language-design.md).
   name, but nothing says so in Type-C's terms. Keep the spellings of
   the claimed form that unread text holds, and refuse them where a
   generic is declared, if a pilot meets one.
+
+- [Medium] `Reachability` tests "does this jump leave the span" twice
+  for the operand of a `return` in a defer scope (design 6 rule 12):
+  `refuse_leaving_operands` for a goto, against the label's definition,
+  and the operand check of a break or continue (`target <
+  operand.first`), beside the same tests that `record_exit` makes for
+  defer scopes. Make the operand a kind of `guarded` region, so that
+  one funnel decides what every jump leaves.
+- [Low] `Reachability.refuse_leaving_operands` looks up the label's
+  definition (`Hashtbl.find`) once per operand inside `leaves`, and
+  raises `Not_found` should the walk ever miss a label, where
+  `check_jump` uses `find_opt`. Carry the label's site on the goto
+  record, so that no lookup is needed.
+- [Low] `Statement_pragma` matches the first identifiers among all the
+  tokens of a pragma line (`Token.Identifiers` drops the others), so
+  `#pragma GCC 4 unroll` passes as `GCC unroll`. Safe while both
+  backends pick a pragma by its first tokens, which makes that line an
+  unknown pragma; have the reader keep the leading run of identifiers
+  and match the list against it, so that such a line is refused.
+- [Low] The TC0074 message names neither the pragma it refuses nor the
+  ones allowed; add the line's first identifiers and point to the
+  list of design 13.5.
+- [Low] The walk field `operands` in `Reachability` holds the operands
+  of the returns in a defer scope; name it for that
+  (`return_operands`), since `operands` reads as those of any
+  expression beside the expression walk's own `operands` helper.
+- [Low] `Declarations` builds the moved text of a deferred statement
+  and then patches its `span` to `Tree.deferred_text`, so that the
+  pragma lines before `S` move with it. Build the record with the span
+  it ends with: hand `moved_text` the span of the text.
+- [Low] `Lowering.moved_text` drops a `#pragma typec` line of moved text
+  by matching the token kind; `Emitter.moved_token`, which says how
+  each token moves, is the place for that decision.
 
 ## Expression typing
 
@@ -1400,13 +1416,6 @@ types (design 13.3).
   typing path that reads `state.entities` directly would let a name
   escape the check unseen. The parser resolves every name: it could
   record the uses and declarations by span for `Resolution` to read.
-- [Medium] Two extents of a deferred statement: the parser refuses a
-  pragma line without tokens from the `defer` keyword to the end of `S`,
-  but `Resolution` checks the identifiers of the pragma lines within the
-  span of `S` alone, so `defer` followed by `#pragma GCC unroll N` on
-  its own line and then `S` leaves `N` unchecked. Derive the extent
-  from one source (the defer item's span, or that of `S`) for both, and
-  for the lowering that writes the copies.
 - [Medium] `Resolution.check` takes one place or none, so a caller with
   several places (the exits of a defer) runs the clauses that hold
   whatever the place once without one and then again at each place.
@@ -1419,16 +1428,11 @@ types (design 13.3).
   only while typing, the parser and `Reachability.defers` agree on the
   same nodes. Carry the view on the exit, or have typing return what it
   found keyed by the nodes that reachability reads.
-- [High] Design 6 rule 12 refuses a `goto`, `break` or `continue` that
-  leaves the operand of a `return` in the scope of a defer statement, as
-  one in a statement expression would, under a code of its own; typec
-  does not check it yet. The jumps are those that `Reachability` records
-  inside the operand's span with a destination outside it.
 - [Medium] `Emitter.moved` takes any range, so only the lowering that
   calls it keeps the text of an instance, which needs the packing
   bracket of design 10.3, from being written without one. The lowering
-  of a `try` uses it, as package 2.5 will for a copy of a deferred
-  statement; give it a site that only the parser makes, as
+  of a `try` and that of the copies of a deferred statement use it;
+  give it a site that only the parser makes, as
   `Emitter.bracketed` takes an anchor: the front of the statement or
   declaration that holds a `try`, or the place of a copy.
 

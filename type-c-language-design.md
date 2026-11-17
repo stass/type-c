@@ -1572,7 +1572,16 @@ defer fclose(f);
    `extern` defines no object and this rule allows it, though it
    declares an entity with linkage, which rule 8 refuses in `S`
    (13.5). A typedef whose specifier declares no type is allowed: the
-   typedef itself names a type and declares none (C11 6.7.8p3).
+   typedef itself names a type and declares none (C11 6.7.8p3). Since
+   `S` is copied to every exit, a `#pragma` line in `S` is one of the
+   pragmas that apply only to the statement after them or to their
+   block, which 13.5 lists; one that sets state for the text after it,
+   as `#pragma pack(push, 1)` does, would be set again by each copy.
+   And since lowering removes the `defer` statement from its place, no
+   `#pragma` line stands directly before it: a `#pragma GCC ivdep`
+   there would apply to the statement after the `defer`, a loop that
+   the source does not annotate. A `;` between them keeps the pragma
+   on a statement of its own.
 10. Within the scope of a `defer` statement there is no GNU computed
     `goto *e` and no `asm goto`. Both are jumps to labels (4.4) that no
     deferred statement can precede: the first chooses its target when
@@ -3901,6 +3910,45 @@ line of its own, at its place among the tokens of each copy. A `#pragma
 typec` line of Type-C text stands outside every external declaration,
 and one of C text is ignored (11.1 rule 1), so lowering moves none.
 
+A copy of a pragma is right only where the pragma applies to no more
+than the statement after it or the block it stands in. One that sets
+state for the rest of the text is in force once per copy: with
+
+```c
+void f(int c) {
+  defer {
+#pragma pack(push, 1)
+    ;
+  }
+  if (c)
+    return;
+}
+#pragma pack(pop)
+struct s { char c; int i; };
+```
+
+the two exits push twice and the one pop leaves `struct s` packed, of
+size 5 and not 8. A deferred statement therefore holds only the pragmas
+of one list, `Statement_pragma` in the parser, each there with the
+reason it reaches no further: `GCC unroll`, `GCC ivdep` and `GCC
+novector`, Clang's `clang loop`, `unroll` and `nounroll`, which annotate
+the loop that follows; and `STDC FP_CONTRACT`, `STDC FENV_ACCESS` and
+`STDC CX_LIMITED_RANGE`, which in a compound statement are in force to
+its end (C11 7.12.2, 7.6.1, 7.3.4), and lowering writes each copy as a
+block of its own. On Apple Clang 21 and GCC 16 each reaches the loop or
+block it precedes and no statement after it; a backend that does not
+know one ignores it. Every other `#pragma` line of a deferred statement
+is an error, in Type-C text and C text alike: `pack`, `GCC diagnostic`,
+`GCC visibility`, `GCC optimize`, `GCC push_options`, `weak`,
+`redefine_extname`, `message`, `once`, and a pragma that no backend
+knows. OpenMP's `omp` pragmas are left out too: they do nothing without
+`-fopenmp`, and with it the namespace holds regions such as `declare
+target ... end declare target` that set state as `pack` does. The list
+matches the leading identifiers of the line; a line whose first tokens
+are not those identifiers alone holds a pragma that neither backend
+knows. A `#pragma` line that is no sequence of tokens is refused first,
+under its own code.
+
 Three rules carry the property into unread text.
 
 - For the first half, an identifier in an attribute argument or a
@@ -3966,7 +4014,8 @@ Three rules carry the property into unread text.
 
 The state that positional pragmas set is that of the place where the
 text is written, and it is outside the property. A deferred statement
-declares no type for such state to lay out (section 6 rule 9). The
+sets no such state and declares no type for it to lay out (section 6
+rule 9). The
 operand of a `try` is written under the state of its own place, since
 no pragma stands between the two (5.1 rule 3). An
 instance is kept from `#pragma pack` by the bracket of 10.3 and from no

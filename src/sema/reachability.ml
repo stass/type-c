@@ -138,6 +138,7 @@ type goto = {
   goto_statement : Tree.span;
   goto_target : Tree.label_id;
   goto_guards : guarded list;
+  goto_operands : Tree.span list;
 }
 
 (* A labelled statement: its label, the innermost guarded statement
@@ -155,11 +156,14 @@ type definition = {
    not source order, as a loop's body is walked before its condition:
    [definitions] and [jumps] hold the labelled statements and the
    jumps, [gotos] the goto statements, [breaches] the refusals of
-   design 6 rule 10, and [defers] the defer statements whose scopes the
-   walk has read, with where each ends. *)
+   design 6 rules 10 and 12, and [defers] the defer statements whose
+   scopes the walk has read, with where each ends. [operands] are the
+   operands of the returns in the scope of a defer statement around the
+   walk, which no jump leaves (design 6 rule 12). *)
 type walk = {
   facts : facts;
   guards : guarded list;
+  operands : Tree.span list;
   context : expression_context;
   definitions : definition Queue.t;
   jumps : jump Queue.t;
@@ -200,6 +204,38 @@ let disputed_jump walk span keyword = function
   | Tree.Only _ -> ()
   | Either { loop = _; around = _ } ->
       breach walk span (Parser.disputed_jump keyword)
+
+(* Design 6 rule 12: lowering writes a return in the scope of a defer
+   statement as a block, which a jump out of its operand would leave. *)
+let operand_jump span what =
+  { span;
+    diagnostic =
+      Rule.message Return_operand_jump
+        (what
+       ^ " that leaves the operand of a `return` in the scope of a defer \
+          statement, which lowering writes in a block of its own") }
+
+(* The walk of the operand [value] of a return: one in the scope of a
+   defer statement is among the operands that no jump leaves. *)
+let in_operand walk (value : Tree.expression option) =
+  match value with
+  | Some operand when in_defer_scope walk ->
+      { walk with operands = operand.span :: walk.operands }
+  | Some _ | None -> walk
+
+(* A break or continue leaves the operands that begin after the keyword
+   of the statement it leaves. A disputed one is refused in the scope of
+   a defer statement, which holds every such operand (design 6 rule
+   10). *)
+let refuse_leaving_operand walk (statement : Tree.statement) keyword =
+  function
+  | Tree.Only (Statement_at target) ->
+      let leaves (operand : Tree.span) = target < operand.first in
+      if List.exists leaves walk.operands then
+        Queue.add
+          (operand_jump statement.span (Printf.sprintf "a `%s`" keyword))
+          walk.breaches
+  | Either _ -> ()
 
 let record_jump walk kind ({ name; label } : Tree.label_name) =
   Queue.add
@@ -248,28 +284,22 @@ let record_return walk (statement : Tree.statement) value =
 let record_try walk (value : Tree.expression) =
   record_exit walk.guards (Error_path value.span) ~leaves:(fun _ -> true)
 
-(* The defer statements [defers] of a sequence whose scopes end in
-   [ending], once the walk has read the sequence. *)
-let record_defers walk defers ending =
-  List.iter (fun read -> Queue.add (read, ending) walk.defers) defers
-
 (* A jump may enter a statement at a label it carries or contains. *)
 let enterable flow = flow.has_named_label || flow.has_case_label
 
 let rec block walk (b : Tree.block) =
-  let flow, defers = sequence walk b.node.items in
-  let ending =
+  let ending (flow : flow) =
     if flow.completes then Completes b.span.last
     else Cannot_complete b.span.last
   in
-  record_defers walk defers ending;
-  flow
+  sequence walk b.node.items ~ending
 
 (* An item is reachable if it is first, if it follows a reachable item
    that can complete, or if a jump may enter it; a sequence completes if
-   it is empty or its last item is reachable and completes. The flow of
-   [items] comes with their defer statements, in source order. *)
-and sequence walk items =
+   it is empty or its last item is reachable and completes. The walk
+   records the defer statements of [items], in source order, with the
+   [ending] of the sequence's flow, where their scopes end. *)
+and sequence walk items ~ending =
   let scope_end =
     match List.rev items with last :: _ -> (item_span last).last | [] -> 0
   in
@@ -285,7 +315,12 @@ and sequence walk items =
           rest
   in
   let reaching, flow, defers = step walk (true, completes, []) items in
-  ({ flow with completes = reaching }, List.rev defers)
+  let flow = { flow with completes = reaching } in
+  let scope_ending = ending flow in
+  List.iter
+    (fun read -> Queue.add (read, scope_ending) walk.defers)
+    (List.rev defers);
+  flow
 
 (* The walk of the items [rest] that follow [item], which are the scope
    of [item] if it is a defer, up to the token [scope_end], and
@@ -392,7 +427,7 @@ and statement_flow walk (statement : Tree.statement) =
       record_jump walk Goto label;
       Queue.add
         { goto_statement = statement.span; goto_target = label.label;
-          goto_guards = walk.guards }
+          goto_guards = walk.guards; goto_operands = walk.operands }
         walk.gotos;
       stops
   | Computed_goto target ->
@@ -400,15 +435,19 @@ and statement_flow walk (statement : Tree.statement) =
       { (expression walk target) with completes = false }
   | Continue { loop } ->
       disputed_jump walk statement.span "continue" loop;
+      refuse_leaving_operand walk statement "continue" loop;
       record_leaving walk statement loop;
       { stops with continues = targets loop }
   | Break { leaves } ->
       disputed_jump walk statement.span "break" leaves;
+      refuse_leaving_operand walk statement "break" leaves;
       record_leaving walk statement leaves;
       { stops with breaks = targets leaves }
   | Return value ->
       record_return walk statement value;
-      { (all (expression walk) (Option.to_list value)) with completes = false }
+      let operand_walk = in_operand walk value in
+      { (all (expression operand_walk) (Option.to_list value)) with
+        completes = false }
   | Asm assembler -> asm_flow walk assembler
   | Match { scrutinee; arms } -> match_flow walk target scrutinee arms
 
@@ -510,11 +549,8 @@ and match_flow walk target scrutinee arms =
     continues = Targets.union outside.continues arms.continues }
 
 and arm walk (arm : Tree.arm) =
-  let flow, defers =
-    sequence (guarded_by (Arm arm.span) walk) arm.node.items
-  in
-  record_defers walk defers Arm_end;
-  flow
+  let arm_end (_ : flow) = Arm_end in
+  sequence (guarded_by (Arm arm.span) walk) arm.node.items ~ending:arm_end
 
 (* Design 4.6 rules 5 and 6: the statement of a single-pattern test may
    complete and leave what is around it, as C's does, but a jump enters
@@ -798,7 +834,7 @@ let check_jump definitions jump =
   | None -> ()
 
 let start facts =
-  { facts; guards = []; context = Outside_statement_expressions;
+  { facts; guards = []; operands = []; context = Outside_statement_expressions;
     definitions = Queue.create (); jumps = Queue.create ();
     gotos = Queue.create (); breaches = Queue.create ();
     defers = Queue.create () }
@@ -820,9 +856,8 @@ let no_facts = { noreturn = (fun _ -> false); non_zero = (fun _ -> false) }
 
 (* The first jump of the walk, in source order, that enters what it may
    not. *)
-let entry_refusal walk =
+let entry_refusal walk definitions =
   match
-    let definitions = by_label walk.definitions in
     let site (jump : jump) = jump.site in
     let jumps = in_source_order site walk.jumps in
     List.iter (check_jump definitions) jumps
@@ -830,13 +865,32 @@ let entry_refusal walk =
   | () -> None
   | exception Refused refusal -> Some refusal
 
-(* The first refusal in source order, of an entry or of design 6 rule
-   10, as GCC and Clang name the first error. *)
+(* Design 6 rule 12 for each goto, which leaves an operand around it that
+   does not hold its label. The parser resolves every goto to a label
+   that a statement in its scope defines, and the walk reads every
+   statement. *)
+let refuse_leaving_operands walk definitions =
+  let refuse goto =
+    let leaves (operand : Tree.span) =
+      let definition = Hashtbl.find definitions goto.goto_target in
+      not (encloses operand definition.site)
+    in
+    if List.exists leaves goto.goto_operands then
+      Queue.add (operand_jump goto.goto_statement "a `goto`") walk.breaches
+  in
+  Queue.iter refuse walk.gotos
+
+(* The first refusal in source order, of an entry or of design 6 rules
+   10 and 12, as GCC and Clang name the first error. *)
 let label_refusal body =
   let walk = start no_facts in
   ignore (block walk body);
+  let definitions = by_label walk.definitions in
+  refuse_leaving_operands walk definitions;
   let refusals = Queue.copy walk.breaches in
-  Option.iter (fun entry -> Queue.add entry refusals) (entry_refusal walk);
+  Option.iter
+    (fun entry -> Queue.add entry refusals)
+    (entry_refusal walk definitions);
   let span (refusal : refusal) = refusal.span in
   match in_source_order span refusals with
   | first :: _ -> Some first

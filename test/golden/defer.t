@@ -5,16 +5,25 @@ The rules local to a defer statement and its statement S (design section
 6). Each source is preprocessed text, as the backend writes it for -E; a
 file named *.tc holds Type-C text, and a line marker opens C text.
 
-The statement of a defer is typed, then refused until lowering of
-package 2.5 writes it, so that none reaches the backend.
+The statement of a defer is typed, and lowering writes it at each exit
+of its scope (design 13.5), so that none reaches the backend.
 
   $ cat > typed.tc <<'EOF'
   > void g(void);
   > void f(void) { defer g(); }
   > EOF
   $ ./golden.exe typed.tc
-  typed.tc:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "typed.tc"
+  void g(void);
+  void f(void) { 
+  # 2 "typed.tc"
+  
+  # 2 "typed.tc"
+   
+  # 2 "typed.tc"
+  { g ( ) ; }
+  # 2 "typed.tc"
+  }
 
   $ cat > typed_error.tc <<'EOF'
   > void f(void) { defer undeclared(); }
@@ -31,8 +40,20 @@ package 2.5 writes it, so that none reaches the backend.
   > # 2 "c_text.tc" 2
   > EOF
   $ ./golden.exe c_text.tc
-  c.h:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "c_text.tc"
+  # 1 "c_text.tc"
+  # 1 "c.h" 1
+  void g(void);
+  void f(void) { 
+  # 2 "c.h"
+  
+  # 2 "c.h"
+   
+  # 2 "c.h"
+  { g ( ) ; }
+  # 2 "c.h"
+  }
+  # 2 "c_text.tc" 2
 
 A defer statement is a block item of a compound statement or a match arm
 in a function body (design 6 rule 11).
@@ -371,8 +392,50 @@ switch with its own case labels and a null statement.
   > }
   > EOF
   $ ./golden.exe allowed.tc
-  allowed.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "allowed.tc"
+  struct s { int a; };
+  void g(int);
+  void f(int c) {
+    
+  # 4 "allowed.tc"
+  
+  # 18 "allowed.tc"
+  
+  
+  # 4 "allowed.tc"
+  { {
+  # 5 "allowed.tc"
+  typedef struct s * p ;
+  # 6 "allowed.tc"
+  struct s v = { 0 } ;
+  # 7 "allowed.tc"
+  for ( ; ; ) {
+  # 8 "allowed.tc"
+  if ( c )
+  # 9 "allowed.tc"
+  break ;
+  # 10 "allowed.tc"
+  continue ;
+  # 11 "allowed.tc"
+  }
+  # 12 "allowed.tc"
+  switch ( c ) {
+  # 13 "allowed.tc"
+  case 1 :
+  # 14 "allowed.tc"
+  break ;
+  # 15 "allowed.tc"
+  }
+  # 16 "allowed.tc"
+  ;
+  # 17 "allowed.tc"
+  g ( v . a ) ;
+  # 18 "allowed.tc"
+  }
+  # 4 "allowed.tc"
+  }
+  # 19 "allowed.tc"
+  }
 
   $ cat > pragma.tc <<'EOF'
   > # 1 "pragma.tc"
@@ -488,8 +551,41 @@ a defer may be taken.
   > }
   > EOF
   $ ./golden.exe entry_allowed.tc
-  entry_allowed.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "entry_allowed.tc"
+  void g(void);
+  void f(int c) {
+  before:;
+    
+  # 4 "entry_allowed.tc"
+  
+  # 4 "entry_allowed.tc"
+  
+    switch (c) {
+    case 1:
+      g();
+    }
+  again:
+    if (c--)
+      goto again;
+    void *p = &&before;
+    (void)p;
+    if (c)
+      
+  # 15 "entry_allowed.tc"
+  {
+  # 4 "entry_allowed.tc"
+  { g ( ) ; }
+  # 15 "entry_allowed.tc"
+  goto before
+  # 15 "entry_allowed.tc"
+  ; }
+  # 15 "entry_allowed.tc"
+  
+  
+  # 4 "entry_allowed.tc"
+  { g ( ) ; }
+  # 16 "entry_allowed.tc"
+  }
 
 In the scope of a defer statement there is no computed goto, no asm goto
 and no disputed break or continue, in any text and in any statement
@@ -647,8 +743,30 @@ the rule.
   > }
   > EOF
   $ ./golden.exe scope_ended.tc
-  scope_ended.tc:6: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "scope_ended.tc"
+  # 1 "scope_ended.tc"
+  void g(void);
+  void f(int c, void *p) {
+    if (c)
+      goto *p;
+    {
+      
+  # 6 "scope_ended.tc"
+  
+  # 6 "scope_ended.tc"
+  
+    
+  # 6 "scope_ended.tc"
+  { g ( ) ; }
+  # 7 "scope_ended.tc"
+  }
+    goto *p;
+  back:
+    asm goto ("" : : : : back);
+  # 1 "c.h" 1
+    while (c) for (;; ({ break; })) ;
+  # 12 "scope_ended.tc" 2
+  }
 
 The statement S of a defer is moved text, written again at each exit of
 its scope, and passes the one check of the resolution property there
@@ -762,8 +880,40 @@ The operand of a return, written at its own place, may.
   > }
   > EOF
   $ ./golden.exe return_linked.tc
-  return_linked.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "return_linked.tc"
+  void g(void);
+  int f(void) 
+  # 2 "return_linked.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)()) __tc_ret;
+  # 2 "return_linked.tc"
+  {
+    
+  # 3 "return_linked.tc"
+  
+  # 3 "return_linked.tc"
+  
+    
+  # 4 "return_linked.tc"
+  { __tc_ret __tc_r = (
+  # 4 "return_linked.tc"
+   ({ extern int o; o; })
+  # 4 "return_linked.tc"
+  );
+  # 3 "return_linked.tc"
+  { g ( ) ; }
+  # 4 "return_linked.tc"
+  return __tc_r; }
+  # 4 "return_linked.tc"
+  
+  
+  # 5 "return_linked.tc"
+  __builtin_trap();
+  # 5 "return_linked.tc"
+  
+  # 5 "return_linked.tc"
+  } }
+  # 5 "return_linked.tc"
+  
 
 A continue that leaves the scope is an exit, and so is a return with an
 operand, whose copies follow the operand.
@@ -837,6 +987,57 @@ word of the pragma that denotes nothing there is not counted.
   pragma_hidden.tc:5: 'N' denotes another entity where lowering writes the text, the one declared at pragma_hidden.tc:9 (design 6 rule 8, 13.5) [TC0063]
   [1]
 
+A pragma line between the keyword and S moves with S, so it is read as
+part of it, and each copy writes it on a line of its own.
+
+  $ cat > pragma_before.tc <<'EOF'
+  > enum { N = 4 };
+  > void use(int);
+  > void f(void) {
+  >   defer
+  > #pragma GCC unroll N
+  >     for (int i = 0; i < 8; i++)
+  >       use(i);
+  >   enum { N = 2 };
+  > }
+  > EOF
+  $ ./golden.exe pragma_before.tc
+  pragma_before.tc:5: 'N' denotes another entity where lowering writes the text, the one declared at pragma_before.tc:8 (design 6 rule 8, 13.5) [TC0063]
+  [1]
+  $ cat > pragma_moved.tc <<'EOF'
+  > void use(int);
+  > void f(int c) {
+  >   defer
+  > #pragma GCC unroll 4
+  >     for (int i = 0; i < 8; i++)
+  >       use(i);
+  >   if (c)
+  >     return;
+  >   use(c);
+  > }
+  > EOF
+  $ ./golden.exe pragma_moved.tc | grep -v '^# ' | grep .
+  void use(int);
+  void f(int c) {
+    
+    if (c)
+      
+  {
+  {
+  #pragma GCC unroll 4
+  for ( int i = 0 ; i < 8 ; i ++ )
+  use ( i ) ;
+  }
+  return
+  ; }
+    use(c);
+  {
+  #pragma GCC unroll 4
+  for ( int i = 0 ; i < 8 ; i ++ )
+  use ( i ) ;
+  }
+  }
+
   $ cat > pragma_word.tc <<'EOF'
   > void use(int);
   > void f(void) {
@@ -850,8 +1051,179 @@ word of the pragma that denotes nothing there is not counted.
   > }
   > EOF
   $ ./golden.exe pragma_word.tc
-  pragma_word.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  # 1 "pragma_word.tc"
+  void use(int);
+  void f(void) {
+    
+  # 3 "pragma_word.tc"
+  
+  # 7 "pragma_word.tc"
+  
+    int ivdep = 0;
+    use(ivdep);
+  
+  # 3 "pragma_word.tc"
+  { {
+  # 4 "pragma_word.tc"
+  #pragma GCC ivdep
+  # 5 "pragma_word.tc"
+  for ( int i = 0 ; i < 8 ; i ++ )
+  # 6 "pragma_word.tc"
+  use ( i ) ;
+  # 7 "pragma_word.tc"
+  }
+  # 3 "pragma_word.tc"
+  }
+  # 10 "pragma_word.tc"
+  }
+
+A pragma that sets state for the text after it is refused in S,
+whatever it is: each copy at an exit would set it again, so with two
+exits a `pack(push, 1)` would push twice and the one `pack(pop)` after
+the function would leave the struct after it packed. Only the pragmas
+of the one list that apply to the statement after them (design 13.5)
+may stand there.
+
+  $ cat > pragma_pack.tc <<'EOF'
+  > void use(int);
+  > void f(int c) {
+  >   defer {
+  > #pragma pack(push, 1)
+  >     ;
+  >   }
+  >   if (c)
+  >     return;
+  >   use(c);
+  > }
+  > #pragma pack(pop)
+  > struct s { char c; int i; };
+  > EOF
+  $ ./golden.exe pragma_pack.tc
+  pragma_pack.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
   [1]
+  $ cat > pragma_diagnostic.tc <<'EOF'
+  > void use(int);
+  > void f(void) {
+  >   defer {
+  > #pragma GCC diagnostic push
+  >     use(0);
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe pragma_diagnostic.tc
+  pragma_diagnostic.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  [1]
+  $ cat > pragma_visibility.tc <<'EOF'
+  > void use(int);
+  > void f(void) {
+  >   defer
+  > #pragma GCC visibility push(hidden)
+  >     use(0);
+  > }
+  > EOF
+  $ ./golden.exe pragma_visibility.tc
+  pragma_visibility.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  [1]
+  $ cat > pragma_unknown.tc <<'EOF'
+  > void use(int);
+  > void f(void) {
+  >   defer {
+  > #pragma frobnicate
+  >     use(0);
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe pragma_unknown.tc
+  pragma_unknown.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  [1]
+
+Lowering removes a defer statement from its place, so a pragma line
+directly before it would apply to the statement after it, here a loop
+that the source does not annotate. A `;` between them keeps the
+pragma on a statement of its own.
+
+  $ cat > pragma_before_defer.tc <<'EOF'
+  > void use(int);
+  > void f(int n) {
+  > #pragma GCC ivdep
+  >   defer use(0);
+  >   for (int i = 0; i < n; i++)
+  >     use(i);
+  > }
+  > EOF
+  $ ./golden.exe pragma_before_defer.tc
+  pragma_before_defer.tc:3: a `#pragma` line directly before a defer statement, which lowering removes, so the pragma would apply to the statement after it; put a `;` between them (design 6 rule 9) [TC0074]
+  [1]
+  $ cat > pragma_null_before_defer.tc <<'EOF'
+  > void use(int);
+  > void f(int n) {
+  > #pragma GCC diagnostic push
+  >   ;
+  >   defer use(0);
+  >   for (int i = 0; i < n; i++)
+  >     use(i);
+  > }
+  > EOF
+  $ ./golden.exe pragma_null_before_defer.tc | grep -v '^# ' | grep .
+  void use(int);
+  void f(int n) {
+  #pragma GCC diagnostic push
+    ;
+    
+    for (int i = 0; i < n; i++)
+      use(i);
+  { use ( 0 ) ; }
+  }
+
+C text is held to the list too, as `_Defer`.
+
+  $ cat > pragma_c.tc <<'EOF'
+  > # 1 "pragma_c.tc"
+  > # 1 "c.h" 1
+  > void g(void);
+  > void f(void) {
+  >   _Defer {
+  > #pragma GCC optimize("O3")
+  >     g();
+  >   }
+  > }
+  > # 2 "pragma_c.tc" 2
+  > EOF
+  $ ./golden.exe pragma_c.tc
+  c.h:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  [1]
+
+A pragma of C11 7.12.2 at the start of a block of S is in force to the
+end of that block, and each copy writes S in a block of its own.
+
+  $ cat > pragma_contract.tc <<'EOF'
+  > double f(double a, double b, double c) {
+  >   double r = 0;
+  >   defer {
+  > #pragma STDC FP_CONTRACT OFF
+  >     r = a * b + c;
+  >   }
+  >   return a * b + c;
+  > }
+  > EOF
+  $ ./golden.exe pragma_contract.tc | grep -v '^# ' | grep .
+  double f(double a, double b, double c) 
+  { typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(a) *)0, *(__typeof__(b) *)0, *(__typeof__(c) *)0)) __tc_ret;
+  {
+    double r = 0;
+    
+    
+  { __tc_ret __tc_r = (
+   a * b + c
+  );
+  { {
+  #pragma STDC FP_CONTRACT OFF
+  r = a * b + c ;
+  }
+  }
+  return __tc_r; }
+  __builtin_trap();
+  } }
 
 The name of a label whose address S takes reads, at an exit, the GNU
 local label of its name that a block around the exit declares: such a
@@ -892,8 +1264,27 @@ it holds none.
   > }
   > EOF
   $ ./golden.exe label_no_exit.tc
-  label_no_exit.tc:5: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "label_no_exit.tc"
+  void use(void *);
+  void f(int c) {
+  L:
+    {
+      
+  # 5 "label_no_exit.tc"
+  
+  # 5 "label_no_exit.tc"
+  
+      {
+        __label__ L;
+      L:
+        c--;
+      }
+    
+  # 5 "label_no_exit.tc"
+  { use ( && L ) ; }
+  # 11 "label_no_exit.tc"
+  }
+  }
 
 A goto that leaves the scope is an exit, a goto back to before the
 defer included, and so is the error path of a try, whose copies stand
@@ -950,8 +1341,107 @@ in front of the statement or declaration that holds the try.
   > }
   > EOF
   $ ./golden.exe declared_by_try.tc
-  declared_by_try.tc:5: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "declared_by_try.tc"
+  int x;
+  void use(int);
+  
+  # 3 "declared_by_try.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 3 "declared_by_try.tc"
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  # 3 "declared_by_try.tc"
+  #pragma pack(pop)
+  # 3 "declared_by_try.tc"
+  
+  # 3 "declared_by_try.tc"
+  result__ii
+  # 3 "declared_by_try.tc"
+   rd(void);
+  
+  # 4 "declared_by_try.tc"
+  #pragma pack(push)
+  #pragma pack()
+  # 2 "<universe>" 3
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  # 4 "declared_by_try.tc"
+  #pragma pack(pop)
+  # 4 "declared_by_try.tc"
+  
+  # 4 "declared_by_try.tc"
+  result__ii
+  # 4 "declared_by_try.tc"
+   h(void) 
+  # 4 "declared_by_try.tc"
+  { typedef __typeof__(((__typeof__(h) *)0)()) __tc_ret;
+  # 4 "declared_by_try.tc"
+  {
+    
+  # 5 "declared_by_try.tc"
+  
+  # 5 "declared_by_try.tc"
+  
+    {
+      
+  # 7 "declared_by_try.tc"
+  const struct result__ii __tc_t0 = rd ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap();
+  # 5 "declared_by_try.tc"
+  { use ( x ) ; }
+  # 7 "declared_by_try.tc"
+  return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  # 7 "declared_by_try.tc"
+  int x = 
+  # 7 "declared_by_try.tc"
+  __tc_t0.u.Ok.value
+  # 7 "declared_by_try.tc"
+  ;
+      use(x);
+    }
+    
+  # 10 "declared_by_try.tc"
+  { __tc_ret __tc_r = (
+  # 10 "declared_by_try.tc"
+   
+  # 10 "declared_by_try.tc"
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  # 10 "declared_by_try.tc"
+  0
+  # 10 "declared_by_try.tc"
+   } })
+  # 10 "declared_by_try.tc"
+  
+  # 10 "declared_by_try.tc"
+  );
+  # 5 "declared_by_try.tc"
+  { use ( x ) ; }
+  # 10 "declared_by_try.tc"
+  return __tc_r; }
+  # 10 "declared_by_try.tc"
+  
+  
+  # 11 "declared_by_try.tc"
+  __builtin_trap();
+  # 11 "declared_by_try.tc"
+  
+  # 11 "declared_by_try.tc"
+  } }
+  # 11 "declared_by_try.tc"
+  
+  
+  # 1 "<typec>" 3
+  #pragma pack(push)
+  #pragma pack(1)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_1 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(2)
+  #pragma pack(push)
+  #pragma pack()
+  struct __tc_pack_probe_2 { char c; int i; };
+  #pragma pack(pop)
+  #pragma pack(pop)
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
 A declaration in whose scope no exit lies reaches no copy; the end of a
 block that cannot complete is no exit; completing a tag that S names
@@ -964,8 +1454,18 @@ S alone, S being a block.
   > void f(void) { defer use(x); { int x = 0; use(x); } }
   > EOF
   $ ./golden.exe no_exit_in_scope.tc
-  no_exit_in_scope.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "no_exit_in_scope.tc"
+  int x;
+  void use(int);
+  void f(void) { 
+  # 3 "no_exit_in_scope.tc"
+  
+  # 3 "no_exit_in_scope.tc"
+   { int x = 0; use(x); } 
+  # 3 "no_exit_in_scope.tc"
+  { use ( x ) ; }
+  # 3 "no_exit_in_scope.tc"
+  }
 
   $ cat > end_not_reached.tc <<'EOF'
   > int x;
@@ -980,8 +1480,35 @@ S alone, S being a block.
   > }
   > EOF
   $ ./golden.exe end_not_reached.tc
-  end_not_reached.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "end_not_reached.tc"
+  int x;
+  void use(int);
+  void f(int c) {
+    
+  # 4 "end_not_reached.tc"
+  
+  # 4 "end_not_reached.tc"
+  
+    if (c)
+      
+  # 6 "end_not_reached.tc"
+  {
+  # 4 "end_not_reached.tc"
+  { use ( x ) ; }
+  # 6 "end_not_reached.tc"
+  return
+  # 6 "end_not_reached.tc"
+  ; }
+  # 6 "end_not_reached.tc"
+  
+    int x = 0;
+    for (;;)
+      use(x);
+  
+  # 10 "end_not_reached.tc"
+  __builtin_trap();
+  # 10 "end_not_reached.tc"
+  }
 
   $ cat > completed_after.tc <<'EOF'
   > void use(unsigned long);
@@ -992,8 +1519,21 @@ S alone, S being a block.
   > }
   > EOF
   $ ./golden.exe completed_after.tc
-  completed_after.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "completed_after.tc"
+  void use(unsigned long);
+  void f(void) {
+    struct s;
+    
+  # 4 "completed_after.tc"
+  
+  # 4 "completed_after.tc"
+  
+    struct s { int a; };
+  
+  # 4 "completed_after.tc"
+  { use ( sizeof ( struct s * ) ) ; }
+  # 6 "completed_after.tc"
+  }
 
   $ cat > own_block.tc <<'EOF'
   > void use(int);
@@ -1067,6 +1607,115 @@ A return that is the substatement of an `if` is held to the same.
   if_return_declares.tc:5: the tag 'q' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 6 rule 12, 13.5) [TC0064]
   [1]
 
+No goto, break or continue leaves the operand of such a return (design 6
+rule 12), whether or not it leaves the scope; a jump that stays in the
+operand, and a return in it, which leaves the function, are allowed.
+
+  $ cat > operand_goto.tc <<'EOF'
+  > void g(void);
+  > int f(int c) {
+  >   defer g();
+  >   if (c)
+  >     return ({ if (c > 1) goto out; 1; });
+  > out:
+  >   return 0;
+  > }
+  > EOF
+  $ ./golden.exe operand_goto.tc
+  operand_goto.tc:5: a `goto` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own (design 6 rule 12) [TC0073]
+  [1]
+  $ cat > operand_break.tc <<'EOF'
+  > void g(void);
+  > int f(int c) {
+  >   defer g();
+  >   for (;;)
+  >     return ({ if (c) break; 1; });
+  >   return 0;
+  > }
+  > EOF
+  $ ./golden.exe operand_break.tc
+  operand_break.tc:5: a `break` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own (design 6 rule 12) [TC0073]
+  [1]
+  $ cat > operand_continue.tc <<'EOF'
+  > void g(void);
+  > int f(int c) {
+  >   while (c--) {
+  >     defer g();
+  >     return ({ if (c) continue; 1; });
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ ./golden.exe operand_continue.tc
+  operand_continue.tc:5: a `continue` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own (design 6 rule 12) [TC0073]
+  [1]
+  $ cat > operand_inner_jumps.tc <<'EOF'
+  > void g(void);
+  > int f(int c) {
+  >   defer g();
+  >   return ({
+  >     for (;;) { if (c) break; continue; }
+  >     if (c) goto in;
+  >   in:
+  >     if (c > 1) return 2;
+  >     1;
+  >   });
+  > }
+  > EOF
+  $ ./golden.exe operand_inner_jumps.tc
+  # 1 "operand_inner_jumps.tc"
+  void g(void);
+  int f(int c) 
+  # 2 "operand_inner_jumps.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(c) *)0)) __tc_ret;
+  # 2 "operand_inner_jumps.tc"
+  {
+    
+  # 3 "operand_inner_jumps.tc"
+  
+  # 3 "operand_inner_jumps.tc"
+  
+    
+  # 4 "operand_inner_jumps.tc"
+  { __tc_ret __tc_r = (
+  # 4 "operand_inner_jumps.tc"
+   ({
+      for (;;) { if (c) break; continue; }
+      if (c) goto in;
+    in:
+      if (c > 1) 
+  # 8 "operand_inner_jumps.tc"
+  { __tc_ret __tc_r = (
+  # 8 "operand_inner_jumps.tc"
+   2
+  # 8 "operand_inner_jumps.tc"
+  );
+  # 3 "operand_inner_jumps.tc"
+  { g ( ) ; }
+  # 8 "operand_inner_jumps.tc"
+  return __tc_r; }
+  # 8 "operand_inner_jumps.tc"
+  
+      1;
+    })
+  # 10 "operand_inner_jumps.tc"
+  );
+  # 3 "operand_inner_jumps.tc"
+  { g ( ) ; }
+  # 10 "operand_inner_jumps.tc"
+  return __tc_r; }
+  # 10 "operand_inner_jumps.tc"
+  
+  
+  # 11 "operand_inner_jumps.tc"
+  __builtin_trap();
+  # 11 "operand_inner_jumps.tc"
+  
+  # 11 "operand_inner_jumps.tc"
+  } }
+  # 11 "operand_inner_jumps.tc"
+  
+
 A return outside every scope of a defer is written as it stands, and an
 operand that only uses a tag declares nothing.
 
@@ -1078,8 +1727,20 @@ operand that only uses a tag declares nothing.
   > }
   > EOF
   $ ./golden.exe return_outside.tc
-  return_outside.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "return_outside.tc"
+  void g(void);
+  int f(void) {
+    { 
+  # 3 "return_outside.tc"
+  
+  # 3 "return_outside.tc"
+   
+  # 3 "return_outside.tc"
+  { g ( ) ; }
+  # 3 "return_outside.tc"
+  }
+    return sizeof(enum { K = 5 });
+  }
 
   $ cat > return_uses.tc <<'EOF'
   > struct p { int a; };
@@ -1090,8 +1751,41 @@ operand that only uses a tag declares nothing.
   > }
   > EOF
   $ ./golden.exe return_uses.tc
-  return_uses.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "return_uses.tc"
+  struct p { int a; };
+  void g(void);
+  int f(void) 
+  # 3 "return_uses.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)()) __tc_ret;
+  # 3 "return_uses.tc"
+  {
+    
+  # 4 "return_uses.tc"
+  
+  # 4 "return_uses.tc"
+  
+    
+  # 5 "return_uses.tc"
+  { __tc_ret __tc_r = (
+  # 5 "return_uses.tc"
+   (struct p){1}.a
+  # 5 "return_uses.tc"
+  );
+  # 4 "return_uses.tc"
+  { g ( ) ; }
+  # 5 "return_uses.tc"
+  return __tc_r; }
+  # 5 "return_uses.tc"
+  
+  
+  # 6 "return_uses.tc"
+  __builtin_trap();
+  # 6 "return_uses.tc"
+  
+  # 6 "return_uses.tc"
+  } }
+  # 6 "return_uses.tc"
+  
 
 A function that returns a value and holds a `return e;` in the scope of
 a defer statement names its return type through a call of its own name
@@ -1108,8 +1802,101 @@ refused, each case with a code of its own; a function without such a
   > void x(void) { defer g(); return g(); }
   > EOF
   $ ./golden.exe form_allowed.tc
-  form_allowed.tc:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "form_allowed.tc"
+  void g(void);
+  int f(int a, char *b) 
+  # 2 "form_allowed.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(a) *)0, *(__typeof__(b) *)0)) __tc_ret;
+  # 2 "form_allowed.tc"
+  { 
+  # 2 "form_allowed.tc"
+  
+  # 2 "form_allowed.tc"
+   
+  # 2 "form_allowed.tc"
+  { __tc_ret __tc_r = (
+  # 2 "form_allowed.tc"
+   a + *b
+  # 2 "form_allowed.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 2 "form_allowed.tc"
+   
+  # 2 "form_allowed.tc"
+  __builtin_trap();
+  # 2 "form_allowed.tc"
+  
+  # 2 "form_allowed.tc"
+  } }
+  # 2 "form_allowed.tc"
+  
+  int h(void) 
+  # 3 "form_allowed.tc"
+  { typedef __typeof__(((__typeof__(h) *)0)()) __tc_ret;
+  # 3 "form_allowed.tc"
+  { 
+  # 3 "form_allowed.tc"
+  
+  # 3 "form_allowed.tc"
+   
+  # 3 "form_allowed.tc"
+  { __tc_ret __tc_r = (
+  # 3 "form_allowed.tc"
+   1
+  # 3 "form_allowed.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 3 "form_allowed.tc"
+   
+  # 3 "form_allowed.tc"
+  __builtin_trap();
+  # 3 "form_allowed.tc"
+  
+  # 3 "form_allowed.tc"
+  } }
+  # 3 "form_allowed.tc"
+  
+  void v(int) { 
+  # 4 "form_allowed.tc"
+  
+  # 4 "form_allowed.tc"
+   
+  # 4 "form_allowed.tc"
+  { { g ( ) ; }
+  # 4 "form_allowed.tc"
+  return
+  # 4 "form_allowed.tc"
+  ; }
+  # 4 "form_allowed.tc"
+   
+  # 4 "form_allowed.tc"
+  __builtin_trap();
+  # 4 "form_allowed.tc"
+  }
+  long w(int w) { if (w) return 1; { 
+  # 5 "form_allowed.tc"
+  
+  # 5 "form_allowed.tc"
+   
+  # 5 "form_allowed.tc"
+  { g ( ) ; }
+  # 5 "form_allowed.tc"
+  } return 0; }
+  void x(void) { 
+  # 6 "form_allowed.tc"
+  
+  # 6 "form_allowed.tc"
+   
+  # 6 "form_allowed.tc"
+  {
+  # 6 "form_allowed.tc"
+   g()
+  # 6 "form_allowed.tc"
+  ; { g ( ) ; } return; }
+  # 6 "form_allowed.tc"
+   
+  # 6 "form_allowed.tc"
+  __builtin_trap();
+  # 6 "form_allowed.tc"
+  }
 
 The parameter list declares the function's own name, which would hide
 the function at the call, as a parameter or as an enumeration constant.
@@ -1156,8 +1943,33 @@ A name that a nested parameter list declares hides nothing at the call.
   > long f(long (*p)(int f)) { defer g(); return p(0); }
   > EOF
   $ ./golden.exe own_name_nested.tc
-  own_name_nested.tc:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "own_name_nested.tc"
+  void g(void);
+  long f(long (*p)(int f)) 
+  # 2 "own_name_nested.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(p) *)0)) __tc_ret;
+  # 2 "own_name_nested.tc"
+  { 
+  # 2 "own_name_nested.tc"
+  
+  # 2 "own_name_nested.tc"
+   
+  # 2 "own_name_nested.tc"
+  { __tc_ret __tc_r = (
+  # 2 "own_name_nested.tc"
+   p(0)
+  # 2 "own_name_nested.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 2 "own_name_nested.tc"
+   
+  # 2 "own_name_nested.tc"
+  __builtin_trap();
+  # 2 "own_name_nested.tc"
+  
+  # 2 "own_name_nested.tc"
+  } }
+  # 2 "own_name_nested.tc"
+  
 
 A prototype scope of the head other than the parameter list, as that of
 a returned function pointer or of a member, is another scope.
@@ -1174,8 +1986,116 @@ a returned function pointer or of a member, is another scope.
   > }
   > EOF
   $ ./golden.exe head_prototypes.tc
-  head_prototypes.tc:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "head_prototypes.tc"
+  void g(void);
+  long (*f(int a))(int f) 
+  # 2 "head_prototypes.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(a) *)0)) __tc_ret;
+  # 2 "head_prototypes.tc"
+  { 
+  # 2 "head_prototypes.tc"
+  
+  # 2 "head_prototypes.tc"
+   
+  # 2 "head_prototypes.tc"
+  { __tc_ret __tc_r = (
+  # 2 "head_prototypes.tc"
+   0
+  # 2 "head_prototypes.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 2 "head_prototypes.tc"
+   
+  # 2 "head_prototypes.tc"
+  __builtin_trap();
+  # 2 "head_prototypes.tc"
+  
+  # 2 "head_prototypes.tc"
+  } }
+  # 2 "head_prototypes.tc"
+  
+  long (*h(int a))(int b) 
+  # 3 "head_prototypes.tc"
+  { typedef __typeof__(((__typeof__(h) *)0)(*(__typeof__(a) *)0)) __tc_ret;
+  # 3 "head_prototypes.tc"
+  { int b = a; 
+  # 3 "head_prototypes.tc"
+  
+  # 3 "head_prototypes.tc"
+   
+  # 3 "head_prototypes.tc"
+  { __tc_ret __tc_r = (
+  # 3 "head_prototypes.tc"
+   0
+  # 3 "head_prototypes.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 3 "head_prototypes.tc"
+   
+  # 3 "head_prototypes.tc"
+  __builtin_trap();
+  # 3 "head_prototypes.tc"
+  
+  # 3 "head_prototypes.tc"
+  } }
+  # 3 "head_prototypes.tc"
+  
+  long (*k(int a))(struct s *b) 
+  # 4 "head_prototypes.tc"
+  { typedef __typeof__(((__typeof__(k) *)0)(*(__typeof__(a) *)0)) __tc_ret;
+  # 4 "head_prototypes.tc"
+  { struct s { int x; }; 
+  # 4 "head_prototypes.tc"
+  
+  # 4 "head_prototypes.tc"
+   
+  # 4 "head_prototypes.tc"
+  { __tc_ret __tc_r = (
+  # 4 "head_prototypes.tc"
+   0
+  # 4 "head_prototypes.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 4 "head_prototypes.tc"
+   
+  # 4 "head_prototypes.tc"
+  __builtin_trap();
+  # 4 "head_prototypes.tc"
+  
+  # 4 "head_prototypes.tc"
+  } }
+  # 4 "head_prototypes.tc"
+  
+  struct r { int (*fp)(int x); } m(int a) 
+  # 5 "head_prototypes.tc"
+  { typedef __typeof__(((__typeof__(m) *)0)(*(__typeof__(a) *)0)) __tc_ret;
+  # 5 "head_prototypes.tc"
+  {
+    int x = a;
+    
+  # 7 "head_prototypes.tc"
+  
+  # 7 "head_prototypes.tc"
+  
+    
+  # 8 "head_prototypes.tc"
+  { __tc_ret __tc_r = (
+  # 8 "head_prototypes.tc"
+   (struct r){0}
+  # 8 "head_prototypes.tc"
+  );
+  # 7 "head_prototypes.tc"
+  { g ( ) ; }
+  # 8 "head_prototypes.tc"
+  return __tc_r; }
+  # 8 "head_prototypes.tc"
+  
+  
+  # 9 "head_prototypes.tc"
+  __builtin_trap();
+  # 9 "head_prototypes.tc"
+  
+  # 9 "head_prototypes.tc"
+  } }
+  # 9 "head_prototypes.tc"
+  
 
 The outermost block of the body declares a name that the parameter list
 declares. C refuses an ordinary identifier there and lets a tag be
@@ -1212,8 +2132,41 @@ A tag that an inner block declares is another tag in C as well.
   > }
   > EOF
   $ ./golden.exe inner_tag.tc
-  inner_tag.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "inner_tag.tc"
+  void g(void);
+  int f(struct s *p) 
+  # 2 "inner_tag.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(p) *)0)) __tc_ret;
+  # 2 "inner_tag.tc"
+  {
+    { struct s { int b; }; }
+    
+  # 4 "inner_tag.tc"
+  
+  # 4 "inner_tag.tc"
+  
+    
+  # 5 "inner_tag.tc"
+  { __tc_ret __tc_r = (
+  # 5 "inner_tag.tc"
+   p != 0
+  # 5 "inner_tag.tc"
+  );
+  # 4 "inner_tag.tc"
+  { g ( ) ; }
+  # 5 "inner_tag.tc"
+  return __tc_r; }
+  # 5 "inner_tag.tc"
+  
+  
+  # 6 "inner_tag.tc"
+  __builtin_trap();
+  # 6 "inner_tag.tc"
+  
+  # 6 "inner_tag.tc"
+  } }
+  # 6 "inner_tag.tc"
+  
 
 Two declarations of the function carry `target` attributes whose
 arguments differ, token for token: they declare two versions.
@@ -1233,8 +2186,34 @@ arguments differ, token for token: they declare two versions.
   > __attribute__((target("avx2"))) int f(void) { defer g(); return 1; }
   > EOF
   $ ./golden.exe target_same.tc
-  target_same.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "target_same.tc"
+  void g(void);
+  int f(void) __attribute__((target("avx2")));
+  __attribute__((target("avx2"))) int f(void) 
+  # 3 "target_same.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)()) __tc_ret;
+  # 3 "target_same.tc"
+  { 
+  # 3 "target_same.tc"
+  
+  # 3 "target_same.tc"
+   
+  # 3 "target_same.tc"
+  { __tc_ret __tc_r = (
+  # 3 "target_same.tc"
+   1
+  # 3 "target_same.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 3 "target_same.tc"
+   
+  # 3 "target_same.tc"
+  __builtin_trap();
+  # 3 "target_same.tc"
+  
+  # 3 "target_same.tc"
+  } }
+  # 3 "target_same.tc"
+  
 
 The `target` attributes of one declaration are one fact of it.
 
@@ -1247,8 +2226,41 @@ The `target` attributes of one declaration are one fact of it.
   > }
   > EOF
   $ ./golden.exe target_pair.tc
-  target_pair.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "target_pair.tc"
+  void g(void);
+  int f(int a) __attribute__((target("avx2"), target("fma")));
+  __attribute__((target("avx2"), target("fma"))) int f(int a) 
+  # 3 "target_pair.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)(*(__typeof__(a) *)0)) __tc_ret;
+  # 3 "target_pair.tc"
+  {
+    
+  # 4 "target_pair.tc"
+  
+  # 4 "target_pair.tc"
+  
+    
+  # 5 "target_pair.tc"
+  { __tc_ret __tc_r = (
+  # 5 "target_pair.tc"
+   a
+  # 5 "target_pair.tc"
+  );
+  # 4 "target_pair.tc"
+  { g ( ) ; }
+  # 5 "target_pair.tc"
+  return __tc_r; }
+  # 5 "target_pair.tc"
+  
+  
+  # 6 "target_pair.tc"
+  __builtin_trap();
+  # 6 "target_pair.tc"
+  
+  # 6 "target_pair.tc"
+  } }
+  # 6 "target_pair.tc"
+  
 
 A declaration of the function carries a marked attribute (design 13.3),
 under any of its spellings, or follows a Clang overload of its name.
@@ -1311,8 +2323,34 @@ A parameter has no name; `(void)` has none to give.
   > int f(nothing) { defer g(); return 1; }
   > EOF
   $ ./golden.exe void_typedef.tc
-  void_typedef.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "void_typedef.tc"
+  typedef void nothing;
+  void g(void);
+  int f(nothing) 
+  # 3 "void_typedef.tc"
+  { typedef __typeof__(((__typeof__(f) *)0)()) __tc_ret;
+  # 3 "void_typedef.tc"
+  { 
+  # 3 "void_typedef.tc"
+  
+  # 3 "void_typedef.tc"
+   
+  # 3 "void_typedef.tc"
+  { __tc_ret __tc_r = (
+  # 3 "void_typedef.tc"
+   1
+  # 3 "void_typedef.tc"
+  ); { g ( ) ; } return __tc_r; }
+  # 3 "void_typedef.tc"
+   
+  # 3 "void_typedef.tc"
+  __builtin_trap();
+  # 3 "void_typedef.tc"
+  
+  # 3 "void_typedef.tc"
+  } }
+  # 3 "void_typedef.tc"
+  
 
 In a function that returns void, the operand of a `return e;` is a void
 expression, in Type-C text and in C text.
@@ -1364,5 +2402,60 @@ depends on it.
   > vector f(int) { defer g(); return; }
   > EOF
   $ ./golden.exe unknown_bare_return.tc
-  unknown_bare_return.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
-  [1]
+  # 1 "unknown_bare_return.tc"
+  typedef int vector __attribute__((vector_size(16)));
+  void g(void);
+  vector f(int) { 
+  # 3 "unknown_bare_return.tc"
+  
+  # 3 "unknown_bare_return.tc"
+   
+  # 3 "unknown_bare_return.tc"
+  { { g ( ) ; }
+  # 3 "unknown_bare_return.tc"
+  return
+  # 3 "unknown_bare_return.tc"
+  ; }
+  # 3 "unknown_bare_return.tc"
+   
+  # 3 "unknown_bare_return.tc"
+  __builtin_trap();
+  # 3 "unknown_bare_return.tc"
+  }
+
+A defer statement, its exits and the end of its block in text that
+lowering drops, here a statement expression in the type name of an
+answered __builtin_types_compatible_p, go with that text: it never runs.
+The defer around it is written as anywhere else.
+
+  $ cat > dropped.tc <<'EOF'
+  > type d = distinct int;
+  > void g(int);
+  > int f(void) {
+  >   defer g(0);
+  >   int c = __builtin_types_compatible_p(
+  >       __typeof__(({ for (;;) { defer g(1); break; } 1; })), d);
+  >   return c;
+  > }
+  > EOF
+  $ ./golden.exe dropped.tc | grep -v '^# ' | grep .
+  typedef
+   int
+  d
+  ;
+  void g(int);
+  int f(void) 
+  { typedef __typeof__(((__typeof__(f) *)0)()) __tc_ret;
+  {
+    
+    int c = 
+  0
+  ;
+    
+  { __tc_ret __tc_r = (
+   c
+  );
+  { g ( 0 ) ; }
+  return __tc_r; }
+  __builtin_trap();
+  } }

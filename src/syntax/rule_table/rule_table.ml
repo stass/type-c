@@ -429,6 +429,22 @@ let rows =
       meaning =
         "A [defer] statement anywhere in the deferred statement of \
          another, which lowering copies to each exit of its scope." };
+    Live { name = "Return_operand_jump"; code = 73;
+      clause = Some "design 6 rule 12";
+      meaning =
+        "A [goto], [break] or [continue] that leaves the operand of a \
+         [return] in the scope of a defer statement, which lowering \
+         writes in a block of its own." };
+    Live { name = "Deferred_pragma"; code = 74;
+      clause = Some "design 6 rule 9";
+      meaning =
+        "A [#pragma] line in the deferred statement of a defer statement \
+         that is not one of the pragmas that apply to the statement that \
+         follows them (design 13.5): lowering copies the statement to each \
+         exit of its scope, and a pragma that sets state for the rest of \
+         the text would be in force once per copy. Or a [#pragma] line \
+         directly before a defer statement, which lowering removes, so \
+         that the pragma would apply to the statement after it." };
   ]
 
 let () =
