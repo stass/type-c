@@ -121,6 +121,18 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Target model
 
+- [Medium] Package 4.6's freestanding check must allow the compiler's
+  runtime helpers. As its row reads, a helper is a symbol the program
+  did not introduce, yet at -O0 on the Cortex-M3 of Pilot C a Type-C
+  object calls the soft-float `__aeabi_dcmpgt`, which the compiler
+  chose. A `-nostdlib` link there needs `-lgcc` to resolve the
+  helpers. Plan package 4.7, criterion 1, lists them.
+- [Medium] The message of the enumeration assertion of design 13.4
+  points at `<typec>:3:1`, a line of text that `typec` generates, which
+  a user cannot open. Name the option or the target default that
+  changed the enumeration's size, and the target, instead. Feeds plan
+  package 4.2.
+
 - [Low] Every target now declares both Arm vector families or neither
   (`Target.vector_families`), so `Keyword_set.vector_families` and the
   family of `Builtin_typedef.Arm_vector` carry no information and can

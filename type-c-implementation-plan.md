@@ -671,7 +671,126 @@ literals became `str` by their target type and none needed a cast.
 | 4.4 | A language reference and a tutorial for users. |
 | 4.5 | Packaging: opam, Homebrew, a FreeBSD port. |
 | 4.6 | Freestanding check: a `-nostdlib` link with `--trap-function` leaves no undefined symbol that the program did not introduce. |
-| 4.7 | Pilot C: a freestanding component. |
+| 4.7 | Pilot C: the stream and message buffers of FreeRTOS, `stream_buffer.c`, rewritten in Type-C, in a FreeRTOS kernel build that boots in QEMU on a Cortex-M3. |
+
+Pilot C lives in a repository of its own,
+`/Volumes/Optaine/type-c-pilot-c`, as Pilots A and B do. It pins commit
+48d4714c71da903b39baa4615b623525a0c0e2a3 of the FreeRTOS repository,
+whose kernel submodule is FreeRTOS-Kernel V11.3.3, and takes from it
+the kernel, the demo `CORTEX_MPS2_QEMU_IAR_GCC` with the common demo
+tasks it builds, and the kernel's CMock unit tests. The pilot patches
+the demo to drop Percepio TraceRecorder, which it does not import. All
+of it is MIT licensed; the pilot's `README.md` records the commits and
+the patch, keeps the licenses, and gives the commands that build and
+run the demo and the tests, with the pilot's change to the CMock
+harness that criterion 4 needs. The demo runs on the MPS2 AN385 board
+(Cortex-M3, Thumb-2, ILP32), a target that is neither the host nor
+LP64.
+
+Each compiler builds the kernel with its own default enumeration ABI.
+Clang's for `thumbv7m-none-eabi` gives an enumeration the size of
+`int`. arm-none-eabi-gcc's gives it the smallest integer type that
+holds its values (short enums), which the assertion of design 13.4
+refuses in a lowered unit. The owner has decided that `typec` supports
+the short-enum representation, through a change to design 13.4. The
+GCC half of criteria 1, 2, 3 and 6 depends on that change: without
+it, the pilot builds with Clang only.
+
+`stream_buffer.c` is the subsystem because:
+
+* it reaches the rest of the kernel only through task notifications,
+  the scheduler lock and critical sections, which its CMock suites
+  replace with mocks of `task.h`, the port and `configASSERT`;
+* its ring indices and message-length prefixes are the checked
+  indexing of design section 8;
+* its buffer kind, stream, message or stream batching, is a variant,
+  and whether it was statically allocated is a `bool`, where the
+  original packs both into one byte of flags; this is provisional,
+  since C code allocates the public `StaticStreamBuffer_t`, which the
+  original asserts is the size of its own structure: the port settles
+  whether the variant keeps that size, and the default keeps the byte
+  of flags;
+* its internal reads and writes report failure as a zero length,
+  provisionally a fit for `result` and `try`: the port settles it,
+  and the default keeps the plain length;
+* the demo's self-checks (`StreamBufferDemo.c`,
+  `StreamBufferInterrupt.c`, `MessageBufferDemo.c` and
+  `MessageBufferAMP.c` of `Common/Minimal`) and the CMock suites of the
+  stream and message buffers, 65 and 28 tests, cover it.
+
+The other subsystems fit less well: `queue.c` shares mutex and
+queue-set logic with `tasks.c`, `heap_4.c` is the allocator itself and
+has no CMock suite, `list.c` is too small to tell a rewrite's cost, and
+`event_groups.c` and `timers.c` index no buffer.
+
+**Exit of package 4.7.** The pilot's repository holds the record, and
+this package cites it by path and commit. The record feeds the
+short-enum change of design 13.4, the review of diagnostics of package
+4.2, and package 4.6's rule on undefined symbols, which allows the
+compiler's runtime helpers as criterion 1 does.
+
+1. For each compiler, arm-none-eabi-gcc and Clang
+   `--target=thumbv7m-none-eabi`, at -Os and at -O2, with and without
+   `--trap-function`, the Type-C file builds with
+   `-ffreestanding -nostdlib`, and every undefined symbol of its object
+   is in that compiler's set: the undefined symbols of the same
+   compiler's build of the original object at the same level, the trap
+   function when `--trap-function` is given, and the compiler's
+   runtime helpers, `memcpy`, `memmove`, `memset`, `memcmp` and the
+   `__aeabi_*` functions. -O0 is outside the matrix; `TODO.md`
+   ("Target model") records a helper it calls. The demo's link
+   resolves every symbol of the kernel, so it would hide a dependency
+   that the original does not have; this comparison of the objects is
+   what finds one.
+2. Each compiler builds the demo's full, self-checking build with the
+   Type-C object in place of the original, at -Os and at -O2, with and
+   without `--trap-function`. Each build boots in
+   `qemu-system-arm -machine mps2-an385` and passes as the pilot's
+   README defines a pass: the check task prints ten lines (50000
+   ticks), every one of them `PASS`, before a timeout stops QEMU, since
+   the demo never exits. Each `PASS` line says that every demo task has
+   made progress since the last one. A build of the demo with Clang is
+   provisional, since the demo's Makefile names GCC: a Clang build of
+   the original settles it, and if none can be made, Clang's object is
+   held to criteria 1 and 6 only.
+3. With each compiler at -Os and `--trap-function`, a test task that
+   overwrites the read index of a message buffer with a value past the
+   end of its storage makes the next receive call the trap function,
+   which the pilot defines to print a line and stop the demo. The
+   original reads past the storage there. A corrupted length prefix
+   is no such test: the original clamps the length to the bytes
+   available (`prvReadMessageFromBuffer`), so a faithful port reads
+   within the storage too.
+4. The CMock suites of the stream and message buffers pass with the
+   Type-C file in place of the original on p620, the FreeBSD 16 amd64
+   host of `tools/hosts/freebsd.sh`, with its GCC and its LP64 target
+   model. The harness preprocesses `stream_buffer.c` with `$(CC) -E`,
+   compiles the `.i` into an object of its own and links that with the
+   mocks; the tests call only the public functions, never a `static`
+   one. The pilot's change to the harness has
+   `typec -c stream_buffer.tc`, with the harness's include paths and
+   defines, write that object in its place, once for each suite, since
+   each suite brings its own `FreeRTOSConfig.h`. The tests check the
+   logic on the host's target; criterion 2 checks the Cortex-M3. A
+   failing `configASSERT` in a test leaves the function under test by
+   `longjmp` (CException), so a function of the port that asserts must
+   leave nothing to a deferred statement after the assertion
+   (design section 6, rule 7). This route is provisional: the port's
+   run through it settles it. A copy of `stream_buffer.c`, named
+   `stream_buffer.tc` and built by `typec`, passes all 93 tests this
+   way. If the port cannot, the default is the QEMU self-checks alone.
+5. A review of the port checks the paths that run in an interrupt (the
+   `FromISR` functions) and every access to a field that another
+   context writes (the `volatile` head, tail and waiting tasks): each
+   keeps the original's `volatile` access and its critical section or
+   interrupt mask.
+6. The record gives the text size of each compiler's Type-C object
+   against the same compiler's build of the original, at -Os and at
+   -O2. It gives no timing: QEMU models no cycle counts, and the demo
+   measures none.
+7. The record lists the features the port uses, those it could not use
+   and why, and the diagnostics that were hard to act on, which feed
+   package 4.2; and every failure of `typec` on this target.
 
 **Exit gate.** Every provisional decision from P1 to P16 is settled or
 defaulted and the design is edited to say so; the three pilots build with
