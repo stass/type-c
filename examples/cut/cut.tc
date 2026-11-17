@@ -38,68 +38,92 @@
 #include <errno.h>
 #include <limits.h>
 #include <locale.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <wchar.h>
 
-static int	bflag;
-static int	cflag;
-static wchar_t	dchar;
-static char	dcharmb[MB_LEN_MAX + 1];
-static int	dflag;
-static int	fflag;
-static int	nflag;
-static int	sflag;
-static int	wflag;
+/* What separates the fields of -f. */
+type delimiter =
+    | Char(wchar_t dchar, str dcharmb)	/* -d, or the default tab */
+    | Blanks;				/* -w: spaces and tabs */
 
-static size_t	autostart, autostop, maxval;
+/* How the input is cut, by the options and the locale. */
+type cut_mode =
+    | Bytes		/* -b, and -c or -n where a character is a byte */
+    | BytesNoSplit	/* -b -n where a character may be more */
+    | Chars		/* -c where a character may be more */
+    | Fields(delimiter delim, bool only_delimited);	/* -f [-s] */
+
+/* Why a list of -b, -c or -f is refused. */
+type list_error =
+    | IllegalValue
+    | ZeroValue
+    | NoMemory(int errnum);	/* the positions it selects do not fit */
+
+static size_t	autostart, maxval;
+static option(size_t) autostop = None;
 static slice(char) positions;
 
 static int	b_cut(FILE *, const char *);
 static int	b_n_cut(FILE *, const char *);
 static int	c_cut(FILE *, const char *);
-static int	f_cut(FILE *, const char *);
-static void	get_list(char *);
-static int	is_delim(wchar_t);
-static void	needpos(size_t);
+static int	cut(cut_mode, FILE *, const char *);
+static int	f_cut(FILE *, const char *, delimiter, bool);
+static result(void, list_error) get_list(char *);
+static int	is_delim(delimiter, wchar_t);
+static result(void, list_error) needpos(size_t);
 static void	usage(void);
 
 int
 main(int argc, char *argv[])
 {
 	FILE *fp;
-	int (*fcn)(FILE *, const char *);
+	cut_mode mode;
+	int bflag, cflag, dflag, fflag, nflag, sflag, wflag;
+	wchar_t dchar;
+	str dcharmb;
 	int ch, rval;
 	size_t n;
 
 	setlocale(LC_ALL, "");
 
-	fcn = NULL;
+	bflag = cflag = dflag = fflag = nflag = sflag = wflag = 0;
 	dchar = '\t';			/* default delimiter is \t */
-	strcpy(dcharmb, "\t");
+	dcharmb = "\t";
 
 	while ((ch = getopt(argc, argv, "b:c:d:f:snw")) != -1)
 		switch(ch) {
 		case 'b':
-			get_list(optarg);
-			bflag = 1;
-			break;
 		case 'c':
-			get_list(optarg);
-			cflag = 1;
+		case 'f':
+			match (get_list(optarg)) {
+			case Ok:
+				break;		/* leaves the match */
+			case Err(IllegalValue):
+				errx(1, "[-bcf] list: illegal list value");
+			case Err(ZeroValue):
+				errx(1, "[-bcf] list: values may not "
+				    "include zero");
+			case Err(NoMemory(errnum)):
+				errno = errnum;
+				err(1, "realloc");
+			}
+			if (ch == 'b')
+				bflag = 1;
+			else if (ch == 'c')
+				cflag = 1;
+			else
+				fflag = 1;
 			break;
 		case 'd':
 			n = mbrtowc(&dchar, optarg, MB_LEN_MAX, NULL);
 			if (dchar == '\0' || n != strlen(optarg))
 				errx(1, "bad delimiter");
-			strcpy(dcharmb, optarg);
+			dcharmb = slice_unchecked((const char *)optarg, n);
 			dflag = 1;
-			break;
-		case 'f':
-			get_list(optarg);
-			fflag = 1;
 			break;
 		case 's':
 			sflag = 1;
@@ -125,34 +149,54 @@ main(int argc, char *argv[])
 	else if (!bflag && nflag)
 		usage();
 
-	if (fflag)
-		fcn = f_cut;
-	else if (cflag)
-		fcn = MB_CUR_MAX > 1 ? c_cut : b_cut;
-	else if (bflag)
-		fcn = nflag && MB_CUR_MAX > 1 ? b_n_cut : b_cut;
+	if (fflag && wflag)
+		mode = Fields(Blanks, sflag);
+	else if (fflag)
+		mode = Fields(Char(dchar, dcharmb), sflag);
+	else if (cflag && MB_CUR_MAX > 1)
+		mode = Chars;
+	else if (bflag && nflag && MB_CUR_MAX > 1)
+		mode = BytesNoSplit;
+	else
+		mode = Bytes;
 
 	rval = 0;
 	if (*argv)
 		for (; *argv; ++argv) {
 			if (strcmp(*argv, "-") == 0)
-				rval |= fcn(stdin, "stdin");
+				rval |= cut(mode, stdin, "stdin");
 			else {
 				if (!(fp = fopen(*argv, "r"))) {
 					warn("%s", *argv);
 					rval = 1;
 					continue;
 				}
-				fcn(fp, *argv);
+				cut(mode, fp, *argv);
 				(void)fclose(fp);
 			}
 		}
 	else
-		rval = fcn(stdin, "stdin");
+		rval = cut(mode, stdin, "stdin");
 	exit(rval);
 }
 
-static void
+/* Cuts fp with the function of the mode, which upstream holds in fcn. */
+static int
+cut(cut_mode mode, FILE *fp, const char *fname)
+{
+	match (mode) {
+	case Bytes:
+		return (b_cut(fp, fname));
+	case BytesNoSplit:
+		return (b_n_cut(fp, fname));
+	case Chars:
+		return (c_cut(fp, fname));
+	case Fields(delimiter delim, sflag):
+		return (f_cut(fp, fname, delim, sflag));
+	}
+}
+
+static result(void, list_error)
 get_list(char *list)
 {
 	size_t setautostart, start, stop;
@@ -181,40 +225,46 @@ get_list(char *list)
 				stop = strtol(p + 1, &p, 10);
 			if (*p == '-') {
 				++p;
-				if (!autostop || autostop > stop)
-					autostop = stop;
+				if (case Some(from) = autostop) {
+					if (from > stop)
+						autostop = Some(stop);
+				} else
+					autostop = Some(stop);
 			}
 		}
 		if (*p)
-			errx(1, "[-bcf] list: illegal list value");
+			return (Err(IllegalValue));
 		if (!stop || !start)
-			errx(1, "[-bcf] list: values may not include zero");
+			return (Err(ZeroValue));
 		if (maxval < stop) {
 			maxval = stop;
-			needpos(maxval + 1);
+			try needpos(maxval + 1);
 		}
 		for (pos = start; start++ <= stop; positions[pos++] = 1);
 	}
 
 	/* overlapping ranges */
-	if (autostop && maxval > autostop) {
-		maxval = autostop;
-		needpos(maxval + 1);
+	if (case Some(from) = autostop) {
+		if (maxval > from) {
+			maxval = from;
+			try needpos(maxval + 1);
+		}
 	}
 
 	/* reversed range with autostart */
 	if (maxval < autostart) {
 		maxval = autostart;
-		needpos(maxval + 1);
+		try needpos(maxval + 1);
 	}
 
 	/* set autostart */
 	if (autostart)
 		memset(slice_sub(positions, 1, autostart + 1).data, '1',
 		    autostart);
+	return (Ok);
 }
 
-static void
+static result(void, list_error)
 needpos(size_t n)
 {
 	size_t npos, oldnpos;
@@ -228,10 +278,11 @@ needpos(size_t n)
 		while (n > npos)
 			npos *= 2;
 		if ((newpos = realloc(positions.data, npos)) == NULL)
-			err(1, "realloc");
+			return (Err(NoMemory(errno)));
 		memset(newpos + oldnpos, 0, npos - oldnpos);
 		positions = slice_unchecked(newpos, npos);
 	}
+	return (Ok);
 }
 
 static int
@@ -252,7 +303,7 @@ b_cut(FILE *fp, const char *fname __unused)
 				(void)putchar(ch);
 		}
 		if (ch != '\n') {
-			if (autostop)
+			if (case Some = autostop)
 				while ((ch = getc(fp)) != EOF && ch != '\n')
 					(void)putchar(ch);
 			else
@@ -276,10 +327,15 @@ b_n_cut(FILE *fp, const char *fname)
 	char *lbuf = NULL;
 	str line;
 	int canwrite, clen, warned;
+	bool tail;
 	mbstate_t mbs;
 
 	memset(&mbs, 0, sizeof(mbs));
 	warned = 0;
+	/* Whether the list selects every byte past maxval, as "N-" does. */
+	tail = false;
+	if (case Some = autostop)
+		tail = true;
 	defer free(lbuf);
 	while ((lbuflen = getline(&lbuf, &bufsize, fp)) >= 0) {
 		line = slice_unchecked(lbuf, lbuflen);
@@ -317,7 +373,7 @@ b_n_cut(FILE *fp, const char *fname)
 				 */
 				canwrite = 1;
 				for (i = col; i < col + clen; i++)
-					if ((i >= maxval && !autostop) ||
+					if ((i >= maxval && !tail) ||
 					    (i < maxval && !positions[1 + i])) {
 						canwrite = 0;
 						break;
@@ -352,7 +408,7 @@ c_cut(FILE *fp, const char *fname)
 				(void)putwchar(ch);
 		}
 		if (ch != '\n') {
-			if (autostop)
+			if (case Some = autostop)
 				while ((ch = getwc(fp)) != WEOF && ch != '\n')
 					(void)putwchar(ch);
 			else
@@ -369,30 +425,37 @@ out:
 }
 
 static int
-is_delim(wchar_t ch)
+is_delim(delimiter delim, wchar_t ch)
 {
-	if (wflag) {
+	match (delim) {
+	case Blanks:
 		if (ch == ' ' || ch == '\t')
 			return 1;
-	} else {
+		break;
+	case Char(dchar, _):
 		if (ch == dchar)
 			return 1;
+		break;
 	}
 	return 0;
 }
 
 static int
-f_cut(FILE *fp, const char *fname)
+f_cut(FILE *fp, const char *fname, delimiter delim, bool sflag)
 {
 	wchar_t ch;
-	int field, i, isdelim;
+	int field, isdelim;
 	size_t pos;
-	str line, p, chmb;
+	str dcharmb, line, p, chmb;
 	int output;
 	char *lbuf = NULL;
 	size_t clen, bufsize = 0, reallen;
 	ssize_t lbuflen;
 
+	/* -w joins the fields with a tab, the default delimiter. */
+	dcharmb = "\t";
+	if (case Char(_, mb) = delim)
+		dcharmb = mb;
 	defer free(lbuf);
 	while ((lbuflen = getline(&lbuf, &bufsize, fp)) >= 0) {
 		reallen = lbuflen;
@@ -419,7 +482,7 @@ f_cut(FILE *fp, const char *fname)
 			if (clen == 0)
 				clen = 1;
 			/* this should work if newline is delimiter */
-			if (is_delim(ch))
+			if (is_delim(delim, ch))
 				isdelim = 1;
 			if (ch == '\n') {
 				if (!isdelim && !sflag)
@@ -433,8 +496,8 @@ f_cut(FILE *fp, const char *fname)
 		pos = 1;
 		for (field = maxval, p = line; field; --field, ++pos) {
 			if (positions[pos] && output++)
-				for (i = 0; dcharmb[i] != '\0'; i++)
-					putchar(dcharmb[i]);
+				(void)fwrite(dcharmb.data, 1, dcharmb.len,
+				    stdout);
 			for (;;) {
 				clen = mbrtowc(&ch, p.data, p.len, NULL);
 				if (clen == (size_t)-1 || clen == (size_t)-2) {
@@ -445,10 +508,11 @@ f_cut(FILE *fp, const char *fname)
 					clen = 1;
 				chmb = slice_sub(p, 0, clen);
 				p = slice_sub(p, clen, p.len);
-				if (ch == '\n' || is_delim(ch)) {
+				if (ch == '\n' || is_delim(delim, ch)) {
 					/* compress whitespace */
-					if (wflag && ch != '\n')
-						while (is_delim(p[0]))
+					if (case Blanks = delim)
+						while (ch != '\n' &&
+						    is_delim(delim, p[0]))
 							p = slice_sub(p, 1,
 							    p.len);
 					break;
@@ -461,10 +525,10 @@ f_cut(FILE *fp, const char *fname)
 				break;
 		}
 		if (ch != '\n') {
-			if (autostop) {
+			if (case Some = autostop) {
 				if (output)
-					for (i = 0; dcharmb[i] != '\0'; i++)
-						putchar(dcharmb[i]);
+					(void)fwrite(dcharmb.data, 1,
+					    dcharmb.len, stdout);
 				for (; (ch = p[0]) != '\n';
 				    p = slice_sub(p, 1, p.len))
 					(void)putchar(ch);
