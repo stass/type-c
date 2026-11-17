@@ -28,6 +28,16 @@ just under Parser.max_depth deep, so the parser accepts it.
   >     ./fuzz.exe "$target"
   > done
 
+The parser target runs the reader and the parser alone, whose work is
+linear in the input. The declaration reader's is bounded by the
+instance budget instead, so it runs in the lowering target, whose
+bounds are those of the budgets. A source that nearly fills the budget
+passes both.
+
+  $ ./budget_probe.exe > probe.i
+  $ ./fuzz.exe parser probe.i
+  $ ./fuzz.exe lowering probe.i
+
 A target states its time limit in milliseconds.
 
   $ ./fuzz.exe -t parser

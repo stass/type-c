@@ -141,15 +141,20 @@ exception, broken property or memory beyond a bound linear in the input.
 The `reader` target checks that every text is read or refused with a
 printable message, and that an accepted text is spelled by its tokens
 and gaps, has only layout in the gaps and is emitted unchanged. The
-`parser` target parses every text the reader accepts and reads the
-file-scope declarations of every unit that parses, for an LP64 target;
-each stage must accept or refuse with a printable message, every node's
-span must hold its parts in token order, and parsing again must give
-the same tree. The `lowering` target lowers every unit whose
+`parser` target parses every text the reader accepts, with the keywords
+of an LP64 target; each stage must accept or refuse with a printable
+message, every node's span must hold its parts in token order, and
+parsing again must give the same tree. It stops at the parser, so that
+its linear bounds below check that parsing stays linear. The `lowering`
+target runs every stage after the parser: it reads the file-scope
+declarations of every unit that parses, lowers every unit whose
 declarations are read, with the builtin trap, and emits it as `typec`
-does; lowering must refuse with a printable message or make edits
-charged at most the output limit (design 3.5 rule 7), which emission
-applies without raising. The parser runs on a fiber whose stack is
+does. Each stage must refuse with a printable message or accept;
+lowering must make edits charged at most the output limit (design 3.5
+rule 7), which emission applies without raising. The declaration
+reader runs only there, because the instance budget, not the input,
+bounds its work; the `lowering` seeds therefore hold every `parser`
+seed, as symbolic links. The parser runs on a fiber whose stack is
 limited to 32K words (`test/support/small_stack.ml`), which holds its
 deepest nesting (`Parser.max_nesting`), so that recursion growing with
 the input overflows it and is reported. The normal build compiles
@@ -212,6 +217,14 @@ output directory shows the totals), and `triage` minimises the crashes
 and hangs of every instance, so a bug that several found is minimised
 once for each.
 
+A running campaign keeps the harness it started with. After a change to
+what a target runs, stop its campaign, run `fuzz.sh build`, and restart
+it; its old crashes and hangs may be ones the new target no longer
+reaches, which `triage` reports as not crashing again. An instance that
+has run before resumes from its own queue and does not read the seeds;
+only an instance new to `out/TARGET`, such as a new secondary, starts
+from the current seeds, and the others take its finds from it.
+
 The generated seeds, in any directory of `seeds/` there (`seeds/headers`
 for those of `fuzz.sh seeds`; preprocessed units of the corpus under
 16 KiB, thinned with `afl-cmin`, can go in another), go to every target. So
@@ -240,7 +253,9 @@ The limits of one execution, whose values are in `fuzz.ml` and
   49 aliases 8 deep over structures
   (`Budget_probes.aliases_over_structures`), which nearly fills the
   instance budget and writes 11 MB of C, takes 1.7 s in the
-  instrumented harness.
+  instrumented harness. The declaration reader runs only under these
+  bounds, so a step of it that is superlinear in the input but makes no
+  instances is reported only once it passes them.
 * Memory: the harness fails when the major heap peaks above
   `heap_words_fixed` plus `heap_words_per_input_byte` per input byte,
   about twice what the densest input needs. The `lowering` target may

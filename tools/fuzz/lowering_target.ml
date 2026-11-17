@@ -10,9 +10,12 @@
    The parser runs on the small stack, as in the parser target; the
    stages after it keep the default one.
 
-   The parser target checks the promises of the tree; this one checks
-   those of lowering and emission. A crash of an earlier stage shows
-   here too, and its backtrace names the stage. *)
+   The parser target checks the promises of the tree; this one is the
+   only target that reads declarations, and it checks the promises of
+   lowering and emission. Its seeds include every seed of the parser
+   target, so that the declaration reader starts from the same texts. A
+   crash of an earlier stage shows here too, and its backtrace names the
+   stage. *)
 
 open Typec_cpp
 open Typec_test_support

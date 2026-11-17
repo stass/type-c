@@ -1215,17 +1215,22 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Fuzzing
 
-- [High] The `parser` fuzz target reads declarations
-  (`Declarations.read`), whose work the instance budget of design 3.5
-  rule 7 bounds rather than the input, under the linear heap bound and
-  the 300 ms limit of the reader and the parser, so a budgeted input is
-  reported as a crash and a hang. `Budget_probes.aliases_over_structures
-  8 50` (2.3 KB) peaks at 15 million words against a bound of 330 000
-  and runs 0.8 s. Either move the declaration reader into the `lowering`
-  target, whose bounds are those of the budgets, and give it the parser
-  seeds that drive the checker; or give the `parser` target the
-  budgeted bounds, which blunts its checks of the parser's linearity.
-  The first is simpler and keeps both targets sharp.
+- [Medium] The `lowering` seeds hold every `parser` seed as a symbolic
+  link made by hand, so a new parser seed without its link silently
+  misses the declaration reader, and a checkout without symbolic links
+  turns each into a path the reader refuses. Send every committed seed
+  to every target, as `gather_seeds` in `tools/fuzz/fuzz.sh` already
+  does for the generated ones, have `seeds.t` run each through each,
+  and delete the links.
+- [Low] A resumed instance never reads the seeds again, so new
+  committed seeds reach a campaign only through a new instance. Giving
+  the main instance `-F` on the seed directory would have AFL++ import
+  them on every run.
+- [Low] The time and heap figures of the `parser` target in
+  `tools/fuzz/fuzz.ml` and the docs' fuzzing limits (8K additions in
+  65 ms, 50 words per byte) were measured with the declaration reader
+  in that target; measure them again in the instrumented harness and
+  adjust the 300 ms limit if the parser alone is much faster.
 - [Medium] `tools/fuzz/seeds.t` passes a seed that its target refuses,
   as the harness exits 0 for a refusal too, so a seed that never reaches
   the stage it is for goes unnoticed (four parser seeds lacked the line

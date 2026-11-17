@@ -3,11 +3,11 @@
 
 ; The fuzz harness. fuzz.sh builds the harness alias with an
 ; AFL-instrumented compiler; the normal build compiles it too, and
-; seeds.t runs it on the seeds.
+; seeds.t runs it on the seeds and on the source budget_probe prints.
 
 (executable
  (name fuzz)
- (modules :standard \ dictionary)
+ (modules :standard \ dictionary budget_probe)
  (libraries
   unix
   typec_cpp
@@ -22,6 +22,11 @@
  (modules dictionary)
  (libraries typec_cpp typec_syntax))
 
+(executable
+ (name budget_probe)
+ (modules budget_probe)
+ (libraries typec_test_support))
+
 (rule
  (with-stdout-to
   fuzz.dict
@@ -34,4 +39,4 @@
  (deps fuzz.exe fuzz.dict))
 
 (cram
- (deps fuzz.exe (source_tree seeds)))
+ (deps fuzz.exe budget_probe.exe (source_tree seeds)))
