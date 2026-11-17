@@ -8,8 +8,9 @@
 # 5.4 that tools/fuzz uses. The Clang comes with its sanitizer runtimes,
 # as the tests of test/run link with -fsanitize. The base image is pinned by the digest of its
 # multi-platform index; the compilers, the C library's and the kernel's
-# headers, and file, which the own suite of the corpus's chibicc runs, by
-# package version, the same on both platforms; the key of
+# headers, file (the own suite of the corpus's chibicc runs it), and ninja
+# and CMake (the tests of the build rules run them), by package version,
+# the same on both platforms; the key of
 # apt.llvm.org by fingerprint; OCaml and dune by a commit of
 # opam-repository. Their own dependencies follow Debian 13, and Clang's
 # apt.llvm.org. A pinned version that leaves the archive fails the build
@@ -21,7 +22,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       gcc=4:14.2.0-1 gcc-14=14.2.0-19 \
       libc6-dev=2.41-12+deb13u4 linux-libc-dev=6.12.117-1 \
-      file=1:5.46-5 \
+      file=1:5.46-5 ninja-build=1.12.1-1 cmake=3.31.6-2 \
       csmith=2.3.0-8 libcsmith-dev=2.3.0-8 m4=1.4.19-8 \
       opam=2.3.0-1+deb13u2 \
       ca-certificates curl gpg git make patch unzip bzip2 \

@@ -32,8 +32,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Emitter.limited` give the output's trap back with the edits.
 - [Low] The tests of the build rules (`make_rule.t`, `ninja_rule.t`,
   `cmake_rule.t`) run only where the host has the tool: the Alpine image
-  has no make, and no host image has ninja or CMake. Add them to the
-  images and to the FreeBSD host so that every host runs the rules.
+  has no make, ninja or CMake, and the FreeBSD host has no ninja or
+  CMake. Add them to the Alpine image, and have `freebsd.sh` require
+  them as it does gmake once the owner has installed the ports there, so
+  that every host runs the rules.
 - [Low] `Target_query.query` starts and waits for the backend itself,
   so in a compilation it hands the backend `typec`'s stdin, not
   `/dev/null`, and does not pass on a caught signal as `Process.wait`
