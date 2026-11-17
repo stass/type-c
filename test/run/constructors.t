@@ -121,5 +121,5 @@ hide the one that the lowered constructor names.
   > }
   > EOF
   $ typec --cc=$clang -o clang-enumerator enumerator.tc
-  typec: enumerator.tc:5: the enumerator `e_A` is declared again, as a type declaration claims it (design 10.1 rule 6) [TC0004]
+  enumerator.tc:5: error: the enumerator `e_A` is declared again, as a type declaration claims it [claimed-name]
   [80]

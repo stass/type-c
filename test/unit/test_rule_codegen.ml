@@ -3,14 +3,20 @@
 
 open Rule_codegen
 
-let live name code =
-  Live { name; code; clause = Some "design 1"; meaning = name ^ " refuses." }
+let live constructor name =
+  Live
+    {
+      constructor;
+      name;
+      clause = "design 1";
+      meaning = constructor ^ " refuses.";
+    }
 
-let retired name code =
-  Retired { name; code; meaning = "The retired refusal." }
+let retired name = Retired { name; meaning = "The retired refusal." }
 
 (* The middle row of this table is retired. *)
-let with_retired = [ live "First" 1; retired "Second" 2; live "Third" 3 ]
+let with_retired =
+  [ live "First" "first"; retired "second"; live "Third" "third-rule" ]
 
 let accepted rows =
   match check rows with () -> true | exception Invalid_table _ -> false
@@ -26,8 +32,7 @@ let contains text part =
   in
   from 0
 
-(* Rows with the codes 1 to 9999, the most that four digits hold. *)
-let four_digit_rows = List.init 9999 (fun i -> live "Row" (i + 1))
+let accepts_name name = accepted [ live "Rule" name ]
 
 let failures () =
   let catalogue_of_all = catalogue with_retired in
@@ -35,38 +40,40 @@ let failures () =
   List.filter_map
     (fun (name, holds) -> if holds then None else Some name)
     [
-      ("codes in sequence with a retired row pass", accepted with_retired);
-      ( "a new rule cannot take a retired code",
-        not (accepted [ live "First" 1; retired "Second" 2; live "Reuse" 2 ])
+      ("unique names with a retired row pass", accepted with_retired);
+      ( "a new rule cannot take a retired name",
+        not (accepted (with_retired @ [ live "Reuse" "second" ])) );
+      ( "two live rules cannot share a name",
+        not (accepted [ live "First" "same"; live "Second" "same" ]) );
+      ( "a retired name cannot repeat a live one",
+        not (accepted [ live "First" "first"; retired "first" ]) );
+      ( "a name is lowercase words of letters and digits",
+        accepts_name "match-arm-end" && accepts_name "c11-rule2" );
+      ("a name is not empty", not (accepts_name ""));
+      ("a name has no uppercase letter", not (accepts_name "Arm-end"));
+      ("a name has no underscore", not (accepts_name "arm_end"));
+      ("a name begins with a letter", not (accepts_name "2-arms"));
+      ( "a name has no empty word",
+        not
+          (accepts_name "-arm" || accepts_name "arm-" || accepts_name "a--b")
       );
-      ( "a new rule cannot skip a code",
-        not (accepted [ live "First" 1; retired "Second" 2; live "Skip" 4 ])
-      );
-      ( "a deleted row leaves a hole",
-        not (accepted [ live "First" 1; live "Third" 3 ]) );
-      ( "a retired code cannot repeat a live one",
-        not (accepted [ live "First" 1; retired "Again" 1 ]) );
-      ( "a retired code cannot fall below an earlier one",
-        not (accepted [ retired "A" 1; retired "B" 3; retired "C" 2 ]) );
-      ("four digits hold 9999 rules", accepted four_digit_rows);
-      ( "a live code has four digits at most",
-        not (accepted (four_digit_rows @ [ live "Last" 10000 ])) );
-      ( "a retired code has four digits at most",
-        not (accepted (four_digit_rows @ [ retired "Last" 10000 ])) );
+      ( "a retired name is checked as a live one",
+        not (accepted [ retired "Moved text" ]) );
       ( "the generators refuse an unchecked table",
-        refused ocaml [ live "First" 2 ] && refused catalogue [ live "First" 2 ]
-      );
-      ( "the catalogue lists the retired code",
-        contains catalogue_of_all "## Retired codes"
-        && contains catalogue_of_all
-             "| TC0002 | `Second` | The retired refusal. |" );
-      ( "the catalogue lists the live rules",
-        contains catalogue_of_all "| TC0003 | `Third` |" );
+        refused ocaml [ live "First" "First" ]
+        && refused catalogue [ live "First" "First" ] );
+      ( "the catalogue lists the retired name",
+        contains catalogue_of_all "## Retired names"
+        && contains catalogue_of_all "| `second` | The retired refusal. |" );
+      ( "the catalogue lists the live rules with their clauses",
+        contains catalogue_of_all "| `third-rule` | design 1 |" );
       ( "the catalogue of live rules has no retired section",
-        not (contains (catalogue [ live "First" 1 ]) "## Retired codes") );
-      ( "Rule has no constructor for a retired row",
-        not (contains source "TC0002" || contains source "Second") );
-      ("Rule keeps the live rules", contains source "| Third -> \"TC0003\"");
+        not (contains (catalogue [ live "First" "first" ]) "## Retired names")
+      );
+      ( "Rule has no name of a retired row",
+        not (contains source "\"second\"") );
+      ( "Rule keeps the live rules",
+        contains source "| Third -> \"third-rule\"" );
     ]
 
 let () =

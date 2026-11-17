@@ -609,7 +609,7 @@ let refuse_early_breaks state breaks items =
         (Rule.message Early_break
            "a break that leaves the match before the end of its arm; put \
             the `break` last in the arm, or leave the loop with `goto` or \
-            `return`, or use a single-pattern test (design 4.6)")
+            `return`, or use a single-pattern test")
 
 (* What the continue at [start] leaves. *)
 let continue_target state start =
@@ -703,10 +703,10 @@ let refuse_pragma_before_defer state ~keyword =
     | Identifier _ | Number | Character _ | String _ | Punctuator _ -> ()
 
 (* A construct that a later work package implements, at the cursor. *)
-let fail_not_implemented state ~section ~package text =
+let fail_not_implemented state ~package text =
   fail state
     (Rule.message Not_implemented
-       (Printf.sprintf "%s (design %s; work package %s)" text section package))
+       (Printf.sprintf "%s (work package %s)" text package))
 
 let found state =
   match peek state with
@@ -1000,8 +1000,8 @@ let end_definition state (name : identifier) (declared : declared)
    typec does not implement yet. *)
 let refuse_universe_name state name =
   match Universe.find name with
-  | Some { meaning = Not_implemented { section; package }; _ } ->
-      fail_not_implemented state ~section ~package
+  | Some { meaning = Not_implemented { package }; _ } ->
+      fail_not_implemented state ~package
         (quoted name ^ " is a universe name that typec does not implement yet")
   | Some { meaning = Generic; _ } | None -> ()
 
@@ -4822,7 +4822,7 @@ and block_declaration state =
       fail state
         (Rule.message Profile
            "a function definition in a block (a GNU nested function) is \
-            outside the GNU profile (design 13.3)")
+            outside the GNU profile")
   | start -> declaration_of_start state start
 
 (* External declarations (C11 6.9). *)

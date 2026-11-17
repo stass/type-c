@@ -5,7 +5,7 @@ The C comparison catalogue (plan, Stage 1 exit gate 6): each entry
 pairs a C program that holds an error with its Type-C counterpart. For
 the C program it records, for GCC and for Clang, which warnings
 -Wall -Wextra give and which flag outside them would; for the Type-C
-program, the code of the rule that refuses it. Each pair also compiles
+program, the name of the rule that refuses it. Each pair also compiles
 without the error, warning-free on each backend, so that the refusal
 is of the error alone.
 
@@ -88,7 +88,7 @@ catches the int form.
 A match without a default fails at every match that misses the new
 constructor. A match with a default hides it, as C's does: the default
 covers Add as it covers Neg. Type-C refuses a default that covers no
-constructor (TC0019), so the vacuous default that C writes "just in
+constructor (match-default), so the vacuous default that C writes "just in
 case" cannot be written ahead of a later constructor.
 
   $ cat > expr.tc <<'EOF'
@@ -126,21 +126,21 @@ case" cannot be written ahead of a later constructor.
   >   done
   > done
   $ typec --cc=$clang -DADDED -c expr.tc -o tc.o
-  typec: expr.tc:10: the match does not cover the constructor 'Add' of the variant 'expr' (design 4.2 rule 1) [TC0018]
+  expr.tc:10: error: the match does not cover the constructor 'Add' of the variant 'expr' [match-coverage]
   [80]
   $ typec --cc=$clang -Wall -Wextra -Werror -DADDED -DWITH_DEFAULT \
   >   -c expr.tc -o tc.o
   $ typec --cc=$clang -DVACUOUS_DEFAULT -c expr.tc -o tc.o
-  typec: expr.tc:21: the `default` of a match covers no constructor (design 4.2 rule 2) [TC0019]
+  expr.tc:21: error: the `default` of a match covers no constructor [match-default]
   [80]
 
 2. A payload read outside a match (design 3.2 rule 6): under the wrong
 tag, or with no tag test at all. C has no warning for either; the read
 gives the bytes of another member. Type-C text reaches neither the tag
 nor the payload: the wrong-tag form is refused first for naming the
-tag's enumerator, which Type-C text cannot use (TC0004); the access
+tag's enumerator, which Type-C text cannot use (claimed-name); the access
 itself, here in the form without a tag test, is refused as an
-operation on a variant (TC0007).
+operation on a variant (variant-operation).
 
   $ cat > token.c <<'EOF'
   > enum token_kind { TOKEN_NUMBER, TOKEN_NAME };
@@ -191,10 +191,10 @@ operation on a variant (TC0007).
   >   typec --cc="$cc" -Wall -Wextra -Werror -c token.tc -o tc.o
   > done
   $ typec --cc=$clang -DWRONG_TAG -c token.tc -o tc.o
-  typec: token.tc:4: the enumerator `token_Name` is not available to Type-C text, as a type declaration claims it (design 10.1 rule 6) [TC0004]
+  token.tc:4: error: the enumerator `token_Name` is not available to Type-C text, as a type declaration claims it [claimed-name]
   [80]
   $ typec --cc=$clang -DNO_TAG_TEST -c token.tc -o tc.o
-  typec: token.tc:7: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  token.tc:7: error: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [80]
 
 3. A missing break at the end of an arm (design 4.3). GCC's -Wextra
@@ -245,7 +245,7 @@ gives -Wimplicit-fallthrough; Clang gives it only when asked.
   >   typec --cc="$cc" -Wall -Wextra -Werror -c cost.tc -o tc.o
   > done
   $ typec --cc=$clang -DMISSING_BREAK -c cost.tc -o tc.o
-  typec: cost.tc:5: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  cost.tc:5: error: the end of the match arm can be reached [match-arm-end]
   [80]
 
 4. A value of one distinct type used as another or as its
@@ -254,7 +254,7 @@ In C the ids are typedefs of one type, so no warning applies, not even
 -Wconversion. A structure of one member for each id would catch all
 three, but it also refuses the operators that design 3.4 allows on a
 distinct type, such as == and a truth test. Type-C refuses the implicit
-conversions (TC0012) and the operator (TC0011).
+conversions (distinct-conversion) and the operator (distinct-operation).
 
   $ cat > ids.c <<'EOF'
   > typedef unsigned user_id;
@@ -293,13 +293,13 @@ conversions (TC0012) and the operator (TC0011).
   >   typec --cc="$cc" -Wall -Wextra -Werror -c ids.tc -o tc.o
   > done
   $ typec --cc=$clang -DSWAPPED -c ids.tc -o tc.o
-  typec: ids.tc:6: a value of type 'group_id' does not convert to 'user_id' without a cast (design 3.4) [TC0012]
+  ids.tc:6: error: a value of type 'group_id' does not convert to 'user_id' without a cast [distinct-conversion]
   [80]
   $ typec --cc=$clang -DRAW -c ids.tc -o tc.o
-  typec: ids.tc:8: a value of type 'user_id' does not convert to 'unsigned int' without a cast (design 3.4) [TC0012]
+  ids.tc:8: error: a value of type 'user_id' does not convert to 'unsigned int' without a cast [distinct-conversion]
   [80]
   $ typec --cc=$clang -DPRODUCT -c ids.tc -o tc.o
-  typec: ids.tc:11: a value of the distinct type 'user_id' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
+  ids.tc:11: error: a value of the distinct type 'user_id' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
   [80]
 
 5. A private value made outside its owner (design 9.2). A C module that
@@ -307,7 +307,7 @@ passes its values by value must show their layout in its header, and
 then any file can build one, as a compound literal does here. An
 opaque structure would stop it, at the cost of passing by value. In
 Type-C a private variant shows its constructors to every file but lets
-only its owner build them: a second Type-C file is refused (TC0013),
+only its owner build them: a second Type-C file is refused (private-creation),
 apart from the zero value {0}. The rule is between Type-C files; a C
 file reads and writes the layout of design 10.1 as C does, and the
 owner builds the values, which private.t shows.
@@ -357,7 +357,7 @@ owner builds the values, which private.t shows.
   >   typec --cc="$cc" -Wall -Wextra -Werror -Iinclude -c forge.tc -o tc.o
   > done
   $ typec --cc=$clang -Iinclude -DFORGED -c forge.tc -o tc.o
-  typec: forge.tc:4: the variant 'insn' is private to 'include/insn.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+  forge.tc:4: error: the variant 'insn' is private to 'include/insn.tci', so only the text of its owner creates its values [private-creation]
   [80]
 
 6. An invalid tag, made by a cast or through a union (design 4.5). C

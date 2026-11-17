@@ -123,27 +123,27 @@ breaks it, naming the rule.
 
   $ printf 'type t = int;\ntype t = long;\n' > twice.tc
   $ ./golden.exe twice.tc
-  twice.tc:2: `t` is declared twice in one scope, and one of them is a type declaration (design 3.1 rule 5) [TC0003]
+  twice.tc:2: error: `t` is declared twice in one scope, and one of them is a type declaration [type-redeclaration]
   [1]
   $ printf 'type t = t *;\n' > own.tc
   $ ./golden.exe own.tc
-  own.tc:1: `t` is used in its own definition, which is not a structure or union specifier (design 3.1 rule 2) [TC0002]
+  own.tc:1: error: `t` is used in its own definition, which is not a structure or union specifier [self-reference]
   [1]
   $ printf 'type t = int[t];\n' > own_operand.tc
   $ ./golden.exe own_operand.tc
-  own_operand.tc:1: `t` is used in its own definition, which is not a structure or union specifier (design 3.1 rule 2) [TC0002]
+  own_operand.tc:1: error: `t` is used in its own definition, which is not a structure or union specifier [self-reference]
   [1]
   $ printf 'type pair = struct { int a; };\nstruct pair { int b; };\n' > tag.tc
   $ ./golden.exe tag.tc
-  tag.tc:2: the tag `pair` is declared again, as a type declaration claims it (design 10.1 rule 6) [TC0004]
+  tag.tc:2: error: the tag `pair` is declared again, as a type declaration claims it [claimed-name]
   [1]
   $ printf 'type node;\nstruct node *p;\n' > named.tc
   $ ./golden.exe named.tc
-  named.tc:2: the tag `node` is not available to Type-C text, as a type declaration claims it (design 10.1 rule 6) [TC0004]
+  named.tc:2: error: the tag `node` is not available to Type-C text, as a type declaration claims it [claimed-name]
   [1]
   $ printf 'int __tc_x;\n' > generated.tc
   $ ./golden.exe generated.tc
-  generated.tc:1: `__tc_x` begins with `__tc_`, which is reserved for the names that typec generates (design 2.3) [TC0001]
+  generated.tc:1: error: `__tc_x` begins with `__tc_`, which is reserved for the names that typec generates [generated-name]
   [1]
 
 A variant (design 10.1) becomes the structure and typedef, the
@@ -213,31 +213,31 @@ Derived names, field types and constructor names are checked.
 
   $ printf 'type e = | A | A;\n' > constructors.tc
   $ ./golden.exe constructors.tc
-  constructors.tc:1: `A` names two constructors of one variant (design 3.2 rule 2) [TC0005]
+  constructors.tc:1: error: `A` names two constructors of one variant [duplicate-constructor]
   [1]
   $ printf 'type e = | try;\n' > try.tc
   $ ./golden.exe try.tc
-  try.tc:1: `try` cannot name a constructor, as it is a word of Type-C (design 3.2 rule 2) [TC0025]
+  try.tc:1: error: `try` cannot name a constructor, as it is a word of Type-C [reserved-constructor]
   [1]
   $ printf 'type e = | A | defer;\n' > defer.tc
   $ ./golden.exe defer.tc
-  defer.tc:1: `defer` cannot name a constructor, as it is a word of Type-C (design 3.2 rule 2) [TC0025]
+  defer.tc:1: error: `defer` cannot name a constructor, as it is a word of Type-C [reserved-constructor]
   [1]
   $ printf 'type e = | str(int x);\n' > str.tc
   $ ./golden.exe str.tc
-  str.tc:1: `str` cannot name a constructor, as it is a universe name (design 3.2 rule 2) [TC0025]
+  str.tc:1: error: `str` cannot name a constructor, as it is a universe name [reserved-constructor]
   [1]
   $ printf 'type e = | result;\n' > result.tc
   $ ./golden.exe result.tc
-  result.tc:1: `result` cannot name a constructor, as it is a universe name (design 3.2 rule 2) [TC0025]
+  result.tc:1: error: `result` cannot name a constructor, as it is a universe name [reserved-constructor]
   [1]
   $ printf 'void f(void) {\n  type e;\n  type e = | slice;\n}\n' > block.tc
   $ ./golden.exe block.tc
-  block.tc:3: `slice` cannot name a constructor, as it is a universe name (design 3.2 rule 2) [TC0025]
+  block.tc:3: error: `slice` cannot name a constructor, as it is a universe name [reserved-constructor]
   [1]
   $ printf 'int e_A;\ntype e = | A;\n' > derived.tc
   $ ./golden.exe derived.tc
-  derived.tc:2: the variant `e` claims the enumerator `e_A`, which this scope declares already (design 10.1 rule 6) [TC0004]
+  derived.tc:2: error: the variant `e` claims the enumerator `e_A`, which this scope declares already [claimed-name]
   [1]
   $ for decl in 'type _Static = | assert;' 'type __x = struct { int a; };' \
   >     'void f(void) { type _Thread = | local; }' 'type _ = | attribute__;' \
@@ -250,24 +250,24 @@ Derived names, field types and constructor names are checked.
   >   printf '%s\n' "$decl" > reserved.tc
   >   ./golden.exe reserved.tc
   > done
-  reserved.tc:1: `_Static` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `__x` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_Thread` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `__x` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_Y` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `__s` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `__v` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `__g` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `a__b` cannot name a type declaration, as it contains `__` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `a_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `vector_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_X` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_x` cannot name a type declaration at file scope, as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_v` cannot name a type declaration at file scope, as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_x_lower` cannot name a type declaration at file scope, as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_A_` cannot name a type declaration, as it ends with `_` (design 3.1 rules 6 and 7) [TC0029]
-  reserved.tc:1: `_A` cannot name a type declaration, as it begins with `_` and an uppercase letter (design 3.1 rules 6 and 7) [TC0029]
+  reserved.tc:1: error: `_Static` cannot name a type declaration, as it begins with `_` and an uppercase letter [reserved-type-name]
+  reserved.tc:1: error: `__x` cannot name a type declaration, as it contains `__` [reserved-type-name]
+  reserved.tc:1: error: `_Thread` cannot name a type declaration, as it begins with `_` and an uppercase letter [reserved-type-name]
+  reserved.tc:1: error: `_` cannot name a type declaration, as it ends with `_` [reserved-type-name]
+  reserved.tc:1: error: `__x` cannot name a type declaration, as it contains `__` [reserved-type-name]
+  reserved.tc:1: error: `_Y` cannot name a type declaration, as it begins with `_` and an uppercase letter [reserved-type-name]
+  reserved.tc:1: error: `__s` cannot name a type declaration, as it contains `__` [reserved-type-name]
+  reserved.tc:1: error: `__v` cannot name a type declaration, as it contains `__` [reserved-type-name]
+  reserved.tc:1: error: `__g` cannot name a type declaration, as it contains `__` [reserved-type-name]
+  reserved.tc:1: error: `a__b` cannot name a type declaration, as it contains `__` [reserved-type-name]
+  reserved.tc:1: error: `a_` cannot name a type declaration, as it ends with `_` [reserved-type-name]
+  reserved.tc:1: error: `vector_` cannot name a type declaration, as it ends with `_` [reserved-type-name]
+  reserved.tc:1: error: `_X` cannot name a type declaration, as it begins with `_` and an uppercase letter [reserved-type-name]
+  reserved.tc:1: error: `_x` cannot name a type declaration at file scope, as it begins with `_` [reserved-type-name]
+  reserved.tc:1: error: `_v` cannot name a type declaration at file scope, as it begins with `_` [reserved-type-name]
+  reserved.tc:1: error: `_x_lower` cannot name a type declaration at file scope, as it begins with `_` [reserved-type-name]
+  reserved.tc:1: error: `_A_` cannot name a type declaration, as it ends with `_` [reserved-type-name]
+  reserved.tc:1: error: `_A` cannot name a type declaration, as it begins with `_` and an uppercase letter [reserved-type-name]
   [1]
   $ for decl in 'type e = | _BitInt(int x);' 'type e = | __A;' \
   >     'type e = | A__B;' 'type e = | _a;' 'type f = | _a(int y);' \
@@ -277,16 +277,16 @@ Derived names, field types and constructor names are checked.
   >   printf '%s\n' "$decl" > member.tc
   >   ./golden.exe member.tc
   > done
-  member.tc:1: `_BitInt` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
-  member.tc:1: `__A` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
-  member.tc:1: `A__B` cannot name a constructor, as it contains `__` (design 3.2 rule 2) [TC0025]
-  member.tc:1: `_a` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
-  member.tc:1: `_a` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
-  member.tc:1: `_a` cannot name a constructor, as it begins with `_` (design 3.2 rule 2) [TC0025]
-  member.tc:1: `__x` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
-  member.tc:1: `_Y` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
-  member.tc:1: `_P` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
-  member.tc:1: `__f` cannot name a field, as C reserves it for any use (design 3.2 rule 2) [TC0025]
+  member.tc:1: error: `_BitInt` cannot name a constructor, as it begins with `_` [reserved-constructor]
+  member.tc:1: error: `__A` cannot name a constructor, as it begins with `_` [reserved-constructor]
+  member.tc:1: error: `A__B` cannot name a constructor, as it contains `__` [reserved-constructor]
+  member.tc:1: error: `_a` cannot name a constructor, as it begins with `_` [reserved-constructor]
+  member.tc:1: error: `_a` cannot name a constructor, as it begins with `_` [reserved-constructor]
+  member.tc:1: error: `_a` cannot name a constructor, as it begins with `_` [reserved-constructor]
+  member.tc:1: error: `__x` cannot name a field, as C reserves it for any use [reserved-constructor]
+  member.tc:1: error: `_Y` cannot name a field, as C reserves it for any use [reserved-constructor]
+  member.tc:1: error: `_P` cannot name a field, as C reserves it for any use [reserved-constructor]
+  member.tc:1: error: `__f` cannot name a field, as C reserves it for any use [reserved-constructor]
   [1]
   $ printf '%s\n' 'type f = | A(int _y) | B_;' \
   >   'void g(void) { type _x_lower = | A | B; type _y = int; type _1 = f; }' \
@@ -295,15 +295,15 @@ Derived names, field types and constructor names are checked.
   $ ./golden.exe usable.tc > usable.c
   $ printf 'type e = | A(e inner);\n' > recursive.tc
   $ ./golden.exe recursive.tc
-  recursive.tc:1: the field 'inner' of 'A' is not a complete object type, so it is not a value type (design 3.2 rule 4) [TC0006]
+  recursive.tc:1: error: the field 'inner' of 'A' is not a complete object type, so it is not a value type [field-type]
   [1]
   $ printf 'type e = | A(int values[4]);\n' > array.tc
   $ ./golden.exe array.tc
-  array.tc:1: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type (design 3.2 rule 4) [TC0006]
+  array.tc:1: error: the field 'values' of 'A' is an array, which a struct can wrap, so it is not a value type [field-type]
   [1]
   $ printf 'type e = | A(__builtin_va_list ap);\n' > va_list.tc
   $ ./golden.exe va_list.tc
-  va_list.tc:1: the field 'ap' of 'A' is a va_list, which is an array on some targets, so it is not a value type (design 3.2 rule 4) [TC0006]
+  va_list.tc:1: error: the field 'ap' of 'A' is a va_list, which is an array on some targets, so it is not a value type [field-type]
   [1]
 
 Type-C text takes a variant only whole (design 3.2 rule 6): no member
@@ -311,19 +311,19 @@ access, no comparison and no cast to or from one.
 
   $ printf 'type e = | A;\nint f(e v) { return v.tag; }\n' > member.tc
   $ ./golden.exe member.tc
-  member.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  member.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [1]
   $ printf 'type e = | A;\nint f(e v, e w) { return v == w; }\n' > equal.tc
   $ ./golden.exe equal.tc
-  equal.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  equal.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [1]
   $ printf 'type e = | A;\nvoid f(e v) { (void)(long)v; }\n' > cast.tc
   $ ./golden.exe cast.tc
-  cast.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  cast.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [1]
   $ printf 'type e = | A;\ne f(void) { return (e)0; }\n' > cast_to.tc
   $ ./golden.exe cast_to.tc
-  cast_to.tc:2: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  cast_to.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [1]
 
 The member path of offsetof, which expands to __builtin_offsetof, may
@@ -340,12 +340,12 @@ end at a variant but not reach into one.
   >   printf 'unsigned long f(void) { return __builtin_offsetof(struct s, %s); }\n' "$path" >> offsetof.tc
   >   ./golden.exe offsetof.tc
   > done
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
-  offsetof.tc:5: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [1]
   $ cat offsetof.h > offsetof.tc
   $ cat >> offsetof.tc <<'EOF'
@@ -443,7 +443,7 @@ implements them.
 
   $ printf 'str s;\n' > universe.tc
   $ ./golden.exe universe.tc
-  universe.tc:1: `str` is a universe name that typec does not implement yet (design 8; work package 3.4) [TC0023]
+  universe.tc:1: error: `str` is a universe name that typec does not implement yet (work package 3.4) [not-implemented]
   [1]
 
 A distinct type lowers to the typedef of its representation (design
@@ -459,19 +459,19 @@ implicit conversions that design 3.4 leaves out, each at its operation.
   d x = (d)0;
   $ printf 'type d = distinct int;\nint f(d a) { return a + 1; }\n' > add.tc
   $ ./golden.exe add.tc
-  add.tc:2: a value of the distinct type 'd' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
+  add.tc:2: error: a value of the distinct type 'd' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
   [1]
   $ printf 'type d = distinct int;\nd f(int a) { return a; }\n' > convert.tc
   $ ./golden.exe convert.tc
-  convert.tc:2: a value of type 'int' does not convert to 'd' without a cast (design 3.4) [TC0012]
+  convert.tc:2: error: a value of type 'int' does not convert to 'd' without a cast [distinct-conversion]
   [1]
   $ printf 'type d = distinct int;\nint f(d a, int b) { return a == b; }\n' > mixed.tc
   $ ./golden.exe mixed.tc
-  mixed.tc:2: the operands are not both of the distinct type 'd' (design 3.4) [TC0011]
+  mixed.tc:2: error: the operands are not both of the distinct type 'd' [distinct-operation]
   [1]
   $ printf 'struct s;\ntype d = distinct struct s;\n' > over.tc
   $ ./golden.exe over.tc
-  over.tc:2: the distinct type 'd' is not over an unqualified arithmetic or pointer type (design 3.4) [TC0010]
+  over.tc:2: error: the distinct type 'd' is not over an unqualified arithmetic or pointer type [distinct-base]
   [1]
 
 An atomic builtin that only moves the value of a distinct object takes
@@ -483,7 +483,7 @@ on the object refuses it (design 3.4).
   > void f(id *p) { (void)__atomic_fetch_add(p, 1, 5); }
   > EOF
   $ ./golden.exe atomic.tc
-  atomic.tc:2: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
+  atomic.tc:2: error: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
   [1]
   $ cat > exchange.tc <<'EOF'
   > type id = distinct unsigned;
@@ -493,26 +493,26 @@ on the object refuses it (design 3.4).
   > }
   > EOF
   $ ./golden.exe exchange.tc
-  exchange.tc:4: a value of type 'bid' does not convert to 'id' without a cast (design 3.4) [TC0012]
+  exchange.tc:4: error: a value of type 'bid' does not convert to 'id' without a cast [distinct-conversion]
   [1]
   $ cat > qualified.tc <<'EOF'
   > type id = distinct unsigned;
   > unsigned f(volatile id *p) { return __atomic_load_n(p, 5) * 2u; }
   > EOF
   $ ./golden.exe qualified.tc
-  qualified.tc:2: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it (design 3.4) [TC0011]
+  qualified.tc:2: error: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
   [1]
   $ cat > load.tc <<'EOF'
   > type id = distinct unsigned;
   > void f(id *p, unsigned *r) { __atomic_load(p, r, 5); }
   > EOF
   $ ./golden.exe load.tc
-  load.tc:2: a value of type 'unsigned int *' does not convert to 'id *' without a cast (design 3.4) [TC0012]
+  load.tc:2: error: a value of type 'unsigned int *' does not convert to 'id *' without a cast [distinct-conversion]
   [1]
   $ cat > store.tc <<'EOF'
   > type id = distinct unsigned;
   > void f(id *p) { __atomic_store_n(p, 0, 5); }
   > EOF
   $ ./golden.exe store.tc
-  store.tc:2: a value of type 'int' does not convert to 'id' without a cast (design 3.4) [TC0012]
+  store.tc:2: error: a value of type 'int' does not convert to 'id' without a cast [distinct-conversion]
   [1]

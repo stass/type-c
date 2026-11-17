@@ -52,20 +52,20 @@ any expression (rule 4); any other value still needs the owner's cast.
   $ client <<'EOF'
   > symbol forged(void) { return (symbol){7}; }
   > EOF
-  client.tc:2: a value of type 'int' does not convert to 'symbol' without a cast (design 3.4) [TC0012]
+  client.tc:2: error: a value of type 'int' does not convert to 'symbol' without a cast [distinct-conversion]
   $ client <<'EOF'
   > instruction forged(void) { return Move(1, 2); }
   > EOF
-  client.tc:2: the variant 'instruction' is private to 'include/ir.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+  client.tc:2: error: the variant 'instruction' is private to 'include/ir.tci', so only the text of its owner creates its values [private-creation]
   $ client <<'EOF'
   > instruction forged(void) { return instruction.Halt; }
   > EOF
-  client.tc:2: the variant 'instruction' is private to 'include/ir.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+  client.tc:2: error: the variant 'instruction' is private to 'include/ir.tci', so only the text of its owner creates its values [private-creation]
   $ client <<'EOF'
   > typedef symbol name;
   > name forged(void) { return (const name)7; }
   > EOF
-  client.tc:3: the distinct type 'symbol' is private to 'include/ir.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+  client.tc:3: error: the distinct type 'symbol' is private to 'include/ir.tci', so only the text of its owner creates its values [private-creation]
 
 A `#line` that names the owner changes the presumed location only, so
 the text after it is still the client's. (A GNU line marker with the
@@ -76,7 +76,7 @@ boundary, rule 4.)
   > # 1 "src/ir.tc"
   > instruction forged(void) { return Halt; }
   > EOF
-  src/ir.tc:1: the variant 'instruction' is private to 'include/ir.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+  src/ir.tc:1: error: the variant 'instruction' is private to 'include/ir.tci', so only the text of its owner creates its values [private-creation]
 
 A source file of another name, or `M.tc` included rather than compiled,
 is no owner; a private type that a `.tc` file declares belongs to it.
@@ -85,7 +85,7 @@ is no owner; a private type that a `.tc` file declares belongs to it.
   >  echo '# 2 "src/ir.tc" 2'; echo 'symbol s(void) { return (symbol)1; }') \
   >   > included.i
   $ ./golden.exe included.i | tail -n 1
-  src/ir.tc:2: the distinct type 'symbol' is private to 'include/ir.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+  src/ir.tc:2: error: the distinct type 'symbol' is private to 'include/ir.tci', so only the text of its owner creates its values [private-creation]
   $ printf '# 1 "a.tc"\ntype t = private | A;\nt f(void) { return A; }\n' \
   >   > local.i
   $ ./golden.exe local.i | grep -c 'tag = t_A'

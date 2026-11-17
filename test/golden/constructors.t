@@ -132,37 +132,37 @@ type has it, the typedef name is no expression.
 
   $ printf 'typedef int T;\ntype e = | T(int i);\ne v = (T(1));\n' > typedef_parenthesized.tc
   $ ./golden.exe typedef_parenthesized.tc
-  typedef_parenthesized.tc:3: expected a declarator, found `1`
+  typedef_parenthesized.tc:3: error: expected a declarator, found `1`
   [1]
   $ printf 'typedef int T;\ntype e = | T(int i);\nint n = T(1);\n' > typedef_untargeted.tc
   $ ./golden.exe typedef_untargeted.tc
-  typedef_untargeted.tc:3: expected an expression, found the type name 'T'
+  typedef_untargeted.tc:3: error: expected an expression, found the type name 'T'
   [1]
 
 Constructors are refused where they do not fit.
 
   $ printf 'type e = | A | B(int i);\ne x = B;\n' > arguments.tc
   $ ./golden.exe arguments.tc
-  arguments.tc:2: the constructor 'B' takes arguments (design 3.3) [TC0009]
+  arguments.tc:2: error: the constructor 'B' takes arguments [constructor-expression]
   [1]
   $ printf 'type e = | A | B(int i);\ne x = e.C;\n' > missing.tc
   $ ./golden.exe missing.tc
-  missing.tc:2: the variant 'e' has no constructor 'C' (design 3.3) [TC0009]
+  missing.tc:2: error: the variant 'e' has no constructor 'C' [constructor-expression]
   [1]
   $ printf 'type e = | A | B(int i);\ne x = A();\n' > empty.tc
   $ ./golden.exe empty.tc
-  empty.tc:2: the constructor 'A' has no fields, so it is written without parentheses (design 3.3) [TC0009]
+  empty.tc:2: error: the constructor 'A' has no fields, so it is written without parentheses [constructor-expression]
   [1]
   $ printf 'type e = | A;\nint n = A;\n' > untargeted.tc
   $ ./golden.exe untargeted.tc
-  untargeted.tc:2: 'A' is not declared (C11 6.5.1p2)
+  untargeted.tc:2: error: 'A' is not declared (C11 6.5.1p2)
   [1]
 
 A type name followed by `.` is a constructor in Type-C text only.
 
   $ printf 'type e = | A;\n# 1 "c.h" 1\ne x = e.A;\n' > c_text.tc
   $ ./golden.exe c_text.tc
-  c.h:1: expected an expression, found the type name `e`
+  c.h:1: error: expected an expression, found the type name `e`
   [1]
 
 `{0}` and `{}` are the only braced initialisers of a variant (design
@@ -202,11 +202,11 @@ array of variants.
   void f(void) { e v = {}; (void)v; }
   $ printf 'type e = | A | B(int i);\ne x = { 1, 2 };\n' > braced.tc
   $ ./golden.exe braced.tc
-  braced.tc:2: an initialiser reaches into the variant 'e'; the only braced initialisers of a variant are {0} and {} (design 3.2 rule 7) [TC0008]
+  braced.tc:2: error: an initialiser reaches into the variant 'e'; the only braced initialisers of a variant are {0} and {} [variant-initializer]
   [1]
   $ printf 'type e = | A | B(int i);\nstruct s { e v; int n; } z = { 0, 1 };\n' > elided.tc
   $ ./golden.exe elided.tc
-  elided.tc:2: an initialiser reaches into the variant 'e'; the only braced initialisers of a variant are {0} and {} (design 3.2 rule 7) [TC0008]
+  elided.tc:2: error: an initialiser reaches into the variant 'e'; the only braced initialisers of a variant are {0} and {} [variant-initializer]
   [1]
 
 A constructor's lowering names the variant's structure tag and its
@@ -234,7 +234,7 @@ not claimed, and a block may hide it.
   > }
   > EOF
   $ ./golden.exe header.tc
-  header.h:1: the enumerator `e_A` is declared again, as a type declaration claims it (design 10.1 rule 6) [TC0004]
+  header.h:1: error: the enumerator `e_A` is declared again, as a type declaration claims it [claimed-name]
   [1]
 
 A constructor expression stands within the scope of its variant's
@@ -251,7 +251,7 @@ would name an unrelated `e_A` or no structure at all.
   > }
   > EOF
   $ ./golden.exe carried.tc
-  carried.tc:3: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 3.3) [TC0024]
+  carried.tc:3: error: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant [constructor-scope]
   [1]
   $ cat > assigned.tc <<'EOF'
   > void f(void) {
@@ -261,7 +261,7 @@ would name an unrelated `e_A` or no structure at all.
   > }
   > EOF
   $ ./golden.exe assigned.tc
-  assigned.tc:4: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 3.3) [TC0024]
+  assigned.tc:4: error: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant [constructor-scope]
   [1]
   $ cat > qualified.tc <<'EOF'
   > void f(void) {
@@ -270,7 +270,7 @@ would name an unrelated `e_A` or no structure at all.
   > }
   > EOF
   $ ./golden.exe qualified.tc
-  qualified.tc:3: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 3.3) [TC0024]
+  qualified.tc:3: error: the constructor expression is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant [constructor-scope]
   [1]
 
 Within the scope, a construction stands anywhere: in the block of the

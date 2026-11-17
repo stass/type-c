@@ -169,7 +169,7 @@ application, citing the line of the universe text that needs it.
 
   $ printf 'struct s;\noption(struct s) o;\n' > incomplete.tc
   $ ./golden.exe incomplete.tc
-  incomplete.tc:2: in the instance 'option__T1s' that this application names, at <universe>:1: the field 'value' of 'Some' is not a complete object type, so it is not a value type (design 3.2 rule 4) [TC0006]
+  incomplete.tc:2: error: in the instance 'option__T1s' that this application names, at <universe>:1: the field 'value' of 'Some' is not a complete object type, so it is not a value type [field-type]
   [1]
 
 A generic that uses option in its definition reads it where the
@@ -293,7 +293,7 @@ text it is the bare generic.
   int g(void) { return f(1); }
   $ printf 'int f(result) int result; { return result; }\n' > old.tc
   $ ./golden.exe old.tc
-  old.tc:1: the generic type `result` names a type only in a type application, `result(...)` (design 3.5 rule 1) [TC0035]
+  old.tc:1: error: the generic type `result` names a type only in a type application, `result(...)` [generic-type-use]
   [1]
 
 A later name of the list is the parameter too, while a universe name
@@ -315,7 +315,7 @@ generic in C text as well.
   > int f(option x);
   > EOF
   $ ./golden.exe typed.i
-  typed.h:1: the generic type `option` names a type only in a type application, `option(...)` (design 3.5 rule 1) [TC0035]
+  typed.h:1: error: the generic type `option` names a type only in a type application, `option(...)` [generic-type-use]
   [1]
   $ cat > abstract.i <<'EOF'
   > # 1 "abstract.tc"
@@ -323,5 +323,5 @@ generic in C text as well.
   > int s = sizeof(void (*)(option));
   > EOF
   $ ./golden.exe abstract.i
-  abstract.h:1: the generic type `option` names a type only in a type application, `option(...)` (design 3.5 rule 1) [TC0035]
+  abstract.h:1: error: the generic type `option` names a type only in a type application, `option(...)` [generic-type-use]
   [1]

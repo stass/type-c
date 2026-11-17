@@ -12,7 +12,7 @@
 (cram
  (deps golden.exe))
 
-; Every rule has a negative golden case: some cram test shows its code.
+; Every rule has a negative golden case: some cram test shows its name.
 
 (test
  (name coverage)

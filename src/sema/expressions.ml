@@ -422,7 +422,7 @@ let needing need (unknown : Unknown.t) =
     | Typed_differently -> "which GCC types otherwise than Clang"
   in
   Rule.message Profile
-    (Printf.sprintf "%s depends on %s at %s:%d, %s (design 13.3)" need
+    (Printf.sprintf "%s depends on %s at %s:%d, %s" need
        unknown.construct unknown.location.file unknown.location.line why)
 
 let returns_void enclosing =
@@ -1136,7 +1136,7 @@ let builtin context span name =
         (Rule.message Profile
            (quote name ^ " is not a builtin of "
            ^ Target.compiler_name target.backend.compiler
-           ^ ", the backend (design 13.3)"))
+           ^ ", the backend"))
   | Of_other_architectures ->
       context.fail span
         (Rule.message Profile
@@ -1144,7 +1144,7 @@ let builtin context span name =
            ^ Target.compiler_name target.backend.compiler
            ^ ", the backend, on this target's architecture ("
            ^ Target.architecture_name target.architecture
-           ^ ") (design 13.3)"))
+           ^ ")"))
   | Not_builtin ->
       context.fail span
         (Rule.c_text (quote name ^ " is not declared (C11 6.5.1p2)"))
@@ -2585,7 +2585,7 @@ let rec builtin_rule context (callee : Tree.expression) =
 let fail_builtin_argument context span name requirement =
   context.fail span
     (Rule.message Profile
-       (Printf.sprintf "the first argument of %s is not %s (design 13.3)"
+       (Printf.sprintf "the first argument of %s is not %s"
           (quote name) requirement))
 
 (* The type of the object that [first] points to, as the result of
@@ -2665,7 +2665,7 @@ let choice context span condition first second =
       context.fail first
         (Rule.message Profile
            "the condition of '__builtin_choose_expr' is not an integer \
-            constant expression (design 13.3)")
+            constant expression")
 
 (* A call of a builtin that a rule types, with the types of its
    arguments. *)
@@ -2686,7 +2686,7 @@ let rule_call context span name (rule : Builtin_function.rule) arguments =
       [] ) ->
       context.fail span
         (Rule.message Profile
-           (quote name ^ " takes at least one argument (design 13.3)"))
+           (quote name ^ " takes at least one argument"))
 
 (* 6.5.2.2p5, or the rule of the builtin that [callee] names. *)
 let call context span callee (callee_typed : typed) arguments =
@@ -2725,8 +2725,7 @@ let void_fields_note (constructor : Ctype.constructor) =
   | [] -> ""
   | names ->
       Printf.sprintf
-        " (in this instance the type void removes the field(s) %s; design \
-         3.5 rule 6)"
+        " (in this instance the type void removes the field(s) %s)"
         (String.concat ", " (List.map quote names))
 
 (* The variant of [t] that names its constructors, unqualified. *)

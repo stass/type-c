@@ -42,7 +42,7 @@ let show_place _text result (token : Token.t) =
 
 let outcome show case =
   match Reader.read ~name:"in.i" case.text with
-  | Error error -> "error: " ^ Reader.error_message error
+  | Error error -> Reader.error_message error
   | Ok result when not (Spans.spell_text case.text result) ->
       "the tokens and gaps do not spell the text"
   | Ok result when not (Spans.gaps_are_layout case.text result) ->
@@ -80,7 +80,7 @@ let kind_cases =
       "punct <: | punct :> | punct <% | punct %> | punct %> | punct <: \
        | punct :";
     case "the longest digraph" "x %:%:% %:%"
-      ("error: in.i:1: " ^ stray_message "%:%:");
+      ("in.i:1: error: " ^ stray_message "%:%:");
     case "longest punctuators" "-> ++ -- << >> <= >= == != && || ... <<= >>="
       "punct -> | punct ++ | punct -- | punct << | punct >> | punct <= \
        | punct >= | punct == | punct != | punct && | punct || | punct ... \
@@ -122,82 +122,82 @@ let kind_cases =
       "pragma #pragma once | typec-pragma #pragma typec checked \
        | typec-pragma #  pragma  typec | pragma #pragma typecx \
        | pragma #pragma | id x";
-    case "a # inside a line" "a # b" ("error: in.i:1: " ^ stray_message "#");
+    case "a # inside a line" "a # b" ("in.i:1: error: " ^ stray_message "#");
     case "a ## inside a line" "a\nb ## c"
-      ("error: in.i:2: " ^ stray_message "##");
-    case "a %: inside a line" "a %: b" ("error: in.i:1: " ^ stray_message "%:");
+      ("in.i:2: error: " ^ stray_message "##");
+    case "a %: inside a line" "a %: b" ("in.i:1: error: " ^ stray_message "%:");
     case "a %:%: at the start of a line" "%:%: b"
-      ("error: in.i:1: " ^ stray_message "%:%:");
+      ("in.i:1: error: " ^ stray_message "%:%:");
     case "a pragma after a blank" "a\n # pragma pack(1)"
-      ("error: in.i:2: " ^ stray_message "#");
+      ("in.i:2: error: " ^ stray_message "#");
     case "a line marker after a tab" "\t# 1 \"f.h\" 1"
-      ("error: in.i:1: " ^ stray_message "#");
+      ("in.i:1: error: " ^ stray_message "#");
     case "a # after a vertical tab and a form feed" "\011\012#pragma x"
-      ("error: in.i:1: " ^ stray_message "#");
+      ("in.i:1: error: " ^ stray_message "#");
     case "a # after a carriage return that no newline follows"
-      "a\r#pragma x" ("error: in.i:1: " ^ stray_message "#");
+      "a\r#pragma x" ("in.i:1: error: " ^ stray_message "#");
     case "a %: that begins a line" "%:pragma x"
-      ("error: in.i:1: " ^ stray_message "%:");
+      ("in.i:1: error: " ^ stray_message "%:");
     case "a %: after a blank" " %: 1 \"f.h\""
-      ("error: in.i:1: " ^ stray_message "%:");
+      ("in.i:1: error: " ^ stray_message "%:");
     case "white space" "\t a \011\012\r\n b " "id a | id b";
     case "empty" "" "";
     case "unexpected character" "a @ b"
-      "error: in.i:1: unexpected character '@'";
-    case "unexpected backquote" "`" "error: in.i:1: unexpected character '`'";
+      "in.i:1: error: unexpected character '@'";
+    case "unexpected backquote" "`" "in.i:1: error: unexpected character '`'";
     case "unexpected control byte" "a\001"
-      "error: in.i:1: unexpected byte 0x01";
-    case "unexpected NUL byte" "\000" "error: in.i:1: unexpected byte 0x00";
-    case "a lone backslash" "a \\x" "error: in.i:1: unexpected character '\\'";
-    case "invalid UTF-8" "\xff" "error: in.i:1: invalid UTF-8";
-    case "truncated UTF-8" "a\xc3" "error: in.i:1: invalid UTF-8";
-    case "overlong UTF-8" "\xc0\x80" "error: in.i:1: invalid UTF-8";
-    case "UTF-8 surrogate" "\xed\xa0\x80" "error: in.i:1: invalid UTF-8";
+      "in.i:1: error: unexpected byte 0x01";
+    case "unexpected NUL byte" "\000" "in.i:1: error: unexpected byte 0x00";
+    case "a lone backslash" "a \\x" "in.i:1: error: unexpected character '\\'";
+    case "invalid UTF-8" "\xff" "in.i:1: error: invalid UTF-8";
+    case "truncated UTF-8" "a\xc3" "in.i:1: error: invalid UTF-8";
+    case "overlong UTF-8" "\xc0\x80" "in.i:1: error: invalid UTF-8";
+    case "UTF-8 surrogate" "\xed\xa0\x80" "in.i:1: error: invalid UTF-8";
     case "short universal character name" "a\\u12g"
-      "error: in.i:1: incomplete universal character name";
+      "in.i:1: error: incomplete universal character name";
     case "a universal character name for a basic character" "_\\u0041"
-      "error: in.i:1: character U+0041 cannot be written as a universal \
+      "in.i:1: error: character U+0041 cannot be written as a universal \
        character name";
     case "a universal character name for a control character" "a\\u009F"
-      "error: in.i:1: character U+009F cannot be written as a universal \
+      "in.i:1: error: character U+009F cannot be written as a universal \
        character name";
     case "a universal character name for a surrogate" "a\\uD800"
-      "error: in.i:1: universal character name \\uD800 names no character";
+      "in.i:1: error: universal character name \\uD800 names no character";
     case "a universal character name beyond Unicode" "a\\U00110000"
-      "error: in.i:1: universal character name \\U00110000 names no \
+      "in.i:1: error: universal character name \\U00110000 names no \
        character";
     case "a universal character name for a dollar sign" "a\\u0024"
-      "error: in.i:1: character U+0024 cannot be part of an identifier";
+      "in.i:1: error: character U+0024 cannot be part of an identifier";
     case "a universal character name for an at sign" "a\\u0040"
-      "error: in.i:1: character U+0040 cannot be part of an identifier";
+      "in.i:1: error: character U+0040 cannot be part of an identifier";
     case "a character outside the identifier ranges" "a\\u00A1"
-      "error: in.i:1: character U+00A1 cannot be part of an identifier";
+      "in.i:1: error: character U+00A1 cannot be part of an identifier";
     case "a UTF-8 character outside the identifier ranges" "a\xc2\xa1"
-      "error: in.i:1: character U+00A1 cannot be part of an identifier";
+      "in.i:1: error: character U+00A1 cannot be part of an identifier";
     case "a private use character" "a\\uE000"
-      "error: in.i:1: character U+E000 cannot be part of an identifier";
+      "in.i:1: error: character U+E000 cannot be part of an identifier";
     case "a noncharacter of a plane" "a\\U0001FFFE"
-      "error: in.i:1: character U+1FFFE cannot be part of an identifier";
+      "in.i:1: error: character U+1FFFE cannot be part of an identifier";
     case "a combining character begins an identifier" "\\u0300a"
-      "error: in.i:1: character U+0300 cannot begin an identifier";
+      "in.i:1: error: character U+0300 cannot begin an identifier";
     case "a UTF-8 combining character begins an identifier" "\xe2\x83\x90"
-      "error: in.i:1: character U+20D0 cannot begin an identifier";
+      "in.i:1: error: character U+20D0 cannot begin an identifier";
     case "a basic character in a number" "1\\u0041"
-      "error: in.i:1: character U+0041 cannot be written as a universal \
+      "in.i:1: error: character U+0041 cannot be written as a universal \
        character name";
-    case "unterminated string" "\"abc" "error: in.i:1: unterminated literal";
+    case "unterminated string" "\"abc" "in.i:1: error: unterminated literal";
     case "string ends at the newline" "\n\"a\nb\""
-      "error: in.i:2: unterminated literal";
+      "in.i:2: error: unterminated literal";
     case "no line splice in a string" "\"a\\\nb\""
-      "error: in.i:1: unterminated literal";
-    case "unterminated character" "'a" "error: in.i:1: unterminated literal";
-    case "empty character" "''" "error: in.i:1: empty character constant";
+      "in.i:1: error: unterminated literal";
+    case "unterminated character" "'a" "in.i:1: error: unterminated literal";
+    case "empty character" "''" "in.i:1: error: empty character constant";
     case "block comment" "a /* c */"
-      ("error: in.i:1: " ^ comment_message);
-    case "line comment" "a // c" ("error: in.i:1: " ^ comment_message);
+      ("in.i:1: error: " ^ comment_message);
+    case "line comment" "a // c" ("in.i:1: error: " ^ comment_message);
     case "other directives" "#define X 1"
-      "error: in.i:1: unsupported directive #define";
-    case "null directive" "#\n" "error: in.i:1: unsupported directive #";
+      "in.i:1: error: unsupported directive #define";
+    case "null directive" "#\n" "in.i:1: error: unsupported directive #";
     case "a preprocessing number need not be a constant"
       "08 1e+ 1..2 10.13.4 10_4 0x1e+1 1$ 1\\u00e9 1\xc3\xa9 1.0u"
       "number 08 | number 1e+ | number 1..2 | number 10.13.4 | number 10_4 \
@@ -208,7 +208,7 @@ let kind_cases =
       "number 1 | punct + | number 2 | number 1e+2 | number 0x1p-3 \
        | number 1E-x | number 1P+ | number 1.e5.x | number 0x1 | punct + \
        | number 1";
-    case "invalid UTF-8 in a number" "1\xff" "error: in.i:1: invalid UTF-8";
+    case "invalid UTF-8 in a number" "1\xff" "in.i:1: error: invalid UTF-8";
   ]
 
 (* What the text after [pragma] is for a pragma token, as
@@ -286,9 +286,9 @@ let written_cases =
 let place_cases =
   [
     case "no line markers, as under -P" "\n\na\nb"
-      ("error: in.i:3: " ^ no_marker_message);
+      ("in.i:3: error: " ^ no_marker_message);
     case "#line in place of line markers, as under -fuse-line-directives"
-      "#line 1 \"t.c\"\na" ("error: t.c:1: " ^ no_marker_message);
+      "#line 1 \"t.c\"\na" ("t.c:1: error: " ^ no_marker_message);
     case "Clang's prologue and a system header"
       "# 1 \"t.c\"\n\
        # 1 \"<built-in>\" 1\n\
@@ -341,9 +341,9 @@ let place_cases =
        # 2 \"t.c\" 2\nt"
       "b b.h b.h:1 | a a.h a.h:2 | t t.c t.c:2";
     case "a token before the first marker" "a\n# 1 \"t.c\"\nb"
-      ("error: in.i:1: " ^ no_marker_message);
+      ("in.i:1: error: " ^ no_marker_message);
     case "a first marker that enters a file" "# 1 \"t.c\" 1\na"
-      "error: in.i:1: line marker enters a file before the main file";
+      "in.i:1: error: line marker enters a file before the main file";
     case "a pragma belongs to its file"
       "# 1 \"t.c\"\n# 1 \"h.h\" 1 3\n#pragma typec x\n"
       "#pragma typec x h.h! h.h:1 3";
@@ -355,50 +355,50 @@ let place_cases =
     case "a name keeps its escapes" "# 1 \"a\\\"b\\\\.c\"\nx"
       "x a\\\"b\\\\.c a\\\"b\\\\.c:1";
     case "an error is placed by the presumed line" "# 7 \"t.c\"\na\n@"
-      "error: t.c:8: unexpected character '@'";
+      "t.c:8: error: unexpected character '@'";
     case "return from the main file" "# 1 \"t.c\" 2"
-      "error: in.i:1: line marker returns from the main file";
+      "in.i:1: error: line marker returns from the main file";
     case "return past the main file" "# 1 \"t.c\"\n# 1 \"h.h\" 1\n\
                                       # 2 \"t.c\" 2\n# 3 \"t.c\" 2"
-      "error: t.c:2: line marker returns from the main file";
+      "t.c:2: error: line marker returns from the main file";
     case "line number too large" "# 2147483648 \"t.c\""
-      "error: in.i:1: line number out of range";
+      "in.i:1: error: line number out of range";
     case "flags out of order" "# 1 \"t.c\" 3 1"
-      "error: in.i:1: invalid line marker flags";
+      "in.i:1: error: invalid line marker flags";
     case "enter and return" "# 1 \"t.c\" 1 2"
-      "error: in.i:1: invalid line marker flags";
+      "in.i:1: error: invalid line marker flags";
     case "flag 4 without 3" "# 1 \"t.c\" 4"
-      "error: in.i:1: invalid line marker flags";
+      "in.i:1: error: invalid line marker flags";
     case "unknown flag" "# 1 \"t.c\" 5"
-      "error: in.i:1: invalid line marker flags";
+      "in.i:1: error: invalid line marker flags";
     case "a flag of two digits" "# 1 \"t.c\" 11"
-      "error: in.i:1: invalid line marker flags";
+      "in.i:1: error: invalid line marker flags";
     case "a flag twice" "# 1 \"t.c\" 1 3 4 4"
-      "error: in.i:1: invalid line marker flags";
+      "in.i:1: error: invalid line marker flags";
     case "text after the flags" "# 1 \"t.c\" 1x"
-      "error: in.i:1: unexpected text at the end of a directive";
+      "in.i:1: error: unexpected text at the end of a directive";
     case "a name without quotes" "# 1 t.c"
-      "error: in.i:1: unexpected text at the end of a directive";
+      "in.i:1: error: unexpected text at the end of a directive";
     case "an unterminated name" "# 1 \"t.c"
-      "error: in.i:1: unterminated literal";
+      "in.i:1: error: unterminated literal";
     case "a message escapes control characters" "# 1 \"a\027[2Jb\"\n@"
-      "error: a\\x1B[2Jb:1: unexpected character '@'";
+      "a\\x1B[2Jb:1: error: unexpected character '@'";
     case "a message escapes other bytes" "# 1 \"a\xc2\x9bb\"\n@"
-      "error: a\\u009Bb:1: unexpected character '@'";
+      "a\\u009Bb:1: error: unexpected character '@'";
     case "a message escapes a character as a universal character name"
       "# 1 \"\xc3\xa9\xf0\x9f\x98\x80\"\n@"
-      "error: \\u00E9\\U0001F600:1: unexpected character '@'";
+      "\\u00E9\\U0001F600:1: error: unexpected character '@'";
     case "a message escapes a byte that is not UTF-8" "# 1 \"\xc3a\"\n@"
-      "error: \\xC3a:1: unexpected character '@'";
+      "\\xC3a:1: error: unexpected character '@'";
     case "a message escapes each byte of a truncated character"
       "# 1 \"a\xe2\x82b\"\n@"
-      "error: a\\xE2\\x82b:1: unexpected character '@'";
+      "a\\xE2\\x82b:1: error: unexpected character '@'";
     case "#line without a number" "#line\n"
-      "error: in.i:1: missing line number";
+      "in.i:1: error: missing line number";
     case "#line with a name for a number" "#line \"x\""
-      "error: in.i:1: missing line number";
+      "in.i:1: error: missing line number";
     case "#line takes no flags" "#line 1 \"f\" 3"
-      "error: in.i:1: unexpected text at the end of a directive";
+      "in.i:1: error: unexpected text at the end of a directive";
   ]
 
 (* The constant a preprocessing number is, as words: the kind, the base

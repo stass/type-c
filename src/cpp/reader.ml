@@ -689,5 +689,5 @@ let escape text =
 
 let error_message error =
   escape
-    (Printf.sprintf "%s:%d: %s" error.location.file error.location.line
-       error.message)
+    (Printf.sprintf "%s:%d: error: %s" error.location.file
+       error.location.line error.message)

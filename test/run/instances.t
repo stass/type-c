@@ -119,7 +119,7 @@ preprocessor makes a pragma line, is refused (design 10.3, P25).
   > type box(T) = struct { _Pragma("pack(1)") T value; };
   > EOF
   $ typec --cc=$clang -fsyntax-only pragma.tc
-  typec: pragma.tc:1: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold (design 10.3, P25) [TC0047]
+  pragma.tc:1: error: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold [generic-pragma]
   [80]
 
 An argument is spelled through the one name of an untagged type, which
@@ -170,7 +170,7 @@ declarator's alone.
   > box(wide) b;
   > EOF
   $ typec --cc=$clang $flags -fsyntax-only wide.tc
-  typec: wide.tc:3: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  wide.tc:3: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
   [80]
 
 A typedef name declared again with an attribute after an alias generic
@@ -186,7 +186,7 @@ read a(int) as aligned and box(a(int)) as box(int).
   > box(a(int)) x;
   > EOF
   $ typec --cc=$clang $flags -fsyntax-only late.tc
-  typec: late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
+  late.tc:5: error: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
   [80]
 
 An instance that stands before that declaration keeps the type that
@@ -228,8 +228,8 @@ so one instance name would have two layouts.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -fsyntax-only object.tc
   > done
-  typec: object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
-  typec: object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
+  object.tc:5: error: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
+  object.tc:5: error: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
   [80]
 
 An instance that stands before that declaration reads obj as the
@@ -264,8 +264,8 @@ so it aligns g(int) as 16 there, where the definition gives 4.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -fsyntax-only widened.tc
   > done
-  typec: widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
-  typec: widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
+  widened.tc:5: error: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
+  widened.tc:5: error: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
   [80]
 
 An instance that stands before the typedef's declaration reads obj as
@@ -301,8 +301,8 @@ through it, so it aligns g(int) as 16 there, where the definition gives
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -fsyntax-only member.tc
   > done
-  typec: member.tc:5: in the instance 'g__i' that this application names, at member.tc:3: the declaration of the typedef name 'plain' at member.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
-  typec: member.tc:5: in the instance 'g__i' that this application names, at member.tc:3: the declaration of the typedef name 'plain' at member.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
+  member.tc:5: error: in the instance 'g__i' that this application names, at member.tc:3: the declaration of the typedef name 'plain' at member.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
+  member.tc:5: error: in the instance 'g__i' that this application names, at member.tc:3: the declaration of the typedef name 'plain' at member.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
   [80]
 
 An alignment specifier declares an object again inexactly as an
@@ -318,8 +318,8 @@ attribute does: both backends give the object alignment 16 after it.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -fsyntax-only alignas.tc
   > done
-  typec: alignas.tc:4: in the instance 'g__i' that this application names, at alignas.tc:2: the declaration of 'obj' at alignas.tc:3, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
-  typec: alignas.tc:4: in the instance 'g__i' that this application names, at alignas.tc:2: the declaration of 'obj' at alignas.tc:3, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
+  alignas.tc:4: error: in the instance 'g__i' that this application names, at alignas.tc:2: the declaration of 'obj' at alignas.tc:3, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
+  alignas.tc:4: error: in the instance 'g__i' that this application names, at alignas.tc:2: the declaration of 'obj' at alignas.tc:3, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
   [80]
 
 A declaration in a block cannot hide a name of an instance that
@@ -340,8 +340,8 @@ constructor Some of option(int) the tag of None on both backends.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -o hidden_tag hidden_tag.tc && ./hidden_tag
   > done
-  typec: hidden_tag.tc:2: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
-  typec: hidden_tag.tc:2: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  hidden_tag.tc:2: error: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
+  hidden_tag.tc:2: error: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [80]
 
 An attribute argument that declares the enumerator would hide it the
@@ -366,8 +366,8 @@ name of the claimed space there (design 10.3, 13.5).
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -o unread_tag unread_tag.tc && ./unread_tag
   > done
-  typec: unread_tag.tc:3: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
-  typec: unread_tag.tc:3: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  unread_tag.tc:3: error: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
+  unread_tag.tc:3: error: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [80]
 
 The typedef of a type argument spells the one name of an untagged type
@@ -397,8 +397,8 @@ that of the payload to 16.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -o spelled spelled.tc && ./spelled
   > done
-  typec: spelled.tc:6: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:4 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
-  typec: spelled.tc:6: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:4 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
+  spelled.tc:6: error: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:4 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry [generic-name-capture]
+  spelled.tc:6: error: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:4 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry [generic-name-capture]
   [80]
 
 Where the typedef stands before that declaration, the name has the
@@ -450,6 +450,6 @@ though the argument's declarator in the same declaration does not.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -o spelled_own spelled_own.tc && ./spelled_own
   > done
-  typec: spelled_own.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:2 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
-  typec: spelled_own.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:2 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
+  spelled_own.tc:4: error: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:2 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry [generic-name-capture]
+  spelled_own.tc:4: error: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:2 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry [generic-name-capture]
   [80]

@@ -31,10 +31,10 @@ backends check the initialiser of a pointer.
   $ printf 'typedef const int F(void);\ntypedef int F(void);\n' > typedef.tc
   $ printf 'const int cf(void);\nint (*p)(void) = cf;\n' > pointer.tc
   $ typec --cc="$clang" -c redeclared.tc -o redeclared.o
-  typec: redeclared.tc:2: 'cf' is redeclared with an incompatible type (C11 6.7p4)
+  redeclared.tc:2: error: 'cf' is redeclared with an incompatible type (C11 6.7p4)
   [80]
   $ typec --cc="$clang" -c typedef.tc -o typedef.o
-  typec: typedef.tc:2: 'F' is redefined as a typedef of another type (C11 6.7p3)
+  typedef.tc:2: error: 'F' is redefined as a typedef of another type (C11 6.7p3)
   [80]
   $ typec --cc="$clang" -c pointer.tc -o pointer.o 2> /dev/null || echo refused
   refused

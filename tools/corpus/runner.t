@@ -290,7 +290,7 @@ no program linked the tests do not run, and the runner exits with 1.
   tests        test.sh: not run: no program linked
   results      none reported
   cpu seconds, summed over the units:
-  refused      greet.c: greet.tc:3: unexpected character '@'
+  refused      greet.c: greet.tc:3: error: unexpected character '@'
   not linked   bin/hello
   hello.clang: gates not met
   [1]
@@ -336,7 +336,7 @@ failed to build is recorded as a partial pass, which does not meet gate
   results      1 passed, 0 failed, 1 failed with the backend too
   test-host    a host test with spaces
   cpu seconds, summed over the units:
-  refused      bad.c: bad.tc:1: unexpected character '@'
+  refused      bad.c: bad.tc:1: error: unexpected character '@'
   backend-fail ugly.c: typec -c exited with 1
   not linked   bin/bad
   not linked   bin/ugly

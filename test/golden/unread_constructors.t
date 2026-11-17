@@ -11,13 +11,13 @@ since lowering writes `T` under a name of its own.
   > int y __attribute__((aligned(sizeof(o(int).S(1)))));
   > EOF
   $ ./golden.exe generic.tc
-  generic.tc:2: `o` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  generic.tc:2: error: `o` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
   [1]
   $ cat > universe.tc <<'EOF'
   > int y __attribute__((aligned(sizeof(option(int).None))));
   > EOF
   $ ./golden.exe universe.tc
-  universe.tc:1: `option` in the arguments of an attribute denotes a universe name, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  universe.tc:1: error: `option` in the arguments of an attribute denotes a universe name, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
   [1]
 
 Through a typedef name, which lowering keeps, `T.C` is no C: lowering
@@ -73,5 +73,5 @@ say, as for any name (design 13.5).
   > int y = sizeof(B(1));
   > EOF
   $ ./golden.exe read.tc
-  read.tc:2: 'B' is not declared (C11 6.5.1p2)
+  read.tc:2: error: 'B' is not declared (C11 6.5.1p2)
   [1]

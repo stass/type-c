@@ -14,7 +14,7 @@ is refused at its first token.
   > }
   > EOF
   $ ./golden.exe declaration.tc
-  declaration.tc:2: a block literal is C text only, so Type-C text cannot write one or be included in one (design 13.3) [TC0030]
+  declaration.tc:2: error: a block literal is C text only, so Type-C text cannot write one or be included in one [block-literal]
   [1]
 
   $ cat > match.tc <<'EOF'
@@ -27,7 +27,7 @@ is refused at its first token.
   > }
   > EOF
   $ ./golden.exe match.tc
-  match.tc:3: a block literal is C text only, so Type-C text cannot write one or be included in one (design 13.3) [TC0030]
+  match.tc:3: error: a block literal is C text only, so Type-C text cannot write one or be included in one [block-literal]
   [1]
 
   $ cat > constructor.tc <<'EOF'
@@ -38,7 +38,7 @@ is refused at its first token.
   > }
   > EOF
   $ ./golden.exe constructor.tc
-  constructor.tc:3: a block literal is C text only, so Type-C text cannot write one or be included in one (design 13.3) [TC0030]
+  constructor.tc:3: error: a block literal is C text only, so Type-C text cannot write one or be included in one [block-literal]
   [1]
 
 A block literal in C text keeps its tokens, also in a unit of Type-C
@@ -66,5 +66,5 @@ at its first token.
   > # 2 "inside.tc" 2
   > EOF
   $ ./golden.exe inside.tc
-  inside.tci:1: a block literal is C text only, so Type-C text cannot write one or be included in one (design 13.3) [TC0030]
+  inside.tci:1: error: a block literal is C text only, so Type-C text cannot write one or be included in one [block-literal]
   [1]

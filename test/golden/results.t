@@ -12,7 +12,7 @@ third clause of for.
   > }
   > EOF
   $ ./golden.exe statement.tc
-  statement.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  statement.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > comma.tc <<'EOF'
@@ -22,7 +22,7 @@ third clause of for.
   > }
   > EOF
   $ ./golden.exe comma.tc
-  comma.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  comma.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > first_clause.tc <<'EOF'
@@ -32,7 +32,7 @@ third clause of for.
   > }
   > EOF
   $ ./golden.exe first_clause.tc
-  first_clause.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  first_clause.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > third_clause.tc <<'EOF'
@@ -42,7 +42,7 @@ third clause of for.
   > }
   > EOF
   $ ./golden.exe third_clause.tc
-  third_clause.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  third_clause.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 A conditional whose type is void, as GNU C makes one with a void
@@ -55,7 +55,7 @@ branch, discards the value of the other branch.
   > }
   > EOF
   $ ./golden.exe void_branch.tc
-  void_branch.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  void_branch.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 Where the value of a conditional is discarded and typec does not know
@@ -70,7 +70,7 @@ conditional is void or not, and typec refuses it (design 13.3).
   > }
   > EOF
   $ ./golden.exe unknown_branch.tc
-  unknown_branch.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'vector_size' at unknown_branch.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  unknown_branch.tc:4: error: the type of a discarded conditional with a branch of a result type depends on the attribute 'vector_size' at unknown_branch.tc:2, which typec does not type yet [unsupported]
   [1]
 
 Where typec cannot tell which association a discarded selection
@@ -84,7 +84,7 @@ it, and typec refuses one of a result type (design 13.3).
   > }
   > EOF
   $ ./golden.exe unknown_choice.tc
-  unknown_choice.tc:3: the choice of a discarded selection with an association of a result type depends on the condition of __builtin_choose_expr at unknown_choice.tc:3, which typec does not type yet (design 13.3) [TC0031]
+  unknown_choice.tc:3: error: the choice of a discarded selection with an association of a result type depends on the condition of __builtin_choose_expr at unknown_choice.tc:3, which typec does not type yet [unsupported]
   [1]
 
   $ cat > unknown_controlling.tc <<'EOF'
@@ -95,7 +95,7 @@ it, and typec refuses one of a result type (design 13.3).
   > }
   > EOF
   $ ./golden.exe unknown_controlling.tc
-  unknown_controlling.tc:4: the choice of a discarded selection with an association of a result type depends on the attribute 'ms_abi' at unknown_controlling.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  unknown_controlling.tc:4: error: the choice of a discarded selection with an association of a result type depends on the attribute 'ms_abi' at unknown_controlling.tc:2, which typec does not type yet [unsupported]
   [1]
 
 The association that a selection selects and the last expression
@@ -110,7 +110,7 @@ around them, so theirs is discarded where that one's is.
   > }
   > EOF
   $ ./golden.exe unknown_selected.tc
-  unknown_selected.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'ms_abi' at unknown_selected.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  unknown_selected.tc:4: error: the type of a discarded conditional with a branch of a result type depends on the attribute 'ms_abi' at unknown_selected.tc:2, which typec does not type yet [unsupported]
   [1]
 
   $ cat > unknown_last.tc <<'EOF'
@@ -121,7 +121,7 @@ around them, so theirs is discarded where that one's is.
   > }
   > EOF
   $ ./golden.exe unknown_last.tc
-  unknown_last.tc:4: the type of a discarded conditional with a branch of a result type depends on the attribute 'ms_abi' at unknown_last.tc:2, which typec does not type yet (design 13.3) [TC0031]
+  unknown_last.tc:4: error: the type of a discarded conditional with a branch of a result type depends on the attribute 'ms_abi' at unknown_last.tc:2, which typec does not type yet [unsupported]
   [1]
 
   $ cat > selected.tc <<'EOF'
@@ -131,7 +131,7 @@ around them, so theirs is discarded where that one's is.
   > }
   > EOF
   $ ./golden.exe selected.tc
-  selected.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  selected.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > last.tc <<'EOF'
@@ -141,7 +141,7 @@ around them, so theirs is discarded where that one's is.
   > }
   > EOF
   $ ./golden.exe last.tc
-  last.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  last.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > selected_used.tc <<'EOF'
@@ -171,7 +171,7 @@ under -Wno-return-mismatch.
   > }
   > EOF
   $ ./golden.exe return_void.tc
-  return_void.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  return_void.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 The rule goes by position, also in an operand that is not evaluated.
@@ -183,7 +183,7 @@ The rule goes by position, also in an operand that is not evaluated.
   > }
   > EOF
   $ ./golden.exe sizeof.tc
-  sizeof.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  sizeof.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 A cast to void discards on purpose. A declaration or an assignment
@@ -223,7 +223,7 @@ name, under a typedef name, and with qualifiers.
   > }
   > EOF
   $ ./golden.exe hidden.tc
-  hidden.tc:4: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  hidden.tc:4: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > typedef.tc <<'EOF'
@@ -234,7 +234,7 @@ name, under a typedef name, and with qualifiers.
   > }
   > EOF
   $ ./golden.exe typedef.tc
-  typedef.tc:4: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  typedef.tc:4: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > qualified.tc <<'EOF'
@@ -245,7 +245,7 @@ name, under a typedef name, and with qualifiers.
   > }
   > EOF
   $ ./golden.exe qualified.tc
-  qualified.tc:4: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  qualified.tc:4: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 A variant of a file that is no result is not one.
@@ -285,7 +285,7 @@ discards its value.
   > }
   > EOF
   $ ./golden.exe last_dropped.tc
-  last_dropped.tc:4: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  last_dropped.tc:4: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > not_last.tc <<'EOF'
@@ -296,7 +296,7 @@ discards its value.
   > }
   > EOF
   $ ./golden.exe not_last.tc
-  not_last.tc:4: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  not_last.tc:4: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 A declaration after the call is the last block item, so the call is
@@ -309,7 +309,7 @@ not.
   > }
   > EOF
   $ ./golden.exe declared_last.tc
-  declared_last.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  declared_last.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
   $ cat > nested.tc <<'EOF'
@@ -319,7 +319,7 @@ not.
   > }
   > EOF
   $ ./golden.exe nested.tc
-  nested.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  nested.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 The rule binds Type-C text, judged by the first token of the discarded
@@ -358,7 +358,7 @@ expression: C text drops a structure value as C does.
   > }
   > EOF
   $ ./golden.exe type_c_first.tc
-  type_c_first.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  type_c_first.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 Type-C text holds no excess initialiser, which GCC and Clang drop with
@@ -374,14 +374,14 @@ token of the excess initialiser; C text keeps the backend's warning.
   > }
   > EOF
   $ ./golden.exe excess_result.tc
-  excess_result.tc:4: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) (design 5.2) [TC0050]
+  excess_result.tc:4: error: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) [excess-initializer]
   [1]
 
   $ cat > excess.tc <<'EOF'
   > int a[1] = { 1, 2 };
   > EOF
   $ ./golden.exe excess.tc
-  excess.tc:1: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) (design 5.2) [TC0050]
+  excess.tc:1: error: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) [excess-initializer]
   [1]
 
 An initialiser that the walk places, braces elided, into a zero-length
@@ -395,7 +395,7 @@ array, which GCC drops and Clang refuses, is excess too.
   > }
   > EOF
   $ ./golden.exe zero_length.tc
-  zero_length.tc:3: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) (design 5.2) [TC0050]
+  zero_length.tc:3: error: an initialiser has no element or member left to initialise, and GCC drops it (C11 6.7.9p2) [excess-initializer]
   [1]
 
   $ cat > c_excess.tc <<'EOF'

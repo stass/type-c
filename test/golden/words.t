@@ -63,7 +63,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int g(void) { { int try = 0; try++; } return try f(); }
   > EOF
   $ ./golden.exe block.tc
-  block.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  block.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
   $ cat > before.tc <<'EOF'
   > int f(void);
@@ -71,7 +71,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int try;
   > EOF
   $ ./golden.exe before.tc
-  before.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  before.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
   $ printf 'void f(int try) { defer f(try); }\n' > defer.tc
   $ ./golden.exe defer.tc
@@ -104,7 +104,7 @@ operand begins nothing there.
 
   $ printf 'int f(int x) { return x + defer; }\n' > bare_defer.tc
   $ ./golden.exe bare_defer.tc
-  bare_defer.tc:1: expected an expression, found `defer`
+  bare_defer.tc:1: error: expected an expression, found `defer`
   [1]
 
 The parser reads a `try` wherever it stands, in an operand as well,
@@ -116,18 +116,18 @@ A `try` takes an operand.
   > int g(void) { int n = 1; n = n + try f(); return n; }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  operand.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
   $ cat > measured.tc <<'EOF'
   > int f(void);
   > unsigned long g(void) { return sizeof try f(); }
   > EOF
   $ ./golden.exe measured.tc
-  measured.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  measured.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
   $ printf 'void f(void) { try; }\n' > bare.tc
   $ ./golden.exe bare.tc
-  bare.tc:1: expected an expression, found `;`
+  bare.tc:1: error: expected an expression, found `;`
   [1]
 
 `_Defer` is a keyword in all text, where `defer` is hidden as well.

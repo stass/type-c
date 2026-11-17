@@ -403,6 +403,6 @@ A pragma that sets state for the text after it is refused: a copy of
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc $flags -o pack pack.tc
   > done
-  typec: pack.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
-  typec: pack.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  pack.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
+  pack.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   [80]

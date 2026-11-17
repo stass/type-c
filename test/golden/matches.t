@@ -136,7 +136,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe missing.tc
-  missing.tc:3: the match does not cover the constructors 'A' and 'C' of the variant 'e' (design 4.2 rule 1) [TC0018]
+  missing.tc:3: error: the match does not cover the constructors 'A' and 'C' of the variant 'e' [match-coverage]
   [1]
 
   $ cat > twice.tc <<'EOF'
@@ -152,7 +152,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe twice.tc
-  twice.tc:7: the constructor 'A' is covered twice (design 4.2 rule 1) [TC0018]
+  twice.tc:7: error: the constructor 'A' is covered twice [match-coverage]
   [1]
 
   $ cat > shared.tc <<'EOF'
@@ -166,7 +166,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe shared.tc
-  shared.tc:5: the binding 'i' is in an arm of several labels, which none of them may bind (design 4.1 rule 6) [TC0017]
+  shared.tc:5: error: the binding 'i' is in an arm of several labels, which none of them may bind [shared-arm-binding]
   [1]
 
   $ cat > scrutinee.tc <<'EOF'
@@ -179,7 +179,7 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe scrutinee.tc
-  scrutinee.tc:3: the scrutinee of a match is not of a variant type; a pointer is not dereferenced implicitly (design 4.1 rule 1) [TC0014]
+  scrutinee.tc:3: error: the scrutinee of a match is not of a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
   [1]
 
 The bindings and the items of an arm are one scope (design 4.1 rules 4
@@ -199,7 +199,7 @@ block that lowering makes around the items would hide the binding.
   > }
   > EOF
   $ ./golden.exe redeclared.tc
-  redeclared.tc:5: 'i' is declared twice in one scope without linkage (C11 6.7p3)
+  redeclared.tc:5: error: 'i' is declared twice in one scope without linkage (C11 6.7p3)
   [1]
 
 A match body is a sequence of arms, each of labels and at least one
@@ -214,7 +214,7 @@ block item (design 4.1 rule 2).
   > }
   > EOF
   $ ./golden.exe form.tc
-  form.tc:4: expected `case` or `default` to begin an arm of `match`, found `v` (design 4.1 rule 2) [TC0015]
+  form.tc:4: error: expected `case` or `default` to begin an arm of `match`, found `v` [match-arm-form]
   [1]
 
 A pattern names a constructor of the scrutinee's type, with a
@@ -232,7 +232,7 @@ sub-pattern for each of its fields (design 4.1 rule 3).
   > }
   > EOF
   $ ./golden.exe pattern.tc
-  pattern.tc:4: the pattern 'B' has 2 sub-pattern(s), and the constructor has 1 field(s) (design 4.1 rule 3) [TC0016]
+  pattern.tc:4: error: the pattern 'B' has 2 sub-pattern(s), and the constructor has 1 field(s) [match-pattern]
   [1]
 
 A case label that omits the field list of a constructor with fields is
@@ -250,7 +250,7 @@ refused: only a single-pattern test may (design 4.1 rule 3, 4.6 rule 2).
   > }
   > EOF
   $ ./golden.exe label_fields.tc
-  label_fields.tc:4: the case label 'Cons' omits the field list of a constructor with 2 field(s), which only a single-pattern test may (design 4.1 rule 3) [TC0016]
+  label_fields.tc:4: error: the case label 'Cons' omits the field list of a constructor with 2 field(s), which only a single-pattern test may [match-pattern]
   [1]
 
 A match has at most one `default`, and that one covers a constructor
@@ -268,7 +268,7 @@ A match has at most one `default`, and that one covers a constructor
   > }
   > EOF
   $ ./golden.exe default.tc
-  default.tc:6: the `default` of a match covers no constructor (design 4.2 rule 2) [TC0019]
+  default.tc:6: error: the `default` of a match covers no constructor [match-default]
   [1]
 
 A `case` or `default` label inside a match arm belongs to the match or
@@ -289,7 +289,7 @@ to a switch inside the arm (design 4.3 rule 3).
   > }
   > EOF
   $ ./golden.exe label.tc
-  label.tc:7: a case or default label inside a match arm, which is not one of its own and belongs to no switch inside it (design 4.3 rule 3) [TC0020]
+  label.tc:7: error: a case or default label inside a match arm, which is not one of its own and belongs to no switch inside it [stray-case-label]
   [1]
 
 The end of every arm, the last one too, must be unreachable by the rules
@@ -311,7 +311,7 @@ goto in the same arm (4.3 rule 3).
   > }
   > EOF
   $ ./golden.exe open.tc
-  open.tc:6: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  open.tc:6: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
 An item is reachable if it carries or contains a label (4.4), so the end
@@ -337,7 +337,7 @@ case label in a block that the switch around it jumps to.
   > }
   > EOF
   $ ./golden.exe contained.tc
-  contained.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  contained.tc:4: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
   $ cat > section.tc <<'EOF'
@@ -360,7 +360,7 @@ case label in a block that the switch around it jumps to.
   > }
   > EOF
   $ ./golden.exe section.tc
-  section.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  section.tc:4: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
 A label counts through a loop and a nested switch: a case label in a
@@ -389,7 +389,7 @@ default can complete.
   > }
   > EOF
   $ ./golden.exe duff.tc
-  duff.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  duff.tc:4: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
   $ cat > nswnamed.tc <<'EOF'
@@ -407,7 +407,7 @@ default can complete.
   > }
   > EOF
   $ ./golden.exe nswnamed.tc
-  nswnamed.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  nswnamed.tc:4: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
   $ cat > innerdefault.tc <<'EOF'
@@ -427,7 +427,7 @@ default can complete.
   > }
   > EOF
   $ ./golden.exe innerdefault.tc
-  innerdefault.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  innerdefault.tc:4: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
 A case label of a switch, or any label in a match arm, inside an item
@@ -474,7 +474,7 @@ reached only from the arm.
   > }
   > EOF
   $ ./golden.exe entry.tc
-  entry.tc:5: a jump into a match arm from outside it (design 4.3 rule 3) [TC0022]
+  entry.tc:5: error: a jump into a match arm from outside it [match-arm-entry]
   [1]
 
 A break or continue in a statement expression in the condition of a
@@ -496,7 +496,7 @@ a loop, switch or match within the expression (design 4.4).
   > }
   > EOF
   $ ./golden.exe control.tc
-  control.tc:5: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
+  control.tc:5: error: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it [ambiguous-jump]
   [1]
 
 C text keeps such a break, and the backend decides where it goes. A
@@ -519,7 +519,7 @@ leaves the match in GCC, and the loop, and with it the arm, in Clang.
   > }
   > EOF
   $ ./golden.exe clang_ends.tc
-  clang_ends.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  clang_ends.tc:4: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
 Here Clang leaves the inner loop for the return, and GCC the outer loop,
@@ -543,7 +543,7 @@ and with it the arm.
   > }
   > EOF
   $ ./golden.exe gcc_ends.tc
-  gcc_ends.tc:4: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+  gcc_ends.tc:4: error: the end of the match arm can be reached [match-arm-end]
   [1]
 
 An arm that ends unreachably on both readings stands, and so does such
@@ -589,7 +589,7 @@ outside them has none to leave (design 4.3 rule 2).
   > }
   > EOF
   $ ./golden.exe stray.tc
-  stray.tc:2: break outside a loop, switch or match (C11 6.8.6.3p1, design 4.3 rule 2) [TC0027]
+  stray.tc:2: error: break outside a loop, switch or match [break-outside]
   [1]
 
 A break that leaves a match ends its arm (design 4.3 rule 5). Before
@@ -614,7 +614,7 @@ leave only the match, and the loop would go on.
   > }
   > EOF
   $ ./golden.exe early.tc
-  early.tc:7: a break that leaves the match before the end of its arm; put the `break` last in the arm, or leave the loop with `goto` or `return`, or use a single-pattern test (design 4.6) (design 4.3 rule 5) [TC0028]
+  early.tc:7: error: a break that leaves the match before the end of its arm; put the `break` last in the arm, or leave the loop with `goto` or `return`, or use a single-pattern test [early-break]
   [1]
 
 A break that a C header brings into an arm is C text, which the rule
@@ -653,7 +653,7 @@ match, which names its tag and enumerators (design 4.1 rule 1).
   > }
   > EOF
   $ ./golden.exe carried.tc
-  carried.tc:2: the match is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant (design 4.1 rule 1) [TC0014]
+  carried.tc:2: error: the match is outside the scope of the declaration of the variant 'e', where the names that it lowers to do not denote the variant [match-scrutinee]
   [1]
 
 Within the scope, in the block of the declaration or a statement

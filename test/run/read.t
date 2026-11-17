@@ -46,7 +46,7 @@ Output that is not cc -E output is refused with its presumed location.
 
   $ printf '# 1 "t.c"\nint x;\nint @;\n' > bad.i
   $ ./read_check.exe bad.i
-  read_check: t.c:2: unexpected character '@'
+  read_check: t.c:2: error: unexpected character '@'
   [1]
 
 Both backends write a '#' or '%:' that a macro expands to after a blank,
@@ -74,8 +74,8 @@ system header and so drop the warning about 'unused'.
   >   typec --cc=$cc -Wall -Werror -c hash.tc -o hash.o
   >   typec --cc=$cc -c digraph.tc -o digraph.o
   > done
-  typec: hash.tc:3: stray '#' outside a directive, as when a macro expands to it
-  typec: digraph.tc:3: stray '%:' outside a directive, as when a macro expands to it
-  typec: hash.tc:3: stray '#' outside a directive, as when a macro expands to it
-  typec: digraph.tc:3: stray '%:' outside a directive, as when a macro expands to it
+  hash.tc:3: error: stray '#' outside a directive, as when a macro expands to it
+  digraph.tc:3: error: stray '%:' outside a directive, as when a macro expands to it
+  hash.tc:3: error: stray '#' outside a directive, as when a macro expands to it
+  digraph.tc:3: error: stray '%:' outside a directive, as when a macro expands to it
   [80]

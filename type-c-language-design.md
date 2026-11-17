@@ -748,7 +748,7 @@ id(stmt) s;                             /* e = s is an error */
    functions that call each other (7.3 rule 2) do not: where `even(T)`
    calls `odd(T)` and `odd(T)` calls `even(T)`, the instance `even__i`
    causes `odd__i`, whose call names `even__i` again and causes nothing,
-   so the first definition breaks the cycle. The error carries a code
+   so the first definition breaks the cycle. The error carries a name
    (13.6): the limit is a rule of the language, which says whether a
    source is valid, and not a translation limit of `typec`.
 
@@ -1871,19 +1871,19 @@ The diagnostics tell apart (13.6) the refusals of rule 8, of rule 9,
 of rule 12, of a `defer` statement in the statement of another (rule
 11, which exists only because lowering repeats the statement at every
 exit) and of the form of a `return` on each of its grounds (13.5), so
-a count of a rule reads codes and matches no message text. Pilot B
+a count of a rule reads names and matches no message text. Pilot B
 met none of these refusals (section 15, P9). A failure of the
 resolution property for a deferred statement is a refusal under rule
-8 and carries the code of rule 8: one code, whichever clause of the
+8 and carries the name of rule 8: one name, whichever clause of the
 property fails. Rule 8 has no check of its own for that. The one check
-of the property derives the code from the kind of text that it reads
+of the property derives the name from the kind of text that it reads
 (13.5). A failure that rests on a type that typec does not compute is
-the exception: it carries the one code of such failures, whatever the
-kind of text, and P21 counts it (13.5). Rule 9 has one code. Under rule
+the exception: it carries the one name of such failures, whatever the
+kind of text, and P21 counts it (13.5). Rule 9 has one name. Under rule
 12, a declaration in the operand fails the same check on the operand of
-a `return` and carries the code of that kind of text, and a jump out of
-the operand a code of its own; no other rule has either code. Each
-refusal of the form of a `return` has a code of its own (13.5).
+a `return` and carries the name of that kind of text, and a jump out of
+the operand a name of its own; no other rule has either name. Each
+refusal of the form of a `return` has a name of its own (13.5).
 
 Rationale for rule 11. C makes the substatement of a selection or
 iteration statement a block of its own (C11 6.8.4p3, 6.8.5p5), so the
@@ -2130,7 +2130,7 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      `__typeof__(c ? a : b) *p = &a;` is an error in that instance alone
      (GCC 16; Apple Clang 21 warns). An `if` statement selects the value
      instead. The container library of Stage 3 settles it, by how often
-     it wants the operator over such values, read from the code of this
+     it wants the operator over such values, read from the name of this
      refusal: if that is common, the operator is allowed where its value
      is converted to `Ti` at once, by an initialisation, an assignment,
      an argument or a `return`. The refusal stays if that cannot settle
@@ -4211,7 +4211,7 @@ warning. The table is the one list of marks:
   takes the form whatever the arguments. `typec` cannot tell the two
   kinds apart without reading the arguments, so every `availability`
   is marked. Few functions that a program defines carry the attribute,
-  and a refusal for a marked attribute has a code of its own (13.5),
+  and a refusal for a marked attribute has a name of its own (13.5),
   by which a pilot counts it.
 - Clang's `diagnose_if`, whatever its arguments. It reports a mention
   of the name where its condition holds, as an error or as a warning,
@@ -4877,7 +4877,7 @@ third.
   the scope of a `defer` statement is the point that needs the answer,
   and it is refused there as 13.3 says.
 
-Each refusal of the form has a code of its own (13.6), so that a count
+Each refusal of the form has a name of its own (13.6), so that a count
 tells them apart: one for each of the two refusals that follow from the
 inner block, one for each of the two ways in which `typec` decides the
 first of the three cases, the `target` attributes and the marked
@@ -5108,17 +5108,16 @@ text has a check of the property of its own: rules 8 and 12 of section
 property and show it on examples, and what rule 3 of 5.1, rule 12 of
 section 6 and rule 2 of section 8 say of a name that an operand
 declares is the third clause on their text. The check is told the kind
-of text that it reads, and a failure carries the code of that kind
-(13.6): one code for
-each kind, whichever clause fails. The one name of an untagged type is
-written into an instance as the definition of a generic is, and carries
-its code. A count of the refusals that one of those rules makes through
-the property so reads a code, and no kind needs a check of its own to
-have a code of its own. A failure that rests on a type that typec does
-not compute (*Provisional (P21)*, above) carries instead one code of its
-own, whatever the kind of text, so that the measurement of P21 counts
-those refusals under one code; the count of a kind's rule leaves them
-out.
+of text that it reads, and a failure carries the name of that kind
+(13.6): one name for each kind, whichever clause fails. The one name of
+an untagged type is written into an instance as the definition of a
+generic is, and is refused under the same name. A count of the refusals
+that one of those rules makes through the property so reads a name, and
+no kind needs a check of its own to have a name of its own. A failure
+that rests on a type that typec does not compute (*Provisional (P21)*,
+above) carries instead one name of its own, whatever the kind of text,
+so that the measurement of P21 counts those refusals under one name; the
+count of a kind's rule leaves them out.
 
 A place where the text is written is a place in the lowered C. The
 copies of deferred statements stand at one place for each exit (section
@@ -5418,7 +5417,7 @@ such a line of its own after the first use of each instance or before
 the definitions.
 
 Stage 3 settles the rule. The container library and the measurements
-(packages 3.5 and 3.6) count its refusals from the code of rule 4 of
+(packages 3.5 and 3.6) count its refusals from the name of rule 4 of
 7.3, by the leading identifiers of the cited line. If the refusals are
 common, the alternative reads the pairs of lines that open and close a
 region, as `#pragma GCC push_options` and `#pragma GCC pop_options`,
@@ -5962,7 +5961,7 @@ and of an element that is held across a call in another argument.
 Stage 3 settles the form
 (package 3.6): the cost of the tests in the container library and the
 pilot, without optimisation as well as with it, the refusals of rule 9
-of section 8, read from its code, the indexes and `slice_sub`
+of section 8, read from its name, the indexes and `slice_sub`
 expressions that stand where C does not evaluate them, and the tests
 that a call could resume, with the cost of volatile temporaries for
 those alone. Without a finding against it the expression stays, with
@@ -6064,7 +6063,7 @@ told from the first:
   refuse each as a redefinition, and take a label that the statement
   expression declares with `__label__`, which each writing has for
   itself. The check of the resolution property refuses the operand
-  first, with the code of this kind of text (above);
+  first, with the name of this kind of text (above);
 - one that holds a `#pragma` line.
 
 An operand of fixed length is evaluated once, whatever it holds. Where
@@ -6188,19 +6187,27 @@ structures of the packing probe that ends one (10.3), one of each.
 
 ### 13.6 Diagnostics and debugging
 
-- A diagnostic carries the file, the line, the source line and a stable
-  code. Stable codes let tests and editors refer to a diagnostic without
-  matching its text.
-- A stable code is `TC` and four digits. It names a rule of this design
-  that the text breaks, a limit of the GNU profile (13.3) that C
-  text or Type-C text meets, or a construct that a later work package
-  implements, and ends the diagnostic in brackets after the clause that
-  states the rule, as GCC and Clang end a warning with its option:
-  `file:line: text (design 4.2 rule 1) [TC0018]`. Each rule's code is
-  written beside it in the one table of rules, which generates the
-  catalogue of diagnostics; a code is never renumbered or reused.
+- A diagnostic is written as GCC and Clang write an error,
+  `file:line: error: text`, and carries the source line and a stable
+  name. Stable names let tests, editors and users refer to a diagnostic
+  without matching its text.
+- A stable name is lowercase words of letters and digits joined by
+  hyphens, as GCC and Clang name the options of their warnings. It names
+  a rule of this design that the text breaks, a limit of the GNU profile
+  (13.3) that C text or Type-C text meets, or a construct that a later
+  work package implements, and ends the diagnostic in brackets, as GCC
+  and Clang end a warning with its option:
+  `file:line: error: the end of the match arm can be reached
+  [match-arm-end]`. The message cites no clause of this design. Each
+  rule's name is written beside it in the one table of rules, which
+  generates the catalogue of diagnostics: one entry for each name, with
+  the rule and the clause that states it. A name is never renamed, and
+  the name of a removed rule is never given to another.
+- A message about no place in the source, as one about the command line
+  or a file that `typec` cannot read or write, begins with `typec:`, as
+  a C compiler's begins with its own name.
 - A refusal of C text that states no rule of this design carries no
-  code: C11, the GCC manual or the backend's own diagnostic names what
+  name: C11, the GCC manual or the backend's own diagnostic names what
   is wrong. A translation limit of `typec` (C11 5.2.4.1) is such a
   refusal: it bounds what this compiler reads or writes and says
   nothing of whether the source is valid, and its message names it
@@ -6212,18 +6219,18 @@ structures of the packing probe that ends one (10.3), one of each.
   construct's text escapes it; and the bound of 4096 bytes on the
   encodings of the arguments of one instance. The limit
   on nested instantiation is none: 3.5 rule 7 states it as a rule of
-  Type-C, so it carries a code. A limit of the GNU profile, a
+  Type-C, so it carries a name. A limit of the GNU profile, a
   construct
   outside the profile or one that needs what `typec` does not compute,
   is a refusal of the accepted dialect by this design rather than by C,
-  so it carries a code. C text that breaks a rule of this design is
-  refused with the rule's code, as Type-C text is: a `defer` statement
+  so it carries a name. C text that breaks a rule of this design is
+  refused with the rule's name, as Type-C text is: a `defer` statement
   that C text writes with `_Defer` is refused under rules 8, 9, 11 and
   12 of section 6, and a `return` in its scope under the refusals of
-  the form (13.5), each with the code it has in Type-C text. Every
-  refusal of the front end is either coded or a refusal of C text that
+  the form (13.5), each with the name it has in Type-C text. Every
+  refusal of the front end is either named or a refusal of C text that
   states no rule of this design, and only the function that appends a
-  rule's code makes a coded one.
+  rule's name makes a named one.
 - Debuggers step through the original lines. Bindings are C locals under
   their source names. A variant value appears as its lowered struct, with
   the tag printed by name. Generic instances appear under their instance
@@ -6307,7 +6314,7 @@ with the scripts that reproduce them (`make size-split`,
 | P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
 | P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |
 | P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
-| P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its code; how many of them stand where C does not evaluate them; and how many tests hold a call or a statement expression in an operand after the first, with what volatile temporaries for those tests alone cost there, the form that the owner decided against (section 8 rule 10). A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays, and its temporaries are not volatile |
+| P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its name; how many of them stand where C does not evaluate them; and how many tests hold a call or a statement expression in an operand after the first, with what volatile temporaries for those tests alone cost there, the form that the owner decided against (section 8 rule 10). A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays, and its temporaries are not volatile |
 | P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
 | P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32; and the encodings of the arguments of one instance hold at most 4096 bytes (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances in the front end, the bytes that lowering charges for each of them and their ratio to the source, and the longest encodings of one instance in them. The budget and the base of the limit are at least four times the largest count and charge, the factor at least four times the largest ratio and the bound at least four times the longest; a larger budget or limit costs in proportion (3.5 rule 7) | 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes |
 

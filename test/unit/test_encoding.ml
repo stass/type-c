@@ -32,7 +32,7 @@ let read ~file source =
    scope. *)
 let encoding_of ?(file = "in.c") source =
   match read ~file source with
-  | Error error -> Error ("error: " ^ Reader.error_message error)
+  | Error error -> Error (Reader.error_message error)
   | Ok ((file_scope : Parser.file_scope), result) -> (
       let entity =
         Option.bind

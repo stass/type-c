@@ -93,7 +93,7 @@ let fail_case source message =
 (* [source] declares [name] at file scope as [expected] describes. *)
 let declares ?file ?(target = lp64) source name expected =
   match read ?file target source with
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
   | Ok read -> (
       match file_scope_entity read name with
       | None -> fail_case source (name ^ " is not declared")
@@ -123,7 +123,7 @@ let rejects ?file ?(target = lp64) source expected =
 let accepts ?file ?(target = lp64) source =
   match read ?file target source with
   | Ok _ -> ()
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
 
 (* Reading [source size] takes time that grows at most as [size] to the
    power [degree], from [small] on. *)
@@ -310,7 +310,8 @@ let tags () =
   rejects "struct s { int a : -1; };" "bit-field";
   rejects "struct s { int x; int a : x; };" "6.5.1p2";
   rejects "int x; struct s { int a : x; };" "6.7.2.1p4";
-  rejects "struct s { int a : sizeof(struct s *[2]); };" "P16";
+  rejects "struct s { int a : sizeof(struct s *[2]); };"
+    "does not evaluate [unsupported]";
   accepts "struct s { int a : sizeof(int); unsigned : 0; _Bool b : 1; };";
   rejects "struct s { int a[]; int b; };" "flexible";
   accepts "struct s { int b; int a[]; };"
@@ -350,7 +351,7 @@ let links () =
    is empty. *)
 let links_to ?(target = lp64) source name expected =
   match read target source with
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
   | Ok (_, result) ->
       let actual =
         match Declarations.linked result name with
@@ -515,7 +516,7 @@ let constant_expressions () =
   evaluates_int "(signed char)200" "-56";
   evaluates_int "(_Bool)256" "1";
   evaluates_int "(int)4294967296" "0";
-  rejects "enum { V = (int)3.5 };" "P16";
+  rejects "enum { V = (int)3.5 };" "does not evaluate [unsupported]";
   evaluates_int "1 ? 2 : 1 / 0" "2";
   evaluates_int "0 && 1 / 0" "0";
   evaluates_int "1 || (1 << 99)" "1";
@@ -694,7 +695,8 @@ let enumerations () =
   declares "int a[sizeof (enum { A, B })];" "B" "enumerator int = 1";
   rejects "enum e { A = 0xffffffffffffffff, B };" "6.7.2.2p2";
   rejects "enum e { A = 0x8000000000000000, B = -1 };" "6.7.2.2p4";
-  rejects "struct s { int a; }; enum e { A = sizeof(struct s), B };" "P16";
+  rejects "struct s { int a; }; enum e { A = sizeof(struct s), B };"
+    "does not evaluate [unsupported]";
   let compatible source expected =
     match read lp64 source with
     | Error error -> fail_case source (Reader.error_message error)
@@ -739,7 +741,7 @@ let errors_are_located () =
 (* The integer type of the enumeration tagged [tag], in words. *)
 let enum_integer_of ?(target = lp64) source tag expected =
   match read target source with
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
   | Ok ((_, result) as read) -> (
       let actual =
         match file_scope_tag read tag with
@@ -826,7 +828,7 @@ let unknown_types () =
     "object char[<constant>] external static";
   declares "char c[sizeof(_Float16[2])];" "c"
     "object char[<constant>] external static";
-  rejects "enum { A = sizeof(_Float16) };" "P16";
+  rejects "enum { A = sizeof(_Float16) };" "does not evaluate [unsupported]";
   (* The value of a cast needs its type. *)
   rejects "char c[(_Float16)2];"
     "the value of a cast depends on '_Float16' at in.c:1";
@@ -1342,7 +1344,7 @@ let initialisers () =
   accepts "int x = { 1, 2 }; int a[1] = { 1, 2 }; int y = { { 1 } };";
   (* Type-C text holds no excess initialiser (design 5.2), judged by its
      first token; C text keeps the backend's warning. *)
-  let excess source = rejects ~file:"in.tc" source "[TC0050]" in
+  let excess source = rejects ~file:"in.tc" source "[excess-initializer]" in
   excess "int x = { 1, 2 };";
   excess "int a[1] = { 1, 2 };";
   excess "int a[2] = { [1] = 1, 2 };";
@@ -1465,7 +1467,7 @@ let variants () =
      through a pointer (rule 5). *)
   rejects ~file "type e = | A(e inner);"
     "the field 'inner' of 'A' is not a complete object type, so it is not \
-     a value type (design 3.2 rule 4) [TC0006]";
+     a value type [field-type]";
   rejects ~file "type e; type e = | A(e inner);" "not a complete object";
   rejects ~file "type e = | A(struct { e x; } s);" "incomplete";
   rejects ~file "struct s; type e = | A(struct s v);" "not a complete object";
@@ -1537,19 +1539,19 @@ let matching () =
     "'x'";
   match_error "match (n) { default: break; }"
     "the scrutinee of a match is not of a variant type; a pointer is not \
-     dereferenced implicitly (design 4.1 rule 1) [TC0014]";
+     dereferenced implicitly [match-scrutinee]";
   match_error "match (p) { default: break; }"
     "the scrutinee of a match is not of a variant type";
   rejects ~file
     "type t; void g(t *q) { match (*q) { default: break; } }"
     "the scrutinee of a match is of the incomplete variant 't', whose \
-     constructors are unknown here (design 4.1 rule 1) [TC0014]";
+     constructors are unknown here [match-scrutinee]";
   match_error "match (v) { case D: break; default: break; }"
-    "'D' names no constructor of the variant 'e' (design 4.1 rule 3) [TC0016]";
+    "'D' names no constructor of the variant 'e' [match-pattern]";
   match_error "match (v) { case C: break; default: break; }"
     "the case label 'C' omits the field list of a constructor with 1 \
-     field(s), which only a single-pattern test may (design 4.1 rule 3) \
-     [TC0016]";
+     field(s), which only a single-pattern test may \
+     [match-pattern]";
   match_error "match (v) { case A: break; case C: case B: break; }"
     "the case label 'C' omits the field list";
   match_error "match (v) { case A: break; case B(_, _): case C: break; }"
@@ -1564,35 +1566,35 @@ let matching () =
     "'KA' is not declared";
   match_error "match (v) { case A: break; case C(x): case B(_, _): break; }"
     "the binding 'x' is in an arm of several labels, which none of them may \
-     bind (design 4.1 rule 6) [TC0017]";
+     bind [shared-arm-binding]";
   match_error "match (v) { case A: break; default: case C(x): break; }"
-    "(design 4.1 rule 6) [TC0017]";
+    "[shared-arm-binding]";
   match_error "match (v) { case A: break; case B(_, _): break; }"
     "the match does not cover the constructor 'C' of the variant 'e' \
-     (design 4.2 rule 1) [TC0018]";
+     [match-coverage]";
   match_error "match (v) { case B(_, _): break; }"
     "the match does not cover the constructors 'A' and 'C' of the variant \
-     'e' (design 4.2 rule 1) [TC0018]";
+     'e' [match-coverage]";
   match_error "match (v) { case A: break; case A: break; default: break; }"
-    "the constructor 'A' is covered twice (design 4.2 rule 1) [TC0018]";
+    "the constructor 'A' is covered twice [match-coverage]";
   match_error "match (v) { case A: case A: break; default: break; }"
     "the constructor 'A' is covered twice";
   match_error "match (v) { case A: break; default: break; default: break; }"
-    "a match has a second `default` (design 4.2 rule 2) [TC0019]";
+    "a match has a second `default` [match-default]";
   match_error
     "match (v) { case A: break; case B(_, _): break; case C(_): break; \
      default: break; }"
-    "the `default` of a match covers no constructor (design 4.2 rule 2) \
-     [TC0019]";
+    "the `default` of a match covers no constructor \
+     [match-default]";
   match_error
     "switch (n) { case 1: match (v) { default: { case 2: break; } } }"
     "a case or default label inside a match arm, which is not one of its \
-     own and belongs to no switch inside it (design 4.3 rule 3) [TC0020]";
+     own and belongs to no switch inside it [stray-case-label]";
   match_error "match (v) { default: if (n) { default: ; } break; }"
-    "(design 4.3 rule 3) [TC0020]";
+    "[stray-case-label]";
   (* A variant reaches no constructor through an enumeration. *)
   rejects ~file "enum k { K }; void g(enum k x) { match (x) { default: ; } }"
-    "(design 4.1 rule 1) [TC0014]"
+    "[match-scrutinee]"
 
 (* Design 4.3 rule 1 and 4.4: the end of every arm is unreachable, by the
    syntactic rules of 4.4, which evaluate no condition but a constant. *)
@@ -1612,7 +1614,7 @@ let arm_termination () =
     in_function ("match (v) { case A: break; default: " ^ arm ^ " }")
   in
   let open_end =
-    "the end of the match arm can be reached (design 4.3 rule 1) [TC0021]"
+    "the end of the match arm can be reached [match-arm-end]"
   in
   let refused arm = rejects ~file (ends arm) open_end in
   let accepted arm = accepts ~file (ends arm) in
@@ -1722,7 +1724,7 @@ let arm_jumps () =
     variant ^ "int f(e v, e w, int n) { " ^ body ^ " out: return 0; }"
   in
   let into =
-    "a jump into a match arm from outside it (design 4.3 rule 3) [TC0022]"
+    "a jump into a match arm from outside it [match-arm-entry]"
   in
   let refused body = rejects ~file (in_function body) into in
   let accepted body = accepts ~file (in_function body) in
@@ -1754,7 +1756,7 @@ let arm_jumps () =
        "match (v) { case A: in: { void *q = &&in; (void)q; } return 1; \
         default: break; }")
     "the address of a label inside a match arm, which a computed goto \
-     could jump to from outside the arm (design 4.3 rule 3) [TC0022]";
+     could jump to from outside the arm [match-arm-entry]";
   (* The labels of the arms are those of the function, as in the C that
      the match lowers to. *)
   rejects ~file
@@ -1771,7 +1773,7 @@ let constructors () =
     variant ^ "void take(e); e f(e v, int n) { " ^ body ^ " }"
   in
   let constructor_error body text =
-    rejects ~file (in_function body) (text ^ " (design 3.3) [TC0009]")
+    rejects ~file (in_function body) (text ^ " [constructor-expression]")
   in
   accepts ~file
     (in_function
@@ -1851,8 +1853,8 @@ let zero_values () =
   let variant = "type e = | A | B(int i); struct s { e v; int n; }; " in
   let refused source =
     rejects ~file (variant ^ source)
-      "the only braced initialisers of a variant are {0} and {} (design \
-       3.2 rule 7) [TC0008]"
+      "the only braced initialisers of a variant are {0} and {} \
+       [variant-initializer]"
   in
   accepts ~file
     (variant
@@ -1920,15 +1922,15 @@ let distinct_types () =
   let refused body =
     rejects ~file (in_function body)
       "a value of the distinct type 'id' takes no such operation; a cast to \
-       its underlying type crosses to it (design 3.4) [TC0011]"
+       its underlying type crosses to it [distinct-operation]"
   in
   let mixed body =
     rejects ~file (in_function body)
-      "the operands are not both of the distinct type 'id' (design 3.4) \
-       [TC0011]"
+      "the operands are not both of the distinct type 'id' \
+       [distinct-operation]"
   in
   let converts body =
-    rejects ~file (in_function body) "without a cast (design 3.4) [TC0012]"
+    rejects ~file (in_function body) "without a cast [distinct-conversion]"
   in
   accepts ~file
     (in_function
@@ -1956,11 +1958,11 @@ let distinct_types () =
     "takes no such operation";
   rejects ~file (in_function "return (id)*r;") "'ref' takes no such operation";
   rejects ~file "type d = distinct struct s *[2];"
-    "is not over an unqualified arithmetic or pointer type (design 3.4) \
-     [TC0010]";
+    "is not over an unqualified arithmetic or pointer type \
+     [distinct-base]";
   rejects ~file "type d = distinct const int;"
-    "is not over an unqualified arithmetic or pointer type (design 3.4) \
-     [TC0010]";
+    "is not over an unqualified arithmetic or pointer type \
+     [distinct-base]";
   accepts ~file
     (types ^ "int g(id a) { return _Generic(a, unsigned: 1, id: 2); }");
   (* C text in a Type-C file sees the representation. *)
@@ -1971,8 +1973,8 @@ let distinct_types () =
       enum { three = (id)3 }; static int t[(id)2];\n\
       # 3 \"in.tc\" 2\n");
   rejects ~file "enum e; type d = distinct enum e;"
-    "is not over an unqualified arithmetic or pointer type (design 3.4) \
-     [TC0010]"
+    "is not over an unqualified arithmetic or pointer type \
+     [distinct-base]"
 
 (* Design 3.4: every operand that typing reads refuses a distinct value
    in Type-C text, whichever path types it; a pointer to a distinct type
@@ -2077,7 +2079,7 @@ let distinct_operands () =
         (void)(p == 0); (void)(p - p); (void)(c ? p : v); return *p;");
   List.iter
     (fun source ->
-      rejects ~file (types ^ source) "without a cast (design 3.4) [TC0012]")
+      rejects ~file (types ^ source) "without a cast [distinct-conversion]")
     [ "struct outer o = {5};"; "struct pair y = {5};";
       "struct outer o = { {5} };" ];
   accepts ~file
@@ -2101,8 +2103,8 @@ let variant_operations () =
   let refused body =
     rejects ~file (in_function body)
       "the variant 'e' takes no such operation; Type-C text reaches its tag \
-       and fields only through constructors and matching (design 3.2 rule 6) \
-       [TC0007]"
+       and fields only through constructors and matching \
+       [variant-operation]"
   in
   accepts ~file
     (in_function
@@ -2169,16 +2171,16 @@ let single_pattern_test () =
   (* 4.1 rules 1 and 3 hold for the operand and the pattern. *)
   refused "if (case A = p) return 1;"
     "the operand of a single-pattern test is not of a variant type; a \
-     pointer is not dereferenced implicitly (design 4.1 rule 1) [TC0014]";
-  refused "if (case A = n && n) return 1;" "[TC0014]";
-  refused "if (case A = v && n) return 1;" "(design 3.2 rule 6) [TC0007]";
+     pointer is not dereferenced implicitly [match-scrutinee]";
+  refused "if (case A = n && n) return 1;" "[match-scrutinee]";
+  refused "if (case A = v && n) return 1;" "[variant-operation]";
   refused "while (case D = v) break;"
-    "'D' names no constructor of the variant 'e' (design 4.1 rule 3) \
-     [TC0016]";
+    "'D' names no constructor of the variant 'e' \
+     [match-pattern]";
   refused "if (case B(i, j) = v) return 1;"
     "the pattern 'B' has 2 sub-pattern(s), and the constructor has 1 \
-     field(s) (design 4.1 rule 3) [TC0016]";
-  refused "if (case A(i) = v) return 1;" "[TC0016]";
+     field(s) [match-pattern]";
+  refused "if (case A(i) = v) return 1;" "[match-pattern]";
   (* 4.6 rule 2: a test may omit the field list of a constructor with
      fields, and then binds nothing. *)
   accepted "if (case B = v) return 1; else n = 2;";
@@ -2188,7 +2190,7 @@ let single_pattern_test () =
   (* 4.3 rule 3 holds for the statement, whether or not it binds. *)
   let into =
     "a jump into the statement of a single-pattern test from outside it \
-     (design 4.3 rule 3) [TC0022]"
+     [match-arm-entry]"
   in
   refused "goto in; if (case A = v) { in: return 1; }" into;
   refused "if (case A = v) n = 1; else goto in; if (case B(i) = v) in: \
@@ -2201,8 +2203,8 @@ let single_pattern_test () =
   accepted "if (case A = v) n = 1; else { in: if (n--) goto in; }";
   refused "switch (n) { case 1: if (case A = v) { case 2: ; } }"
     "a case or default label inside the statement of a single-pattern \
-     test, which only a successful test enters (design 4.3 rule 3) \
-     [TC0020]";
+     test, which only a successful test enters \
+     [stray-case-label]";
   (* Reachability: the test is no constant, and its statement's labels
      enter only from inside it. *)
   accepts ~file
@@ -2213,7 +2215,7 @@ let single_pattern_test () =
     (variant
    ^ "int g(e v) { match (v) { case A: return 1; default: if (case A = v) \
       return 1; } }")
-    "[TC0021]";
+    "[match-arm-end]";
   accepts ~file
     (variant
    ^ "int g(e v) { match (v) { case A: return 1; default: return 2; \
@@ -2390,14 +2392,14 @@ let generic_variants () =
   (* Exhaustiveness (4.2 rule 1). *)
   rejects ~file (in_function "match (v) { case Nil: break; }")
     "the match does not cover the constructor 'Cons' of the variant \
-     'list__i' (design 4.2 rule 1) [TC0018]";
+     'list__i' [match-coverage]";
   rejects ~file
     (in_function
        "match (v) { case Nil: break; case Cons(_, _): break; \
         default: break; }")
-    "the `default` of a match covers no constructor (design 4.2 rule 2)";
+    "the `default` of a match covers no constructor";
   rejects ~file (in_function "list(int) x = list(int).None; (void)x;")
-    "has no constructor 'None' (design 3.3) [TC0009]";
+    "has no constructor 'None' [constructor-expression]";
   (* An unqualified constructor needs a variant target type. *)
   rejects ~file (in_function "int k = Nil; (void)k;") "'Nil'";
   (* A definition check that needs an instance leaves it to later uses;
@@ -2701,7 +2703,7 @@ let placements source =
   let declaration_at, read = read_type_c source in
   match read with
   | Error error ->
-      fail_case source ("error: " ^ Reader.error_message error);
+      fail_case source (Reader.error_message error);
       []
   | Ok result ->
       let shown (placement : Declarations.placement) =
@@ -2729,7 +2731,7 @@ let function_instances source =
   let declaration_at, read = read_type_c source in
   match read with
   | Error error ->
-      fail_case source ("error: " ^ Reader.error_message error);
+      fail_case source (Reader.error_message error);
       []
   | Ok result ->
       List.map
@@ -2887,7 +2889,7 @@ let generic_resolution () =
   rejects ~file ("extern int a[]; " ^ uses ^ " int a[3]; g(int) x;")
     "changes the type that the text uses";
   rejects ~file ("int a(); " ^ uses ^ " int a(int); g(int) x;")
-    "changes the type that the text uses (design 13.5) [TC0071]";
+    "changes the type that the text uses [generic-name-capture]";
   accepts ~file ("extern int a[2]; " ^ uses ^ " extern int a[2]; g(int) x;");
   accepts ~file ("int a(int); " ^ uses ^ " int a(int); g(int) x;");
   accepts ~file ("extern int a[]; " ^ uses ^ " g(int) x; int a[3];");
@@ -2897,7 +2899,7 @@ let generic_resolution () =
   rejects ~file
     ("static _Float16 a(_Float16); " ^ uses
    ^ " static _Float16 a(_Float16 x) { return x; } g(int) x;")
-    "[TC0045]";
+    "[name-capture-unknown]";
   accepts ~file ("static _Float16 a(_Float16); " ^ uses ^ " g(int) x;");
   (* A typedef name declared again with an attribute between the text
      and the place where lowering writes it gives the text another type
@@ -2923,11 +2925,17 @@ let generic_resolution () =
   (* An attribute that the text has already may change, and typec does
      not compare attributes, so any declaration with one is refused. *)
   let narrow = "typedef int p __attribute__((aligned(8))); " in
-  rejects ~file (narrow ^ holder ^ wide ^ " g(int) y;") "[TC0071]";
-  rejects ~file (narrow ^ holder ^ " typedef int p; g(int) y;") "[TC0071]";
+  rejects ~file
+    (narrow ^ holder ^ wide ^ " g(int) y;")
+    "[generic-name-capture]";
+  rejects ~file
+    (narrow ^ holder ^ " typedef int p; g(int) y;")
+    "[generic-name-capture]";
   (* Declared again before the alias, the typedef name makes the alias
      inexact at its own place, and the argument is refused there. *)
-  rejects ~file (plain ^ wide ^ " " ^ alias ^ " box(a(int)) x;") "[TC0041]";
+  rejects ~file
+    (plain ^ wide ^ " " ^ alias ^ " box(a(int)) x;")
+    "[type-argument]";
   (* The exactness of an alias generic is read once, at its definition,
      so a chain of aliases each applied takes time linear in its length,
      not in its square. *)
@@ -2962,7 +2970,7 @@ let generic_resolution () =
     added;
   rejects ~file
     (typed_wide ^ "extern wide obj; " ^ reads_obj ^ "extern int obj; g(int) x;")
-    "[TC0071]";
+    "[generic-name-capture]";
   rejects ~file
     (typed_wide ^ "int *f(void); " ^ reads_f ^ "wide *f(void); g(int) x;")
     added;
@@ -3085,8 +3093,10 @@ let generic_resolution () =
   let aligned =
     "type g(T) = struct { T v __attribute__((aligned(sizeof(T)))); };"
   in
-  rejects ~file ("typedef char T; " ^ aligned ^ " g(int) x;") "[TC0038]";
-  rejects ~file aligned "[TC0038]";
+  rejects ~file
+    ("typedef char T; " ^ aligned ^ " g(int) x;")
+    "[generic-definition]";
+  rejects ~file aligned "[generic-definition]";
   accepts ~file
     "enum { N = 8 }; \
      type g(T) = struct { T v; int w __attribute__((aligned(N))); }; g(int) x;";

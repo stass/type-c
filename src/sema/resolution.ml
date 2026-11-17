@@ -78,7 +78,7 @@ type context = {
 }
 
 (* Whether a failure rests on facts that typec knows, or on a type that
-   it does not compute (P21), which carries one code across the kinds. *)
+   it does not compute (P21), which carries one name across the kinds. *)
 type ground = Known | Unknown_type
 
 (* Raised at the first point of the text that breaks the property, with
@@ -101,7 +101,7 @@ let kind_rule : kind -> Rule.t = function
   | Return_operand -> Return_operand_moved
 
 (* The one failure path: [run] of the clauses, with the failure made a
-   diagnostic under the code of [kind], or under the one code of a
+   diagnostic under the name of [kind], or under the one name of a
    failure on an unknown type. *)
 let checking kind run =
   match run () with
@@ -658,7 +658,7 @@ let check_spelled_name context place (use : name) =
 (* The first half of the property for a text that lowering makes and
    that spells [names] of the source. The one name of an untagged type
    is written into an instance, as the definition of a generic is, and
-   takes its code. *)
+   is refused under the same name. *)
 let check_spelled context names ~at =
   checking Generic_definition (fun () ->
       List.iter (check_spelled_name context at) names)

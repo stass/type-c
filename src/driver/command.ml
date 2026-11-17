@@ -4,8 +4,11 @@
 module Target = Typec_sema.Target
 
 (* The status still reports the failure when stderr is closed. *)
-let report message =
-  try prerr_endline ("typec: " ^ message) with Sys_error _ -> ()
+let print_error line = try prerr_endline line with Sys_error _ -> ()
+
+(* A message that names no place in the source names the program, as a
+   C compiler's does. *)
+let report message = print_error ("typec: " ^ message)
 
 let fail failure message =
   report message;
@@ -46,6 +49,12 @@ let stop failure message =
   report message;
   raise (Stopped (Exit (Exit_status.code failure)))
 
+(* A refusal names its place in the source, which says where it comes
+   from, so it is printed without the program's name. *)
+let refuse error =
+  print_error (Typec_cpp.Reader.error_message error);
+  raise (Stopped (Exit (Exit_status.code Exit_status.Refused)))
+
 let stop_if_caught () =
   match Signals.caught () with
   | Some signal -> raise (Stopped (Signal signal))
@@ -85,8 +94,7 @@ let read_preprocessed (translation : Pipeline.translation) =
   in
   match Typec_cpp.Reader.read ~name:translation.source text with
   | Ok unit -> unit
-  | Error error ->
-      stop Exit_status.Refused (Typec_cpp.Reader.error_message error)
+  | Error error -> refuse error
 
 (* A signal that interrupts the query ends the pipeline by that signal.
    The query is the first step, and a backend that fails it, as one
@@ -110,8 +118,7 @@ let query_target ~program options =
 let lower dialect target text =
   match Front_end.lower dialect target text with
   | Ok lowered -> lowered
-  | Error error ->
-      stop Exit_status.Refused (Typec_cpp.Reader.error_message error)
+  | Error error -> refuse error
 
 let write_emitted (destination : Pipeline.destination) text =
   try

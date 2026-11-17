@@ -7,7 +7,7 @@
     passes an lvalue of each parameter, in a typedef before its body,
     and puts the body in a block of its own; a function that returns
     void evaluates [e] as a statement. Each case where that text cannot
-    be written is refused with a code of its own (13.6). *)
+    be written is refused with a name of its own (13.6). *)
 
 open Typec_syntax
 

@@ -182,6 +182,6 @@ typec refuses the operand.
   $ for cc in $clang $gcc; do
   >   typec --cc=$cc -Wall -Wextra -Werror -o linked linked.tc && ./linked
   > done
-  typec: linked.tc:7: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
-  typec: linked.tc:7: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
+  linked.tc:7: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [try-name-capture]
+  linked.tc:7: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [try-name-capture]
   [80]

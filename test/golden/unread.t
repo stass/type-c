@@ -14,7 +14,7 @@ reach the backend as written.
   > void f(void) { int x __attribute__((aligned(sizeof(_Defer)))); }
   > EOF
   $ ./golden.exe defer_attribute.tc
-  defer_attribute.tc:1: `_Defer` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]
+  defer_attribute.tc:1: error: `_Defer` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written [unread-word]
   [1]
   $ cat > defer_c_attribute.tc <<'EOF'
   > # 1 "defer_c_attribute.tc"
@@ -23,7 +23,7 @@ reach the backend as written.
   > # 2 "defer_c_attribute.tc" 2
   > EOF
   $ ./golden.exe defer_c_attribute.tc
-  defer.h:1: `_Defer` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]
+  defer.h:1: error: `_Defer` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written [unread-word]
   [1]
 
 A function body that C text of a system header opens is passed through
@@ -36,7 +36,7 @@ unread, and `_Defer` there is refused too.
   > # 2 "defer_body.tc" 2
   > EOF
   $ ./golden.exe defer_body.tc
-  system.h:1: `_Defer` in a function body that a system header opens, which typing does not read, begins a construct of Type-C that would reach the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]
+  system.h:1: error: `_Defer` in a function body that a system header opens, which typing does not read, begins a construct of Type-C that would reach the backend as written [unread-word]
   [1]
 
 The parser reads the body of a block literal, which typing does not, so
@@ -50,7 +50,7 @@ scan of the literal after.
   > # 2 "defer_block.tc" 2
   > EOF
   $ ./golden.exe defer_block.tc
-  block.h:1: `_Defer` in a block literal, which typing does not read, begins a construct of Type-C that would reach the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]
+  block.h:1: error: `_Defer` in a block literal, which typing does not read, begins a construct of Type-C that would reach the backend as written [unread-word]
   [1]
 
 The words `defer` and `try` of Type-C text are refused in an attribute
@@ -62,14 +62,14 @@ text that Type-C text writes, only an attribute argument holds words.
   > void f(void) { int x __attribute__((cleanup(defer))); }
   > EOF
   $ ./golden.exe defer_word.tc
-  defer_word.tc:2: `defer` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]
+  defer_word.tc:2: error: `defer` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written [unread-word]
   [1]
   $ cat > try_word.tc <<'EOF'
   > int g(void);
   > void f(void) { int x __attribute__((aligned(sizeof(try g())))); }
   > EOF
   $ ./golden.exe try_word.tc
-  try_word.tc:2: `try` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]
+  try_word.tc:2: error: `try` in the arguments of an attribute, which typing does not read, begins a construct of Type-C that would reach the backend as written [unread-word]
   [1]
 
 A declaration hides the words, and in C text they are identifiers.
@@ -126,7 +126,7 @@ identifier of unread text is refused.
   > }
   > EOF
   $ ./golden.exe claim_enumerator.tc
-  claim_enumerator.tc:2: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  claim_enumerator.tc:2: error: the name `option__i_Some` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
   $ cat > claim_tag.tc <<'EOF'
   > # 1 "claim_tag.tc"
@@ -134,7 +134,7 @@ identifier of unread text is refused.
   > int x __attribute__((aligned(sizeof(struct option__i { int a; }))));
   > EOF
   $ ./golden.exe claim_tag.tc
-  claim_tag.h:1: the name `option__i` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  claim_tag.h:1: error: the name `option__i` is spelled in the arguments of an attribute, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
   $ cat > claim_body.tc <<'EOF'
   > # 1 "claim_body.tc"
@@ -142,7 +142,7 @@ identifier of unread text is refused.
   > static int g(void) { enum { result__i_Ok }; return result__i_Ok; }
   > EOF
   $ ./golden.exe claim_body.tc
-  system.h:1: the name `result__i_Ok` is spelled in a function body that a system header opens, which typing does not read, but the generic `result` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  system.h:1: error: the name `result__i_Ok` is spelled in a function body that a system header opens, which typing does not read, but the generic `result` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
 
   $ cat > claim_block.tc <<'EOF'
@@ -151,7 +151,7 @@ identifier of unread text is refused.
   > static void g(void) { void (^b)(void) = ^{ (void)sizeof(option__i); }; b(); }
   > EOF
   $ ./golden.exe claim_block.tc
-  block.h:1: the name `option__i` is spelled in a block literal, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  block.h:1: error: the name `option__i` is spelled in a block literal, which typing does not read, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
 
 A name whose part before its first `__` is no generic is not claimed.

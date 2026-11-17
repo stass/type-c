@@ -412,8 +412,7 @@ let not_read state span name =
   fail state span
     (Rule.message Profile
        (quote name
-      ^ " is declared where typec does not read declarations yet (design \
-         13.3)"))
+      ^ " is declared where typec does not read declarations yet"))
 
 (* What the moved texts being read use and declare (design 13.5): every
    use of a name passes [note_use], and every declaration of one
@@ -1911,8 +1910,7 @@ and bit_field_width state width =
   | Constant { value = Opaque; _ } ->
       fail state width.span
         (Rule.message Profile
-           "the width of a bit-field is one that typec does not evaluate \
-            (design P16)")
+           "the width of a bit-field is one that typec does not evaluate")
   | Not_constant span ->
       fail state span
         (Rule.c_text
@@ -2045,8 +2043,7 @@ and enumerator_value state previous span (value : Tree.expression option) =
       | Constant { value = Opaque; _ } ->
           fail state expression.span
             (Rule.message Profile
-               "an enumerator value is one that typec does not evaluate \
-                (design P16)")
+               "an enumerator value is one that typec does not evaluate")
       | Constant { value = Known value; _ }
         when Integer_constant.fits target Int value ->
           (Integer.Int, value)
@@ -3524,7 +3521,7 @@ and no_row_diagnostic argument ({ part; reason } : Encoding.no_row) =
   | Function_not_under_pointer ->
       refused (holds "a function type not under a pointer")
   | Opaque_length ->
-      refused (holds "whose array length typec does not compute (design P16)")
+      refused (holds "whose array length typec does not compute")
   | Variable_length -> refused (holds "which is variably modified")
   | Unnamed -> refused (holds "which no declaration names")
   | Several_names names ->

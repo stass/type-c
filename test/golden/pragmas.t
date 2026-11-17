@@ -27,7 +27,7 @@ sequence of tokens, which Type-C text refuses.
   > int y;
   > EOF
   $ ./golden.exe mark.tc
-  mark.tc:2: a `#pragma` line whose text is no sequence of preprocessing tokens: unterminated literal (design 13.5) [TC0040]
+  mark.tc:2: error: a `#pragma` line whose text is no sequence of preprocessing tokens: unterminated literal [pragma-tokens]
   [1]
 
 C text that does not move passes such a line on whole.

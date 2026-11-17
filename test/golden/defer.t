@@ -29,7 +29,7 @@ of its scope (design 13.5), so that none reaches the backend.
   > void f(void) { defer undeclared(); }
   > EOF
   $ ./golden.exe typed_error.tc
-  typed_error.tc:1: 'undeclared' is not declared (C11 6.5.1p2)
+  typed_error.tc:1: error: 'undeclared' is not declared (C11 6.5.1p2)
   [1]
 
   $ cat > c_text.tc <<'EOF'
@@ -66,7 +66,7 @@ in a function body (design 6 rule 11).
   > }
   > EOF
   $ ./golden.exe substatement.tc
-  substatement.tc:4: a `defer` statement is a block item of a compound statement or a match arm in a function body, not the substatement of a statement; write it in a compound statement (design 6 rule 11) [TC0057]
+  substatement.tc:4: error: a `defer` statement is a block item of a compound statement or a match arm in a function body, not the substatement of a statement; write it in a compound statement [defer-position]
   [1]
 
   $ cat > labelled.tc <<'EOF'
@@ -77,7 +77,7 @@ in a function body (design 6 rule 11).
   > }
   > EOF
   $ ./golden.exe labelled.tc
-  labelled.tc:4: a `defer` statement is a block item of a compound statement or a match arm in a function body, not the statement of a label; write it in a compound statement (design 6 rule 11) [TC0057]
+  labelled.tc:4: error: a `defer` statement is a block item of a compound statement or a match arm in a function body, not the statement of a label; write it in a compound statement [defer-position]
   [1]
 
   $ cat > case.tc <<'EOF'
@@ -90,7 +90,7 @@ in a function body (design 6 rule 11).
   > }
   > EOF
   $ ./golden.exe case.tc
-  case.tc:5: a `defer` statement is a block item of a compound statement or a match arm in a function body, not the statement of a label; write it in a compound statement (design 6 rule 11) [TC0057]
+  case.tc:5: error: a `defer` statement is a block item of a compound statement or a match arm in a function body, not the statement of a label; write it in a compound statement [defer-position]
   [1]
 
   $ cat > deferred.tc <<'EOF'
@@ -98,7 +98,7 @@ in a function body (design 6 rule 11).
   > void f(void) { defer defer g(); }
   > EOF
   $ ./golden.exe deferred.tc
-  deferred.tc:2: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
+  deferred.tc:2: error: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement [nested-defer]
   [1]
 
 No `defer` statement stands in the statement of another at any depth:
@@ -116,7 +116,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > }
   > EOF
   $ ./golden.exe deferred_block.tc
-  deferred_block.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
+  deferred_block.tc:6: error: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement [nested-defer]
   [1]
 
   $ cat > deferred_value.tc <<'EOF'
@@ -129,7 +129,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > }
   > EOF
   $ ./golden.exe deferred_value.tc
-  deferred_value.tc:4: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
+  deferred_value.tc:4: error: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement [nested-defer]
   [1]
 
   $ cat > deferred_arm.tc <<'EOF'
@@ -146,7 +146,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > }
   > EOF
   $ ./golden.exe deferred_arm.tc
-  deferred_arm.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
+  deferred_arm.tc:6: error: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement [nested-defer]
   [1]
 
   $ cat > statement_expression.tc <<'EOF'
@@ -154,7 +154,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > void f(void) { (void)({ defer g(); 0; }); }
   > EOF
   $ ./golden.exe statement_expression.tc
-  statement_expression.tc:2: a `defer` statement is a block item of a compound statement or a match arm in a function body, not a block item of the compound statement of a statement expression, whose last item gives its value (design 6 rule 11) [TC0057]
+  statement_expression.tc:2: error: a `defer` statement is a block item of a compound statement or a match arm in a function body, not a block item of the compound statement of a statement expression, whose last item gives its value [defer-position]
   [1]
 
   $ cat > file_scope.tc <<'EOF'
@@ -162,7 +162,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > int a[({ { _Defer g(); } 1; })];
   > EOF
   $ ./golden.exe file_scope.tc
-  file_scope.tc:2: a `defer` statement is a block item of a compound statement or a match arm in a function body, not outside every function body (design 6 rule 11) [TC0057]
+  file_scope.tc:2: error: a `defer` statement is a block item of a compound statement or a match arm in a function body, not outside every function body [defer-position]
   [1]
 
 Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
@@ -172,7 +172,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > void f(void) { defer return; }
   > EOF
   $ ./golden.exe return.tc
-  return.tc:1: `return` in the statement of a defer, which control leaves only at its end (design 6 rule 4) [TC0058]
+  return.tc:1: error: `return` in the statement of a defer, which control leaves only at its end [deferred-exit]
   [1]
 
   $ cat > return_in_value.tc <<'EOF'
@@ -183,7 +183,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > }
   > EOF
   $ ./golden.exe return_in_value.tc
-  return_in_value.tc:3: `return` in the statement of a defer, which control leaves only at its end (design 6 rule 4) [TC0058]
+  return_in_value.tc:3: error: `return` in the statement of a defer, which control leaves only at its end [deferred-exit]
   [1]
 
   $ cat > break.tc <<'EOF'
@@ -194,7 +194,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > }
   > EOF
   $ ./golden.exe break.tc
-  break.tc:3: a `break` that leaves the statement of a defer (design 6 rule 4) [TC0058]
+  break.tc:3: error: a `break` that leaves the statement of a defer [deferred-exit]
   [1]
 
   $ cat > continue.tc <<'EOF'
@@ -208,7 +208,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > }
   > EOF
   $ ./golden.exe continue.tc
-  continue.tc:5: a `continue` that leaves the statement of a defer (design 6 rule 4) [TC0058]
+  continue.tc:5: error: a `continue` that leaves the statement of a defer [deferred-exit]
   [1]
 
   $ cat > break_in_condition.tc <<'EOF'
@@ -220,7 +220,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > }
   > EOF
   $ ./golden.exe break_in_condition.tc
-  break_in_condition.tc:3: a `break` that leaves the statement of a defer (design 6 rule 4) [TC0058]
+  break_in_condition.tc:3: error: a `break` that leaves the statement of a defer [deferred-exit]
   [1]
 
   $ cat > goto.tc <<'EOF'
@@ -232,7 +232,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > }
   > EOF
   $ ./golden.exe goto.tc
-  goto.tc:3: `goto` in the statement of a defer, which control leaves only at its end (design 6 rule 4) [TC0058]
+  goto.tc:3: error: `goto` in the statement of a defer, which control leaves only at its end [deferred-exit]
   [1]
 
   $ cat > computed_goto.tc <<'EOF'
@@ -242,7 +242,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > # 2 "computed_goto.tc" 2
   > EOF
   $ ./golden.exe computed_goto.tc
-  c.h:1: `goto *` in the statement of a defer, which control leaves only at its end (design 6 rule 4) [TC0058]
+  c.h:1: error: `goto *` in the statement of a defer, which control leaves only at its end [deferred-exit]
   [1]
 
   $ cat > asm_goto.tc <<'EOF'
@@ -252,7 +252,7 @@ Control leaves the statement only at its end (design 6 rule 4, 5.1 rule
   > # 2 "asm_goto.tc" 2
   > EOF
   $ ./golden.exe asm_goto.tc
-  c.h:1: `asm goto` in the statement of a defer, which control leaves only at its end (design 6 rule 4) [TC0058]
+  c.h:1: error: `asm goto` in the statement of a defer, which control leaves only at its end [deferred-exit]
   [1]
 
 Labels, the jumps of `asm goto`, follow the clobbers of no other asm,
@@ -265,14 +265,14 @@ which would otherwise jump without the qualifier.
   > # 2 "asm_labels.tc" 2
   > EOF
   $ ./golden.exe asm_labels.tc
-  c.h:1: labels after the clobbers of an `asm` without `goto` (GCC manual, "Extended Asm")
+  c.h:1: error: labels after the clobbers of an `asm` without `goto` (GCC manual, "Extended Asm")
   [1]
 
   $ cat > try.tc <<'EOF'
   > void f(void) { defer try g(); }
   > EOF
   $ ./golden.exe try.tc
-  try.tc:1: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  try.tc:1: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > disputed.tc <<'EOF'
@@ -282,7 +282,7 @@ which would otherwise jump without the qualifier.
   > # 2 "disputed.tc" 2
   > EOF
   $ ./golden.exe disputed.tc
-  c.h:1: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
+  c.h:1: error: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it [ambiguous-jump]
   [1]
 
 Lowering copies the statement to each exit, so it defines nothing that a
@@ -292,7 +292,7 @@ copy would define again (design 6 rule 9).
   > void f(void) { defer { again:; } }
   > EOF
   $ ./golden.exe label.tc
-  label.tc:1: the label `again` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  label.tc:1: error: the label `again` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > local_label.tc <<'EOF'
@@ -302,7 +302,7 @@ copy would define again (design 6 rule 9).
   > # 2 "local_label.tc" 2
   > EOF
   $ ./golden.exe local_label.tc
-  c.h:1: `__label__` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  c.h:1: error: `__label__` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > static.tc <<'EOF'
@@ -310,7 +310,7 @@ copy would define again (design 6 rule 9).
   > void f(void) { defer { static int n; g(&n); } }
   > EOF
   $ ./golden.exe static.tc
-  static.tc:2: a declaration with static or thread storage duration and no `extern` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  static.tc:2: error: a declaration with static or thread storage duration and no `extern` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > thread_local.tc <<'EOF'
@@ -318,42 +318,42 @@ copy would define again (design 6 rule 9).
   > void f(void) { defer { _Thread_local static int n; g(&n); } }
   > EOF
   $ ./golden.exe thread_local.tc
-  thread_local.tc:2: a declaration with static or thread storage duration and no `extern` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  thread_local.tc:2: error: a declaration with static or thread storage duration and no `extern` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > struct_body.tc <<'EOF'
   > void f(void) { defer { struct { int a; } v; (void)v; } }
   > EOF
   $ ./golden.exe struct_body.tc
-  struct_body.tc:1: a structure or union with a body in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  struct_body.tc:1: error: a structure or union with a body in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > enum_body.tc <<'EOF'
   > void f(void) { defer { enum { K }; } }
   > EOF
   $ ./golden.exe enum_body.tc
-  enum_body.tc:1: an enumeration with a body in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  enum_body.tc:1: error: an enumeration with a body in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > tag.tc <<'EOF'
   > void f(void) { defer { struct s; } }
   > EOF
   $ ./golden.exe tag.tc
-  tag.tc:1: the declaration of the tag `s` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  tag.tc:1: error: the declaration of the tag `s` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > implicit_tag.tc <<'EOF'
   > void f(void *p) { defer (void)(struct s *)p; }
   > EOF
   $ ./golden.exe implicit_tag.tc
-  implicit_tag.tc:1: the declaration of the tag `s` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  implicit_tag.tc:1: error: the declaration of the tag `s` in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > type_declaration.tc <<'EOF'
   > void f(void) { defer { type t = int; } }
   > EOF
   $ ./golden.exe type_declaration.tc
-  type_declaration.tc:1: a type declaration in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  type_declaration.tc:1: error: a type declaration in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
   $ cat > block_literal.tc <<'EOF'
@@ -363,7 +363,7 @@ copy would define again (design 6 rule 9).
   > # 2 "block_literal.tc" 2
   > EOF
   $ ./golden.exe block_literal.tc
-  c.h:1: a block literal in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again (design 6 rule 9, 13.5) [TC0059]
+  c.h:1: error: a block literal in the statement of a defer, which lowering copies to each exit of its scope, where each copy would define it again [deferred-declaration]
   [1]
 
 What a copy can repeat is allowed: a typedef that declares no type, a
@@ -450,7 +450,7 @@ switch with its own case labels and a null statement.
   > # 2 "pragma.tc" 2
   > EOF
   $ ./golden.exe pragma.tc
-  c.h:4: a `#pragma` line whose text is no sequence of preprocessing tokens: unterminated literal (design 13.5) [TC0040]
+  c.h:4: error: a `#pragma` line whose text is no sequence of preprocessing tokens: unterminated literal [pragma-tokens]
   [1]
 
 No jump from outside the statement of a defer or its scope enters it
@@ -468,7 +468,7 @@ the address of a label in the scope wherever the address is taken.
   > }
   > EOF
   $ ./golden.exe case_in_statement.tc
-  case_in_statement.tc:5: a case or default label in the statement of a defer that belongs to a switch around it, which would jump into the statement (design 6 rule 5) [TC0060]
+  case_in_statement.tc:5: error: a case or default label in the statement of a defer that belongs to a switch around it, which would jump into the statement [deferred-entry]
   [1]
 
   $ cat > default_in_scope.tc <<'EOF'
@@ -484,7 +484,7 @@ the address of a label in the scope wherever the address is taken.
   > }
   > EOF
   $ ./golden.exe default_in_scope.tc
-  default_in_scope.tc:7: a case or default label in the scope of a defer statement that belongs to a switch around the scope, which would jump into the scope past the defer (design 6 rule 5) [TC0060]
+  default_in_scope.tc:7: error: a case or default label in the scope of a defer statement that belongs to a switch around the scope, which would jump into the scope past the defer [deferred-entry]
   [1]
 
   $ cat > goto_into_scope.tc <<'EOF'
@@ -498,7 +498,7 @@ the address of a label in the scope wherever the address is taken.
   > }
   > EOF
   $ ./golden.exe goto_into_scope.tc
-  goto_into_scope.tc:4: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  goto_into_scope.tc:4: error: a jump into the scope of a defer statement from outside it [deferred-entry]
   [1]
 
   $ cat > address_in_scope.tc <<'EOF'
@@ -511,7 +511,7 @@ the address of a label in the scope wherever the address is taken.
   > }
   > EOF
   $ ./golden.exe address_in_scope.tc
-  address_in_scope.tc:3: the address of a label inside the scope of a defer statement, which a computed goto could jump to from outside the scope (design 6 rule 5) [TC0060]
+  address_in_scope.tc:3: error: the address of a label inside the scope of a defer statement, which a computed goto could jump to from outside the scope [deferred-entry]
   [1]
 
 Where no switch is around the defer, a case label in it or its scope
@@ -525,7 +525,7 @@ belongs to none, as C says.
   > }
   > EOF
   $ ./golden.exe case_without_switch.tc
-  case_without_switch.tc:4: a case or default label outside a switch (C11 6.8.1p2)
+  case_without_switch.tc:4: error: a case or default label outside a switch (C11 6.8.1p2)
   [1]
 
 A switch in the scope jumps to its own labels, a goto may leave the scope
@@ -599,7 +599,7 @@ nested in the scope (design 6 rule 10).
   > }
   > EOF
   $ ./golden.exe scope_computed_goto.tc
-  scope_computed_goto.tc:4: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  scope_computed_goto.tc:4: error: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first [defer-scope-jump]
   [1]
 
   $ cat > scope_asm_goto.tc <<'EOF'
@@ -611,7 +611,7 @@ nested in the scope (design 6 rule 10).
   > }
   > EOF
   $ ./golden.exe scope_asm_goto.tc
-  scope_asm_goto.tc:5: an `asm goto` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  scope_asm_goto.tc:5: error: an `asm goto` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first [defer-scope-jump]
   [1]
 
   $ cat > scope_disputed.tc <<'EOF'
@@ -625,7 +625,7 @@ nested in the scope (design 6 rule 10).
   > }
   > EOF
   $ ./golden.exe scope_disputed.tc
-  c.h:1: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
+  c.h:1: error: a break in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it [ambiguous-jump]
   [1]
 
   $ cat > scope_c_text.tc <<'EOF'
@@ -639,7 +639,7 @@ nested in the scope (design 6 rule 10).
   > # 2 "scope_c_text.tc" 2
   > EOF
   $ ./golden.exe scope_c_text.tc
-  c.h:4: a continue in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it (design 4.4) [TC0026]
+  c.h:4: error: a continue in the condition of a loop or the step of a for, which Clang takes to leave the loop and GCC the statement around it [ambiguous-jump]
   [1]
 
 The scope holds every statement nested in it: a block, a statement
@@ -656,7 +656,7 @@ expression and a match arm, which a jump enters only from inside.
   > }
   > EOF
   $ ./golden.exe scope_nested.tc
-  scope_nested.tc:5: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  scope_nested.tc:5: error: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first [defer-scope-jump]
   [1]
 
   $ cat > scope_arm.tc <<'EOF'
@@ -673,7 +673,7 @@ expression and a match arm, which a jump enters only from inside.
   > }
   > EOF
   $ ./golden.exe scope_arm.tc
-  scope_arm.tc:7: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  scope_arm.tc:7: error: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first [defer-scope-jump]
   [1]
 
   $ cat > arm_scope.tc <<'EOF'
@@ -690,7 +690,7 @@ expression and a match arm, which a jump enters only from inside.
   > }
   > EOF
   $ ./golden.exe arm_scope.tc
-  arm_scope.tc:7: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  arm_scope.tc:7: error: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first [defer-scope-jump]
   [1]
 
   $ cat > scope_tested.tc <<'EOF'
@@ -703,7 +703,7 @@ expression and a match arm, which a jump enters only from inside.
   > }
   > EOF
   $ ./golden.exe scope_tested.tc
-  scope_tested.tc:6: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first (design 6 rule 10) [TC0062]
+  scope_tested.tc:6: error: a `goto *` in the scope of a defer statement, which may leave the scope where lowering cannot run the deferred statement first [defer-scope-jump]
   [1]
 
 The first refusal in source order is named, of rule 10 or of an entry.
@@ -719,7 +719,7 @@ The first refusal in source order is named, of rule 10 or of an entry.
   > }
   > EOF
   $ ./golden.exe scope_order.tc
-  scope_order.tc:4: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  scope_order.tc:4: error: a jump into the scope of a defer statement from outside it [deferred-entry]
   [1]
 
 Before the defer and after its block ends, the jumps are no concern of
@@ -981,7 +981,7 @@ the scope of one nested in it (design 6 rule 5).
   > }
   > EOF
   $ ./golden.exe goto_after_scope.tc
-  goto_after_scope.tc:9: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  goto_after_scope.tc:9: error: a jump into the scope of a defer statement from outside it [deferred-entry]
   [1]
 
   $ cat > asm_goto_into_scope.tc <<'EOF'
@@ -994,7 +994,7 @@ the scope of one nested in it (design 6 rule 5).
   > }
   > EOF
   $ ./golden.exe asm_goto_into_scope.tc
-  asm_goto_into_scope.tc:3: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  asm_goto_into_scope.tc:3: error: a jump into the scope of a defer statement from outside it [deferred-entry]
   [1]
 
   $ cat > goto_into_nested.tc <<'EOF'
@@ -1011,13 +1011,13 @@ the scope of one nested in it (design 6 rule 5).
   > }
   > EOF
   $ ./golden.exe goto_into_nested.tc
-  goto_into_nested.tc:5: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  goto_into_nested.tc:5: error: a jump into the scope of a defer statement from outside it [deferred-entry]
   [1]
 
 The statement S of a defer is moved text, written again at each exit of
 its scope, and passes the one check of the resolution property there
 (design 6 rule 8, 13.5): a declaration that would make a name of S read
-otherwise at an exit is an error, under the code of rule 8 whichever
+otherwise at an exit is an error, under the name of rule 8 whichever
 clause fails.
 
   $ cat > hidden_at_end.tc <<'EOF'
@@ -1026,7 +1026,7 @@ clause fails.
   > void f(void) { defer use(x); int x = 0; }
   > EOF
   $ ./golden.exe hidden_at_end.tc
-  hidden_at_end.tc:3: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_end.tc:3 (design 6 rule 8, 13.5) [TC0063]
+  hidden_at_end.tc:3: error: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_end.tc:3 [defer-name-capture]
   [1]
 
   $ cat > hidden_at_return.tc <<'EOF'
@@ -1042,7 +1042,7 @@ clause fails.
   > }
   > EOF
   $ ./golden.exe hidden_at_return.tc
-  hidden_at_return.tc:4: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_return.tc:6 (design 6 rule 8, 13.5) [TC0063]
+  hidden_at_return.tc:4: error: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_return.tc:6 [defer-name-capture]
   [1]
 
   $ cat > hidden_at_break.tc <<'EOF'
@@ -1059,7 +1059,7 @@ clause fails.
   > }
   > EOF
   $ ./golden.exe hidden_at_break.tc
-  hidden_at_break.tc:5: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_break.tc:6 (design 6 rule 8, 13.5) [TC0063]
+  hidden_at_break.tc:5: error: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_break.tc:6 [defer-name-capture]
   [1]
 
   $ cat > hidden_tag.tc <<'EOF'
@@ -1071,7 +1071,7 @@ clause fails.
   > }
   > EOF
   $ ./golden.exe hidden_tag.tc
-  hidden_tag.tc:4: the tag 's' denotes another tag where lowering writes the text, the one declared at hidden_tag.tc:5 (design 6 rule 8, 13.5) [TC0063]
+  hidden_tag.tc:4: error: the tag 's' denotes another tag where lowering writes the text, the one declared at hidden_tag.tc:5 [defer-name-capture]
   [1]
 
   $ cat > inexact_again.tc <<'EOF'
@@ -1083,7 +1083,7 @@ clause fails.
   > }
   > EOF
   $ ./golden.exe inexact_again.tc
-  inexact_again.tc:4: the declaration of 'o' at inexact_again.tc:5, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 6 rule 8, 13.5) [TC0063]
+  inexact_again.tc:4: error: the declaration of 'o' at inexact_again.tc:5, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [defer-name-capture]
   [1]
 
 S declares no object or function with linkage, which the text around
@@ -1100,7 +1100,7 @@ The operand of a return, written at its own place, may.
   > }
   > EOF
   $ ./golden.exe linked.tc
-  linked.tc:4: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 6 rule 8, 13.5) [TC0063]
+  linked.tc:4: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [defer-name-capture]
   [1]
 
   $ cat > linked_no_exit.tc <<'EOF'
@@ -1115,7 +1115,7 @@ The operand of a return, written at its own place, may.
   > }
   > EOF
   $ ./golden.exe linked_no_exit.tc
-  linked_no_exit.tc:4: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 6 rule 8, 13.5) [TC0063]
+  linked_no_exit.tc:4: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [defer-name-capture]
   [1]
 
   $ cat > return_linked.tc <<'EOF'
@@ -1179,7 +1179,7 @@ operand, whose copies follow the operand.
   > }
   > EOF
   $ ./golden.exe hidden_at_continue.tc
-  hidden_at_continue.tc:5: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_continue.tc:7 (design 6 rule 8, 13.5) [TC0063]
+  hidden_at_continue.tc:5: error: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_continue.tc:7 [defer-name-capture]
   [1]
 
   $ cat > hidden_at_value_return.tc <<'EOF'
@@ -1195,11 +1195,11 @@ operand, whose copies follow the operand.
   > }
   > EOF
   $ ./golden.exe hidden_at_value_return.tc
-  hidden_at_value_return.tc:4: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_value_return.tc:6 (design 6 rule 8, 13.5) [TC0063]
+  hidden_at_value_return.tc:4: error: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_value_return.tc:6 [defer-name-capture]
   [1]
 
 A declaration whose effect on the type that S uses depends on a type
-that typec does not compute is refused under the one code of P21.
+that typec does not compute is refused under the one name of P21.
 
   $ cat > unknown_type_again.tc <<'EOF'
   > _Float16 dot(_Float16);
@@ -1210,7 +1210,7 @@ that typec does not compute is refused under the one code of P21.
   > }
   > EOF
   $ ./golden.exe unknown_type_again.tc
-  unknown_type_again.tc:4: the declaration of 'dot' at unknown_type_again.tc:5, between the text and a place where lowering writes it, may change the type that the text uses: that depends on '_Float16', whose type typec does not compute (design 13.5, P21) [TC0045]
+  unknown_type_again.tc:4: error: the declaration of 'dot' at unknown_type_again.tc:5, between the text and a place where lowering writes it, may change the type that the text uses: that depends on '_Float16', whose type typec does not compute [name-capture-unknown]
   [1]
 
 An identifier of a `#pragma` line of S that denotes something at the
@@ -1230,7 +1230,7 @@ word of the pragma that denotes nothing there is not counted.
   > }
   > EOF
   $ ./golden.exe pragma_hidden.tc
-  pragma_hidden.tc:5: 'N' denotes another entity where lowering writes the text, the one declared at pragma_hidden.tc:9 (design 6 rule 8, 13.5) [TC0063]
+  pragma_hidden.tc:5: error: 'N' denotes another entity where lowering writes the text, the one declared at pragma_hidden.tc:9 [defer-name-capture]
   [1]
 
 A pragma line between the keyword and S moves with S, so it is read as
@@ -1248,7 +1248,7 @@ part of it, and each copy writes it on a line of its own.
   > }
   > EOF
   $ ./golden.exe pragma_before.tc
-  pragma_before.tc:5: 'N' denotes another entity where lowering writes the text, the one declared at pragma_before.tc:8 (design 6 rule 8, 13.5) [TC0063]
+  pragma_before.tc:5: error: 'N' denotes another entity where lowering writes the text, the one declared at pragma_before.tc:8 [defer-name-capture]
   [1]
   $ cat > pragma_moved.tc <<'EOF'
   > void use(int);
@@ -1345,7 +1345,7 @@ may stand there.
   > struct s { char c; int i; };
   > EOF
   $ ./golden.exe pragma_pack.tc
-  pragma_pack.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  pragma_pack.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   [1]
   $ cat > pragma_diagnostic.tc <<'EOF'
   > void use(int);
@@ -1357,7 +1357,7 @@ may stand there.
   > }
   > EOF
   $ ./golden.exe pragma_diagnostic.tc
-  pragma_diagnostic.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  pragma_diagnostic.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   [1]
   $ cat > pragma_visibility.tc <<'EOF'
   > void use(int);
@@ -1368,7 +1368,7 @@ may stand there.
   > }
   > EOF
   $ ./golden.exe pragma_visibility.tc
-  pragma_visibility.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  pragma_visibility.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   [1]
   $ cat > pragma_unknown.tc <<'EOF'
   > void use(int);
@@ -1380,7 +1380,7 @@ may stand there.
   > }
   > EOF
   $ ./golden.exe pragma_unknown.tc
-  pragma_unknown.tc:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  pragma_unknown.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   [1]
 
 Lowering removes a defer statement from its place, so a pragma line
@@ -1398,7 +1398,7 @@ pragma on a statement of its own.
   > }
   > EOF
   $ ./golden.exe pragma_before_defer.tc
-  pragma_before_defer.tc:3: a `#pragma` line directly before a defer statement, which lowering removes, so the pragma would apply to the statement after it; put a `;` between them (design 6 rule 9) [TC0074]
+  pragma_before_defer.tc:3: error: a `#pragma` line directly before a defer statement, which lowering removes, so the pragma would apply to the statement after it; put a `;` between them [deferred-pragma]
   [1]
   $ cat > pragma_null_before_defer.tc <<'EOF'
   > void use(int);
@@ -1436,7 +1436,7 @@ C text is held to the list too, as `_Defer`.
   > # 2 "pragma_c.tc" 2
   > EOF
   $ ./golden.exe pragma_c.tc
-  c.h:4: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them (design 6 rule 9) [TC0074]
+  c.h:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   [1]
 
 A pragma of C11 7.12.2 at the start of a block of S is in force to the
@@ -1489,7 +1489,7 @@ an FMA under `-mfma` and the one at the end of the block would not.
   > }
   > EOF
   $ ./golden.exe scope_fp_contract.tc
-  scope_fp_contract.tc:7: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  scope_fp_contract.tc:7: error: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement [deferred-pragma]
   [1]
 
 A pragma of C11 7.12.2 is in force to the end of its block, here one
@@ -1509,7 +1509,7 @@ that holds an exit, so the scope holds none, at any depth.
   > }
   > EOF
   $ ./golden.exe scope_stdc.tc
-  scope_stdc.tc:6: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  scope_stdc.tc:6: error: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement [deferred-pragma]
   [1]
   $ cat > scope_pack.tc <<'EOF'
   > struct s { char c; int i; };
@@ -1522,7 +1522,7 @@ that holds an exit, so the scope holds none, at any depth.
   > }
   > EOF
   $ ./golden.exe scope_pack.tc
-  scope_pack.tc:5: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  scope_pack.tc:5: error: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement [deferred-pragma]
   [1]
 
 C text is held to the rule too.
@@ -1539,7 +1539,7 @@ C text is held to the rule too.
   > # 2 "scope_c.tc" 2
   > EOF
   $ ./golden.exe scope_c.tc
-  c.h:4: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement (design 6 rule 9) [TC0074]
+  c.h:4: error: a `#pragma` line in the scope of a defer statement that is not one of the pragmas that annotate only the loop after them: a copy of the deferred statement at an exit after it would be compiled under what the pragma sets, and not as at the defer statement [deferred-pragma]
   [1]
 
 A loop pragma in the scope stands before no exit, before the end of
@@ -1559,7 +1559,7 @@ annotates.
   > }
   > EOF
   $ ./golden.exe scope_before_break.tc
-  scope_before_break.tc:5: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  scope_before_break.tc:5: error: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach [deferred-pragma]
   [1]
   $ cat > scope_loop_return.tc <<'EOF'
   > void use(int);
@@ -1572,7 +1572,7 @@ annotates.
   > }
   > EOF
   $ ./golden.exe scope_loop_return.tc
-  scope_loop_return.tc:4: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  scope_loop_return.tc:4: error: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach [deferred-pragma]
   [1]
   $ cat > scope_before_end.tc <<'EOF'
   > void use(int);
@@ -1583,7 +1583,7 @@ annotates.
   > }
   > EOF
   $ ./golden.exe scope_before_end.tc
-  scope_before_end.tc:5: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  scope_before_end.tc:5: error: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach [deferred-pragma]
   [1]
 
 A `goto` that leaves the inner scope alone and the error path of a
@@ -1604,7 +1604,7 @@ try are exits as well.
   > }
   > EOF
   $ ./golden.exe scope_nested_goto.tc
-  scope_nested_goto.tc:6: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  scope_nested_goto.tc:6: error: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach [deferred-pragma]
   [1]
   $ cat > scope_loop_try.tc <<'EOF'
   > type r = result(int, int);
@@ -1619,7 +1619,7 @@ try are exits as well.
   > }
   > EOF
   $ ./golden.exe scope_loop_try.tc
-  scope_loop_try.tc:6: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach (design 6 rule 9) [TC0074]
+  scope_loop_try.tc:6: error: a `#pragma` line in the scope of a defer statement directly before an exit of the scope, the end of its block, or a statement or declaration that holds an exit, where lowering writes text that the pragma would reach [deferred-pragma]
   [1]
 
 The pragma lines of a later deferred statement in the scope are held
@@ -1690,7 +1690,7 @@ it holds none.
   > }
   > EOF
   $ ./golden.exe label_hidden.tc
-  label_hidden.tc:5: the label 'L' denotes another label where lowering writes the text, the one declared at label_hidden.tc:7 (design 6 rule 8, 13.5) [TC0063]
+  label_hidden.tc:5: error: the label 'L' denotes another label where lowering writes the text, the one declared at label_hidden.tc:7 [defer-name-capture]
   [1]
 
   $ cat > label_no_exit.tc <<'EOF'
@@ -1750,7 +1750,7 @@ in front of the statement or declaration that holds the try.
   > }
   > EOF
   $ ./golden.exe hidden_at_goto.tc
-  hidden_at_goto.tc:6: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_goto.tc:8 (design 6 rule 8, 13.5) [TC0063]
+  hidden_at_goto.tc:6: error: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_goto.tc:8 [defer-name-capture]
   [1]
 
   $ cat > hidden_at_try.tc <<'EOF'
@@ -1768,7 +1768,7 @@ in front of the statement or declaration that holds the try.
   > }
   > EOF
   $ ./golden.exe hidden_at_try.tc
-  hidden_at_try.tc:5: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_try.tc:7 (design 6 rule 8, 13.5) [TC0063]
+  hidden_at_try.tc:5: error: 'x' denotes another entity where lowering writes the text, the one declared at hidden_at_try.tc:7 [defer-name-capture]
   [1]
 
   $ cat > declared_by_try.tc <<'EOF'
@@ -1987,13 +1987,13 @@ S alone, S being a block.
   > }
   > EOF
   $ ./golden.exe own_block.tc
-  own_block.tc:4: 'y' is not declared (C11 6.5.1p2)
+  own_block.tc:4: error: 'y' is not declared (C11 6.5.1p2)
   [1]
 
 Lowering writes a return in the scope of a defer statement as a block
 that holds its operand (design 6 rule 12, 13.5), so the operand declares
 no name that is in scope after it: the third clause of the resolution
-property, under the code of the operand of a return.
+property, under the name of the operand of a return.
 
   $ cat > return_declares.tc <<'EOF'
   > void g(void);
@@ -2007,7 +2007,7 @@ property, under the code of the operand of a return.
   > }
   > EOF
   $ ./golden.exe return_declares.tc
-  return_declares.tc:6: 'K' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 6 rule 12, 13.5) [TC0064]
+  return_declares.tc:6: error: 'K' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text [defer-return-name-capture]
   [1]
 
   $ cat > return_tag.tc <<'EOF'
@@ -2018,7 +2018,7 @@ property, under the code of the operand of a return.
   > }
   > EOF
   $ ./golden.exe return_tag.tc
-  return_tag.tc:4: the tag 'p' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 6 rule 12, 13.5) [TC0064]
+  return_tag.tc:4: error: the tag 'p' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text [defer-return-name-capture]
   [1]
 
 The same holds in a function that returns void, where lowering writes
@@ -2033,7 +2033,7 @@ the operand ahead of the copies in a block as well.
   > }
   > EOF
   $ ./golden.exe void_return_declares.tc
-  void_return_declares.tc:5: 'K' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 6 rule 12, 13.5) [TC0064]
+  void_return_declares.tc:5: error: 'K' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text [defer-return-name-capture]
   [1]
 
 A return that is the substatement of an `if` is held to the same.
@@ -2048,7 +2048,7 @@ A return that is the substatement of an `if` is held to the same.
   > }
   > EOF
   $ ./golden.exe if_return_declares.tc
-  if_return_declares.tc:5: the tag 'q' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 6 rule 12, 13.5) [TC0064]
+  if_return_declares.tc:5: error: the tag 'q' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text [defer-return-name-capture]
   [1]
 
 No goto, break or continue leaves the operand of such a return (design 6
@@ -2066,7 +2066,7 @@ operand, and a return in it, which leaves the function, are allowed.
   > }
   > EOF
   $ ./golden.exe operand_goto.tc
-  operand_goto.tc:5: a `goto` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own (design 6 rule 12) [TC0073]
+  operand_goto.tc:5: error: a `goto` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own [defer-return-jump]
   [1]
   $ cat > operand_break.tc <<'EOF'
   > void g(void);
@@ -2078,7 +2078,7 @@ operand, and a return in it, which leaves the function, are allowed.
   > }
   > EOF
   $ ./golden.exe operand_break.tc
-  operand_break.tc:5: a `break` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own (design 6 rule 12) [TC0073]
+  operand_break.tc:5: error: a `break` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own [defer-return-jump]
   [1]
   $ cat > operand_continue.tc <<'EOF'
   > void g(void);
@@ -2091,7 +2091,7 @@ operand, and a return in it, which leaves the function, are allowed.
   > }
   > EOF
   $ ./golden.exe operand_continue.tc
-  operand_continue.tc:5: a `continue` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own (design 6 rule 12) [TC0073]
+  operand_continue.tc:5: error: a `continue` that leaves the operand of a `return` in the scope of a defer statement, which lowering writes in a block of its own [defer-return-jump]
   [1]
   $ cat > operand_inner_jumps.tc <<'EOF'
   > void g(void);
@@ -2234,7 +2234,7 @@ operand that only uses a tag declares nothing.
 A function that returns a value and holds a `return e;` in the scope of
 a defer statement names its return type through a call of its own name
 (design 13.5). Where that call cannot be written, the function is
-refused, each case with a code of its own; a function without such a
+refused, each case with a name of its own; a function without such a
 `return` is not.
 
   $ cat > form_allowed.tc <<'EOF'
@@ -2350,7 +2350,7 @@ the function at the call, as a parameter or as an enumeration constant.
   > long f(int f) { defer g(); return f; }
   > EOF
   $ ./golden.exe own_name.tc
-  own_name.tc:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  own_name.tc:2: error: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it [defer-return-own-name]
   [1]
 
   $ cat > own_enumerator.tc <<'EOF'
@@ -2358,7 +2358,7 @@ the function at the call, as a parameter or as an enumeration constant.
   > long f(enum { f } e) { defer g(); return e; }
   > EOF
   $ ./golden.exe own_enumerator.tc
-  own_enumerator.tc:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  own_enumerator.tc:2: error: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it [defer-return-own-name]
   [1]
 
   $ cat > own_name_c.tc <<'EOF'
@@ -2369,7 +2369,7 @@ the function at the call, as a parameter or as an enumeration constant.
   > # 2 "own_name_c.tc" 2
   > EOF
   $ ./golden.exe own_name_c.tc
-  c.h:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  c.h:2: error: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it [defer-return-own-name]
   [1]
 
   $ cat > own_name_old_style.tc <<'EOF'
@@ -2377,7 +2377,7 @@ the function at the call, as a parameter or as an enumeration constant.
   > long f(f) long f; { defer g(); return f; }
   > EOF
   $ ./golden.exe own_name_old_style.tc
-  own_name_old_style.tc:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  own_name_old_style.tc:2: error: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it [defer-return-own-name]
   [1]
 
 A name that a nested parameter list declares hides nothing at the call.
@@ -2554,7 +2554,7 @@ completed, which the body's block of its own would make another tag.
   > }
   > EOF
   $ ./golden.exe redeclared_tag.tc
-  redeclared_tag.tc:3: the outermost block of the body declares 's' again, which the parameter list declares; the form of a `return e;` in the scope of a `defer` statement puts the body in a block of its own, where this would declare another (design 13.5) [TC0066]
+  redeclared_tag.tc:3: error: the outermost block of the body declares 's' again, which the parameter list declares; the form of a `return e;` in the scope of a `defer` statement puts the body in a block of its own, where this would declare another [defer-return-parameter-redeclared]
   [1]
 
   $ cat > redeclared_ordinary.tc <<'EOF'
@@ -2562,7 +2562,7 @@ completed, which the body's block of its own would make another tag.
   > int f(int a) { int a = 0; defer g(); return a; }
   > EOF
   $ ./golden.exe redeclared_ordinary.tc
-  redeclared_ordinary.tc:2: 'a' is declared twice in one scope without linkage (C11 6.7p3)
+  redeclared_ordinary.tc:2: error: 'a' is declared twice in one scope without linkage (C11 6.7p3)
   [1]
 
 A tag that an inner block declares is another tag in C as well.
@@ -2621,7 +2621,7 @@ arguments differ, token for token: they declare two versions.
   > __attribute__((target("fma,avx2"))) int f(void) { defer g(); return 1; }
   > EOF
   $ ./golden.exe target_versions.tc
-  target_versions.tc:3: 'f' is declared with `target` attributes whose arguments differ, as versions of one function, which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot name (design 13.5) [TC0067]
+  target_versions.tc:3: error: 'f' is declared with `target` attributes whose arguments differ, as versions of one function, which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot name [defer-return-target-versions]
   [1]
 
   $ cat > target_same.tc <<'EOF'
@@ -2714,7 +2714,7 @@ under any of its spellings, or follows a Clang overload of its name.
   > __attribute__((overloadable)) int f(int a) { defer g(); return a; }
   > EOF
   $ ./golden.exe marked.tc
-  marked.tc:2: a declaration of 'f' carries the attribute 'overloadable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  marked.tc:2: error: a declaration of 'f' carries the attribute 'overloadable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error [defer-return-marked-attribute]
   [1]
 
   $ cat > marked_earlier.tc <<'EOF'
@@ -2723,7 +2723,7 @@ under any of its spellings, or follows a Clang overload of its name.
   > int f(int a) { defer g(); return a; }
   > EOF
   $ ./golden.exe marked_earlier.tc
-  marked_earlier.tc:3: a declaration of 'f' carries the attribute 'clang::availability', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  marked_earlier.tc:3: error: a declaration of 'f' carries the attribute 'clang::availability', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error [defer-return-marked-attribute]
   [1]
 
   $ cat > marked_beside.tc <<'EOF'
@@ -2732,7 +2732,7 @@ under any of its spellings, or follows a Clang overload of its name.
   > int f(int a) { defer g(); return a; }
   > EOF
   $ ./golden.exe marked_beside.tc
-  marked_beside.tc:3: a declaration of 'f' carries the attribute 'overloadable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  marked_beside.tc:3: error: a declaration of 'f' carries the attribute 'overloadable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error [defer-return-marked-attribute]
   [1]
 
   $ cat > marked_inner.tc <<'EOF'
@@ -2740,7 +2740,7 @@ under any of its spellings, or follows a Clang overload of its name.
   > int (__attribute__((unavailable)) f)(int a) { defer g(); return a; }
   > EOF
   $ ./golden.exe marked_inner.tc
-  marked_inner.tc:2: a declaration of 'f' carries the attribute 'unavailable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  marked_inner.tc:2: error: a declaration of 'f' carries the attribute 'unavailable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error [defer-return-marked-attribute]
   [1]
 
 A parameter has no name; `(void)` has none to give.
@@ -2750,7 +2750,7 @@ A parameter has no name; `(void)` has none to give.
   > int f(int a, char *) { defer g(); return a; }
   > EOF
   $ ./golden.exe unnamed.tc
-  unnamed.tc:2: a parameter without a name, of which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot pass an lvalue; name it (design 13.5) [TC0069]
+  unnamed.tc:2: error: a parameter without a name, of which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot pass an lvalue; name it [defer-return-unnamed-parameter]
   [1]
 
   $ cat > unnamed_only.tc <<'EOF'
@@ -2758,7 +2758,7 @@ A parameter has no name; `(void)` has none to give.
   > int f(int) { defer g(); return 1; }
   > EOF
   $ ./golden.exe unnamed_only.tc
-  unnamed_only.tc:2: a parameter without a name, of which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot pass an lvalue; name it (design 13.5) [TC0069]
+  unnamed_only.tc:2: error: a parameter without a name, of which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot pass an lvalue; name it [defer-return-unnamed-parameter]
   [1]
 
   $ cat > void_typedef.tc <<'EOF'
@@ -2804,7 +2804,7 @@ expression, in Type-C text and in C text.
   > void f(int c) { defer g(); if (c) return g(); return c; }
   > EOF
   $ ./golden.exe void_value.tc
-  void_value.tc:2: a `return e;` of a value in the scope of a `defer` statement, in a function that returns void: lowering writes it as the statement `e;`, which loses C's diagnostic of the return (C11 6.8.6.4p1) (design 13.5) [TC0070]
+  void_value.tc:2: error: a `return e;` of a value in the scope of a `defer` statement, in a function that returns void: lowering writes it as the statement `e;`, which loses C's diagnostic of the return (C11 6.8.6.4p1) [defer-return-void-value]
   [1]
 
   $ cat > void_value_c.tc <<'EOF'
@@ -2815,7 +2815,7 @@ expression, in Type-C text and in C text.
   > # 2 "void_value_c.tc" 2
   > EOF
   $ ./golden.exe void_value_c.tc
-  c.h:2: a `return e;` of a value in the scope of a `defer` statement, in a function that returns void: lowering writes it as the statement `e;`, which loses C's diagnostic of the return (C11 6.8.6.4p1) (design 13.5) [TC0070]
+  c.h:2: error: a `return e;` of a value in the scope of a `defer` statement, in a function that returns void: lowering writes it as the statement `e;`, which loses C's diagnostic of the return (C11 6.8.6.4p1) [defer-return-void-value]
   [1]
 
   $ cat > void_unknown.tc <<'EOF'
@@ -2825,7 +2825,7 @@ expression, in Type-C text and in C text.
   > void f(void) { defer g(); return h(); }
   > EOF
   $ ./golden.exe void_unknown.tc
-  void_unknown.tc:4: a `return e;` in the scope of a `defer` statement, in a function that returns void, whose operand depends on the attribute 'vector_size' at void_unknown.tc:1: typec cannot tell whether it is void, which lowering needs to know (design 13.5) [TC0070]
+  void_unknown.tc:4: error: a `return e;` in the scope of a `defer` statement, in a function that returns void, whose operand depends on the attribute 'vector_size' at void_unknown.tc:1: typec cannot tell whether it is void, which lowering needs to know [defer-return-void-value]
   [1]
 
 A return type that typec does not know may be void, so a `return e;`
@@ -2837,7 +2837,7 @@ depends on it.
   > vector f(vector v) { defer g(); return v; }
   > EOF
   $ ./golden.exe unknown_return.tc
-  unknown_return.tc:3: the form of a `return e;` in the scope of a `defer` statement depends on the attribute 'vector_size' at unknown_return.tc:1, which typec does not type yet (design 13.3) [TC0031]
+  unknown_return.tc:3: error: the form of a `return e;` in the scope of a `defer` statement depends on the attribute 'vector_size' at unknown_return.tc:1, which typec does not type yet [unsupported]
   [1]
 
   $ cat > unknown_bare_return.tc <<'EOF'

@@ -191,7 +191,7 @@ as they are.
   int a = _Generic(x, int: 1, default: 2);
   $ printf 'type d = distinct int;\n# 1 "c.h" 1\nint b = __builtin_types_compatible_p(d, int);\nint c = _Generic(1, d: 1, int: 2);\n' > c_twice.tc
   $ ./golden.exe c_twice.tc
-  c.h:2: the type of a generic association is compatible with that of another (C11 6.5.1.1p2)
+  c.h:2: error: the type of a generic association is compatible with that of another (C11 6.5.1.1p2)
   [1]
 
 C text sees a distinct type inside another type as its representation
@@ -207,5 +207,5 @@ be one.
 
   $ printf 'type d = distinct int;\nd x; int n;\nint f(void) { return _Generic(__builtin_choose_expr(__builtin_constant_p(n), x, x), int: 1, default: 2); }\n' > unknown.tc
   $ ./golden.exe unknown.tc
-  unknown.tc:3: the answer to a comparison of types, which may have a distinct type in them, depends on the condition of __builtin_choose_expr at unknown.tc:3, which typec does not type yet (design 13.3) [TC0031]
+  unknown.tc:3: error: the answer to a comparison of types, which may have a distinct type in them, depends on the condition of __builtin_choose_expr at unknown.tc:3, which typec does not type yet [unsupported]
   [1]

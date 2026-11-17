@@ -138,7 +138,7 @@ pragma (design 10.3, P25).
   > };
   > EOF
   $ ./golden.exe pragma.tc
-  pragma.tc:2: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold (design 10.3, P25) [TC0047]
+  pragma.tc:2: error: the definition of a generic type holds a pragma or a `#`, which the text of its instances cannot hold [generic-pragma]
   [1]
 
 An instance of a generic variant is a variant (design 3.5 rule 3): its
@@ -259,21 +259,21 @@ messages name it by its instance name (design 10.3).
   > }
   > EOF
   $ ./golden.exe uncovered.tc
-  uncovered.tc:3: the match does not cover the constructor 'Cons' of the variant 'list__i' (design 4.2 rule 1) [TC0018]
+  uncovered.tc:3: error: the match does not cover the constructor 'Cons' of the variant 'list__i' [match-coverage]
   [1]
   $ cat > opened.tc <<'EOF'
   > type list(T) = | Nil | Cons(T head, list(T) *tail);
   > int tag(list(int) l) { return l.tag; }
   > EOF
   $ ./golden.exe opened.tc
-  opened.tc:2: the variant 'list__i' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+  opened.tc:2: error: the variant 'list__i' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
   [1]
 
 A generic type is declared at file scope only (design 3.1).
 
   $ printf 'void f(void) { type box(T) = struct { T value; }; }\n' > block.tc
   $ ./golden.exe block.tc
-  block.tc:1: the generic type `box` is declared in a block; a generic type is declared at file scope only (design 3.1) [TC0033]
+  block.tc:1: error: the generic type `box` is declared in a block; a generic type is declared at file scope only [generic-scope]
   [1]
 
 No generic type has a universe name (design 3.6), whether or not a
@@ -282,7 +282,7 @@ declaration hides it.
   $ printf 'int option;\ntype option(T) = | None | Some(T value);\n' \
   >   > universe.tc
   $ ./golden.exe universe.tc
-  universe.tc:2: `option` is a universe name, which no generic type has (design 3.6) [TC0034]
+  universe.tc:2: error: `option` is a universe name, which no generic type has [generic-universe-name]
   [1]
 
 The name of a generic type alone is not a type, and an application has
@@ -290,12 +290,12 @@ one argument for each type parameter (design 3.5 rule 1).
 
   $ printf 'type box(T) = struct { T value; };\nbox b;\n' > bare.tc
   $ ./golden.exe bare.tc
-  bare.tc:2: the generic type `box` names a type only in a type application, `box(...)` (design 3.5 rule 1) [TC0035]
+  bare.tc:2: error: the generic type `box` names a type only in a type application, `box(...)` [generic-type-use]
   [1]
   $ printf 'type pair(A, B) = struct { A a; B b; };\npair(int) p;\n' \
   >   > arity.tc
   $ ./golden.exe arity.tc
-  arity.tc:2: the generic type `pair` takes 2 type arguments, not 1 (design 3.5 rule 1) [TC0035]
+  arity.tc:2: error: the generic type `pair` takes 2 type arguments, not 1 [generic-type-use]
   [1]
 
 The definition that completes an incomplete variant has as many type
@@ -303,7 +303,7 @@ parameters (design 3.1 rule 4); their names may differ.
 
   $ printf 'type list(T);\ntype list(A, B) = | Nil;\n' > completion.tc
   $ ./golden.exe completion.tc
-  completion.tc:2: the variant `list` has 2 type parameters, and the incomplete variant that it completes has 1 type parameter (design 3.1 rule 4) [TC0036]
+  completion.tc:2: error: the variant `list` has 2 type parameters, and the incomplete variant that it completes has 1 type parameter [completion-parameter-count]
   [1]
 
 A tag that a type argument is the first to mention is declared where C
@@ -315,14 +315,14 @@ could take (design 3.5 rule 2).
   > void f(void) { box(struct s) b; }
   > EOF
   $ ./golden.exe argument.tc
-  argument.tc:2: a type argument declares the tag `s` in a parameter list or a block (C11 6.7.2.3p8); declare the tag at file scope before it (design 3.5 rule 2) [TC0037]
+  argument.tc:2: error: a type argument declares the tag `s` in a parameter list or a block (C11 6.7.2.3p8); declare the tag at file scope before it [type-argument-tag]
   [1]
   $ cat > prototype.tc <<'EOF'
   > type box(T) = struct { T *value; };
   > box(void (*)(struct s *)) b;
   > EOF
   $ ./golden.exe prototype.tc
-  prototype.tc:2: a type argument declares the tag `s` in a parameter list or a block (C11 6.7.2.3p8); declare the tag at file scope before it (design 3.5 rule 2) [TC0037]
+  prototype.tc:2: error: a type argument declares the tag `s` in a parameter list or a block (C11 6.7.2.3p8); declare the tag at file scope before it [type-argument-tag]
   [1]
 
 The definition of a generic type uses a type parameter only as a type,
@@ -331,20 +331,20 @@ holds it (design 3.5 rule 4).
 
   $ printf 'type id(T) = distinct T;\n' > distinct.tc
   $ ./golden.exe distinct.tc
-  distinct.tc:1: the type parameter `T` is the representation after `distinct` (design 3.5 rule 4) [TC0038]
+  distinct.tc:1: error: the type parameter `T` is the representation after `distinct` [generic-definition]
   [1]
   $ printf 'type bits(T) = struct { T b : 3; };\n' > bit_field.tc
   $ ./golden.exe bit_field.tc
-  bit_field.tc:1: the type parameter `T` is the type of a bit-field (design 3.5 rule 4) [TC0038]
+  bit_field.tc:1: error: the type parameter `T` is the type of a bit-field [generic-definition]
   [1]
   $ printf 'type a(T) = struct { _Alignas(T) char c; T v; };\n' > align.tc
   $ ./golden.exe align.tc
-  align.tc:1: the type parameter `T` is used in `_Alignas` (design 3.5 rule 4) [TC0038]
+  align.tc:1: error: the type parameter `T` is used in `_Alignas` [generic-definition]
   [1]
   $ printf 'type a(T) = struct { _Alignas(sizeof(T *)) char c; };\n' \
   >   > align_expression.tc
   $ ./golden.exe align_expression.tc
-  align_expression.tc:1: the type parameter `T` is used in `_Alignas` (design 3.5 rule 4) [TC0038]
+  align_expression.tc:1: error: the type parameter `T` is used in `_Alignas` [generic-definition]
   [1]
 
 The arguments of an attribute are unread text, which lowering leaves as
@@ -356,39 +356,39 @@ writes it.
   > type a(T) = struct { T v __attribute__((aligned(sizeof(T)))); };
   > EOF
   $ ./golden.exe attribute.tc
-  attribute.tc:1: the type parameter `T` is used in the arguments of an attribute (design 3.5 rule 4) [TC0038]
+  attribute.tc:1: error: the type parameter `T` is used in the arguments of an attribute [generic-definition]
   [1]
   $ cat > c_attribute.tc <<'EOF'
   > # 1 "c.h" 1
   > type a(T) = struct { T v __attribute__((aligned(sizeof(T)))); };
   > EOF
   $ ./golden.exe c_attribute.tc
-  c.h:1: the type parameter `T` is used in the arguments of an attribute (design 3.5 rule 4) [TC0038]
+  c.h:1: error: the type parameter `T` is used in the arguments of an attribute [generic-definition]
   [1]
   $ cat > standard.tc <<'EOF'
   > type a(T) = struct { [[gnu::aligned(sizeof(T))]] T v; };
   > EOF
   $ ./golden.exe standard.tc
-  standard.tc:1: the type parameter `T` is used in the arguments of an attribute (design 3.5 rule 4) [TC0038]
+  standard.tc:1: error: the type parameter `T` is used in the arguments of an attribute [generic-definition]
   [1]
   $ printf 'type node(T) = struct node { T v; };\n' > tagged.tc
   $ ./golden.exe tagged.tc
-  tagged.tc:1: the structure or union `node` has a body in the definition of a generic type, where a body has no tag (design 3.5 rule 4) [TC0038]
+  tagged.tc:1: error: the structure or union `node` has a body in the definition of a generic type, where a body has no tag [generic-definition]
   [1]
   $ printf 'type p(T) = struct { T x; } *;\n' > pointer.tc
   $ ./golden.exe pointer.tc
-  pointer.tc:1: a structure or union body stands in the definition of a generic type only as the whole definition or in a field of a variant, or inside either, and not in a type argument (design 3.5 rule 4) [TC0038]
+  pointer.tc:1: error: a structure or union body stands in the definition of a generic type only as the whole definition or in a field of a variant, or inside either, and not in a type argument [generic-definition]
   [1]
   $ cat > argument_body.tc <<'EOF'
   > type box(T) = struct { T *value; };
   > type nest(T) = | Leaf | Node(box(struct { T v; }) b);
   > EOF
   $ ./golden.exe argument_body.tc
-  argument_body.tc:2: a structure or union body stands in the definition of a generic type only as the whole definition or in a field of a variant, or inside either, and not in a type argument (design 3.5 rule 4) [TC0038]
+  argument_body.tc:2: error: a structure or union body stands in the definition of a generic type only as the whole definition or in a field of a variant, or inside either, and not in a type argument [generic-definition]
   [1]
   $ printf 'type e(T) = struct { enum { A, B } k; T v; };\n' > enum.tc
   $ ./golden.exe enum.tc
-  enum.tc:1: an enumeration specifier has a body in the definition of a generic type, so that every instance would declare its enumerators again (design 3.5 rule 4) [TC0038]
+  enum.tc:1: error: an enumeration specifier has a body in the definition of a generic type, so that every instance would declare its enumerators again [generic-definition]
   [1]
 
 The definition of a generic type is written in each instance and not at
@@ -399,12 +399,12 @@ own, and a tag declared before the definition is named by it.
   $ printf 'type link(T) = struct { struct node *next; T v; };\n' \
   >   > first_mention.tc
   $ ./golden.exe first_mention.tc
-  first_mention.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0071]
+  first_mention.tc:1: error: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text [generic-name-capture]
   [1]
   $ printf 'type step(T) = | Done | Next(struct node *n, T v);\n' \
   >   > first_mention_field.tc
   $ ./golden.exe first_mention_field.tc
-  first_mention_field.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0071]
+  first_mention_field.tc:1: error: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text [generic-name-capture]
   [1]
 
 Nor does it declare an object or a function with linkage, even in a
@@ -414,7 +414,7 @@ block of its own, which declares an entity that file scope sees.
   > type g(T) = struct { T t; int a[sizeof(({ extern int o; o; }))]; };
   > EOF
   $ ./golden.exe linked.tc
-  linked.tc:1: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 13.5) [TC0071]
+  linked.tc:1: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [generic-name-capture]
   [1]
 
 Nor does it hold, in the arguments of an attribute, which typing does
@@ -428,7 +428,7 @@ is visible is named.
   > };
   > EOF
   $ ./golden.exe unread_brace.tc
-  unread_brace.tc:2: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0071]
+  unread_brace.tc:2: error: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere [generic-name-capture]
   [1]
   $ cat > unread_tag.tc <<'EOF'
   > type g(T) = struct {
@@ -436,7 +436,7 @@ is visible is named.
   > };
   > EOF
   $ ./golden.exe unread_tag.tc
-  unread_tag.tc:2: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0071]
+  unread_tag.tc:2: error: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere [generic-name-capture]
   [1]
   $ cat > unread_visible_tag.tc <<'EOF'
   > struct q;
@@ -459,7 +459,7 @@ application (design 3.5 rule 5).
   > struct holder { box(struct s) b; };
   > EOF
   $ ./golden.exe incomplete.tc
-  incomplete.tc:3: in the instance 'box__T1s' that this application names, at incomplete.tc:1: member has an incomplete or function type
+  incomplete.tc:3: error: in the instance 'box__T1s' that this application names, at incomplete.tc:1: member has an incomplete or function type
   [1]
 
 A type argument has a row in the table of design 10.3 for every type in
@@ -468,7 +468,7 @@ it (design 3.5 rule 2).
   $ printf 'type box(T) = struct { T value; };\nbox(int[2]) *b;\n' \
   >   > array.tc
   $ ./golden.exe array.tc
-  array.tc:2: the type argument 'int[2]' is an array (design 3.5 rule 2) [TC0041]
+  array.tc:2: error: the type argument 'int[2]' is an array [type-argument]
   [1]
 
 An argument holds no attribute: none is written in it, and no typedef
@@ -484,13 +484,13 @@ it from the argument without the attribute.
   >     > attributed.tc
   >   ./golden.exe attributed.tc
   > done
-  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'void (*)(int)' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  attributed.tc:6: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  attributed.tc:6: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  attributed.tc:6: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' [type-argument]
+  attributed.tc:6: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' [type-argument]
+  attributed.tc:6: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'void (*)(int)' [type-argument]
+  attributed.tc:6: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' [type-argument]
+  attributed.tc:6: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  attributed.tc:6: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
   [1]
 
 A typedef name redeclared keeps the attribute of either declaration, as
@@ -503,8 +503,8 @@ both backends do.
   >     'type box(T) = struct { T value; };' 'box(t) *b;' > redeclared.tc
   >   ./golden.exe redeclared.tc
   > done
-  redeclared.tc:4: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  redeclared.tc:4: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  redeclared.tc:4: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  redeclared.tc:4: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
   [1]
 
 A typedef name that an alias generic uses, declared again with an
@@ -517,13 +517,13 @@ refused.
   >   'type box(T) = struct { T value; };' \
   >   'typedef int p __attribute__((aligned(16)));' 'box(a(int)) x;' > late.tc
   $ ./golden.exe late.tc
-  late.tc:5: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
+  late.tc:5: error: in the instance 'a__i' that this application names, at late.tc:2: the declaration of the typedef name 'p' at late.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
   [1]
   $ printf '%s\n' 'typedef int p;' \
   >   'typedef int p __attribute__((aligned(16)));' 'type a(T) = p;' \
   >   'type box(T) = struct { T value; };' 'box(a(int)) x;' > before.tc
   $ ./golden.exe before.tc
-  before.tc:5: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  before.tc:5: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
   [1]
 
 An object or a function declared again through an inexact typedef name
@@ -536,13 +536,13 @@ between the text and the place where an instance first stands gives
   >   'typedef int wide __attribute__((aligned(16)));' 'extern wide obj;' \
   >   'g(int) x;' > object.tc
   $ ./golden.exe object.tc
-  object.tc:5: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
+  object.tc:5: error: in the instance 'g__i' that this application names, at object.tc:2: the declaration of 'obj' at object.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
   [1]
   $ printf '%s\n' 'typedef int wide __attribute__((aligned(16)));' \
   >   'int *f(void);' 'type g(T) = struct { __typeof__(*f()) v; T t; };' \
   >   'wide *f(void);' 'g(int) x;' > function.tc
   $ ./golden.exe function.tc
-  function.tc:5: in the instance 'g__i' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 13.5) [TC0071]
+  function.tc:5: error: in the instance 'g__i' that this application names, at function.tc:3: the declaration of 'f' at function.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [generic-name-capture]
   [1]
 
 So does a typedef name that the declaration of the object is written
@@ -554,7 +554,7 @@ changes the typedef in place.
   >   'typedef int plain __attribute__((aligned(16)));' 'g(int) x;' \
   >   > widened.tc
   $ ./golden.exe widened.tc
-  widened.tc:5: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it (design 13.5) [TC0071]
+  widened.tc:5: error: in the instance 'g__i' that this application names, at widened.tc:3: the declaration of the typedef name 'plain' at widened.tc:4, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change each type written through it [generic-name-capture]
   [1]
 
 An argument holds no `__typeof__` of an expression at the same depth,
@@ -572,14 +572,14 @@ type name is valid.
   >     > typeof.tc
   >   ./golden.exe typeof.tc
   > done
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' (design 3.5 rule 2) [TC0041]
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
-  typeof.tc:8: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' (design 3.5 rule 2) [TC0041]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int *' [type-argument]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
+  typeof.tc:8: error: the type argument may carry an attribute that no instance name encodes, as it holds an attribute or `typeof` of an expression, or a typedef name or an alias declared with one: it would share the instance of 'int' [type-argument]
   [1]
   $ printf '%s\n' 'type box(T) = struct { T value; };' \
   >   'box(__typeof__(int)) *b;' > typeof_type.tc
@@ -592,7 +592,7 @@ A chain of instances that each define the next holds at most 64
   $ printf 'type box(T) = struct { T value; };\nstruct w { %sint%s deep; };\n' \
   >   "$(printf 'box(%.0s' $(seq 65))" "$(printf ')%.0s' $(seq 65))" > deep.tc
   $ ./golden.exe deep.tc
-  deep.tc:2: the application would define the instance 'box__i' after a chain of 64 instances that each define the next, which the application at deep.tc:2 began; a chain holds at most 64 (design 3.5 rule 7) [TC0042]
+  deep.tc:2: error: the application would define the instance 'box__i' after a chain of 64 instances that each define the next, which the application at deep.tc:2 began; a chain holds at most 64 [instance-nesting]
   [1]
 
 The texts of an instance stand before the external declaration of its
@@ -602,7 +602,7 @@ first use, so what they need complete is complete before it (design
   $ printf 'type a2(T) = T[2];\nstruct s { int a; } *f(a2(struct s) *p);\n' \
   >   > early.tc
   $ ./golden.exe early.tc
-  early.tc:2: the instance 'a2__T1s' needs 'struct s' complete where its text stands, before the external declaration that completes it at early.tc:2; complete it in an earlier one (design 10.3) [TC0043]
+  early.tc:2: error: the instance 'a2__T1s' needs 'struct s' complete where its text stands, before the external declaration that completes it at early.tc:2; complete it in an earlier one [instance-placement]
   [1]
 
 The definition is checked once with each type parameter an opaque value
@@ -611,11 +611,11 @@ or in a constant expression, is refused there (design 3.5 rule 4).
 
   $ printf 'type same(U) = U;\ntype d(T) = distinct same(T);\n' > through.tc
   $ ./golden.exe through.tc
-  through.tc:2: the representation after `distinct` depends on a type parameter (design 3.5 rule 4) [TC0038]
+  through.tc:2: error: the representation after `distinct` depends on a type parameter [generic-definition]
   [1]
   $ printf 'type a(T) = struct { char b[sizeof(T)]; T v; };\n' > size.tc
   $ ./golden.exe size.tc
-  size.tc:1: a type in an expression in the definition of a generic type depends on a type parameter (design 3.5 rule 4) [TC0038]
+  size.tc:1: error: a type in an expression in the definition of a generic type depends on a type parameter [generic-definition]
   [1]
 
 The definition of a generic reads where the text of an instance stands
@@ -632,7 +632,7 @@ spelling C declares there.
   > handler(int) h;
   > EOF
   $ ./golden.exe handler.tc
-  handler.tc:3: in the instance 'handler__i' that this application names, at handler.tc:1: the text declares the tag 'ctx' in a scope of its own, but where lowering writes it the tag is the one declared at handler.tc:2 (design 13.5) [TC0071]
+  handler.tc:3: error: in the instance 'handler__i' that this application names, at handler.tc:1: the text declares the tag 'ctx' in a scope of its own, but where lowering writes it the tag is the one declared at handler.tc:2 [generic-name-capture]
   [1]
 
   $ cat > dot.tc <<'EOF'
@@ -642,7 +642,7 @@ spelling C declares there.
   > g(int) x;
   > EOF
   $ ./golden.exe dot.tc
-  dot.tc:4: in the instance 'g__i' that this application names, at dot.tc:2: the declaration of 'dot' at dot.tc:3, between the text and a place where lowering writes it, may change the type that the text uses: that depends on '_Float16', whose type typec does not compute (design 13.5, P21) [TC0045]
+  dot.tc:4: error: in the instance 'g__i' that this application names, at dot.tc:2: the declaration of 'dot' at dot.tc:3, between the text and a place where lowering writes it, may change the type that the text uses: that depends on '_Float16', whose type typec does not compute [name-capture-unknown]
   [1]
 
   $ cat > aligned.tc <<'EOF'
@@ -653,7 +653,7 @@ spelling C declares there.
   > g(int) x;
   > EOF
   $ ./golden.exe aligned.tc
-  aligned.tc:2: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 (design 13.5) [TC0071]
+  aligned.tc:2: error: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 [generic-name-capture]
   [1]
 
 Type-C text names no generic and no universe name in the arguments of an
@@ -670,19 +670,19 @@ backend's to read.
   > int y __attribute__((aligned(_Alignof(vector(int)))));
   > EOF
   $ ./golden.exe application.tc
-  application.tc:3: `vector` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  application.tc:3: error: `vector` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
   [1]
   $ cat > bare.tc <<'EOF'
   > type g(T) = struct { T v; };
   > int y __attribute__((aligned(sizeof(g))));
   > EOF
   $ ./golden.exe bare.tc
-  bare.tc:2: `g` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  bare.tc:2: error: `g` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
   [1]
   $ printf 'int y __attribute__((aligned(_Alignof(option(int)))));\n' \
   >   > universe.tc
   $ ./golden.exe universe.tc
-  universe.tc:1: `option` in the arguments of an attribute denotes a universe name, which lowering writes under a name of its own, but it leaves the arguments as written (design 13.5) [TC0046]
+  universe.tc:1: error: `option` in the arguments of an attribute denotes a universe name, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
   [1]
   $ cat > hidden.tc <<'EOF'
   > int option;
@@ -718,14 +718,14 @@ option(int) lowers to.
   > option(int) f(void) { enum { option__i_Some = 0 }; return Some(123); }
   > EOF
   $ ./golden.exe claim_enumerator.tc
-  claim_enumerator.tc:1: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  claim_enumerator.tc:1: error: the name `option__i_Some` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
   $ cat > claim_typedef.tc <<'EOF'
   > type box(T) = struct { T v; };
   > void g(void) { typedef int box__i; }
   > EOF
   $ ./golden.exe claim_typedef.tc
-  claim_typedef.tc:2: the name `box__i` is declared, but the generic `box` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  claim_typedef.tc:2: error: the name `box__i` is declared, but the generic `box` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
   $ cat > claim_tag.i <<'EOF'
   > # 1 "claim_tag.tc"
@@ -733,14 +733,14 @@ option(int) lowers to.
   > void g(struct option__i_tag *p);
   > EOF
   $ ./golden.exe claim_tag.i
-  claim_tag.h:1: the tag `option__i_tag` is named, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  claim_tag.h:1: error: the tag `option__i_tag` is named, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
   $ cat > claim_before.tc <<'EOF'
   > int box__i;
   > type box(T) = struct { T v; };
   > EOF
   $ ./golden.exe claim_before.tc
-  claim_before.tc:2: the generic `box` claims every name that begins with its own name and `__` for its instances, and this scope declares `box__i` already (design 10.1 rule 6) [TC0004]
+  claim_before.tc:2: error: the generic `box` claims every name that begins with its own name and `__` for its instances, and this scope declares `box__i` already [claimed-name]
   [1]
 
 A tag declared before is refused as well, and the message names the
@@ -752,7 +752,7 @@ name of the space that the scope declares first.
   > type box(T) = struct { T v; };
   > EOF
   $ ./golden.exe claim_tag_before.tc
-  claim_tag_before.tc:3: the generic `box` claims every name that begins with its own name and `__` for its instances, and this scope declares `box__z` already (design 10.1 rule 6) [TC0004]
+  claim_tag_before.tc:3: error: the generic `box` claims every name that begins with its own name and `__` for its instances, and this scope declares `box__z` already [claimed-name]
   [1]
 
 A name whose part before its first `__` is no generic is no claimed
@@ -778,7 +778,7 @@ the constructor of the return type is still written there.
   > option(int) f(void) { int option; enum { option__i_None = 1 }; return None; }
   > EOF
   $ ./golden.exe claim_hidden.tc
-  claim_hidden.tc:1: the name `option__i_None` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances (design 10.1 rule 6) [TC0004]
+  claim_hidden.tc:1: error: the name `option__i_None` is declared, but the generic `option` claims every name that begins with its own name and `__` for its instances [claimed-name]
   [1]
 
 The typedef of a type argument spells the one name of an untagged type
@@ -794,7 +794,7 @@ though the argument's own declaration is exact.
   > option(p) o;
   > EOF
   $ ./golden.exe spelled.tc
-  spelled.tc:4: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:3 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
+  spelled.tc:4: error: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled.tc:3 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry [generic-name-capture]
   [1]
 
 The one name is that of the first declarator that gives it, as a later
@@ -805,7 +805,7 @@ one in the same declaration may add an attribute.
   > option(q) o;
   > EOF
   $ ./golden.exe spelled_twice.tc
-  spelled_twice.tc:2: in `typedef n *__tc_arg__P1n;`, which lowering writes for this application: the declaration of 'n' at spelled_twice.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
+  spelled_twice.tc:2: error: in `typedef n *__tc_arg__P1n;`, which lowering writes for this application: the declaration of 'n' at spelled_twice.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry [generic-name-capture]
   [1]
 
 The declarator that gives the one name may hold the attribute itself,
@@ -816,5 +816,5 @@ which no declaration of the argument shows.
   > option(p) o;
   > EOF
   $ ./golden.exe spelled_own.tc
-  spelled_own.tc:2: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry (design 13.5) [TC0071]
+  spelled_own.tc:2: error: in `typedef s *__tc_arg__P1s;`, which lowering writes for this application: the declaration of 's' at spelled_own.tc:1 gives it a type that may hold an attribute or `typeof` of an expression, which the text that lowering writes would carry [generic-name-capture]
   [1]

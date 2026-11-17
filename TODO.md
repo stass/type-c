@@ -147,25 +147,29 @@ is [type-c-language-design.md](type-c-language-design.md).
   as directives. Lex them, counting their newlines.
 - [Low] Diagnostics of later stages print names and spellings from the
   text, and file names from line markers (`Expressions.needing`), where
-  a crafted name can hold control bytes or a fake `[TC0018]`; route them
+  a crafted name can hold control bytes or a fake `[match-coverage]`; route them
   through the escaping of `Reader.error_message`, and
   cut a quoted spelling, such as a number that is no constant, to a
   bounded length so that a huge token cannot make a huge message.
 - [Medium] `Rule.c_text` takes free text, so a site can still write a
-  Type-C refusal without its code as a refusal of C text, and whether
+  Type-C refusal without its name as a refusal of C text, and whether
   each of its sites cites C11 or the GCC manual rests on review. Give it
   a structured citation (C11 clause, GCC manual section, translation
   limit) that renders the parenthesised clause, so that no design
   citation can be written there; about 15 sites cite nothing yet.
+- [Low] A rule's name is stable by review alone: `Rule_codegen.check`
+  refuses a name used twice, but no check sees a row renamed or deleted.
+  Add a step to `tools/gate.sh` that fails unless every name of
+  `rule_table.ml` at the merge base with master is still in the table.
+- [Low] `Temp_dir` writes the `typec:` prefix and its guard against a
+  closed stderr by hand, beside `Command.report`; give both one function.
 - [Low] `Rule.diagnostic`, `message`, `c_text` and `text` are OCaml in a
   string of `rule_codegen.ml`, sealed by an `include (struct ... end :
   sig ... end)`; move them to a hand-written `diagnostic.ml` and `.mli`
-  over the generated `Rule.code` and `Rule.clause`, so the generator
+  over the generated `Rule.name`, so the generator
   emits only what the table derives.
-- [Low] The rule `Profile` has no clause, so each of its ten sites
-  writes "(design 13.3)" or "(design P16)" by hand, and only two tests
-  assert its code. Give it the clause (the P16 sites keep P16 in their
-  prose) and assert `[TC0031]` at each site.
+- [Low] Few tests assert the name of the rule `Profile` at its sites;
+  assert `[unsupported]` at each.
 - [Low] A diagnostic gives the file and the line but not the source line
   that design 13.6 says it carries; print the line of text under it.
 - [Low] A carriage return that no newline follows is a blank to the
@@ -293,7 +297,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   text. The parser passes over `Token.Typec_pragma` like any other
   pragma, wherever it stands (`lexeme_of` in `src/syntax/parser.ml`).
   Refuse the line inside an external declaration of Type-C text, with
-  a rule code of its own.
+  a rule name of its own.
 - [Low] A `#pragma typec` line stays inside the spans of the nodes
   around it, so emission copies it to the backend. Stage 5, which gives
   the line a meaning, decides what emission does with it.
@@ -339,7 +343,7 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] The parser parses the body of a block literal and scans it as
   unread text because typing (`src/sema/expressions.ml`) does not read
   it, a decision two modules keep apart; and a block literal inside an
-  attribute argument is not parsed, so design 13.3's text rule (TC0030)
+  attribute argument is not parsed, so design 13.3's text rule (`block-literal`)
   does not reach it. Passing the body through `skip_balanced` would make
   "unread" mean "not parsed", if the jump and label checks the parser
   applies to the body can go.
@@ -378,7 +382,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   scope have no case of a defer in a match arm, of a loop pragma before
   the `}` of a block that cannot complete, before a labelled statement
   that holds an exit, or between `S` and the first item.
-- [Low] The TC0074 message names neither the pragma it refuses nor the
+- [Low] The `deferred-pragma` message names neither the pragma it refuses nor the
   ones allowed; add the line's first identifiers and point to the
   list of design 13.5.
 - [Low] The walk field `operands` in `Reachability` holds the operands
@@ -406,7 +410,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   generic callee is typed (`generic_callee`), so the `Parenthesized`
   nodes have no entry in the typed tables that lowering reads; the
   `Unknown_type` arm of `generic_call` types no callee at all and may be
-  unreachable (TC0077 refuses the function types that could reach it).
+  unreachable (`generic-function-form` refuses the function types that could reach it).
 - [Low] `Tree.Instance` holds its generic as an expression that is
   always an identifier (`invalid_arg` in `explicit_instance`); a
   `{ name; reference }` field would make that unrepresentable. The
@@ -615,7 +619,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   discards a value of a type parameter, which an instance at `result`
   then fails, against design 3.5 rule 4: `type pair(T) = struct { int
   n[sizeof(({ T x = {0}; x; }), 1)]; };` is accepted and `pair(result(int,
-  int))` refused at the instance (TC0048). The way in is a declaration
+  int))` refused at the instance (`discarded-result`). The way in is a declaration
   of `T` inside a statement expression, which rule 4 does not refuse.
   Refuse a discarded value of an opaque type parameter in a definition
   check, or close the gap in rule 4; section 7.1 rule 3 meets the same
@@ -647,7 +651,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   that may be chosen (known compatible, unknown, and the default only
   where none is known compatible), decide the selection where one is
   left, and have `selected` judge exactly those; then where each of them
-  is a result, report TC0048 rather than a dependence on typec.
+  is a result, report `discarded-result` rather than a dependence on typec.
 - [Medium] Which operand gives the value of the expression around it
   is decided in several places that must agree: `as_enclosing` and
   `value_position` (positions), `is_assignment` (parentheses only, so
@@ -987,7 +991,7 @@ is [type-c-language-design.md](type-c-language-design.md).
   (`Declarations.expression_type_name`), where design 7.1 rule 4
   refuses only a construct that needs the value of an expression that
   depends on one: `type g(T) = struct { __typeof__((T *)0) p; };` is
-  refused (TC0038) and the design allows it. Give the definition check
+  refused (`generic-definition`) and the design allows it. Give the definition check
   the test of rule 4 when generic functions are typed, as their bodies
   need it.
 - [Medium] `Ctype.instance` holds the encodings of its arguments as
@@ -1479,7 +1483,7 @@ types (design 13.3).
   operand of `__asm__`, which asks for a constant.
 - [Low] Generic functions, readability: `dependent_objects` stores a
   span that nothing reads; the message of `parameter_dependent` and the
-  meaning of TC0076 name too few sources of dependence; "in a generic
+  meaning of `type-parameter-constant` name too few sources of dependence; "in a generic
   function" is held both in `Declarations.state.in_generic_function`
   and in `Expressions.enclosing.in_generic`.
 - [Medium] GCC 16 warns of `unused` in a type name on a structure
@@ -1580,7 +1584,7 @@ types (design 13.3).
 - [Medium] Function names in a generic function (design 7.1 rule
   3): the refusal follows the array through the forms that hand it
   on as it is. Pairs for `test/golden/generic_functions.t`, each
-  refused with TC0075 in a generic body: `sizeof (__func__)`,
+  refused with `type-parameter-operation` in a generic body: `sizeof (__func__)`,
   `sizeof _Generic(0, int: __func__)`,
   `sizeof __builtin_choose_expr(1, __func__, 0)` and
   `sizeof __extension__ __func__`, which `typec` refuses and no test
@@ -1588,7 +1592,7 @@ types (design 13.3).
   for another reason: the front end does not read
   `__typeof_unqual__` in source text and reports an undeclared
   name. Decide whether the profile reads that specifier (design 13.3
-  names `typeof` alone); if it does, the refusal is TC0075. Partners
+  names `typeof` alone); if it does, the refusal is `type-parameter-operation`. Partners
   that stand, where C converts the array: `puts((__func__))`,
   `puts(_Generic(0, int: __func__))`, `puts(__extension__ __func__)`,
   `sizeof(({ __func__; }))`, `sizeof(0, __func__)` and
@@ -1706,12 +1710,12 @@ types (design 13.3).
   own unwind entry (about 2 KB of .eh_frame and code). Find the .rodata
   mechanism before changing the lowering; see the item on the trapping
   default in a hot loop.
-- [Low] Two diagnostics from Pilot A's injections: TC0013 gives no
+- [Low] Two diagnostics from Pilot A's injections: `private-creation` gives no
   column and names the owner by the path the backend found it through
   (`./type.tci`); and a binding of another arm used in an arm reads
-  "'addr' is not declared (C11 6.5.1p2)" with no code, where a message
+  "'addr' is not declared (C11 6.5.1p2)" with no name, where a message
   naming the arm that binds it would point at the mistake.
-- [Low] TC0061 on `T *p = try f(sizeof(*p));` says that `p` is not
+- [Low] `try-name-capture` on `T *p = try f(sizeof(*p));` says that `p` is not
   visible where lowering writes the text and names no remedy. Pilot B
   met it 4 times and wrote `sizeof(T)` each time, which no longer
   follows the type of `p`. Have the message suggest `T *p; p = try

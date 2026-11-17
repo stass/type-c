@@ -4,7 +4,7 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 Generic functions (design 7.1): the definition is read once against an
 opaque value type for each type parameter. Instances are not written
 yet, so a unit that holds a generic function stops after its check
-(TC0023), and so does a use of its name (design 7.2).
+(not-implemented), and so does a use of its name (design 7.2).
 
 A definition that uses its type parameters only as every value type
 allows is checked and stops at the sentinel.
@@ -19,7 +19,7 @@ allows is checked and stops at the sentinel.
   > generic(K, V) void put(K *key, V *value);
   > EOF
   $ ./golden.exe last.tc
-  last.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  last.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 Design 7.1 rule 3: a value of a type parameter is used only as C uses a
@@ -37,7 +37,7 @@ with __typeof__, and yielded by a comma.
   > }
   > EOF
   $ ./golden.exe discard.tc
-  discard.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  discard.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 A cast of a value of a type parameter, other than to void, is refused,
@@ -47,14 +47,14 @@ and so is a cast to a type parameter.
   > generic(T) int f(T t) { return (int)t; }
   > EOF
   $ ./golden.exe cast_int.tc
-  cast_int.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  cast_int.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > cast_to.tc <<'EOF'
   > generic(T) void f(T t) { (T)t; }
   > EOF
   $ ./golden.exe cast_to.tc
-  cast_to.tc:1: a cast to a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  cast_to.tc:1: error: a cast to a type parameter, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 So are the operations that C refuses of a structure: arithmetic,
@@ -64,35 +64,35 @@ comparison, member access, calls and truth tests.
   > generic(T) void f(T a, T b) { a + b; }
   > EOF
   $ ./golden.exe arithmetic.tc
-  arithmetic.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  arithmetic.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > compare.tc <<'EOF'
   > generic(T) int f(T a, T b) { return a == b; }
   > EOF
   $ ./golden.exe compare.tc
-  compare.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  compare.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > member.tc <<'EOF'
   > generic(T) int f(T a) { return a.x; }
   > EOF
   $ ./golden.exe member.tc
-  member.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  member.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > called.tc <<'EOF'
   > generic(T) void f(T a) { a(); }
   > EOF
   $ ./golden.exe called.tc
-  called.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  called.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > truth.tc <<'EOF'
   > generic(T) int f(T a) { if (a) return 1; return 0; }
   > EOF
   $ ./golden.exe truth.tc
-  truth.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  truth.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 The default argument promotions convert some value types and not
@@ -105,7 +105,7 @@ prototype.
   > generic(T) void f(T t) { printf("", t); }
   > EOF
   $ ./golden.exe variadic.tc
-  variadic.tc:2: a value of a type parameter is an argument that no parameter type receives, which the default argument promotions or a builtin read by its type, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  variadic.tc:2: error: a value of a type parameter is an argument that no parameter type receives, which the default argument promotions or a builtin read by its type, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > unprototyped.tc <<'EOF'
@@ -113,14 +113,14 @@ prototype.
   > generic(T) void f(T t) { g(t); }
   > EOF
   $ ./golden.exe unprototyped.tc
-  unprototyped.tc:2: a value of a type parameter is an argument that no parameter type receives, which the default argument promotions or a builtin read by its type, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  unprototyped.tc:2: error: a value of a type parameter is an argument that no parameter type receives, which the default argument promotions or a builtin read by its type, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > va_arg.tc <<'EOF'
   > generic(T) void f(T *p, __builtin_va_list ap) { *p = __builtin_va_arg(ap, T); }
   > EOF
   $ ./golden.exe va_arg.tc
-  va_arg.tc:1: va_arg of a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  va_arg.tc:1: error: va_arg of a type parameter, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > old_pointer.tc <<'EOF'
@@ -132,7 +132,7 @@ prototype.
   > }
   > EOF
   $ ./golden.exe old_pointer.tc
-  old_pointer.tc:4: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  old_pointer.tc:4: error: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 Provisionally, the conditional operator takes no value of a type
@@ -142,7 +142,7 @@ parameter: its type is that of the usual arithmetic conversions.
   > generic(T) void f(int c, T a, T b, T *p) { *p = c ? a : b; }
   > EOF
   $ ./golden.exe conditional.tc
-  conditional.tc:1: a value of a type parameter is a branch of the conditional operator, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  conditional.tc:1: error: a value of a type parameter is a branch of the conditional operator, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 A construct that compares types is an error where the argument decides
@@ -153,20 +153,20 @@ comparison that decides it, among the associations of _Generic too.
   > generic(T) int f(int x) { return _Generic(x, T: 1, default: 0); }
   > EOF
   $ ./golden.exe selection.tc
-  selection.tc:1: _Generic compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  selection.tc:1: error: _Generic compares a type parameter with another type, which is compatible with it for some arguments and not for others [type-parameter-constant]
   [1]
 
   $ cat > compatible.tc <<'EOF'
   > generic(T) int f(void) { return __builtin_types_compatible_p(T, int); }
   > EOF
   $ ./golden.exe compatible.tc
-  compatible.tc:1: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  compatible.tc:1: error: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others [type-parameter-constant]
   [1]
   $ cat > associations.tc <<'EOF'
   > generic(T) int f(T t) { return _Generic(&t, T *: 1, int *: 2); }
   > EOF
   $ ./golden.exe associations.tc
-  associations.tc:1: _Generic compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  associations.tc:1: error: _Generic compares a type parameter with another type, which is compatible with it for some arguments and not for others [type-parameter-constant]
   [1]
 
 A comparison that a type parameter does not decide stands: a type
@@ -186,7 +186,7 @@ ARRAY_SIZE.
   > }
   > EOF
   $ ./golden.exe compared.tc
-  compared.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  compared.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 The argument decides wherever a type parameter enters the comparison,
@@ -203,7 +203,7 @@ argument decides.
   > }
   > EOF
   $ ./golden.exe instances.tc
-  instances.tc:4: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  instances.tc:4: error: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others [type-parameter-constant]
   [1]
   $ cat > handles.tc <<'EOF'
   > type handle(T) = distinct T *;
@@ -213,7 +213,7 @@ argument decides.
   > }
   > EOF
   $ ./golden.exe handles.tc
-  handles.tc:4: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  handles.tc:4: error: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others [type-parameter-constant]
   [1]
   $ cat > unknown.tc <<'EOF'
   > generic(T) int f(void)
@@ -223,7 +223,7 @@ argument decides.
   > }
   > EOF
   $ ./golden.exe unknown.tc
-  unknown.tc:3: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  unknown.tc:3: error: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others [type-parameter-constant]
   [1]
   $ cat > unprototyped.tc <<'EOF'
   > generic(T) int f(void)
@@ -232,7 +232,7 @@ argument decides.
   > }
   > EOF
   $ ./golden.exe unprototyped.tc
-  unprototyped.tc:3: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  unprototyped.tc:3: error: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others [type-parameter-constant]
   [1]
 
 Two instances that differ in a part that mentions no type parameter
@@ -248,7 +248,7 @@ different tags, though both hold a type parameter.
   > }
   > EOF
   $ ./golden.exe tags.tc
-  tags.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  tags.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
   $ cat > apart.tc <<'EOF'
@@ -260,7 +260,7 @@ different tags, though both hold a type parameter.
   > }
   > EOF
   $ ./golden.exe apart.tc
-  apart.tc:2: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  apart.tc:2: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 No declaration in the body gives its identifier linkage, whatever its
@@ -278,7 +278,7 @@ object and a pointer to a function have no linkage, and stand.
   > }
   > EOF
   $ ./golden.exe linked.tc
-  linked.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  linked.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
   $ cat > extern_int.tc <<'EOF'
@@ -288,7 +288,7 @@ object and a pointer to a function have no linkage, and stand.
   > }
   > EOF
   $ ./golden.exe extern_int.tc
-  extern_int.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  extern_int.tc:3: error: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again [type-parameter-operation]
   [1]
   $ cat > extern_body_type.tc <<'EOF'
   > generic(T) void f(T t)
@@ -298,7 +298,7 @@ object and a pointer to a function have no linkage, and stand.
   > }
   > EOF
   $ ./golden.exe extern_body_type.tc
-  extern_body_type.tc:4: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  extern_body_type.tc:4: error: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again [type-parameter-operation]
   [1]
   $ cat > block_int_function.tc <<'EOF'
   > generic(T) void f(T t)
@@ -307,7 +307,7 @@ object and a pointer to a function have no linkage, and stand.
   > }
   > EOF
   $ ./golden.exe block_int_function.tc
-  block_int_function.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  block_int_function.tc:3: error: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again [type-parameter-operation]
   [1]
 
   $ cat > extern_object.tc <<'EOF'
@@ -317,7 +317,7 @@ object and a pointer to a function have no linkage, and stand.
   > }
   > EOF
   $ ./golden.exe extern_object.tc
-  extern_object.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  extern_object.tc:3: error: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again [type-parameter-operation]
   [1]
 
   $ cat > block_function.tc <<'EOF'
@@ -327,7 +327,7 @@ object and a pointer to a function have no linkage, and stand.
   > }
   > EOF
   $ ./golden.exe block_function.tc
-  block_function.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  block_function.tc:3: error: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again [type-parameter-operation]
   [1]
 
 No initialiser enters a type parameter but the zero initialiser, {0}
@@ -354,7 +354,7 @@ initialises it whole.
   > }
   > EOF
   $ ./golden.exe zeroed.tc
-  zeroed.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  zeroed.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 Any other initialiser that reaches a type parameter is for one of its
@@ -364,7 +364,7 @@ members, in its own braces or through elided ones, and is an error.
   > generic(T) void f(T *p, T t) { T u = { t }; *p = u; }
   > EOF
   $ ./golden.exe braced.tc
-  braced.tc:1: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  braced.tc:1: error: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises [type-parameter-operation]
   [1]
   $ cat > elided_array.tc <<'EOF'
   > generic(T) void f(void)
@@ -373,7 +373,7 @@ members, in its own braces or through elided ones, and is an error.
   > }
   > EOF
   $ ./golden.exe elided_array.tc
-  elided_array.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  elided_array.tc:3: error: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises [type-parameter-operation]
   [1]
   $ cat > unsized.tc <<'EOF'
   > generic(T) void f(void)
@@ -382,7 +382,7 @@ members, in its own braces or through elided ones, and is an error.
   > }
   > EOF
   $ ./golden.exe unsized.tc
-  unsized.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  unsized.tc:3: error: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises [type-parameter-operation]
   [1]
   $ cat > elided_member.tc <<'EOF'
   > generic(T) void f(void)
@@ -391,7 +391,7 @@ members, in its own braces or through elided ones, and is an error.
   > }
   > EOF
   $ ./golden.exe elided_member.tc
-  elided_member.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  elided_member.tc:3: error: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises [type-parameter-operation]
   [1]
   $ cat > designated.tc <<'EOF'
   > generic(T) void f(void)
@@ -400,7 +400,7 @@ members, in its own braces or through elided ones, and is an error.
   > }
   > EOF
   $ ./golden.exe designated.tc
-  designated.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  designated.tc:3: error: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises [type-parameter-operation]
   [1]
   $ cat > literal.tc <<'EOF'
   > generic(T) void f(void)
@@ -409,7 +409,7 @@ members, in its own braces or through elided ones, and is an error.
   > }
   > EOF
   $ ./golden.exe literal.tc
-  literal.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  literal.tc:3: error: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises [type-parameter-operation]
   [1]
   $ cat > nested.tc <<'EOF'
   > generic(T) void f(void)
@@ -418,7 +418,7 @@ members, in its own braces or through elided ones, and is an error.
   > }
   > EOF
   $ ./golden.exe nested.tc
-  nested.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  nested.tc:3: error: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises [type-parameter-operation]
   [1]
 
 Design 7.1 rule 4: sizes, alignments and offsets.
@@ -440,7 +440,7 @@ initialise a value of one.
   > }
   > EOF
   $ ./golden.exe sizes.tc
-  sizes.tc:2: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  sizes.tc:2: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 An expression that holds the size, alignment or offset of a type that
@@ -452,35 +452,35 @@ initialiser, and _Alignas takes no such type.
   > generic(T) void f(T *p) { char b[sizeof(T *)]; (void)b; (void)p; }
   > EOF
   $ ./golden.exe bound.tc
-  bound.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  bound.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
   $ cat > case.tc <<'EOF'
   > generic(T) int f(int x) { switch (x) { case sizeof(T): return 1; } return 0; }
   > EOF
   $ ./golden.exe case.tc
-  case.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  case.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
   $ cat > static_assert.tc <<'EOF'
   > generic(T) void f(T *p) { _Static_assert(sizeof(T) > 0, ""); (void)p; }
   > EOF
   $ ./golden.exe static_assert.tc
-  static_assert.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  static_assert.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
   $ cat > alignas.tc <<'EOF'
   > generic(T) void f(T *p) { _Alignas(T *) char c; (void)c; (void)p; }
   > EOF
   $ ./golden.exe alignas.tc
-  alignas.tc:1: the type of `_Alignas` mentions a type parameter, so the alignment differs between arguments (design 7.1 rule 4) [TC0076]
+  alignas.tc:1: error: the type of `_Alignas` mentions a type parameter, so the alignment differs between arguments [type-parameter-constant]
   [1]
 
   $ cat > static.tc <<'EOF'
   > generic(T) void f(T *p) { static unsigned long n = sizeof(T); (void)n; (void)p; }
   > EOF
   $ ./golden.exe static.tc
-  static.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  static.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 A structure declared in the body with a member of a type parameter
@@ -496,7 +496,7 @@ mentions it.
   > }
   > EOF
   $ ./golden.exe local.tc
-  local.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  local.tc:4: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 An expression depends on a type parameter whether its sizeof is
@@ -506,7 +506,7 @@ evaluated or not.
   > generic(T) int f(int x) { switch (x) { case 1 || sizeof(T): return 1; } return 0; }
   > EOF
   $ ./golden.exe unevaluated.tc
-  unevaluated.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  unevaluated.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 A value of a type parameter converts to no other type, nor does another
@@ -516,28 +516,28 @@ type convert to it.
   > generic(T) int f(T t) { int x = t; return x; }
   > EOF
   $ ./golden.exe to_int.tc
-  to_int.tc:1: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  to_int.tc:1: error: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > from_int.tc <<'EOF'
   > generic(T) T f(T t) { t = 3; return t; }
   > EOF
   $ ./golden.exe from_int.tc
-  from_int.tc:1: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  from_int.tc:1: error: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > two_parameters.tc <<'EOF'
   > generic(T, U) void f(T t, U u) { t = u; (void)t; }
   > EOF
   $ ./golden.exe two_parameters.tc
-  two_parameters.tc:1: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  two_parameters.tc:1: error: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > classify.tc <<'EOF'
   > generic(T) int f(T *p) { return __builtin_classify_type(*p); }
   > EOF
   $ ./golden.exe classify.tc
-  classify.tc:1: a value of a type parameter is an argument that no parameter type receives, which the default argument promotions or a builtin read by its type, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  classify.tc:1: error: a value of a type parameter is an argument that no parameter type receives, which the default argument promotions or a builtin read by its type, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 Every constant that C asks for refuses such an expression: a bit-field
@@ -547,21 +547,21 @@ width, an enumerator's value and an _Alignas expression too.
   > generic(T) void f(T *p) { struct b { unsigned x : sizeof(T); } b = {0}; (void)b; (void)p; }
   > EOF
   $ ./golden.exe width.tc
-  width.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  width.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
   $ cat > enumerator.tc <<'EOF'
   > generic(T) int f(T *p) { enum { size = sizeof(T) }; (void)p; return size; }
   > EOF
   $ ./golden.exe enumerator.tc
-  enumerator.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  enumerator.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
   $ cat > alignas_expression.tc <<'EOF'
   > generic(T) void f(T *p) { _Alignas(sizeof(T)) char c; (void)c; (void)p; }
   > EOF
   $ ./golden.exe alignas_expression.tc
-  alignas_expression.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  alignas_expression.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 A union with a member of a type parameter mentions it.
@@ -576,7 +576,7 @@ A union with a member of a type parameter mentions it.
   > }
   > EOF
   $ ./golden.exe union.tc
-  union.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  union.tc:4: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 Two pointers meet, by a conversion or an operation on both, only
@@ -586,21 +586,21 @@ where their referenced types are compatible or one is void.
   > generic(T) long f(T *p, int *q) { return p - q; }
   > EOF
   $ ./golden.exe pointer_difference.tc
-  pointer_difference.tc:1: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  pointer_difference.tc:1: error: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > pointer_equality.tc <<'EOF'
   > generic(T) int f(T *p, int *q) { return p == q; }
   > EOF
   $ ./golden.exe pointer_equality.tc
-  pointer_equality.tc:1: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  pointer_equality.tc:1: error: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > pointer_branch.tc <<'EOF'
   > generic(T) void f(int c, T *p, int *q) { void *r = c ? p : q; (void)r; }
   > EOF
   $ ./golden.exe pointer_branch.tc
-  pointer_branch.tc:1: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  pointer_branch.tc:1: error: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 Where typec does not know whether the referenced types are compatible,
@@ -610,7 +610,7 @@ the pointers do not meet either.
   > generic(T) void f(T *p) { _Complex int *q = p; (void)q; }
   > EOF
   $ ./golden.exe pointer_unknown.tc
-  pointer_unknown.tc:1: pointers meet where one mentions a type parameter, and whether their types are compatible depends on '_Complex int', whose type typec does not compute, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  pointer_unknown.tc:1: error: pointers meet where one mentions a type parameter, and whether their types are compatible depends on '_Complex int', whose type typec does not compute, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 A builtin that reads the object a pointer points to does not read a
@@ -620,14 +620,14 @@ value of a type parameter.
   > generic(T) void f(T *p, T *q) { *q = __atomic_load_n(p, 0); }
   > EOF
   $ ./golden.exe atomic_load.tc
-  atomic_load.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  atomic_load.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
   $ cat > sync_add.tc <<'EOF'
   > generic(T) void f(T *p) { (void)__sync_fetch_and_add(p, 1); }
   > EOF
   $ ./golden.exe sync_add.tc
-  sync_add.tc:1: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  sync_add.tc:1: error: a value of a type parameter is the operand of an operation, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 An asm constraint asks of its operand a size and a kind, which differ
@@ -637,7 +637,7 @@ between arguments.
   > generic(T) void f(T *p) { __asm__("" : : "r"(p)); }
   > EOF
   $ ./golden.exe asm_operand.tc
-  asm_operand.tc:1: an asm operand has a type that mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  asm_operand.tc:1: error: an asm operand has a type that mentions a type parameter, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
 An expression depends on a type parameter wherever its sizeof stands,
@@ -647,7 +647,7 @@ an index of an offsetof included.
   > generic(T) int f(int x, int n) { switch (x) { case n + sizeof(T): return 1; } return 0; }
   > EOF
   $ ./golden.exe order.tc
-  order.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  order.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
   $ cat > offsetof_index.tc <<'EOF'
@@ -655,7 +655,7 @@ an index of an offsetof included.
   > generic(T) void f(T *p) { _Static_assert(__builtin_offsetof(struct s, a[sizeof(T)]) > 0, ""); (void)p; }
   > EOF
   $ ./golden.exe offsetof_index.tc
-  offsetof_index.tc:2: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  offsetof_index.tc:2: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 Dependence is a fact of a value. Arithmetic on a pointer to a type
@@ -669,7 +669,7 @@ member of one for an offset, as sizeof does.
   > }
   > EOF
   $ ./golden.exe pointer_bound.tc
-  pointer_bound.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  pointer_bound.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > pool_address.tc <<'EOF'
   > generic(T) T *f(T t)
@@ -680,7 +680,7 @@ member of one for an offset, as sizeof does.
   > }
   > EOF
   $ ./golden.exe pool_address.tc
-  pool_address.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  pool_address.tc:4: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > member_address.tc <<'EOF'
   > generic(T) unsigned long f(T t)
@@ -691,7 +691,7 @@ member of one for an offset, as sizeof does.
   > }
   > EOF
   $ ./golden.exe member_address.tc
-  member_address.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  member_address.tc:4: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 The same constructs over a type that mentions no type parameter stand,
@@ -713,7 +713,7 @@ asks for no layout.
   > }
   > EOF
   $ ./golden.exe plain_addresses.tc
-  plain_addresses.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  plain_addresses.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 A builtin depends unless the values of its arguments alone decide it.
@@ -725,7 +725,7 @@ A builtin depends unless the values of its arguments alone decide it.
   > }
   > EOF
   $ ./golden.exe classify_bound.tc
-  classify_bound.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  classify_bound.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > value_builtins.tc <<'EOF'
   > generic(T) void f(T t)
@@ -736,7 +736,7 @@ A builtin depends unless the values of its arguments alone decide it.
   > void g(int t) { char b[__builtin_classify_type(t) == 1 ? 1 : -1]; }
   > EOF
   $ ./golden.exe value_builtins.tc
-  value_builtins.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  value_builtins.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 A `const` object carries the dependence of its initialiser, which the
@@ -751,7 +751,7 @@ constant to neither, so its use declares a variable length array.
   > }
   > EOF
   $ ./golden.exe const_bound.tc
-  const_bound.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  const_bound.tc:4: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > const_array_static.tc <<'EOF'
   > generic(T) void f(T t)
@@ -761,7 +761,7 @@ constant to neither, so its use declares a variable length array.
   > }
   > EOF
   $ ./golden.exe const_array_static.tc
-  const_array_static.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  const_array_static.tc:4: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > variable_bound.tc <<'EOF'
   > generic(T) void f(T t, unsigned long count)
@@ -775,7 +775,7 @@ constant to neither, so its use declares a variable length array.
   > }
   > EOF
   $ ./golden.exe variable_bound.tc
-  variable_bound.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  variable_bound.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 Whether an expression that depends is a null pointer constant, which
@@ -789,7 +789,7 @@ designator differ between arguments.
   > }
   > EOF
   $ ./golden.exe null_pointer.tc
-  null_pointer.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_pointer.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > plain_null_pointer.tc <<'EOF'
   > generic(T) void *f(T *p, int c)
@@ -798,7 +798,7 @@ designator differ between arguments.
   > }
   > EOF
   $ ./golden.exe plain_null_pointer.tc
-  plain_null_pointer.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  plain_null_pointer.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 An integer converts to a pointer only as a null pointer constant, so
@@ -813,7 +813,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_initialised.tc
-  null_initialised.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_initialised.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_assigned.tc <<'EOF'
   > generic(T) void f(T *q)
@@ -822,7 +822,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_assigned.tc
-  null_assigned.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_assigned.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_compared.tc <<'EOF'
   > generic(T) int f(T *q)
@@ -831,7 +831,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_compared.tc
-  null_compared.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_compared.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_branch.tc <<'EOF'
   > generic(T) T *f(T *q, int c)
@@ -840,7 +840,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_branch.tc
-  null_branch.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_branch.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_argument.tc <<'EOF'
   > void g(int *);
@@ -850,7 +850,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_argument.tc
-  null_argument.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_argument.tc:4: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_elided.tc <<'EOF'
   > generic(T) void f(void)
@@ -859,7 +859,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_elided.tc
-  null_elided.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_elided.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_designated.tc <<'EOF'
   > generic(T) void f(void)
@@ -868,7 +868,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_designated.tc
-  null_designated.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_designated.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_function.tc <<'EOF'
   > generic(T) void f(void)
@@ -877,7 +877,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_function.tc
-  null_function.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_function.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_function_compared.tc <<'EOF'
   > generic(T) int f(void (*g)(void))
@@ -886,7 +886,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_function_compared.tc
-  null_function_compared.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  null_function_compared.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > null_plain.tc <<'EOF'
   > generic(T) int f(T *q, int c)
@@ -897,7 +897,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe null_plain.tc
-  null_plain.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  null_plain.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
   $ cat > choose.tc <<'EOF'
   > generic(T) unsigned long f(T t)
@@ -906,7 +906,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe choose.tc
-  choose.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  choose.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > designator_index.tc <<'EOF'
   > generic(T) void f(T t)
@@ -915,7 +915,7 @@ assignment, an argument, an equality and the integer branch of ?:.
   > }
   > EOF
   $ ./golden.exe designator_index.tc
-  designator_index.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  designator_index.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 Design 7.1 rule 6: what follows generic( ) is one function, which its
@@ -929,49 +929,49 @@ definition.
   > generic(T) void none(void);
   > EOF
   $ ./golden.exe forms.tc
-  forms.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  forms.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
   $ cat > empty_list.tc <<'EOF'
   > generic(T) void f();
   > EOF
   $ ./golden.exe empty_list.tc
-  empty_list.tc:1: a generic function has a prototype, `(void)` where it takes no argument, and neither `()` nor an identifier list (design 7.1 rule 6) [TC0077]
+  empty_list.tc:1: error: a generic function has a prototype, `(void)` where it takes no argument, and neither `()` nor an identifier list [generic-function-form]
   [1]
 
   $ cat > identifiers.tc <<'EOF'
   > generic(T) void f(p) T *p; { (void)p; }
   > EOF
   $ ./golden.exe identifiers.tc
-  identifiers.tc:1: a generic function has a prototype, `(void)` where it takes no argument, and neither `()` nor an identifier list (design 7.1 rule 6) [TC0077]
+  identifiers.tc:1: error: a generic function has a prototype, `(void)` where it takes no argument, and neither `()` nor an identifier list [generic-function-form]
   [1]
 
   $ cat > extern.tc <<'EOF'
   > generic(T) extern void f(T *p);
   > EOF
   $ ./golden.exe extern.tc
-  extern.tc:1: `static` is the only storage class of a generic function, whose instances have internal linkage (design 7.1 rule 6) [TC0077]
+  extern.tc:1: error: `static` is the only storage class of a generic function, whose instances have internal linkage [generic-function-form]
   [1]
 
   $ cat > noreturn.tc <<'EOF'
   > generic(T) _Noreturn void f(T *p);
   > EOF
   $ ./golden.exe noreturn.tc
-  noreturn.tc:1: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from (design 7.1 rule 6) [TC0077]
+  noreturn.tc:1: error: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from [generic-function-form]
   [1]
 
   $ cat > attribute.tc <<'EOF'
   > generic(T) void f(T *p) __attribute__((cold));
   > EOF
   $ ./golden.exe attribute.tc
-  attribute.tc:1: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from (design 7.1 rule 6) [TC0077]
+  attribute.tc:1: error: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from [generic-function-form]
   [1]
 
   $ cat > asm_label.tc <<'EOF'
   > generic(T) void f(T *p) __asm__("g");
   > EOF
   $ ./golden.exe asm_label.tc
-  asm_label.tc:1: an assembler label would give every instance of a generic function one name (design 7.1 rule 6) [TC0077]
+  asm_label.tc:1: error: an assembler label would give every instance of a generic function one name [generic-function-form]
   [1]
 
 No parameter has a variably modified type once C has adjusted it, so
@@ -981,7 +981,7 @@ No parameter has a variably modified type once C has adjusted it, so
   > generic(T) void f(unsigned long n, T a[n], T b[][4], T c[static 4]);
   > EOF
   $ ./golden.exe adjusted.tc
-  adjusted.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  adjusted.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 A parameter of a type that typec does not compute is left to rule 7,
@@ -991,21 +991,21 @@ which agrees it with no other declaration.
   > generic(T) void f(T *t, _Complex int z) { (void)t; (void)z; }
   > EOF
   $ ./golden.exe unknown_parameter.tc
-  unknown_parameter.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  unknown_parameter.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
   $ cat > variable_pointer.tc <<'EOF'
   > generic(T) void f(unsigned long n, T (*m)[n]);
   > EOF
   $ ./golden.exe variable_pointer.tc
-  variable_pointer.tc:1: no parameter of a generic function is variably modified (design 7.1 rule 6) [TC0077]
+  variable_pointer.tc:1: error: no parameter of a generic function is variably modified [generic-function-form]
   [1]
 
   $ cat > variable_matrix.tc <<'EOF'
   > generic(T) void f(unsigned long n, unsigned long k, T m[n][k]) {}
   > EOF
   $ ./golden.exe variable_matrix.tc
-  variable_matrix.tc:1: no parameter of a generic function is variably modified (design 7.1 rule 6) [TC0077]
+  variable_matrix.tc:1: error: no parameter of a generic function is variably modified [generic-function-form]
   [1]
 
 The head defines no structure, union or enumeration, which an instance
@@ -1016,14 +1016,14 @@ may define one, and the head may name one declared before.
   > generic(T) enum e { A } f(T);
   > EOF
   $ ./golden.exe head_enumeration.tc
-  head_enumeration.tc:1: the head of a generic function defines no structure, union or enumeration, which every instance would define twice (design 7.1 rule 6) [TC0077]
+  head_enumeration.tc:1: error: the head of a generic function defines no structure, union or enumeration, which every instance would define twice [generic-function-form]
   [1]
 
   $ cat > head_parameter_structure.tc <<'EOF'
   > generic(T) void f(T t, struct { int x; } *p);
   > EOF
   $ ./golden.exe head_parameter_structure.tc
-  head_parameter_structure.tc:1: the head of a generic function defines no structure, union or enumeration, which every instance would define twice (design 7.1 rule 6) [TC0077]
+  head_parameter_structure.tc:1: error: the head of a generic function defines no structure, union or enumeration, which every instance would define twice [generic-function-form]
   [1]
 
 A tag that the head is the first to mention is declared there, in the
@@ -1033,13 +1033,13 @@ scope of the parameter list or at file scope, and is refused too.
   > generic(T) void f(T t, struct s *p);
   > EOF
   $ ./golden.exe head_parameter_tag.tc
-  head_parameter_tag.tc:1: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice (design 7.1 rule 6) [TC0077]
+  head_parameter_tag.tc:1: error: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice [generic-function-form]
   [1]
   $ cat > head_return_tag.tc <<'EOF'
   > generic(T) union u *f(T t);
   > EOF
   $ ./golden.exe head_return_tag.tc
-  head_return_tag.tc:1: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice (design 7.1 rule 6) [TC0077]
+  head_return_tag.tc:1: error: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice [generic-function-form]
   [1]
 
   $ cat > named_tags.tc <<'EOF'
@@ -1054,28 +1054,28 @@ scope of the parameter list or at file scope, and is refused too.
   > }
   > EOF
   $ ./golden.exe named_tags.tc
-  named_tags.tc:2: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  named_tags.tc:2: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
   $ cat > two.tc <<'EOF'
   > generic(T) void f(T *p), g(T *p);
   > EOF
   $ ./golden.exe two.tc
-  two.tc:1: `generic( )` prefixes one function: its definition, or a declaration with one declarator, which declares a function (design 7.1 rule 6) [TC0077]
+  two.tc:1: error: `generic( )` prefixes one function: its definition, or a declaration with one declarator, which declares a function [generic-function-form]
   [1]
 
   $ cat > object.tc <<'EOF'
   > generic(T) T *p;
   > EOF
   $ ./golden.exe object.tc
-  object.tc:1: `generic( )` prefixes one function: its definition, or a declaration with one declarator, which declares a function (design 7.1 rule 6) [TC0077]
+  object.tc:1: error: `generic( )` prefixes one function: its definition, or a declaration with one declarator, which declares a function [generic-function-form]
   [1]
 
   $ cat > tag_only.tc <<'EOF'
   > generic(T) struct s;
   > EOF
   $ ./golden.exe tag_only.tc
-  tag_only.tc:1: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice (design 7.1 rule 6) [TC0077]
+  tag_only.tc:1: error: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice [generic-function-form]
   [1]
 
 Design 7.1 rule 7: declarations of a generic function agree where they
@@ -1098,37 +1098,37 @@ type parameter as those of a `const` object would.
   > }
   > EOF
   $ ./golden.exe func_pointer.tc
-  func_pointer.tc:3: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  func_pointer.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
   $ cat > func_size.tc <<'EOF'
   > generic(T) unsigned long f(T t) { return sizeof __func__; }
   > EOF
   $ ./golden.exe func_size.tc
-  func_size.tc:1: __func__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  func_size.tc:1: error: __func__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
   $ cat > func_address.tc <<'EOF'
   > generic(T) void f(T t) { const char (*name)[] = &__FUNCTION__; }
   > EOF
   $ ./golden.exe func_address.tc
-  func_address.tc:1: __FUNCTION__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  func_address.tc:1: error: __FUNCTION__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
   $ cat > func_typeof.tc <<'EOF'
   > generic(T) void f(T t) { __typeof__(__PRETTY_FUNCTION__) copy; }
   > EOF
   $ ./golden.exe func_typeof.tc
-  func_typeof.tc:1: __PRETTY_FUNCTION__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  func_typeof.tc:1: error: __PRETTY_FUNCTION__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
   $ cat > func_array.tc <<'EOF'
   > generic(T) void f(T t) { char n[] = __func__; }
   > EOF
   $ ./golden.exe func_array.tc
-  func_array.tc:1: an array is initialised by an expression that is not a string literal (C11 6.7.9p16)
+  func_array.tc:1: error: an array is initialised by an expression that is not a string literal (C11 6.7.9p16)
   [1]
   $ cat > func_static.tc <<'EOF'
   > generic(T) void f(T t) { static int k = __func__[0]; }
   > EOF
   $ ./golden.exe func_static.tc
-  func_static.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  func_static.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > plain_name.tc <<'EOF'
   > const char *g(void) { return __func__; }
@@ -1136,7 +1136,7 @@ type parameter as those of a `const` object would.
   > generic(T) void f(T t);
   > EOF
   $ ./golden.exe plain_name.tc
-  plain_name.tc:3: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  plain_name.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
 A declaration in a block hides the name.
@@ -1147,7 +1147,7 @@ A declaration in a block hides the name.
   > void g(void) { int f = 0; (void)f; }
   > EOF
   $ ./golden.exe agree.tc
-  agree.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  agree.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
 
   $ cat > count.tc <<'EOF'
@@ -1155,7 +1155,7 @@ A declaration in a block hides the name.
   > generic(T, U) void f(T *p);
   > EOF
   $ ./golden.exe count.tc
-  count.tc:2: 'f' is declared again with another number of type parameters (design 7.1 rule 7) [TC0078]
+  count.tc:2: error: 'f' is declared again with another number of type parameters [generic-function-agreement]
   [1]
 
   $ cat > other_type.tc <<'EOF'
@@ -1163,7 +1163,7 @@ A declaration in a block hides the name.
   > generic(T) void f(int *p);
   > EOF
   $ ./golden.exe other_type.tc
-  other_type.tc:2: 'f' is declared again with another type (design 7.1 rule 7) [TC0078]
+  other_type.tc:2: error: 'f' is declared again with another type [generic-function-agreement]
   [1]
 
   $ cat > swapped.tc <<'EOF'
@@ -1171,7 +1171,7 @@ A declaration in a block hides the name.
   > generic(U, T) void f(T *p, U *q);
   > EOF
   $ ./golden.exe swapped.tc
-  swapped.tc:2: 'f' is declared again with another type (design 7.1 rule 7) [TC0078]
+  swapped.tc:2: error: 'f' is declared again with another type [generic-function-agreement]
   [1]
 
   $ cat > compatible_only.tc <<'EOF'
@@ -1179,7 +1179,7 @@ A declaration in a block hides the name.
   > generic(T) void f(T (*p)[4]);
   > EOF
   $ ./golden.exe compatible_only.tc
-  compatible_only.tc:2: 'f' is declared again with another type (design 7.1 rule 7) [TC0078]
+  compatible_only.tc:2: error: 'f' is declared again with another type [generic-function-agreement]
   [1]
 
   $ cat > defined_twice.tc <<'EOF'
@@ -1187,7 +1187,7 @@ A declaration in a block hides the name.
   > generic(T) void f(T *p) { (void)p; }
   > EOF
   $ ./golden.exe defined_twice.tc
-  defined_twice.tc:2: 'f' is defined again (design 7.1 rule 7) [TC0078]
+  defined_twice.tc:2: error: 'f' is defined again [generic-function-agreement]
   [1]
 
 No backend compares two declarations of a generic function, so a
@@ -1198,7 +1198,7 @@ length or a type that typec does not compute agrees with nothing.
   > generic(T) void f(T (*p)[3]);
   > EOF
   $ ./golden.exe opaque_length.tc
-  opaque_length.tc:2: 'f' is declared again with another type (design 7.1 rule 7) [TC0078]
+  opaque_length.tc:2: error: 'f' is declared again with another type [generic-function-agreement]
   [1]
 
   $ cat > unknown_type.tc <<'EOF'
@@ -1206,7 +1206,7 @@ length or a type that typec does not compute agrees with nothing.
   > generic(T) void f(T t, int y __attribute__((weird_unknown))) { (void)t; (void)y; }
   > EOF
   $ ./golden.exe unknown_type.tc
-  unknown_type.tc:2: 'f' is declared again, and whether with the same type depends on the attribute 'weird_unknown', whose type typec does not compute (design 7.1 rule 7) [TC0078]
+  unknown_type.tc:2: error: 'f' is declared again, and whether with the same type depends on the attribute 'weird_unknown', whose type typec does not compute [generic-function-agreement]
   [1]
 
 The name of a generic function denotes nothing else at file scope.
@@ -1216,7 +1216,7 @@ The name of a generic function denotes nothing else at file scope.
   > generic(T) void f(T *p);
   > EOF
   $ ./golden.exe before.tc
-  before.tc:2: 'f' is a generic function, so no other declaration of its name stands at file scope (design 7.1 rule 7) [TC0078]
+  before.tc:2: error: 'f' is a generic function, so no other declaration of its name stands at file scope [generic-function-agreement]
   [1]
 
   $ cat > after.tc <<'EOF'
@@ -1224,7 +1224,7 @@ The name of a generic function denotes nothing else at file scope.
   > void f(int *p);
   > EOF
   $ ./golden.exe after.tc
-  after.tc:2: 'f' is a generic function, so no other declaration of its name stands at file scope (design 7.1 rule 7) [TC0078]
+  after.tc:2: error: 'f' is a generic function, so no other declaration of its name stands at file scope [generic-function-agreement]
   [1]
 
   $ cat > object_after.tc <<'EOF'
@@ -1232,7 +1232,7 @@ The name of a generic function denotes nothing else at file scope.
   > int f;
   > EOF
   $ ./golden.exe object_after.tc
-  object_after.tc:2: 'f' is a generic function, so no other declaration of its name stands at file scope (design 7.1 rule 7) [TC0078]
+  object_after.tc:2: error: 'f' is a generic function, so no other declaration of its name stands at file scope [generic-function-agreement]
   [1]
 
   $ cat > typedef_after.tc <<'EOF'
@@ -1240,7 +1240,7 @@ The name of a generic function denotes nothing else at file scope.
   > typedef int f;
   > EOF
   $ ./golden.exe typedef_after.tc
-  typedef_after.tc:2: 'f' is a generic function, so no other declaration of its name stands at file scope (design 7.1 rule 7) [TC0078]
+  typedef_after.tc:2: error: 'f' is a generic function, so no other declaration of its name stands at file scope [generic-function-agreement]
   [1]
 
   $ cat > enumerator_after.tc <<'EOF'
@@ -1248,7 +1248,7 @@ The name of a generic function denotes nothing else at file scope.
   > enum { f };
   > EOF
   $ ./golden.exe enumerator_after.tc
-  enumerator_after.tc:2: 'f' is a generic function, so no other declaration of its name stands at file scope (design 7.1 rule 7) [TC0078]
+  enumerator_after.tc:2: error: 'f' is a generic function, so no other declaration of its name stands at file scope [generic-function-agreement]
   [1]
 
   $ cat > type_after.tc <<'EOF'
@@ -1256,7 +1256,7 @@ The name of a generic function denotes nothing else at file scope.
   > type f = int;
   > EOF
   $ ./golden.exe type_after.tc
-  type_after.tc:2: `f` is declared twice in one scope, and one of them is a type declaration (design 3.1 rule 5) [TC0003]
+  type_after.tc:2: error: `f` is declared twice in one scope, and one of them is a type declaration [type-redeclaration]
   [1]
 
 Design 13.3, "Attributes in a generic": an attribute whose subject
@@ -1277,7 +1277,7 @@ stands.
   > }
   > EOF
   $ ./golden.exe stand_alike.tc
-  stand_alike.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  stand_alike.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
   $ cat > stand_other.tc <<'EOF'
   > struct s;
@@ -1291,62 +1291,62 @@ stands.
   > }
   > EOF
   $ ./golden.exe stand_other.tc
-  stand_other.tc:3: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  stand_other.tc:3: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]
   $ cat > member.tc <<'EOF'
   > generic(T) void f(T *p) { struct { T v __attribute__((aligned(8))); } x; }
   > EOF
   $ ./golden.exe member.tc
-  member.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  member.tc:1: error: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > typedef.tc <<'EOF'
   > generic(T) void f(T *p) { typedef T u __attribute__((aligned(8))); }
   > EOF
   $ ./golden.exe typedef.tc
-  typedef.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  typedef.tc:1: error: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > buffer.tc <<'EOF'
   > generic(T) void f(T t) { char b[8] __attribute__((aligned(sizeof(t)))); }
   > EOF
   $ ./golden.exe buffer.tc
-  buffer.tc:1: the attribute 'aligned' names 't', which the definition declares, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  buffer.tc:1: error: the attribute 'aligned' names 't', which the definition declares, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > vector.tc <<'EOF'
   > generic(T) void f(T *p) { (void)sizeof(T __attribute__((vector_size(16)))); }
   > EOF
   $ ./golden.exe vector.tc
-  vector.tc:1: the attribute 'vector_size' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  vector.tc:1: error: the attribute 'vector_size' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > mode.tc <<'EOF'
   > generic(T) void f(T *p) { T o __attribute__((mode(DI))); }
   > EOF
   $ ./golden.exe mode.tc
-  mode.tc:1: the attribute 'mode' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  mode.tc:1: error: the attribute 'mode' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > cleanup.tc <<'EOF'
   > void g(void *);
   > generic(T) void f(T *p) { T o __attribute__((cleanup(g))); }
   > EOF
   $ ./golden.exe cleanup.tc
-  cleanup.tc:2: the attribute 'cleanup' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  cleanup.tc:2: error: the attribute 'cleanup' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > nonnull.tc <<'EOF'
   > generic(T) __attribute__((nonnull(1))) void f(T *p) { (void)p; }
   > EOF
   $ ./golden.exe nonnull.tc
-  nonnull.tc:1: the attribute 'nonnull' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  nonnull.tc:1: error: the attribute 'nonnull' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > returns_nonnull.tc <<'EOF'
   > generic(T) __attribute__((returns_nonnull)) T *f(T *p) { return p; }
   > EOF
   $ ./golden.exe returns_nonnull.tc
-  returns_nonnull.tc:1: the attribute 'returns_nonnull' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  returns_nonnull.tc:1: error: the attribute 'returns_nonnull' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > alignas.tc <<'EOF'
   > generic(T) void f(T *p) { _Alignas(8) T o; }
   > EOF
   $ ./golden.exe alignas.tc
-  alignas.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  alignas.tc:1: error: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > alignas_names.tc <<'EOF'
   > generic(T) void f(T *p)
@@ -1358,7 +1358,7 @@ stands.
   > }
   > EOF
   $ ./golden.exe alignas_names.tc
-  alignas_names.tc:5: the attribute 'aligned' names 'A', which the definition declares, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  alignas_names.tc:5: error: the attribute 'aligned' names 'A', which the definition declares, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > alignas_tag.tc <<'EOF'
   > generic(T) void f(T *p)
@@ -1368,13 +1368,13 @@ stands.
   > }
   > EOF
   $ ./golden.exe alignas_tag.tc
-  alignas_tag.tc:4: the attribute 'aligned' names 's', which the definition declares, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  alignas_tag.tc:4: error: the attribute 'aligned' names 's', which the definition declares, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
   $ cat > pointer.tc <<'EOF'
   > generic(T) void f(T *p) { T *__attribute__((aligned(8))) q = p; }
   > EOF
   $ ./golden.exe pointer.tc
-  pointer.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  pointer.tc:1: error: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
 
 A declaration that is no definition carries no attribute anywhere in it
@@ -1384,19 +1384,19 @@ A declaration that is no definition carries no attribute anywhere in it
   > generic(T) void (__attribute__((cold)) f)(T);
   > EOF
   $ ./golden.exe prototype_inner.tc
-  prototype_inner.tc:1: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from (design 7.1 rule 6) [TC0077]
+  prototype_inner.tc:1: error: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from [generic-function-form]
   [1]
   $ cat > prototype_parameter.tc <<'EOF'
   > generic(T) void f(T x __attribute__((unused)));
   > EOF
   $ ./golden.exe prototype_parameter.tc
-  prototype_parameter.tc:1: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from (design 7.1 rule 6) [TC0077]
+  prototype_parameter.tc:1: error: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from [generic-function-form]
   [1]
   $ cat > generic_type.tc <<'EOF'
   > type g(T) = struct { T v __attribute__((vector_size(16))); };
   > EOF
   $ ./golden.exe generic_type.tc
-  generic_type.tc:1: the attribute 'vector_size' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  generic_type.tc:1: error: the attribute 'vector_size' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
   [1]
 
 The rest of the uses of a predefined name of the function that design
@@ -1407,7 +1407,7 @@ its length or its address.
   > generic(T) void f(T *p) { (void)p; (void)__alignof__(__func__); }
   > EOF
   $ ./golden.exe func_alignof.tc
-  func_alignof.tc:1: __func__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  func_alignof.tc:1: error: __func__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
   $ cat > func_strlen.tc <<'EOF'
   > generic(T) void f(T *p) {
@@ -1416,13 +1416,13 @@ its length or its address.
   > }
   > EOF
   $ ./golden.exe func_strlen.tc
-  func_strlen.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  func_strlen.tc:3: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > func_static.tc <<'EOF'
   > generic(T) void f(T *p) { (void)p; static const char *name = __func__; (void)name; }
   > EOF
   $ ./golden.exe func_static.tc
-  func_static.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  func_static.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
 
 A builtin called through parentheses depends as its plain call does,
@@ -1432,11 +1432,11 @@ while one that the values of its arguments decide stands.
   > generic(T) void f(T t) { char b[(__builtin_object_size)(&t, 0) > 1000 ? 1 : -1]; }
   > EOF
   $ ./golden.exe paren_builtin.tc
-  paren_builtin.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  paren_builtin.tc:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
   [1]
   $ cat > decided_builtin.tc <<'EOF'
   > generic(T) void f(T *p) { (void)p; char b[__builtin_popcount(3)]; (void)b; }
   > EOF
   $ ./golden.exe decided_builtin.tc
-  decided_builtin.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  decided_builtin.tc:1: error: a generic function is checked, but typec does not write its instances yet (work package 3.3) [not-implemented]
   [1]

@@ -27,7 +27,7 @@ let refuse_generic_functions (text : Typec_cpp.Reader.t) unit =
       let diagnostic =
         Typec_syntax.Rule.message Not_implemented
           "a generic function is checked, but typec does not write its \
-           instances yet (design 7.3; work package 3.3)"
+           instances yet (work package 3.3)"
       in
       Error
         { Typec_cpp.Reader.location = text.tokens.(first).location;

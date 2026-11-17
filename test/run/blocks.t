@@ -19,7 +19,7 @@ blocks runtime to link them.
   > }
   > EOF
   $ typec --cc=$clang -fblocks -c typed.tc
-  typec: typed.tc:3: a block literal is C text only, so Type-C text cannot write one or be included in one (design 13.3) [TC0030]
+  typed.tc:3: error: a block literal is C text only, so Type-C text cannot write one or be included in one [block-literal]
   [80]
 
   $ cat > twice.h <<'EOF'

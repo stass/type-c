@@ -238,7 +238,7 @@ val parse_with_scopes :
     views of its scopes. *)
 
 val error_message : error -> string
-(** ["file:line: message"], as {!Reader.error_message}. *)
+(** ["file:line: error: message"], as {!Reader.error_message}. *)
 
 val disputed_jump : string -> Rule.diagnostic
 (** The refusal of a disputed [break] or [continue] (design 4.4), named by

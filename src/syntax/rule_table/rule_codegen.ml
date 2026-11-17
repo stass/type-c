@@ -2,56 +2,60 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 type rule = {
+  constructor : string;
   name : string;
-  code : int;
-  clause : string option;
+  clause : string;
   meaning : string;
 }
 
 type row =
   | Live of rule
-  | Retired of { name : string; code : int; meaning : string }
+  | Retired of { name : string; meaning : string }
 
 exception Invalid_table of string
 
-(* Stable codes are "TC" and four digits: fixed width for tools that read
-   them, and a prefix that no backend's diagnostic uses. *)
-let largest_code = 9999
-
-let code_text code = Printf.sprintf "TC%04d" code
-
-let row_code = function
-  | Live rule -> rule.code
-  | Retired { code; _ } -> code
-
-let row_label = function
-  | Live rule -> rule.name
-  | Retired { name; _ } -> "retired " ^ name
+let row_name = function Live rule -> rule.name | Retired { name; _ } -> name
 
 let live_rules rows =
   List.filter_map (function Live rule -> Some rule | Retired _ -> None) rows
 
 let is_retired = function Retired _ -> true | Live _ -> false
 
-(* Row i of the table has code i + 1, so codes are unique and in the order
-   of the catalogue, and a removed row leaves a hole that fails the check:
-   a developer must retire a rule, not delete it, and a retired code stays
-   below every later one. A rule deleted from the end of the table is the
-   one removal that the check cannot see; its number is free again. The
-   compiler refuses a name used twice when it builds the generated
-   variant. *)
+(* A name is written as GCC and Clang write the names of their warnings:
+   lowercase words of letters and digits joined by single hyphens, which
+   a tool matches without quoting. *)
+let is_lowercase_or_digit = function
+  | 'a' .. 'z' | '0' .. '9' -> true
+  | _ -> false
+
+let is_word word = word <> "" && String.for_all is_lowercase_or_digit word
+
+let starts_with_letter name =
+  match name.[0] with 'a' .. 'z' -> true | _ -> false
+
+(* A name of non-empty words has a first character for the second test. *)
+let is_well_formed name =
+  List.for_all is_word (String.split_on_char '-' name)
+  && starts_with_letter name
+
+(* A retired row keeps its name, so a name is unique over every row that
+   the table holds, and a new rule cannot take the name of a removed one.
+   A row renamed or deleted is not seen: that is a fact of history, which
+   the table alone does not hold. The compiler refuses a constructor used
+   twice when it builds the generated variant. *)
 let check rows =
-  let check_row index row =
-    let code = row_code row in
-    if code <> index + 1 then
+  let check_row seen row =
+    let name = row_name row in
+    if not (is_well_formed name) then
+      raise (Invalid_table (Printf.sprintf "%S is no well-formed name" name));
+    if List.mem name seen then
       raise
         (Invalid_table
-           (row_label row ^ "'s code is not " ^ string_of_int (index + 1)
-            ^ "; retire a rule, do not delete it"));
-    if code > largest_code then
-      raise (Invalid_table (row_label row ^ "'s code has over four digits"))
+           (Printf.sprintf
+              "%S names two rows; retire a rule, do not reuse its name" name));
+    name :: seen
   in
-  List.iteri check_row rows
+  ignore (List.fold_left check_row [] rows)
 
 (* Generated text keeps doc comments within 80 columns. *)
 let wrap ~indent ~width text =
@@ -78,7 +82,7 @@ let module_header =
     constructs outside the GNU profile, and the constructs that it refuses
     because a later work package of the plan implements them; and the
     diagnostics of the front end. Every diagnostic about a rule is made by
-    {!message}, which ends it with the rule's stable code. *)
+    {!message}, which ends it with the rule's stable name. *)
 
 type t =
 |}
@@ -86,16 +90,12 @@ type t =
 let module_message =
   {|
 (* The signature makes [diagnostic] private, so that only [message] makes
-   a refusal under a rule, and every such refusal ends with its code. *)
+   a refusal under a rule, and every such refusal ends with its name. *)
 include (
   struct
     type diagnostic = Type_c of string | C_text of string
 
-    let message rule text =
-      match clause rule with
-      | Some clause ->
-          Type_c (Printf.sprintf "%s (%s) [%s]" text clause (code rule))
-      | None -> Type_c (Printf.sprintf "%s [%s]" text (code rule))
+    let message rule text = Type_c (Printf.sprintf "%s [%s]" text (name rule))
 
     let c_text text = C_text text
 
@@ -106,15 +106,14 @@ include (
       type diagnostic = private
         | Type_c of string
             (** a refusal under a rule of this module, which ends with
-                the rule's code *)
+                the rule's name *)
         | C_text of string
             (** a refusal of C text or a translation limit, which
-                carries no code (design 13.6) *)
+                carries no name (design 13.6) *)
 
       (** [message rule text] is the diagnostic [text] about [rule], which
-          it follows with the clause that states the rule and the rule's
-          code in brackets, as GCC and Clang end a warning with its
-          option. *)
+          it follows with the rule's name in brackets, as GCC and Clang
+          end a warning with its option. *)
       val message : t -> string -> diagnostic
 
       (** [c_text text] is the refusal of C text [text]. *)
@@ -130,32 +129,23 @@ let doc_opening = "      (** "
 
 let add_constructor out rule =
   let indent = String.length doc_opening in
-  Printf.bprintf out "  | %s\n%s%s *)\n" rule.name doc_opening
+  Printf.bprintf out "  | %s\n%s%s *)\n" rule.constructor doc_opening
     (wrap ~indent ~width:(80 - String.length " *)") rule.meaning)
 
-let add_code out rule =
-  Printf.bprintf out "  | %s -> %S\n" rule.name (code_text rule.code)
-
-let add_clause out rule =
-  match rule.clause with
-  | Some clause -> Printf.bprintf out "  | %s -> Some %S\n" rule.name clause
-  | None -> Printf.bprintf out "  | %s -> None\n" rule.name
+let add_name out rule =
+  Printf.bprintf out "  | %s -> %S\n" rule.constructor rule.name
 
 let ocaml rows =
   check rows;
   let rules = live_rules rows and out = Buffer.create 8192 in
   Buffer.add_string out module_header;
   List.iter (add_constructor out) rules;
-  Buffer.add_string out "\n(** [code rule] is the stable code of [rule]. *)\n";
-  Buffer.add_string out "let code = function\n";
-  List.iter (add_code out) rules;
-  Buffer.add_string out
-    "\n(** [clause rule] is the clause that states [rule]. *)\n";
-  Buffer.add_string out "let clause = function\n";
-  List.iter (add_clause out) rules;
-  Buffer.add_string out "\n(** Every rule, in the order of their codes. *)\n";
+  Buffer.add_string out "\n(** [name rule] is the stable name of [rule]. *)\n";
+  Buffer.add_string out "let name = function\n";
+  List.iter (add_name out) rules;
+  Buffer.add_string out "\n(** Every rule, in the order of the table. *)\n";
   Buffer.add_string out "let all = [\n";
-  List.iter (fun rule -> Printf.bprintf out "  %s;\n" rule.name) rules;
+  List.iter (fun rule -> Printf.bprintf out "  %s;\n" rule.constructor) rules;
   Buffer.add_string out "]\n";
   Buffer.add_string out module_message;
   Buffer.contents out
@@ -165,26 +155,27 @@ let catalogue_header =
 
 Generated by `src/syntax/rule_table/rule_table.ml`; do not edit.
 
-A diagnostic about a rule ends with the clause that states the rule and
-the rule's stable code (design 13.6):
+A diagnostic about a rule ends with the rule's stable name in brackets,
+as GCC and Clang end a warning with the name of its option (design
+13.6). A name is never renamed, and never given to another rule.
 
 ```
-file:line: text (clause) [code]
+file:line: error: text [name]
 ```
 
-| Code | Rule | Clause | What it refuses |
-| --- | --- | --- | --- |
+| Name | Stated in | What it refuses |
+| --- | --- | --- |
 |}
 
 let retired_header =
   {|
-## Retired codes
+## Retired names
 
-The rules of these codes were removed. A code is never given to another
+The rules of these names were removed. A name is never given to another
 rule.
 
-| Code | Rule | What the rule refused |
-| --- | --- | --- |
+| Name | What the rule refused |
+| --- | --- |
 |}
 
 (* odoc's [code] is Markdown's `code`. *)
@@ -192,15 +183,12 @@ let markdown text =
   String.map (fun c -> if c = '[' || c = ']' then '`' else c) text
 
 let add_entry out rule =
-  Printf.bprintf out "| %s | `%s` | %s | %s |\n" (code_text rule.code)
-    rule.name
-    (Option.value rule.clause ~default:"named in the text")
+  Printf.bprintf out "| `%s` | %s | %s |\n" rule.name rule.clause
     (markdown rule.meaning)
 
 let add_retired out = function
-  | Retired { name; code; meaning } ->
-      Printf.bprintf out "| %s | `%s` | %s |\n" (code_text code) name
-        (markdown meaning)
+  | Retired { name; meaning } ->
+      Printf.bprintf out "| `%s` | %s |\n" name (markdown meaning)
   | Live _ -> ()
 
 let catalogue rows =

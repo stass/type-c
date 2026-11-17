@@ -61,7 +61,7 @@ let parsed ~file text =
   | Error error -> Error ("read error: " ^ Reader.error_message error)
   | Ok reader -> (
       match Parser.parse_with_scopes ~keywords reader with
-      | Error error -> Error ("error: " ^ Parser.error_message error)
+      | Error error -> Error (Parser.error_message error)
       | Ok (unit, scopes) -> Ok (reader, unit, scopes))
 
 let outcome see ?(file = "in.i") case =

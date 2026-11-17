@@ -3,7 +3,7 @@
 
 (* misuse: Typec_syntax private type Typec_syntax.Rule.diagnostic *)
 
-(* A refusal under a rule of Type-C without the rule's code (design
+(* A refusal under a rule of Type-C without the rule's name (design
    13.6): Rule.diagnostic is private, so only Rule.message makes one,
    and this must not compile. *)
 

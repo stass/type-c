@@ -39,7 +39,7 @@ refused at its first token.
   > # 2 "included.tc" 2
   > EOF
   $ ./golden.exe included.tc
-  inner.tci:1: a function body that C text of a system header opens is passed through unread, so it holds C text of system headers only (design 13.3) [TC0032]
+  inner.tci:1: error: a function body that C text of a system header opens is passed through unread, so it holds C text of system headers only [system-body-text]
   [1]
 
 C text of a file that is no system header is refused there too, as the
@@ -56,7 +56,7 @@ reason for passing a body through holds for the system header alone.
   > # 2 "user.tc" 2
   > EOF
   $ ./golden.exe user.tc
-  user.h:1: a function body that C text of a system header opens is passed through unread, so it holds C text of system headers only (design 13.3) [TC0032]
+  user.h:1: error: a function body that C text of a system header opens is passed through unread, so it holds C text of system headers only [system-body-text]
   [1]
 
 A body that the user's text opens is read, each token as the text it

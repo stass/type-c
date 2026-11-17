@@ -239,7 +239,8 @@ let type_c_copy unit = Filename.chop_suffix unit ".c" ^ ".tc"
 let derived unit suffix = type_c_copy unit ^ suffix
 
 (* typec reports a failure of its own last, after anything the backend
-   printed; the record leaves out the name the message starts with. *)
+   printed; the record leaves out the name that a message with no place
+   in the source starts with. *)
 let typec_message stderr_text =
   let name = "typec: " in
   let lines = String.split_on_char '\n' (String.trim stderr_text) in

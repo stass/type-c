@@ -47,9 +47,9 @@ type own = {
     (design 3.5 rule 8), the operand of a [try] (5.1 rule 3), the
     statement of a defer (6 rule 8) and the operand of a [return] in the
     scope of a defer, which lowering writes in a block of its own (6
-    rule 12). A failure carries the code of its kind, whichever clause
+    rule 12). A failure carries the name of its kind, whichever clause
     fails, but one that rests on a type that typec does not compute
-    carries the one code of those, across the kinds (P21). *)
+    carries the one name of those, across the kinds (P21). *)
 type kind =
   | Generic_definition
   | Try_operand
@@ -136,7 +136,7 @@ val check :
     reads there as at its own place; otherwise it is a point of the text
     that breaks the property, the first that the clauses meet in their
     order, with the diagnostic that cites the declaration that makes it
-    so, under the code that the text's {!kind} gives. A text that
+    so, under the name that the text's {!kind} gives. A text that
     lowering writes nowhere, as
     the definition of a generic is in its check, has no place [at]. *)
 
@@ -148,5 +148,5 @@ val check_spelled :
     argument does (design 10.3): each is a use of its declaration, which
     the text holds none of, and its declaration at [at] is exact, as no
     own place of the text vouches for it. The result is that of
-    {!check}, under the code of the definition of a generic, which the
+    {!check}, under the name of the definition of a generic, which the
     text is written into an instance with. *)

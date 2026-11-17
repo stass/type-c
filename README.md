@@ -222,7 +222,7 @@ double area(shape s) {
 
 ```console
 $ typec -std=c11 -Wall -Wextra -c area.tc
-typec: area.tc:7: the match does not cover the constructor 'Triangle' of the variant 'shape' (design 4.2 rule 1) [TC0018]
+area.tc:7: error: the match does not cover the constructor 'Triangle' of the variant 'shape' [match-coverage]
 [80]
 ```
 
@@ -266,7 +266,7 @@ long number_value(token t) {
 ```console
 $ typec -c token.tc
 $ typec -c peek.tc
-typec: peek.tc:4: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+peek.tc:4: error: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
 [80]
 ```
 
@@ -295,7 +295,7 @@ int cost(op o) {
 
 ```console
 $ typec -c cost.tc
-typec: cost.tc:6: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+cost.tc:6: error: the end of the match arm can be reached [match-arm-end]
 [80]
 ```
 
@@ -322,7 +322,7 @@ int may_read(user_id u, group_id g) {
 
 ```console
 $ typec -c ids.tc
-typec: ids.tc:7: a value of type 'group_id' does not convert to 'user_id' without a cast (design 3.4) [TC0012]
+ids.tc:7: error: a value of type 'group_id' does not convert to 'user_id' without a cast [distinct-conversion]
 [80]
 ```
 
@@ -390,7 +390,7 @@ port port_from_argument(const char *argument) {
 ```console
 $ typec -Iinclude -c port.tc
 $ typec -Iinclude -c server.tc
-typec: server.tc:5: the distinct type 'port' is private to 'include/port.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+server.tc:5: error: the distinct type 'port' is private to 'include/port.tci', so only the text of its owner creates its values [private-creation]
 [80]
 ```
 
@@ -595,7 +595,7 @@ void backup(void) {
 
 ```console
 $ typec -c backup.tc
-typec: backup.tc:6: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+backup.tc:6: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
 [80]
 ```
 
@@ -886,9 +886,15 @@ command that links a `.tc` input with other inputs loses the `.dSYM` of
 
 ## What typec reports
 
-`typec` stops at the first error it finds, with the file and line, a
-message, the section of the [design](type-c-language-design.md) that
-states the rule, and the rule's code, and exits with status 80. An error
+`typec` stops at the first error it finds, prints it as GCC and Clang
+print theirs, `file:line: error: message`, and exits with status 80. An
+error under a rule of Type-C ends with the rule's name in brackets, as
+`[match-arm-end]`, the way GCC ends a warning with its option; the
+catalogue of diagnostics (`dune build docs/diagnostics.md` writes it to
+`_build/default/docs/diagnostics.md`) gives each name's rule and the
+section of the [design](type-c-language-design.md) that states it. A
+message about no place in the source, as one about the command line,
+begins with `typec:` instead. An error
 that the C compiler finds in the C that `typec` writes, as with the
 generic types above, comes with the C compiler's message and status.
 [`test/run/readme.t`](test/run/readme.t) checks the files and the output
@@ -1381,10 +1387,10 @@ amd64 frames (more where a frame is larger).
 that the front end gives for a source, with no backend
 (`test/golden/golden.ml`); `dune test test/golden` runs them and
 `dune promote` takes a changed output. Every rule that typec enforces has
-a stable code in the one table `src/syntax/rule_table/rule_table.ml`,
+a stable name in the one table `src/syntax/rule_table/rule_table.ml`,
 which generates the module `Rule` and the catalogue
 `_build/default/docs/diagnostics.md` (`dune build docs/diagnostics.md`);
-`test/golden/coverage.ml` fails while some rule's code appears in no
+`test/golden/coverage.ml` fails while some rule's name appears in no
 golden output, so a new rule needs a golden case. `test/run` holds cram
 tests that run `typec` and the backends;
 `types.t` and `declarations.t` compile static assertions of what typec

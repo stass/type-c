@@ -3,40 +3,36 @@
 
 (* coverage FILE...: every rule of Typec_syntax.Rule has a negative golden
    case, which is a cram test among FILE whose expected output holds the
-   rule's code; and no expected output holds a code that is no rule's.
+   rule's name; and no expected output holds a name that is no rule's.
    Cram fails a case whose output differs, so the expected outputs are
    what golden.exe prints. *)
 
-module Codes = Set.Make (String)
+module Names = Set.Make (String)
 
-let code_length = String.length "TC0000"
+(* Reader.error_message marks a diagnostic as an error, and Rule.message
+   ends one about a rule with the rule's name in brackets. *)
+let error_mark = ": error: "
 
-let is_digit c = c >= '0' && c <= '9'
+let contains line part =
+  let length = String.length part in
+  let rec from index =
+    index + length <= String.length line
+    && (String.sub line index length = part || from (index + 1))
+  in
+  from 0
 
-(* A code is "TC" and four digits in brackets, as Rule.message ends a
-   diagnostic. *)
-let code_at line index =
-  if index + code_length + 2 > String.length line then None
-  else
-    let code = String.sub line (index + 1) code_length in
-    let digits = String.sub code 2 (code_length - 2) in
-    if
-      line.[index] = '['
-      && line.[index + code_length + 1] = ']'
-      && String.starts_with ~prefix:"TC" code
-      && String.for_all is_digit digits
-    then Some code
-    else None
+let name_of_line line =
+  let closing = String.length line - 1 in
+  match String.rindex_opt line '[' with
+  | Some opening
+    when contains line error_mark && String.ends_with ~suffix:"]" line ->
+      Some (String.sub line (opening + 1) (closing - opening - 1))
+  | Some _ | None -> None
 
-let codes_of_line codes line =
-  let found = ref codes in
-  String.iteri
-    (fun index _ ->
-      match code_at line index with
-      | Some code -> found := Codes.add code !found
-      | None -> ())
-    line;
-  !found
+let names_of_line names line =
+  match name_of_line line with
+  | Some name -> Names.add name names
+  | None -> names
 
 (* In a cram test, an output line is indented by two spaces and is neither
    a command ("  $ ") nor its continuation ("  > "). *)
@@ -46,24 +42,24 @@ let is_output line =
        (String.starts_with ~prefix:"  $ " line
        || String.starts_with ~prefix:"  > " line)
 
-let codes_of_file codes path =
+let names_of_file names path =
   In_channel.with_open_bin path In_channel.input_lines
   |> List.filter is_output
-  |> List.fold_left codes_of_line codes
+  |> List.fold_left names_of_line names
 
-let report heading codes =
-  if not (Codes.is_empty codes) then
+let report heading names =
+  if not (Names.is_empty names) then
     Printf.printf "%s: %s\n" heading
-      (String.concat " " (Codes.elements codes))
+      (String.concat " " (Names.elements names))
 
 let () =
   let files = List.tl (Array.to_list Sys.argv) in
-  let tested = List.fold_left codes_of_file Codes.empty files in
+  let tested = List.fold_left names_of_file Names.empty files in
   let rules =
-    Codes.of_list (List.map Typec_syntax.Rule.code Typec_syntax.Rule.all)
+    Names.of_list (List.map Typec_syntax.Rule.name Typec_syntax.Rule.all)
   in
-  let untested = Codes.diff rules tested in
-  let unknown = Codes.diff tested rules in
+  let untested = Names.diff rules tested in
+  let unknown = Names.diff tested rules in
   report "rules without a golden case" untested;
-  report "codes of no rule" unknown;
-  if not (Codes.is_empty untested && Codes.is_empty unknown) then exit 1
+  report "names of no rule" unknown;
+  if not (Names.is_empty untested && Names.is_empty unknown) then exit 1

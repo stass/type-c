@@ -77,19 +77,19 @@ removed.
 
   $ printf 'type opt(T) = | No | Yes(T value);\nopt(void) o = Yes();\n' > empty.tc
   $ ./golden.exe empty.tc
-  empty.tc:2: the constructor 'Yes' has no fields, so it is written without parentheses (in this instance the type void removes the field(s) 'value'; design 3.5 rule 6) (design 3.3) [TC0009]
+  empty.tc:2: error: the constructor 'Yes' has no fields, so it is written without parentheses (in this instance the type void removes the field(s) 'value') [constructor-expression]
   [1]
   $ printf 'type opt(T) = | No | Yes(T value);\nopt(void) o = Yes(1);\n' > argument.tc
   $ ./golden.exe argument.tc
-  argument.tc:2: the constructor 'Yes' has no fields, so it is written without parentheses (in this instance the type void removes the field(s) 'value'; design 3.5 rule 6) (design 3.3) [TC0009]
+  argument.tc:2: error: the constructor 'Yes' has no fields, so it is written without parentheses (in this instance the type void removes the field(s) 'value') [constructor-expression]
   [1]
   $ printf 'type two(A, B) = | Two(A a, B b);\ntwo(void, int) t = Two(1, 2);\n' > arity.tc
   $ ./golden.exe arity.tc
-  arity.tc:2: the constructor 'Two' takes one argument for each of its 1 fields (in this instance the type void removes the field(s) 'a'; design 3.5 rule 6) (design 3.3) [TC0009]
+  arity.tc:2: error: the constructor 'Two' takes one argument for each of its 1 fields (in this instance the type void removes the field(s) 'a') [constructor-expression]
   [1]
   $ printf 'type two(A, B) = | Two(A a, B b);\ntwo(void, int) t = Two;\n' > bare.tc
   $ ./golden.exe bare.tc
-  bare.tc:2: the constructor 'Two' takes arguments (in this instance the type void removes the field(s) 'a'; design 3.5 rule 6) (design 3.3) [TC0009]
+  bare.tc:2: error: the constructor 'Two' takes arguments (in this instance the type void removes the field(s) 'a') [constructor-expression]
   [1]
   $ cat > label.tc <<'EOF'
   > type two(A, B) = | Two(A a, B b);
@@ -100,7 +100,7 @@ removed.
   > }
   > EOF
   $ ./golden.exe label.tc
-  label.tc:4: the case label 'Two' omits the field list of a constructor with 1 field(s), which only a single-pattern test may (in this instance the type void removes the field(s) 'a'; design 3.5 rule 6) (design 4.1 rule 3) [TC0016]
+  label.tc:4: error: the case label 'Two' omits the field list of a constructor with 1 field(s), which only a single-pattern test may (in this instance the type void removes the field(s) 'a') [match-pattern]
   [1]
   $ cat > pattern.tc <<'EOF'
   > type opt(T) = | No | Yes(T value);
@@ -112,7 +112,7 @@ removed.
   > }
   > EOF
   $ ./golden.exe pattern.tc
-  pattern.tc:5: the pattern 'Yes' has 1 sub-pattern(s), and the constructor has 0 field(s) (in this instance the type void removes the field(s) 'value'; design 3.5 rule 6) (design 4.1 rule 3) [TC0016]
+  pattern.tc:5: error: the pattern 'Yes' has 1 sub-pattern(s), and the constructor has 0 field(s) (in this instance the type void removes the field(s) 'value') [match-pattern]
   [1]
 
 Only substitution removes a field: void written as the type of a field
@@ -121,9 +121,9 @@ argument is an error.
 
   $ printf 'type bad(T) = | Bad(void x, T y);\n' > literal.tc
   $ ./golden.exe literal.tc
-  literal.tc:1: the field 'x' of 'Bad' is not a complete object type, so it is not a value type (design 3.2 rule 4) [TC0006]
+  literal.tc:1: error: the field 'x' of 'Bad' is not a complete object type, so it is not a value type [field-type]
   [1]
   $ printf 'type arr(T) = | Arr(T a[2]);\narr(void) a;\n' > array.tc
   $ ./golden.exe array.tc
-  array.tc:1: the field 'a' of 'Arr' is an array, which a struct can wrap, so it is not a value type (design 3.2 rule 4) [TC0006]
+  array.tc:1: error: the field 'a' of 'Arr' is an array, which a struct can wrap, so it is not a value type [field-type]
   [1]

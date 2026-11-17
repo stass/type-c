@@ -136,7 +136,7 @@ keeping the parser for Type-C text, and an implementation inside Clang.
 | 1.5 | `match`: patterns, bindings, exhaustiveness, lowering with the trap. |
 | 1.6 | Reachability, arm termination and the jump rules. |
 | 1.7 | `.tci` files, the owner rule and `private`. |
-| 1.8 | Diagnostic catalogue with stable codes; a negative golden test for every rule of the design. |
+| 1.8 | Diagnostic catalogue with stable names; a negative golden test for every rule of the design. |
 | 1.9 | ABI tests: C callers in both directions, layout assertions, both backends. |
 | 1.10 | Pilot A. |
 | 1.11 | The single-pattern test (design 4.6): parsing, typing, the jump rules, lowering. The rule on a `break` that does not end its arm (design 4.3 rule 5). A negative golden test for each rule. |
@@ -198,7 +198,7 @@ lives in its own repository and records:
    Each entry pairs a C program with its Type-C counterpart and records,
    for GCC and for Clang, whether `-Wall -Wextra` gives a diagnostic and
    which other warning would (`-Wswitch-enum`; `-Wimplicit-fallthrough`
-   on Clang). The Type-C side gives the code of the rule that refuses it
+   on Clang). The Type-C side gives the name of the rule that refuses it
    (package 1.8). The entries:
    - a constructor added without updating every `match` (4.2), beside a
      C `switch` on the kind that has a `default` or an `int` kind field,
@@ -288,7 +288,7 @@ record of what it found.
 | 3.3 | Instantiation and emission: per-unit instances, typedef substitution, the nesting limit, the instance budget, the output limit and the bound on encodings of design 3.5 rule 7, and rule 8 of design 3.5 for function definitions (P23). |
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
-| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The bytes of text that each unit of the library and of the pilot counts for its instances in the front end, the bytes that lowering charges for it and their ratio to its source, and its longest encodings of one instance, against the instance budget, the output limit and the bound on encodings of design 3.5 rule 7 (P30). The bytes of a `long double` that the zero initialiser leaves, counted by the functions of its test on both backends at `-O0`, `-O2` and `-O3` (design 13.5): a record, and no test. The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches, and where a call stores through the address of an element that it holds across another argument, when the full expression that holds the index is resumed after its function has begun to evaluate it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
+| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The bytes of text that each unit of the library and of the pilot counts for its instances in the front end, the bytes that lowering charges for it and their ratio to its source, and its longest encodings of one instance, against the instance budget, the output limit and the bound on encodings of design 3.5 rule 7 (P30). The bytes of a `long double` that the zero initialiser leaves, counted by the functions of its test on both backends at `-O0`, `-O2` and `-O3` (design 13.5): a record, and no test. The refusals, by their names, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches, and where a call stores through the address of an element that it holds across another argument, when the full expression that holds the index is resumed after its function has begun to evaluate it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
 
 **Exit gate**
 
@@ -434,7 +434,7 @@ Type-C is considered here, not earlier.
 
 | Kind | What it shows |
 | --- | --- |
-| Golden tests | The C and the diagnostics for a given source, including stable codes. |
+| Golden tests | The C and the diagnostics for a given source, including stable names. |
 | Run tests | Generated code behaves as specified, on both backends. |
 | Differential tests | A Type-C program and a hand-written C program agree; plain C through `typec` yields identical objects. |
 | Typing oracle | The front end types C as Clang does. |

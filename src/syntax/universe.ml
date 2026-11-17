@@ -17,9 +17,8 @@
 (** What typec makes of a universe name. *)
 type meaning =
   | Generic  (** declared by the universe text *)
-  | Not_implemented of { section : string; package : string }
-      (** to get its meaning in work [package] of the plan, after design
-          [section] *)
+  | Not_implemented of { package : string }
+      (** to get its meaning in work [package] of the plan *)
 
 type t = { name : string; meaning : meaning }
 
@@ -33,7 +32,7 @@ let generic_names =
 let generic name = { name; meaning = Generic }
 
 let slice_name name =
-  { name; meaning = Not_implemented { section = "8"; package = "3.4" } }
+  { name; meaning = Not_implemented { package = "3.4" } }
 
 let names =
   List.map generic generic_names

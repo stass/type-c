@@ -111,7 +111,7 @@ val length : t -> int
     among them. *)
 
 val error_message : error -> string
-(** ["file:line: message"], the form of a C compiler's diagnostics, with
+(** ["file:line: error: message"], the form of a C compiler's errors, with
     every character that is not printable ASCII escaped as C writes it:
     a character of UTF-8 as a universal character name, and any other
     byte as [\xNN]. *)

@@ -7,28 +7,38 @@
    lets the catalogue and the golden tests enumerate every rule: OCaml
    cannot list the constructors of a hand-written variant.
 
-   A rule's number is written in the table, so that adding or removing a
-   rule renumbers no other. A new rule takes a number above every number
-   the table has ever held. A rule that is removed stays as a [Retired]
-   row, never deleted: row i has code i + 1, so a deleted row fails the
-   build. Only the last row, deleted, frees its number unseen. *)
+   A rule's name is what a diagnostic ends with and what users and tools
+   match, as GCC and Clang name their warnings, so a name is never
+   changed; review keeps it so, since no check sees a row renamed or
+   deleted. Pick a new rule's name as a user reads it in the brackets
+   after the message: the thing refused in two or three lowercase words,
+   joined by hyphens, as [match-arm-end] or [discarded-result]; not the
+   constructor spelled with hyphens when that reads badly. A rule that
+   is removed stays as a [Retired] row, never deleted, and a name used
+   by two rows fails the build, so no rule takes a removed rule's name.
+   [clause] is where the design or the plan states the rule, which the
+   catalogue cites; a message never cites the design. *)
 
 open Rule_codegen
 
 let rows =
   [
-    Live { name = "Generated_name"; code = 1; clause = Some "design 2.3";
+    Live { constructor = "Generated_name"; name = "generated-name";
+      clause = "design 2.3";
       meaning =
         "An identifier that begins with [__tc_]." };
-    Live { name = "Own_name"; code = 2; clause = Some "design 3.1 rule 2";
+    Live { constructor = "Own_name"; name = "self-reference";
+      clause = "design 3.1 rule 2";
       meaning =
         "A definition that uses the name it defines, other than a \
          structure or union specifier." };
-    Live { name = "One_definition"; code = 3; clause = Some "design 3.1 rule 5";
+    Live { constructor = "One_definition"; name = "type-redeclaration";
+      clause = "design 3.1 rule 5";
       meaning =
         "A name declared twice in one scope where either is a type \
          declaration." };
-    Live { name = "Claimed_name"; code = 4; clause = Some "design 10.1 rule 6";
+    Live { constructor = "Claimed_name"; name = "claimed-name";
+      clause = "design 10.1 rule 6";
       meaning =
         "A tag or enumerator that a type declaration claims for the C \
          it lowers to (also design 10.2), declared otherwise in its \
@@ -36,105 +46,120 @@ let rows =
          generic's name and `__`, which the generic claims for its \
          instances (design 10.3), declared where the generic is in \
          scope or spelled in unread text there (design 13.5)." };
-    Live { name = "Duplicate_constructor"; code = 5;
-      clause = Some "design 3.2 rule 2";
+    Live { constructor = "Duplicate_constructor";
+      name = "duplicate-constructor";
+      clause = "design 3.2 rule 2";
       meaning =
         "Two constructors of one variant with one name." };
-    Live { name = "Field_type"; code = 6; clause = Some "design 3.2 rule 4";
+    Live { constructor = "Field_type"; name = "field-type";
+      clause = "design 3.2 rule 4";
       meaning =
         "A field of a constructor whose type is not a value type; also \
          design 3.2 rule 5." };
-    Live { name = "Variant_operation"; code = 7;
-      clause = Some "design 3.2 rule 6";
+    Live { constructor = "Variant_operation"; name = "variant-operation";
+      clause = "design 3.2 rule 6";
       meaning =
         "An operation on a variant in Type-C text other than those that \
          design 3.2 rule 6 allows." };
-    Live { name = "Zero_value"; code = 8; clause = Some "design 3.2 rule 7";
+    Live { constructor = "Zero_value"; name = "variant-initializer";
+      clause = "design 3.2 rule 7";
       meaning =
         "A braced initialiser of a variant other than [{0}] and [{}] in \
          Type-C text." };
-    Live { name = "Constructor_expression"; code = 9;
-      clause = Some "design 3.3";
+    Live { constructor = "Constructor_expression";
+      name = "constructor-expression";
+      clause = "design 3.3";
       meaning =
         "A constructor expression that names no constructor, or whose \
          arguments do not match its fields." };
-    Live { name = "Distinct_representation"; code = 10;
-      clause = Some "design 3.4";
+    Live { constructor = "Distinct_representation"; name = "distinct-base";
+      clause = "design 3.4";
       meaning =
         "A distinct type over a type that is no unqualified arithmetic \
          or pointer type." };
-    Live { name = "Distinct_operation"; code = 11; clause = Some "design 3.4";
+    Live { constructor = "Distinct_operation"; name = "distinct-operation";
+      clause = "design 3.4";
       meaning =
         "An operation on a value of a distinct type in Type-C text that \
          the table of design 3.4 does not allow." };
-    Live { name = "Distinct_conversion"; code = 12; clause = Some "design 3.4";
+    Live { constructor = "Distinct_conversion"; name = "distinct-conversion";
+      clause = "design 3.4";
       meaning =
         "An implicit conversion to or from a distinct type in Type-C \
          text." };
-    Live { name = "Private_creation"; code = 13;
-      clause = Some "design 9.2 rule 1";
+    Live { constructor = "Private_creation"; name = "private-creation";
+      clause = "design 9.2 rule 1";
       meaning =
         "A constructor expression of a private variant, or a cast to a \
          private distinct type, in Type-C text that does not own the \
          type." };
-    Live { name = "Match_scrutinee"; code = 14;
-      clause = Some "design 4.1 rule 1";
+    Live { constructor = "Match_scrutinee"; name = "match-scrutinee";
+      clause = "design 4.1 rule 1";
       meaning =
         "A match whose scrutinee is no complete variant, or one outside \
          the scope of the declaration of the variant; also design 4.2 \
          rule 4. The same for a single-pattern test and its operand \
          (design 4.6 rule 2)." };
-    Live { name = "Arm_form"; code = 15; clause = Some "design 4.1 rule 2";
+    Live { constructor = "Arm_form"; name = "match-arm-form";
+      clause = "design 4.1 rule 2";
       meaning =
         "A match body that is not a sequence of arms, each of labels \
          and at least one block item." };
-    Live { name = "Pattern"; code = 16; clause = Some "design 4.1 rule 3";
+    Live { constructor = "Pattern"; name = "match-pattern";
+      clause = "design 4.1 rule 3";
       meaning =
         "A pattern that names no constructor of the scrutinee's type, \
          or whose sub-patterns do not match its fields, or a case label \
          that omits the field list of a constructor with fields; also \
          the pattern of a single-pattern test (design 4.6 rule 2)." };
-    Live { name = "Shared_arm"; code = 17; clause = Some "design 4.1 rule 6";
+    Live { constructor = "Shared_arm"; name = "shared-arm-binding";
+      clause = "design 4.1 rule 6";
       meaning =
         "An arm of several labels one of which binds." };
-    Live { name = "Exhaustiveness"; code = 18;
-      clause = Some "design 4.2 rule 1";
+    Live { constructor = "Exhaustiveness"; name = "match-coverage";
+      clause = "design 4.2 rule 1";
       meaning =
         "A constructor that a match covers twice or not at all." };
-    Live { name = "Default_arm"; code = 19; clause = Some "design 4.2 rule 2";
+    Live { constructor = "Default_arm"; name = "match-default";
+      clause = "design 4.2 rule 2";
       meaning =
         "A second [default] in a match, or one that covers no \
          constructor." };
-    Live { name = "Enclosing_switch_label"; code = 20;
-      clause = Some "design 4.3 rule 3";
+    Live { constructor = "Enclosing_switch_label"; name = "stray-case-label";
+      clause = "design 4.3 rule 3";
       meaning =
         "A [case] or [default] label inside a match that is not one of \
          its own, or inside the statement of a single-pattern test \
          (design 4.6 rule 6)." };
-    Live { name = "Arm_end"; code = 21; clause = Some "design 4.3 rule 1";
+    Live { constructor = "Arm_end"; name = "match-arm-end";
+      clause = "design 4.3 rule 1";
       meaning =
         "A match arm whose end can be reached; also design 4.4."
     };
-    Live { name = "Arm_entry"; code = 22; clause = Some "design 4.3 rule 3";
+    Live { constructor = "Arm_entry"; name = "match-arm-entry";
+      clause = "design 4.3 rule 3";
       meaning =
         "A jump into a match arm or the statement of a single-pattern \
          test (design 4.6 rule 6) from outside it, or the address of a \
          label inside one." };
-    Live { name = "Not_implemented"; code = 23; clause = None;
+    Live { constructor = "Not_implemented"; name = "not-implemented";
+      clause = "implementation plan";
       meaning =
         "A construct that a later work package of the plan implements; \
-         the text names the section of the design and the package." };
-    Live { name = "Variant_scope"; code = 24; clause = Some "design 3.3";
+         the text names the package." };
+    Live { constructor = "Variant_scope"; name = "constructor-scope";
+      clause = "design 3.3";
       meaning =
         "A constructor expression outside the scope of the declaration \
          of its variant." };
-    Live { name = "Reserved_constructor"; code = 25;
-      clause = Some "design 3.2 rule 2";
+    Live { constructor = "Reserved_constructor"; name = "reserved-constructor";
+      clause = "design 3.2 rule 2";
       meaning =
         "A constructor named for a word of Type-C text (design 2.3) or \
          a universe name, or whose name contains [__] or begins with \
          [_]; and a field whose name C reserves for any use." };
-    Live { name = "Disputed_jump"; code = 26; clause = Some "design 4.4";
+    Live { constructor = "Disputed_jump"; name = "ambiguous-jump";
+      clause = "design 4.4";
       meaning =
         "A [break] or [continue] in a statement expression in the \
          condition of a loop or the step of a [for], outside every loop, \
@@ -142,62 +167,68 @@ let rows =
          different statements: in Type-C text, and in a deferred \
          statement or the scope of a defer statement in any text \
          (design 6 rule 10)." };
-    Live { name = "Break_outside"; code = 27;
-      clause = Some "C11 6.8.6.3p1, design 4.3 rule 2";
+    Live { constructor = "Break_outside"; name = "break-outside";
+      clause = "C11 6.8.6.3p1, design 4.3 rule 2";
       meaning =
         "A [break] outside every loop, [switch] and match; also C11 \
          6.8.6.3p1." };
-    Live { name = "Early_break"; code = 28; clause = Some "design 4.3 rule 5";
+    Live { constructor = "Early_break"; name = "early-break";
+      clause = "design 4.3 rule 5";
       meaning =
         "A [break] in Type-C text that leaves a match other than in \
          tail position of its arm." };
-    Live { name = "Type_name_spelling"; code = 29;
-      clause = Some "design 3.1 rules 6 and 7";
+    Live { constructor = "Type_name_spelling"; name = "reserved-type-name";
+      clause = "design 3.1 rules 6 and 7";
       meaning =
         "A type declaration of any form whose name contains [__], ends \
          with [_] or begins with [_] and an uppercase letter; or, at \
          file scope, begins with [_]." };
-    Live { name = "Block_literal_text"; code = 30;
-      clause = Some "design 13.3";
+    Live { constructor = "Block_literal_text"; name = "block-literal";
+      clause = "design 13.3";
       meaning =
         "A Clang block literal that Type-C text writes, or that holds \
          Type-C text an include puts inside it." };
-    Live { name = "Profile"; code = 31; clause = None;
+    Live { constructor = "Profile"; name = "unsupported";
+      clause = "design 13.3, P16";
       meaning =
-        "A construct that the front end does not take (design 13.3): \
-         outside the GNU profile, a builtin that the backend lacks or a \
-         call that breaks the rule of a builtin, or one that needs a type, \
-         a value or a declaration that typec does not compute; the text \
-         names the clause." };
-    Live { name = "System_body_text"; code = 32;
-      clause = Some "design 13.3";
+        "A construct that the front end does not take: outside the GNU \
+         profile, a builtin that the backend lacks or a call that breaks \
+         the rule of a builtin, or one that needs a type, a value or a \
+         declaration that typec does not compute." };
+    Live { constructor = "System_body_text"; name = "system-body-text";
+      clause = "design 13.3";
       meaning =
         "A token other than C text of a system header in a function \
          body whose [{] is C text of a system header, which is passed \
          through unread." };
-    Live { name = "Generic_scope"; code = 33; clause = Some "design 3.1";
+    Live { constructor = "Generic_scope"; name = "generic-scope";
+      clause = "design 3.1";
       meaning =
         "A type declaration with type parameters outside file scope." };
-    Live { name = "Generic_universe_name"; code = 34;
-      clause = Some "design 3.6";
+    Live { constructor = "Generic_universe_name";
+      name = "generic-universe-name";
+      clause = "design 3.6";
       meaning =
         "A type declaration with type parameters whose name is a universe \
          name." };
-    Live { name = "Generic_name"; code = 35; clause = Some "design 3.5 rule 1";
+    Live { constructor = "Generic_name"; name = "generic-type-use";
+      clause = "design 3.5 rule 1";
       meaning =
         "The name of a generic type other than in a type application \
          with one argument for each of its type parameters." };
-    Live { name = "Completion_parameters"; code = 36;
-      clause = Some "design 3.1 rule 4";
+    Live { constructor = "Completion_parameters";
+      name = "completion-parameter-count";
+      clause = "design 3.1 rule 4";
       meaning =
         "A variant definition that completes an incomplete variant with \
          a different number of type parameters." };
-    Live { name = "Argument_tag"; code = 37; clause = Some "design 3.5 rule 2";
+    Live { constructor = "Argument_tag"; name = "type-argument-tag";
+      clause = "design 3.5 rule 2";
       meaning =
         "A tag that a type argument declares, or is the first to mention, \
          in a parameter list or a block." };
-    Live { name = "Generic_definition"; code = 38;
-      clause = Some "design 3.5 rule 4";
+    Live { constructor = "Generic_definition"; name = "generic-definition";
+      clause = "design 3.5 rule 4";
       meaning =
         "In the definition of a generic type: a type parameter, written \
          or through a transparent alias, directly after [distinct], as \
@@ -207,20 +238,14 @@ let rows =
          with a body and a tag, or with a body where the definition of \
          an instance does not hold it; an enumeration specifier with a \
          body." };
-    Retired { name = "Moved_declaration"; code = 39;
-      meaning =
-        "A declaration in moved text of a name that is in scope after \
-         the text, or of an object or a function with linkage, in any \
-         scope of the text; or, in the arguments of an attribute there, \
-         a brace or a tag keyword of a tag that is not visible: refused \
-         under the code of its kind of moved text." };
-    Live { name = "Pragma_tokens"; code = 40; clause = Some "design 13.5";
+    Live { constructor = "Pragma_tokens"; name = "pragma-tokens";
+      clause = "design 13.5";
       meaning =
         "A [#pragma] line whose text after [pragma] is no sequence of \
          preprocessing tokens, in Type-C text or in a deferred statement \
          (design 6), which is moved text." };
-    Live { name = "Type_argument"; code = 41;
-      clause = Some "design 3.5 rule 2";
+    Live { constructor = "Type_argument"; name = "type-argument";
+      clause = "design 3.5 rule 2";
       meaning =
         "A type argument that is no object type, an array, variably \
          modified, holds a type without a row in the table of design \
@@ -229,107 +254,107 @@ let rows =
          the declaration of a typedef name or alias that it uses; and a \
          type argument of a generic function, deduced or explicit, that \
          is no value type (design 7.2 rule 5)." };
-    Live { name = "Instance_nesting"; code = 42;
-      clause = Some "design 3.5 rule 7";
+    Live { constructor = "Instance_nesting"; name = "instance-nesting";
+      clause = "design 3.5 rule 7";
       meaning =
         "An application that would cause the 65th instance of a chain \
          in which each instance causes the next." };
-    Live { name = "Instance_placement"; code = 43; clause = Some "design 10.3";
+    Live { constructor = "Instance_placement"; name = "instance-placement";
+      clause = "design 10.3";
       meaning =
         "An application whose instance texts cannot stand before the \
          external declaration that holds it: a type that they name or \
          need complete is not ready there, or the forward declaration of \
          a tag that they write would change a mention before it." };
-    Retired { name = "Moved_text"; code = 44;
-      meaning =
-        "A declaration between moved text and a place where lowering \
-         writes it that makes a name of the text read otherwise there: a \
-         name that the text uses denotes another entity or tag, or an \
-         entity of another type, as a typedef name declared again with \
-         an attribute may be, or a name that the text declares for \
-         itself is a typedef name or a tag of the scope around it." };
-    Live { name = "Moved_text_unknown"; code = 45;
-      clause = Some "design 13.5, P21";
+    Live { constructor = "Moved_text_unknown"; name = "name-capture-unknown";
+      clause = "design 13.5, P21";
       meaning =
         "A declaration between moved text of any kind and a place where \
          lowering writes it of an entity that the text uses, where \
          whether the entity keeps its type depends on a type that typec \
          does not compute." };
-    Live { name = "Unread_own_name"; code = 46; clause = Some "design 13.5";
+    Live { constructor = "Unread_own_name"; name = "unread-renamed-name";
+      clause = "design 13.5";
       meaning =
         "An identifier in the arguments of an attribute that denotes a \
          generic or a universe name, which lowering writes under a name \
          of its own, in Type-C text. In moved text that is C text, where \
          the place that lowering writes it at declares a C entity of its \
-         spelling, the refusal carries the code of the kind of text." };
-    Live { name = "Generic_pragma"; code = 47;
-      clause = Some "design 10.3, P25";
+         spelling, the refusal carries the name of the kind of text." };
+    Live { constructor = "Generic_pragma"; name = "generic-pragma";
+      clause = "design 10.3, P25";
       meaning =
         "A generic whose definition holds a [#pragma] line, which a \
          [_Pragma] operator also becomes, or a [#] punctuator, which the \
          text of an instance cannot hold." };
-    Live { name = "Dropped_result"; code = 48; clause = Some "design 5.2";
+    Live { constructor = "Dropped_result"; name = "discarded-result";
+      clause = "design 5.2";
       meaning =
         "A value of a [result] type that Type-C text discards other than \
          by a cast to [void]: as an expression statement, the left \
          operand of [,], or the first or third clause of [for]. An \
          assignment discards none, having stored it." };
-    Live { name = "Unread_word"; code = 49;
-      clause = Some "design 6 rule 13, 5.1 rule 3";
+    Live { constructor = "Unread_word"; name = "unread-word";
+      clause = "design 6 rule 13, 5.1 rule 3";
       meaning =
         "[_Defer] in unread text (design 13.5), or the word [defer] or \
          [try] in the arguments of an attribute of Type-C text where no \
          declaration hides it: typing does not read the text, so the \
          construct would reach the backend as written." };
-    Live { name = "Excess_initialiser"; code = 50; clause = Some "design 5.2";
+    Live { constructor = "Excess_initialiser"; name = "excess-initializer";
+      clause = "design 5.2";
       meaning =
         "An initialiser in Type-C text that has no element or member \
          left to initialise (C11 6.7.9p2), other than the 0 of [{0}]." };
-    Live { name = "Try_operand"; code = 51; clause = Some "design 5.1 rule 1";
+    Live { constructor = "Try_operand"; name = "try-operand";
+      clause = "design 5.1 rule 1";
       meaning =
         "A [try] whose operand is not of a [result] type, or that stands \
          in a function that does not return one." };
-    Live { name = "Try_error_type"; code = 52;
-      clause = Some "design 5.1 rule 1";
+    Live { constructor = "Try_error_type"; name = "try-error-type";
+      clause = "design 5.1 rule 1";
       meaning =
         "A [try] whose operand's error type is not the one that the \
          function returns, qualifiers at every level of it included." };
-    Live { name = "Try_void"; code = 53; clause = Some "design 5.1 rule 2";
+    Live { constructor = "Try_void"; name = "try-void";
+      clause = "design 5.1 rule 2";
       meaning =
         "A [try] whose value is void other than as the statement \
          [try e;]." };
-    Live { name = "Try_position"; code = 54; clause = Some "design 5.1 rule 3";
+    Live { constructor = "Try_position"; name = "try-position";
+      clause = "design 5.1 rule 3";
       meaning =
         "A [try] that is not the whole of an expression statement, the \
          whole right operand of a simple assignment that is one, or the \
          whole initialiser of the one declarator of a declaration that \
          is a block item; so also a [try] in a statement expression or in \
          a deferred statement (design 5.1 rule 4)." };
-    Live { name = "Try_declaration"; code = 55;
-      clause = Some "design 5.1 rule 3";
+    Live { constructor = "Try_declaration"; name = "try-declaration";
+      clause = "design 5.1 rule 3";
       meaning =
         "A [try] that initialises an object of static or thread storage \
          duration, or one of a variably modified type." };
-    Live { name = "Try_pragma"; code = 56; clause = Some "design 5.1 rule 3";
+    Live { constructor = "Try_pragma"; name = "try-pragma";
+      clause = "design 5.1 rule 3";
       meaning =
         "A [try] in a statement or declaration that holds a pragma line \
          or directly follows one, its C labels included." };
-    Live { name = "Defer_position"; code = 57;
-      clause = Some "design 6 rule 11";
+    Live { constructor = "Defer_position"; name = "defer-position";
+      clause = "design 6 rule 11";
       meaning =
         "A [defer] statement that is no block item of a compound \
          statement or a match arm in a function body: the substatement \
          of a statement, the statement of a label, [case] or [default], \
          a block item of the compound statement of a statement \
          expression, or outside every function body." };
-    Live { name = "Deferred_exit"; code = 58;
-      clause = Some "design 6 rule 4";
+    Live { constructor = "Deferred_exit"; name = "deferred-exit";
+      clause = "design 6 rule 4";
       meaning =
         "A deferred statement that holds a [return], a [goto], a GNU \
          computed [goto *] or an [asm goto], or a [break] or [continue] \
          that leaves it; a [try] in one is refused as [Try_position]." };
-    Live { name = "Deferred_declaration"; code = 59;
-      clause = Some "design 6 rule 9, 13.5";
+    Live { constructor = "Deferred_declaration"; name = "deferred-declaration";
+      clause = "design 6 rule 9, 13.5";
       meaning =
         "A deferred statement that holds an identifier label, a GNU \
          [__label__] declaration, the definition of an object with static \
@@ -337,8 +362,8 @@ let rows =
          specifier that has a body or declares its tag, a type \
          declaration or a block literal, which each copy of the statement \
          would define again." };
-    Live { name = "Deferred_entry"; code = 60;
-      clause = Some "design 6 rule 5";
+    Live { constructor = "Deferred_entry"; name = "deferred-entry";
+      clause = "design 6 rule 5";
       meaning =
         "A jump into a deferred statement from outside it, or into the \
          scope of a defer statement from outside the scope: a [case] or \
@@ -346,8 +371,8 @@ let rows =
          goto] from outside to a label there, or the GNU address of a \
          label in the scope, which a computed [goto] could jump to from \
          anywhere in the function." };
-    Live { name = "Try_moved_operand"; code = 61;
-      clause = Some "design 5.1 rule 3, 13.5";
+    Live { constructor = "Try_moved_operand"; name = "try-name-capture";
+      clause = "design 5.1 rule 3, 13.5";
       meaning =
         "The operand of a [try], which is moved text, where it breaks \
          any clause of the resolution property: a name that it uses \
@@ -356,66 +381,74 @@ let rows =
          declares a name that is in scope after it or an object or a \
          function with linkage, or holds a brace or a tag keyword of a \
          tag that is not visible in the arguments of an attribute." };
-    Live { name = "Defer_scope_jump"; code = 62;
-      clause = Some "design 6 rule 10";
+    Live { constructor = "Defer_scope_jump"; name = "defer-scope-jump";
+      clause = "design 6 rule 10";
       meaning =
         "A GNU computed [goto *] or an [asm goto] in the scope of a \
          defer statement, in any text, which no deferred statement can \
          precede; a disputed [break] or [continue] there is refused as \
          [Disputed_jump]." };
-    Live { name = "Deferred_moved"; code = 63;
-      clause = Some "design 6 rule 8, 13.5";
+    Live { constructor = "Deferred_moved"; name = "defer-name-capture";
+      clause = "design 6 rule 8, 13.5";
       meaning =
         "The statement of a defer, which is moved text, where it breaks \
          a clause of the resolution property at an exit of its scope on a \
          fact that typec knows: a declaration between the defer and the \
          exit makes a name of the statement read otherwise there." };
-    Live { name = "Return_operand_moved"; code = 64;
-      clause = Some "design 6 rule 12, 13.5";
+    Live { constructor = "Return_operand_moved";
+      name = "defer-return-name-capture";
+      clause = "design 6 rule 12, 13.5";
       meaning =
         "The operand of a [return] in the scope of a defer statement, \
          which lowering writes in a block of its own, where it declares a \
          name that is in scope after the [return]." };
-    Live { name = "Return_own_name"; code = 65; clause = Some "design 13.5";
+    Live { constructor = "Return_own_name"; name = "defer-return-own-name";
+      clause = "design 13.5";
       meaning =
         "A function that returns a value and holds a [return e;] in the \
          scope of a defer statement, whose parameter list declares the \
          function's own name, as a parameter or an enumeration \
          constant." };
-    Live { name = "Return_parameter_redeclared"; code = 66;
-      clause = Some "design 13.5";
+    Live { constructor = "Return_parameter_redeclared";
+      name = "defer-return-parameter-redeclared";
+      clause = "design 13.5";
       meaning =
         "A declaration in the outermost block of the body of a function \
          that returns a value and holds a [return e;] in the scope of a \
          defer statement, of a name that the parameter list declares in \
          the same name space: a tag, as C refuses an ordinary \
          identifier there (C11 6.7p3)." };
-    Live { name = "Return_target_versions"; code = 67;
-      clause = Some "design 13.5";
+    Live { constructor = "Return_target_versions";
+      name = "defer-return-target-versions";
+      clause = "design 13.5";
       meaning =
         "A function that returns a value and holds a [return e;] in the \
          scope of a defer statement, two of whose declarations in scope at \
          the definition carry [target] attributes whose arguments differ \
          token for token." };
-    Live { name = "Return_marked_attribute"; code = 68;
-      clause = Some "design 13.5";
+    Live { constructor = "Return_marked_attribute";
+      name = "defer-return-marked-attribute";
+      clause = "design 13.5";
       meaning =
         "A function that returns a value and holds a [return e;] in the \
          scope of a defer statement, one of whose declarations in scope at \
          the definition carries an attribute that the table of attributes \
          marks (design 13.3), or that follows a Clang overload of its \
          name." };
-    Live { name = "Return_unnamed_parameter"; code = 69;
-      clause = Some "design 13.5";
+    Live { constructor = "Return_unnamed_parameter";
+      name = "defer-return-unnamed-parameter";
+      clause = "design 13.5";
       meaning =
         "A function that returns a value and holds a [return e;] in the \
          scope of a defer statement, with a parameter that has no name." };
-    Live { name = "Return_void_value"; code = 70; clause = Some "design 13.5";
+    Live { constructor = "Return_void_value"; name = "defer-return-void-value";
+      clause = "design 13.5";
       meaning =
         "A [return e;] in the scope of a defer statement, in a function \
          that returns void, where [e] is not a void expression or has a \
          type that typec does not know (design 13.3)." };
-    Live { name = "Generic_moved"; code = 71; clause = Some "design 13.5";
+    Live { constructor = "Generic_moved"; name = "generic-name-capture";
+      clause = "design 13.5";
       meaning =
         "The definition of a generic, or the one name of an untagged \
          type that the typedef of a type argument spells, where it breaks \
@@ -426,19 +459,19 @@ let rows =
          text declares for itself, or the text declares a name that is in \
          scope after it, such as a tag that the definition of a generic \
          type is the first to mention in file scope (design 3.5 rule 8)." };
-    Live { name = "Defer_in_deferred"; code = 72;
-      clause = Some "design 6 rule 11";
+    Live { constructor = "Defer_in_deferred"; name = "nested-defer";
+      clause = "design 6 rule 11";
       meaning =
         "A [defer] statement anywhere in the deferred statement of \
          another, which lowering copies to each exit of its scope." };
-    Live { name = "Return_operand_jump"; code = 73;
-      clause = Some "design 6 rule 12";
+    Live { constructor = "Return_operand_jump"; name = "defer-return-jump";
+      clause = "design 6 rule 12";
       meaning =
         "A [goto], [break] or [continue] that leaves the operand of a \
          [return] in the scope of a defer statement, which lowering \
          writes in a block of its own." };
-    Live { name = "Deferred_pragma"; code = 74;
-      clause = Some "design 6 rule 9";
+    Live { constructor = "Deferred_pragma"; name = "deferred-pragma";
+      clause = "design 6 rule 9";
       meaning =
         "A [#pragma] line in the deferred statement of a defer statement \
          that is not one of the pragmas that apply to the statement that \
@@ -453,8 +486,9 @@ let rows =
          block or a statement or declaration that holds an exit: a copy \
          of the deferred statement would be compiled under other pragmas \
          than the defer statement." };
-    Live { name = "Type_parameter_operation"; code = 75;
-      clause = Some "design 7.1 rule 3";
+    Live { constructor = "Type_parameter_operation";
+      name = "type-parameter-operation";
+      clause = "design 7.1 rule 3";
       meaning =
         "In a generic function, a use of a value of a type parameter \
          that C refuses of a structure, or that would have another type \
@@ -477,8 +511,9 @@ let rows =
          declaration in the body that gives its identifier linkage; and \
          [__func__], [__FUNCTION__] or [__PRETTY_FUNCTION__] in the \
          body where an operation reads its array whole." };
-    Live { name = "Type_parameter_constant"; code = 76;
-      clause = Some "design 7.1 rule 4";
+    Live { constructor = "Type_parameter_constant";
+      name = "type-parameter-constant";
+      clause = "design 7.1 rule 4";
       meaning =
         "In a generic function, an expression that depends on a type \
          parameter, holding [sizeof], [_Alignof] or [offsetof] of a type \
@@ -489,8 +524,9 @@ let rows =
          that mentions a type parameter; and [_Generic] or \
          [__builtin_types_compatible_p] where a type parameter meets \
          another type in a comparison that decides." };
-    Live { name = "Generic_function_form"; code = 77;
-      clause = Some "design 7.1 rule 6";
+    Live { constructor = "Generic_function_form";
+      name = "generic-function-form";
+      clause = "design 7.1 rule 6";
       meaning =
         "What follows [generic( )] is not one function that an instance \
          can be written from: a definition, or a declaration with one \
@@ -501,8 +537,9 @@ let rows =
          or body defined in the head, and on a declaration that is not \
          a definition neither [_Noreturn] nor an attribute anywhere in \
          it." };
-    Live { name = "Generic_function_agreement"; code = 78;
-      clause = Some "design 7.1 rule 7";
+    Live { constructor = "Generic_function_agreement";
+      name = "generic-function-agreement";
+      clause = "design 7.1 rule 7";
       meaning =
         "Two declarations of a generic function that do not agree: they \
          have different numbers of type parameters, or, with each type \
@@ -510,8 +547,8 @@ let rows =
          other, declare different types; or a second definition of it; \
          or another declaration of its name at file scope, before it or \
          after it." };
-    Live { name = "Generic_attribute"; code = 79;
-      clause = Some "design 13.3";
+    Live { constructor = "Generic_attribute"; name = "generic-attribute";
+      clause = "design 13.3";
       meaning =
         "In the definition of a generic type or a generic function, an \
          attribute or an alignment specifier, read as the attribute \
@@ -519,14 +556,14 @@ let rows =
          arguments name what the definition declares, where the table \
          of attributes does not record that both backends take it alike \
          for every type, kind of subject and argument list." };
-    Live { name = "Generic_function_use"; code = 80;
-      clause = Some "design 7.2";
+    Live { constructor = "Generic_function_use"; name = "generic-function-use";
+      clause = "design 7.2";
       meaning =
         "The name of a generic function other than as the called \
          expression of a call or before the type arguments of an \
          explicit instance." };
-    Live { name = "Deduction_mismatch"; code = 81;
-      clause = Some "design 7.2 rule 2";
+    Live { constructor = "Deduction_mismatch"; name = "deduction-mismatch";
+      clause = "design 7.2 rule 2";
       meaning =
         "An argument of a call of a generic function whose type, after \
          lvalue, array and function conversion, differs from the type of \
@@ -534,13 +571,14 @@ let rows =
          argument before it deduces, other than by qualifiers that a \
          pointer parameter adds to the pointed-to type; or in which a \
          type parameter that occurs twice meets two different types." };
-    Live { name = "Undeduced_type_parameter"; code = 82;
-      clause = Some "design 7.2 rule 3";
+    Live { constructor = "Undeduced_type_parameter";
+      name = "undeduced-type-parameter";
+      clause = "design 7.2 rule 3";
       meaning =
         "A call of a generic function that leaves a type parameter that \
          no argument deduces." };
-    Live { name = "Instance_arguments"; code = 83;
-      clause = Some "design 7.2 rule 4";
+    Live { constructor = "Instance_arguments"; name = "instance-arguments";
+      clause = "design 7.2 rule 4";
       meaning =
         "An explicit instance of a generic function with a number of \
          type arguments other than the number of its type parameters." };

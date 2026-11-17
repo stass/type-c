@@ -106,7 +106,7 @@ let in_function ?(declarations = prelude) ?(name = "t") ?(parameters = "void")
 let types ?(target = lp64) ?declarations ?name ?parameters body expected =
   let source = in_function ?declarations ?name ?parameters body in
   match read target source with
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
   | Ok (unit, result) -> (
       match Option.bind (probed unit) (Declarations.expression result) with
       | None -> fail_case source "the expression is not typed"
@@ -136,7 +136,7 @@ let rejects ?target ?declarations body expected =
 let accepts_source ?(target = lp64) ?file source =
   match read ?file target source with
   | Ok _ -> ()
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
 
 let accepts ?target ?declarations body =
   accepts_source ?target (in_function ?declarations body)
@@ -784,7 +784,7 @@ let dropped_results () =
   in
   let type_c body = in_function ~declarations body in
   let rejects body =
-    rejects_source ~file:"in.tc" (type_c body) "[TC0048]"
+    rejects_source ~file:"in.tc" (type_c body) "[discarded-result]"
   in
   let undecided body =
     rejects_source ~file:"in.tc" (type_c body)
@@ -872,8 +872,8 @@ let tries () =
   let source ?(returns = "result(int, int)") body =
     declarations ^ returns ^ " t(int n) { " ^ body ^ "; return Ok(0); }"
   in
-  let refuses ?returns body code =
-    rejects_source ~file:"in.tc" (source ?returns body) ("[" ^ code ^ "]")
+  let refuses ?returns body name =
+    rejects_source ~file:"in.tc" (source ?returns body) ("[" ^ name ^ "]")
   in
   let accepts ?returns body =
     accepts_source ~file:"in.tc" (source ?returns body)
@@ -881,7 +881,7 @@ let tries () =
   let needs ?returns body need =
     rejects_source ~file:"in.tc" (source ?returns body) (need ^ " depends on")
   in
-  let position body = refuses body "TC0054" in
+  let position body = refuses body "try-position" in
   (* The three positions, each as a block item and a substatement. *)
   accepts "try g()";
   accepts "x = try f()";
@@ -901,22 +901,22 @@ let tries () =
   accepts "result(int, int) r = f(); match (r) { case Ok(v): x = try f(); \
            return Ok(x); default: return r; }";
   (* Rule 1. *)
-  refuses "x = try x" "TC0051";
-  refuses "x = try &constant" "TC0051";
-  refuses ~returns:"int" "x = try f()" "TC0051";
-  refuses ~returns:"void" "try g()" "TC0051";
-  refuses ~returns:"result(int, long)" "x = try f()" "TC0052";
+  refuses "x = try x" "try-operand";
+  refuses "x = try &constant" "try-operand";
+  refuses ~returns:"int" "x = try f()" "try-operand";
+  refuses ~returns:"void" "try g()" "try-operand";
+  refuses ~returns:"result(int, long)" "x = try f()" "try-error-type";
   refuses ~returns:"result(int, const char *)"
-    "result(int, char *) e(void); x = try e()" "TC0052";
+    "result(int, char *) e(void); x = try e()" "try-error-type";
   refuses ~returns:"result(int, int **)"
-    "result(int, int *const *) e(void); x = try e()" "TC0052";
+    "result(int, int *const *) e(void); x = try e()" "try-error-type";
   needs "x = try half" "whether the operand of try is a result";
   needs ~returns:"typeof(half)" "x = try f()"
     "whether the function that holds try returns a result";
   (* Rule 2. *)
-  refuses "x = try g()" "TC0053";
-  refuses "int v = try g()" "TC0053";
-  refuses "try nested()" "TC0048";
+  refuses "x = try g()" "try-void";
+  refuses "int v = try g()" "try-void";
+  refuses "try nested()" "discarded-result";
   accepts "result(int, int) inner = try nested()";
   (* Rule 3: anywhere else, one error. *)
   position "x += try f()";
@@ -949,19 +949,19 @@ let tries () =
   position "int u = 0, v = try f()";
   position "int a[1] = { try f() }";
   position "int a[try f()]";
-  refuses "static int v = try f()" "TC0055";
-  refuses "_Thread_local static int v = try f()" "TC0055";
-  refuses "int (*p)[n] = try f()" "TC0055";
+  refuses "static int v = try f()" "try-declaration";
+  refuses "_Thread_local static int v = try f()" "try-declaration";
+  refuses "int (*p)[n] = try f()" "try-declaration";
   needs "typeof(half) v = try f()"
     "whether a declaration that holds try declares a variably modified \
      type";
   rejects_source ~file:"in.tc"
     (declarations ^ "int v = try f();")
-    "[TC0054]";
+    "[try-position]";
   (* Rule 3: the operand is moved text, which reads before the holder as
      at its own place (design 13.5), and declares nothing that is in
      scope after it. *)
-  let moved body = refuses body "TC0061" in
+  let moved body = refuses body "try-name-capture" in
   moved "{ int n = try read_into(&n); }";
   moved "int fresh = try from(fresh)";
   moved "int a[8]; a[sizeof(enum { K = 5 })] = try from(K)";
@@ -986,21 +986,21 @@ let tries () =
      the statement, its C labels included, to its final ;. The labels of
      an arm are the arm's. *)
   let pragma = "\n#pragma GCC diagnostic push\n" in
-  refuses (pragma ^ "x = try f()") "TC0056";
-  refuses (pragma ^ "int v = try f()") "TC0056";
-  refuses ("x = try" ^ pragma ^ "f()") "TC0056";
-  refuses ("x = try f()" ^ pragma) "TC0056";
-  refuses (pragma ^ "again: x = try f()") "TC0056";
-  refuses ("switch (c) {" ^ pragma ^ "case 1: x = try f(); }") "TC0056";
-  refuses ("if (c)" ^ pragma ^ "x = try f()") "TC0056";
-  refuses ("{" ^ pragma ^ "x = try f(); }") "TC0056";
+  refuses (pragma ^ "x = try f()") "try-pragma";
+  refuses (pragma ^ "int v = try f()") "try-pragma";
+  refuses ("x = try" ^ pragma ^ "f()") "try-pragma";
+  refuses ("x = try f()" ^ pragma) "try-pragma";
+  refuses (pragma ^ "again: x = try f()") "try-pragma";
+  refuses ("switch (c) {" ^ pragma ^ "case 1: x = try f(); }") "try-pragma";
+  refuses ("if (c)" ^ pragma ^ "x = try f()") "try-pragma";
+  refuses ("{" ^ pragma ^ "x = try f(); }") "try-pragma";
   accepts (pragma ^ "; x = try f()");
   accepts ("x = try f();" ^ pragma ^ ";");
   accepts ("result(int, int) r = f(); match (r) {" ^ pragma
            ^ "case Ok(v): x = try f(); return r; default: return r; }");
   refuses ("result(int, int) r = f(); match (r) { case Ok(v):" ^ pragma
            ^ "x = try f(); return r; default: return r; }")
-    "TC0056";
+    "try-pragma";
   position "x = _Generic(0, int: try f(), default: 0)";
   position "switch (c) { case sizeof(try f()): ; }";
   position "_Static_assert(sizeof(try f()), \"\")";
@@ -1034,7 +1034,7 @@ let try_sites () =
       (field site.ok_field) (field site.err_field)
   in
   match read ~file:"in.tc" lp64 source with
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
   | Ok (_, result) ->
       let actual =
         List.map describe (Expressions.tries (Declarations.typed result))
@@ -1245,7 +1245,7 @@ let describe_constant (constant : Expressions.constant) =
 let classes ?declarations ?parameters body expected =
   let source = in_function ?declarations ?parameters body in
   match read lp64 source with
-  | Error error -> fail_case source ("error: " ^ Reader.error_message error)
+  | Error error -> fail_case source (Reader.error_message error)
   | Ok (unit, result) -> (
       match Option.bind (probed unit) (Declarations.constant result) with
       | None -> fail_case source "the expression is not classed"

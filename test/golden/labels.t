@@ -16,7 +16,7 @@ them in C text too, with the clause and no code (design 13.6).
   > }
   > EOF
   $ ./golden.exe twice.tc
-  twice.tc:5: a second definition of a label in its scope (C11 6.8.1p3)
+  twice.tc:5: error: a second definition of a label in its scope (C11 6.8.1p3)
   [1]
 
   $ cat > missing.tc <<'EOF'
@@ -31,7 +31,7 @@ them in C text too, with the clause and no code (design 13.6).
   > }
   > EOF
   $ ./golden.exe missing.tc
-  missing.tc:5: a goto to a label that is not defined in its scope (C11 6.8.6.1p1)
+  missing.tc:5: error: a goto to a label that is not defined in its scope (C11 6.8.6.1p1)
   [1]
 
 The first definition in source order stands, though the condition of a
@@ -48,7 +48,7 @@ loop is read after its body.
   > }
   > EOF
   $ ./golden.exe order.tc
-  order.tc:4: a second definition of a label in its scope (C11 6.8.1p3)
+  order.tc:4: error: a second definition of a label in its scope (C11 6.8.1p3)
   [1]
 
 GNU C adds three rules that both backends enforce under every option:
@@ -60,7 +60,7 @@ from outside it. typec refuses them with the GCC manual's section.
   > static void *resume = &&again;
   > EOF
   $ ./golden.exe address.tc
-  address.tc:1: the address of a label outside a function body (GCC manual, "Labels as Values")
+  address.tc:1: error: the address of a label outside a function body (GCC manual, "Labels as Values")
   [1]
 
   $ cat > local.tc <<'EOF'
@@ -76,7 +76,7 @@ from outside it. typec refuses them with the GCC manual's section.
   > }
   > EOF
   $ ./golden.exe local.tc
-  local.tc:3: a local label declared twice in its block (GCC manual, "Local Labels")
+  local.tc:3: error: a local label declared twice in its block (GCC manual, "Local Labels")
   [1]
 
   $ cat > into.tc <<'EOF'
@@ -90,5 +90,5 @@ from outside it. typec refuses them with the GCC manual's section.
   > }
   > EOF
   $ ./golden.exe into.tc
-  into.tc:3: a goto into a statement expression from outside it (GCC manual, "Statement Exprs")
+  into.tc:3: error: a goto into a statement expression from outside it (GCC manual, "Statement Exprs")
   [1]

@@ -173,7 +173,7 @@ markers, in which no token can be placed in its file, and text that
 keeps comments or directives. Where the refused text stands depends on
 the backend and its headers, so its location is cut.
 
-  $ without_location() { sed 's/^typec: .*:[0-9]*: //'; }
+  $ without_location() { sed 's/^.*:[0-9]*: error: //'; }
   $ typec --cc=$clang -Wp,-P -c x.tc 2>&1 | without_location
   token before the first line marker, as when an option such as -P removes the line markers
   $ typec --cc=$gcc -Wp,-P -c x.tc 2>&1 | without_location
@@ -232,10 +232,10 @@ typec and to the backends alike.
   $ cmp iso-gcc-ref.o iso-gcc.o
   $ typec --cc=$clang -fno-asm -fsyntax-only iso.tc
   $ typec --cc=$clang -c iso.tc
-  typec: iso.tc:1: expected `(` after `typeof`, found `;`
+  iso.tc:1: error: expected `(` after `typeof`, found `;`
   [80]
   $ typec --cc=$gcc -std=c11 -fasm -c iso.tc
-  typec: iso.tc:1: expected `(` after `typeof`, found `;`
+  iso.tc:1: error: expected `(` after `typeof`, found `;`
   [80]
   $ $clang -x c -std=gnu11 -fsyntax-only iso.tc 2>/dev/null
   [1]
@@ -276,7 +276,7 @@ shows that the backend can write there.
   [1]
   $ printf 'int @;\n' > bad-read.tc
   $ typec --cc=$clang -c bad-read.tc
-  typec: bad-read.tc:1: unexpected character '@'
+  bad-read.tc:1: error: unexpected character '@'
   [80]
   $ printf '#!/bin/sh\nkill -s KILL $$\n' > killed-cc && chmod +x killed-cc
   $ { typec --cc=./killed-cc -c x.tc; } 2>/dev/null
@@ -317,14 +317,14 @@ status 80 and one message, before anything is emitted or compiled.
 
   $ printf 'int x = ;\n' > bad-parse.tc
   $ typec --cc=$clang -c bad-parse.tc
-  typec: bad-parse.tc:1: expected an expression, found `;`
+  bad-parse.tc:1: error: expected an expression, found `;`
   [80]
   $ printf 'int n;\nlong n;\n' > bad-type.tc
   $ typec --cc=$gcc -c bad-type.tc
-  typec: bad-type.tc:2: 'n' is redeclared with an incompatible type (C11 6.7p4)
+  bad-type.tc:2: error: 'n' is redeclared with an incompatible type (C11 6.7p4)
   [80]
   $ typec --cc=$clang --emit-c bad-type.tc
-  typec: bad-type.tc:2: 'n' is redeclared with an incompatible type (C11 6.7p4)
+  bad-type.tc:2: error: 'n' is redeclared with an incompatible type (C11 6.7p4)
   [80]
   $ test ! -e bad-parse.o && test ! -e bad-type.o && ls -A tmp
 
@@ -335,5 +335,5 @@ by default on x86-64 and not on arm64, so the first compile asks for it.
   $ printf 'int a[(char)-1 < 0 ? 1 : -1];\n' > signed-char.tc
   $ typec --cc=$clang -fsigned-char --emit-c signed-char.tc -o out/signed-char.i
   $ typec --cc=$clang -funsigned-char --emit-c signed-char.tc
-  typec: signed-char.tc:1: array has a negative length
+  signed-char.tc:1: error: array has a negative length
   [80]

@@ -205,7 +205,7 @@ closing parenthesis, so a test joined with && is refused.
   > }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:3: the operand of a single-pattern test is not of a variant type; a pointer is not dereferenced implicitly (design 4.1 rule 1) [TC0014]
+  operand.tc:3: error: the operand of a single-pattern test is not of a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
   [1]
 
   $ cat > joined.tc <<'EOF'
@@ -217,7 +217,7 @@ closing parenthesis, so a test joined with && is refused.
   > }
   > EOF
   $ ./golden.exe joined.tc
-  joined.tc:3: the operand of a single-pattern test is not of a variant type; a pointer is not dereferenced implicitly (design 4.1 rule 1) [TC0014]
+  joined.tc:3: error: the operand of a single-pattern test is not of a variant type; a pointer is not dereferenced implicitly [match-scrutinee]
   [1]
 
 The pattern is that of a case label (4.1 rule 3): a constructor of the
@@ -233,7 +233,7 @@ operand's type, unqualified, with one sub-pattern per field.
   > }
   > EOF
   $ ./golden.exe foreign.tc
-  foreign.tc:4: 'Empty' names no constructor of the variant 'list' (design 4.1 rule 3) [TC0016]
+  foreign.tc:4: error: 'Empty' names no constructor of the variant 'list' [match-pattern]
   [1]
 
   $ cat > arity.tc <<'EOF'
@@ -245,7 +245,7 @@ operand's type, unqualified, with one sub-pattern per field.
   > }
   > EOF
   $ ./golden.exe arity.tc
-  arity.tc:3: the pattern 'Cons' has 1 sub-pattern(s), and the constructor has 2 field(s) (design 4.1 rule 3) [TC0016]
+  arity.tc:3: error: the pattern 'Cons' has 1 sub-pattern(s), and the constructor has 2 field(s) [match-pattern]
   [1]
 
 A test, and only a test, may omit the field list of a constructor with
@@ -287,7 +287,7 @@ statement (4.6 rule 4).
   > }
   > EOF
   $ ./golden.exe redeclared.tc
-  redeclared.tc:4: 'head' is declared twice in one scope without linkage (C11 6.7p3)
+  redeclared.tc:4: error: 'head' is declared twice in one scope without linkage (C11 6.7p3)
   [1]
 
   $ cat > otherwise.tc <<'EOF'
@@ -300,7 +300,7 @@ statement (4.6 rule 4).
   > }
   > EOF
   $ ./golden.exe otherwise.tc
-  otherwise.tc:6: 'head' is not declared (C11 6.5.1p2)
+  otherwise.tc:6: error: 'head' is not declared (C11 6.5.1p2)
   [1]
 
 Only a successful test enters the controlled statement, so no goto from
@@ -320,7 +320,7 @@ around it stands in it (4.6 rule 6, 4.3 rule 3).
   > }
   > EOF
   $ ./golden.exe entry.tc
-  entry.tc:4: a jump into the statement of a single-pattern test from outside it (design 4.3 rule 3) [TC0022]
+  entry.tc:4: error: a jump into the statement of a single-pattern test from outside it [match-arm-entry]
   [1]
 
   $ cat > label.tc <<'EOF'
@@ -337,5 +337,5 @@ around it stands in it (4.6 rule 6, 4.3 rule 3).
   > }
   > EOF
   $ ./golden.exe label.tc
-  label.tc:6: a case or default label inside the statement of a single-pattern test, which only a successful test enters (design 4.3 rule 3) [TC0020]
+  label.tc:6: error: a case or default label inside the statement of a single-pattern test, which only a successful test enters [stray-case-label]
   [1]

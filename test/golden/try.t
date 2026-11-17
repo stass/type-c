@@ -1026,7 +1026,7 @@ neither.
   > }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:2: the operand of try is of no result type (design 5.1 rule 1) [TC0051]
+  operand.tc:2: error: the operand of try is of no result type [try-operand]
   [1]
 
   $ cat > return_type.tc <<'EOF'
@@ -1037,7 +1037,7 @@ neither.
   > }
   > EOF
   $ ./golden.exe return_type.tc
-  return_type.tc:3: try stands in a function that returns no result type (design 5.1 rule 1) [TC0051]
+  return_type.tc:3: error: try stands in a function that returns no result type [try-operand]
   [1]
 
   $ cat > error_type.tc <<'EOF'
@@ -1048,7 +1048,7 @@ neither.
   > }
   > EOF
   $ ./golden.exe error_type.tc
-  error_type.tc:3: the error type of the operand of try is not the one that the function returns; no error type converts to another (design 5.1 rule 1) [TC0052]
+  error_type.tc:3: error: the error type of the operand of try is not the one that the function returns; no error type converts to another [try-error-type]
   [1]
 
   $ cat > void_error_type.tc <<'EOF'
@@ -1059,7 +1059,7 @@ neither.
   > }
   > EOF
   $ ./golden.exe void_error_type.tc
-  void_error_type.tc:3: the error type of the operand of try is not the one that the function returns; no error type converts to another (design 5.1 rule 1) [TC0052]
+  void_error_type.tc:3: error: the error type of the operand of try is not the one that the function returns; no error type converts to another [try-error-type]
   [1]
 
 Only the statement try e; holds a void value (rule 2).
@@ -1073,7 +1073,7 @@ Only the statement try e; holds a void value (rule 2).
   > }
   > EOF
   $ ./golden.exe void_value.tc
-  void_value.tc:4: the value of try is void, which only the statement try e; discards (design 5.1 rule 2) [TC0053]
+  void_value.tc:4: error: the value of try is void, which only the statement try e; discards [try-void]
   [1]
 
 Anywhere else a try is one error.
@@ -1087,7 +1087,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe compound.tc
-  compound.tc:4: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  compound.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > chained.tc <<'EOF'
@@ -1099,7 +1099,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe chained.tc
-  chained.tc:4: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  chained.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > parenthesised.tc <<'EOF'
@@ -1111,7 +1111,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe parenthesised.tc
-  parenthesised.tc:4: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  parenthesised.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > parenthesised_assignment.tc <<'EOF'
@@ -1123,7 +1123,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe parenthesised_assignment.tc
-  parenthesised_assignment.tc:4: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  parenthesised_assignment.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > comma.tc <<'EOF'
@@ -1135,7 +1135,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe comma.tc
-  comma.tc:4: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  comma.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > operand_of_operator.tc <<'EOF'
@@ -1147,7 +1147,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe operand_of_operator.tc
-  operand_of_operator.tc:4: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  operand_of_operator.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > argument.tc <<'EOF'
@@ -1159,7 +1159,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe argument.tc
-  argument.tc:4: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  argument.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > condition.tc <<'EOF'
@@ -1171,7 +1171,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe condition.tc
-  condition.tc:3: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  condition.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > return.tc <<'EOF'
@@ -1181,7 +1181,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe return.tc
-  return.tc:3: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  return.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > for_clause.tc <<'EOF'
@@ -1193,7 +1193,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe for_clause.tc
-  for_clause.tc:3: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  for_clause.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > statement_expression.tc <<'EOF'
@@ -1204,7 +1204,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe statement_expression.tc
-  statement_expression.tc:3: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  statement_expression.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > declarators.tc <<'EOF'
@@ -1215,7 +1215,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe declarators.tc
-  declarators.tc:3: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  declarators.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > file_scope.tc <<'EOF'
@@ -1223,7 +1223,7 @@ Anywhere else a try is one error.
   > int x = try f();
   > EOF
   $ ./golden.exe file_scope.tc
-  file_scope.tc:2: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own (design 5.1 rule 3) [TC0054]
+  file_scope.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
   [1]
 
 A declaration that holds a try declares an automatic object, whose type
@@ -1237,7 +1237,7 @@ is not variably modified.
   > }
   > EOF
   $ ./golden.exe static.tc
-  static.tc:3: a declaration that holds try declares an object of static or thread storage duration (design 5.1 rule 3) [TC0055]
+  static.tc:3: error: a declaration that holds try declares an object of static or thread storage duration [try-declaration]
   [1]
 
   $ cat > variably_modified.tc <<'EOF'
@@ -1248,7 +1248,7 @@ is not variably modified.
   > }
   > EOF
   $ ./golden.exe variably_modified.tc
-  variably_modified.tc:3: a declaration that holds try declares an object of a variably modified type, whose size C evaluates before its initialiser (design 5.1 rule 3) [TC0055]
+  variably_modified.tc:3: error: a declaration that holds try declares an object of a variably modified type, whose size C evaluates before its initialiser [try-declaration]
   [1]
 
 try e; where T is a result drops the inner result (design 5.2).
@@ -1261,7 +1261,7 @@ try e; where T is a result drops the inner result (design 5.2).
   > }
   > EOF
   $ ./golden.exe dropped.tc
-  dropped.tc:3: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+  dropped.tc:3: error: a value of a result type is discarded; handle it with try or match, store it, or cast it to void [discarded-result]
   [1]
 
 No pragma line stands in the statement or declaration that holds a try,
@@ -1277,7 +1277,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_before.tc
-  pragma_before.tc:4: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own (design 5.1 rule 3) [TC0056]
+  pragma_before.tc:4: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_before_label.tc <<'EOF'
@@ -1290,7 +1290,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_before_label.tc
-  pragma_before_label.tc:5: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own (design 5.1 rule 3) [TC0056]
+  pragma_before_label.tc:5: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_inside.tc <<'EOF'
@@ -1303,7 +1303,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_inside.tc
-  pragma_inside.tc:3: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own (design 5.1 rule 3) [TC0056]
+  pragma_inside.tc:3: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_then_null.tc <<'EOF'
@@ -1398,7 +1398,7 @@ initialiser, so the operand would name another object there, or none.
   > }
   > EOF
   $ ./golden.exe own_declarator.tc
-  own_declarator.tc:5: 'n' denotes another entity where lowering writes the text, the one declared at own_declarator.tc:3 (design 5.1 rule 3, 13.5) [TC0061]
+  own_declarator.tc:5: error: 'n' denotes another entity where lowering writes the text, the one declared at own_declarator.tc:3 [try-name-capture]
   [1]
 
   $ cat > undeclared_there.tc <<'EOF'
@@ -1409,7 +1409,7 @@ initialiser, so the operand would name another object there, or none.
   > }
   > EOF
   $ ./golden.exe undeclared_there.tc
-  undeclared_there.tc:3: 'n' is not visible where lowering writes the text (design 5.1 rule 3, 13.5) [TC0061]
+  undeclared_there.tc:3: error: 'n' is not visible where lowering writes the text [try-name-capture]
   [1]
 
 The left operand of an assignment is read before the try, so the
@@ -1425,7 +1425,7 @@ nothing in the scope around it that the left operand would read.
   > }
   > EOF
   $ ./golden.exe left_declares.tc
-  left_declares.tc:4: 'K' is not visible where lowering writes the text (design 5.1 rule 3, 13.5) [TC0061]
+  left_declares.tc:4: error: 'K' is not visible where lowering writes the text [try-name-capture]
   [1]
 
   $ cat > operand_declares.tc <<'EOF'
@@ -1438,7 +1438,7 @@ nothing in the scope around it that the left operand would read.
   > }
   > EOF
   $ ./golden.exe operand_declares.tc
-  operand_declares.tc:5: 'K' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 5.1 rule 3, 13.5) [TC0061]
+  operand_declares.tc:5: error: 'K' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text [try-name-capture]
   [1]
 
 A tag declared before the holder and completed in it before the try is
@@ -1455,7 +1455,7 @@ the tag or reads a member through a pointer to it.
   > }
   > EOF
   $ ./golden.exe completed_named.tc
-  completed_named.tc:5: the tag 'S' is completed at completed_named.tc:5, between a place where lowering writes the text and the text, so it is incomplete there (design 5.1 rule 3, 13.5) [TC0061]
+  completed_named.tc:5: error: the tag 'S' is completed at completed_named.tc:5, between a place where lowering writes the text and the text, so it is incomplete there [try-name-capture]
   [1]
 
   $ cat > completed_unnamed.tc <<'EOF'
@@ -1469,7 +1469,7 @@ the tag or reads a member through a pointer to it.
   > }
   > EOF
   $ ./golden.exe completed_unnamed.tc
-  completed_unnamed.tc:6: the tag 'S' is completed at completed_unnamed.tc:6, between a place where lowering writes the text and the text, so it is incomplete there (design 5.1 rule 3, 13.5) [TC0061]
+  completed_unnamed.tc:6: error: the tag 'S' is completed at completed_unnamed.tc:6, between a place where lowering writes the text and the text, so it is incomplete there [try-name-capture]
   [1]
 
 An object declared again with an attribute in the holder before the try,
@@ -1487,7 +1487,7 @@ operand on GCC, which changes the object in place.
   > }
   > EOF
   $ ./golden.exe redeclared_in_block.tc
-  redeclared_in_block.tc:6: the declaration of 'o' at redeclared_in_block.tc:5, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses (design 5.1 rule 3, 13.5) [TC0061]
+  redeclared_in_block.tc:6: error: the declaration of 'o' at redeclared_in_block.tc:5, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [try-name-capture]
   [1]
 
 An operand that declares an object or a function with linkage, in a
@@ -1505,7 +1505,7 @@ the holder on GCC, so the operand declares none (design 13.5).
   > }
   > EOF
   $ ./golden.exe declares_linked.tc
-  declares_linked.tc:5: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
+  declares_linked.tc:5: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [try-name-capture]
   [1]
 
   $ cat > declares_function.tc <<'EOF'
@@ -1515,7 +1515,7 @@ the holder on GCC, so the operand declares none (design 13.5).
   > }
   > EOF
   $ ./golden.exe declares_function.tc
-  declares_function.tc:2: 'f' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
+  declares_function.tc:2: error: 'f' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [try-name-capture]
   [1]
 
 So does one of internal linkage, while a block-scope static object has
@@ -1529,7 +1529,7 @@ no linkage and is the operand's own.
   > }
   > EOF
   $ ./golden.exe declares_internal.tc
-  declares_internal.tc:3: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 5.1 rule 3, 13.5) [TC0061]
+  declares_internal.tc:3: error: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text [try-name-capture]
   [1]
 
   $ cat > declares_static.tc <<'EOF'
@@ -1555,7 +1555,7 @@ expression that GCC reads as declaring o aligned to 16 for the holder.
   > }
   > EOF
   $ ./golden.exe declares_unread.tc
-  declares_unread.tc:5: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 5.1 rule 3, 13.5) [TC0061]
+  declares_unread.tc:5: error: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere [try-name-capture]
   [1]
 
 Nor a tag keyword there of a tag that is not visible, which would
@@ -1573,7 +1573,7 @@ struct q in the holder would name one type.
   > }
   > EOF
   $ ./golden.exe declares_unread_tag.tc
-  declares_unread_tag.tc:6: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 5.1 rule 3, 13.5) [TC0061]
+  declares_unread_tag.tc:6: error: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere [try-name-capture]
   [1]
 
 A tag that the holder declares anew, in a block of its own, is none

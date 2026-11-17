@@ -32,7 +32,7 @@ let outcome ?(file = "in.i") ~parse ~spans text =
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match parse reader with
-      | Error error -> "error: " ^ Parser.error_message error
+      | Error error -> Parser.error_message error
       | Ok unit -> (
           let dump = Tree_dump.translation_unit reader unit in
           match Tree_dump.span_violation (Tree_dump.group dump) with
@@ -47,7 +47,7 @@ let resolutions ?(file = "in.i") text =
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with
-      | Error error -> "error: " ^ Parser.error_message error
+      | Error error -> Parser.error_message error
       | Ok unit ->
           Tree_dump.resolutions (Tree_dump.translation_unit reader unit))
 
@@ -95,7 +95,7 @@ let scope_ends ?(file = type_c_file) text =
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with
-      | Error error -> "error: " ^ Parser.error_message error
+      | Error error -> Parser.error_message error
       | Ok unit ->
           List.concat_map (external_declaration reader)
             (Tree.external_declarations unit)
@@ -184,7 +184,7 @@ let jump_targets ?(file = type_c_file) text =
   | Error error -> "read error: " ^ Reader.error_message error
   | Ok reader -> (
       match Parser.parse ~keywords:gnu_keywords reader with
-      | Error error -> "error: " ^ Parser.error_message error
+      | Error error -> Parser.error_message error
       | Ok unit ->
           List.concat_map (external_declaration reader)
             (Tree.external_declarations unit)
@@ -236,49 +236,48 @@ let jump_target_cases =
       "while (n)\nmatch (v) {\ndefault:\nif (case A = v) break;\nelse break;\n}"
       "break->match:3 break->match:3";
     jumps "a break outside a loop, switch or match" "break;"
-      "error: in.tc:2: break outside a loop, switch or match (C11 \
-       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
+      "in.tc:2: error: break outside a loop, switch or match [break-outside]";
     jumps "a continue in a switch outside a loop"
       "switch (n) { default: continue; }"
-      "error: in.tc:2: continue outside a loop (C11 6.8.6.2p1)";
+      "in.tc:2: error: continue outside a loop (C11 6.8.6.2p1)";
     jumps "a continue in a match outside a loop"
       "match (v) { default: continue; }"
-      "error: in.tc:2: continue outside a loop (C11 6.8.6.2p1)";
+      "in.tc:2: error: continue outside a loop (C11 6.8.6.2p1)";
     jumps "a break in a while condition"
       "for (;;) {\nwhile (({ if (n) break; 1; })) ;\n}"
-      "error: in.tc:3: a break in the condition of a loop or the step of a \
+      "in.tc:3: error: a break in the condition of a loop or the step of a \
        for, which Clang takes to leave the loop and GCC the statement \
-       around it (design 4.4) [TC0026]";
+       around it [ambiguous-jump]";
     jumps "a break in a do condition"
       "for (;;) {\ndo ; while (({ break; 1; }));\n}"
-      "error: in.tc:3: a break in the condition of a loop or the step of a \
+      "in.tc:3: error: a break in the condition of a loop or the step of a \
        for, which Clang takes to leave the loop and GCC the statement \
-       around it (design 4.4) [TC0026]";
+       around it [ambiguous-jump]";
     jumps "a continue in a for condition"
       "for (;;) {\nfor (; ({ continue; 1; }); ) ;\n}"
-      "error: in.tc:3: a continue in the condition of a loop or the step \
+      "in.tc:3: error: a continue in the condition of a loop or the step \
        of a for, which Clang takes to leave the loop and GCC the statement \
-       around it (design 4.4) [TC0026]";
+       around it [ambiguous-jump]";
     jumps "a continue in a for step, in a switch within it"
       "for (;;) {\nfor (;; ({ switch (n) { default: continue; } })) ;\n}"
-      "error: in.tc:3: a continue in the condition of a loop or the step \
+      "in.tc:3: error: a continue in the condition of a loop or the step \
        of a for, which Clang takes to leave the loop and GCC the statement \
-       around it (design 4.4) [TC0026]";
+       around it [ambiguous-jump]";
     jumps "a break in a while condition in the function body"
       "while (({ break; 1; })) ;"
-      "error: in.tc:2: a break in the condition of a loop or the step of a \
+      "in.tc:2: error: a break in the condition of a loop or the step of a \
        for, which Clang takes to leave the loop and GCC the statement \
-       around it (design 4.4) [TC0026]";
+       around it [ambiguous-jump]";
     jumps "a continue in a for step in the function body"
       "for (;; ({ continue; })) ;"
-      "error: in.tc:2: a continue in the condition of a loop or the step \
+      "in.tc:2: error: a continue in the condition of a loop or the step \
        of a for, which Clang takes to leave the loop and GCC the statement \
-       around it (design 4.4) [TC0026]";
+       around it [ambiguous-jump]";
     jumps "a break in a loop condition in a loop condition"
       "while (({ do ; while (({ break; 1; })); 1; })) ;"
-      "error: in.tc:2: a break in the condition of a loop or the step of a \
+      "in.tc:2: error: a break in the condition of a loop or the step of a \
        for, which Clang takes to leave the loop and GCC the statement \
-       around it (design 4.4) [TC0026]";
+       around it [ambiguous-jump]";
   ]
 
 (* In C text the backend decides where a break or continue in the
@@ -292,12 +291,10 @@ let c_text_jump_target_cases =
   [
     jumps "a block literal body is a function of its own"
       "while (n) {\n(void)^{ break; };\n}"
-      "error: in.i:3: break outside a loop, switch or match (C11 \
-       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
+      "in.i:3: error: break outside a loop, switch or match [break-outside]";
     jumps "so are a block literal's parameters"
       "while (n) {\n(void)^(int a[({ break; 1; })]) { };\n}"
-      "error: in.i:3: break outside a loop, switch or match (C11 \
-       6.8.6.3p1, design 4.3 rule 2) [TC0027]";
+      "in.i:3: error: break outside a loop, switch or match [break-outside]";
     jumps "a break in a while condition"
       "for (;;) {\nwhile (({ if (n) break; 1; })) ;\n}"
       "break->while:3|for:2";
@@ -337,10 +334,9 @@ let tail_break_cases =
   let jumps name body expected = case name (in_function body) expected in
   let refused line =
     Printf.sprintf
-      "error: in.tc:%d: a break that leaves the match before the end of \
+      "in.tc:%d: error: a break that leaves the match before the end of \
        its arm; put the `break` last in the arm, or leave the loop with \
-       `goto` or `return`, or use a single-pattern test (design 4.6) \
-       (design 4.3 rule 5) [TC0028]"
+       `goto` or `return`, or use a single-pattern test [early-break]"
       line
   in
   [
@@ -502,7 +498,7 @@ let typedef_cases =
        T) (int (array a (sizeof T))))) | (declaration (T) y)";
     case "a parameter shadows the typedef name until the prototype ends"
       "typedef int T; void f(int T, T x);"
-      "error: in.i:1: expected a parameter declaration, found `T`";
+      "in.i:1: error: expected a parameter declaration, found `T`";
     case "a typedef name in parentheses is a parameter list"
       "typedef int T; void f(int (T));"
       "(declaration (typedef int) T) | (declaration (void) (function f (int \
@@ -522,7 +518,7 @@ let typedef_cases =
       "(declaration (typedef int) T) | (declaration (int) T) | (declaration \
        (int) (init x T))";
     case "a type name is not an expression" "typedef int T; int x = T;"
-      "error: in.i:1: expected an expression, found the type name `T`";
+      "in.i:1: error: expected an expression, found the type name `T`";
     case "sizeof a type and an expression"
       "typedef int T; int a = sizeof(T), b = sizeof(a), c = sizeof a;"
       "(declaration (typedef int) T) | (declaration (int) (init a \
@@ -555,7 +551,7 @@ let aggregate_cases =
       "(declaration ((struct s (member (int) a) (member (int) b))) v) | \
        (declaration ((struct t {})) w)";
     case "a struct with neither tag nor body" "struct;"
-      "error: in.i:1: expected a tag or `{` after `struct` or `union`, found \
+      "in.i:1: error: expected a tag or `{` after `struct` or `union`, found \
        `;`";
   ]
 
@@ -577,12 +573,12 @@ let initialiser_cases =
     case "an empty list" "int a[] = {};"
       "(declaration (int) (init (array a) {}))";
     case "a comma alone" "int a[] = { , };"
-      "error: in.i:1: expected an expression, found `,`";
+      "in.i:1: error: expected an expression, found `,`";
     case "a range designator" "int a[] = { [0 ... 2] = 1, [3] = 2 };"
       "(declaration (int) (init (array a) ({} (designate ([...] 0 2) 1) \
        (designate ([] 3) 2))))";
     case "a designator without =" "int a[] = { [0] 1 };"
-      "error: in.i:1: expected `=` after a designator, found `1`";
+      "in.i:1: error: expected `=` after a designator, found `1`";
   ]
 
 (* Each expression is the initialiser of [x]. *)
@@ -798,7 +794,7 @@ let scope_cases =
        (block (label T ;) (declaration (T) x) (goto T)))";
     case "an object named as a typedef name is no type after it"
       "typedef int T; void f(void) { T T; T x; }"
-      "error: in.i:1: expected `;` after an expression, found `x`";
+      "in.i:1: error: expected `;` after an expression, found `x`";
     case "parameters end with a declaration that is no definition"
       "typedef int a; int f(int a); a * x;"
       "(declaration (typedef int) a) | (declaration (int) (function f (int \
@@ -976,7 +972,7 @@ let definition_cases =
        a))))";
     case "a declaration list only after an identifier list"
       "int f(int a) int b; { }"
-      "error: in.i:1: expected `;` after a declaration, found `int`";
+      "in.i:1: error: expected `;` after a declaration, found `int`";
     case "a body in a system header is skipped"
       "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\n\
        static int g(void) { __asm__ volatile (\"\"); return 0; }\n\
@@ -985,7 +981,7 @@ let definition_cases =
        (function h (void)) (block (return 0)))";
     case "an unterminated body in a system header"
       "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nint g(void) {\n"
-      "error: sys.h:1: expected `}` to end the function body, found end of \
+      "sys.h:1: error: expected `}` to end the function body, found end of \
        input";
   ]
 
@@ -1054,7 +1050,7 @@ let attribute_cases =
        (return x)))) (return 0)))";
     case "no C23 attributes in an old-style declaration list"
       "int f(a, b) int a; [[gnu::unused]] int b; { return a; }"
-      "error: in.i:1: expected a parameter declaration or `{`, found `[`";
+      "in.i:1: error: expected a parameter declaration or `{`, found `[`";
     case "an attribute declaration" "[[gnu::unused]];"
       "(declaration ((attributes unused)))";
     case "an attribute among the specifiers"
@@ -1207,9 +1203,9 @@ let keyword_cases =
       "__extension__ __asm__(\"\"); __extension__ ;"
       "(asm (\"\")) | ;";
     case "asm is a keyword in GNU C" "int asm;"
-      "error: in.i:1: expected a declarator, found `asm`";
+      "in.i:1: error: expected a declarator, found `asm`";
     case "typeof is a keyword in GNU C" "int typeof;"
-      "error: in.i:1: expected `(` after `typeof`, found `;`";
+      "in.i:1: error: expected `(` after `typeof`, found `;`";
   ]
 
 (* The GNU keywords spelled without underscores are identifiers in ISO C,
@@ -1223,9 +1219,9 @@ let iso_keyword_cases =
       "(declaration ((typeof (type int))) a) | (declaration ((typeof a)) b) \
        | (asm (\"\")) | (asm (\"\"))";
     case "__asm__ is a keyword" "int __asm__;"
-      "error: in.i:1: expected a declarator, found `__asm__`";
+      "in.i:1: error: expected a declarator, found `__asm__`";
     case "__typeof is a keyword" "int __typeof;"
-      "error: in.i:1: expected `(` after `typeof`, found `;`";
+      "in.i:1: error: expected `(` after `typeof`, found `;`";
     case "the C99 keywords" "static inline int f(int *restrict p);"
       "(declaration (static inline int) (function f (int (pointer restrict \
        p))))";
@@ -1344,7 +1340,7 @@ let assembler_cases =
       "(declaration (int) (declarator (function p (void)) (asm \"_p\") \
        (attributes x)))";
     case "no asm label on a definition" "int q(void) __asm(\"_q\") { }"
-      "error: in.i:1: expected `;` after a declaration, found `{`";
+      "in.i:1: error: expected `;` after a declaration, found `{`";
     case "file-scope assembler" "__asm__(\".globl x\");"
       "(asm (\".globl x\"))";
     statement_case "basic assembler" "asm(\"nop\");" "(asm (\"nop\"))";
@@ -1469,231 +1465,231 @@ let gnu_error_cases =
     (* GCC's nested functions are outside the profile: Clang has none. *)
     case "a nested function definition"
       "void f(void) { int g(int x) { return x; } }"
-      "error: in.i:1: a function definition in a block (a GNU nested \
-       function) is outside the GNU profile (design 13.3) [TC0031]";
+      "in.i:1: error: a function definition in a block (a GNU nested \
+       function) is outside the GNU profile [unsupported]";
     case "a label address of a constant" "void *p = && 1;"
-      "error: in.i:1: expected a label after `&&`, found `1`";
+      "in.i:1: error: expected a label after `&&`, found `1`";
     case "a label address takes no postfix"
       "void f(void) { void *p = &&a[0]; }"
-      "error: in.i:1: expected `;` after a declaration, found `[`";
+      "in.i:1: error: expected `;` after a declaration, found `[`";
     case "a computed goto without a target" "void f(void) { goto *; }"
-      "error: in.i:1: expected an expression, found `;`";
+      "in.i:1: error: expected an expression, found `;`";
     case "a computed goto without its semicolon" "void f(void) { goto *p }"
-      "error: in.i:1: expected `;` after `goto *`, found `}`";
+      "in.i:1: error: expected `;` after `goto *`, found `}`";
     case "__label__ without a label" "void f(void) { __label__; }"
-      "error: in.i:1: expected a label name, found `;`";
+      "in.i:1: error: expected a label name, found `;`";
     case "__label__ with a trailing comma" "void f(void) { __label__ a,; }"
-      "error: in.i:1: expected a label name, found `;`";
+      "in.i:1: error: expected a label name, found `;`";
     case "__label__ after a statement" "void f(void) { ; __label__ a; }"
-      "error: in.i:1: expected an expression, found `__label__`";
+      "in.i:1: error: expected an expression, found `__label__`";
     case "__label__ at file scope" "__label__ a;"
-      "error: in.i:1: expected a declaration, found `__label__`";
+      "in.i:1: error: expected a declaration, found `__label__`";
     case "an attribute without its parentheses" "int x __attribute__(a);"
-      "error: in.i:1: expected `((` after `__attribute__`, found `a`";
+      "in.i:1: error: expected `((` after `__attribute__`, found `a`";
     case "unclosed attribute arguments" "int x __attribute__((a(1, 2;"
-      "error: in.i:1: expected `)` to end the arguments of an attribute, \
+      "in.i:1: error: expected `)` to end the arguments of an attribute, \
        found end of input";
     case "a mismatched bracket in attribute arguments"
       "int x __attribute__((a(1]));"
-      "error: in.i:1: expected `)`, found `]`";
+      "in.i:1: error: expected `)`, found `]`";
     case "an attribute without a name" "int x __attribute__((1));"
-      "error: in.i:1: expected an attribute name, found `1`";
+      "in.i:1: error: expected an attribute name, found `1`";
     case "attributes without a comma" "int x __attribute__((a b));"
-      "error: in.i:1: expected `,` or `)` after an attribute, found `b`";
+      "in.i:1: error: expected `,` or `)` after an attribute, found `b`";
     case "asm without parentheses" "void f(void) { asm volatile; }"
-      "error: in.i:1: expected `(` after `asm`, found `;`";
+      "in.i:1: error: expected `(` after `asm`, found `;`";
     case "an operand without parentheses"
       "void f(void) { asm(\"\" : \"=r\" x); }"
-      "error: in.i:1: expected `(` after the constraint of an operand, found \
+      "in.i:1: error: expected `(` after the constraint of an operand, found \
        `x`";
     case "too many assembler sections"
       "void f(void) { asm goto(\"\" : : : : l : x); }"
-      "error: in.i:1: expected `:` or `)` in `asm`, found `:`";
+      "in.i:1: error: expected `:` or `)` in `asm`, found `:`";
     case "assembler labels without goto"
       "void f(void) { l: asm(\"\" : : : : l); }"
-      "error: in.i:1: labels after the clobbers of an `asm` without `goto` \
+      "in.i:1: error: labels after the clobbers of an `asm` without `goto` \
        (GCC manual, \"Extended Asm\")";
     case "typeof without parentheses" "typeof int x;"
-      "error: in.i:1: expected `(` after `typeof`, found `int`";
+      "in.i:1: error: expected `(` after `typeof`, found `int`";
     case "an unterminated statement expression" "int x = ({ 1; );"
-      "error: in.i:1: expected an expression, found `)`";
+      "in.i:1: error: expected an expression, found `)`";
     case "a mismatched bracket in a skipped body"
       "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nint g(void) { ) }\n"
-      "error: sys.h:1: expected `}`, found `)`";
+      "sys.h:1: error: expected `}`, found `)`";
     case "an inner mismatched bracket in attribute arguments"
       "int a __attribute__((aligned( ( } )));"
-      "error: in.i:1: expected `)`, found `}`";
+      "in.i:1: error: expected `)`, found `}`";
     case "a closer ends no conditional in a skipped body"
       "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nint f(void) { a ? } int g(void) { \
        }\n"
-      "error: sys.h:1: expected `:` of a conditional, found `}`";
+      "sys.h:1: error: expected `:` of a conditional, found `}`";
     case "an enumeration as a fixed type"
       "enum E : enum F : int { A } { B };"
-      "error: in.i:1: expected an integer type after `:`, found `enum`";
+      "in.i:1: error: expected an integer type after `:`, found `enum`";
     case "a structure as a fixed type" "enum E : struct s { B };"
-      "error: in.i:1: expected an integer type after `:`, found `struct`";
+      "in.i:1: error: expected an integer type after `:`, found `struct`";
     case "alignof takes a unary expression" "int x = __alignof__ (int)a;"
-      "error: in.i:1: expected `;` after a declaration, found `a`";
+      "in.i:1: error: expected `;` after a declaration, found `a`";
     case "types compatible takes two type names"
       "int x = __builtin_types_compatible_p(int);"
-      "error: in.i:1: expected `,` after the first type name of \
+      "in.i:1: error: expected `,` after the first type name of \
        `__builtin_types_compatible_p`, found `)`";
     case "types compatible takes no expression"
       "int x = __builtin_types_compatible_p(int, a);"
-      "error: in.i:1: expected a type name, found `a`";
+      "in.i:1: error: expected a type name, found `a`";
     case "a block literal without a body" "void *b = ^;"
-      "error: in.i:1: expected `{` or `(` after `^`, found `;`";
+      "in.i:1: error: expected `{` or `(` after `^`, found `;`";
     case "a block literal with a return type" "void *b = ^int { };"
-      "error: in.i:1: expected `{` or `(` after `^`, found `int`";
+      "in.i:1: error: expected `{` or `(` after `^`, found `int`";
     case "a block literal without a body after its parameters"
       "void *b = ^(void) x;"
-      "error: in.i:1: expected `{` of a block literal, found `x`";
+      "in.i:1: error: expected `{` of a block literal, found `x`";
     case "a block literal with an identifier list" "void *b = ^(x) { };"
-      "error: in.i:1: expected a parameter declaration, found `x`";
+      "in.i:1: error: expected a parameter declaration, found `x`";
     case "attributes before a later function definition"
       "int a, __attribute__((unused)) f(void) { return 0; }"
-      "error: in.i:1: expected `;` after a declaration, found `{`";
+      "in.i:1: error: expected `;` after a declaration, found `{`";
     case "attributes before a later member declarator"
       "struct s { int a, __attribute__((x)) b; };"
-      "error: in.i:1: expected a declarator, found `__attribute__`";
+      "in.i:1: error: expected a declarator, found `__attribute__`";
     case "attributes after a case label before an expression"
       "void f(int a) { switch (a) { case 1: __attribute__((x)) a = 1; } }"
-      "error: in.i:1: expected `;` after the attributes of a statement, \
+      "in.i:1: error: expected `;` after the attributes of a statement, \
        found `a`";
     case "attributes that begin a declaration after a label"
       "void f(void) { l: ; case 1: __attribute__((x)) int y; }"
-      "error: in.i:1: expected `;` after the attributes of a statement, \
+      "in.i:1: error: expected `;` after the attributes of a statement, \
        found `int`";
     case "the end of the input inside attributes after a parenthesis"
       "int x = sizeof(int (__attribute__((a)"
-      "error: in.i:1: expected `))` to end `__attribute__`, found end of \
+      "in.i:1: error: expected `))` to end `__attribute__`, found end of \
        input";
     case "an attribute without parentheses after a parenthesis"
       "int x = sizeof(int (__attribute__ *));"
-      "error: in.i:1: expected `((` after `__attribute__`, found `*`";
+      "in.i:1: error: expected `((` after `__attribute__`, found `*`";
     case "a long chain of fixed types"
       ("enum E : "
       ^ String.concat "" (List.init 100_000 (fun _ -> "enum : "))
       ^ "int x;")
-      "error: in.i:1: expected an integer type after `:`, found `enum`";
+      "in.i:1: error: expected an integer type after `:`, found `enum`";
   ]
 
 let error_cases =
   [
     case "an implicit int" "x;"
-      "error: in.i:1: expected a declaration, found `x`";
+      "in.i:1: error: expected a declaration, found `x`";
     case "an unterminated body" "int f(void) {\n{\n"
-      "error: in.i:2: expected `}` to end a compound statement, found end \
+      "in.i:2: error: expected `}` to end a compound statement, found end \
        of input";
     case "the end of input after a loop head" "void f(void) { while (1)"
-      "error: in.i:1: expected an expression, found end of input";
+      "in.i:1: error: expected an expression, found end of input";
     case "the end of input after a label" "void f(void) { L:"
-      "error: in.i:1: expected an expression, found end of input";
+      "in.i:1: error: expected an expression, found end of input";
     case "the end of input after else" "void f(void) { if (1) ; else"
-      "error: in.i:1: expected an expression, found end of input";
+      "in.i:1: error: expected an expression, found end of input";
     case "a body after a non-function" "int x { }"
-      "error: in.i:1: expected `;` after a declaration, found `{`";
+      "in.i:1: error: expected `;` after a declaration, found `{`";
     case "a body after a pointer to a function" "int (*f)(void) { }"
-      "error: in.i:1: expected `;` after a declaration, found `{`";
+      "in.i:1: error: expected `;` after a declaration, found `{`";
     case "a missing declarator" "int *;"
-      "error: in.i:1: expected a declarator, found `;`";
+      "in.i:1: error: expected a declarator, found `;`";
     case "a pp-number that is no constant" "int x = 1.2.3;"
-      "error: in.i:1: expected a constant, found the preprocessing number \
+      "in.i:1: error: expected a constant, found the preprocessing number \
        `1.2.3`";
     case "a keyword as a member name" "int x = a.int;"
-      "error: in.i:1: expected a member name after `.`, found `int`";
+      "in.i:1: error: expected a member name after `.`, found `int`";
     case "a statement keyword at file scope" "if (x) y;"
-      "error: in.i:1: expected a declaration, found `if`";
+      "in.i:1: error: expected a declaration, found `if`";
     case "an error on a later line" "int x;\nint y = (1;\n"
-      "error: in.i:2: expected `)` after an expression, found `;`";
+      "in.i:2: error: expected `)` after an expression, found `;`";
     case "a long token is shortened"
       ("int x = 1 \"" ^ String.make 60 'a' ^ "\";")
-      ("error: in.i:1: expected `;` after a declaration, found `\""
+      ("in.i:1: error: expected `;` after a declaration, found `\""
       ^ String.make 39 'a' ^ "...`");
     case "a cast where a unary expression must be" "int x = ++(int)a;"
-      "error: in.i:1: expected `{` of a compound literal, found `a`";
+      "in.i:1: error: expected `{` of a compound literal, found `a`";
     case "a parameter list after an abstract declarator in a type name"
       "int x = sizeof(int (a));"
-      "error: in.i:1: expected a declarator, found `a`";
+      "in.i:1: error: expected a declarator, found `a`";
     case "_Imaginary is not in the grammar" "_Imaginary float x;"
-      "error: in.i:1: expected a declaration, found `_Imaginary`";
+      "in.i:1: error: expected a declaration, found `_Imaginary`";
     case "the left operand of = is a unary expression" "int x = a + b = c;"
-      "error: in.i:1: the left operand of `=` is not a unary expression";
+      "in.i:1: error: the left operand of `=` is not a unary expression";
     case "nor a cast" "int x = (int)a = 1;"
-      "error: in.i:1: the left operand of `=` is not a unary expression";
+      "in.i:1: error: the left operand of `=` is not a unary expression";
     case "the last operand of ?: is not an assignment"
       "int x = (a ? b : c = d);"
-      "error: in.i:1: the left operand of `=` is not a unary expression";
+      "in.i:1: error: the left operand of `=` is not a unary expression";
     case "a typedef name ends an identifier list"
       "typedef int T; int f(a, T);"
-      "error: in.i:1: expected a parameter name, found the type name `T`";
+      "in.i:1: error: expected a parameter name, found the type name `T`";
     case "an ellipsis after an identifier list" "int f(a, ...);"
-      "error: in.i:1: expected a parameter name, found `...`";
+      "in.i:1: error: expected a parameter name, found `...`";
     case "too many brackets"
       ("int x = " ^ String.make (Parser.max_nesting + 1) '(')
       (Printf.sprintf
-         "error: in.i:1: more than %d nested brackets or conditionals"
+         "in.i:1: error: more than %d nested brackets or conditionals"
          Parser.max_nesting);
     case "if without parentheses" "void f(void) { if a; }"
-      "error: in.i:1: expected `(` after `if`, found `a`";
+      "in.i:1: error: expected `(` after `if`, found `a`";
     case "do without while" "void f(void) { do x; y; }"
-      "error: in.i:1: expected `while` after the body of `do`, found `y`";
+      "in.i:1: error: expected `while` after the body of `do`, found `y`";
     case "else without if" "void f(void) { else x; }"
-      "error: in.i:1: expected an expression, found `else`";
+      "in.i:1: error: expected an expression, found `else`";
     case "a declaration after a label" "void f(void) { L: int x; }"
-      "error: in.i:1: expected an expression, found `int`";
+      "in.i:1: error: expected an expression, found `int`";
     case "do without its semicolon" "void f(void) { do ; while (1) }"
-      "error: in.i:1: expected `;` after `do` ... `while`, found `}`";
+      "in.i:1: error: expected `;` after `do` ... `while`, found `}`";
     case "default without a colon" "void f(void) { switch (a) { default ; } }"
-      "error: in.i:1: expected `:` after `default`, found `;`";
+      "in.i:1: error: expected `:` after `default`, found `;`";
     case "case without a value" "void f(void) { switch (a) { case: ; } }"
-      "error: in.i:1: expected an expression, found `:`";
+      "in.i:1: error: expected an expression, found `:`";
     case "return without a semicolon" "int f(void) { return }"
-      "error: in.i:1: expected an expression, found `}`";
+      "in.i:1: error: expected an expression, found `}`";
     case "goto without a label" "void f(void) { goto 1; }"
-      "error: in.i:1: expected a label after `goto`, found `1`";
+      "in.i:1: error: expected a label after `goto`, found `1`";
     case "a goto to a label that its function does not define"
       "void f(void) {\ngoto a;\n{ __label__ b; goto b; }\nb: ;\n}"
-      "error: in.i:2: a goto to a label that is not defined in its scope \
+      "in.i:2: error: a goto to a label that is not defined in its scope \
        (C11 6.8.6.1p1)";
     case "a goto to a local label that its block does not define"
       "void f(void) {\n{ __label__ b; goto b; }\nb: ;\n}"
-      "error: in.i:2: a goto to a label that is not defined in its scope \
+      "in.i:2: error: a goto to a label that is not defined in its scope \
        (C11 6.8.6.1p1)";
     case "an asm goto to a label that is not defined"
       "void f(void) {\nasm goto (\"\" : : : : c);\n}"
-      "error: in.i:2: a goto to a label that is not defined in its scope \
+      "in.i:2: error: a goto to a label that is not defined in its scope \
        (C11 6.8.6.1p1)";
     case "a goto in a block literal to its function's label"
       "void f(void) {\na: (void)^{\ngoto a;\n};\n}"
-      "error: in.i:3: a goto to a label that is not defined in its scope \
+      "in.i:3: error: a goto to a label that is not defined in its scope \
        (C11 6.8.6.1p1)";
     case "a label defined twice" "void f(void) {\na: ;\n{ a: ; }\n}"
-      "error: in.i:3: a second definition of a label in its scope (C11 \
+      "in.i:3: error: a second definition of a label in its scope (C11 \
        6.8.1p3)";
     case "a local label declared twice in its block"
       "void f(void) { __label__ a,\na; a: ; }"
-      "error: in.i:2: a local label declared twice in its block (GCC \
+      "in.i:2: error: a local label declared twice in its block (GCC \
        manual, \"Local Labels\")";
     case "the address of a label outside a function body"
       "void *p =\n&&a;"
-      "error: in.i:2: the address of a label outside a function body (GCC \
+      "in.i:2: error: the address of a label outside a function body (GCC \
        manual, \"Labels as Values\")";
     case "the address of a label in the parameters of a definition"
       "void f(int (*p)[sizeof (&&a)]) { a: ; }"
-      "error: in.i:1: the address of a label outside a function body (GCC \
+      "in.i:1: error: the address of a label outside a function body (GCC \
        manual, \"Labels as Values\")";
     case "a label outside a function body"
       "int n = sizeof (({\na: 0; }));"
-      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
+      "in.i:2: error: a label outside a function body (C11 6.2.1p3)";
     case "a goto outside a function body"
       "int n = sizeof (({\ngoto a; 0; }));"
-      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
+      "in.i:2: error: a label outside a function body (C11 6.2.1p3)";
     case "a local label outside a function body"
       "int n = sizeof (({\n__label__ a; 0; }));"
-      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
+      "in.i:2: error: a label outside a function body (C11 6.2.1p3)";
     case "the labels of a file-scope asm" "asm goto (\"\" : : : :\na);"
-      "error: in.i:2: a label outside a function body (C11 6.2.1p3)";
+      "in.i:2: error: a label outside a function body (C11 6.2.1p3)";
     case "an empty file" "" "";
     case "only pragmas" "#pragma once\n#pragma typec checked\n" "";
     case "a pragma line of no tokens passes whole in C text"
@@ -2069,45 +2065,45 @@ let type_c_error_cases =
   [
     case "a pragma line of no tokens in Type-C text"
       "int x;\n#pragma mark - Don't edit\nint y;"
-      "error: in.tc:2: a `#pragma` line whose text is no sequence of \
-       preprocessing tokens: unterminated literal (design 13.5) [TC0040]";
+      "in.tc:2: error: a `#pragma` line whose text is no sequence of \
+       preprocessing tokens: unterminated literal [pragma-tokens]";
     case "a try without an operand" "void f(void) { try; }"
-      "error: in.tc:1: expected an expression, found `;`";
+      "in.tc:1: error: expected an expression, found `;`";
     case "a block literal in Type-C text"
       "void f(void) {\n(void)\n^{ };\n}"
-      "error: in.tc:3: a block literal is C text only, so Type-C text cannot \
-       write one or be included in one (design 13.3) [TC0030]";
+      "in.tc:3: error: a block literal is C text only, so Type-C text cannot \
+       write one or be included in one [block-literal]";
     case "_Defer in an attribute's arguments"
       "int x __attribute__((aligned(_Defer)));"
-      "error: in.tc:1: `_Defer` in the arguments of an attribute, which \
+      "in.tc:1: error: `_Defer` in the arguments of an attribute, which \
        typing does not read, begins a construct of Type-C that would reach \
-       the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+       the backend as written [unread-word]";
     case "defer in an attribute's arguments"
       "void f(void) { [[gnu::cleanup(defer)]] int x; }"
-      "error: in.tc:1: `defer` in the arguments of an attribute, which \
+      "in.tc:1: error: `defer` in the arguments of an attribute, which \
        typing does not read, begins a construct of Type-C that would reach \
-       the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+       the backend as written [unread-word]";
     case "try in an attribute's arguments"
       "int f(void);\nint x __attribute__((aligned(sizeof(try f()))));"
-      "error: in.tc:2: `try` in the arguments of an attribute, which typing \
+      "in.tc:2: error: `try` in the arguments of an attribute, which typing \
        does not read, begins a construct of Type-C that would reach the \
-       backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+       backend as written [unread-word]";
     case "a declaration hides try in an attribute's arguments"
       "int try; int x __attribute__((aligned(sizeof(try))));"
       "(declaration (int) try) | (declaration (int) (declarator x (attributes \
        (aligned ( sizeof ( try ) )))))";
     case "a claimed name in an attribute's arguments"
       "int x __attribute__((aligned(sizeof(enum { option__i_Some }))));"
-      "error: in.tc:1: the name `option__i_Some` is spelled in the arguments \
+      "in.tc:1: error: the name `option__i_Some` is spelled in the arguments \
        of an attribute, which typing does not read, but the generic `option` \
        claims every name that begins with its own name and `__` for its \
-       instances (design 10.1 rule 6) [TC0004]";
+       instances [claimed-name]";
     case "a claimed name in a body that a system header opens"
       "# 1 \"in.tc\"\n# 1 \"sys.h\" 1 3\nint g(void) { return option__i; }\n"
-      "error: sys.h:1: the name `option__i` is spelled in a function body \
+      "sys.h:1: error: the name `option__i` is spelled in a function body \
        that a system header opens, which typing does not read, but the \
        generic `option` claims every name that begins with its own name and \
-       `__` for its instances (design 10.1 rule 6) [TC0004]";
+       `__` for its instances [claimed-name]";
     case "a defer statement" "void f(void) { defer f(); }"
       "(define (void) (function f (void)) (block (defer (expr (call f)))))";
     case "_Defer is defer" "void f(void) { _Defer f(); }"
@@ -2115,28 +2111,28 @@ let type_c_error_cases =
     case "a defer of a null statement" "void f(void) { defer; }"
       "(define (void) (function f (void)) (block (defer ;)))";
     case "a defer in a defer" "void f(void) { defer { defer f(); f(); } }"
-      "error: in.tc:1: a `defer` statement in the statement of a defer, \
+      "in.tc:1: error: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
-       would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0072]";
+       would repeat every copy of the inner statement \
+       [nested-defer]";
     case "a defer in a block of a defer"
       "void f(void) { defer { f(); { defer f(); } } }"
-      "error: in.tc:1: a `defer` statement in the statement of a defer, \
+      "in.tc:1: error: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
-       would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0072]";
+       would repeat every copy of the inner statement \
+       [nested-defer]";
     case "a defer in a statement expression of a defer"
       "void f(void) { defer (void)({ { defer f(); } 0; }); }"
-      "error: in.tc:1: a `defer` statement in the statement of a defer, \
+      "in.tc:1: error: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
-       would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0072]";
+       would repeat every copy of the inner statement \
+       [nested-defer]";
     case "a defer as the statement of a defer"
       "void f(void) { defer defer f(); }"
-      "error: in.tc:1: a `defer` statement in the statement of a defer, \
+      "in.tc:1: error: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
-       would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0072]";
+       would repeat every copy of the inner statement \
+       [nested-defer]";
     case "a defer after the labels of an arm"
       "type t = | A | B;\nvoid f(t v) { match (v) { case A: defer f(v); \
        break; default: break; } }"
@@ -2145,170 +2141,170 @@ let type_c_error_cases =
        break))))";
     case "a declaration is no statement of a defer"
       "void f(void) { defer int x = 0; }"
-      "error: in.tc:1: expected an expression, found `int`";
+      "in.tc:1: error: expected an expression, found `int`";
     case "defer in an operand" "int f(int x) { return x + defer; }"
-      "error: in.tc:1: expected an expression, found `defer`";
+      "in.tc:1: error: expected an expression, found `defer`";
     case "a generated name" "int __tc_x;"
-      "error: in.tc:1: `__tc_x` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_x` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a generated member" "struct s { int __tc_m; };"
-      "error: in.tc:1: `__tc_m` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_m` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a generated tag" "struct __tc_s *p;"
-      "error: in.tc:1: `__tc_s` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_s` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a generated label" "void f(void) { __tc_l: ; }"
-      "error: in.tc:1: `__tc_l` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_l` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a generated type declaration" "type __tc_t = int;"
-      "error: in.tc:1: `__tc_t` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_t` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a use of a generated name" "int f(void) { return __tc_x; }"
-      "error: in.tc:1: `__tc_x` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_x` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a generated local label" "void f(void) { __label__ __tc_l; }"
-      "error: in.tc:1: `__tc_l` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_l` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a generated name in an attribute's arguments"
       "int x __attribute__((cleanup(__tc_f)));"
-      "error: in.tc:1: `__tc_f` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.tc:1: error: `__tc_f` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "a universe name in an expression"
       "int f(void) { return slice; }"
-      "error: in.tc:1: `slice` is a universe name that typec does not \
-       implement yet (design 8; work package 3.4) [TC0023]";
+      "in.tc:1: error: `slice` is a universe name that typec does not \
+       implement yet (work package 3.4) [not-implemented]";
     case "a universe name where a declaration begins" "str s;"
-      "error: in.tc:1: `str` is a universe name that typec does not implement \
-       yet (design 8; work package 3.4) [TC0023]";
+      "in.tc:1: error: `str` is a universe name that typec does not implement \
+       yet (work package 3.4) [not-implemented]";
     case "a universe name in a block" "void f(void) { slice_sub(0); }"
-      "error: in.tc:1: `slice_sub` is a universe name that typec does not \
-       implement yet (design 8; work package 3.4) [TC0023]";
+      "in.tc:1: error: `slice_sub` is a universe name that typec does not \
+       implement yet (work package 3.4) [not-implemented]";
     case "a type declaration repeated" "type t = int;\ntype t = int;"
-      "error: in.tc:2: `t` is declared twice in one scope, and one of them is \
-       a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:2: error: `t` is declared twice in one scope, and one of them is \
+       a type declaration [type-redeclaration]";
     case "a forward declaration repeated" "type t; type t;"
-      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
-       a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:1: error: `t` is declared twice in one scope, and one of them is \
+       a type declaration [type-redeclaration]";
     case "a typedef before a type declaration"
       "typedef int t; type t = int;"
-      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
-       a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:1: error: `t` is declared twice in one scope, and one of them is \
+       a type declaration [type-redeclaration]";
     case "a declaration after a type declaration" "type t = int; int t;"
-      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
-       a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:1: error: `t` is declared twice in one scope, and one of them is \
+       a type declaration [type-redeclaration]";
     case "a parameter redeclared by a type declaration"
       "void f(int t) { type t = int; }"
-      "error: in.tc:1: `t` is declared twice in one scope, and one of them is \
-       a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:1: error: `t` is declared twice in one scope, and one of them is \
+       a type declaration [type-redeclaration]";
     case "an alias that uses its own name" "type t = t *;"
-      "error: in.tc:1: `t` is used in its own definition, which is not a \
-       structure or union specifier (design 3.1 rule 2) [TC0002]";
+      "in.tc:1: error: `t` is used in its own definition, which is not a \
+       structure or union specifier [self-reference]";
     case "an alias of a pointer to a structure that uses its own name"
       "type t = struct { t *next; } *;"
-      "error: in.tc:1: `t` is used in its own definition, which is not a \
-       structure or union specifier (design 3.1 rule 2) [TC0002]";
+      "in.tc:1: error: `t` is used in its own definition, which is not a \
+       structure or union specifier [self-reference]";
     case "an alias that hides an outer name uses its own"
       "typedef int t; void f(void) { type t = t; }"
-      "error: in.tc:1: `t` is used in its own definition, which is not a \
-       structure or union specifier (design 3.1 rule 2) [TC0002]";
+      "in.tc:1: error: `t` is used in its own definition, which is not a \
+       structure or union specifier [self-reference]";
     case "two constructors of one name" "type e = | A | B(int x) | A;"
-      "error: in.tc:1: `A` names two constructors of one variant (design \
-       3.2 rule 2) [TC0005]";
+      "in.tc:1: error: `A` names two constructors of one variant \
+       [duplicate-constructor]";
     case "a derived enumerator declared before" "int e_A; type e = | A;"
-      "error: in.tc:1: the variant `e` claims the enumerator `e_A`, which \
-       this scope declares already (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the variant `e` claims the enumerator `e_A`, which \
+       this scope declares already [claimed-name]";
     case "a derived enumerator declared after" "type e = | A; int e_A;"
-      "error: in.tc:1: the enumerator `e_A` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the enumerator `e_A` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a block declares a derived enumerator"
       "type e = | A; void f(void) { int e_A; }"
-      "error: in.tc:1: the enumerator `e_A` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the enumerator `e_A` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a parameter of a prototype declares a derived enumerator"
       "type e = | A; void f(int e_A);"
-      "error: in.tc:1: the enumerator `e_A` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the enumerator `e_A` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a variant in a block derives an outer one's enumerator"
       "type a_b = | C; void f(void) { type a = | b_C; }"
-      "error: in.tc:1: the variant `a` claims the enumerator `a_b_C`, which \
-       an enclosing scope claims already (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the variant `a` claims the enumerator `a_b_C`, which \
+       an enclosing scope claims already [claimed-name]";
     case "a derived enumerator named in Type-C text"
       "type e = | A; int x = e_A;"
-      "error: in.tc:1: the enumerator `e_A` is not available to Type-C \
-       text, as a type declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the enumerator `e_A` is not available to Type-C \
+       text, as a type declaration claims it [claimed-name]";
     case "a derived enumeration tag declared before"
       "enum e_tag { X }; type e = | A;"
-      "error: in.tc:1: the type declaration of `e` claims the tag `e_tag`, \
-       which this scope declares already (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the type declaration of `e` claims the tag `e_tag`, \
+       which this scope declares already [claimed-name]";
     case "a derived enumeration tag declared after"
       "type e = | A; enum e_tag { X };"
-      "error: in.tc:1: the tag `e_tag` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `e_tag` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a derived enumeration tag named in Type-C text"
       "type e = | A; enum e_tag t;"
-      "error: in.tc:1: the tag `e_tag` is not available to Type-C text, as \
-       a type declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `e_tag` is not available to Type-C text, as \
+       a type declaration claims it [claimed-name]";
     case "the derived names of two variants meet"
       "type a_b = | C; type a = | b_C;"
-      "error: in.tc:1: the variant `a` claims the enumerator `a_b_C`, which \
-       this scope declares already (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the variant `a` claims the enumerator `a_b_C`, which \
+       this scope declares already [claimed-name]";
     case "a variant completed twice" "type e; type e = | A; type e = | B;"
-      "error: in.tc:1: `e` is declared twice in one scope, and one of them \
-       is a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:1: error: `e` is declared twice in one scope, and one of them \
+       is a type declaration [type-redeclaration]";
     case "an incomplete variant completed by an alias" "type e; type e = int;"
-      "error: in.tc:1: `e` is declared twice in one scope, and one of them \
-       is a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:1: error: `e` is declared twice in one scope, and one of them \
+       is a type declaration [type-redeclaration]";
     case "an incomplete variant declared twice" "type e; type e;"
-      "error: in.tc:1: `e` is declared twice in one scope, and one of them \
-       is a type declaration (design 3.1 rule 5) [TC0003]";
+      "in.tc:1: error: `e` is declared twice in one scope, and one of them \
+       is a type declaration [type-redeclaration]";
     case "a field names a derived enumerator of a later constructor"
       "double e_B; void f(void) { type e = | A(typeof(e_B) v) | B; }"
-      "error: in.tc:1: the enumerator `e_B` is not available to Type-C \
-       text, as a type declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the enumerator `e_B` is not available to Type-C \
+       text, as a type declaration claims it [claimed-name]";
     case "a type declaration named with two underscores"
       "type __tc = | x;"
-      "error: in.tc:1: `__tc` cannot name a type declaration, as it \
-       contains `__` (design 3.1 rules 6 and 7) [TC0029]";
+      "in.tc:1: error: `__tc` cannot name a type declaration, as it \
+       contains `__` [reserved-type-name]";
     case "a type declaration at file scope named with an underscore"
       "type _t = int;"
-      "error: in.tc:1: `_t` cannot name a type declaration at file scope, \
-       as it begins with `_` (design 3.1 rules 6 and 7) [TC0029]";
+      "in.tc:1: error: `_t` cannot name a type declaration at file scope, \
+       as it begins with `_` [reserved-type-name]";
     case "a constructor named with an underscore" "type e = | _a;"
-      "error: in.tc:1: `_a` cannot name a constructor, as it begins with \
-       `_` (design 3.2 rule 2) [TC0025]";
+      "in.tc:1: error: `_a` cannot name a constructor, as it begins with \
+       `_` [reserved-constructor]";
     case "a field named as C reserves for any use, through a universal \
           character name"
       "type e = | A(int _\\u0041);"
-      "read error: in.tc:1: character U+0041 cannot be written as a universal \
-       character name";
+      "read error: in.tc:1: error: character U+0041 cannot be written as a \
+       universal character name";
     case "a type name whose derived tag would begin with two underscores"
       "type _ = | tc_x;"
-      "error: in.tc:1: `_` cannot name a type declaration, as it ends with \
-       `_` (design 3.1 rules 6 and 7) [TC0029]";
+      "in.tc:1: error: `_` cannot name a type declaration, as it ends with \
+       `_` [reserved-type-name]";
     case "a constructor with empty parentheses" "type e = | A();"
-      "error: in.tc:1: expected a field, found `)`";
+      "in.tc:1: error: expected a field, found `)`";
     case "a field without a name" "type e = | A(int);"
-      "error: in.tc:1: expected a declarator, found `)`";
+      "in.tc:1: error: expected a declarator, found `)`";
     case "constructors without a bar between them" "type e = | A B;"
-      "error: in.tc:1: expected `;` after a type declaration, found `B`";
+      "in.tc:1: error: expected `;` after a type declaration, found `B`";
     case "a variant without a constructor" "type e = | ;"
-      "error: in.tc:1: expected the name of a constructor, found `;`";
+      "in.tc:1: error: expected the name of a constructor, found `;`";
     case "a constructor named by a number" "type e = | 5;"
-      "error: in.tc:1: expected the name of a constructor, found `5`";
+      "in.tc:1: error: expected the name of a constructor, found `5`";
     case "a later constructor named by a number" "type e = | A(int x) | 5;"
-      "error: in.tc:1: expected the name of a constructor, found `5`";
+      "in.tc:1: error: expected the name of a constructor, found `5`";
     case "two bars between constructors" "type e = | A(int x) | | B;"
-      "error: in.tc:1: expected the name of a constructor, found `|`";
+      "in.tc:1: error: expected the name of a constructor, found `|`";
     case "a variant that ends at its bar" "type e = |"
-      "error: in.tc:1: expected the name of a constructor, found end of \
+      "in.tc:1: error: expected the name of a constructor, found end of \
        input";
     case "a later reserved constructor before a malformed field"
       "type e = | A(int x, ) | _b;"
-      "error: in.tc:1: `_b` cannot name a constructor, as it begins with \
-       `_` (design 3.2 rule 2) [TC0025]";
+      "in.tc:1: error: `_b` cannot name a constructor, as it begins with \
+       `_` [reserved-constructor]";
     case "a malformed field before a later constructor"
       "type e = | A(int x | B;"
-      "error: in.tc:1: expected `,` or `)` after a field, found `|`";
+      "in.tc:1: error: expected `,` or `)` after a field, found `|`";
     case "a distinct type" "type d = distinct unsigned int;"
       "(type d distinct (type unsigned int))";
     case "a private variant" "type v = private | A;"
@@ -2317,62 +2313,62 @@ let type_c_error_cases =
       "(type v private distinct (type int))";
     case "private before a distinct that begins no type name"
       "typedef int private; type v = private distinct;"
-      "error: in.tc:1: expected `;` after a type declaration, found \
+      "in.tc:1: error: expected `;` after a type declaration, found \
        `distinct`";
     case "an application with an argument too many"
       "type box(T) = struct { T value; }; box(int, int) b;"
-      "error: in.tc:1: the generic type `box` takes 1 type argument, not 2 \
-       (design 3.5 rule 1) [TC0035]";
+      "in.tc:1: error: the generic type `box` takes 1 type argument, not 2 \
+       [generic-type-use]";
     case "a generic name alone in an expression"
       "type box(T) = struct { T value; }; int n = sizeof box;"
-      "error: in.tc:1: the generic type `box` names a type only in a type \
-       application, `box(...)` (design 3.5 rule 1) [TC0035]";
+      "in.tc:1: error: the generic type `box` names a type only in a type \
+       application, `box(...)` [generic-type-use]";
     case "an application where an expression begins"
       "type box(T) = struct { T value; }; int n = sizeof box(int);"
-      "error: in.tc:1: expected an expression, found the type name `box`";
+      "in.tc:1: error: expected an expression, found the type name `box`";
     case "a type declaration without = or ;" "type t int;"
-      "error: in.tc:1: expected `=` or `;` after the name of a type \
+      "in.tc:1: error: expected `=` or `;` after the name of a type \
        declaration, found `int`";
     case "a type declaration in a for clause"
       "void f(void) { for (type t = int; ; ) ; }"
-      "error: in.tc:1: expected `;` after the first clause of `for`, found \
+      "in.tc:1: error: expected `;` after the first clause of `for`, found \
        `t`";
     case "a claimed tag declared before" "struct pair; type pair = struct \
        { int a; };"
-      "error: in.tc:1: the type declaration of `pair` claims the tag `pair`, \
-       which this scope declares already (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the type declaration of `pair` claims the tag `pair`, \
+       which this scope declares already [claimed-name]";
     case "a claimed tag declared after"
       "type pair = struct { int a; }; struct pair { int b; };"
-      "error: in.tc:1: the tag `pair` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `pair` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a claimed tag of a forward declaration declared after"
       "type node; struct node { int b; };"
-      "error: in.tc:1: the tag `node` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `node` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a block declares a claimed tag"
       "type node; void f(void) { struct node { int x; } n; }"
-      "error: in.tc:1: the tag `node` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `node` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a block declares a derived enumeration tag"
       "type e = | A; void f(void) { enum e_tag { X }; }"
-      "error: in.tc:1: the tag `e_tag` is declared again, as a type \
-       declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `e_tag` is declared again, as a type \
+       declaration claims it [claimed-name]";
     case "a variant in a block meets an outer incomplete one"
       "type e; void f(void) { type e = | A; e x; }"
-      "error: in.tc:1: the type declaration of `e` claims the tag `e`, which \
-       an enclosing scope claims already (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the type declaration of `e` claims the tag `e`, which \
+       an enclosing scope claims already [claimed-name]";
     case "a type declaration in a block claims an outer one's tag"
       "type e = | A; void f(void) { type e = | B; }"
-      "error: in.tc:1: the type declaration of `e` claims the tag `e`, which \
-       an enclosing scope claims already (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the type declaration of `e` claims the tag `e`, which \
+       an enclosing scope claims already [claimed-name]";
     case "a claimed tag named in Type-C text"
       "type node; struct node *p;"
-      "error: in.tc:1: the tag `node` is not available to Type-C text, as a \
-       type declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `node` is not available to Type-C text, as a \
+       type declaration claims it [claimed-name]";
     case "a claimed tag named in the structure's body"
       "type node = struct { struct node *next; };"
-      "error: in.tc:1: the tag `node` is not available to Type-C text, as a \
-       type declaration claims it (design 10.1 rule 6) [TC0004]";
+      "in.tc:1: error: the tag `node` is not available to Type-C text, as a \
+       type declaration claims it [claimed-name]";
   ]
 
 (* C text, where try and defer are identifiers, declared or not. *)
@@ -2387,10 +2383,10 @@ let c_text_word_cases =
       "(define (void) (function f (void)) (block (expr (call try)) (expr \
        (call defer))))";
     case "_Defer is a keyword in C text as well" "int _Defer;"
-      "error: in.i:1: expected a declarator, found `_Defer`";
+      "in.i:1: error: expected a declarator, found `_Defer`";
     case "a generated name in C text" "int __tc_x;"
-      "error: in.i:1: `__tc_x` begins with `__tc_`, which is reserved for \
-       the names that typec generates (design 2.3) [TC0001]";
+      "in.i:1: error: `__tc_x` begins with `__tc_`, which is reserved for \
+       the names that typec generates [generated-name]";
     case "type declarations in C text" "type t = int; t x;"
       "(type t (type int)) | (declaration (t) x)";
     case "try and defer in an attribute's arguments in C text"
@@ -2399,15 +2395,15 @@ let c_text_word_cases =
        defer ) )))))";
     case "_Defer in an attribute's arguments in C text"
       "int x __attribute__((aligned(_Defer)));"
-      "error: in.i:1: `_Defer` in the arguments of an attribute, which \
+      "in.i:1: error: `_Defer` in the arguments of an attribute, which \
        typing does not read, begins a construct of Type-C that would reach \
-       the backend as written (design 6 rule 13, 5.1 rule 3) [TC0049]";
+       the backend as written [unread-word]";
     case "_Defer in a body that a system header opens"
       "# 1 \"in.i\"\n# 1 \"sys.h\" 1 3\nvoid g(void) { _Defer g(); }\n"
-      "error: sys.h:1: `_Defer` in a function body that a system header \
+      "sys.h:1: error: `_Defer` in a function body that a system header \
        opens, which typing does not read, begins a construct of Type-C that \
-       would reach the backend as written (design 6 rule 13, 5.1 rule 3) \
-       [TC0049]";
+       would reach the backend as written \
+       [unread-word]";
   ]
 
 let type_c_resolution_cases =
@@ -2473,25 +2469,25 @@ let universe_cases =
        ((struct option)) o) | (declaration ((option (type int))) p)";
     case "a universe generic alone in an expression"
       "int f(void) { return result; }"
-      "error: in.tc:1: the generic type `result` names a type only in a type \
-       application, `result(...)` (design 3.5 rule 1) [TC0035]";
+      "in.tc:1: error: the generic type `result` names a type only in a type \
+       application, `result(...)` [generic-type-use]";
     case "a generic type with a universe name"
       "type option(T) = | None | Some(T value);"
-      "error: in.tc:1: `option` is a universe name, which no generic type has \
-       (design 3.6) [TC0034]";
+      "in.tc:1: error: `option` is a universe name, which no generic type \
+       has [generic-universe-name]";
     case "a generic type with a universe name that a declaration hides"
       "int result; type result(T, E) = | Err(E error) | Ok(T value);"
-      "error: in.tc:1: `result` is a universe name, which no generic type has \
-       (design 3.6) [TC0034]";
+      "in.tc:1: error: `result` is a universe name, which no generic type \
+       has [generic-universe-name]";
     case "text that a line marker names <universe> is not the universe"
       "# 1 \"<universe>\" 1\ntype option(T) = | None | Some(T value);\n"
-      "error: <universe>:1: `option` is a universe name, which no generic \
-       type has (design 3.6) [TC0034]";
+      "<universe>:1: error: `option` is a universe name, which no generic \
+       type has [generic-universe-name]";
     case "a universe generic in the arguments of an attribute"
       "int y __attribute__((aligned(_Alignof(option(int)))));"
-      "error: in.tc:1: `option` in the arguments of an attribute denotes a \
+      "in.tc:1: error: `option` in the arguments of an attribute denotes a \
        universe name, which lowering writes under a name of its own, but it \
-       leaves the arguments as written (design 13.5) [TC0046]";
+       leaves the arguments as written [unread-renamed-name]";
     case "a universe name in parentheses is the parameter it declares"
       "int f(int (option));"
       "(declaration (int) (function f (int (paren option))))";
@@ -2505,11 +2501,11 @@ let universe_cases =
        (int (function (option)))))";
     case "a universe name as an old-style parameter"
       "int f(result) int result; { return result; }"
-      "error: in.tc:1: the generic type `result` names a type only in a type \
-       application, `result(...)` (design 3.5 rule 1) [TC0035]";
+      "in.tc:1: error: the generic type `result` names a type only in a type \
+       application, `result(...)` [generic-type-use]";
     case "a universe name that typec does not implement yet" "str s;"
-      "error: in.tc:1: `str` is a universe name that typec does not implement \
-       yet (design 8; work package 3.4) [TC0023]";
+      "in.tc:1: error: `str` is a universe name that typec does not implement \
+       yet (work package 3.4) [not-implemented]";
   ]
 
 (* A generic claims the names of its instances by one lookup in the
@@ -2590,16 +2586,16 @@ let match_cases =
       "while (case A = f(v)) { break; }"
       "(while (test (case A) (call f v)) (block break))";
     error_in_function "a test is the whole condition: not negated"
-      "if (!(case A = v)) ;" "error: in.tc:1: expected an expression, found \
+      "if (!(case A = v)) ;" "in.tc:1: error: expected an expression, found \
                               `case`";
     error_in_function "nor parenthesised" "if ((case A = v)) ;"
-      "error: in.tc:1: expected an expression, found `case`";
+      "in.tc:1: error: expected an expression, found `case`";
     error_in_function "nor the condition of a for" "for (; case A = v;) ;"
-      "error: in.tc:1: expected an expression, found `case`";
+      "in.tc:1: error: expected an expression, found `case`";
     error_in_function "nor that of a do" "do ; while (case A = v);"
-      "error: in.tc:1: expected an expression, found `case`";
+      "in.tc:1: error: expected an expression, found `case`";
     error_in_function "a test binds with =" "if (case A == v) ;"
-      "error: in.tc:1: expected `=` after the pattern of a single-pattern \
+      "in.tc:1: error: expected `=` after the pattern of a single-pattern \
        test, found `==`";
     statement_case "the operand of a test extends to the parenthesis"
       "if (case A = v && c, w) ;" "(if (test (case A) (, (&& v c) w)) ; _)";
@@ -2608,20 +2604,20 @@ let match_cases =
       "(declaration (typedef int) match) | (declaration ((struct s (member \
        (match) match)))) | (declaration (match) (paren m))";
     error_in_function "an arm needs a label first" "match (v) { x; }"
-      "error: in.tc:1: expected `case` or `default` to begin an arm of \
-       `match`, found `x` (design 4.1 rule 2) [TC0015]";
+      "in.tc:1: error: expected `case` or `default` to begin an arm of \
+       `match`, found `x` [match-arm-form]";
     error_in_function "a match has at least one arm" "match (v) { }"
-      "error: in.tc:1: expected `case` or `default` to begin an arm of \
-       `match`, found `}` (design 4.1 rule 2) [TC0015]";
+      "in.tc:1: error: expected `case` or `default` to begin an arm of \
+       `match`, found `}` [match-arm-form]";
     error_in_function "an arm needs a block item" "match (v) { case A: }"
-      "error: in.tc:1: an arm of `match` has no block item after its labels, \
-       found `}` (design 4.1 rule 2) [TC0015]";
+      "in.tc:1: error: an arm of `match` has no block item after its labels, \
+       found `}` [match-arm-form]";
     error_in_function "a pattern has at least one sub-pattern in parentheses"
       "match (v) { case A(): break; }"
-      "error: in.tc:1: expected a binding or `_`, found `)`";
+      "in.tc:1: error: expected a binding or `_`, found `)`";
     error_in_function "a pattern names its constructor unqualified"
       "match (v) { case e.A: break; }"
-      "error: in.tc:1: expected `:` after the label of an arm, found `.`";
+      "in.tc:1: error: expected `:` after the label of an arm, found `.`";
   ]
 
 (* A binding is in scope in its arm only (design 4.1 rules 4, 5). *)
