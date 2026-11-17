@@ -1,0 +1,262 @@
+/*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * sched: a round-robin job scheduler, simulated. It reads commands from
+ * the standard input, one to a line:
+ *
+ *	add NAME WORK		queue a job of WORK units of work
+ *	urgent NAME WORK	the same, at the head of the queue
+ *	run QUANTUM		run each queued job for up to QUANTUM units
+ *	kill NAME		take a queued job off the queue
+ *	ps			list every job in the order added
+ *
+ * A bad command is reported and skipped, and makes the exit status 1.
+ */
+
+#include <err.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "list.tci"
+
+#define	NAME_MAX_LEN	15	/* the longest name of a job */
+#define	COUNT_MAX	1000000	/* the most units of work or of a quantum */
+#define	MAX_WORDS	3	/* the most words of a command */
+
+enum state { READY, DONE, KILLED };
+
+static const char *const state_names[] = { "ready", "done", "killed" };
+
+struct job {
+	char		 name[NAME_MAX_LEN + 1];
+	unsigned	 left;		/* the units of work still to run */
+	enum state	 state;
+};
+
+struct scheduler {
+	list(struct job)	all;	/* every job, in the order added */
+	list(struct job *)	ready;	/* the READY jobs of all, in run order */
+};
+
+/* Reads a count of 1 to COUNT_MAX, in decimal digits alone. */
+static bool
+parse_count(const char *word, unsigned *count)
+{
+	unsigned value = 0;
+
+	if (*word == '\0')
+		return (false);
+	for (; *word != '\0'; word++) {
+		if (*word < '0' || *word > '9')
+			return (false);
+		value = value * 10 + (unsigned)(*word - '0');
+		if (value > COUNT_MAX)
+			return (false);
+	}
+	if (value == 0)
+		return (false);
+	*count = value;
+	return (true);
+}
+
+static option(struct job *)
+find_job(struct scheduler *s, const char *name)
+{
+	list_node(struct job) *n;
+
+	for (n = s->all.first; n != NULL; n = n->next)
+		if (strcmp(n->value.name, name) == 0)
+			return (Some(&n->value));
+	return (None);
+}
+
+/* add NAME WORK, or urgent NAME WORK when urgent is set. */
+static bool
+add_job(struct scheduler *s, slice(char *) words, bool urgent)
+{
+	struct job new = { 0 };
+	struct job *j, **queued;
+	unsigned work;
+
+	if (words.len != 3) {
+		warnx("usage: %s NAME WORK", words[0]);
+		return (false);
+	}
+	if (strlen(words[1]) > NAME_MAX_LEN) {
+		warnx("%s: name too long: %s", words[0], words[1]);
+		return (false);
+	}
+	if (case Some = find_job(s, words[1])) {
+		warnx("%s: job %s exists", words[0], words[1]);
+		return (false);
+	}
+	if (!parse_count(words[2], &work)) {
+		warnx("%s: bad work: %s", words[0], words[2]);
+		return (false);
+	}
+	strcpy(new.name, words[1]);
+	new.left = work;
+	new.state = READY;
+	if ((j = list_insert_tail(&s->all, new)) == NULL)
+		err(1, "malloc");
+	if (urgent)
+		queued = list_insert_head(&s->ready, j);
+	else
+		queued = list_insert_tail(&s->ready, j);
+	if (queued == NULL)
+		err(1, "malloc");
+	return (true);
+}
+
+/* run QUANTUM: one round of the queue, in order. */
+static bool
+run_jobs(struct scheduler *s, slice(char *) words)
+{
+	list_node(struct job *) *n, *next;
+	struct job *j;
+	unsigned quantum, ran;
+
+	if (words.len != 2) {
+		warnx("usage: run QUANTUM");
+		return (false);
+	}
+	if (!parse_count(words[1], &quantum)) {
+		warnx("run: bad quantum: %s", words[1]);
+		return (false);
+	}
+	for (n = s->ready.first; n != NULL; n = next) {
+		next = n->next;
+		j = n->value;
+		ran = quantum;
+		if (ran > j->left)
+			ran = j->left;
+		j->left -= ran;
+		if (j->left > 0) {
+			printf("%s: ran %u, %u left\n", j->name, ran, j->left);
+			continue;
+		}
+		printf("%s: ran %u, done\n", j->name, ran);
+		j->state = DONE;
+		list_remove(&s->ready, n);
+	}
+	return (true);
+}
+
+/* kill NAME */
+static bool
+kill_job(struct scheduler *s, slice(char *) words)
+{
+	list_node(struct job *) *n;
+
+	if (words.len != 2) {
+		warnx("usage: kill NAME");
+		return (false);
+	}
+	if (case Some(j) = find_job(s, words[1])) {
+		if (j->state != READY) {
+			warnx("kill: job %s is %s", j->name,
+			    state_names[j->state]);
+			return (false);
+		}
+		j->state = KILLED;
+		/* A READY job is on ready, but does not know its node. */
+		for (n = s->ready.first; n->value != j; n = n->next)
+			continue;
+		list_remove(&s->ready, n);
+		return (true);
+	}
+	warnx("kill: no job %s", words[1]);
+	return (false);
+}
+
+/* ps */
+static bool
+list_jobs(struct scheduler *s, slice(char *) words)
+{
+	list_node(struct job) *n;
+	struct job *j;
+
+	if (words.len != 1) {
+		warnx("usage: %s", words[0]);
+		return (false);
+	}
+	for (n = s->all.first; n != NULL; n = n->next) {
+		j = &n->value;
+		printf("%s %u %s\n", j->name, j->left, state_names[j->state]);
+	}
+	return (true);
+}
+
+static bool
+run_command(struct scheduler *s, slice(char *) words)
+{
+	if (strcmp(words[0], "add") == 0)
+		return (add_job(s, words, false));
+	if (strcmp(words[0], "urgent") == 0)
+		return (add_job(s, words, true));
+	if (strcmp(words[0], "run") == 0)
+		return (run_jobs(s, words));
+	if (strcmp(words[0], "kill") == 0)
+		return (kill_job(s, words));
+	if (strcmp(words[0], "ps") == 0)
+		return (list_jobs(s, words));
+	warnx("unknown command: %s", words[0]);
+	return (false);
+}
+
+/*
+ * Splits line into its words, at most as many as words holds, and
+ * returns the part of words that holds them. words holds one more than
+ * MAX_WORDS, so that a command with too many words is seen.
+ */
+static slice(char *)
+split(char *line, slice(char *) words)
+{
+	size_t nwords = 0;
+	char *word;
+
+	for (word = strtok(line, " \t\n"); word != NULL;
+	    word = strtok(NULL, " \t\n")) {
+		words[nwords++] = word;
+		if (nwords == words.len)
+			break;
+	}
+	return (slice_sub(words, 0, nwords));
+}
+
+static void
+free_jobs(struct scheduler *s)
+{
+	list_clear(&s->ready);
+	list_clear(&s->all);
+}
+
+int
+main(void)
+{
+	struct scheduler s = { 0 };	/* two empty lists */
+	char *words[MAX_WORDS + 1];
+	slice(char *) command;
+	char *line = NULL;
+	size_t size = 0;
+	int status = 0;
+
+	defer free(line);
+	defer free_jobs(&s);
+	while (getline(&line, &size, stdin) >= 0) {
+		command = split(line, slice_from_array(words));
+		if (command.len == 0)
+			continue;
+		if (!run_command(&s, command))
+			status = 1;
+	}
+	if (ferror(stdin))
+		err(1, "stdin");
+	return (status);
+}

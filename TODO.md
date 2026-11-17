@@ -489,6 +489,15 @@ is [type-c-language-design.md](type-c-language-design.md).
     `Parser.quoted` also cuts at 40 bytes, which may split a UTF-8
     sequence, where the typing stages cut with `Shown.cut`; one cut
     goes with the one quoting.
+- [High] A call of a generic function does not check an argument
+  whose parameter is already deduced against the substituted type
+  (design 7.2 rule 1): with `generic(T) void put(box(T) *b, T value)`,
+  `put(b, p)` where `b` is a `box(int) *` and `p` an `int *` passes
+  `typec` and fails only in the backend, at the lowered instance call,
+  as a C error under Clang and GCC 14 and later and as a warning under
+  older GCC. `typec` should refuse it as it refuses the same assignment
+  (C11 6.5.16.1p1). Found by the `list_insert_tail(&s->all, j)` mixup of
+  `examples/queue/README.md`.
 - [Medium] The `Unknown_type` arm of `Expressions.generic_call` types
   no callee at all and may be unreachable, as `generic-function-form`
   refuses the function types that could reach it: show it reachable

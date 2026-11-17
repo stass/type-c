@@ -14,6 +14,7 @@ differently, and each runs a check that compares the two.
 |---|---|
 | [`cut`](cut/) | FreeBSD's `cut(1)`, ported with the original's functions, names and layout kept, so its diff is what Type-C changes: the column table and the lines become slices, which removes an upstream buffer overrun, and a `defer` frees the line buffer. Its check runs both programs over the same command lines. |
 | [`dns`](dns/) | A parser of DNS responses, beside the careful C it ports function for function: every error a `result` that `try` hands up in place of 24 tests for `-1`, the record data a variant in place of a tagged union, and the message a slice, so that a length check left out traps instead of leaking the heap. Its check runs both programs over real and malformed messages. |
+| [`queue`](queue/) | A round-robin job scheduler on BSD `sys/queue.h` tail queues, beside the same program on `list(T)`, a typed list written once as generic functions: what the types catch of the classic `TAILQ` mistakes, what they do not, and what a list that owns its nodes costs against an intrusive one. Its check runs both over the same inputs. |
 
 ## Building one
 

@@ -29,12 +29,16 @@ gmake where make is another, as on FreeBSD.
   $ check "$clang" -O0
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
+  queue: 8 inputs agree with original/sched
   $ check "$clang" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
+  queue: 8 inputs agree with original/sched
   $ check "$gcc" -O0
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
+  queue: 8 inputs agree with original/sched
   $ check "$gcc" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
+  queue: 8 inputs agree with original/sched

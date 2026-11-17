@@ -1,0 +1,92 @@
+/*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * A doubly linked list of values of any one type. The list allocates a
+ * node for each value it holds and frees the node when the value leaves,
+ * so a value need not know what lists it is on. A list of all zeros is
+ * empty. A value stays at one address while it is on the list.
+ */
+
+#include <stdlib.h>
+
+type list_node(T) = struct {
+	T		 value;
+	list_node(T)	*next;
+	list_node(T)	*prev;
+};
+
+type list(T) = struct {
+	list_node(T)	*first;
+	list_node(T)	*last;
+};
+
+/* Copies value into a new node at the head; NULL when malloc fails. */
+generic(T) T *
+list_insert_head(list(T) *l, T value)
+{
+	list_node(T) *n;
+
+	if ((n = malloc(sizeof(*n))) == NULL)
+		return (NULL);
+	n->value = value;
+	n->prev = NULL;
+	n->next = l->first;
+	if (l->first != NULL)
+		l->first->prev = n;
+	else
+		l->last = n;
+	l->first = n;
+	return (&n->value);
+}
+
+/* Copies value into a new node at the tail; NULL when malloc fails. */
+generic(T) T *
+list_insert_tail(list(T) *l, T value)
+{
+	list_node(T) *n;
+
+	if ((n = malloc(sizeof(*n))) == NULL)
+		return (NULL);
+	n->value = value;
+	n->next = NULL;
+	n->prev = l->last;
+	if (l->last != NULL)
+		l->last->next = n;
+	else
+		l->first = n;
+	l->last = n;
+	return (&n->value);
+}
+
+/* Unlinks n, a node of l, and frees it. */
+generic(T) void
+list_remove(list(T) *l, list_node(T) *n)
+{
+	if (n->prev != NULL)
+		n->prev->next = n->next;
+	else
+		l->first = n->next;
+	if (n->next != NULL)
+		n->next->prev = n->prev;
+	else
+		l->last = n->prev;
+	free(n);
+}
+
+/* Frees every node of l, which is then empty. */
+generic(T) void
+list_clear(list(T) *l)
+{
+	list_node(T) *n, *next;
+
+	for (n = l->first; n != NULL; n = next) {
+		next = n->next;
+		free(n);
+	}
+	l->first = NULL;
+	l->last = NULL;
+}
