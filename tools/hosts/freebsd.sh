@@ -241,10 +241,15 @@ export HOME
 mkdir -p "$HOME"
 dune build --root src --build-dir "$PWD/build"
 # Every Clang runs, so that one failure does not hide another.
+#
+# The AddressSanitizer runtime of GCC 14 exits at the start of a program
+# under ASLR, which FreeBSD enables by default, where Clang's runs the
+# program again without it. So the tests run with ASLR disabled, which
+# every process they start inherits.
 status=0
 for clang in "$@"; do
   echo "== dune test with $clang and $gcc"
-  TYPEC_TEST_CLANG=$clang TYPEC_TEST_GCC=$gcc \
+  TYPEC_TEST_CLANG=$clang TYPEC_TEST_GCC=$gcc proccontrol -m aslr -s disable \
     dune test --root src --build-dir "$PWD/build" --diff-command "diff -u" \
     || status=1
 done

@@ -108,7 +108,10 @@ filled the cache here, and the script sends its sources. Everything goes to
 `~/typec-host` of the account and nothing runs as root; the corpus
 programs are third-party code run with the account's own rights, so use
 an account that holds nothing else. ssh asks no question, so the key
-must be loaded or named and the host key must be known.
+must be loaded or named and the host key must be known. The suite runs
+under `proccontrol -m aslr -s disable`, as the AddressSanitizer runtime
+of GCC 14 exits at the start of a program under FreeBSD's default ASLR;
+a `dune test` run by hand on FreeBSD needs the same.
 
 ```sh
 export TYPEC_FREEBSD_TARGET=user@freebsd-host
