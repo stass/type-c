@@ -1082,6 +1082,18 @@ let refuse_mixed context span (t : Ctype.t) =
 
 let differs context span a b = compatible context span a b = Answer false
 
+(* A variant or an instance of a generic: a structure or union whose C
+   name only lowering makes, so that the backend's message about it would
+   spell the encoding of its name. *)
+let is_type_c_record (t : Ctype.t) =
+  match t.shape with
+  | Record { record_name = Variant_name _ | Instance_name _; _ } -> true
+  | Record _ | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+  | Array _ | Function _ | Unknown_type _ ->
+      false
+
+let mentions_type_c_record t = Ctype.has_part is_type_c_record t
+
 (* Why two pointers do not meet. *)
 type pointer_gap =
   | Distinct_gap
@@ -1089,6 +1101,12 @@ type pointer_gap =
           where two pointers to incompatible types meet, and the backend,
           which sees U for D, does not even warn, so typec decides in
           Type-C text. *)
+  | Record_gap
+      (** C11 6.5.16.1p1, 6.5.6p3, 6.5.8p2, 6.5.9p2, 6.5.15p3: pointers
+          to incompatible types where a variant or an instance is part of
+          one, as of [list(int) *] and [list(double) *]. GNU C only warns
+          of most, naming the C encodings, so typec refuses them as C
+          does, in any text. *)
   | Parameter_gap of string
       (** Design 7.1 rule 3: pointers to incompatible types where one
           mentions a type parameter are compatible for some arguments
@@ -1104,10 +1122,19 @@ let unknown_parameter_gap (unknown : Unknown.t) =
      types are compatible depends on %s, whose type typec does not compute"
     unknown.construct
 
+(* Whether [a] and [b], where a variant or an instance is part of either,
+   are incompatible as the backend sees them: a distinct type is its
+   representation there, so a gap that it hides in C text, which leaves
+   distinct types to the backend, still shows. *)
+let records_differ context span a b =
+  let a = Ctype.representation a and b = Ctype.representation b in
+  (mentions_type_c_record a || mentions_type_c_record b)
+  && differs context span a b
+
 (* The one rule for conversions and for the operations on two pointers:
    two pointers whose referenced types [a] and [b] mention a distinct
-   type or a type parameter meet only where those are compatible or one
-   is void. *)
+   type, a type parameter, a variant or an instance meet only where those
+   are compatible or one is void. *)
 let pointers_differ context span (a : Ctype.t) (b : Ctype.t) =
   let a = Ctype.unqualified a and b = Ctype.unqualified b in
   let is_void t = Ctype.is_void t = Answer true in
@@ -1122,6 +1149,7 @@ let pointers_differ context span (a : Ctype.t) (b : Ctype.t) =
     | Answer false -> Some (Parameter_gap pointer_parameter_gap)
     | Depends_on unknown -> Some (Parameter_gap (unknown_parameter_gap unknown))
   else if may_be_void a || may_be_void b then None
+  else if records_differ context span a b then Some Record_gap
   else if
     (Ctype.mentions_distinct a || Ctype.mentions_distinct b)
     && differs context span a b
@@ -1192,16 +1220,6 @@ let refuse_type_parameter_conversion context span target (typed : typed) =
     refuse_type_parameter context span
       "a value converts to or from a type parameter of another type"
 
-(* A variant or an instance of a generic: a structure or union whose C
-   name only lowering makes, so that the backend's message about it would
-   spell the encoding of its name. *)
-let is_type_c_record (t : Ctype.t) =
-  match t.shape with
-  | Record { record_name = Variant_name _ | Instance_name _; _ } -> true
-  | Record _ | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
-  | Array _ | Function _ | Unknown_type _ ->
-      false
-
 (* The step that likely reaches the value that a [source] variant holds:
    a result is opened by try, any variant by matching (design 5). *)
 let opening_hint source =
@@ -1259,6 +1277,30 @@ let refuse_record_conversion context span ~target ~source =
            are compatible or not"
     | Every_argument (Answer true | Depends_on _) -> ()
 
+(* C11 6.5.16.1p1: a pointer to a variant or an instance converts to a
+   pointer only as C lets it, which GNU C only warns of, naming the C
+   encodings. *)
+let refuse_pointer_conversion context span ~target ~source =
+  context.fail span
+    (Rule.c_text
+       (Printf.sprintf
+          "a value of type %s does not convert to %s without a cast \
+           (C11 6.5.16.1p1)"
+          (quote (Type_name.of_ctype source))
+          (quote (Type_name.of_ctype target))))
+
+(* C11 6.5.16.1p1: the type that a converted pointer points to has every
+   qualifier of the one that the value points to. [pointers_differ]
+   compares the types without qualifiers, so the qualifiers are checked
+   here, where a variant or an instance is part of either. *)
+let refuse_dropped_qualifiers context span ~target ~source =
+  match ((target : Ctype.t).shape, (source : Ctype.t).shape) with
+  | Pointer t, Pointer s
+    when (mentions_type_c_record t || mentions_type_c_record s)
+         && Qualifiers.union t.qualifiers s.qualifiers <> t.qualifiers ->
+      refuse_pointer_conversion context span ~target ~source
+  | _ -> ()
+
 (* Design 3.4: Type-C text converts no value implicitly to or from a
    distinct type, nor a pointer but as [pointers_differ] allows. The
    backend sees a distinct type as its representation (design 10.2), so
@@ -1269,11 +1311,14 @@ let refuse_conversion context span target (typed : typed) =
   let target = Ctype.unqualified target in
   let source = value_type typed in
   refuse_record_conversion context span ~target ~source;
+  refuse_dropped_qualifiers context span ~target ~source;
   let crosses =
     match (target.shape, source.shape) with
     | Pointer t, Pointer s -> (
         match pointers_differ context span t s with
         | Some (Parameter_gap use) -> refuse_type_parameter context span use
+        | Some Record_gap ->
+            refuse_pointer_conversion context span ~target ~source
         | Some Distinct_gap -> true
         | None -> false)
     | (Record _ | Array _), _ -> false
@@ -1373,9 +1418,10 @@ let operand context (typed : typed) =
   | None, Not_bit_field ->
       value_operand context (value_type typed)
 
-(* Refuses an operation at [span] on two pointers that [pointers_differ]
-   keeps apart, a distinct type in Type-C text only. *)
-let refuse_mixed_pointers context span left right =
+(* Refuses an operation at [span], under C's [clause], that relates two
+   pointers that [pointers_differ] keeps apart: one with a distinct type
+   in Type-C text only, one with a variant or an instance in any text. *)
+let refuse_mixed_pointers context span ~clause left right =
   match (left, right) with
   | Pointer_operand a, Pointer_operand b -> (
       match pointers_differ context span a.referenced b.referenced with
@@ -1388,6 +1434,15 @@ let refuse_mixed_pointers context span left right =
                    crosses between them"
                   (quote (Type_name.of_ctype a.pointer))
                   (quote (Type_name.of_ctype b.pointer))))
+      | Some Record_gap ->
+          context.fail span
+            (Rule.c_text
+               (Printf.sprintf
+                  "the pointers %s and %s point to types that are not \
+                   compatible; a cast converts one to the other (C11 %s)"
+                  (quote (Type_name.of_ctype a.pointer))
+                  (quote (Type_name.of_ctype b.pointer))
+                  clause))
       | Some Distinct_gap | None -> ())
   | _ -> ()
 
@@ -2242,11 +2297,7 @@ let logical context span ~clause left right =
 
 let binary_type context span (op : Tree.binary_operator) left right =
   let left = operand context left and right = operand context right in
-  (* Every operator but a logical one, which takes each operand as a
-     truth value on its own, relates two pointers that it takes. *)
-  (match op with
-  | Logical_and | Logical_or -> ()
-  | _ -> refuse_mixed_pointers context span left right);
+  let related clause = refuse_mixed_pointers context span ~clause left right in
   let arithmetic ~integer clause =
     arithmetic_binary context span ~integer ~clause left right
   in
@@ -2254,11 +2305,15 @@ let binary_type context span (op : Tree.binary_operator) left right =
   | Multiply | Divide -> arithmetic ~integer:false "6.5.5p2"
   | Remainder -> arithmetic ~integer:true "6.5.5p2"
   | Add -> addition context span left right
-  | Subtract -> subtraction context span left right
+  | Subtract ->
+      related "6.5.6p3";
+      subtraction context span left right
   | Shift_left | Shift_right -> shift context span left right
   | Less_than | Greater_than | Less_or_equal | Greater_or_equal ->
+      related "6.5.8p2";
       comparison context span ~relational:true ~clause:"6.5.8p2" left right
   | Equal_to | Not_equal_to ->
+      related "6.5.9p2";
       comparison context span ~relational:false ~clause:"6.5.9p2" left right
   | Bitwise_and -> arithmetic ~integer:true "6.5.10p2"
   | Bitwise_xor -> arithmetic ~integer:true "6.5.11p2"
@@ -4649,7 +4704,8 @@ and conditional_type context span second third =
   in
   let second_operand = branch_operand second
   and third_operand = branch_operand third in
-  refuse_mixed_pointers context span second_operand third_operand;
+  refuse_mixed_pointers context span ~clause:"6.5.15p3" second_operand
+    third_operand;
   match (second_operand, third_operand) with
   | Distinct_operand a, Distinct_operand b when one_distinct context span a b
     ->

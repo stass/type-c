@@ -677,14 +677,19 @@ let is_opaque t =
   | Function _ | Unknown_type _ ->
       false
 
-let rec mentions_distinct t =
+let rec has_part found t =
+  found t
+  ||
   match t.shape with
-  | Distinct _ -> true
   | Pointer referenced | Array { element = referenced; _ } ->
-      mentions_distinct referenced
+      has_part found referenced
   | Function { return; parameters } ->
-      List.exists mentions_distinct (return :: parameter_types parameters)
-  | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Unknown_type _ -> false
+      List.exists (has_part found) (return :: parameter_types parameters)
+  | Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+  | Unknown_type _ ->
+      false
+
+let mentions_distinct t = has_part (fun part -> as_distinct part <> None) t
 
 (* One walk over [t], so the cost is linear in its size. *)
 let rec replace_distinct t =

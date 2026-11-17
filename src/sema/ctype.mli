@@ -368,7 +368,7 @@ val is_opaque : t -> bool
 
 val mentions_opaque : tags -> t -> bool
 (** Whether [t] mentions a type parameter (design 7.1 rule 4): an opaque
-    value type is part of [t], as {!mentions_distinct} reads "part", an
+    value type is part of [t], as {!has_part} reads "part", an
     argument of an instance that [t] is, or the type of a member of a
     structure or union that [t] is. *)
 
@@ -605,14 +605,17 @@ val has_distinct : tags -> bool
 val as_distinct : t -> distinct option
 (** The distinct type that [t] is, qualified or not. *)
 
+val has_part : (t -> bool) -> t -> bool
+(** [has_part found t]: whether [found] holds of a part of [t]: [t]
+    itself, or a part of a type that it points to, is an array of, returns
+    or takes. Members of a structure or union are not part of it. *)
+
 val mentions_distinct : t -> bool
-(** Whether a distinct type is part of [t]: [t] itself, or a type that it
-    points to, is an array of, returns or takes. Members of a structure or
-    union are not part of it. *)
+(** Whether a distinct type is part of [t], as {!has_part} reads "part". *)
 
 val representation : t -> t
 (** The type that C text sees for [t] (design 10.2): [t] with every
-    distinct type that {!mentions_distinct} finds in it replaced by its
+    distinct type that is part of it replaced by its
     representation, which keeps the distinct type's qualifiers. Members of
     a structure or union keep their types, which C text sees in turn as
     it reads them. *)

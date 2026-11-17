@@ -437,12 +437,12 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [High] A pointer to one instance converts to a pointer to another:
-  `list(int) *p = &d;` with `d` a `list(double)` is accepted, and
-  Clang only warns (`-Wincompatible-pointer-types`), naming the C
-  encodings. `pointers_differ` knows distinct types and type
-  parameters alone; refuse pointers to incompatible instances and
-  variants in Type-C text, as their values are refused (design 5).
+- [Low] In C text, a value of a distinct type that is a pointer to an
+  instance, `type dp = distinct holder(int) *;`, converts to
+  `holder(long) *` unrefused: `refuse_conversion` reaches
+  `pointers_differ` only when both types are pointers, and the distinct
+  type is not one. Clang warns in the C encodings. Read both types as
+  their representations there in C text.
 - [Low] `str s = { "abc" };` elides the braces of the slice and gives
   `len` 0, which C accepts. Decide whether a braced list may initialise
   a slice member by member (design section 8), or refuse it as a

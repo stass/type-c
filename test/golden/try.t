@@ -2206,3 +2206,98 @@ member of an instance through elided braces.
   > result(int, error) u(void) { option(int) o = Some(try f()); (void)o; return Ok(0); }
   > EOF
   $ ./golden.exe valid.tc > /dev/null
+
+A pointer to a variant or an instance converts implicitly only to a
+pointer to a compatible type or to void, as C asks of every pointer to
+an object, and two of them meet in an operator only as C lets them:
+GNU C only warns of the others, in the C encodings of the types.
+
+  $ { cat conversions.h; printf 'holder(double) d;\nvoid a(void) { holder(int) *p = &d; (void)p; }\n'; } > pointer_initialised.tc
+  $ ./golden.exe pointer_initialised.tc
+  pointer_initialised.tc:8: error: a value of type 'holder(double) *' does not convert to 'holder(int) *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void b(holder(int) *p, holder(long) *q) { p = q; }\n'; } > pointer_assigned.tc
+  $ ./golden.exe pointer_assigned.tc
+  pointer_assigned.tc:7: error: a value of type 'holder(long) *' does not convert to 'holder(int) *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void t(holder(int) *p);\nvoid c(holder(long) *q) { t(q); }\n'; } > pointer_passed.tc
+  $ ./golden.exe pointer_passed.tc
+  pointer_passed.tc:8: error: a value of type 'holder(long) *' does not convert to 'holder(int) *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'error *d(option(int) *o) { return o; }\n'; } > pointer_returned.tc
+  $ ./golden.exe pointer_returned.tc
+  pointer_returned.tc:7: error: a value of type 'option(int) *' does not convert to 'error *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'holder(int) **e(holder(long) **q) { return q; }\n'; } > pointer_nested.tc
+  $ ./golden.exe pointer_nested.tc
+  pointer_nested.tc:7: error: a value of type 'holder(long) **' does not convert to 'holder(int) **' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'int cmp(holder(int) *p, holder(long) *q) { return p == q; }\n'; } > pointer_compared.tc
+  $ ./golden.exe pointer_compared.tc
+  pointer_compared.tc:7: error: the pointers 'holder(int) *' and 'holder(long) *' point to types that are not compatible; a cast converts one to the other (C11 6.5.9p2)
+  [1]
+  $ { cat conversions.h; printf 'void h(int c, holder(int) *p, holder(long) *q) { (void)(c ? p : q); }\n'; } > pointer_branch.tc
+  $ ./golden.exe pointer_branch.tc
+  pointer_branch.tc:7: error: the pointers 'holder(int) *' and 'holder(long) *' point to types that are not compatible; a cast converts one to the other (C11 6.5.15p3)
+  [1]
+
+A conversion drops no qualifier of the type pointed to, and an operator
+that relates no two pointers is refused for its own operands.
+
+  $ { cat conversions.h; printf 'void q(const holder(int) *c) { holder(int) *p = c; (void)p; }\n'; } > pointer_qualifier.tc
+  $ ./golden.exe pointer_qualifier.tc
+  pointer_qualifier.tc:7: error: a value of type 'const holder(int) *' does not convert to 'holder(int) *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void r(const holder(int) *c) { void *p = c; (void)p; }\n'; } > pointer_qualifier_void.tc
+  $ ./golden.exe pointer_qualifier_void.tc
+  pointer_qualifier_void.tc:7: error: a value of type 'const holder(int) *' does not convert to 'void *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void s(holder(int) *p, holder(long) *q) { (void)(p + q); }\n'; } > pointer_added.tc
+  $ ./golden.exe pointer_added.tc
+  pointer_added.tc:7: error: the operands have types that the operator does not take (C11 6.5.6p2)
+  [1]
+
+C text that reaches an instance is refused as well, with a distinct type
+read as its representation, as the backend reads it.
+
+  $ cp conversions.h pointer_c_text.tc
+  $ cat >> pointer_c_text.tc <<'EOF'
+  > holder(long) hl;
+  > typedef holder(int) hint;
+  > # 1 "c.h" 1
+  > hint *p = &hl;
+  > EOF
+  $ ./golden.exe pointer_c_text.tc
+  c.h:1: error: a value of type 'holder(long) *' does not convert to 'holder(int) *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ cp conversions.h pointer_c_distinct.tc
+  $ cat >> pointer_c_distinct.tc <<'EOF'
+  > type dp = distinct holder(int) *;
+  > dp x;
+  > # 1 "c.h" 1
+  > holder(long) **q = &x;
+  > EOF
+  $ ./golden.exe pointer_c_distinct.tc
+  c.h:1: error: a value of type 'dp *' does not convert to 'holder(long) **' without a cast (C11 6.5.16.1p1)
+  [1]
+
+The partners convert: a pointer to the same instance, to or from void,
+one that adds a qualifier, a null pointer constant, and an explicit
+cast, as in C.
+
+  $ cp conversions.h pointer_valid.tc
+  $ cat >> pointer_valid.tc <<'EOF'
+  > holder(int) h;
+  > void p(holder(long) *l) {
+  >   holder(int) *same = &h;
+  >   void *any = same;
+  >   holder(int) *back = any;
+  >   const holder(int) *read = back;
+  >   holder(int) *none = 0;
+  >   holder(int) *cast = (holder(int) *)l;
+  >   (void)(same == back);
+  >   (void)(read == none);
+  >   (void)(cast == any);
+  > }
+  > EOF
+  $ ./golden.exe pointer_valid.tc > /dev/null

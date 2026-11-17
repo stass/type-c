@@ -1785,6 +1785,17 @@ name (13.6), except in the definition of a generic function where a
 type argument decides whether the types are compatible, which 7.1
 refuses.
 
+A pointer to a type that a variant or an instance is part of converts
+implicitly only as C11 6.5.16.1p1 lets a pointer convert: to a pointer
+to a compatible type or to `void`, qualified at least as the type it
+pointed to. `list(int) *p = &d;` with `d` a `list(double)` is an error,
+and so is `==`, `-`, a relational operator or a conditional whose two
+pointers point to incompatible types (C11 6.5.6p3, 6.5.8p2, 6.5.9p2,
+6.5.15p3). GNU C only warns of most of these, naming the C encodings
+of the types, so `typec` refuses them as C does, in any text; in C
+text a distinct type is its representation (10.2), as the backend
+reads it. An explicit cast converts such a pointer, as in C.
+
 ### 5.1 `try`
 
 1. The operand of `try` has type `result(T, E)`, and the enclosing function
