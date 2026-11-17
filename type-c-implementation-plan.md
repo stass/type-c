@@ -372,7 +372,7 @@ alignment.
 
 **Measurements of 3.12.** The raw data and the numbers are in the data
 repository, at `/Volumes/Optaine/type-c-corpus/measure/3.12/2026-11-17-darwin-x86_64/`
-(its README, commit fb82bed), from Type-C commit `1423847df810`. The
+(its README, commit fb82bed), from Type-C commit `01df407`. The
 library holds 12
 `try` expressions, all `try e;` statements; Pilot B 61, 25 of them
 statements, 22 initialisers and 14 right operands of an assignment; the
