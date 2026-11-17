@@ -167,9 +167,10 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    are being read (rule 7), none outside one.
    [instance_bytes] counts the bytes of the text that the readings for
    instances so far give their instances, those of definition checks
-   included, which a trial does not undo. [external_facts] are those of
-   the external declaration being read, and [placements] where the texts
-   of the instances stand (design 10.3).
+   included, which a trial does not undo, and [copy_bytes] those of the
+   copies of deferred statements that the exits so far run. [external_facts]
+   are those of the external declaration being read, and [placements]
+   where the texts of the instances stand (design 10.3).
    [views] are the parser's views of the unit's unread text, and
    [definition_views] holds the view in front of each declaration of a
    generic, by its id, which is the own place of its definition (design
@@ -224,6 +225,7 @@ type state = {
       (** the universe generic [slice] (design section 8), once read *)
   mutable nesting : nesting option;
   mutable instance_bytes : int;
+  mutable copy_bytes : int;
   mutable external_facts : external_facts;
   mutable placements : placements;
   mutable place : place;
@@ -3353,9 +3355,53 @@ and in_instance :
    instance [link.defining] gives the instances of the unit, refused
    where they would pass the instance budget. *)
 and charge_reading state link bytes =
-  let counted = state.instance_bytes + bytes in
-  if counted > instance_budget then fail_instances state link;
-  state.instance_bytes <- counted
+  state.instance_bytes <-
+    charged ~bound:instance_budget state.instance_bytes bytes (fun () ->
+        instances_refusal state link)
+
+(* Design 3.5 rule 7: one more exit that runs a copy of the deferred
+   statement at [span], which the front end reads there for the check of
+   13.5 and lowering writes there, refused where the copies of the unit
+   would pass the output limit. The copies are text that lowering
+   writes, so they are held to its limit and not to the instance budget;
+   they are counted here because their number grows with the square of
+   the source before lowering makes any text. *)
+and charge_copy state span =
+  state.copy_bytes <-
+    charged ~bound:(Output_limit.of_unit state.text) state.copy_bytes
+      (copy_charge state span) (fun () -> copies_refusal state span)
+
+(* What lowering charges for a copy [{ S }] of the statement at [span]
+   where each token of [S] stays a piece of its own, which is all that
+   the front end can know of the edits inside it. *)
+and copy_charge state (span : Tree.span) =
+  let brace = Output_limit.piece_charge 1 in
+  let charge = ref (2 * brace) in
+  for index = span.first to span.last do
+    let length = state.text.tokens.(index).length in
+    charge := !charge + Output_limit.piece_charge length
+  done;
+  !charge
+
+(* The deferred statement at [span] is where the count of copies would
+   pass the limit; the count is of the whole unit. *)
+and copies_refusal state span =
+  let message =
+    "the copies of the unit's deferred statements, one at each exit of \
+     the scope of a defer, would pass "
+    ^ Output_limit.described state.text
+  in
+  Failed
+    { location = location_of state span;
+      message = Rule.text (Rule.c_text message) }
+
+(* The one funnel of the front end's counts of rule 7: [count] raised by
+   [bytes], or the exception that [refusal ()] makes, where that would
+   pass [bound]. *)
+and charged ~bound count bytes refusal =
+  let counted = count + bytes in
+  if counted > bound then raise (refusal ());
+  counted
 
 (* What the reading of the tokens at [span] charges (rule 7): the bytes
    of each token, which lowering copies, and at least
@@ -3511,7 +3557,7 @@ and fail_nesting state application instance began =
 
 (* The application of the instance whose reading passes the budget is
    the error, as where it would pass the nesting limit. *)
-and fail_instances state { depth = _; began; defining } =
+and instances_refusal state { depth = _; began; defining } =
   let application = Ctype.Instances.find defining state.applied_at in
   let began = location_of state began in
   let message =
@@ -3524,10 +3570,9 @@ and fail_instances state { depth = _; began; defining } =
       (quote (shown_instance defining))
       instance_budget began.file began.line
   in
-  raise
-    (Instance_failed
-       { location = location_of state application;
-         message = Rule.text (Rule.c_text message) })
+  Instance_failed
+    { location = location_of state application;
+      message = Rule.text (Rule.c_text message) }
 
 and no_row_diagnostic argument ({ part; reason } : Encoding.no_row) =
   let argument_name = quote (Type_name.of_ctype argument) in
@@ -3700,6 +3745,7 @@ and typing state : Expressions.context =
     label_address =
       (fun { name; label } ->
         note_use state name.span name.node (Resolution.Label label));
+    copy_deferred = charge_copy state;
   }
 
 (* The operand at [operand] of a try with the [views], typed with what
@@ -4259,6 +4305,7 @@ let read target text (scopes : Parser.scopes) =
       applied_at = Ctype.Instances.empty;
       slice_generic = None;
       instance_bytes = 0;
+      copy_bytes = 0;
       nesting = None;
       external_facts = declaration_state tags None Parser.View.empty;
       placements = no_placements;

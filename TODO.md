@@ -682,16 +682,24 @@ is [type-c-language-design.md](type-c-language-design.md).
   has none). Refuse C text inside moved text, or hold the rule of
   `Resolution.check_unread_declarations` in the parser's one scan of
   unread text (`scan_unread`) for every unread kind in a moved span.
-- [Low] Each check of moved text walks every inexact typedef
-  redeclaration in its window (`Resolution.check_reading`), and stops
-  only at one of a name declared before both places. Redeclarations of
-  names first declared inside the window are passed over at every
-  check, so N pairs `typedef int tK; typedef int tK
-  __attribute__((unused));` between a generic and N instances take
-  quadratic time (4.2 s at N = 8000, 15 s at 16000). Index them by the
-  token of each name's first declaration, so that a check finds one
-  declared before its window directly (a range query over tokens), if
-  such input is met.
+- [High] Security: each check of moved text at a place walks every
+  inexact typedef redeclaration in its window
+  (`Resolution.check_reading`, the typedef clause), and the clause
+  refuses only one of a name that the earlier place sees.
+  Redeclarations of names first declared inside the window are passed
+  over at every check, so N pairs `typedef int tK; typedef int tK
+  __attribute__((unused));` cost N times the checks whose windows hold
+  them, and no count of `typec` bounds that work: between a generic and
+  N instances, 4.2 s at N = 8000 and 15 s at 16000, and a tree 14
+  deep with 4000 pairs 10 s; in one function,
+  one `defer ;` and N such pairs each followed by a return, 2.5 s and
+  110 MB at 8000, 8.8 s and 229 MB at 16000; and N times `defer ;`
+  followed by such a pair, with one return at the end, 5 s at 8000 and
+  20 s at 16000. Deciding the clause once for each defer statement
+  would not help the last, whose statements have one exit each. Index
+  the redeclarations by the token of each name's first declaration,
+  so that a check finds one declared before its window directly (a
+  range query over tokens).
 - [Medium] `Declarations` knows the effects of the GNU attributes of a
   table (`attribute_effects`): `noreturn`, `gnu_inline` and Clang's
   `overloadable` mark a function, the rest change no type or constant it
@@ -1496,20 +1504,7 @@ types (design 13.3).
 - [Medium] Follow-ups of the review of the instance budget: the
   messages echo the presumed file name unbounded (`fail_instances`,
   `fail_nesting`, the output limit's refusal and every location
-  prefix), so a file name of 100 KB is printed whole;
-  `Resolution.check_reading` walks every inexact typedef redeclaration
-  for each reading (a tree 14 deep with 4000 pairs: 10 s).
-- [High] Security: the pairs of a defer and an exit grow with the
-  square of the source before lowering makes any text, so the output
-  limit does not bound them. `Reachability` gives each defer site
-  every exit that leaves its scope, and `Lowering.places` makes all
-  the (place, site) pairs and sorts them with polymorphic compare,
-  once in `function_edits` and again in `error_path_cleanups`. 1700
-  defers each followed by a return (66 KB) take 3.7 s and 281 MB to
-  refuse, 3400 (133 KB) 14 s and 1.1 GB. Represent the sites that a
-  place leaves as the chain of its scopes, linear in the source, and
-  make each copy as the place is lowered, so that the limit bounds the
-  pairs by construction.
+  prefix), so a file name of 100 KB is printed whole.
 - [Low] The output limit charges each piece where it is made, so a
   piece that lowering puts into two edits is written twice and
   charged once. A `Moved` edit's pieces are read only through

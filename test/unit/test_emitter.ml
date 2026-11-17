@@ -606,7 +606,7 @@ let () =
   let written =
     String.length (emit unit (made unit edits)) - String.length closing_block
   in
-  let limit = Emitter.limit unit in
+  let limit = Typec_sema.Output_limit.of_unit unit in
   let filled extra output =
     ignore (edits output);
     String.make (limit - written - 1 + extra) 'a'

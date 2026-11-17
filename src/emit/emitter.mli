@@ -18,9 +18,10 @@
 type piece
 
 (** The C text of one unit while lowering makes it, held to the output
-    limit of design 3.5 rule 7. Every piece and every edit is made for
-    an output and charged, as it is made, the bytes that {!emit} writes
-    for it, markers and pragmas included, and a piece at least 32; the
+    limit of design 3.5 rule 7 ({!Typec_sema.Output_limit}). Every piece
+    and every edit is made for an output and charged, as it is made, the
+    bytes that {!emit} writes for it, markers and pragmas included, and a
+    piece at least 32 ({!Typec_sema.Output_limit.piece_charge}); the
     unit's own text is charged in full first. So the charge covers all
     that {!emit} writes for the unit but the static assertions that end
     it, a fixed text of typec's. Only {!limited} makes an output.
@@ -35,14 +36,11 @@ val limited :
   Typec_cpp.Reader.t -> (output -> 'a) -> ('a, Typec_cpp.Reader.error) result
 (** [limited unit make] is [make output] for an output of [unit], or the
     error at the location of the first piece, edit or {!joined} text
-    whose charge would pass {!limit}, after which nothing more is made.
+    whose charge would pass the output limit of [unit], after which
+    nothing more is made.
     [output] belongs to [make] alone: one that escapes it would raise
     past this function, and edits of two outputs are each held to a
     limit of their own. *)
-
-val limit : Typec_cpp.Reader.t -> int
-(** [limit unit] is the output limit of [unit] in bytes: a base and a
-    factor for each byte of the unit ({!Typec_cpp.Reader.length}). *)
 
 val unit : output -> Typec_cpp.Reader.t
 (** [unit output] is the unit that [output] is made from. *)

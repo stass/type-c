@@ -95,6 +95,11 @@ val label_refusal : Tree.block -> refusal option
     included, but the arguments of attributes and the parameters and
     body of a block literal, which is a function of its own. *)
 
-val defers : facts -> Tree.block -> defer_site list
+val defers :
+  facts -> copied:(Tree.span -> unit) -> Tree.block -> defer_site list
 (** The defer statements of the body of a function, in source order,
-    with the exits of their scopes. *)
+    with the exits of their scopes. [copied] is called with the span of
+    a deferred statement once for each exit that runs its copy, before
+    the exit is recorded, and may raise to end the walk: the pairs of a
+    defer and an exit can grow with the square of the body (design 3.5
+    rule 7). *)

@@ -459,6 +459,10 @@ type context = {
   label_address : Tree.label_name -> unit;
       (** notes the label that [&&] takes the address of, a use of its
           name (design 13.5) *)
+  copy_deferred : Tree.span -> unit;
+      (** counts one more copy of the deferred statement at the span,
+          which an exit of its scope runs, against the output limit
+          (design 3.5 rule 7) *)
 }
 
 val whole_value : context -> Tree.expression -> typed

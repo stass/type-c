@@ -123,27 +123,32 @@ type jump = {
 (* What a jump enters only from inside it: a match arm (design 4.3 rule
    3), the statement of a single-pattern test, which only a successful
    test enters (4.6 rule 6), or the scope of a defer statement, the
-   items after it in its block (6 rules 1 and 5), with the exits of the
-   scope and the statements and items in it with a pragma line directly
-   before them that the walk has read. *)
+   items after it in its block (6 rules 1 and 5). The defer statement
+   of a scope holds what the walk has found in it so far: its exits, and
+   its statements and items that a pragma line stands directly
+   before. *)
 type guarded =
   | Arm of Tree.span
   | Tested of Tree.span
-  | Defer_scope of {
-      scope : Tree.span;
-      scope_exits : exit Queue.t;
-      scope_annotated : Tree.span Queue.t;
-    }
+  | Defer_scope of { scope : Tree.span; read : read_defer }
 
 (* A defer statement that a sequence of items holds, with the exits and
    the annotated statements and items of its scope, which fill as the
    walk reads the items after it. *)
-type read_defer = {
+and read_defer = {
   defer_keyword : Tree.span;
   defer_statement : Tree.span;
   defer_exits : exit Queue.t;
   defer_annotated : Tree.span Queue.t;
 }
+
+(* What a walk does with each scope of a defer statement that an exit
+   leaves. The walk for {!defers} records the exit in the scope, once
+   [copied] has charged the copy of the deferred statement that lowering
+   writes at the exit, so that the pairs of a defer and an exit, which
+   grow with the square of the source, are bounded where they are made
+   (design 3.5 rule 7). The walks for refusals need no pair. *)
+type pairs = Ignored | Recorded of { copied : Tree.span -> unit }
 
 (* Where the scope of a defer statement ends: at the [}], token
    [closing], of a block that can complete, which is an exit; of one
@@ -187,6 +192,7 @@ type definition = {
    walk, which no jump leaves (design 6 rule 12). *)
 type walk = {
   facts : facts;
+  pairs : pairs;
   guards : guarded list;
   operands : Tree.span list;
   context : expression_context;
@@ -219,9 +225,9 @@ let note_annotated walk (span : Tree.span) =
       walk.guards
   in
   match innermost_scope with
-  | Some (Defer_scope { scope_annotated; _ })
-    when walk.facts.pragma_before span.first ->
-      Queue.add span scope_annotated
+  | Some (Defer_scope { read; _ }) when walk.facts.pragma_before span.first
+    ->
+      Queue.add span read.defer_annotated
   | Some (Defer_scope _ | Arm _ | Tested _) | None -> ()
 
 (* Records the refusal of a jump that design 6 rule 10 forbids, if the
@@ -296,19 +302,32 @@ let exit_of = function
   | Returns exit -> exit
   | Jumps { statement; keyword = _; target = _ } -> Jump statement
 
+(* Records [leaving] in the scopes of the defer statements among
+   [guards], the innermost first, that it leaves, with [copied] charging
+   each copy first. The scopes nest, so those that an exit leaves are the
+   innermost ones, and the walk stops at the first that it does not
+   leave: past the guards that the nesting limit bounds, the scopes that
+   it reads are those that it charges for and one more. *)
+let record_pairs ~copied guards leaving =
+  let rec from = function
+    | Defer_scope { scope; read } :: outer when leaves leaving scope ->
+        copied read.defer_statement;
+        Queue.add (exit_of leaving) read.defer_exits;
+        from outer
+    | Defer_scope _ :: _ | [] -> ()
+    | (Arm _ | Tested _) :: outer -> from outer
+  in
+  from guards
+
 (* The one funnel that decides what an exit leaves: it records the exit
    in the scopes of the defer statements among [guards] that it leaves,
-   and adds to [breaches] a jump that leaves one of [operands] (design 6
-   rule 12). A return in an operand leaves the function, and is no such
-   jump. *)
-let record_exit ~guards ~operands breaches leaving =
-  List.iter
-    (function
-      | Defer_scope { scope; scope_exits; scope_annotated = _ }
-        when leaves leaving scope ->
-          Queue.add (exit_of leaving) scope_exits
-      | Defer_scope _ | Arm _ | Tested _ -> ())
-    guards;
+   where [pairs] asks for them, and adds to [breaches] a jump that leaves
+   one of [operands] (design 6 rule 12). A return in an operand leaves
+   the function, and is no such jump. *)
+let record_exit ~pairs ~guards ~operands breaches leaving =
+  (match pairs with
+  | Recorded { copied } -> record_pairs ~copied guards leaving
+  | Ignored -> ());
   match leaving with
   | Jumps { statement; keyword; target = _ }
     when List.exists (leaves leaving) operands ->
@@ -319,8 +338,8 @@ let record_exit ~guards ~operands breaches leaving =
 
 (* An exit from where the walk is. *)
 let record_exit_here walk leaving =
-  record_exit ~guards:walk.guards ~operands:walk.operands walk.breaches
-    leaving
+  record_exit ~pairs:walk.pairs ~guards:walk.guards ~operands:walk.operands
+    walk.breaches leaving
 
 (* A break or continue leaves for the statement that the parser resolved
    it to. A disputed one is refused in a defer scope (design 6 rule 10),
@@ -409,11 +428,7 @@ and in_scope walk read rest ~scope_end =
   match rest with
   | first :: _ ->
       let scope = { Tree.first = (item_span first).first; last = scope_end } in
-      guarded_by
-        (Defer_scope
-           { scope; scope_exits = read.defer_exits;
-             scope_annotated = read.defer_annotated })
-        walk
+      guarded_by (Defer_scope { scope; read }) walk
   | [] -> walk
 
 and block_item walk = function
@@ -914,15 +929,16 @@ let check_jump definitions jump =
       refuse_guarded_entry definition jump
   | None -> ()
 
-let start facts =
-  { facts; guards = []; operands = []; context = Outside_statement_expressions;
+let start ~pairs facts =
+  { facts; pairs; guards = []; operands = [];
+    context = Outside_statement_expressions;
     definitions = Queue.create (); jumps = Queue.create ();
     gotos = Queue.create (); breaches = Queue.create ();
     defers = Queue.create () }
 
 (* Design 4.3 rule 1. *)
 let arm_refusal facts (matched : Tree.arm) =
-  if (arm (start facts) matched).completes then
+  if (arm (start ~pairs:Ignored facts) matched).completes then
     Some
       { span = matched.span;
         diagnostic =
@@ -957,8 +973,8 @@ let record_gotos walk definitions =
   let record goto =
     match Hashtbl.find_opt definitions goto.goto_target with
     | Some (definition : definition) ->
-        record_exit ~guards:goto.goto_guards ~operands:goto.goto_operands
-          walk.breaches
+        record_exit ~pairs:walk.pairs ~guards:goto.goto_guards
+          ~operands:goto.goto_operands walk.breaches
           (Jumps
              { statement = goto.goto_statement; keyword = "goto";
                target = definition.site.first })
@@ -969,7 +985,7 @@ let record_gotos walk definitions =
 (* The first refusal in source order, of an entry or of design 6 rules
    10 and 12, as GCC and Clang name the first error. *)
 let label_refusal body =
-  let walk = start no_facts in
+  let walk = start ~pairs:Ignored no_facts in
   ignore (block walk body);
   let definitions = by_label walk.definitions in
   record_gotos walk definitions;
@@ -995,8 +1011,8 @@ let defer_site { read; ending; tokens } =
     scope_tokens = tokens;
     annotated = List.of_seq (Queue.to_seq read.defer_annotated) }
 
-let defers facts body =
-  let walk = start facts in
+let defers facts ~copied body =
+  let walk = start ~pairs:(Recorded { copied }) facts in
   ignore (block walk body);
   record_gotos walk (by_label walk.definitions);
   let keyword { read; _ } = read.defer_keyword in

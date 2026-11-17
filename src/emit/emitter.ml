@@ -3,19 +3,9 @@
 
 open Typec_cpp
 open Typec_syntax
+module Output_limit = Typec_sema.Output_limit
 
 type piece = { text : string; location : Location.t }
-
-(* The output limit of design 3.5 rule 7, on the bytes that emission
-   writes for a unit: [limit_base] and [limit_per_byte] for each byte of
-   the preprocessed unit. The base lets a short unit hold the instances
-   that the front end's count lets through, and the factor lets the text
-   of a long unit grow far past what the inputs of the tests ask; design
-   P30 gives the measures. *)
-let limit_base = 33554432
-let limit_per_byte = 256
-
-let limit unit = limit_base + (limit_per_byte * Reader.length unit)
 
 (* The output of a unit as lowering makes it: the bytes charged so far,
    which only [charge] raises, and the limit they are held to. *)
@@ -31,11 +21,7 @@ let charge output location bytes =
 
 let over_limit output location : Reader.error =
   let message =
-    Printf.sprintf
-      "the C text of the unit would pass the output limit of typec, %d \
-       bytes for this unit: %d and %d for each byte of its preprocessed \
-       text"
-      output.limit limit_base limit_per_byte
+    "the C text of the unit would pass " ^ Output_limit.described output.unit
   in
   { location; message = Rule.text (Rule.c_text message) }
 
@@ -43,24 +29,17 @@ let over_limit output location : Reader.error =
    that is charged before anything is made. *)
 let limited unit make =
   let size = Reader.length unit in
-  let output = { unit; limit = limit unit; charged = size } in
+  let output = { unit; limit = Output_limit.of_unit unit; charged = size } in
   match make output with
   | made -> Ok made
   | exception Over_limit location -> Error (over_limit output location)
 
 let unit output = output.unit
 
-(* The least that a piece is charged. A piece costs typec some hundred
-   bytes of memory whatever its text, so where a piece of one token was
-   charged only its bytes, a unit of copied tokens would take 35 times
-   its limit in memory. *)
-let least_piece_charge = 32
-
-(* A piece takes its text and the blank or the line break after it on
-   the line of its run (see [moved_lines]). *)
+(* A piece is written on the line of its run (see [moved_lines]). *)
 let made_piece output piece =
-  let bytes = String.length piece.text + 1 in
-  charge output piece.location (max bytes least_piece_charge);
+  let length = String.length piece.text in
+  charge output piece.location (Output_limit.piece_charge length);
   piece
 
 (* The token [index] of the unit at its own location. *)

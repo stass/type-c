@@ -2499,6 +2499,37 @@ let instance_budget () =
   rejects ~file (Budget_probes.tree ~tag_length:4000 10) "instance budget";
   accepts ~file (Budget_probes.tree ~tag_length:4000 6)
 
+(* Design 3.5 rule 7: each exit that runs a copy of a deferred statement
+   counts the statement's tokens against the output limit, so the pairs
+   of a defer and an exit, which grow with the square of the source,
+   stop at the limit: past it the front end takes time linear in the
+   source. *)
+let copies_of_defers () =
+  let file = "in.tc" in
+  let copies = "copies of the unit's deferred statements" in
+  rejects ~file (Budget_probes.defers_by_exits 3400) copies;
+  accepts ~file (Budget_probes.defers_by_exits 300);
+  reads_in_time ~file ~degree:1 "defers by exits past the limit" ~small:800
+    Budget_probes.defers_by_exits;
+  (* A jump that leaves the scopes counts their copies as a return
+     does. *)
+  List.iter
+    (fun jump ->
+      rejects ~file (Budget_probes.defers_by_jumps ~jump 3400) copies;
+      accepts ~file (Budget_probes.defers_by_jumps ~jump 300))
+    [ "break"; "continue"; "goto out" ];
+  (* The copies of a unit's functions add up, to their unit's limit and
+     not to the instance budget, which they pass here. *)
+  accepts ~file (Budget_probes.defers_in_functions 3000);
+  rejects ~file
+    (Budget_probes.functions_of_defers_by_exits ~functions:400 120)
+    copies;
+  accepts ~file (Budget_probes.functions_of_defers_by_exits ~functions:20 120);
+  (* The check of the pragma lines in a scope finds the places of each
+     statement by a search, not a scan of them all. *)
+  reads_in_time ~file ~degree:1 "pragmas before exits" ~small:4000
+    Budget_probes.pragmas_before_exits
+
 let generic_checks () =
   let file = "in.tc" in
   (* Rule 4: an application over a type parameter is an instance, so the
@@ -2545,6 +2576,7 @@ let generic_checks () =
      readings. *)
   rejects ~file (doubling_instances ~members:1000 30) "instance budget";
   instance_budget ();
+  copies_of_defers ();
   (* A transparent alias instance is a link of its chain, which causes
      the instance that it needs complete. *)
   let aliased depth =

@@ -67,12 +67,9 @@ let variant_tree ~tag_length depth =
 let aliases_in_long_file ~length depth =
   Printf.sprintf "#line 1 \"%s\"\n" (String.make length 'n') ^ aliases depth
 
-(* The output limit of design 3.5 rule 7 bounds the unit's own text as
-   well, which grows faster than the source in the two sources below
-   and the smaller partners of each. *)
-
 (* A function of [count] defers, each followed by a return that runs
-   the copies of all the defers before it. *)
+   the copies of all the defers before it: the front end counts each
+   copy against the output limit of design 3.5 rule 7. *)
 let defers_by_exits count =
   let step n = Printf.sprintf "  defer g(%d); if (c == %d) return;" n n in
   lines
@@ -80,8 +77,48 @@ let defers_by_exits count =
     @ List.init count step
     @ [ "}" ])
 
+(* [functions] functions of [count] defers by exits each, whose copies
+   add up to the unit's. *)
+let functions_of_defers_by_exits ~functions count =
+  let step n = Printf.sprintf "  defer g(%d); if (c == %d) return;" n n in
+  let definition k =
+    (Printf.sprintf "void f%d(int c) {" k :: List.init count step) @ [ "}" ]
+  in
+  lines ("void g(int);" :: List.concat (List.init functions definition))
+
+(* The same in a loop, each defer followed by [jump] instead: a break, a
+   continue, or a goto to the label after the loop. *)
+let defers_by_jumps ~jump count =
+  let step n = Printf.sprintf "    defer g(%d); if (c == %d) %s;" n n jump in
+  lines
+    ([ "void g(int);"; "void f(int c) {"; "  for (;;) {" ]
+    @ List.init count step
+    @ [ "  }"; "out:"; "  return;"; "}" ])
+
+(* [count] functions of three defers and twelve returns each, whose
+   copies together pass the instance budget: an ordinary program, which
+   the count of copies must let through. *)
+let defers_in_functions count =
+  let return_step n = Printf.sprintf "  if (c == %d) return;" n in
+  let defer_step n = Printf.sprintf "  defer g(%d);" n in
+  let definition k =
+    (Printf.sprintf "void f%d(int c) {" k :: List.init 3 defer_step)
+    @ List.init 11 return_step
+    @ [ "  return;"; "}" ]
+  in
+  lines ("void g(int);" :: List.concat (List.init count definition))
+
+(* A function of one defer and [count] returns in its scope, each in a
+   statement that a pragma line stands before, which design 6 refuses:
+   every statement holds a place of the defer. *)
+let pragmas_before_exits count =
+  let step _ = "#pragma GCC unroll 2\n  while (c) return;" in
+  lines
+    ([ "void f(int c) {"; "  defer ;" ] @ List.init count step @ [ "}" ])
+
 (* [count] type declarations, each of them edits with two line markers,
-   after a presumed file name of [length] bytes. *)
+   after a presumed file name of [length] bytes, whose text the output
+   limit of design 3.5 rule 7 bounds. *)
 let edits_in_long_file ~length count =
   Printf.sprintf "#line 1 \"%s\"\n" (String.make length 'n')
   ^ lines (List.init count (Printf.sprintf "type t%d = int;"))

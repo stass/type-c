@@ -78,19 +78,32 @@ let state_refusals tokens sites =
   |> List.filter refused
   |> List.map (fun index -> (index, state_pragma))
 
+(* Whether [statement] holds one of the token indices [sorted], found
+   by a binary search, so that the statements of a scope and its places
+   cost their sum and not their product. *)
+let holds_any sorted (statement : Tree.span) =
+  (* The first position whose index is at least [statement.first]. *)
+  let rec search low high =
+    if low >= high then low
+    else
+      let middle = (low + high) / 2 in
+      if sorted.(middle) < statement.first then search (middle + 1) high
+      else search low middle
+  in
+  let position = search 0 (Array.length sorted) in
+  position < Array.length sorted && sorted.(position) <= statement.last
+
 (* The pragma line directly before the end of the block of [site], where
    lowering writes the copies or a trap, and those directly before the
    statements and items of its scope that hold a place of [site]. A jump
    that leaves an outer scope leaves this one too, so the places of the
    innermost scope around a statement are all that it can hold. *)
 let placement_refusals tokens (site : Reachability.defer_site) =
-  let holds (statement : Tree.span) =
-    List.exists
-      (fun place ->
-        let token = Reachability.place_token place in
-        statement.first <= token && token <= statement.last)
-      site.places
+  let place_tokens =
+    Array.of_list (List.map Reachability.place_token site.places)
   in
+  Array.sort Int.compare place_tokens;
+  let holds = holds_any place_tokens in
   let before_end : Reachability.place -> int option = function
     | (Block_end closing | Trap closing)
       when closing - 1 >= site.scope_tokens.first

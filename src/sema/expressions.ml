@@ -468,6 +468,7 @@ type context = {
   read_moved : Tree.span -> (unit -> unit) -> unit;
   array_operand : whole:Tree.span -> Tree.span -> (unit -> typed) -> typed;
   label_address : Tree.label_name -> unit;
+  copy_deferred : Tree.span -> unit;
 }
 
 let needing need (unknown : Unknown.t) =
@@ -5030,7 +5031,10 @@ and subscripted_addressable context (operand : Tree.expression) =
    typing has read it, as its facts need, and the function around them
    that the form of a return in their scopes needs (design 13.5). *)
 let record_defers context ~name ~declarator ~enclosing (block : Tree.block) =
-  match Reachability.defers (reachability_facts context) block with
+  match
+    Reachability.defers (reachability_facts context)
+      ~copied:context.copy_deferred block
+  with
   | [] -> None
   | sites ->
       let returns =
