@@ -68,7 +68,7 @@ test names its own program.
   > }
   > static int first_area(void) {
   >   match (stored) {
-  >   case Two(f, _):
+  >   case Two(shape f, _):
   >     return area(f);
   >   }
   > }

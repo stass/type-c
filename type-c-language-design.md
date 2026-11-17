@@ -1522,6 +1522,17 @@ one node, for which 4.1 to 4.6 say everything.
    an error, which names the identifier and the variant and says how a
    field is bound (rule 4). A misspelled constructor is therefore
    refused: it cannot become a binding that matches every value.
+   The parser does not know the type of a position, so it declares an
+   identifier alone in the scope of the arm wherever it stands, and
+   typing then reads it as a constructor or a binding. A constructor
+   declares nothing: a use of its name in the arm is the constructor
+   where a target type resolves it (3.3), and an error that names the
+   qualified form `T.C` everywhere else. Where the two readings would
+   differ, the program is refused, never compiled to other code.
+   *Provisional:* no ported program yet shows whether an arm uses such
+   a name with no target type often enough to want it read as the
+   constructor there; porting the examples of 4 and 5 settles it, and
+   the error is the default.
 4. **A typed binding binds a field of variant type whole.** `T x` is the
    binding of 4.1(4): an object `x` of the field's type, initialised
    with a copy of the field. `T` is a typedef name or a type application

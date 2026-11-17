@@ -28,7 +28,7 @@ report(result(void, container_error) r)
 	match (r) {
 	case Ok:
 		return (0);
-	case Err(e):
+	case Err(container_error e):
 		printf("error: %s\n", error_name(e));
 		return (1);
 	}

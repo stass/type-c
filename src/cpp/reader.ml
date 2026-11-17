@@ -610,6 +610,19 @@ let spelling (result : t) (token : Token.t) =
     ->
       String.sub result.text.bytes token.start token.length
 
+let excerpt (result : t) ~first ~last =
+  let words = Buffer.create 32 in
+  for index = first to last do
+    let token = result.tokens.(index) in
+    if index > first then begin
+      let before = result.tokens.(index - 1) in
+      if before.start + before.length < token.start then
+        Buffer.add_char words ' '
+    end;
+    Buffer.add_string words (spelling result token)
+  done;
+  Buffer.contents words
+
 let range (tokens : Token.t array) ~first ~count =
   let token_count = Array.length tokens in
   if first < 0 || first >= token_count || count < 0

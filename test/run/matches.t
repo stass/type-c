@@ -271,7 +271,7 @@ program compiles with -std=c11 -pedantic-errors on each backend.
   > }
   > static int scaled(register box b) {
   >   match (b) {
-  >   case Wrap(inner, scale):
+  >   case Wrap(shape inner, scale):
   >     match (inner) {
   >     case Circle(r):
   >       return scale * r;

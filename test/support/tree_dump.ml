@@ -611,29 +611,36 @@ and condition reader = function
       node
         { first = pattern_span.first; last = operand.span.last }
         "test"
-        [ pattern pattern_span p; expression reader operand ]
+        [ pattern reader pattern_span p; expression reader operand ]
 
 (* An arm as [(arm labels items)]; a pattern as [(case C sub-patterns)],
    where a binding is a declaration entry and [_] a leaf. *)
 and arm reader (a : arm) =
   node a.span "arm"
-    (List.map arm_label a.node.labels
+    (List.map (arm_label reader) a.node.labels
     @ List.map (block_item reader) a.node.items)
 
-and arm_label (l : arm_label) =
+and arm_label reader (l : arm_label) =
   match l.node with
   | Default_arm_label -> node l.span "default" []
-  | Pattern_label p -> pattern l.span p
+  | Pattern_label p -> pattern reader l.span p
 
-and pattern span { constructor; sub_patterns } =
-  let sub = function
-    | Wildcard _ -> leaf "_"
-    | Binding { name; declared } ->
-        noted (declaration_entry name.node declared) (identifier name)
-  in
+and pattern reader span { constructor; sub_patterns } =
   node span "case"
     (identifier constructor
-    :: List.map sub (Option.value sub_patterns ~default:[]))
+    :: List.map (sub_pattern reader) (Option.value sub_patterns ~default:[]))
+
+and sub_pattern reader (sub : sub_pattern) =
+  match sub.node with
+  | Wildcard -> leaf "_"
+  | Alone { name; declared } ->
+      noted (declaration_entry name.node declared) (identifier name)
+  | Nested p -> pattern reader sub.span p
+  | Followed p -> node sub.span "*" [ pattern reader sub.span p ]
+  | Typed_binding { type_name = t; name; declared } ->
+      node sub.span "typed"
+        [ type_name reader t; noted (declaration_entry name.node declared)
+            (identifier name) ]
 
 and block reader (b : block) =
   node b.span "block"

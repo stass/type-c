@@ -170,13 +170,20 @@ val constructions : t -> construction list
     atomic or is no lvalue that typec knows [&] may take. *)
 type access = Through_pointer | Through_copy
 
-(** A binding of a match: its name, the constructor of its pattern and
-    the field that it copies (design 4.1 rule 4). *)
-type binding = {
-  name : string;
+(** One step from a position of a pattern down to a field (design 4.7
+    rule 1): the member [field] of the constructor [constructor] that the
+    position holds, where [through_pointer] says that the position the
+    step reaches is the object that the field points to (rule 5). *)
+type field_step = {
   constructor : Spelling.constructor;
   field : string;
+  through_pointer : bool;
 }
+
+(** A binding of a match: its name and the field that it copies, from
+    the scrutinee down, outermost step first (design 4.1 rule 4, 4.7
+    rule 7). *)
+type binding = { name : string; field : field_step list }
 
 (** An arm of a match: its span; the span from its first label to its
     last; the constructors it takes, in the order of its labels, where a
@@ -205,9 +212,27 @@ type test = {
   controlled : Tree.span;
 }
 
+(** The selection tree of a match as lowering writes it (design 13.5):
+    a leaf is the number of an arm from 0 in source order; a node reads
+    the tag of the field [tag], from the scrutinee down, which is the
+    scrutinee where it is empty, of the variant [variant], with a branch
+    for one or more of its constructors. *)
+type selection_tree =
+  | Arm of int
+  | Read of {
+      tag : field_step list;
+      variant : Ctype.variant_name;
+      branches : (Spelling.constructor list * selection_tree) list;
+    }
+
+(** The arms of a match, and its selection tree where the tree has more
+    than one node (design 4.7 rule 6); a tree of one node is the [switch]
+    on the scrutinee's tag that [matched] gives. *)
+type arms = { matched : matched_arm list; nested : selection_tree option }
+
 (** What a matching selects with the tag of its scrutinee: the arms of a
     match statement, or the one constructor of a single-pattern test. *)
-type selection = Arms of matched_arm list | Test of test
+type selection = Arms of arms | Test of test
 
 (** A match statement (design 4) or a single-pattern test (4.6) that
     lowering replaces (13.5): its span, that of its scrutinee, which is
@@ -422,6 +447,14 @@ type type_argument =
     [__extension__] there. *)
 type initialiser_holder = Holder_at of int | For_clause
 
+(** How typing first read an identifier alone in a pattern, which the
+    parser declared (design 4.7 rule 3): a constructor of the named
+    variant, or a binding. Each later reading of the same identifier,
+    in an instance of the generic function that holds it, takes the
+    first, so that an instance reads it as its definition did (7.1 rule
+    2). *)
+type alone_reading = Constructor_word of string | Binding_word
+
 (** What the declaration reader gives typing. [fail] reports the first
     error at the start of a span and does not return; [entity] gives what
     a resolved use of a name denotes, and [overloaded] whether it names
@@ -475,6 +508,9 @@ type context = {
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
+  alone_reading : Tree.declared -> (unit -> alone_reading) -> alone_reading;
+      (** the reading of an identifier alone that typing recorded first,
+          else the one that the function gives, which it records *)
   needs_complete : Ctype.t -> unit;
   slice_instance : Tree.span -> Ctype.t -> Ctype.t;
       (** the instance of the universe [slice] over an element type that

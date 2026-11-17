@@ -1881,30 +1881,36 @@ types (design 13.3).
   initialised through a temporary of its declaring type.
   Package 3.12 adds the script under `tools/measure`; have the design
   cite it.
-- [High] Build nested patterns, as in `case Err(DivByZero):` (owner: the
-  README's first example uses them): design 4.7, plan packages 3.8 to
-  3.10.
-- [Medium] Before 3.8 lowers nested patterns: design 4.7 rule 10 bounds
-  the selection tree at 127 nodes deep so that its nested `switch`
-  statements (13.5) fit Clang's default bracket depth of 256, but the
-  nesting of the statements around the match counts against the same
-  256 and nothing bounds it below the parser's node depth, so a match
-  nested about 130 deep with a tree near the bound fails in the
-  backend. Bound the two together in one place, or lower a path of the
+- [High] An instance of a generic function re-resolves an unqualified
+  constructor by its target type (design 3.3) against the instance's
+  types, so it can read a name differently from the definition check:
+  in `generic(T) void f(T *out, T Overflow) { *out = Overflow; }` the
+  definition reads the parameter and the instance over `eval_error`
+  the constructor, which compiles to other code. Record the
+  definition's resolution of each use, as `Declarations.alone_readings`
+  records the reading of an identifier alone, or refuse a target-type
+  resolution whose target type holds a type parameter while an
+  ordinary identifier of that name is visible.
+- [High] Lowering spells the full path from `__tc_match` at every node
+  of a selection tree and in every binding (`Lowering.field_access`), so
+  the text of a match grows with depth times path length: a 100 KB
+  input, a chain of 120 `*C(` over a field with a 100 KB name, builds
+  about 900 MB of text before the output limit refuses it, because
+  `Emitter.joined` charges a part only after spelling it. Give each node
+  a pointer local, `const T *const __tc_pK = &parent->u.C.f;`, so that a
+  tag read and a binding are one step from it, or charge each node's
+  text before spelling its subtree.
+- [High] Build nested patterns in the single-pattern test, as in
+  `while (case Some(Ok(v)) = next())`: design 4.6 and 4.7 rule 9, plan
+  packages 3.9 and 3.10.
+- [Medium] Design 4.7 rule 10 bounds the selection tree at 127 nodes
+  deep so that its nested `switch` statements (13.5) fit Clang's
+  default bracket depth of 256, but the nesting of the statements
+  around the match counts against the same 256 and nothing bounds it
+  below the parser's node depth, so a match nested about 130 deep with
+  a tree near the bound fails in the backend. Bound the two together in one place, or lower a path of the
   tree without nesting (a `switch` per node in sequence), which would
   remove the depth bound.
-- [Medium] `Expressions.pattern_constructor` finds the constructor that a
-  label names by a linear search of its variant's constructors, so a
-  match of L labels over V constructors compares L x V names before
-  selection, which is linear in L (design 4.7 rule 10), runs: 20000
-  labels over as many constructors take 1.67 s, 5000 take 0.22 s. Look
-  a label up in a table of the variant's constructors by name, built
-  once per variant.
-- [Medium] With nested patterns (3.8) the errors of
-  `Expressions.coverage` keep their flat wording: a never-selected
-  label is "the constructor 'Err' is covered twice" and a `default`
-  that takes nothing "covers no constructor". Word them for a label and
-  for values, and give each a golden test.
 - [Medium] Design 4.7 cites counts of the bindings and fields of Pilots
   A and B that no script in either pilot's repository reproduces: add
   the script there and cite the commit that holds it.

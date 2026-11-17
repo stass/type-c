@@ -176,11 +176,13 @@ type construction = {
 }
 
 type access = Through_pointer | Through_copy
-type binding = {
-  name : string;
+type field_step = {
   constructor : Spelling.constructor;
   field : string;
+  through_pointer : bool;
 }
+
+type binding = { name : string; field : field_step list }
 
 type matched_arm = {
   arm : Tree.span;
@@ -199,7 +201,16 @@ type test = {
   controlled : Tree.span;
 }
 
-type selection = Arms of matched_arm list | Test of test
+type selection_tree =
+  | Arm of int
+  | Read of {
+      tag : field_step list;
+      variant : Ctype.variant_name;
+      branches : (Spelling.constructor list * selection_tree) list;
+    }
+
+type arms = { matched : matched_arm list; nested : selection_tree option }
+type selection = Arms of arms | Test of test
 
 type 'selects matching_of = {
   statement : Tree.span;
@@ -240,10 +251,21 @@ module Sites : sig
      it is checked for. *)
   type site =
     | Construction of construction
-    | Matching of (unit -> matched_arm list) matching_of
+    | Matching of (unit -> arms) matching_of
     | Testing of (unit -> test) matching_of
 
   val create : unit -> t
+
+  (* Design 4.7 rule 8: a constructor pattern at [span], whose variant
+     the matching around it lowers to the names of, stands within the
+     scope of that variant's declaration. *)
+  val refuse_outside_pattern :
+    Ctype.tags ->
+    fail:(Tree.span -> Rule.diagnostic -> unit) ->
+    variant_type:Ctype.t ->
+    variant:Ctype.variant_name ->
+    Tree.span ->
+    unit
 
   val record :
     t ->
@@ -271,7 +293,7 @@ end = struct
 
   type site =
     | Construction of construction
-    | Matching of (unit -> matched_arm list) matching_of
+    | Matching of (unit -> arms) matching_of
     | Testing of (unit -> test) matching_of
 
   let create () =
@@ -289,6 +311,10 @@ end = struct
          "%s is outside the scope of the declaration of the variant %s, \
           where the names that it lowers to do not denote the variant"
          what (quoted_variant variant))
+
+  let refuse_outside_pattern tags ~fail ~variant_type ~variant span =
+    if not (within_scope tags variant_type span) then
+      fail span (outside_scope Variant_scope ~what:"the pattern" ~variant)
 
   (* A matching that [what] names, with what it selects typed by
      [selects] once it is known to be in scope. *)
@@ -354,16 +380,79 @@ let value_position = function
    4.6 rule 2). *)
 type pattern_site = Match_label | Test_pattern
 
-(* A pattern checked against the constructor it names: each sub-pattern
-   with its field, none without a field list. Only [pattern_constructor]
-   builds one, so that no binding pairs sub-patterns left unchecked. *)
+(* A variant that a pattern names, with the index of each constructor
+   by its name, made once for each variant in a match, so that finding
+   the constructor of a pattern takes a time that grows with neither the
+   variant nor the labels (design 4.7 rule 10). *)
+type indexed_variant = {
+  variant_type : Ctype.t;
+  name : Ctype.variant_name;
+  constructors : Ctype.constructor array;
+  index_of : (string, int) Hashtbl.t;
+}
+
+(* What may stand at a position, by its type (design 4.7 rule 2): a
+   variant; a pointer to a variant, with the type that it points to;
+   any other type, which a type parameter is (7.1 rule 2). *)
+type position_type =
+  | Variant_position of indexed_variant
+  | Pointer_position of Ctype.t
+  | Other_position
+
+(* A binding that a label declares, and the field below the scrutinee,
+   outermost step first, that it copies (4.7 rule 7). *)
+type found_binding = {
+  identifier : Tree.identifier;
+  declared : Tree.declared;
+  object_type : Ctype.t;
+  copied : field_step list;
+}
+
+(* A pattern checked against the variant of its position: the
+   constructor that it names, the pattern as selection reads it, and its
+   bindings at every depth in source order. Only [constructor_pattern]
+   makes one, so that the index of a selection pattern is that of its
+   constructor in its variant. *)
 type checked_pattern = {
   constructor : Ctype.constructor;
-  index : int;  (** of [constructor] in its variant's declaration order *)
-  sub_fields : (Tree.sub_pattern * Ctype.member) list;
+  selection : Selection.constructor_pattern;
+  bindings : found_binding list;
 }
 
 type zero_initialiser = { list : Tree.span; holder : int }
+
+(* Where a tag that selection reads stands: the field that holds it,
+   outermost step first, which is the scrutinee where there is none, and
+   its variant. *)
+type place = { tag : field_step list; variant : Ctype.variant_name }
+
+(* A table keyed by positions that hashes every step: the polymorphic
+   hash reads only the first few values of a list, so positions that
+   share their nearest steps would share a bucket, and a wide pattern
+   would take time quadratic in its width. *)
+module Positions = Hashtbl.Make (struct
+  type t = Selection.position
+
+  let equal = ( = )
+
+  let hash position =
+    List.fold_left
+      (fun hash (step : Selection.step) ->
+        Hashtbl.hash (hash, step.holder, step.field, step.through_pointer))
+      0 position
+end)
+
+(* What the patterns of one match or test share: where they stand, the
+   variants that they name, by the id of each one's structure, and the
+   place of each position that a constructor pattern reads. *)
+type pattern_reading = {
+  site : pattern_site;
+  variants : (int, indexed_variant) Hashtbl.t;
+  places : place Positions.t;
+}
+
+let pattern_reading site =
+  { site; variants = Hashtbl.create 8; places = Positions.create 8 }
 
 (* [enclosing] belongs to the walk in progress. Only the reader's failure
    leaves a walk early, and it ends the read, so it is not restored on
@@ -458,6 +547,8 @@ type type_argument =
   | Written of Tree.type_name * Ctype.t
   | Deduced of Ctype.t
 
+type alone_reading = Constructor_word of string | Binding_word
+
 type context = {
   typed : t;
   target : Target.t;
@@ -477,6 +568,7 @@ type context = {
   declaration : initialiser_holder -> Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
+  alone_reading : Tree.declared -> (unit -> alone_reading) -> alone_reading;
   needs_complete : Ctype.t -> unit;
   slice_instance : Tree.span -> Ctype.t -> Ctype.t;
   block_literal : unit -> unit;
@@ -1086,6 +1178,10 @@ let require_scalar context span ~clause typed =
 
 let spelling context (span : Tree.span) =
   Reader.spelling context.text context.text.tokens.(span.first)
+
+(* The tokens of [span] as a message quotes them. *)
+let excerpt context (span : Tree.span) =
+  Reader.excerpt context.text ~first:span.first ~last:span.last
 
 let constant_type context span (number : Number.t) =
   match number with
@@ -4723,7 +4819,9 @@ and match_statement context (statement : Tree.statement) scrutinee arms =
          access = access_of context scrutinee t;
          selects =
            (fun () ->
-             typed_arms context ~statement variant constructors arms) })
+             let reading = pattern_reading Match_label in
+             let root = indexed_in reading variant t constructors in
+             typed_arms context ~statement reading root arms) })
 
 (* Design 4.6: the operand obeys 4.1 rule 1 and the pattern 4.1 rule 3,
    as a scrutinee and a label of a match do. The [else] statement is the
@@ -4742,46 +4840,57 @@ and single_pattern_test context (statement : Tree.statement) ~pattern_span
          access = access_of context operand t;
          selects =
            (fun () ->
-             tested context variant constructors ~pattern_span pattern
-               controlled form) })
+             let reading = pattern_reading Test_pattern in
+             let root = indexed_in reading variant t constructors in
+             tested context reading root ~pattern_span pattern controlled
+               form) })
 
 (* The bindings of a test, then its statement, which is in their scope
    and in which no case or default label of a switch around it may stand
    (4.6 rules 4 and 6). *)
-and tested context variant constructors ~pattern_span
-    (pattern : Tree.pattern) (controlled : Tree.statement) form =
+and tested context reading root ~pattern_span (pattern : Tree.pattern)
+    (controlled : Tree.statement) form =
   let checked =
-    pattern_constructor context ~site:Test_pattern variant constructors
+    constructor_pattern context reading root ~position:[] ~path:[]
       pattern_span pattern
   in
-  let bindings = pattern_bindings context checked in
+  if reads_below checked.selection then
+    context.fail pattern_span
+      (Rule.message Pattern
+         "typec reads no nested pattern in a single-pattern test");
+  let bindings = List.map (declare_binding context) checked.bindings in
   let enclosing =
     { context.typed.enclosing with case_labels = Test_statement }
   in
   within context enclosing (fun () -> typed_statement context controlled);
   { form; constructor = checked.constructor.constructor_name;
-    constructors = List.map constructor_name constructors; bindings;
-    controlled = controlled.span }
+    constructors = List.map constructor_name (Array.to_list root.constructors);
+    bindings; controlled = controlled.span }
 
-(* The arms of a match of [variant]: their labels, the coverage of the
-   constructors and the items of each arm. *)
-and typed_arms context ~(statement : Tree.statement) variant constructors
-    arms =
-  let labelled =
-    List.map (labelled_constructors context variant constructors) arms
+(* The arms of a match of the variant [root]: their labels, the coverage
+   of its values and the items of each arm, and the selection tree that
+   lowering writes where it has more than one node. *)
+and typed_arms context ~(statement : Tree.statement) reading root arms =
+  let labelled = List.map (labelled_patterns context reading root) arms in
+  let tree =
+    coverage context ~statement:statement.span root (List.concat labelled)
   in
-  let defaulted =
-    coverage context ~statement:statement.span variant constructors
-      (List.concat labelled)
-  in
+  let defaulted = Selection.defaulted tree in
   let enclosing = { context.typed.enclosing with case_labels = Match_arm } in
-  List.map2
-    (fun (arm : Tree.arm) labels ->
-      let matched = matched_arm context arm labels defaulted in
-      within context enclosing (fun () -> arm_items context arm);
-      refuse_open_arm context arm;
-      matched)
-    arms labelled
+  let matched =
+    List.map2
+      (fun (arm : Tree.arm) labels ->
+        let matched = matched_arm context arm labels defaulted in
+        within context enclosing (fun () -> arm_items context arm);
+        refuse_open_arm context arm;
+        matched)
+      arms labelled
+  in
+  let nested =
+    if is_flat tree then None
+    else Some (lowered_tree reading root labelled tree)
+  in
+  { matched; nested }
 
 (* Design 4.4: a callee that designates a function declared [_Noreturn]
    or with the GNU [noreturn], or a builtin that is; an undeclared name
@@ -4850,31 +4959,232 @@ and scrutinee_variant context ~what span t =
           ^ " is not of a variant type; a pointer is not dereferenced \
              implicitly"))
 
-(* The constructor that [pattern] at [site] names, with one sub-pattern
-   per field or, in a test, no field list (4.1 rule 3, 4.6 rule 2). *)
-and pattern_constructor context ~site variant constructors
-    (label : Tree.span) (pattern : Tree.pattern) =
-  let name = pattern.constructor.node in
-  let named index (constructor : Ctype.constructor) =
-    if (constructor.constructor_name :> string) = name then
-      Some (index, constructor)
-    else None
-  in
-  match List.find_mapi named constructors with
+(* The variant [name] of type [t] with its [constructors] indexed, once
+   for each variant that the patterns of [reading] name. *)
+and indexed_in (reading : pattern_reading) name (t : Ctype.t) constructors =
+  let key = variant_key t in
+  match Hashtbl.find_opt reading.variants key with
+  | Some indexed -> indexed
   | None ->
-      context.fail label
-        (Rule.message Pattern
-           (Printf.sprintf "%s names no constructor of the variant %s"
-              (quote name) (quoted_variant variant)))
-  | Some (index, constructor) ->
+      let constructors = Array.of_list constructors in
+      let index_of = Hashtbl.create (Array.length constructors) in
+      Array.iteri
+        (fun index (constructor : Ctype.constructor) ->
+          Hashtbl.replace index_of
+            (constructor.constructor_name :> string)
+            index)
+        constructors;
+      let indexed = { variant_type = t; name; constructors; index_of } in
+      Hashtbl.replace reading.variants key indexed;
+      indexed
+
+(* A variant is a structure (design 10.1), which its id names. *)
+and variant_key (t : Ctype.t) =
+  match t.shape with
+  | Record tag -> tag.record_id
+  | _ -> invalid_arg "Expressions.variant_key: no variant"
+
+(* What a sub-pattern at a field of type [t] may be (4.7 rule 2). *)
+and position_type context reading (t : Ctype.t) =
+  match (Ctype.as_variant t, Ctype.constructors context.tags t) with
+  | Some name, Some constructors ->
+      Variant_position (indexed_in reading name t constructors)
+  | _ -> (
+      match (Ctype.unqualified t).shape with
+      | Pointer referenced when Option.is_some (Ctype.as_variant referenced)
+        ->
+          Pointer_position referenced
+      | _ -> Other_position)
+
+(* The constructor that [pattern] names in [variant], at [position] below
+   the scrutinee, which [path] reaches, nearest step first, with one
+   sub-pattern per field or, in a test, no field list (4.1 rule 3, 4.6
+   rule 2, 4.7 rules 2 and 8). The one place that makes a selection
+   pattern. *)
+and constructor_pattern context reading (variant : indexed_variant)
+    ~position ~path (span : Tree.span) (pattern : Tree.pattern) =
+  let name = pattern.constructor.node in
+  Sites.refuse_outside_pattern context.tags ~fail:context.fail
+    ~variant_type:variant.variant_type ~variant:variant.name span;
+  match Hashtbl.find_opt variant.index_of name with
+  | None ->
+      context.fail span (no_constructor name variant ~nested:(path <> []))
+  | Some index ->
+      let constructor = variant.constructors.(index) in
+      Positions.replace reading.places position
+        { tag = List.rev path; variant = variant.name };
+      let checked =
+        List.mapi
+          (fun field (sub, member) ->
+            sub_pattern context reading ~holder:constructor ~position ~path
+              field sub member)
+          (sub_pattern_fields context ~site:reading.site span pattern
+             constructor)
+      in
       { constructor;
-        index;
-        sub_fields = sub_pattern_fields context ~site label pattern constructor
-      }
+        selection =
+          { variant = variant.constructors; index;
+            fields = List.map fst checked };
+        bindings = List.concat_map snd checked }
+
+(* Design 4.1 rule 3; at a field, 4.7 rule 3, which says how a field of
+   variant type is bound. *)
+and no_constructor name (variant : indexed_variant) ~nested =
+  let text =
+    Printf.sprintf "%s names no constructor of the variant %s" (quote name)
+      (quoted_variant variant.name)
+  in
+  if nested then
+    Rule.message Pattern
+      (text ^ "; a field of a variant type is bound with its type, as in `T x`")
+  else Rule.message Pattern text
+
+(* The sub-pattern [sub] at the field [member], of index [field], of the
+   constructor [holder] at [position]: as selection reads it, and its
+   bindings (4.7 rules 2 to 5). *)
+and sub_pattern context reading ~(holder : Ctype.constructor) ~position
+    ~path field (sub : Tree.sub_pattern) (member : Ctype.member) =
+  let field_name =
+    match member.member_name with
+    | Some field_name -> field_name
+    | None -> invalid_arg "Expressions.sub_pattern: an unnamed field"
+  in
+  let below through_pointer =
+    ( { Selection.holder = holder.constructor_name; field; through_pointer }
+      :: position,
+      { constructor = holder.constructor_name; field = field_name;
+        through_pointer }
+      :: path )
+  in
+  let nested pattern variant ~through_pointer =
+    let position, path = below through_pointer in
+    constructor_pattern context reading variant ~position ~path sub.span
+      pattern
+  in
+  let bound (name : Tree.identifier) declared =
+    let _, path = below false in
+    ( Selection.Any,
+      [ { identifier = name; declared;
+          object_type = non_modifiable member.member_type;
+          copied = List.rev path } ] )
+  in
+  let position_type = position_type context reading member.member_type in
+  match (sub.node, position_type) with
+  | Wildcard, _ -> (Selection.Any, [])
+  | Alone { name; declared }, _ -> (
+      let first () =
+        alone_reading context reading name position_type
+      in
+      match (context.alone_reading declared first, position_type) with
+      | Binding_word, _ -> bound name declared
+      | Constructor_word _, Variant_position variant ->
+          let checked =
+            nested { constructor = name; sub_patterns = None } variant
+              ~through_pointer:false
+          in
+          (Constructor checked.selection, checked.bindings)
+      | Constructor_word _, (Pointer_position _ | Other_position) ->
+          invalid_arg "Expressions.sub_pattern: a constructor off a variant")
+  | Nested pattern, Variant_position variant ->
+      let checked = nested pattern variant ~through_pointer:false in
+      (Constructor checked.selection, checked.bindings)
+  | Followed pattern, Pointer_position referenced ->
+      let variant = followed_variant context reading sub.span referenced in
+      let checked = nested pattern variant ~through_pointer:true in
+      (Pointer checked.selection, checked.bindings)
+  | Typed_binding { type_name; name; declared }, Variant_position variant ->
+      refuse_other_type context type_name variant;
+      bound name declared
+  | (Nested _ | Followed _ | Typed_binding _), _ ->
+      refuse_sub_pattern context sub member.member_type position_type
+
+(* 4.7 rule 5: [*] reads the tag of a complete variant in place. *)
+and followed_variant context reading span (referenced : Ctype.t) =
+  if referenced.qualifiers.volatile || referenced.qualifiers.atomic then
+    context.fail span
+      (Rule.message Pattern
+         "a `*` follows no pointer to a volatile or atomic variant, which \
+          selection would read at separate moments; a match in the arm \
+          copies the object");
+  context.needs_complete referenced;
+  match position_type context reading referenced with
+  | Variant_position variant -> variant
+  | Pointer_position _ | Other_position ->
+      context.fail span
+        (Rule.message Pattern
+           (Printf.sprintf
+              "a `*` follows a pointer to %s, whose constructors are \
+               unknown here"
+              (quote (Type_name.of_ctype referenced))))
+
+(* 4.7 rule 3: what an identifier alone is where typing first reads it,
+   which the type of its position decides. *)
+and alone_reading context reading name position_type =
+  match position_type with
+  | Variant_position variant ->
+      Constructor_word (Encoding.variant_name variant.name :> string)
+  | Pointer_position referenced ->
+      refuse_constructor_binding context reading name referenced;
+      Binding_word
+  | Other_position -> Binding_word
+
+(* 4.7 rule 5: a binding of a pointer to a variant does not have the
+   name of one of the variant's constructors, which [*] would match. *)
+and refuse_constructor_binding context reading (name : Tree.identifier)
+    referenced =
+  match position_type context reading referenced with
+  | Variant_position variant when Hashtbl.mem variant.index_of name.node ->
+      context.fail name.span
+        (Rule.message Pattern
+           (Printf.sprintf
+              "the binding %s of a pointer to the variant %s has the name \
+               of one of its constructors; `*%s` matches that constructor, \
+               and a binding of the pointer takes another name"
+              (quote name.node) (quoted_variant variant.name) name.node))
+  | Variant_position _ | Pointer_position _ | Other_position -> ()
+
+(* 4.7 rule 4: the type of a typed binding is that of its field, since
+   the binding converts nothing. *)
+and refuse_other_type context (type_name : Tree.type_name)
+    (variant : indexed_variant) =
+  let named = Ctype.unqualified (context.type_name type_name) in
+  match named.shape with
+  | Record tag when tag.record_id = variant_key variant.variant_type -> ()
+  | _ ->
+      context.fail type_name.span
+        (Rule.message Pattern
+           (Printf.sprintf
+              "the typed binding names the type %s, and its field is of \
+               the variant %s; a binding converts nothing"
+              (quote (excerpt context type_name.span))
+              (quoted_variant variant.name)))
+
+(* 4.7 rule 2: a sub-pattern that the type of its position does not
+   list. *)
+and refuse_sub_pattern context (sub : Tree.sub_pattern) t position_type =
+  let takes =
+    match position_type with
+    | Variant_position _ -> "`_`, a constructor pattern or a typed binding"
+    | Pointer_position _ -> "`_`, a binding or `*` and a constructor pattern"
+    | Other_position -> "`_` or a binding"
+  in
+  context.fail sub.span
+    (Rule.message Pattern
+       (Printf.sprintf
+          "the sub-pattern %s stands at a field of type %s, which takes %s"
+          (quote (excerpt context sub.span))
+          (quote (Type_name.of_ctype t))
+          takes))
+
+(* Whether selection reads a tag below the constructor of [pattern]. *)
+and reads_below (pattern : Selection.constructor_pattern) =
+  List.exists
+    (function Selection.Any -> false | Constructor _ | Pointer _ -> true)
+    pattern.fields
 
 (* The sub-patterns of [pattern] with the fields of [constructor]: one
    sub-pattern per field, or no field list, which only a test may omit
-   for a constructor with fields (4.1 rule 3, 4.6 rule 2). *)
+   for a constructor with fields (4.1 rule 3, 4.6 rule 2, 4.7 rule 9). *)
 and sub_pattern_fields context ~site label (pattern : Tree.pattern)
     (constructor : Ctype.constructor) =
   let name = quote (constructor.constructor_name :> string) in
@@ -4899,43 +5209,81 @@ and sub_pattern_fields context ~site label (pattern : Tree.pattern)
            name (List.length sub_patterns) fields)
   | Some sub_patterns, _ -> List.combine sub_patterns constructor.fields
 
-(* Each label of [arm] with its pattern checked against the constructor
-   that it names; [None] for a [default]. *)
-and labelled_constructors context variant constructors (arm : Tree.arm) =
+(* Each label of [arm] with its pattern checked against the variant
+   [root]; [None] for a [default]. *)
+and labelled_patterns context reading root (arm : Tree.arm) =
   List.map
     (fun (label : Tree.arm_label) ->
       match label.node with
       | Default_arm_label -> (label, None)
       | Pattern_label pattern ->
-          let checked =
-            pattern_constructor context ~site:Match_label variant
-              constructors label.span pattern
-          in
-          (label, Some checked))
+          ( label,
+            Some
+              (constructor_pattern context reading root ~position:[] ~path:[]
+                 label.span pattern) ))
     arm.node.labels
 
 (* 4.2 rules 1 and 2, read from the selection tree of the labels of a
    match (4.7 rule 6): every case label and the one [default] are
    selected for some value, and every value is taken. The result is the
-   constructors of the scrutinee that the [default] takes. *)
-and coverage context ~statement variant constructors labelled =
+   tree. *)
+and coverage context ~statement root labelled =
   let cases = List.filter_map snd labelled in
   let has_default =
     List.exists (fun (_, checked) -> Option.is_none checked) labelled
   in
-  let variant_constructors = Array.of_list constructors in
   match
-    Selection.select variant_constructors
-      (List.map (selection_pattern variant_constructors) cases)
+    Selection.select root.constructors
+      (List.map (fun (checked : checked_pattern) -> checked.selection) cases)
       ~default:has_default
   with
   | Error refusal ->
       context.fail statement (Rule.c_text (selection_refusal refusal))
   | Ok tree ->
       refuse_unselected_labels context tree labelled;
-      refuse_missing context ~statement variant tree;
-      refuse_unselected_default context tree labelled;
-      Selection.defaulted tree
+      refuse_missing context ~statement root.name tree;
+      refuse_unselected_default context tree labelled
+        ~flat:(not (List.exists (fun c -> reads_below c.selection) cases));
+      tree
+
+(* A tree of one node, whose root reads the scrutinee's tag alone
+   (13.5). *)
+and is_flat (tree : Selection.t) =
+  List.for_all
+    (fun (branch : Selection.branch) ->
+      match branch.subtree with Leaf _ -> true | Node _ -> false)
+    tree.scrutinee
+
+(* The tree that lowering writes (13.5): each leaf the number of its arm
+   from 0 in source order, and each node with the place of its tag. A
+   tree of a match that passed {!coverage} has no leaf of nothing. *)
+and lowered_tree reading root labelled (tree : Selection.t) =
+  let arms = Array.of_list labelled in
+  let arm_of_label = Hashtbl.create 16 and default_arm = ref None in
+  Array.iteri
+    (fun arm labels ->
+      List.iter
+        (function
+          | _, Some _ ->
+              Hashtbl.replace arm_of_label (Hashtbl.length arm_of_label) arm
+          | _, None -> default_arm := Some arm)
+        labels)
+    arms;
+  let rec lowered : Selection.tree -> selection_tree = function
+    | Leaf (Label index) -> Arm (Hashtbl.find arm_of_label index)
+    | Leaf Default -> Arm (Option.get !default_arm)
+    | Leaf Nothing -> invalid_arg "Expressions.lowered_tree: a value missed"
+    | Node { position; branches } ->
+        let place = Positions.find reading.places position in
+        Read
+          { tag = place.tag; variant = place.variant;
+            branches = List.map branch branches }
+  and branch (branch : Selection.branch) =
+    (List.map constructor_name branch.constructors, lowered branch.subtree)
+  in
+  Read
+    { tag = []; variant = root.name;
+      branches = List.map branch tree.scrutinee }
 
 (* A translation limit of typec on selection (4.7 rule 10, C11
    5.2.4.1). *)
@@ -4951,18 +5299,10 @@ and selection_refusal : Selection.refusal -> string = function
          that typec takes (a translation limit, C11 5.2.4.1)"
         Selection.max_depth
 
-(* The pattern of a case label as selection reads it. Its sub-patterns
-   are [_] and bindings, which read no tag. *)
-and selection_pattern variant_constructors (checked : checked_pattern) :
-    Selection.constructor_pattern =
-  { variant = variant_constructors;
-    index = checked.index;
-    fields = List.map (fun _ -> Selection.Any) checked.sub_fields }
-
 (* In source order: a second [default] (4.2 rule 2), and a case label
    that is no leaf of [tree], since the labels before it match all that
-   it matches (rule 1). Without nested patterns that is a constructor
-   named twice, which is how the error names it. *)
+   it matches (rule 1). For a label without a nested pattern that is a
+   constructor named twice, which is how the error names it. *)
 and refuse_unselected_labels context tree labelled =
   let never = Selection.never_selected tree in
   let rec walk case_index ~after_default = function
@@ -4972,15 +5312,23 @@ and refuse_unselected_labels context tree labelled =
           context.fail label.span
             (Rule.message Default_arm "a match has a second `default`");
         walk case_index ~after_default:true rest
-    | (label, Some { constructor; _ }) :: rest ->
+    | (label, Some (checked : checked_pattern)) :: rest ->
         if List.mem case_index never then
           context.fail label.span
             (Rule.message Exhaustiveness
-               (Printf.sprintf "the constructor %s is covered twice"
-                  (quote (constructor.constructor_name :> string))));
+               (unselected_label checked.constructor
+                  ~flat:(not (reads_below checked.selection))));
         walk (case_index + 1) ~after_default rest
   in
   walk 0 ~after_default:false labelled
+
+and unselected_label (constructor : Ctype.constructor) ~flat =
+  if flat then
+    Printf.sprintf "the constructor %s is covered twice"
+      (quote (constructor.constructor_name :> string))
+  else
+    "the case label is never selected, since the labels before it match \
+     every value that it matches"
 
 (* The values that no label takes (4.2 rule 1). *)
 and refuse_missing context ~statement variant tree =
@@ -5003,17 +5351,21 @@ and missing_text variant (missing : Selection.missing) =
       Some ("the match does not cover " ^ value_list named ~more)
 
 (* 4.2 rule 2: a [default] takes at least one value. *)
-and refuse_unselected_default context tree labelled =
+and refuse_unselected_default context tree labelled ~flat =
   if Selection.default_never_selected tree then
     match
       List.find_opt (fun (_, checked) -> Option.is_none checked) labelled
     with
     | Some ((default : Tree.arm_label), _) ->
         context.fail default.span
-          (Rule.message Default_arm
-             "the `default` of a match covers no constructor")
+          (Rule.message Default_arm (unselected_default ~flat))
     | None -> ()
 
+and unselected_default ~flat =
+  if flat then "the `default` of a match covers no constructor"
+  else
+    "the `default` of the match takes no value, since its case labels \
+     match every value"
 
 and constructor_name (constructor : Ctype.constructor) =
   constructor.constructor_name
@@ -5049,21 +5401,22 @@ and listed ~one ~several ~more quoted =
 
 (* An arm and its bindings, which only an arm of one label may declare
    (4.1 rule 6). A binding is a non-modifiable object of its field's
-   type in the arm's scope (rule 4). *)
+   type in the arm's scope (rule 4), at any depth (4.7 rule 7). *)
 and matched_arm context (arm : Tree.arm) labelled defaulted =
   let labels = arm.node.labels in
   let first = List.hd labels and last = List.hd (List.rev labels) in
   let bindings =
     match labelled with
-    | [ (_, Some checked) ] -> pattern_bindings context checked
+    | [ (_, Some (checked : checked_pattern)) ] ->
+        List.map (declare_binding context) checked.bindings
     | _ ->
-        List.iter (refuse_shared_binding context) labels;
+        List.iter (refuse_shared_binding context) labelled;
         []
   in
   let cases =
     List.concat_map
       (function
-        | _, Some { constructor; _ } -> [ constructor ]
+        | _, Some (checked : checked_pattern) -> [ checked.constructor ]
         | _, None -> defaulted)
       labelled
   in
@@ -5072,39 +5425,19 @@ and matched_arm context (arm : Tree.arm) labelled defaulted =
     cases = List.map constructor_name cases;
     bindings }
 
-and refuse_shared_binding context (label : Tree.arm_label) =
-  match label.node with
-  | Pattern_label { sub_patterns = Some sub_patterns; _ } ->
-      List.iter
-        (function
-          | Tree.Binding { name; _ } ->
-              context.fail name.span
-                (Rule.message Shared_arm
-                   (Printf.sprintf
-                      "the binding %s is in an arm of several labels, which \
-                       none of them may bind"
-                      (quote name.node)))
-          | Wildcard _ -> ())
-        sub_patterns
-  | Pattern_label { sub_patterns = None; _ } | Default_arm_label -> ()
+and refuse_shared_binding context = function
+  | _, Some { bindings = { identifier; _ } :: _; _ } ->
+      context.fail identifier.span
+        (Rule.message Shared_arm
+           (Printf.sprintf
+              "the binding %s is in an arm of several labels, which none of \
+               them may bind"
+              (quote identifier.node)))
+  | _, Some { bindings = []; _ } | _, None -> ()
 
-(* A pattern without a field list has no sub-pattern to bind, as if each
-   field were [_] (4.6 rule 2). *)
-and pattern_bindings context (checked : checked_pattern) =
-  List.concat_map
-    (sub_pattern_binding context checked.constructor)
-    checked.sub_fields
-
-and sub_pattern_binding context (constructor : Ctype.constructor)
-    ((sub_pattern : Tree.sub_pattern), (field : Ctype.member)) =
-  match (sub_pattern, field.member_name) with
-  | Wildcard _, _ -> []
-  | Binding { name = binding; declared }, Some field_name ->
-      context.binding binding declared (non_modifiable field.member_type);
-      [ { name = binding.node; constructor = constructor.constructor_name;
-          field = field_name } ]
-  | Binding _, None ->
-      invalid_arg "Expressions.sub_pattern_binding: an unnamed field"
+and declare_binding context (found : found_binding) =
+  context.binding found.identifier found.declared found.object_type;
+  { name = found.identifier.node; field = found.copied }
 
 (* A field type is unqualified and no array (design 3.2 rule 4), so it
    takes [const]. *)

@@ -2658,7 +2658,7 @@ let match_cases =
        found `}` [match-arm-form]";
     error_in_function "a pattern has at least one sub-pattern in parentheses"
       "match (v) { case A(): break; }"
-      "in.tc:1: error: expected a binding or `_`, found `)`";
+      "in.tc:1: error: expected a sub-pattern, found `)`";
     error_in_function "a pattern names its constructor unqualified"
       "match (v) { case e.A: break; }"
       "in.tc:1: error: expected `:` after the label of an arm, found `.`";

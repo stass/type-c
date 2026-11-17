@@ -404,7 +404,7 @@ of long double and on the libc.
   >   case Flags(f):
   >     printf("Flags %d %d %d\n", f.ready, f.level, f.delta);
   >     break;
-  >   case Inner(s, after):
+  >   case Inner(scalar s, after):
   >     printf("Inner %c ", after);
   >     scalar_fields(s);
   >     printf("\n");
@@ -418,7 +418,7 @@ of long double and on the libc.
   >   case Bits(b): return Bits(b);
   >   case Name(n): return Name(n);
   >   case Flags(f): return Flags(f);
-  >   case Inner(s, after): return Inner(tc_rebuild_scalar(s), after);
+  >   case Inner(scalar s, after): return Inner(tc_rebuild_scalar(s), after);
   >   }
   > }
   > 

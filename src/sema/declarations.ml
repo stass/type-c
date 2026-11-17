@@ -230,6 +230,9 @@ type state = {
   at_file_scope : (string, entity) Hashtbl.t;
   beside : (Tree.reference, entity option) Hashtbl.t;
   overloaded : (Tree.reference, unit) Hashtbl.t;
+  alone_readings : (Tree.reference, Expressions.alone_reading) Hashtbl.t;
+      (* how typing first read each identifier alone in a pattern, which
+         the parser declared (design 4.7 rule 3) *)
   generic_functions : (Tree.reference, generic_function) Hashtbl.t;
       (* each declaration of a generic function (design 7.1) *)
   mutable generic_part : generic_part option;
@@ -568,11 +571,28 @@ let entity_used state span name reference =
     note_use state span name (Resolution.Ordinary reference);
   Hashtbl.find_opt state.entities reference
 
+(* Design 4.7 rule 3: the parser declares an identifier alone in a
+   pattern in the scope of the arm before typing reads it as a
+   constructor, which declares nothing, so a use of the name there that
+   no target type resolves (3.3) is refused. *)
+let refuse_constructor_word state span name variant =
+  fail state span
+    (Rule.message Pattern
+       (Printf.sprintf
+          "%s is a constructor of %s in a pattern of this arm and binds \
+           nothing; the arm writes it %s"
+          (quote name) (quote variant)
+          (quote (variant ^ "." ^ name))))
+
 (* The entity that [reference] denotes at the use of [name] at [span]. *)
 let referenced state span name reference =
   match entity_used state span name reference with
   | Some entity -> entity
-  | None -> not_read state span name
+  | None -> (
+      match Hashtbl.find_opt state.alone_readings reference with
+      | Some (Constructor_word variant) ->
+          refuse_constructor_word state span name variant
+      | Some Binding_word | None -> not_read state span name)
 
 (* Design 7.1 rule 7: when declarations of a generic function agree. *)
 let refuse_generic_agreement state span name reason =
@@ -4133,6 +4153,7 @@ and typing state : Expressions.context =
     type_declaration =
       (fun declaration -> ignore (read_type_declaration state declaration));
     binding = bind_binding state;
+    alone_reading = alone_reading state;
     needs_complete = needs_complete state;
     slice_instance = slice_instance state;
     block_literal = (fun () -> note_block_literal state);
@@ -4287,6 +4308,19 @@ and note_block_literal state =
   let facts = state.external_facts in
   if Option.is_none facts.block_literal && not (in_instance_definition state)
   then facts.block_literal <- Some (Ctype.now state.tags)
+
+(* The reading of an identifier alone in a pattern that typing recorded
+   first, else [first ()], recorded: an instance of a generic function
+   reads it as the definition check did (design 4.7 rule 3, 7.1 rule
+   2). *)
+and alone_reading state (declared : Tree.declared) first =
+  let reference = Tree.In_tree declared.id in
+  match Hashtbl.find_opt state.alone_readings reference with
+  | Some reading -> reading
+  | None ->
+      let reading = first () in
+      Hashtbl.replace state.alone_readings reference reading;
+      reading
 
 (* A binding of a match (design 4.1 rule 4): an object without linkage
    in the block scope of its arm. *)
@@ -4756,6 +4790,7 @@ let read target text (scopes : Parser.scopes) =
       at_file_scope = Hashtbl.create 1024;
       beside = Hashtbl.create 64;
       overloaded = Hashtbl.create 64;
+      alone_readings = Hashtbl.create 16;
       generic_functions = Hashtbl.create 16;
       generic_part = None;
       trial = false;

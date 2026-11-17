@@ -624,19 +624,32 @@ and arm_label = arm_label_node spanned
 
 and arm_label_node = Pattern_label of pattern | Default_arm_label
 
-(** A constructor of the scrutinee's type, unqualified, and its
+(** A constructor of the variant of its position, unqualified, and its
     sub-patterns in parentheses, [None] without them (design 4.1 rule 3,
-    Appendix A). *)
+    4.7, Appendix A). *)
 and pattern = {
   constructor : identifier;
   sub_patterns : sub_pattern list option;
 }
 
-(** A sub-pattern: an identifier, which declares a binding where it
-    enters scope, or [_], which binds nothing. *)
-and sub_pattern =
-  | Binding of { name : identifier; declared : declared }
-  | Wildcard of span
+(** A sub-pattern (design 4.7 rule 2, Appendix A). The type of its
+    position, which typing reads, decides what an identifier alone is:
+    a constructor without a field list where the position is a variant,
+    and a binding elsewhere (rule 3). It enters the scope of the arm in
+    either reading. *)
+and sub_pattern = sub_pattern_node spanned
+
+and sub_pattern_node =
+  | Wildcard  (** [_], which binds nothing *)
+  | Alone of { name : identifier; declared : declared }
+      (** an identifier alone *)
+  | Nested of pattern  (** a constructor with its field list *)
+  | Followed of pattern  (** [*] and a constructor pattern (rule 5) *)
+  | Typed_binding of {
+      type_name : type_name;
+      name : identifier;
+      declared : declared;
+    }  (** [T x] (rule 4) *)
 
 (** The braces of a compound statement and what is between them: the
     GNU local label declarations, which come before everything else, and

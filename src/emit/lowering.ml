@@ -380,15 +380,40 @@ let scrutinee_holder (matching : _ Typec_sema.Expressions.matching_of) =
         Printf.sprintf "), *const %s = &%s; " scrutinee_pointer
           scrutinee_copy )
 
+(* The member access that reaches an object from one that [pointer]
+   says is reached through a pointer. *)
+let member_operator ~pointer = if pointer then "->" else "."
+
+(* The field that [steps] reach from the scrutinee (design 13.5), as
+   [__tc_match->u.Add.l->u.Num.value], and whether the object it reaches
+   is the one that the field points to. *)
+let field_access (steps : Typec_sema.Expressions.field_step list) =
+  (* One buffer, since a string built anew at each step would copy the
+     path once per step, quadratic in the depth of the field. *)
+  let path = Buffer.create 64 in
+  Buffer.add_string path scrutinee_pointer;
+  let add_step pointer (step : Typec_sema.Expressions.field_step) =
+    Buffer.add_string path (member_operator ~pointer);
+    Buffer.add_string path Tree.union_member;
+    Buffer.add_char path '.';
+    Buffer.add_string path (step.constructor :> string);
+    Buffer.add_char path '.';
+    Buffer.add_string path step.field;
+    step.through_pointer
+  in
+  let pointer = List.fold_left add_step true steps in
+  (Buffer.contents path, pointer)
+
+(* The tag of the variant at the end of [steps]. *)
+let tag_access steps =
+  let object_text, pointer = field_access steps in
+  object_text ^ member_operator ~pointer ^ Tree.tag_member
+
 (* The type of a binding is spelt [__typeof__] its field (design 2.4),
    because no name of the field's type that C11 can spell is sure to be
    visible, and not hidden, at the match. *)
 let binding_declaration (binding : Typec_sema.Expressions.binding) =
-  let field =
-    Printf.sprintf "%s->%s.%s.%s" scrutinee_pointer Tree.union_member
-      (binding.constructor :> string)
-      binding.field
-  in
+  let field, _ = field_access binding.field in
   Printf.sprintf " const __typeof__(%s) %s = %s;" field binding.name field
 
 let binding_declarations output location bindings =
@@ -415,22 +440,70 @@ let arm_block output location
       ( "{" ^ binding_declarations output location bindings ^ " {",
         " } " ^ trap ^ " }" )
 
-(* The labels of an arm become the [case] of each constructor it takes
-   and open its block; a trap closes the block after its last item. *)
-let matched_arm output ~variant (arm : Typec_sema.Expressions.matched_arm) =
+(* The labels of an arm become the [case] labels that [cases] gives and
+   open its block; a trap closes the block after its last item. *)
+let matched_arm output ~cases (arm : Typec_sema.Expressions.matched_arm) =
   let tokens = tokens_of output in
   let location = tokens.(arm.labels.first).location in
   let opening, closing = arm_block output location arm.bindings in
-  let cases =
-    Emitter.joined output location ~separator:" " (case_label ~variant)
-      arm.cases
-  in
+  let cases = cases location arm in
   replace output ~location
     (cases ^ " " ^ opening)
     (grammar_tokens tokens arm.labels.first arm.labels.last)
   @ [ close output ~after:arm.arm.last closing ]
 
-let match_statement output matching arms =
+(* In a match whose selection tree has one node, the [case] of each
+   constructor that an arm takes. *)
+let constructor_cases output ~variant location
+    (arm : Typec_sema.Expressions.matched_arm) =
+  Emitter.joined output location ~separator:" " (case_label ~variant)
+    arm.cases
+
+(* Design 13.5: a selection tree of more than one node sets the local
+   [__tc_arm] to the number of the arm that it selects, and a [switch] on
+   the local holds the arms, each written once. *)
+let arm_local = "__tc_arm"
+
+let rec selection_text output location
+    (tree : Typec_sema.Expressions.selection_tree) =
+  match tree with
+  | Arm arm -> Printf.sprintf "%s = %d;" arm_local arm
+  | Read { tag; variant; branches } ->
+      let variant = Typec_sema.Encoding.variant_name variant in
+      let branch (constructors, subtree) =
+        Emitter.joined output location ~separator:" " (case_label ~variant)
+          constructors
+        ^ " "
+        ^ selection_text output location subtree
+        ^ " break;"
+      in
+      Printf.sprintf "switch (%s) { %s %s }" (tag_access tag)
+        (Emitter.joined output location ~separator:" " branch branches)
+        invalid_tag
+
+let arm_case arm_numbers _location
+    (arm : Typec_sema.Expressions.matched_arm) =
+  Printf.sprintf "case %d:" (Hashtbl.find arm_numbers arm.arm)
+
+(* The [switch] that holds the arms, and the [case] labels of an arm. *)
+let arms_switch output location ~variant
+    (arms : Typec_sema.Expressions.arms) =
+  match arms.nested with
+  | None ->
+      ( Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member,
+        constructor_cases output ~variant )
+  | Some tree ->
+      let arm_numbers = Hashtbl.create 16 in
+      List.iteri
+        (fun number (arm : Typec_sema.Expressions.matched_arm) ->
+          Hashtbl.replace arm_numbers arm.arm number)
+        arms.matched;
+      ( Printf.sprintf "unsigned %s; %s switch (%s) {" arm_local
+          (selection_text output location tree)
+          arm_local,
+        arm_case arm_numbers )
+
+let match_statement output matching (arms : Typec_sema.Expressions.arms) =
   let tokens = tokens_of output in
   let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
     matching
@@ -441,14 +514,12 @@ let match_statement output matching arms =
   let close_paren = grammar_token_after tokens scrutinee.last in
   let open_brace = grammar_token_after tokens close_paren in
   let opening, held = scrutinee_holder matching in
-  let switch =
-    Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member
-  in
+  let location = tokens.(close_paren).location in
+  let switch, cases = arms_switch output location ~variant arms in
   replace output ~location:tokens.(match_token).location opening
     [ match_token; open_paren ]
-  @ replace output ~location:tokens.(close_paren).location (held ^ switch)
-      [ close_paren; open_brace ]
-  @ List.concat_map (matched_arm output ~variant) arms
+  @ replace output ~location (held ^ switch) [ close_paren; open_brace ]
+  @ List.concat_map (matched_arm output ~cases) arms.matched
   @ replace output
       ~location:tokens.(statement.last).location
       (Printf.sprintf "%s } }" invalid_tag)

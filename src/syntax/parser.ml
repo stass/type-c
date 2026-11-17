@@ -2677,12 +2677,20 @@ and open_kind =
     }
 
 (* A pattern as read, before its bindings enter scope where its block
-   scope begins: its constructor and its sub-patterns, each an
-   identifier, which may be [_]. *)
+   scope begins: its constructor and its sub-patterns (design 4.7,
+   Appendix A). *)
 type pattern_words = {
   constructor : identifier;
-  sub_patterns : identifier list option;
+  sub_patterns : (span * sub_pattern_words) list option;
 }
+
+(* A sub-pattern as read: a pattern, which without a field list is an
+   identifier alone and may be [_]; [*] and a pattern; or a typed
+   binding, its type name and its identifier. *)
+and sub_pattern_words =
+  | Pattern_words of pattern_words
+  | Followed_words of pattern_words
+  | Typed_words of { type_name : type_name; name : identifier }
 
 (* What the substatement of an open statement leaves: the statement
    closed, or, after the [else] of an [if], open again. *)
@@ -3801,20 +3809,25 @@ and postfix_operators state start operand =
    after it, such as the arguments of [T.C(...)]. *)
 and qualified_constructor state name ordinary =
   let start = state.position in
-  advance state;
-  let at = first_token state start in
-  let specifier =
-    finish state start (Type_specifier (named_type state name ordinary ~at))
-  in
-  let variant =
-    finish state start { specifier_qualifiers = [ specifier ]; abstract = None }
-  in
+  let variant = named_type_name state name ordinary in
   expect state P.Dot "`.` after the type name";
   let constructor = identifier state "a constructor name after `.`" in
   let named =
     finish state start (Qualified_constructor { variant; constructor })
   in
   postfix_operators state start named
+
+(* At the typedef name [name], which [ordinary] declares: the type name
+   of it alone, or of its application, as a qualified constructor and a
+   typed binding write it (design 3.3, 4.7 rule 4). *)
+and named_type_name state name ordinary =
+  let start = state.position in
+  advance state;
+  let at = first_token state start in
+  let specifier =
+    finish state start (Type_specifier (named_type state name ordinary ~at))
+  in
+  finish state start { specifier_qualifiers = [ specifier ]; abstract = None }
 
 (* After the [(] of a call, up to and including the [)]. *)
 (* Design 7.2 rule 4: at the [(] after the name of a generic function, a
@@ -4700,14 +4713,13 @@ and arm_label state =
   expect state P.Colon "`:` after the label of an arm";
   finish state start node
 
-(* After the [case]: a constructor and its sub-patterns. *)
-and pattern_words state =
-  let constructor = identifier state "a constructor after `case`" in
+(* After the [case], or where a sub-pattern begins, which [expected]
+   names: a constructor and its sub-patterns. *)
+and pattern_words ?(expected = "a constructor after `case`") state =
+  let constructor = identifier state expected in
   let sub_patterns =
     if accept state P.Left_paren then begin
-      let read =
-        one_or_more state (fun state -> identifier state "a binding or `_`")
-      in
+      let read = one_or_more state sub_pattern_words in
       expect state P.Right_paren "`)` after the sub-patterns of a pattern";
       Some read
     end
@@ -4715,15 +4727,67 @@ and pattern_words state =
   in
   { constructor; sub_patterns }
 
-(* The pattern [words], whose bindings enter the current scope here: the
-   one place that declares a binding (design 4.1 rule 4). *)
-and bound_pattern state (words : pattern_words) : pattern =
-  let sub_pattern (name : identifier) =
-    if name.node = wildcard_word then Wildcard name.span
-    else Binding { name; declared = declare state ~kind:Not_a_type name }
+(* Design 4.7 rule 4: what follows a name tells a typed binding from a
+   pattern, whatever names are visible. An identifier follows the type
+   name of a typed binding, directly or after the type arguments of an
+   application; [,] or [)] follows a pattern. *)
+and sub_pattern_words state =
+  let start = state.position in
+  let node =
+    if accept state P.Star then
+      Followed_words (pattern_words ~expected:"a constructor after `*`" state)
+    else if begins_typed_binding state then typed_binding_words state
+    else Pattern_words (pattern_words ~expected:"a sub-pattern" state)
   in
+  (span_from state start, node)
+
+and begins_typed_binding state =
+  match (peek state, peek_at state 1) with
+  | Identifier_token _, Identifier_token _ -> true
+  | Identifier_token _, Punctuator_token P.Left_paren ->
+      is_identifier (peek_at state (past_group state P.Left_paren 1))
+  | _ -> false
+
+(* [T x], where [T] is a typedef name or the application of a generic
+   type. *)
+and typed_binding_words state =
+  let name = next_spelling state in
+  match typedef_declaration state name with
+  | None ->
+      fail state
+        (Rule.c_text
+           (Printf.sprintf
+              "expected a type name before the binding of a sub-pattern, \
+               found %s"
+              (found state)))
+  | Some ordinary ->
+      let type_name = named_type_name state name ordinary in
+      Typed_words { type_name; name = identifier state "a binding" }
+
+(* The pattern [words], whose bindings enter the current scope here: the
+   one place that declares a binding (design 4.1 rule 4). An identifier
+   alone enters scope as a binding also where its position, which typing
+   reads, makes it a constructor (4.7 rule 3). *)
+and bound_pattern state (words : pattern_words) : pattern =
   { constructor = words.constructor;
-    sub_patterns = Option.map (List.map sub_pattern) words.sub_patterns }
+    sub_patterns =
+      Option.map (List.map (bound_sub_pattern state)) words.sub_patterns }
+
+and bound_sub_pattern state ((span : span), (words : sub_pattern_words)) =
+  let bind name = declare state ~kind:Not_a_type name in
+  let node =
+    match words with
+    | Pattern_words { constructor; sub_patterns = None }
+      when constructor.node = wildcard_word ->
+        Wildcard
+    | Pattern_words { constructor = name; sub_patterns = None } ->
+        Alone { name; declared = bind name }
+    | Pattern_words words -> Nested (bound_pattern state words)
+    | Followed_words words -> Followed (bound_pattern state words)
+    | Typed_words { type_name; name } ->
+        Typed_binding { type_name; name; declared = bind name }
+  in
+  spanned state span node
 
 (* After the [asm]: its qualifiers, and its template and operands in
    parentheses. *)

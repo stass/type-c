@@ -26,9 +26,10 @@ is designed but not built yet ([Status](#status)).
 
 An evaluator of arithmetic expression trees, which reports a division
 by zero or an overflow as a value instead of crashing. This example
-uses two features that are planned but not built yet, `try` inside an
-expression and nested patterns; every other C and Type-C example in
-this README is checked by its tests.
+uses a feature that is planned but not built yet, `try` inside an
+expression, and nested patterns, which are built, as in
+`case Err(DivByZero):`; every other C and Type-C example in this
+README is checked by its tests.
 
 <!-- untested: planned syntax -->
 ```c
@@ -620,15 +621,12 @@ main(void)
 	case Ok(n):
 		printf("%ld\n", n);
 		return (0);
-	case Err(error):
-		match (error) {
-		case Missing(name):
-			fprintf(stderr, "%s is not set\n", name);
-			return (1);
-		case NotANumber(name):
-			fprintf(stderr, "%s is not a number\n", name);
-			return (1);
-		}
+	case Err(Missing(name)):
+		fprintf(stderr, "%s is not set\n", name);
+		return (1);
+	case Err(NotANumber(name)):
+		fprintf(stderr, "%s is not a number\n", name);
+		return (1);
 	}
 }
 ```
@@ -1410,10 +1408,12 @@ checked indexing are built,
 functions are not yet:
 `generic(T) T *vector_last(vector(T) *v);`.
 
-Planned, and previewed by [A first look](#a-first-look): nested
-patterns such as `case Err(DivByZero):`, which
+Nested patterns in `match`, such as `case Err(DivByZero):`, which
 [design 4.7](type-c-language-design.md#47-nested-patterns) specifies,
-and `try` inside any expression, which the
+are built; in a single-pattern test they are not yet.
+
+Planned, and previewed by [A first look](#a-first-look): `try` inside
+any expression, which the
 [design](type-c-language-design.md#12-outside-the-core) lists outside
 the core until it adopts it.
 
