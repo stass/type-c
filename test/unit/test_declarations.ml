@@ -126,13 +126,13 @@ let accepts ?file ?(target = lp64) source =
   | Ok _ -> ()
   | Error error -> fail_case source (Reader.error_message error)
 
-(* Reading [source size] takes time that grows at most as [size] to the
+(* Reading [source size] does work that grows at most as [size] to the
    power [degree], from [small] on. *)
-let reads_in_time ?file ~degree name ~small source =
+let reads_in_work ?file ~degree name ~small source =
   let reading size = ignore (read ?file lp64 (source size)) in
-  match Timing.outgrows ~degree ~small reading with
+  match Work.outgrows ~degree ~small reading with
   | None -> ()
-  | Some times -> fail_case name times
+  | Some growth -> fail_case name growth
 
 (* The type and value of an integer constant (6.4.4.1p5). *)
 let constant_type ?(target = lp64) spelling expected =
@@ -265,14 +265,14 @@ let typedefs () =
   rejects "typedef int f(void) {}" "6.9.1p4";
   rejects "register int f(void) {}" "6.9.1p4";
   declares "static int f(int x) { }" "f" "function int (int) internal";
-  (* The typedef names of an untagged type are kept once each in time
+  (* The typedef names of an untagged type are kept once each in work
      near linear in their number, not in its square. *)
   let named count =
     let names = List.init count (Printf.sprintf "n%d") in
     "typedef struct { int x; } " ^ String.concat ", " names ^ ";"
   in
   accepts (named 32000);
-  reads_in_time ~degree:1 "many typedef names of one type" ~small:32000
+  reads_in_work ~degree:1 "many typedef names of one type" ~small:32000
     named
 
 let tags () =
@@ -1504,10 +1504,10 @@ let variants () =
     "has a const-qualified member";
   rejects ~file "type e = | A(int x, long x);" "duplicate member";
   (* Whether a record holds a const member is found once per record, so
-     the time is linear in the text, not in the size of the value. *)
+     the work is linear in the text, not in the size of the value. *)
   accepts ~file (doubling_structures 30 "");
   rejects ~file (doubling_structures 30 " const int c;") "const-qualified";
-  reads_in_time ~degree:1 ~file "doubling_structures" ~small:7
+  reads_in_work ~degree:1 ~file "doubling_structures" ~small:7
     (fun depth -> doubling_structures depth " const int c;")
 
 (* Type-C text takes a variant only whole (design 3.2 rule 6): it may
@@ -1799,7 +1799,7 @@ let constructors () =
       struct b { int : 3; e v; } r[1] = { A }; \
       struct c { struct d { e v; int n; } d[2]; int n; } u[1] = { A };");
   (* The first variant along the first members of a record is found once
-     per record, so the time is linear in the text, not the nesting depth
+     per record, so the work is linear in the text, not the nesting depth
      times the length of the list. *)
   let nested depth =
     "struct n0 { e v; };"
@@ -1812,7 +1812,7 @@ let constructors () =
         (String.concat ", " (List.init depth (fun _ -> "y")))
   in
   accepts ~file (variant ^ nested 2000);
-  reads_in_time ~degree:1 ~file "nested structures" ~small:2000
+  reads_in_work ~degree:1 ~file "nested structures" ~small:2000
     (fun depth -> variant ^ nested depth);
   accepts ~file (variant ^ "typedef e alias; e x = alias.A;");
   (* A qualified constructor is an expression wherever one may stand,
@@ -1902,11 +1902,11 @@ let zero_values () =
   in
   accepts ~file (lost_walk 30 " int k;");
   rejects ~file (lost_walk 30 " e k;") "in an object that holds a variant";
-  reads_in_time ~degree:1 ~file "lost_walk" ~small:7 (fun depth ->
+  reads_in_work ~degree:1 ~file "lost_walk" ~small:7 (fun depth ->
       lost_walk depth " e k;");
   (* In a generic function, whether the object of a braced list holds a
      type that typec does not compute is found once per record too. *)
-  reads_in_time ~degree:1 ~file "generic_walk" ~small:7 (fun depth ->
+  reads_in_work ~degree:1 ~file "generic_walk" ~small:7 (fun depth ->
       doubling_structures depth ""
       ^ " generic(T) void g(void) { struct top z = {0}; (void)z; }");
   (* A variant held through a member record, an array member or an
@@ -2486,7 +2486,7 @@ let rejects_at ~line source expected =
              location.line message line expected)
 
 (* [count] aliases, the nth of 2^n nested applications of the first,
-   which only a reading per instance types in time. *)
+   which only a reading per instance types in work. *)
 let doubling_aliases count =
   "type b0(T) = T;"
   ^ String.concat ""
@@ -2529,14 +2529,14 @@ let instance_budget () =
 (* Design 3.5 rule 7: each exit that runs a copy of a deferred statement
    counts the statement's tokens against the output limit, so the pairs
    of a defer and an exit, which grow with the square of the source,
-   stop at the limit: past it the front end takes time linear in the
+   stop at the limit: past it the front end takes work linear in the
    source. *)
 let copies_of_defers () =
   let file = "in.tc" in
   let copies = "copies of the unit's deferred statements" in
   rejects ~file (Budget_probes.defers_by_exits 3400) copies;
   accepts ~file (Budget_probes.defers_by_exits 300);
-  reads_in_time ~file ~degree:1 "defers by exits past the limit" ~small:800
+  reads_in_work ~file ~degree:1 "defers by exits past the limit" ~small:800
     Budget_probes.defers_by_exits;
   (* A jump that leaves the scopes counts their copies as a return
      does. *)
@@ -2554,7 +2554,7 @@ let copies_of_defers () =
   accepts ~file (Budget_probes.functions_of_defers_by_exits ~functions:20 120);
   (* The check of the pragma lines in a scope finds the places of each
      statement by a search, not a scan of them all. *)
-  reads_in_time ~file ~degree:1 "pragmas before exits" ~small:4000
+  reads_in_work ~file ~degree:1 "pragmas before exits" ~small:4000
     Budget_probes.pragmas_before_exits
 
 let generic_checks () =
@@ -2596,7 +2596,7 @@ let generic_checks () =
     __builtin_constant_p(n), n, n), int: 1, default: 2); }";
   (* The instance budget bounds the text that the readings for a unit's
      instances give them, which can grow exponentially with the source,
-     and so the time of the refusal: without it, these sources would not
+     and so the work of the refusal: without it, these sources would not
      be read in any time a test waits for. *)
   rejects ~file (doubling_instances 30) "instance budget";
   (* A definition of many members reaches the budget after fewer
@@ -2612,12 +2612,12 @@ let generic_checks () =
   in
   accepts ~file (aliased 62);
   rejects ~file (aliased 63) "after a chain of 64";
-  (* Each instance of a transparent alias is read once, so the time
+  (* Each instance of a transparent alias is read once, so the work
      grows as a power of the count of aliases, not as its 2^count
-     applications. The power is about 1.7 by measurement, for a reason
+     applications. The power in words allocated is about 1.5, for a reason
      not yet found, so the test allows the square. *)
   accepts ~file (doubling_aliases 40);
-  reads_in_time ~file ~degree:2 "doubling_aliases" ~small:10
+  reads_in_work ~file ~degree:2 "doubling_aliases" ~small:10
     doubling_aliases;
   (* An error of a nested instance is reported at the outermost
      application. *)
@@ -2905,7 +2905,7 @@ let generic_definitions () =
 
 (* Design 7.1 rule 4: each constant that C asks for in a generic
    function is checked against the measurements of type parameters before
-   it, in time that grows no faster than the function. *)
+   it, in work that grows no faster than the function. *)
 let generic_function_constants () =
   let measured count =
     "generic(T) void f(void) {"
@@ -2914,7 +2914,7 @@ let generic_function_constants () =
              Printf.sprintf " unsigned long m%d = sizeof(T); int a%d[1];" n n))
     ^ " }"
   in
-  reads_in_time ~file:"in.tc" ~degree:1 "constants after measurements"
+  reads_in_work ~file:"in.tc" ~degree:1 "constants after measurements"
     ~small:2000 measured
 
 (* Design 13.5 and 3.5 rule 8: the definition of a generic reads where
@@ -3002,7 +3002,7 @@ let generic_resolution () =
     (plain ^ wide ^ " " ^ alias ^ " box(a(int)) x;")
     "[type-argument]";
   (* The exactness of an alias generic is read once, at its definition,
-     so a chain of aliases each applied takes time linear in its length,
+     so a chain of aliases each applied takes work linear in its length,
      not in its square. *)
   let link index =
     Printf.sprintf "type g%d(T) = g%d(int); g%d(int) x%d;" index (index - 1)
@@ -3013,7 +3013,7 @@ let generic_resolution () =
     String.concat " " ("type g0(T) = int; g0(int) x0;" :: links)
   in
   accepts ~file (chain 1000);
-  reads_in_time ~degree:1 ~file "a chain of alias generics" ~small:1000
+  reads_in_work ~degree:1 ~file "a chain of alias generics" ~small:1000
     chain;
   (* An object or a function declared again through an inexact typedef
      name, or with an attribute, may give [__typeof__] of it another type
@@ -3144,7 +3144,7 @@ let generic_resolution () =
             index index)
   in
   accepts ~file (unrelated 2000);
-  reads_in_time ~degree:1 ~file "unrelated redeclarations" ~small:2000
+  reads_in_work ~degree:1 ~file "unrelated redeclarations" ~small:2000
     unrelated;
   (* A structure completed after the text is complete at the place, where
      the text reads it through a pointer as it does at its own place. *)
@@ -3352,7 +3352,7 @@ let typedef_windows () =
   List.iter
     (fun (name, small, source) ->
       accepts ~file (source small);
-      reads_in_time ~file ~degree:1 name ~small source)
+      reads_in_work ~file ~degree:1 name ~small source)
     [ ("pairs before exits", 4000, exits);
       ("defers before pairs", 2000, defers);
       ("pairs before instances", 2000, instances) ]

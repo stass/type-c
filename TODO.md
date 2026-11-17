@@ -1374,13 +1374,6 @@ the order of its commits:
 (musl) in containers, each on x86-64 and on arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
-- [Medium] The linearity checks of `test/unit/test_lowering.ml`
-  (`grows_linearly`, "the time to lower many tries in the scope of a
-  defer") compare wall-clock times, and failed once at a load average
-  of 9.5 (1.8 s against 0.22 s) and passed on rerun, so the gate can
-  fail on a busy host. Compare counts of work (allocated words, or
-  steps counted by the lowering) instead of time, or take the least of
-  several runs.
 - [Low] Two runs of `tools/hosts/freebsd.sh` on one `DIR` at once are
   not guarded: each empties the other's source and corpus.
 - [Low] Two runs of `tools/hosts/run.sh` for one host from trees with

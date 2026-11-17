@@ -330,7 +330,7 @@ let bound () =
     (doubling 20 ~trailing:0 = Error Too_many_steps)
 
 (* The labels that a tree keeps possible cost steps at each of its
-   nodes, though the tree stays small: the bound refuses them in time
+   nodes, though the tree stays small: the bound refuses them in work
    that does not grow with their number. *)
 let probe_labels = 13
 let probe_trailing = 1000
@@ -343,18 +343,18 @@ let kept_possible () =
     if doubling probe_labels ~trailing <> Error Selection.Too_many_steps then
       all_refused := false
   in
-  let times = Timing.outgrows ~degree:0 ~small:probe_trailing refuse in
+  let growth = Work.outgrows ~degree:0 ~small:probe_trailing refuse in
   check "a doubling tree that keeps many labels possible is refused"
     !all_refused;
-  match times with
+  match growth with
   | None -> ()
-  | Some times ->
+  | Some growth ->
       check ("the refusal does not grow with the labels kept possible: "
-             ^ times) false
+             ^ growth) false
 
 (* A step compares positions at a cost that does not grow with their
    depth: the probe's labels, as many fields in all at each depth, are
-   refused in time that does not grow with the depth. *)
+   refused in work that does not grow with the depth. *)
 let probe_depth = 16
 
 let deep_positions () =
@@ -364,14 +364,14 @@ let deep_positions () =
     if doubling ~depth probe_labels ~trailing <> Error Selection.Too_many_steps
     then all_refused := false
   in
-  let times = Timing.outgrows ~degree:0 ~small:probe_depth refuse in
+  let growth = Work.outgrows ~degree:0 ~small:probe_depth refuse in
   check "a deep doubling tree that keeps many labels possible is refused"
     !all_refused;
-  match times with
+  match growth with
   | None -> ()
-  | Some times ->
+  | Some growth ->
       check ("the refusal does not grow with the depth of the labels: "
-             ^ times) false
+             ^ growth) false
 
 (* One label W(X, ..., X) of [fields] fields makes a path of a node per
    field below the root's. *)
@@ -405,14 +405,14 @@ let wide_value size i =
 
 let small_miss = 2000
 
-(* The values missing are named in time linear in the size of the tree,
+(* The values missing are named in work linear in the size of the tree,
    the first of them only. *)
-let missing_in_linear_time () =
+let missing_in_linear_work () =
   let name size = ignore (missing (wide_miss size)) in
-  (match Timing.outgrows ~degree:1 ~small:small_miss name with
+  (match Work.outgrows ~degree:1 ~small:small_miss name with
    | None -> ()
-   | Some times ->
-       check ("what a match misses is named in linear time: " ^ times) false);
+   | Some growth ->
+       check ("what a match misses is named in linear work: " ^ growth) false);
   check "the first values missing are named and the others counted"
     (let first = List.init Selection.max_named (fun i -> i + 1) in
      match Selection.missing (wide_miss small_miss) with
@@ -455,7 +455,7 @@ let declared name =
   | Ok name -> Ctype.Declared name
   | Error _ -> failwith (name ^ " is no type name")
 
-(* The error names values whose constructors have many fields in time
+(* The error names values whose constructors have many fields in work
    that does not grow with the fields, however deep the leaf. *)
 let small_big = 20_000
 
@@ -475,10 +475,10 @@ let missing_of_many_fields () =
   in
   ignore (tree small_big);
   ignore (tree (4 * small_big));
-  (match Timing.outgrows ~degree:0 ~small:small_big word with
+  (match Work.outgrows ~degree:0 ~small:small_big word with
    | None -> ()
-   | Some times ->
-       check ("values of many fields are named in bounded time: " ^ times)
+   | Some growth ->
+       check ("values of many fields are named in bounded work: " ^ growth)
          false);
   check "the eight values of the deep leaf are named, cut short"
     (match Selection.missing (tree small_big) with
@@ -537,14 +537,14 @@ let wording () =
    constructors takes steps linear in their number. *)
 let large_flat = 20_000
 
-let flat_in_linear_time () =
+let flat_in_linear_work () =
   check "a flat match of 20000 labels is accepted"
     (Result.is_ok (flat_match ~labels:large_flat ~extra:0));
   let build labels = ignore (flat_match ~labels ~extra:0) in
-  match Timing.outgrows ~degree:1 ~small:(large_flat / 4) build with
+  match Work.outgrows ~degree:1 ~small:(large_flat / 4) build with
   | None -> ()
-  | Some times ->
-      check ("a flat match is built in linear time: " ^ times) false
+  | Some growth ->
+      check ("a flat match is built in linear work: " ^ growth) false
 
 (* Property test *)
 
@@ -819,11 +819,11 @@ let () =
   kept_possible ();
   deep_positions ();
   depth ();
-  missing_in_linear_time ();
+  missing_in_linear_work ();
   missing_of_many_fields ();
   missing_in_tree_order ();
   wording ();
-  flat_in_linear_time ();
+  flat_in_linear_work ();
   property ();
   reversed_partner ();
   if !failures > 0 then exit 1

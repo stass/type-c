@@ -2549,7 +2549,7 @@ let universe_cases =
 
 (* A generic claims the names of its instances by one lookup in the
    names of its scope, not a scan of them (design 10.3), so a unit of
-   many generics among many other names parses in time linear in it. *)
+   many generics among many other names parses in work linear in it. *)
 let failed_instance_claims () =
   let declarations index =
     Printf.sprintf "int n%d; struct s%d; type g%d(T);\n" index index index
@@ -2558,10 +2558,10 @@ let failed_instance_claims () =
   let small = 4000 in
   let parsing count = ignore (parse_failure type_c_file (text count)) in
   let failed_parse = parse_failure type_c_file (text small) in
-  let too_slow = Timing.outgrows ~degree:1 ~small parsing in
+  let too_much_work = Work.outgrows ~degree:1 ~small parsing in
   List.filter_map
     (Option.map (fun message -> ("many generics", message)))
-    [ failed_parse; too_slow ]
+    [ failed_parse; too_much_work ]
 
 (* A name that derives others is bounded (design 3.5 rule 7), so the
    names of a variant's enumerators, each of which holds it, grow with

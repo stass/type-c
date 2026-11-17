@@ -67,13 +67,13 @@ let compares name actual expected =
 let lowers name source expected =
   compares name (words (emitted source)) expected
 
-(* [run] takes time about linear in its size, from [small] on. *)
+(* [run] does work about linear in its size, from [small] on. *)
 let grows_linearly name ~small run =
-  match Timing.outgrows ~degree:1 ~small run with
+  match Work.outgrows ~degree:1 ~small run with
   | None -> ()
-  | Some times ->
+  | Some growth ->
       incr failures;
-      Printf.eprintf "FAIL: %s\n  %s\n" name times
+      Printf.eprintf "FAIL: %s\n  %s\n" name growth
 
 (* Design 13.5: a compound literal, or in an initialiser the braced list
    alone; the arguments keep their tokens. *)
@@ -187,7 +187,38 @@ let anchors () =
     (string_of_int (List.length anchored))
     "1"
 
-(* Every application is a range that lowering replaces, so the time to
+(* The measure of work tells linear from quadratic: a list built by
+   appending each element to the end of it allocates about the square of its
+   length in all, and a scan of a list allocates nothing but takes time. *)
+let linearity_check_tells_quadratic_work () =
+  let appending count =
+    let rec build list = function
+      | 0 -> list
+      | left -> build (list @ [ left ]) (left - 1)
+    in
+    ignore (build [] count)
+  in
+  let consing count = ignore (List.init count (fun index -> index)) in
+  if Work.outgrows ~degree:1 ~small:500 consing <> None then begin
+    incr failures;
+    prerr_endline "FAIL: linear work is taken for more than linear"
+  end;
+  if Work.outgrows ~degree:1 ~small:500 appending = None then begin
+    incr failures;
+    prerr_endline "FAIL: quadratic work that allocates is taken for linear"
+  end;
+  (* A search of a list for each of its elements allocates only the list. *)
+  let scanning count =
+    let list = List.init count (fun index -> index) in
+    List.iter (fun element -> ignore (List.mem (-element) list)) list
+  in
+  if Work.outgrows ~degree:1 ~small:1000 scanning = None then begin
+    incr failures;
+    prerr_endline "FAIL: quadratic work that allocates nothing is taken \
+                   for linear"
+  end
+
+(* Every application is a range that lowering replaces, so the work to
    lower a unit is linear in its applications, not in their square. *)
 let many_applications () =
   let source count =
@@ -199,7 +230,7 @@ let many_applications () =
   compares "the edits of many applications"
     (string_of_int (List.length edits))
     (string_of_int (small + 2));
-  grows_linearly "the time to lower many applications" ~small
+  grows_linearly "the work to lower many applications" ~small
     (fun count -> ignore (lowered (source count)))
 
 (* The words of [text] from the first [first] to the [last] after it,
@@ -233,7 +264,7 @@ let lowers_instance case source name expected =
     (expected ^ " #pragma pack(pop)")
 
 (* Each field of an instance is looked up among its void fields in a
-   set, so the time to lower a variant is linear in its fields, not in
+   set, so the work to lower a variant is linear in its fields, not in
    their square. *)
 let many_void_fields () =
   let source count =
@@ -247,7 +278,7 @@ let many_void_fields () =
        ~first:"enum many__v_tag" ~last:"#pragma pack(pop)")
     "enum many__v_tag { many__v_A }; struct many__v { enum many__v_tag tag; \
      }; #pragma pack(pop)";
-  grows_linearly "the time to lower many void fields" ~small
+  grows_linearly "the work to lower many void fields" ~small
     (fun count -> ignore (emitted (source count)))
 
 let void_fields () =
@@ -282,7 +313,7 @@ let void_fields () =
 
 (* The edits inside the operand of a try are found by one search of the
    unit's edits, and each temporary is numbered from the one before it,
-   so the time to lower a function is linear in its tries, not in their
+   so the work to lower a function is linear in its tries, not in their
    square. *)
 let many_tries () =
   let source count =
@@ -296,12 +327,12 @@ let many_tries () =
   compares "the temporary of the last of many tries"
     (between (words (emitted (source small))) ~first:last ~last:"=")
     (last ^ " =");
-  grows_linearly "the time to lower many tries" ~small
+  grows_linearly "the work to lower many tries" ~small
     (fun count -> ignore (emitted (source count)))
 
 (* The prelude of a chain of conditionals with a try in each second
    operand evaluates each try under the truths of every first operand
-   before it. It is written in one pass over them, so the time to lower
+   before it. It is written in one pass over them, so the work to lower
    the chain grows no faster than the square of its length. *)
 let tries_in_a_chain_of_conditionals () =
   let source count =
@@ -310,16 +341,16 @@ let tries_in_a_chain_of_conditionals () =
     ^ "0;\n  return Ok(x);\n}\n"
   in
   match
-    Timing.outgrows ~degree:2 ~small:400
+    Work.outgrows ~degree:2 ~small:400
       (fun count -> ignore (emitted (source count)))
   with
   | None -> ()
-  | Some times ->
+  | Some growth ->
       incr failures;
-      Printf.eprintf "FAIL: the time to lower a chain of conditionals\n  %s\n"
-        times
+      Printf.eprintf "FAIL: the work to lower a chain of conditionals\n  %s\n"
+        growth
 
-(* The cleanups of the error paths are indexed by try once, so the time
+(* The cleanups of the error paths are indexed by try once, so the work
    to lower many tries in the scope of a defer is linear in the tries,
    not in their square. *)
 let many_tries_in_a_defer_scope () =
@@ -345,7 +376,7 @@ let many_tries_in_a_defer_scope () =
   compares "each try and the return in the scope of a defer run its copy"
     (string_of_int (copies (words (emitted (source small)))))
     (string_of_int (small + 1));
-  grows_linearly "the time to lower many tries in the scope of a defer"
+  grows_linearly "the work to lower many tries in the scope of a defer"
     ~small (fun count -> ignore (emitted (source count)))
 
 (* Design 6 and 13.5: each exit of the scope of a defer runs a copy of
@@ -367,7 +398,7 @@ let many_defers () =
        (String.length text - String.length ending)
        (String.length ending))
     ending;
-  grows_linearly "the time to lower many defers" ~small
+  grows_linearly "the work to lower many defers" ~small
     (fun count -> ignore (emitted (source count)))
 
 let trap = "__builtin_trap();"
@@ -713,7 +744,7 @@ let deep_pattern_allocation = 200_000_000.
 let deep_patterns () =
   let source depth = Budget_probes.deep_pattern ~length:4000 depth in
   under_limit "a deep pattern" (source 120);
-  grows_linearly "the time to lower a deep pattern" ~small:24 (fun depth ->
+  grows_linearly "the work to lower a deep pattern" ~small:24 (fun depth ->
       ignore (lowered (source depth)));
   let text, _, declarations =
     read (Budget_probes.deep_pattern ~length:100_000 120)
@@ -779,6 +810,7 @@ let () =
     "void f(void) { typedef typeof(({ typedef int b ; (b)1; })) * a ; }";
   constructors ();
   anchors ();
+  linearity_check_tells_quadratic_work ();
   many_applications ();
   many_void_fields ();
   void_fields ();
