@@ -904,7 +904,7 @@ id(stmt) s;                             /* e = s is an error */
    and a source is valid Type-C whatever they count. Their refusals
    therefore carry no code (13.6).
 
-   *Provisional (P30).* The budget is between four and five times
+   The budget is between four and five times
    the text of a heavy unit of C++, which is the measure taken
    because no Type-C unit of that weight exists. A C++20 unit that
    uses the standard containers, regular expressions, futures,
@@ -915,10 +915,12 @@ id(stmt) s;                             /* e = s is an error */
    line markers, and that of a function of 152 tokens, the mean of
    the 82 functions of tomlc99 (their median is 72), about 900.
    Both sizes are estimates, and they make that unit 3.6 MB. The
-   bound on encodings rests on no measurement of a Type-C program, and
-   that on names, 2^8 - 1, above four times the 63 significant initial
-   characters that C11 5.2.4.1 asks of an internal identifier, on none
-   either.
+   units of the container library and of Pilot B count at most 105259
+   bytes for their instances, 1/159 of the budget, and their longest
+   encoding of one instance holds 35 bytes against the bound of 4096
+   (section 15, P30). The bound on names is 2^8 - 1, above four times
+   the 63 significant initial characters that C11 5.2.4.1 asks of an
+   internal identifier; the longest name of those units is 15.
    The output limit rests on the inputs of the test suite: of the 560
    units that it lowers, every one is charged less than the base, the
    most 32086171 bytes for 82 KB of source whose file name of 80 KB
@@ -958,7 +960,7 @@ id(stmt) s;                             /* e = s is an error */
    return, 1.5 MB of source, compile in 11 s and 1.8 GB. The 3000
    functions above, 950 KB of source, compile in 1.7 s and 235 MB (one
    x86-64 host).
-8. *Provisional (P23).* The definition of a generic, type or function
+8. The definition of a generic, type or function
    (section 7), is moved text: lowering writes it in each instance,
    where 10.3 places it, and the resolution property of 13.5 holds for
    it: what the definition names, and what it declares for itself,
@@ -1642,7 +1644,7 @@ one node, for which 4.1 to 4.6 say everything.
    that holds another constructor. A constructor with fields may be
    written without its field list at any depth of a test's pattern
    (4.6(2)), and at no depth of a label's.
-10. **The bounds on selection.** *Provisional (P32).* Building the
+10. **The bounds on selection.** Building the
     selection tree of one match or test (rule 9) takes at most 4194304
     steps, and the tree is at most 127 nodes deep, counting the root and
     the nodes on one path to a leaf. A step is a label that a node looks at to sort
@@ -1982,7 +1984,7 @@ result(uint32_t, parse_error) read_number(reader *r)
    expression has a check of its own, so none can be missing, and an
    operator that the lists do not name is refused until it is added to
    them. The refusals have four names.
-   * `try-loop`, *provisional (P34)*: the condition of a `while`, a
+   * `try-loop`: the condition of a `while`, a
      `do` or a `for`, a single-pattern test that is the condition of a
      `while`, and the first and third clause of a `for`. A loop
      evaluates its condition and its third clause once for each
@@ -1992,7 +1994,7 @@ result(uint32_t, parse_error) read_number(reader *r)
    * `try-declaration`: the initialiser of an object of static or
      thread storage duration, which is a constant expression, and a
      declaration of a variably modified type.
-   * `try-list`, *provisional (P35)*: an initialiser of a braced
+   * `try-list`: an initialiser of a braced
      list, of a declaration or of a compound literal, that holds a
      `try` and is not itself a `try` expression, in parentheses or
      not. In a list, a `try` is a whole initialiser or stands in the
@@ -2019,7 +2021,8 @@ result(uint32_t, parse_error) read_number(reader *r)
      nothing about what else the initialiser holds, so it also
      refuses a cast of the value, as in
      `{ .len = (size_t)try read_u32(r) }`, where the order divides
-     nothing that has an effect. P35 counts those. The conversion
+     nothing that has an effect. No source of the library, Pilot B or
+     the README holds one (section 15, P35). The conversion
      that the list itself makes of a value is no part of what the
      source writes in the initialiser, and the rule refuses nothing
      for it: `{ .len = try read_u32(r) }` stands.
@@ -2142,11 +2145,10 @@ result(uint32_t, parse_error) read_number(reader *r)
    before its first block item. A `try` in such a statement or
    declaration is an error. A null statement, `;`, after the pragma
    takes the next statement out of the stretch, so `DIAG_PUSH; ...
-   DIAG_POP;` refuses nothing. The clause is accepted without a count
-   of its refusals: the source of Pilot B holds no pragma. It is a
-   refusal, so relaxing it breaks no program that it accepts, and the
-   Stage 3 library and the corpus count how often it refuses (section
-   15, P8).
+   DIAG_POP;` refuses nothing. The sources of the container library,
+   Pilot B and the README hold no pragma line, so the clause has refused
+   nothing there (section 15, P8). It is a refusal, so relaxing it
+   breaks no program that it accepts.
 4. `try` cannot appear in a deferred statement.
 5. *Provisional (P21).* A `try` is an error where one of these rules
    asks something of an unknown type (13.3): whether the type of the
@@ -2168,7 +2170,7 @@ result(uint32_t, parse_error) read_number(reader *r)
    has written the type that the value is converted to, or none. The
    measurement of P21 counts these refusals.
 
-Rationale for the order. *Provisional (P33).* C leaves the evaluation
+Rationale for the order. C leaves the evaluation
 order of operands and arguments unspecified and sequences `&&`, `||`,
 `?:` and `,`, and C11 has no expression that can hold a `return`. Three
 orders were weighed.
@@ -2209,17 +2211,19 @@ orders were weighed.
   operand, as C++17 orders every assignment.
 
 The third is the design. What it costs is the reader who expects the
-order of reading where an operand before a `try` has a side effect,
-and P33 says what would settle that.
+order of reading where an operand before a `try` has a side effect.
+No holder of the container library, Pilot B or the README has one
+(section 15, P33).
 
-Rationale for the loops. *Provisional (P34).* The condition of a
+Rationale for the loops. The condition of a
 `while` or of a `for` could be lowered as a test and a `break` that
 begin the body, which moves the whole condition into the body and makes
 it moved text of a second kind. The condition of a `do` and the third
 clause of a `for` are where `continue` jumps to, and evaluating a `try`
 there takes a label and a rewrite of each `continue` of the loop. The
 refusal costs one line in the loop, and relaxing it breaks no program
-that it accepts.
+that it accepts. No loop of the container library, Pilot B or the
+README needed the relaxation (section 15, P34).
 
 Rationale for the lifetimes. A prelude is several full expressions,
 and a condition of it is an `if`, whose branch C makes a block in
@@ -2239,7 +2243,7 @@ beside a `try`. Neither refusal is provisional: one of these forms
 lifts it and no measurement does, and lifting it breaks no program
 that it accepts.
 
-Rationale for the list. *Provisional (P35).* Three rules keep C's
+Rationale for the list. Three rules keep C's
 order in a braced list. A list holds no `try`: it refuses
 `{ try coord(r), try coord(r) }`, which reads a structure member by
 member. An initialiser that holds a `try` is itself a `try`
@@ -2249,8 +2253,9 @@ that holds a `try` holds nothing else that has an effect: it admits
 `(size_t)try read_u32(r)`, and takes a definition of what has an
 effect, which a call, an assignment, a volatile object, a slice test
 that traps (section 8) and a conversion that raises a floating-point
-exception all do. The second is the design, and P35 says what would
-widen it.
+exception all do. The second is the design, and a use that needs more
+would widen it by naming the operators that have no effect (section 15,
+P35).
 
 Rationale for the conversion of a list. What the source does not
 write in such an initialiser, C adds: the conversion of the value to
@@ -3356,7 +3361,7 @@ section 12 says what evidence would revisit this.
 
 ### 7.2 Calls
 
-1. *Provisional (P11).* A call `f(arguments)` deduces the type arguments
+1. A call `f(arguments)` deduces the type arguments
    from left to right. For each parameter in turn: if every type parameter
    in its type is already deduced, it is an ordinary parameter of the
    substituted type, with a target type and C's implicit conversions.
@@ -3390,11 +3395,11 @@ Example: with `vector(long) v`, the call `vector_push(&v, 0)` deduces `T` as
 argument that mentions a type parameter fixes it: `max(0, n)` with `n` a
 `size_t` deduces `int` and converts `n`, exactly as a call to
 `int max(int, int)` would. A stricter rule, under which only constants
-convert, is weighed with P11.
+convert, has no evidence behind it (section 15, P11).
 
 ### 7.3 Instances
 
-1. *Provisional (P12).* Each instance used in a translation unit is compiled
+1. Each instance used in a translation unit is compiled
    in that translation unit as a function with internal linkage, named
    and placed as 10.3 says. A generic function that is not used produces
    no code. Rule 7 of 3.5 bounds what a use causes: a chain of
@@ -3441,8 +3446,8 @@ convert, is weighed with P11.
    are refused in the same way. The first is the refusal expected most
    often where nothing would go wrong: a header declares
    `extern int tbl[];`, a generic uses `tbl`, and the definition of `tbl`
-   with its size stands before an instance. The measurement of P23
-   counts these.
+   with its size stands before an instance. Rule 8 refuses no
+   declaration in a unit of the container library (section 15, P23).
 
    Where the source declares an enumeration without its list before
    the definition, the first use of an instance that is written after
@@ -3481,7 +3486,7 @@ convert, is weighed with P11.
    that the check and an instance cannot read one name two ways; an
    instance that read its own would compile code that no check
    typed.
-4. *Provisional (P27).* An instance is compiled under the pragmas in
+4. An instance is compiled under the pragmas in
    force at the definition of its generic, as a `static inline`
    function of a header is under those of the header. It is not
    compiled under the pragmas in force at its first use, which it would
@@ -3545,8 +3550,8 @@ str greeting = "hello";                             /* len 5    */
    `s[(size_t)i]` writes the narrowing into the source. An index of any
    other type is an error, as it is in a subscript of C (C11
    6.5.2.1p1). Where C does not evaluate the index, as in
-   `sizeof(s[0])`, there is nothing to test (rule 9). *Provisional
-   (P14):* no option turns the check off. `s.data[i]` is the unchecked
+   `sizeof(s[0])`, there is nothing to test (rule 9). No option
+   turns the check off. `s.data[i]` is the unchecked
    spelling and is visible in the source.
 2. `slice_from_array(a)` takes an lvalue of array type `T[N]` and yields a
    `slice(T)` of length `N`. A pointer is not accepted, and neither is
@@ -3573,8 +3578,9 @@ str greeting = "hello";                             /* len 5    */
      would repeat;
    * the size of an element is not 0. The length is the size of the
      array over the size of an element, and the GNU profile has types
-     of size 0: a structure without members, an array of length 0. The
-     size of a type is the backend's alone (13.3, P16), so the refusal
+     of size 0: a structure without members, a structure whose one
+     member is an array of length 0. The size of a type is the
+     backend's alone (13.3, P16), so the refusal
      is the backend's too: for such an element lowering names an array
      type of negative size, which the backend reports at the
      `slice_from_array` (13.5).
@@ -3637,7 +3643,7 @@ str greeting = "hello";                             /* len 5    */
    neither NUL termination nor an encoding.
 8. `data` and `len` are ordinary members and can be read and, outside
    checked mode, written.
-9. *Provisional (P28).* The test of an index and of a `slice_sub` is
+9. The test of an index and of a `slice_sub` is
    code of the place where it stands. Lowering writes it there as an
    expression and shares no function between the uses (13.5), so the
    test is compiled under the pragmas in force at its use and lies in
@@ -4640,10 +4646,10 @@ a design change to this document, not an implementation detail.
 | Constant patterns | `case Add(*Number(0), r):`, with an integer, character or enumeration constant as a sub-pattern (4.7). Needs a test of equality beside the tests of tags, a `default` wherever a constant stands, and a rule that tells a misspelled enumeration constant from a binding, which the type of the position cannot do: such a constant fits any integer position. | Arms in pilot code that bind a field only to compare it with a constant. |
 | `try` on `option` | Returns `None` from a function that returns an `option`. | Repeated hand-written propagation of `None`. |
 | Expression `match` | A match that yields a value. | Real code where a local assigned in each arm reads materially worse. |
-| Constraints | `requires(...)` on type parameters, resolved statically. Needs overloading or named instances. | Measured cost of function-pointer operations in the Stage 3 library: time, and noise at call sites. |
-| Deduction from the target type | `vector(int) v = vector_new(8);` | Frequency of explicit instances in pilot code (P11). |
+| Constraints | `requires(...)` on type parameters, resolved statically. Needs overloading or named instances. | Measured cost of function-pointer operations against direct calls, and noise at call sites. The map of the Stage 3 library calls its hash and equality through function pointers in Type-C and in both C twins, so its measurement does not isolate that cost; a twin with direct calls would. |
+| Deduction from the target type | `vector(int) v = vector_new(8);` | Explicit instances that read badly in pilot code: the container library has one, `region_new(struct point)(r)` (P11). |
 | Declarations typed by their initialiser | `auto r = parse_numbers(text);` gives `r` the type of the initialiser after lvalue conversion, as GNU `__auto_type` and C23 `auto` do. Block-scope objects with an initialiser only: never parameters, return types or file-scope objects, so every interface still states its types. One expression decides the type, so this is not the pervasive inference that principle 3 excludes. | Local declarations in the Stage 2 pilots that repeat a long generic type their initialiser already names, and whether passing `__auto_type` through from the GNU profile suffices. |
-| External instances | One definition of an instance per program. | Measured code growth from per-unit instances (P12). |
+| External instances | One definition of an instance per program. | Code growth from per-unit instances that is large against one definition per program; the benchmark program at `-O2` is within 6% of C with its functions defined once (P12). |
 | Operations on distinct types | Declared arithmetic, so that `meters + meters` is `meters`. | Casts that dominate real arithmetic on distinct values. |
 | Tag ordinal | The tag as an integer, for tables and serialisation. | Tables in pilot code that a `match` expresses badly. |
 | Compact layouts | Smaller tags; `option(T *)` as a nullable pointer. An ABI change, so opt-in. | Measured size of pilot data against hand-written C (10.1). |
@@ -5409,7 +5415,7 @@ Two properties follow by construction:
 | --- | --- |
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
 | Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. As the initialiser of an object, or of a member or an element of one, that is declared with the variant's type, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. The braced list replaces the whole initialiser, with the parentheses that the source writes around the constructor, which change neither its type nor its value (C11 6.5.1p5): a braced list inside them would be a statement expression of GNU C, and GCC under `-pedantic-errors` refuses the compound literal inside them at file scope. An object that takes its type from its initialiser, as one declared with `__auto_type` does, has no type for a braced list, and its initialiser is the compound literal. |
-| `match` | A block: a pointer to the scrutinee where it is an lvalue whose address C aligns for its type, or else a copy. The address is aligned for a named object not declared `register`, a compound literal, the object of a pointer that is read as a stored value or returned by a call, and an element of an array whose address is aligned; it is not for a member of a structure or union, which a `#pragma pack` or an attribute may pack where typec does not see it and which the backend reads correctly through a member access only, nor for the object of a pointer that the scrutinee forms, as by converting a member array. A volatile or atomic scrutinee is copied too. Then: a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
+| `match` | A block: a pointer to the scrutinee where it is an lvalue whose address C aligns for its type, or else a copy. The address is aligned for a named object not declared `register`, a compound literal, the object of a pointer that is read as a stored value or returned by a call, and an element of an array whose address is aligned; it is not for a member of a structure or union, which a `#pragma pack` or an attribute may pack where typec does not see it and which the backend reads correctly through a member access only, nor for the object of a pointer that the scrutinee forms, as by converting a member array. The copy of a member is equal in size at `-O2` to a `switch` on the member in place, and a read through a pointer to a typedef of the variant declared `aligned(1)` is larger on ARMv5 (33 and 66 instructions against 19 and 21), so the copy stays. A volatile or atomic scrutinee is copied too. Then: a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
 | Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm0;`, then a pointer local for each position under a `*` where a constructor pattern stands, `const struct V *__tc_p0_K = 0;` for the `K`th such position, of the variant `V`, and for each node a `switch` on the tag of the node's position. The locals are numbered from 1 in the order in which the labels name their positions, so that each follows the one it is reached from, and the scrutinee's pointer is `__tc_match0`. An object is reached from the nearest local above it, `__tc_match0` or one of a position under a `*`, through the members of 10.1: a node under a `*` first points its local at the object that the pointer field points to, `__tc_p0_1 = __tc_match0->u.Add.l;`, and switches on `__tc_p0_1->tag`; a node at a field in place switches on the field's tag, `__tc_match0->u.Err.error.tag`, `__tc_p0_1->u.Wrapped.inner.tag`. A field in place has no local, since its address may be misaligned in a packed variant, where a member access is not. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm0 = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm0)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm0`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_p0_1->u.Num.value`. The path from a local to an object never passes a `*`, so a variant is held in place at most once on it and its length is bounded by the variants of the unit and the depth of the tree, not by the depth of a pattern under `*`; spelling the whole path from `__tc_match0` at each node would make a 100 KB pattern 120 deep over a long field name about 900 MB of text. Every path to a node or to an arm passes the nodes that point the locals that it reads, since a label is selected only after every tag that it names is read (4.7 rule 6); the null pointer that a local starts as spares a backend that cannot see this a warning of a value used uninitialized. |
@@ -5507,17 +5513,18 @@ dialect.
 
 Selection reads each tag at most once on a path and reads a tag only
 for the first label that is still possible (4.7 rule 6), so no path
-makes more tests than the labels would in order. *Provisional (P31).*
+makes more tests than the labels would in order.
 Against nested `switch` statements written by hand, whose branches
 hold the bodies, the form costs one store to the local and one
 `switch` on it; in a test, the store and the `if`. A backend that
 threads jumps can remove both where it optimises, and they remain at
-`-O0`. The text of the tree can be longer than the labels, because a
+`-O0`. The objects of the form are within 8 bytes of the twins' on
+Clang and 25 bytes on GCC at `-O2` (section 15, P31).
+The text of the tree can be longer than the labels, because a
 label is a leaf in each branch that leaves it possible; a leaf is one
 assignment, 4.7 rule 10 bounds the size and depth of the tree, and the
-text is charged to
-the output limit as it is made, as all that lowering writes is (3.5
-rule 7).
+text is charged to the output limit as it is made, as all that
+lowering writes is (3.5 rule 7).
 
 **The zero initialiser of a type parameter.** The zero initialiser of
 an object or subobject whose type mentions a type parameter gives
@@ -5912,7 +5919,7 @@ written in C, and no form of lowering answers for it. A member
 the declaring type as from a call, in every build, and no signal is
 raised.
 
-**The cost of a prelude.** *Provisional (P33).* A prelude is the C
+**The cost of a prelude.** A prelude is the C
 that a programmer writes for a fallible call inside an expression: a
 declaration and a test for the call, an `if` where the call is under a
 condition, and then the statement. Measured on one function of four
@@ -5928,9 +5935,9 @@ expression takes 244 and 547 bytes at `-O2`. A converted initialiser
 of a braced list adds one object of an arithmetic type to its prelude,
 which C written by hand declares as well where it keeps the order of
 the list; its size and speed are not measured. One function measures
-no program: package 3.12 of the plan measures the preludes of the
-container library, the pilot and the README, those of braced lists
-among them, from a script that it keeps under `tools/measure`.
+no program: the preludes of the container library, the pilot and the
+README are measured from a script under `tools/measure` (section 15,
+P33).
 
 **A `try` beside the other lowered forms.** The holder is lowered as it
 would be with the reads in place of its `try` expressions, and each
@@ -6325,7 +6332,7 @@ each. A third clause covers the text around it.
   rare: both backends report `enum E;` before the list under
   `-pedantic`, and an enumeration that is declared with a fixed type
   is not refused. Where the text is the definition of a generic, the
-  measurement of P23 counts the refusal with the others of rule 8 of
+  refusal is that of rule 8 of
   3.5. A declaration is inexact if it or an earlier declaration of its
   entity that it sees holds an attribute, an alignment specifier or
   a `__typeof__` of an expression (3.5 rule 2), or is written through a
@@ -6613,7 +6620,7 @@ unit, and outside it in another, has one name and two layouts. Code
 under such a pragma keeps the first use of every type instance outside
 its region.
 
-*Provisional (P27).* A function instance is compiled under the state of
+A function instance is compiled under the state of
 its generic's definition, by the construction that serves the operand
 of a `try`: no `#pragma` line that sets state stands between the two
 places (7.3 rule 4). The first use of an instance is an error where
@@ -6724,17 +6731,17 @@ generic functions after the headers that hold such lines, and writes
 such a line of its own after the first use of each instance or before
 the definitions.
 
-Stage 3 settles the rule. The container library and the measurements
-(packages 3.5 and 3.6) count its refusals from the name of rule 4 of
-7.3, by the leading identifiers of the cited line. If the refusals are
-common, the alternative reads the pairs of lines that open and close a
+The refusals of rule 4 of 7.3 are counted from its name, by the leading
+identifiers of the cited line; the container library and Pilot B have
+none (section 15, P27). If the refusals become common, the alternative
+reads the pairs of lines that open and close a
 region, as `#pragma GCC push_options` and `#pragma GCC pop_options`,
 and passes over a region that is closed before the place of writing.
 Each pair enters one list with the measurement, for each backend, that
 its closing line restores everything that a line of the region can
 set. Without such a finding the refusal stays.
 
-**The check of a slice.** *Provisional (P28).* A function that served
+**The check of a slice.** A function that served
 the indexes of a slice type would be written from no definition in the
 source, and the rule above would have nothing to hold it to. Lowering
 therefore writes none. A slice index `s[i]` is an expression at its use
@@ -7181,10 +7188,9 @@ nothing; an index whose operand calls a function that the backend
 inlines into a loop would pay what the loops above pay. The form adds
 a judgement to lowering and leaves the values that the backend holds.
 The owner's decision is against it: the temporaries are plain, and
-section 8 rule 10 documents the limit. Stage 3 still counts such tests
-in the library and the pilot and measures the qualifier on them
-(package 3.6), so that the cost that the decision avoids is on record
-with P28.
+section 8 rule 10 documents the limit. No test of the container
+library holds such an operand, so the qualifier would cost nothing
+there (section 15, P28).
 
 No refusal is complete short of one that refuses every call in a
 full expression that holds an index. A refusal of the statement
@@ -7258,13 +7264,10 @@ term for an element of size 0, of the initialisers of file scope, of
 the conversion in a conditional operator and for elements of array
 type, of the length of a `slice_from_array` as the size of an array
 and of an element that is held across a call in another argument.
-Stage 3 settles the form
-(package 3.6): the cost of the tests in the container library and the
-pilot, without optimisation as well as with it, the refusals of rule 9
-of section 8, read from its name, the indexes and `slice_sub`
-expressions that stand where C does not evaluate them, and the tests
-that a call could resume, with the cost of volatile temporaries for
-those alone. Without a finding against it the expression stays, with
+The container library and Pilot B
+show no finding against the form: no refusal of rule 9 of section 8,
+no index or `slice_sub` where C does not evaluate it, and no test that
+a call could resume (section 15, P28). The expression stays, with
 plain temporaries.
 
 **`slice_from_array` and `slice_unchecked`.** Neither holds a test or
@@ -7392,14 +7395,17 @@ The second term of the length is the limit of rule 2 on the size of
 an element and adds 0.
 A quotient by the size of an element has no value where that size is
 0, as it is in the GNU profile for a structure without members and
-for an array of length 0. In a block both backends take the quotient
+for a structure whose one member is an array of length 0. In a block
+both backends take the quotient
 alone with a warning and no error: Apple Clang 21 then yields a length
 that is no count of elements, and the code of GCC 16 ends the program
 with a division fault. The size of a type is the backend's alone (13.3, P16).
 What `typec` reads of a type shows a structure without members, and
-not an array whose length is a layout constant that has the value 0,
-as `int[sizeof(struct four) - 4]` where `struct four` holds one `int`.
-So the backend makes the refusal, for every such type, from text that
+not a structure whose one member is an array whose length is a layout
+constant that has the value 0, as `int[sizeof(struct four) - 4]` where
+`struct four` holds one `int`. An array is itself no element: `typec`
+refuses it as a type argument first (section 8 rule 2, 3.5 rule 2). So
+the backend makes the refusal, for every such type, from text that
 lowering writes: the name of an array type of `char` whose length is 1,
 or -1 where the element has the size 0. The length of an array type
 is greater than 0 where it is a constant (C11 6.7.6.2p1), and this one
@@ -7639,13 +7645,13 @@ with the scripts that reproduce them (`make size-split`,
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Pilot B: one `void` argument, `result(void, reported)`, the return type of 11 functions; no refusal and no rewrite | **Decided:** as specified |
-| P8 | No `try` stands in a holder that holds or directly follows a pragma line (5.1 rule 3) | The clause is accepted unmeasured, as tomlc99, the source of Pilot B, holds no pragma: it is a refusal, so relaxing it breaks no program that it accepts. Stage 3, package 3.12: how often it refuses in the container library and the corpus, read from the rule's name. Pilot B's 4 rewrites, all of `T *p = try f(sizeof(*p));`, came from another clause of 5.1 rule 3, which is not provisional: a hoisted operand names nothing that its holder declares before it | **Decided:** as specified |
+| P8 | No `try` stands in a holder that holds or directly follows a pragma line (5.1 rule 3) | The clause is accepted unmeasured, as tomlc99, the source of Pilot B, holds no pragma: it is a refusal, so relaxing it breaks no program that it accepts. Plan, "Measurements of 3.12": `try-pragma` refuses no unit of the container library, Pilot B or the README, and none of their sources holds a `#pragma` line. Pilot B's 4 rewrites, all of `T *p = try f(sizeof(*p));`, came from another clause of 5.1 rule 3, which is not provisional: a hoisted operand names nothing that its holder declares before it | **Decided:** as specified |
 | P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11), and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Pilot B: rules 8, 9, 11 and 12 of section 6 and the form of a `return` (13.5) refused nothing, no diagnostic of the list of 13.5 was lost, and no diagnostic that the form adds broke a build. The 30 copies of the 9 deferred statements cost 1.1% of the text under Apple Clang 21 and 2.0% under GCC 16 more than the cleanups of a hand-written `goto cleanup` version, each cost measured by removing the cleanups from its source. The limit of the evidence: every deferred statement is a single call | **Decided:** repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | The injectivity tests of the encoding, on types drawn from a seeded generator (`test/unit/test_naming.ml`); in Pilot B lldb shows an instance as `result__Pc8reported`, with its tags by name, and hides no value. gdb is untried | **Decided:** as specified |
-| P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
-| P12 | Instances are per translation unit (7.3) | Stage 3: code size of the library and pilot | Per unit |
-| P13 | A string literal becomes `str` by target type (8) | Stage 3 pilot | As specified |
-| P14 | Slice checks cannot be turned off (8) | Stage 3 benchmarks | Always on |
+| P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | No conversion that surprised is reported in the container library; none was counted. It needs one explicit instance, `region_new(struct point)(r)`, and only because `T` appears in the return type alone | **Decided:** as specified |
+| P12 | Instances are per translation unit (7.3) | Plan, "Measurements of 3.6": the text of the benchmark program at `-O2` is 5192 bytes against 4920 for C with its functions defined once and 4568 with them `static inline` on Clang 21, and 4428 against 4523 and 3950 on GCC 16, within 6% of the external functions; at `-O0` 7113 against 5369 and 5785, and 7556 against 5447 and 5842. The Type-C side holds three functions that the twins leave out. `typec -c` of a unit takes 0.18 to 0.45 s against 0.06 to 0.25 s for `cc -c` of a C unit | **Decided:** per unit |
+| P13 | A string literal becomes `str` by target type (8) | A program that uses `str`: Pilot B uses no slice or `str`, and the container library uses `str` keys with no refusal or surprise recorded. Port the string handling of Pilot B, or one module of the corpus, to `str` and count the literals that needed a cast | As specified |
+| P14 | Slice checks cannot be turned off (8) | Plan, "Measurements of 3.6": the checked and the unchecked sum take 1.24 and 1.29 ms on Clang and 3.55 and 3.56 on GCC 16 at `-O2` for 10^4 elements (1.50 and 1.52, 3.46 and 3.43 for 10^6), the same within noise; at `-O0` 20.0 and 17.4 ms on Clang (+15%) and 21.3 and 17.3 on GCC 16 (+23%), a cost that does not justify an unsafe mode | **Decided:** always on |
 | P15 | The backend preprocesses (13.2) | Stage 4 review of diagnostic quality | Backend preprocesses |
 | P16 | The front end computes no aggregate layout (13.3) | Stage 0 corpus: constructs that need a layout value | No layout |
 | P17 | The tier 1 rule set (11.2) | Stage 5 prototype on pilot code | Tier 1 is not released until the rules pass |
@@ -7654,19 +7660,19 @@ with the scripts that reproduce them (`make size-split`,
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
 | P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties, the declarations that the resolution check of 13.5 refuses for one among them, read from the one code that such a refusal carries for every kind of moved text | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
-| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, read from the code of the definition of a generic (13.5). Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
+| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Rule 8 refuses nothing in the six units of the container library, the generic function bodies among them, and no unit of the README is refused by it; Pilot B writes no generic. The count is that no unit is refused: no field of `--stats` counts the refusals of rule 8 per site | **Decided:** as specified |
 | P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
 | P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
 | P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |
-| P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
-| P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its name; how many of them stand where C does not evaluate them; and how many tests hold a call or a statement expression in an operand after the first, with what volatile temporaries for those tests alone cost there, the form that the owner decided against (section 8 rule 10). A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays, and its temporaries are not volatile |
+| P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Plan, "Measurements of 3.6": no unit of the container library or of Pilot B is refused by `instance-pragma`. The library sets no state with a `#pragma` (GCC adds only `GCC diagnostic` lines, which are exempt) and Pilot B holds no generic, so real code has not tested the rule; it is a refusal, so relaxing it later breaks no program that it accepts | **Decided:** the refusal stays |
+| P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Plan, "Measurements of 3.6": no unit of the container library or of Pilot B is refused by `slice-check-place` (rule 9 of section 8); no index or `slice_sub` of either stands where C does not evaluate it; no test holds a call or a statement expression in an operand after the first, so volatile temporaries for those alone cost nothing (section 8 rule 10); the tests cost what P14 records. The library holds 15 tested indexes, 2 `slice_sub`s and 2 conversions and Pilot B no slice, so the evidence is that of a small library. A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | **Decided:** the expression stays, and its temporaries are not volatile |
 | P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
-| P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32, and on the front end's count of the copies of its deferred statements, each token at least 32 and each copy 64 more; the encodings of the arguments of one instance hold at most 4096 bytes; and the name of a type declaration or a generic function at most 255 (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances in the front end, the bytes that lowering charges for each of them and their ratio to the source, the longest encodings of one instance in them, and their longest name of a type declaration or generic function. The budget and the base of the limit are at least four times the largest count and charge, the factor at least four times the largest ratio and each bound at least four times the longest; a larger budget or limit costs in proportion, and a longer name in proportion to the constructors and uses that hold it (3.5 rule 7) | 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes; 255 bytes |
-| P31 | Selection sets a local that a second `switch` reads (13.5) | Stage 3, package 3.10: size and speed against hand-written nested `switch` statements, on both backends at `-O0` and at `-O2`. If the local costs at `-O2`: the leaves reach the arms by `goto` | The local stays |
-| P32 | Building the selection tree of a match or a test takes at most 4194304 steps, and the tree is at most 127 nodes deep (4.7 rule 10) | Stage 3, package 3.10: the most steps and the deepest tree of one match in the container library, the pilot and the tests. The step bound is at least sixteen times the most, and the depth bound at least the deepest; with GCC and Clang, a tree of the depth bound lowered and compiled at `-O0` and `-O2` | 4194304 steps; 127 nodes |
-| P33 | The `try` expressions of a holder are evaluated before the rest of it, in the order of the source, and not in the order of reading; the prelude that does so is ISO C and costs what the same code written by hand costs (5.1 rule 3, 13.5) | Stage 3, package 3.12: each holder in the container library, the pilot and the README that holds, before a `try`, an operand with a side effect that C leaves unsequenced with it, found by reading the holders, and whether the order of reading was meant there; size and speed of the preludes against the same code with each `try` in a declaration of its own, on both backends at `-O0` and at `-O2`. If such holders are common and mean the order of reading: the operands before a `try` are hoisted with it, with the forms and refusals that the rationale of 5.1 lists | The order stays |
-| P34 | No `try` stands in the condition or in a clause of a loop (5.1 rule 3) | Stage 3, package 3.12: how often `try-loop` refuses in the container library, the pilot and the README, read from the rule's name, and what each loop became. If loops that test a fallible call are common: the condition of a `while` and of a `for` is lowered as a test and a `break` that begin the body | The refusal stays |
-| P35 | In a braced list an initialiser that holds a `try` is itself a `try` expression (5.1 rule 3) | Stage 3, package 3.12: how often `try-list` refuses in the container library, the pilot and the README, read from the rule's name, and what each refused initialiser holds beside its `try`. If most hold a conversion of the value and nothing else: the design names the operators over a `try` that have no effect, and an initialiser may hold them | The refusal stays |
+| P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32, and on the front end's count of the copies of its deferred statements, each token at least 32 and each copy 64 more; the encodings of the arguments of one instance hold at most 4096 bytes; and the name of a type declaration or a generic function at most 255 (3.5 rule 7) | Plan, "Measurements of 3.6": the units of the container library and Pilot B count at most 105259 bytes for their instances in the front end (`points.tc`), 1/159 of the budget; lowering charges the library at most 336877 bytes for a unit on Clang at `-O2`, a hundredth of the base of the limit, at most 2.51 times the unit against the factor of 256; their longest encoding of one instance holds 35 bytes (Pilot B) against 4096 and their longest name 15 against 255. Each bound is more than four times what is measured; a larger budget or limit costs in proportion, and a longer name in proportion to the constructors and uses that hold it (3.5 rule 7) | **Decided:** 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes; 255 bytes |
+| P31 | Selection sets a local that a second `switch` reads (13.5) | Plan, "Measurements of 3.10": against hand-written nested `switch` statements the objects hold at `-O2` from 0 to 8 bytes more code on Clang and from 25 fewer to 22 more on GCC (whole programs 4204 against 4188 and 3645 against 3638), and time is 0.91 to 1.07 and 0.97 to 1.04 of the twins'; at `-O0` the objects are 1.2 to 1.9 times as large and time 1.02 to 1.32. The `goto` form is the remedy for a cost at `-O2`, and there is none | **Decided:** the local stays |
+| P32 | Building the selection tree of a match or a test takes at most 4194304 steps, and the tree is at most 127 nodes deep (4.7 rule 10) | Plan, "Measurements of 3.10": the most steps of one match or test are 8 in the container library and in Pilot B, 28 in the tests, 19 in the README and 635 for a tree at the depth bound, against 4194304; the deepest tree is 1 node deep in the library and the pilot, 3 in the tests and 2 in the README; a tree of the depth bound, 127 nodes, lowers and compiles on both backends at `-O0` and `-O2`. No unit is refused for a bound | **Decided:** 4194304 steps; 127 nodes |
+| P33 | The `try` expressions of a holder are evaluated before the rest of it, in the order of the source, and not in the order of reading; the prelude that does so is ISO C and costs what the same code written by hand costs (5.1 rule 3, 13.5) | Plan, "Measurements of 3.12": no holder in the container library, Pilot B or the README holds, before a `try`, an operand with a side effect that C leaves unsequenced with it. Against the same code with each `try` in a declaration of its own, the preludes give objects of equal size at `-O2` on both backends for `toml.o` and the README's units, 0.5 to 7 per cent smaller at `-O0`, and time 0.960 to 1.001 at `-O2` for the parser. The single forms cost at `-O2` in time 1.135 (Clang) and 1.137 (GCC 16) for `&&` and 1.267 (Clang) for a `try` in the condition of an `if`, forms that Pilot B does not hold; that cost is in the prelude of `typec`, not in the order | **Decided:** the order stays |
+| P34 | No `try` stands in the condition or in a clause of a loop (5.1 rule 3) | Plan, "Measurements of 3.12": `try-loop` refuses nothing in the container library, Pilot B or the README. Of 16 loops of the library 4 hold a `try` in the body, and of 46 of the pilot 6; in the C original of the pilot 0 of 48 loops call a function that returns a result in the condition or a clause, and the README's 3 loops call none | **Decided:** the refusal stays |
+| P35 | In a braced list an initialiser that holds a `try` is itself a `try` expression (5.1 rule 3) | Plan, "Measurements of 3.12": `try-list` refuses nothing in the container library, Pilot B or the README, none of whose sources holds an initialiser list that holds a `try`; a written sample of two such lists, one with a conversion to `float`, is accepted. The evidence is an absence of use, so the relaxation by the operators over a `try` that have no effect stays described (5.1 rule 3) | **Decided:** the refusal stays |
 
 ## 16. Non-goals
 

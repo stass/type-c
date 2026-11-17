@@ -474,10 +474,14 @@ typec accepts.
      diagnostic under `-pedantic-errors -Wall -Wextra` in a block, at
      file scope, in a return type, in the size of a member and in a
      parameter list, `void f(char x[sizeof(slice_from_array(a))])`;
-     the partner, one of an array whose elements have size 0, a
-     structure without members and `int[sizeof(struct four) - 4]`, is
-     refused by both backends for the negative size of an array
-     (design 13.5), in a block, at file scope and in a parameter list;
+     the partner, one of an array whose elements have size 0, is refused
+     by both backends for the negative size of an array (design 13.5),
+     in a block, at file scope and in a parameter list. The element is
+     a structure without members, or a structure whose one member is
+     `int[sizeof(struct four) - 4]`; the size of that array is a layout
+     constant that `typec` does not compute. The array alone is no
+     element: `typec` refuses it as a type argument (design section 8
+     rule 2, 3.5 rule 2);
    - an index whose operand returns a second time reaches the element
      of its index again where its function has not begun to evaluate
      it in between, with `setjmp` in a statement expression and with a
@@ -643,9 +647,17 @@ typec accepts.
    - the fuzzing of the parser and the checker (Tests) starts from a
      corpus that holds `try` inside expressions.
 
-**Decided at the gate:** P11 to P14, P23, P27, P28, P30 to P35, and whether the
-measured cost of function-pointer operations is evidence for constraints
-(design section 12). **Release 0.3.**
+**Decided at the gate:** P11, P12, P14, P23, P27, P28 and P30 to P35, each
+as the design specifies, on the measurements above and the builds and reports
+of the library (design section 15 holds the evidence of each row), and
+whether the measured cost of function-pointer
+operations is evidence for constraints (design section 12): it is not, since
+all three sides of the benchmark call through function pointers, so
+constraints stay out. The member scrutinee stays copied: the copy costs
+nothing at `-O2` and the `aligned(1)` form is larger on ARMv5 (3.10). P13
+stays provisional, as no pilot uses `str`; porting the string handling of
+Pilot B, or one module of the corpus, to `str` and counting the literals that
+needed a cast settles it, and it carries to Stage 4. **Release 0.3.**
 
 ## Stage 4: interoperation and release quality
 
@@ -665,7 +677,9 @@ measured cost of function-pointer operations is evidence for constraints
 defaulted and the design is edited to say so; the three pilots build with
 the release; the core language is frozen as **release 1.0**.
 
-**Decided at the gate:** P15 (whether line-granular locations are good
+**Decided at the gate:** P13 (whether a string literal becomes `str` by its
+target type, settled by the port of the string handling of Pilot B, or of one
+corpus module, to `str`) and P15 (whether line-granular locations are good
 enough, or `typec` gets a preprocessor of its own).
 
 ## Stage 5: checked mode, tier 1

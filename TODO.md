@@ -462,6 +462,10 @@ is [type-c-language-design.md](type-c-language-design.md).
   string literals (section 8, P13) and generic deduction (7.2) also take
   meaning from the target: before they land, state the rule as the first
   subobject on the elision chain whose type gives the target a meaning.
+- [Medium] P13 (design section 8 rule 6) is still provisional because no
+  pilot uses `str`. Before the Stage 4 gate, port the string handling of
+  Pilot B, or one corpus module, to `str` and count the literals that
+  needed a cast; the default is as specified.
 - [Low] `Ctype.first_variant` follows the elision chain that
   `Initialiser.first_level` encodes too. Split a pure first-subobject
   step that both use, keeping the rule 6 refusal at the callers that open
@@ -1404,19 +1408,6 @@ types (design 13.3).
 - [Low] `typec --stats` reports nothing for a unit that typec refuses,
   which is the unit nearest a limit. If package 3.6 or the pilot wants
   the counts of a refused unit, carry them in the error.
-- [High] Stage 3 exit gate item 3 and design 13.5 (the paragraphs on
-  `slice_from_array`) name `int[sizeof(struct four) - 4]` as an
-  element of size 0 that the backend refuses for the negative size of
-  an array. An array is no type argument (section 8 rule 2, 3.5 rule
-  2), so typec refuses the `slice_from_array` first, with
-  `[type-argument]`, and the backend never sees the size:
-  `struct four { int x; }; typedef int element[sizeof(struct four) - 4];`
-  `extern element buffer[8];`
-  `size_t f(void) { return slice_from_array(buffer).len; }`.
-  An element whose size is that layout constant reaches the backend as
-  a structure whose one member is the array, which
-  test/run/slice_lowering.t runs in its place. Reword the gate bullet
-  and 13.5 to name that structure.
 
 - [High] Package 4.1 decides whether a Type-C translation unit may
   include an emitted header (design 9.3). The include guards are macros
@@ -1919,16 +1910,6 @@ types (design 13.3).
   initialised through a temporary of its declaring type.
   Package 3.12 adds the script under `tools/measure`; have the design
   cite it.
-- [Medium] A match or a test copies a scrutinee that is a member, as
-  `match (n->kind)`, since typec cannot tell a packed structure from
-  another (design 13.5, `Expressions.access_of`), where hand-written C
-  switches on `n->kind.tag` in place. Package 3.10 measured the copy
-  (plan, after the Stage 3 table). At the Stage 3 gate decide whether
-  to reach every lvalue scrutinee through a pointer to a typedef of the
-  variant declared `aligned(1)`, which both backends accept under
-  `-pedantic-errors` and which deletes the list of aligned forms, and
-  measure its loads by running code on a target that requires
-  alignment.
 - [Medium] `Expressions.test` and `Expressions.arms` hold both forms
   of selection: a test keeps `constructor` and `constructors`, and an arm
   its `cases`, which lowering reads only where `nested` is `None`. Make
