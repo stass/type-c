@@ -143,6 +143,18 @@ build_image() {
   fi
 }
 
+# Whether qemu-user runs the host: its platform is not the Docker
+# daemon's.
+emulated() {
+  docker_arch=$(docker version --format '{{.Server.Arch}}') ||
+    fail "docker gives no architecture"
+  case $docker_arch in
+    amd64 | arm64) ;;
+    *) fail "docker runs on an unknown architecture: $docker_arch" ;;
+  esac
+  [ "${platform#linux/}" != "$docker_arch" ]
+}
+
 # Runs the suite with the source mounted read-only.
 run_suite() {
   echo "$host: running dune build and dune test"
@@ -153,8 +165,16 @@ run_suite() {
   # shellcheck disable=SC2016
   suite='dune build --root /src --build-dir "$HOME/build" &&
     dune test --root /src --build-dir "$HOME/build" --diff-command "diff -u"'
+  # LeakSanitizer stops the threads of a program with ptrace, which
+  # qemu-user does not implement, so an emulated host runs the sanitized
+  # tests without leak detection. An empty ASAN_OPTIONS is the default.
+  asan_options=''
+  if emulated; then
+    asan_options=detect_leaks=0
+    echo "$host: emulated, so LeakSanitizer is off"
+  fi
   if ! docker run --platform "$platform" --rm --network none --cap-drop ALL \
-    --security-opt no-new-privileges \
+    --security-opt no-new-privileges --env "ASAN_OPTIONS=$asan_options" \
     --mount "type=bind,source=$source_dir,target=/src,readonly" \
     "$image" sh -c "$suite" >> "$log" 2>&1; then
     fail "the suite fails; see $log"

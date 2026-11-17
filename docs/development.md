@@ -37,6 +37,9 @@ A platform other than the machine's runs under emulation, which needs
 qemu-user binfmt handlers for it in the Docker VM (colima's has them for
 arm64: `docker run --rm --platform linux/arm64 alpine:3.24 uname -m`
 prints `aarch64`) and makes the build and the suite many times slower.
+LeakSanitizer needs ptrace, which qemu-user does not implement, so a
+host whose platform is not the Docker daemon's runs the sanitized tests
+with `ASAN_OPTIONS=detect_leaks=0`, and the run says so.
 
 ```sh
 tools/hosts/run.sh debian-amd64
