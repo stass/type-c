@@ -3,8 +3,9 @@
 
 (* The reader as a fuzz target: any text is read, a rejection must come
    with a printable message, and an accepted text must keep the promises
-   of Reader.t: its tokens and gaps spell it, the gaps are layout only,
-   and the emitter copies it unchanged. *)
+   of Reader.t: its tokens and gaps spell it, the gaps are layout and
+   definition lines only, and the emitter copies it unchanged but for
+   the definition lines. *)
 
 open Typec_cpp
 open Typec_test_support
@@ -28,8 +29,10 @@ let check_accepted text (result : Reader.t) =
   let unchanged : Typec_emit.Emitter.lowered =
     { trap = Typec_emit.Trap.builtin; edits = []; assertions = [] }
   in
-  if Typec_emit.Emitter.emit result unchanged <> text then
-    violated "a unit without edits is emitted as it was read";
+  if Typec_emit.Emitter.emit result unchanged
+     <> Spans.without_definition_lines text
+  then violated "a unit without edits is emitted as it was read, but \
+     its definition lines";
   classify_numbers result
 
 let check text =

@@ -2,9 +2,16 @@
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
 (* [bytes] is the universe text, where the unit is a Type-C unit, then
-   the unit's own text, which starts at [own_start]. *)
-type text = { bytes : string; own_start : int }
-type t = { text : text; tokens : Token.t array }
+   the unit's own text, which starts at [own_start]. [definition_lines]
+   are the (start, stop) bytes of each definition line without its
+   newline, in order: emission copies none of them (design 13.3). *)
+type text = {
+  bytes : string;
+  own_start : int;
+  definition_lines : (int * int) list;
+}
+
+type t = { text : text; tokens : Token.t array; macros : Macros.t }
 type range = { first : int; count : int }
 type replacement = { range : range; text : string }
 type error = { location : Location.t; message : string }
@@ -33,6 +40,9 @@ type state = {
           nothing recurses over it. *)
   mutable owners : File.t Owners.t;  (** each owner made so far *)
   mutable tokens : Token.t list;  (** in reverse *)
+  mutable token_count : int;  (** the length of [tokens] *)
+  mutable macro_lines : Macros.line list;  (** in reverse *)
+  mutable definition_lines : (int * int) list;  (** in reverse *)
 }
 
 (* Raised at the first part of the text that is not cc -E output. *)
@@ -96,6 +106,16 @@ let describe_byte c =
 
 (* Lines, owners and tokens. *)
 
+(* The newline that ends the line, or the end of the text: a search of
+   the bytes, since skipping the rest of the definition lines takes most
+   of the time of reading -dD output. *)
+let line_end state =
+  Option.value
+    (String.index_from_opt state.text state.pos '\n')
+    ~default:(String.length state.text)
+
+let skip_to_line_end state = state.pos <- line_end state
+
 let start_next_line state =
   state.presumed <- { state.presumed with line = state.presumed.line + 1 }
 
@@ -130,7 +150,8 @@ let add_token state kind start =
       location = state.presumed;
     }
   in
-  state.tokens <- token :: state.tokens
+  state.tokens <- token :: state.tokens;
+  state.token_count <- state.token_count + 1
 
 (* Tokens. *)
 
@@ -229,7 +250,7 @@ let check_extended_char state c ~initial =
 (* The name of an identifier is in UTF-8 however its characters are
    written, so that each name has one spelling in every later stage;
    the text keeps the bytes, which emission copies unchanged. *)
-let scan_identifier state =
+let scan_name state =
   let start = state.pos in
   let name = Buffer.create 16 in
   let continues = ref true in
@@ -242,7 +263,7 @@ let scan_identifier state =
         Buffer.add_utf_8_uchar name c
     | None -> continues := false
   done;
-  Token.Identifier (Buffer.contents name)
+  Buffer.contents name
 
 (* A preprocessing number (C11 6.4.8): a digit, or '.' and a digit, then
    digits, identifier characters, '.' and signs after e, E, p and P. *)
@@ -313,8 +334,20 @@ let scan_punctuator state =
       Token.Punctuator punctuator
   | None -> fail state ("unexpected " ^ describe_byte state.text.[state.pos])
 
+(* The spellings that open a raw string literal, which GCC and Clang
+   read in their GNU modes. One may hold newlines, and the lines inside
+   it would read as directives, so it is refused wherever it stands. In
+   C no identifier stands directly before a string literal, so no valid
+   text spells one. *)
+let raw_string_openers = [ "R\""; "LR\""; "uR\""; "UR\""; "u8R\"" ]
+
+let raw_string_message =
+  "raw string literal, a GNU extension that C does not have"
+
 (* Consumes one token and returns its kind. *)
 let scan_token state =
+  if List.exists (looking_at state) raw_string_openers then
+    fail state raw_string_message;
   let opens_here (opener, _) = looking_at state opener in
   match List.find_opt opens_here literal_openers with
   | Some (opener, kind) ->
@@ -324,7 +357,7 @@ let scan_token state =
       kind
   | None ->
       if starts_number state then scan_number state
-      else if starts_identifier state then scan_identifier state
+      else if starts_identifier state then Token.Identifier (scan_name state)
       else if looking_at state "/*" || looking_at state "//" then
         fail state
           "comment in preprocessed text, as when an option such as -C \
@@ -454,10 +487,25 @@ let rec line_identifiers state names =
 (* A pragma line that is no sequence of tokens is no error of the text:
    C text passes the line on whole, and the parser refuses it where a
    rule reads its identifiers (design 13.5). *)
+(* Every raw string opener ends in R". A backend may lex on past the
+   part where the reader stopped and find a raw string there, so a line
+   that holds R" from that part on is refused, whatever stands before
+   it. *)
+let holds_raw_string_tail state =
+  let stop = line_end state in
+  let rec from index =
+    index + 1 < stop
+    && ((state.text.[index] = 'R' && state.text.[index + 1] = '"')
+       || from (index + 1))
+  in
+  from state.pos
+
 let pragma_text state =
   match line_identifiers state [] with
   | names -> Token.Identifiers names
-  | exception Failed { message; _ } -> Token.Not_tokens message
+  | exception Failed { message; _ } ->
+      if holds_raw_string_tail state then fail state raw_string_message;
+      Token.Not_tokens message
 
 (* A [#pragma typec] line is one whose first token is the identifier
    [typec], read as any other identifier, so that a longer name such as
@@ -483,8 +531,62 @@ let read_pragma state hash =
       Token.Pragma (pragma_text state)
     end
   in
-  skip_while state (fun c -> c <> '\n');
+  skip_to_line_end state;
   add_token state kind hash
+
+(* Definition lines, which -dD writes (design 13.3). *)
+
+let read_macro_name state =
+  if not (next_is state is_blank) then fail state "missing macro name";
+  skip_while state is_blank;
+  (* A digit continues an identifier but begins none. *)
+  if next_is state is_digit || not (starts_identifier state) then
+    fail state "missing macro name";
+  scan_name state
+
+(* What follows the name of a macro: its parameters, a blank before its
+   replacement list, or the end of the line. *)
+let end_macro_name state =
+  match peek state 0 with
+  | None | Some ('(' | '\n') -> ()
+  | Some c when is_blank c -> ()
+  | Some _ -> fail state "unexpected text after the macro name"
+
+(* The change takes effect at the next token. The line, which ends at
+   the cursor, is kept out of emission. *)
+let record_change state ~line_start name change =
+  let line = { Macros.name; position = state.token_count; change } in
+  state.macro_lines <- line :: state.macro_lines;
+  state.definition_lines <- (line_start, state.pos) :: state.definition_lines
+
+(* No consumer reads the parameters or the replacement list, and -dD
+   writes far more of them than there are tokens, so the rest of the line
+   is skipped without lexing it unless it holds a quote. A raw string
+   literal, which GCC and Clang read in their GNU modes, may run past its
+   line, and -dD writes its newlines as they are, so the lines inside it
+   would read as directives; lexing refuses it (scan_token). *)
+let skip_replacement_list state =
+  let stop = line_end state in
+  let rec holds_quote index =
+    index < stop && (state.text.[index] = '"' || holds_quote (index + 1))
+  in
+  (* Lexed for its refusals alone: no consumer reads the tokens. *)
+  let lex_rest_of_line () = ignore (line_identifiers state []) in
+  if holds_quote state.pos then lex_rest_of_line () else state.pos <- stop
+
+let read_definition state ~line_start =
+  let name = read_macro_name state in
+  end_macro_name state;
+  let definition =
+    { Macros.owner = current_owner state; location = state.presumed }
+  in
+  skip_replacement_list state;
+  record_change state ~line_start name (Defined definition)
+
+let read_undefinition state ~line_start =
+  let name = read_macro_name state in
+  end_directive state;
+  record_change state ~line_start name Undefined
 
 let read_directive state =
   let hash = state.pos in
@@ -496,6 +598,8 @@ let read_directive state =
     match read_word state with
     | "line" -> read_line_directive state
     | "pragma" -> read_pragma state hash
+    | "define" -> read_definition state ~line_start:hash
+    | "undef" -> read_undefinition state ~line_start:hash
     | name -> fail state (Printf.sprintf "unsupported directive #%s" name)
 
 (* The text. *)
@@ -557,6 +661,9 @@ let initial_state ~name text =
     include_stack = [];
     owners = Owners.empty;
     tokens = [];
+    token_count = 0;
+    macro_lines = [];
+    definition_lines = [];
   }
 
 (* Whether the main file is Type-C text (design 2.1), which makes the
@@ -592,7 +699,9 @@ let read_after ~universe ~name text =
   with
   | () ->
       let tokens = Array.of_list (List.rev state.tokens) in
-      Ok { text = { bytes; own_start }; tokens }
+      let definition_lines = List.rev state.definition_lines in
+      let macros = Macros.of_lines (List.rev state.macro_lines) in
+      Ok { text = { bytes; own_start; definition_lines }; tokens; macros }
   | exception Failed error -> Error error
 
 (* A C unit has no universe text, so its first part is empty and reads
@@ -641,28 +750,52 @@ let replaced_bytes (tokens : Token.t array) range =
     let last = tokens.(end_token range) in
     (start, last.start + last.length)
 
+(* The universe text holds no definition line (File.universe_text), so
+   each line counted is in the unit's own text. *)
 let length (result : t) =
-  String.length result.text.bytes - result.text.own_start
+  let line_bytes sum (start, stop) = sum + (stop - start) in
+  let definitions = List.fold_left line_bytes 0 result.text.definition_lines in
+  String.length result.text.bytes - result.text.own_start - definitions
+
+(* Copies the bytes from [from] to [upto] but the definition lines among
+   them, and gives the lines not yet passed. [lines] are in order, and
+   one that starts before [from] lay in a range that a replacement
+   dropped. A line lies between two tokens, so it ends by [upto]. *)
+let rec copy_without_definitions buffer bytes lines ~from ~upto =
+  match lines with
+  | (start, _) :: rest when start < from ->
+      copy_without_definitions buffer bytes rest ~from ~upto
+  | (start, stop) :: rest when start < upto ->
+      Buffer.add_substring buffer bytes from (start - from);
+      copy_without_definitions buffer bytes rest ~from:stop ~upto
+  | _ ->
+      Buffer.add_substring buffer bytes from (upto - from);
+      lines
 
 let rewrite (result : t) replacements =
-  let { bytes; own_start } = result.text in
-  let buffer = Buffer.create (String.length bytes - own_start) in
+  let { bytes; own_start; definition_lines } = result.text in
+  let buffer = Buffer.create (length result) in
+  let copy lines ~from ~upto =
+    copy_without_definitions buffer bytes lines ~from ~upto
+  in
   (* [next] is the token after the range of the replacement before; a
      range that starts before it overlaps that range or is out of order.
      [copied] is the end of the text copied so far, which starts with the
-     unit's own text. *)
-  let apply (next, copied) { range; text } =
+     unit's own text, and [lines] the definition lines after it. *)
+  let apply (next, copied, lines) { range; text } =
     if range.first < next then
       invalid_arg "Reader.rewrite: replacements out of order";
     let start, stop = replaced_bytes result.tokens range in
     if start < own_start then
       invalid_arg "Reader.rewrite: a replacement in the universe";
-    Buffer.add_substring buffer bytes copied (start - copied);
+    let lines = copy lines ~from:copied ~upto:start in
     Buffer.add_string buffer text;
-    (range.first + range.count, stop)
+    (range.first + range.count, stop, lines)
   in
-  let _, copied = List.fold_left apply (0, own_start) replacements in
-  Buffer.add_substring buffer bytes copied (String.length bytes - copied);
+  let _, copied, lines =
+    List.fold_left apply (0, own_start, definition_lines) replacements
+  in
+  ignore (copy lines ~from:copied ~upto:(String.length bytes));
   Buffer.contents buffer
 
 let escaped_byte c = Printf.sprintf "\\x%02X" (Char.code c)

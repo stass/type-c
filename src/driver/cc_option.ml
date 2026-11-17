@@ -26,7 +26,12 @@ type role =
   | Refused of string
   | Typec of typec_option
 
-type t = { role : role; separate_values : int; joined_value : string }
+type t = {
+  role : role;
+  separate_values : int;
+  joined_value : string;
+  forwards : bool;
+}
 
 (* How an option is spelled with its values, as GCC and Clang read it. *)
 type form =
@@ -39,10 +44,12 @@ type form =
   | Joined_and_separate
       (** the spelling with a value appended, then one more value *)
 
-type entry = { spelling : string; form : form; role : role }
+(* [forwards] says that the values of the option are options that the
+   driver hands unread to a later step. *)
+type entry = { spelling : string; form : form; role : role; forwards : bool }
 
-let entries role form spellings =
-  List.map (fun spelling -> { spelling; form; role }) spellings
+let entries ?(forwards = false) role form spellings =
+  List.map (fun spelling -> { spelling; form; role; forwards }) spellings
 
 (* A long option joins its value after "=", which keeps its spelling
    from matching a longer option as a prefix: --target= is no prefix of
@@ -200,9 +207,12 @@ let table =
           "-iwithprefixbefore"; "-iwithsysroot"; "-cxx-isystem";
           "-stdlib++-isystem"; "-imultilib"; "-imultiarch";
         ];
+      (* GCC and Clang split the value of -Wp, at its commas. *)
+      entries ~forwards:true Preprocess Joined [ "-Wp," ];
+      entries ~forwards:true Preprocess (Separate 1) [ "-Xpreprocessor" ];
       entries Preprocess (Separate 1)
         [
-          "-include-pch"; "-Xpreprocessor"; "-dependency-file";
+          "-include-pch"; "-dependency-file";
           "-dependency-dot"; "-module-dependency-dir";
           "-fexperimental-openacc-macro-override";
         ];
@@ -216,7 +226,6 @@ let table =
           "--no-system-header-prefix";
         ];
       long_joined_entries Preprocess [ "--embed-dir" ];
-      entries Preprocess Joined [ "-Wp," ];
       entries Preprocess Flag [ "-nostdinc"; "-undef"; "-H" ];
       (* The source's encoding: only the step that reads the source
          decodes it, and GCC writes UTF-8 for -E, which the compile step
@@ -269,7 +278,7 @@ let table =
         [
           "-target"; "-target-variant"; "-darwin-target-variant";
           "-darwin-target-variant-triple"; "-B"; "-F"; "-G"; "-V";
-          "-isysroot"; "-Xclang"; "-Xclangas"; "-Xassembler"; "-Xanalyzer";
+          "-isysroot"; "-Xclangas"; "-Xassembler"; "-Xanalyzer";
           "-Xcuda-fatbinary"; "-Xcuda-ptxas"; "-Xopenmp-target";
           "-Xarch_device"; "-Xarch_host";
           "-Xmicrosoft-visualc-tools-root";
@@ -299,6 +308,7 @@ let table =
           "--encoding"; "--extdirs"; "--mhwdiv"; "--output-class-directory";
           "--resource";
         ];
+      entries ~forwards:true Common (Separate 1) [ "-Xclang" ];
       entries Common Joined_and_separate
         [ "-Xarch_"; "-Xopenmp-target="; "-Xoffload-compiler" ];
       (* Long options of every step that have no form with one '-'
@@ -316,7 +326,8 @@ let table =
 let response_file =
   { role = Refused "typec does not read the options in a response file";
     separate_values = 0;
-    joined_value = "" }
+    joined_value = "";
+    forwards = false }
 
 (* GCC reads an unambiguous abbreviation of a long option as that
    option and any other --NAME as -fNAME (GCC 16), so a long option
@@ -328,16 +339,20 @@ let unknown_long_option =
         "typec does not know this long option, which GCC may read as an \
          abbreviation of another or as -f and its name";
     separate_values = 0;
-    joined_value = "" }
+    joined_value = "";
+    forwards = false }
 
-let unknown = { role = Common; separate_values = 0; joined_value = "" }
+let unknown =
+  { role = Common; separate_values = 0; joined_value = ""; forwards = false }
 
 (* How [entry] reads [argument], if it does. *)
 let reading argument entry =
   let exact = argument = entry.spelling in
   let prefixed = String.starts_with ~prefix:entry.spelling argument in
   let option separate_values joined_value =
-    Some { role = entry.role; separate_values; joined_value }
+    Some
+      { role = entry.role; separate_values; joined_value;
+        forwards = entry.forwards }
   in
   let joined () =
     let length = String.length entry.spelling in
@@ -370,3 +385,22 @@ let classify argument =
     | (_, option) :: _ -> option
     | [] when String.starts_with ~prefix:"--" argument -> unknown_long_option
     | [] -> unknown
+
+(* The options that [option] hands to a later step, with its separate
+   [values]: the parts of its joined value between commas, then those
+   values. *)
+let forwarded_options (option : t) values =
+  if not option.forwards then []
+  else if option.joined_value = "" then values
+  else String.split_on_char ',' option.joined_value @ values
+
+(* A dump changes the preprocessed text whichever step reads it, so an
+   option that the -d entry refuses on its own is refused when it is
+   forwarded; the others pass, and the reader refuses the text that
+   they change. *)
+let is_dump word = (classify word).role = Refused dumps
+
+let role (option : t) values =
+  match List.find_opt is_dump (forwarded_options option values) with
+  | Some dump -> Refused (Printf.sprintf "it passes on %s, and %s" dump dumps)
+  | None -> option.role

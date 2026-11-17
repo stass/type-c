@@ -131,9 +131,11 @@ gets it.
   [1]
 
 --emit-c writes the emitted C, on stdout or to the -o file, and compiles
-nothing. It is the preprocessed text.
+nothing. It is the text of the -E -dD step with each #define and #undef
+line emptied, since the backend would apply a definition that it reads.
 
-  $ $clang -E -x c -D__TYPEC__=1 -std=gnu17 x.tc > plain.i
+  $ $clang -E -dD -x c -D__TYPEC__=1 -std=gnu17 x.tc |
+  >   sed -E 's/^#(define|undef) .*//' > plain.i
   $ typec --cc=$clang --emit-c x.tc | cmp - plain.i
   $ typec --cc=$clang --emit-c x.tc -o out/x.i && cmp out/x.i plain.i
   $ typec --cc=$clang --emit-c x.tc twice.c
@@ -285,8 +287,20 @@ the backend and its headers, so its location is cut.
   token before the first line marker, as when an option such as -P removes the line markers
   $ typec --cc=$clang -Wp,-C -c x.tc 2>&1 | without_location
   comment in preprocessed text, as when an option such as -C keeps the comments
-  $ typec --cc=$gcc -Xpreprocessor -dD -c x.tc 2>&1 | without_location
-  unsupported directive #define
+
+An option that starts with -d is a dump, which changes the text as
+-dM and -dU do, so it is refused when -Wp, -Xpreprocessor or -Xclang
+passes it on as it is on its own.
+
+  $ typec --cc=$gcc -Wp,-dM -c x.tc
+  typec: -Wp,-dM cannot be used with a .tc input: it passes on -dM, and the letters after -d select dumps, and some, such as -dD, -dM and -dI, change the preprocessed text
+  [81]
+  $ typec --cc=$gcc -Xpreprocessor -dI -c x.tc
+  typec: -Xpreprocessor cannot be used with a .tc input: it passes on -dI, and the letters after -d select dumps, and some, such as -dD, -dM and -dI, change the preprocessed text
+  [81]
+  $ typec --cc=$clang -Xclang -dD -c x.tc
+  typec: -Xclang cannot be used with a .tc input: it passes on -dD, and the letters after -d select dumps, and some, such as -dD, -dM and -dI, change the preprocessed text
+  [81]
 
 Several -arch options make Apple's cc build a universal binary, but its
 -E step preprocesses for one architecture only, so typec refuses two

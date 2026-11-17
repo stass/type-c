@@ -385,15 +385,8 @@ is [type-c-language-design.md](type-c-language-design.md).
   backends pick a pragma by its first tokens, which makes that line an
   unknown pragma; have the reader keep the leading run of identifiers
   and match the list against it, so that such a line is refused.
-- [Medium] Build the `-dD` reading of design 13.2 and 13.3 (the `-E`
-  step's `-dD`, definition lines read and left out of emission, the
-  table of macros) and the rule of 13.5 that refuses a macro in any
+- [Medium] Build the rule of design 13.5 that refuses a macro in any
   `#pragma` line, replacing `Pragma_words` and its rule `pragma-word`.
-- [High] Refuse an option after `-Wp,`, `-Xpreprocessor` or `-Xclang`
-  that starts with `-d` (design 13.2): with the `-E` step's `-dD` the
-  reader accepts definition lines, so GCC's `-Wp,-dM` output reads as
-  an empty unit and compiles to an empty object, and `-Wp,-dU` leaves
-  the table of macros without the unused ones.
 - [Low] A `#pragma` line of C text that is no sequence of tokens is
   not looked at for macros (design 13.5, provisional); if a backend is
   found to apply such a line, have the reader keep the identifiers
@@ -1232,6 +1225,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   65 ms, 50 words per byte) were measured with the declaration reader
   in that target; measure them again in the instrumented harness and
   adjust the 300 ms limit if the parser alone is much faster.
+- [Medium] The refusal of a forwarded `-d` option (design 13.2) knows
+  only `-Wp,`, `-Xpreprocessor` and `-Xclang`: Apple Clang 21 also
+  passes on `-Xclang=-dM`, `-Xarch_host -dM`, `-Xarch_ARCH`,
+  `-Xarch_device`, `-Xopenmp-target[=]` and `-Xoffload-compiler`
+  values, and expands `@FILE` inside `-Xclang` and `-Wp,`. The reader
+  refuses Clang's `-dM` and `-dI` text and Clang ignores `-dU`, so no
+  wrong unit is known to pass, but the rule is a list. Decide whether
+  a forwarded option is read as the same option on its own for every
+  refusal (which also refuses `-Wp,-P` and `@FILE` up front) and
+  whether the `-X` family is marked by a prefix rule; `is_dump` also
+  tells a dump by its refusal message, which an entry flag would make
+  hold by construction.
 - [Medium] `tools/fuzz/seeds.t` passes a seed that its target refuses,
   as the harness exits 0 for a refusal too, so a seed that never reaches
   the stage it is for goes unnoticed (four parser seeds lacked the line

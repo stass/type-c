@@ -34,13 +34,6 @@ let gaps text (result : Reader.t) =
     Some (List.rev ((!previous_end, text_end) :: !gaps))
   else None
 
-(* The gaps and the tokens, alternating, spell the text: the tokens are
-   in order and apart, and the text that the reader keeps for emission
-   is the text it read. *)
-let spell_text text (result : Reader.t) =
-  Option.is_some (gaps (read_bytes text result) result)
-  && Reader.rewrite result [] = text
-
 let is_space = function
   | ' ' | '\t' | '\r' | '\011' | '\012' | '\n' -> true
   | _ -> false
@@ -70,8 +63,38 @@ let is_marker_line line =
      && String.starts_with ~prefix:"line" directive
      && is_space directive.[4]
 
-(* A gap holds only white space and whole lines that are line markers:
-   none of the text was dropped from the tokens. *)
+(* A #define or #undef line of -dD: '#', any blanks, the directive's
+   name and a blank. *)
+let is_definition_line line =
+  String.starts_with ~prefix:"#" line
+  &&
+  let directive =
+    drop_leading_space (String.sub line 1 (String.length line - 1))
+  in
+  let directive_is name =
+    let length = String.length name in
+    String.length directive > length
+    && String.starts_with ~prefix:name directive
+    && is_space directive.[length]
+  in
+  directive_is "define" || directive_is "undef"
+
+(* [text] with each definition line emptied, its newline kept: what
+   emission copies of a text that it changes nowhere. *)
+let without_definition_lines text =
+  String.split_on_char '\n' text
+  |> List.map (fun line -> if is_definition_line line then "" else line)
+  |> String.concat "\n"
+
+(* The gaps and the tokens, alternating, spell the text: the tokens are
+   in order and apart, and the text that the reader keeps for emission
+   is the text it read but its definition lines. *)
+let spell_text text (result : Reader.t) =
+  Option.is_some (gaps (read_bytes text result) result)
+  && Reader.rewrite result [] = without_definition_lines text
+
+(* A gap holds only white space and whole lines that are line markers or
+   definition lines: none of the text was dropped from the tokens. *)
 let gap_is_layout text (start, stop) =
   let gap = String.sub text start (stop - start) in
   let lines = String.split_on_char '\n' gap in
@@ -84,7 +107,8 @@ let gap_is_layout text (start, stop) =
          let whole =
            (index > 0 || starts_line) && (index < last || ends_line)
          in
-         String.for_all is_space line || (whole && is_marker_line line))
+         String.for_all is_space line
+         || whole && (is_marker_line line || is_definition_line line))
        lines)
 
 let gaps_are_layout text (result : Reader.t) =

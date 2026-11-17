@@ -324,18 +324,22 @@ let compile_command shape arguments ~linked_object source emitted_file =
       @ as_preprocessed emitted_file)
 
 (* The -E step of [source] with the options of the command line that
-   matter to preprocessing, and [outputs] before the input. *)
-let preprocessing_command shape arguments ~outputs source compiler =
+   matter to preprocessing, and [own_options], which this step alone
+   gets, before the input. *)
+let preprocessing_command shape arguments ~own_options source compiler =
   (shape.program :: "-E" :: type_c_macro
    :: with_standard shape compiler
         (options_where preprocessing_role arguments))
-  @ outputs @ [ "-x"; "c"; source ]
+  @ own_options @ [ "-x"; "c"; source ]
 
 (* The -E step that a translation reads, whose dependency file is the
-   one that cc would write when it compiles. *)
+   one that cc would write when it compiles. -dD writes each #define and
+   #undef at its place, so that the reader knows the macros at each
+   token (design 13.2, 13.3). *)
 let preprocess_command shape arguments source =
   preprocessing_command shape arguments source
-    ~outputs:(dependency_options ~output:shape.output arguments source)
+    ~own_options:
+      ("-dD" :: dependency_options ~output:shape.output arguments source)
 
 (* Under -M or -MM the -E step prints the rule in place of the
    preprocessed text, where -o says. It gets -o and the dependency
@@ -343,7 +347,7 @@ let preprocess_command shape arguments source =
    dependency file as it does for a C source. *)
 let rule_command shape arguments source =
   preprocessing_command shape arguments source
-    ~outputs:(output_option shape.output)
+    ~own_options:(output_option shape.output)
 
 (* [linked_object] is the object that the step makes when the command
    line links. *)

@@ -1616,15 +1616,17 @@ bug in `typec`. Every other status is the backend's.
 An input whose name ends in `.tc`, with no `-x` other than `-x none`
 before it, goes through three steps:
 
-1. `BACKEND -E -D__TYPEC__=1 -std=gnu17 OPTIONS -x c FILE.tc`, with its
-   stdout in a private temporary directory;
+1. `BACKEND -E -D__TYPEC__=1 -std=gnu17 OPTIONS -dD -x c FILE.tc`,
+   with its stdout in a private temporary directory; `-dD` keeps each
+   `#define` and `#undef` in the text, so that `typec` knows which names
+   are macros where;
 2. `typec` reads the preprocessed text, parses it and reads its
    declarations at file scope, then emits it. The declarations are read
    for the target model that the backend gives with the options of step
    3 (see "Printing the target model"). A text that the front end
    refuses stops `typec` with one message, `FILE:LINE: MESSAGE`. With no
    Type-C construct the emitted text is the preprocessed text, byte for
-   byte;
+   byte, but that each `#define` and `#undef` line is left empty;
 3. `BACKEND -std=gnu17 OPTIONS -c -o OUTPUT -x cpp-output EMITTED`,
    with `-S` in place of `-c`, or `-fsyntax-only` in place of `-c -o
    OUTPUT`, as the command line asks, and with `-fno-trigraphs` last on
@@ -1718,7 +1720,9 @@ A `.tc` input refuses the option that stops the backend at
 preprocessing (`-E`), the options that change the preprocessed text
 (`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-traditional-cpp`,
 `-fdirectives-only`), every `-d` option of dumps (`-dD`, `-dM`, `-dI`
-and the like), `-save-temps`, `-###`, `-ansi`, `--`, the options that
+and the like), alone or passed on by `-Wp,`, `-Xpreprocessor` or
+`-Xclang` (which so refuses Clang's `-Xclang -disable-O0-optnone` too),
+`-save-temps`, `-###`, `-ansi`, `--`, the options that
 name a file of further options (response files, `@FILE`, `-specs=` and
 `--config=`) and the queries that print a fact of the backend
 (`-print-file-name=` and every other `-print-` option, `-dumpmachine`),

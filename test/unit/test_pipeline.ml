@@ -14,7 +14,10 @@ let check name passed =
 (* The option table. *)
 
 let classified argument (role, separate_values, joined_value) =
-  Cc_option.classify argument = { role; separate_values; joined_value }
+  let option = Cc_option.classify argument in
+  option.role = role
+  && option.separate_values = separate_values
+  && option.joined_value = joined_value
 
 let () =
   let cases =
@@ -174,6 +177,30 @@ let () =
     (Command_line.words arguments
     = [ "-o"; "x.tc"; "a.tc"; "-x"; "c"; "b.tc"; "-xnone"; "c.tc"; "-"; "-I" ])
 
+(* An option passed on to a later step is refused when it is a dump
+   (design 13.2); the role of each argument of [words]. *)
+let () =
+  let roles words =
+    List.map
+      (function
+        | Command_line.Option { role = Cc_option.Refused _; _ } -> "refused"
+        | Option _ -> "passed"
+        | Input _ | Truncated _ -> "other")
+      (Command_line.read words)
+  in
+  let refused = [ "refused" ] and passed = [ "passed" ] in
+  check "-Wp,-dD" (roles [ "-Wp,-dD" ] = refused);
+  check "-Wp, with a dump after a comma" (roles [ "-Wp,-MD,-dM" ] = refused);
+  check "-Xpreprocessor -dU" (roles [ "-Xpreprocessor"; "-dU" ] = refused);
+  check "-Xclang -dI" (roles [ "-Xclang"; "-dI" ] = refused);
+  check "-Wp,-P passes, for the reader" (roles [ "-Wp,-P" ] = passed);
+  check "-Xpreprocessor -dependency-file, which is no dump"
+    (roles [ "-Xpreprocessor"; "-dependency-file" ] = passed);
+  check "-Xassembler -dD, which no preprocessor reads"
+    (roles [ "-Xassembler"; "-dD" ] = passed);
+  check "a dump as the value of an option that passes none on"
+    (roles [ "-o"; "-dD" ] = passed)
+
 (* Planning. *)
 
 let temp_dir = "/T"
@@ -210,7 +237,7 @@ let () =
     (translation.preprocess Gcc
     = [
         "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-O2"; "-Iinc"; "-DX";
-        "-x"; "c"; "x.tc";
+        "-dD"; "-x"; "c"; "x.tc";
       ]);
   check "-c -o: compile"
     (for_gcc translation.compile
@@ -314,8 +341,8 @@ let () =
   check "Clang: preprocess quiets unused options"
     ((only_translation plan).preprocess Clang
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-trigraphs"; "-x";
-        "c"; "x.tc";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; quiet; "-trigraphs";
+        "-dD"; "-x"; "c"; "x.tc";
       ]);
   check "Clang: compile without trigraphs"
     (for_clang (only_translation plan).compile
@@ -341,34 +368,34 @@ let () =
   check "-MD names the file and target after -o"
     (preprocess [ "-MD"; "-c"; "x.tc"; "-o"; "out/x.o" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MD"; "-MF";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MD"; "-dD"; "-MF";
         "out/x.d";
         "-MQ"; "out/x.o"; "-x"; "c"; "x.tc";
       ]);
   check "-MMD names the file and target after the input"
     (preprocess [ "-MMD"; "-MP"; "-c"; "dir/x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MMD"; "-MP"; "-MF";
-        "x.d"; "-MQ"; "x.o"; "-x"; "c"; "dir/x.tc";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MMD"; "-MP"; "-dD";
+        "-MF"; "x.d"; "-MQ"; "x.o"; "-x"; "c"; "dir/x.tc";
       ]);
   check "-MF and -MT are kept"
     (preprocess [ "-MD"; "-MF"; "d"; "-MTt"; "-c"; "x.tc" ]
     = [
         "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MD"; "-MF"; "d";
-        "-MTt";
+        "-MTt"; "-dD";
         "-x"; "c"; "x.tc";
       ]);
   check "-MF without -MD adds nothing"
     (preprocess [ "-MF"; "d"; "-c"; "x.tc" ]
     = [
-        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MF"; "d"; "-x"; "c";
-        "x.tc";
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MF"; "d"; "-dD"; "-x";
+        "c"; "x.tc";
       ]);
   check "--write-dependencies is -MD"
     (preprocess [ "--write-dependencies"; "-c"; "x.tc"; "-o"; "x.o" ]
     = [
         "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "--write-dependencies";
-        "-MF"; "x.d"; "-MQ"; "x.o"; "-x"; "c"; "x.tc";
+        "-dD"; "-MF"; "x.d"; "-MQ"; "x.o"; "-x"; "c"; "x.tc";
       ]);
   let plan = planned [ "--write-user-dependencies"; "-c"; "x.tc" ] in
   check "--write-user-dependencies: not compile or the target query"

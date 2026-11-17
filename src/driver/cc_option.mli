@@ -68,8 +68,15 @@ type role =
 (** How an argument that starts with ['-'] or ['@'] reads: its role, how
     many of the next arguments are its values, and its own value, which
     is the part after its spelling for a joined form ([-Idir], [-std=c11],
-    [--cc=PATH]) and empty otherwise. *)
-type t = { role : role; separate_values : int; joined_value : string }
+    [--cc=PATH]) and empty otherwise; and whether its values are options
+    that the driver passes on unread to a later step, as those of
+    [-Wp,], [-Xpreprocessor] and [-Xclang] are. *)
+type t = {
+  role : role;
+  separate_values : int;
+  joined_value : string;
+  forwards : bool;
+}
 
 val classify : string -> t
 (** [classify argument] finds [argument] in the table: an exact spelling
@@ -78,3 +85,10 @@ val classify : string -> t
     starts with ["--"] and [Common] with no value otherwise. An argument
     that starts with ['@'] is a response file, which is [Refused]:
     [typec] does not read the options inside it. *)
+
+val role : t -> string list -> role
+(** [role option values] is the role of [option] with its separate
+    [values]: [Refused] when it passes on an option that starts with
+    [-d] and that the [-d] entry refuses on its own, since a dump changes
+    the preprocessed text whichever step reads it (design 13.2); the role
+    of [option] otherwise. *)

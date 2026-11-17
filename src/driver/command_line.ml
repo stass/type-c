@@ -50,7 +50,12 @@ let read words =
               if option.role = Cc_option.Language then value else language
             in
             let argument =
-              Option { role = option.role; words = word :: values; value }
+              Option
+                {
+                  role = Cc_option.role option values;
+                  words = word :: values;
+                  value;
+                }
             in
             read_from language (argument :: arguments) rest)
   in

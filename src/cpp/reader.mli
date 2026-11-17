@@ -3,11 +3,17 @@
 
 (** Reading the output of [cc -E] into tokens.
 
-    The input is the text that GCC or Clang writes for [-E]: tokens,
-    white space, line markers ([# N "file" flags]), [#line] directives and
-    [#pragma] lines. A [#] that is the first byte of a line starts a
-    directive; after a blank it is a punctuator. Comments and other
-    directives are errors, as is any byte that starts no token.
+    The input is the text that GCC or Clang writes for [-E -dD]: tokens,
+    white space, line markers ([# N "file" flags]), [#line] directives,
+    [#pragma] lines and definition lines ([#define] and [#undef], design
+    13.3). A [#] that is the first byte of a line starts a directive;
+    after a blank it is a punctuator. Comments, other directives and raw
+    string literals are errors, as is any byte that starts no token.
+
+    A definition line is no part of the unit's text: the reader reads
+    the macro's name, skips the rest of the line without lexing it, and
+    records the change in {!Macros.t}; {!rewrite} and {!length} leave the
+    line out.
 
     The name of an identifier, which its token carries, is in UTF-8,
     whether its extended characters are written as universal character
@@ -55,10 +61,11 @@
     alone. *)
 type text
 
-(** The text and its tokens in order. The bytes before, between and after
-    the tokens are white space and line markers only, so the tokens with
-    those gaps spell the text exactly. *)
-type t = private { text : text; tokens : Token.t array }
+(** The text, its tokens in order and its macros. The bytes before,
+    between and after the tokens are white space, line markers and
+    definition lines only, so the tokens with those gaps spell the text
+    exactly. *)
+type t = private { text : text; tokens : Token.t array; macros : Macros.t }
 
 (** Why a text is not [cc -E] output: the message and the presumed
     location of the line where reading stopped. *)
@@ -105,16 +112,20 @@ val rewrite : t -> replacement list -> string
 (** [rewrite result replacements] is the text as [cc -E] wrote it with
     the replacements made: the bytes that emission copies, in which those
     of an identifier may differ from its {!spelling}. It holds no byte of
-    the universe text, which the backend never reads. The ranges must be
+    the universe text, which the backend never reads, and no definition
+    line, since Clang applies a [#define] that it reads in preprocessed
+    input. The newline of a definition line outside every range stays,
+    so the lines after it keep their numbers; a range drops the lines in
+    it with their newlines, as it drops any. The ranges must be
     made from the tokens of [result], and none may start at a token of
     the universe text. Each starts at or after the token after the range
     before it, [first + count], so they do not overlap and insertions in
     front of one token keep their order; [Invalid_argument] otherwise. *)
 
 val length : t -> int
-(** [length result] is the bytes of the text as [cc -E] wrote it, which
-    {!rewrite} copies when it replaces nothing; the universe text is not
-    among them. *)
+(** [length result] is the bytes of the text as [cc -E] wrote it that
+    {!rewrite} copies when it replaces nothing: the universe text and the
+    definition lines are not among them. *)
 
 val error_message : error -> string
 (** ["file:line: error: message"], the form of a C compiler's errors, with

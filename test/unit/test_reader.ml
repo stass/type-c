@@ -40,13 +40,20 @@ let show_place _text result (token : Token.t) =
     token.location.file token.location.line
     (Location.flag_spelling token.location.flags)
 
-let outcome show case =
+(* The reader's result for [case], or what to show in place of its
+   tokens. *)
+let checked_read case =
   match Reader.read ~name:"in.i" case.text with
-  | Error error -> Reader.error_message error
+  | Error error -> Error (Reader.error_message error)
   | Ok result when not (Spans.spell_text case.text result) ->
-      "the tokens and gaps do not spell the text"
+      Error "the tokens and gaps do not spell the text"
   | Ok result when not (Spans.gaps_are_layout case.text result) ->
-      "a gap holds more than white space and line markers"
+      Error "a gap holds more than white space and line markers"
+  | Ok result -> Ok result
+
+let outcome show case =
+  match checked_read case with
+  | Error shown -> shown
   | Ok result ->
       Array.to_list result.tokens
       |> List.map (show case.text result)
@@ -62,6 +69,9 @@ let comment_message =
 let stray_message spelling =
   Printf.sprintf
     "stray '%s' outside a directive, as when a macro expands to it" spelling
+
+let raw_string_message =
+  "raw string literal, a GNU extension that C does not have"
 
 let no_marker_message =
   "token before the first line marker, as when an option such as -P removes \
@@ -195,8 +205,28 @@ let kind_cases =
     case "block comment" "a /* c */"
       ("in.i:1: error: " ^ comment_message);
     case "line comment" "a // c" ("in.i:1: error: " ^ comment_message);
-    case "other directives" "#define X 1"
-      "in.i:1: error: unsupported directive #define";
+    case "raw string literals, whose quotes may balance on the line"
+      "R\"x(\"\n#undef M\n\")x\""
+      ("in.i:1: error: " ^ raw_string_message);
+    case "each raw string prefix" "a LR\"(x)\""
+      ("in.i:1: error: " ^ raw_string_message);
+    case "u8R" "u8R\"(x)\"" ("in.i:1: error: " ^ raw_string_message);
+    case "a raw string in a pragma line"
+      "#pragma foo R\"(\nchar *hidden = (char *\n)\"/\";"
+      ("in.i:1: error: " ^ raw_string_message);
+    case "a raw string after a part of a pragma line that is no token"
+      "#pragma foo @ R\"(\nx\n)\""
+      ("in.i:1: error: " ^ raw_string_message);
+    case "a pragma line that is no tokens and holds no raw string"
+      "#pragma mark - Don't \"edit\"\nx"
+      "pragma #pragma mark - Don't \"edit\" | id x";
+    case "uR" "uR\"(x)\"" ("in.i:1: error: " ^ raw_string_message);
+    case "UR" "UR\"(x)\"" ("in.i:1: error: " ^ raw_string_message);
+    case "an identifier ending in R before a quote is no raw string"
+      "xR \"x\""
+      "id xR | str \"x\"";
+    case "other directives" "#ident \"x\""
+      "in.i:1: error: unsupported directive #ident";
     case "null directive" "#\n" "in.i:1: error: unsupported directive #";
     case "a preprocessing number need not be a constant"
       "08 1e+ 1..2 10.13.4 10_4 0x1e+1 1$ 1\\u00e9 1\xc3\xa9 1.0u"
@@ -266,6 +296,126 @@ let pragma_cases =
        | pragma [typec\xcc\x80] \
        | pragma not tokens: character U+2014 cannot be part of an identifier";
   ]
+
+(* The spelling of each token, and for an identifier that names a macro
+   there "=owner location" of its definition. *)
+let show_macro (result : Reader.t) index (token : Token.t) =
+  let spelling = Reader.spelling result token in
+  match token.kind with
+  | Token.Identifier name -> (
+      match Macros.at result.macros name index with
+      | Some { owner; location } ->
+          Printf.sprintf "%s=%s %s:%d" spelling owner.name location.file
+            location.line
+      | None -> spelling)
+  | _ -> spelling
+
+let macro_outcome case =
+  match checked_read case with
+  | Error shown -> shown
+  | Ok result ->
+      Array.to_list (Array.mapi (show_macro result) result.tokens)
+      |> String.concat " | "
+
+(* The definition lines of -dD (design 13.3). *)
+let macro_cases =
+  [
+    case "a definition takes effect at the next token"
+      "# 1 \"in.i\"\nX\n#define X 1\nX"
+      "X | X=in.i in.i:2";
+    case "an #undef ends it, and a redefinition moves it"
+      "# 1 \"in.i\"\n#define X\nX\n#undef X\nX\n#define X 1\n\
+       #define X 2\nX"
+      "X=in.i in.i:1 | X | X=in.i in.i:6";
+    case "the parameters and a body without a quote are not lexed"
+      "# 1 \"in.i\"\n#define F(a,b) a ## b # ' @ \\ /* \xff\nF"
+      "F=in.i in.i:1";
+    case "a body with a quote is lexed"
+      "# 1 \"in.i\"\n#define S(a) \"s\" # a 'c'\nS"
+      "S=in.i in.i:1";
+    case "a raw string in a body is refused"
+      "# 1 \"in.i\"\n#define M 1\n#define HIDE R\"x(\n#undef M\n)x\"\n"
+      ("in.i:2: error: " ^ raw_string_message);
+    case "a raw string whose quotes balance is refused"
+      "# 1 \"in.i\"\n#define M 1\n#define HIDE R\"x(\"\n#undef M\n\")x\"\n"
+      ("in.i:2: error: " ^ raw_string_message);
+    case "an empty body, written with a blank after the name"
+      "# 1 \"in.i\"\n#define E \n#define G\nE G"
+      "E=in.i in.i:1 | G=in.i in.i:2";
+    case "blanks after # and between the words"
+      "# 1 \"in.i\"\n#  define\tX 1\n# undef  Y\nX Y"
+      "X=in.i in.i:1 | Y";
+    case "Clang's predefined block"
+      "# 1 \"m.c\"\n# 1 \"<built-in>\" 1\n# 1 \"<built-in>\" 3\n\
+       #define __STDC__ 1\n# 1 \"<command line>\" 1\n\
+       #define __TYPEC__ 1\n#undef U\n# 1 \"<built-in>\" 2\n\
+       # 1 \"m.c\" 2\n__STDC__ __TYPEC__ U"
+      "__STDC__=<built-in> <built-in>:1 \
+       | __TYPEC__=<command line> <command line>:1 | U";
+    case "GCC's predefined block belongs to the main file"
+      "# 0 \"m.c\"\n# 0 \"<built-in>\"\n#define __STDC__ 1\n\
+       # 0 \"<command-line>\"\n#define __TYPEC__ 1\n# 1 \"m.c\"\n\
+       __STDC__ __TYPEC__"
+      "__STDC__=m.c <built-in>:0 | __TYPEC__=m.c <command-line>:0";
+    case "a definition in an included file"
+      "# 1 \"in.i\"\n# 1 \"h.h\" 1 3\n#define H 1\n# 2 \"in.i\" 2\nH"
+      "H=h.h h.h:1";
+    case "a name by its name in UTF-8"
+      "# 1 \"in.i\"\n#define caf\\u00e9 1\ncaf\xc3\xa9"
+      "caf\xc3\xa9=in.i in.i:1";
+    case "no name" "# 1 \"in.i\"\n#define\n"
+      "in.i:1: error: missing macro name";
+    case "a number for a name" "# 1 \"in.i\"\n#undef 1\n"
+      "in.i:1: error: missing macro name";
+    case "no blank before the name" "# 1 \"in.i\"\n#define\\u00e9 1\n"
+      "in.i:1: error: missing macro name";
+    case "a longer directive name" "# 1 \"in.i\"\n#defineX 1\n"
+      "in.i:1: error: unsupported directive #defineX";
+    case "text glued to the name" "# 1 \"in.i\"\n#define X+1\n"
+      "in.i:1: error: unexpected text after the macro name";
+    case "text after an #undef" "# 1 \"in.i\"\n#undef X 1\n"
+      "in.i:1: error: unexpected text at the end of a directive";
+    case "a # that a macro makes stands after a blank"
+      "# 1 \"in.i\"\n #define X 1\n"
+      "in.i:1: error: stray '#' outside a directive, as when a macro \
+       expands to it";
+    case "a definition before the main file, as under -P" "#define X 1\n"
+      ("in.i:1: error: " ^ no_marker_message);
+  ]
+
+(* Emission copies no definition line but its newline (design 13.3).
+   Each check is its name, the emitted text and the text expected. *)
+let rewrite_checks () =
+  let rewritten text replacements =
+    match Reader.read ~name:"in.i" text with
+    | Error error -> Reader.error_message error
+    | Ok result ->
+        let replace (first, count, text) =
+          { Reader.range = Reader.range result.tokens ~first ~count; text }
+        in
+        let emitted = Reader.rewrite result (List.map replace replacements) in
+        if replacements = [] && Reader.length result <> String.length emitted
+        then "the length is not that of the emitted text"
+        else emitted
+  in
+  let head = "# 1 \"in.i\"\n" in
+  [
+    ( "the lines are emptied",
+      rewritten (head ^ "a\n#define X 1\n#undef X\nb\n#define Y") [],
+      head ^ "a\n\n\nb\n" );
+    ( "a replacement over a definition drops it with its newline",
+      rewritten (head ^ "a\n#define X 1\nb c\n#define Y\n")
+        [ (0, 2, "z") ],
+      head ^ "z c\n\n" );
+    ( "an insertion before the token after a definition",
+      rewritten (head ^ "a\n#define X 1\nb\n") [ (1, 0, "z ") ],
+      head ^ "a\n\nz b\n" );
+  ]
+
+let failed_rewrite_checks () =
+  List.filter
+    (fun (_, actual, expected) -> actual <> expected)
+    (rewrite_checks ())
 
 (* "spelling = written" for each token: the name of an identifier
    against its bytes in the text, which emission copies. *)
@@ -751,6 +901,20 @@ let () =
     @ failed_cases show_place place_cases
     @ failed_cases show_pragma pragma_cases
   in
+  let failed_macros =
+    List.filter_map
+      (fun case ->
+        let actual = macro_outcome case in
+        if actual = case.expected then None else Some (case, actual))
+      macro_cases
+  in
+  let failed = failed @ failed_macros in
+  let failed_rewrites = failed_rewrite_checks () in
+  List.iter
+    (fun (name, actual, expected) ->
+      Printf.eprintf "FAIL: %s\n  expected: %S\n  actual:   %S\n" name
+        expected actual)
+    failed_rewrites;
   List.iter
     (fun (case, actual) ->
       Printf.eprintf "FAIL: %s\n  expected: %s\n  actual:   %s\n" case.name
@@ -783,5 +947,5 @@ let () =
   if
     failed <> [] || failed_constants <> [] || failed_punctuators <> []
     || (not shared) || failed_mains <> [] || failed_owners <> []
-    || failed_universe <> []
+    || failed_universe <> [] || failed_rewrites <> []
   then exit 1

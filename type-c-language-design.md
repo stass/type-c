@@ -5465,7 +5465,10 @@ list as they are, so the lines inside it would otherwise read as
 directives. The reader refuses a raw string literal wherever it
 stands, in a definition line or among the tokens, where one whose
 quotes balance on each line (`R"x("`, a line, `")x"`) would forge the
-lines inside it just as well. Its openers `R"`, `LR"`, `uR"`, `UR"`
+lines inside it just as well. A `#pragma` line whose text is no
+sequence of tokens is refused too where it holds `R"` from the part at
+which its tokens stop, since a backend may lex on past that part. Its
+openers `R"`, `LR"`, `uR"`, `UR"`
 and `u8R"` open no valid C, since in C no identifier stands directly
 before a string literal, so refusing them costs no program. Either way
 a body costs what any byte of the text costs, so reading stays linear
