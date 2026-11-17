@@ -1710,7 +1710,14 @@ the first). Last come the most steps (`selection_steps`), nodes
 (`selection_nodes`) and nodes on one path (`selection_depth`) that
 building the selection tree of one match or test of the unit or of an
 instance took, which the measurements of P32 read, each the most over
-all of them. A unit that typec refuses reports none.
+all of them. The holders of a `try` of the unit and of each instance come
+last, which the measurements of P33 to P35 read: `try_holders` (the
+holders), `try_tries` (their `try` expressions), `try_first_operands`
+(the hoisted operands that are the first operand of `&&`, `||` or a
+conditional operator or the left operand of a comma), `try_conditioned`
+(the hoisted operands under a condition) and `try_multiple` (the holders
+with more than one hoisted operand). A unit that typec refuses reports
+none.
 
 A `.tc` input refuses the option that stops the backend at
 preprocessing (`-E`), the options that change the preprocessed text

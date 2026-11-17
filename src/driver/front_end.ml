@@ -4,8 +4,42 @@
 module Declarations = Typec_sema.Declarations
 module Expressions = Typec_sema.Expressions
 module Selection = Typec_sema.Selection
+module Try_plan = Typec_sema.Try_plan
 
 let ( let* ) = Result.bind
+
+(* What the preludes of a unit and its instances hold, a holder as
+   Expressions reports it. *)
+type try_counts = {
+  holders : int;
+  tries : int;
+  first_operands : int;
+  conditioned : int;
+  multiple : int;
+}
+
+let count_try_holders holders =
+  let count counts (holder : Expressions.try_holder) =
+    let first_operand (hoisted : Try_plan.hoisted) =
+      match hoisted.form with
+      | Tried _ -> false
+      | Truth _ | Discarded_left -> true
+    in
+    let conditioned (hoisted : Try_plan.hoisted) =
+      hoisted.conditions <> []
+    in
+    let count_of keep = List.length (List.filter keep holder.hoisted) in
+    { holders = counts.holders + 1;
+      tries = counts.tries + List.length holder.tries;
+      first_operands = counts.first_operands + count_of first_operand;
+      conditioned = counts.conditioned + count_of conditioned;
+      multiple =
+        counts.multiple + Bool.to_int (List.length holder.hoisted > 1) }
+  in
+  List.fold_left count
+    { holders = 0; tries = 0; first_operands = 0; conditioned = 0;
+      multiple = 0 }
+    holders
 
 (* How many slice tests of each form a unit and its instances hold. *)
 type slice_counts = {
@@ -26,6 +60,7 @@ type counts = {
   longest_name : int;
   slices : slice_counts;
   selection : Selection.size;
+  preludes : try_counts;
 }
 
 let count_slice_checks checks =
@@ -82,6 +117,7 @@ let lower dialect target ~trap text =
       slices;
       selection =
         largest_selection (Declarations.selection_sizes declarations);
+      preludes = count_try_holders (Declarations.try_holders declarations);
     }
   in
   let lowered : Typec_emit.Emitter.lowered =
@@ -95,10 +131,13 @@ let counts_line counts =
      output_limit=%d longest_instance_code=%d longest_name=%d \
      slice_indexes=%d slice_subs=%d slice_conversions=%d \
      slice_untested=%d slice_late_calls=%d selection_steps=%d \
-     selection_nodes=%d selection_depth=%d"
+     selection_nodes=%d selection_depth=%d try_holders=%d try_tries=%d \
+     try_first_operands=%d try_conditioned=%d try_multiple=%d"
     counts.unit_bytes counts.instance_bytes counts.copy_bytes
     counts.output_bytes counts.output_limit counts.longest_instance_code
     counts.longest_name counts.slices.indexes counts.slices.subs
     counts.slices.conversions counts.slices.untested
     counts.slices.late_calls counts.selection.steps counts.selection.nodes
-    counts.selection.depth
+    counts.selection.depth counts.preludes.holders counts.preludes.tries
+    counts.preludes.first_operands counts.preludes.conditioned
+    counts.preludes.multiple

@@ -132,6 +132,12 @@ let selection_sizes result =
       Expressions.selection_sizes reading.typed @ sizes)
     result.placements.readings (Expressions.selection_sizes result.typed)
 
+let try_holders result =
+  Ctype.Instances.fold
+    (fun _ (reading : instance_text) holders ->
+      Expressions.try_holders reading.typed @ holders)
+    result.placements.readings (Expressions.try_holders result.typed)
+
 let type_declarations result =
   Hashtbl.to_seq_values result.type_declarations
   |> List.of_seq

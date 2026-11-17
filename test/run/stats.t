@@ -47,7 +47,7 @@ bytes and 256 for each byte of the unit.
   >   typec --cc=$cc --stats -c counted.tc 2> stats || cat stats
   >   sed 's/^typec: stats: counted.tc: //' stats | tr ' ' '\n' > fields
   >   grep -v '^unit_bytes=\|^output_bytes=\|^output_limit=' fields |
-  >     grep -v '^slice_\|^selection_'
+  >     grep -v '^slice_\|^selection_\|^try_'
   >   eval "$(grep '^unit_bytes=\|^output_bytes=\|^output_limit=' fields)"
   >   [ "$output_limit" -eq $((33554432 + 256 * unit_bytes)) ] &&
   >     [ "$output_bytes" -ge "$unit_bytes" ] &&
@@ -175,3 +175,35 @@ of a generic function counts its own.
   selection_steps=10 selection_nodes=2 selection_depth=2 
   selection_steps=0 selection_nodes=0 selection_depth=0 
   selection_steps=10 selection_nodes=2 selection_depth=2 
+
+The preludes of the holders of a try are counted by their holders, tries
+and hoisted operands (design 5.1 rule 3, P33): the first operands of
+`&&`, `||` and a conditional operator and the left operands of a comma,
+the hoisted operands that stand
+under a condition, and the holders with more than one hoisted operand,
+whose prelude is more than the declaration of one value. Below, `plain`
+holds one `try` as a statement and one as an initialiser, `guarded` a
+first operand and a `try` under it, and `summed` two tries.
+
+  $ cat > preludes.tc <<'EOF'
+  > typedef result(int, int) result_int;
+  > static result_int g(void) { return Ok(1); }
+  > static result_int plain(void) {
+  >   try g();
+  >   int a = try g();
+  >   return Ok(a);
+  > }
+  > static result_int guarded(int *p) {
+  >   return Ok(p && try g() > 0);
+  > }
+  > static result_int summed(void) {
+  >   return Ok(try g() + try g());
+  > }
+  > EOF
+  $ typec --cc=$clang --stats -c preludes.tc 2> stats || cat stats
+  $ tr ' ' '\n' < stats | grep '^try_'
+  try_holders=4
+  try_tries=5
+  try_first_operands=1
+  try_conditioned=1
+  try_multiple=2

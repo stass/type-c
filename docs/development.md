@@ -677,3 +677,34 @@ from the README, where a unit that `typec` refuses has the one row
 `selection_depth` of a unit are the most that building the selection
 tree of one of its matches or tests took; `unit_stats.sh` reports the
 same for the container library and the pilot.
+
+`tools/measure/try_expr/` and the two scripts beside it measure `try`
+inside expressions (package 3.12, P33 to P35, P8).
+`tools/measure/try_expr.sh OUT [CC...]` builds, with each backend at
+`-O0` and `-O2`, four programs twice: with each `try` where its author
+put it (side `prelude`, which `typec` lowers to preludes) and with each
+`try` in a declaration of its own (side `decl`). They are `forms.tc`,
+nine functions each of a form of design 5.1 rule 3 and `forms_decl.tc`,
+its twin written by hand; the README's first example, `eval`, timed on a
+tree, with its twin made by `readme_decl.sed`; the README's `copy.tc` and
+`pair.tc`; and `toml.tc` of Pilot B, with its twin made by
+`toml_decl.sed` and timed on the pilot's own `tools/bench/bench.c`. It
+writes the bytes of machine code of each object and program, the best
+time of each, and the counts that `--stats` reports, and fails where the
+two sides print different checksums (for the pilot, parse a different
+number of files) or a twin keeps a `try` in a place other than a
+declaration or a statement of its own.
+`tools/measure/try_stats.sh OUT CC` counts without building: for the
+container library, the pilot and the README's units, which refusal of
+design 5.1 rule 3 stops each unit, the preludes that `--stats` reports
+(`try_holders`, `try_tries`, `try_first_operands`, `try_conditioned` and
+`try_multiple`), where each `try` stands on its line, the loops that
+call a function that returns a result and those whose body holds a
+`try`, the initialiser lists that hold one, and the `#pragma` lines. It
+writes `OUT.detail`, which lists the lines that those counts read.
+
+```sh
+tools/measure/try_expr.sh /Volumes/Optaine/measure-3.12/run/try_expr.csv
+tools/measure/try_stats.sh /Volumes/Optaine/measure-3.12/run/try_stats.csv \
+    /usr/bin/clang
+```

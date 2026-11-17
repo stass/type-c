@@ -29,6 +29,23 @@ type slice_counts = {
           not *)
 }
 
+(** The preludes of the holders of a [try] that a unit and the instances
+    it uses hold (design 5.1 rule 3, P33). *)
+type try_counts = {
+  holders : int;  (** the holders that hold a [try] *)
+  tries : int;  (** the [try] expressions of all of them *)
+  first_operands : int;
+      (** the hoisted operands that are no [try]'s own: the first operands
+          of [&&], [||] and a conditional operator, and the left operands
+          of a comma *)
+  conditioned : int;
+      (** the hoisted operands that stand under a condition, whose
+          prelude is written under an [if] *)
+  multiple : int;
+      (** the holders with more than one hoisted operand, whose prelude
+          is more than the declaration of one value *)
+}
+
 (** What a unit counts against the translation limits of design 3.5
     rule 7, which [--stats] reports for measurement (design P30). *)
 type counts = {
@@ -57,6 +74,9 @@ type counts = {
           (design 4.7 rule 10, P32), each the most over all of them, so
           that the three need not be of one tree; zeros where there is
           none *)
+  preludes : try_counts;
+      (** the holders of a [try] of the unit and of each instance it
+          uses, which the measurements of P33 to P35 read *)
 }
 
 val lower :

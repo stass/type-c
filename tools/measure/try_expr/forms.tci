@@ -1,0 +1,17 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/* The two fallible functions that the forms of forms.tc call. */
+
+#ifndef FORMS_TCI
+#define	FORMS_TCI
+
+typedef result(int, int) result_int;
+typedef result(double, int) result_double;
+
+result_int	get(int x);
+result_double	get_double(int x);
+
+#endif /* !FORMS_TCI */

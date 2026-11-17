@@ -1,0 +1,149 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * Nine functions, each with a try inside the expression of its holder:
+ * the forms of design 5.1 rule 3 that a prelude writes with a
+ * declaration, a test, and where a condition needs one an if.  A form is
+ * compiled alone with -DFORM_X, X from a to i, or all together without
+ * it.  forms_decl.tc is the same nine with each try in a declaration of
+ * its own.
+ */
+
+#include "forms.tci"
+#include "forms_run.tci"
+
+#ifdef FORM_ALL
+#define	FORM_a
+#define	FORM_b
+#define	FORM_c
+#define	FORM_d
+#define	FORM_e
+#define	FORM_f
+#define	FORM_g
+#define	FORM_h
+#define	FORM_i
+#endif
+
+#if defined(FORM_e)
+static int
+scale(int a, int b)
+{
+
+	return (a * 7 + b);
+}
+#endif
+
+/* Two tries under +. */
+#ifdef FORM_a
+static result_int
+form_a(int x)
+{
+
+	return (Ok(try get(x) + try get(x + 1)));
+}
+RUN(a)
+#endif
+
+/* A try under &&, whose first operand the prelude evaluates. */
+#ifdef FORM_b
+static result_int
+form_b(int x)
+{
+
+	return (Ok((x & 1) && try get(x) > 0));
+}
+RUN(b)
+#endif
+
+/* A try in each branch of a conditional operator. */
+#ifdef FORM_c
+static result_int
+form_c(int x)
+{
+
+	return (Ok((x & 4) ? try get(x) : try get(x + 2)));
+}
+RUN(c)
+#endif
+
+/* The right operand of an assignment to an element. */
+#ifdef FORM_d
+static int buffer[8];
+
+static result_int
+form_d(int x)
+{
+
+	buffer[x & 7] = try get(x);
+	return (Ok(buffer[x & 7]));
+}
+RUN(d)
+#endif
+
+/* Two tries as arguments of a call. */
+#ifdef FORM_e
+static result_int
+form_e(int x)
+{
+
+	return (Ok(scale(try get(x), try get(x + 1))));
+}
+RUN(e)
+#endif
+
+/* Two tries as initialisers of a braced list, no conversion. */
+#ifdef FORM_f
+static result_int
+form_f(int x)
+{
+	int a[2] = { try get(x), try get(x + 1) };
+
+	return (Ok(a[0] - a[1]));
+}
+RUN(f)
+#endif
+
+/* The same with a conversion of each value to float. */
+#ifdef FORM_g
+static result_int
+form_g(int x)
+{
+	float a[2] = { try get_double(x), try get_double(x + 1) };
+
+	return (Ok((int)(a[0] * 10 + a[1])));
+}
+RUN(g)
+#endif
+
+/* A try in the condition of an if. */
+#ifdef FORM_h
+static result_int
+form_h(int x)
+{
+
+	if (try get(x) > 40)
+		return (Ok(1));
+	return (Ok(0));
+}
+RUN(h)
+#endif
+
+/*
+ * A side effect before the try, which C leaves unsequenced with it: the
+ * prelude evaluates the try first, and the read order does not matter to
+ * the function.
+ */
+#ifdef FORM_i
+static int position;
+
+static result_int
+form_i(int x)
+{
+
+	return (Ok(position++ + try get(x)));
+}
+RUN(i)
+#endif

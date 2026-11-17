@@ -188,6 +188,11 @@ val selection_sizes : t -> Selection.size list
     unit's own text and in the definition of each instance that it uses
     ({!Expressions.selection_sizes}). *)
 
+val try_holders : t -> Expressions.try_holder list
+(** The holders of a [try] typed in the unit's own text and in the
+    definition of each instance that it uses
+    ({!Expressions.try_holders}). *)
+
 val instance_bytes : t -> int
 (** The bytes that the readings for the unit's instances charged the
     instance budget (design 3.5 rule 7). *)

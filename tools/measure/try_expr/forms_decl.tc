@@ -1,0 +1,162 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * The nine forms of forms.tc with each try in a declaration of its own,
+ * under the if statements that the conditions need, which is the code
+ * that a programmer writes without a try inside an expression.  The
+ * order of the tries is that of the preludes of forms.tc.
+ */
+
+#include "forms.tci"
+#include "forms_run.tci"
+
+#ifdef FORM_ALL
+#define	FORM_a
+#define	FORM_b
+#define	FORM_c
+#define	FORM_d
+#define	FORM_e
+#define	FORM_f
+#define	FORM_g
+#define	FORM_h
+#define	FORM_i
+#endif
+
+#if defined(FORM_e)
+static int
+scale(int a, int b)
+{
+
+	return (a * 7 + b);
+}
+#endif
+
+#ifdef FORM_a
+static result_int
+form_a(int x)
+{
+	int p = try get(x);
+	int q = try get(x + 1);
+
+	return (Ok(p + q));
+}
+RUN(a)
+#endif
+
+#ifdef FORM_b
+static result_int
+form_b(int x)
+{
+	int guard = (x & 1) != 0;
+	int t = 0;
+
+	if (guard) {
+		int u = try get(x);
+
+		t = u;
+	}
+	return (Ok(guard && t > 0));
+}
+RUN(b)
+#endif
+
+#ifdef FORM_c
+static result_int
+form_c(int x)
+{
+	int t;
+
+	if (x & 4) {
+		int u = try get(x);
+
+		t = u;
+	} else {
+		int u = try get(x + 2);
+
+		t = u;
+	}
+	return (Ok(t));
+}
+RUN(c)
+#endif
+
+#ifdef FORM_d
+static int buffer[8];
+
+static result_int
+form_d(int x)
+{
+	int t = try get(x);
+
+	buffer[x & 7] = t;
+	return (Ok(buffer[x & 7]));
+}
+RUN(d)
+#endif
+
+#ifdef FORM_e
+static result_int
+form_e(int x)
+{
+	int p = try get(x);
+	int q = try get(x + 1);
+
+	return (Ok(scale(p, q)));
+}
+RUN(e)
+#endif
+
+#ifdef FORM_f
+static result_int
+form_f(int x)
+{
+	int p = try get(x);
+	int q = try get(x + 1);
+	int a[2] = { p, q };
+
+	return (Ok(a[0] - a[1]));
+}
+RUN(f)
+#endif
+
+#ifdef FORM_g
+static result_int
+form_g(int x)
+{
+	double p = try get_double(x);
+	double q = try get_double(x + 1);
+	float a[2] = { p, q };
+
+	return (Ok((int)(a[0] * 10 + a[1])));
+}
+RUN(g)
+#endif
+
+#ifdef FORM_h
+static result_int
+form_h(int x)
+{
+	int t = try get(x);
+
+	if (t > 40)
+		return (Ok(1));
+	return (Ok(0));
+}
+RUN(h)
+#endif
+
+#ifdef FORM_i
+static int position;
+
+static result_int
+form_i(int x)
+{
+	int t = try get(x);
+
+	return (Ok(position++ + t));
+}
+RUN(i)
+#endif

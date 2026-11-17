@@ -1,0 +1,32 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * The fallible functions of the forms, in a unit of their own so that no
+ * backend can inline them.  Each fails for one argument in 64.
+ */
+
+#include "forms.tci"
+
+/* One argument in this many fails. */
+#define	FAILS_ONE_IN	64
+
+result_int
+get(int x)
+{
+
+	if (x % FAILS_ONE_IN == FAILS_ONE_IN - 1)
+		return (Err(x & 7));
+	return (Ok(x * 3 + 1));
+}
+
+result_double
+get_double(int x)
+{
+
+	if (x % FAILS_ONE_IN == FAILS_ONE_IN - 1)
+		return (Err(x & 7));
+	return (Ok(x * 0.1 + 0.3));
+}

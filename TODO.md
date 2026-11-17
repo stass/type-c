@@ -103,7 +103,8 @@ is [type-c-language-design.md](type-c-language-design.md).
   the option, and what the backend is then given, or the refusal stays
   and the README says how such a build switches a file.
 - [Medium] The measure scripts `containers.sh`, `unit_stats.sh`,
-  `resume.sh`, `nested.sh` and `selection_stats.sh` each repeat the
+  `resume.sh`, `nested.sh`, `selection_stats.sh`, `try_expr.sh` and
+  `try_stats.sh` each repeat the
   check that OUT lies outside the
   repository, the revision lookup, the build of typec, the CSV `row`
   function and (all but `resume.sh`) the parser of the `--stats` line, and

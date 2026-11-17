@@ -1,0 +1,72 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * The eval of the README's first example, timed.  The unit includes
+ * the file that EVAL names, which is the example as the README has it or
+ * the same with each try in a declaration of its own, and renames its
+ * main so that the file stays whole.  run_eval(rounds) evaluates a tree
+ * of the nodes below that many times and returns a checksum of the
+ * results and the errors.
+ */
+
+#define	main	example_main
+#include EVAL
+#undef main
+
+/* A tree stored as a heap, of this many levels. */
+#define	LEVELS		11
+#define	NODES		((1 << LEVELS) - 1)
+#define	LEAVES		(1 << (LEVELS - 1))
+
+static expr nodes[NODES];
+
+/*
+ * The leaf at index i is 1 or 2; an inner node is a sum, except one in
+ * four that is a quotient, which is 0 where the numerator is the
+ * smaller, a division by zero for the node above it.  No product is
+ * built, so that no tree overflows an int and every error is a division
+ * by zero.
+ */
+static void
+build(void)
+{
+	int i;
+
+	for (i = NODES - 1; i >= 0; i--) {
+		if (i >= LEAVES - 1) {
+			nodes[i] = Num(1 + (i & 1));
+			continue;
+		}
+		if (i % 4 == 3)
+			nodes[i] = Div(&nodes[2 * i + 1], &nodes[2 * i + 2]);
+		else
+			nodes[i] = Add(&nodes[2 * i + 1], &nodes[2 * i + 2]);
+	}
+}
+
+long
+run_eval(long rounds)
+{
+	long sum;
+	long round;
+
+	build();
+	sum = 0;
+	for (round = 0; round < rounds; round++) {
+		match (eval(&nodes[round % 4])) {
+		case Ok(value):
+			sum += value;
+			break;
+		case Err(DivByZero):
+			sum -= 1;
+			break;
+		case Err(Overflow):
+			sum -= 2;
+			break;
+		}
+	}
+	return (sum);
+}
