@@ -346,6 +346,49 @@ the twin at `-O2` (at `-O0`, 59 and 86 against 53 and 66 for the copy
 and 43 and 40 for the twin); no code ran on a target that requires
 alignment.
 
+**Measurements of 3.12.** The raw data and the numbers are in the data
+repository, at `/Volumes/Optaine/type-c-corpus/measure/3.12/2026-11-17-darwin-x86_64/`
+(its README, commit fb82bed), from Type-C commit `1423847df810`. The
+library holds 12
+`try` expressions, all `try e;` statements; Pilot B 61, 25 of them
+statements, 22 initialisers and 14 right operands of an assignment; the
+README 12 in 10 holders, and 5 of those 12 stand inside an expression:
+two in each of the two `return`s of `eval` that add and multiply, and
+one in the `return` that divides by `d`. No holder of the three holds an
+operand with a side effect before a `try` that C leaves unsequenced
+with it (P33); no holder holds a first operand of `&&`, `||` or `?:` or
+a `try` under a condition; the only holders of more than one hoisted operand are 2 of
+the README's. Against the same code with each `try` in a declaration of
+its own (the 14 assignments of the pilot, the 4 holders of `eval`, the 4
+assignments of the README's `copy` and `pair`, and the nine functions of
+a written sample of the forms of 5.1 rule 3), prelude over declarations:
+text of the objects equal at `-O2` on both backends for `toml.o` (19187
+on Clang, 20703 on GCC 16), `eval` and the README's units, and 0.5 to 7
+per cent smaller at `-O0` for them
+(`toml.o` 30040 against 30200 and 29992 against 30146); the sample 1261
+against 1229 (Clang) and 1770 against 1770 (GCC 16) at `-O2`, 3203
+against 3171 and 3197 against 3257 at `-O0`, with the objects of the
+single forms differing at `-O2` for `&&` (Clang 127 against 124, GCC 193
+against 185), for `?:` on Clang (104 against 99) and for a `try` in the
+condition of an `if` on Clang (132 against 101). Time over the twins is
+1.001 (Clang) and 0.960 (GCC 16) for the parser on a 1.3 MB document at
+`-O2` and 1.017 and 0.996 at `-O0`, 0.997 and 0.998 for `eval` at `-O2`
+and 0.907 and 0.950 at `-O0`; for the nine forms 0.996 to 1.022 at `-O2`
+except `&&` (1.135 on Clang, 1.137 on GCC 16) and the `if` (1.267 on
+Clang), and 0.947 to 1.304 on Clang at `-O0` (`?:` 1.304, `&&` 1.137)
+and 0.967 to 1.065 on GCC 16, with other jobs running on the host. No unit of the
+three is refused by `try-loop`, `try-list` or `try-pragma`, and no
+source holds a `#pragma` line or an initialiser list that holds a
+`try`; the six README units that typec refuses are refused on purpose
+for other rules (P8, P34, P35). Loops (P34): the library has 16, 4 of
+them holding a `try` in the body; the pilot 46, 6 of them, and its C
+original 48, with no loop in either whose condition or clause calls a
+function that returns a result; 7 loops of `toml.c` call one in the
+body, 6 of which hold a `try` in the port and one calls one without it;
+the README has 3 loops, none calling one. A written sample holds two
+lists of two `try` expressions, one with a conversion to `float`, which
+typec accepts.
+
 **Exit gate**
 
 1. The library compiles in separate translation units and runs with
