@@ -10,18 +10,17 @@ beside its default, so -Wswitch-enum stays quiet on lowered code (13.5).
 The tests run on a Cortex-M3: Clang for thumbv7m-none-eabi, whose
 default is int-sized enumerations, and arm-none-eabi-gcc, whose default
 is short ones, named by TYPEC_TEST_ARM_GCC; each runs where present,
-under each representation. A configuration is a backend, its target
-option, the option of a representation and that of the other.
+under each representation, and backends_report in backends.sh says
+which ran. A configuration is a backend, its target option, the option
+of a representation and that of the other.
 
   $ . ./backends.sh
-  $ arm_gcc=${TYPEC_TEST_ARM_GCC:-arm-none-eabi-gcc}
   $ configurations() {
-  >   if "$clang" --target=thumbv7m-none-eabi -E -x c /dev/null \
-  >       > /dev/null 2>&1; then
-  >     echo "$clang --target=thumbv7m-none-eabi -fno-short-enums -fshort-enums"
-  >     echo "$clang --target=thumbv7m-none-eabi -fshort-enums -fno-short-enums"
+  >   if arm_clang_present; then
+  >     echo "$clang $arm_clang_target -fno-short-enums -fshort-enums"
+  >     echo "$clang $arm_clang_target -fshort-enums -fno-short-enums"
   >   fi
-  >   if command -v "$arm_gcc" > /dev/null 2>&1; then
+  >   if arm_gcc_present; then
   >     echo "$arm_gcc -mcpu=cortex-m3 -fshort-enums -fno-short-enums"
   >     echo "$arm_gcc -mcpu=cortex-m3 -fno-short-enums -fshort-enums"
   >   fi
@@ -81,4 +80,53 @@ other with the enumeration assertion.
   >   typec --cc="$cc" $target $this --emit-c -o other.i list.tc
   >   "$cc" $target $other -fsyntax-only other.i 2>&1 |
   >     grep -q 'typec assumes' || echo "no assertion: $cc $this"
+  > done
+
+--print-target names the representation of each configuration.
+
+  $ configurations | while read -r cc target this other; do
+  >   expected=short
+  >   [ "$this" = -fno-short-enums ] && expected=int-sized
+  >   typec --cc="$cc" $target $this --print-target |
+  >     grep -qx "enum_representation: $expected" ||
+  >     echo "representation: $cc $this"
+  > done
+
+An enumeration whose values fit in 8 bits has 8 bits under short
+enumerations, so typec refuses a bit-field of 9 bits of it under them
+alone. --emit-c runs no compile of the unit, so a refusal is typec's
+and not the backend's.
+
+  $ cat > bitfield.tc <<'EOF'
+  > struct s { enum { A } f : 9; };
+  > EOF
+  $ configurations | while read -r cc target this other; do
+  >   expected=accepted
+  >   [ "$this" = -fshort-enums ] && expected=refused
+  >   outcome=accepted
+  >   typec --cc="$cc" $target $this --emit-c -o /dev/null bitfield.tc \
+  >     2> /dev/null ||
+  >     outcome=refused
+  >   [ "$outcome" = "$expected" ] || echo "$outcome: $cc $this"
+  > done
+
+An -Xclang -fshort-enums reaches the target query, so it gives Clang
+the short representation.
+
+  $ if arm_clang_present; then
+  >   typec --cc="$clang" $arm_clang_target -Xclang -fshort-enums \
+  >     --print-target | grep -qx 'enum_representation: short' ||
+  >     echo "-Xclang -fshort-enums: not short"
+  > fi
+
+An enumeration whose earlier declaration alone holds packed compiles
+under each configuration.
+
+  $ cat > packed.tc <<'EOF'
+  > enum __attribute__((packed)) p7;
+  > enum p7 { P7 };
+  > EOF
+  $ configurations | while read -r cc target this other; do
+  >   typec --cc="$cc" $target $this -c packed.tc ||
+  >     echo "refused: $cc $this"
   > done

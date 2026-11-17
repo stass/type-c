@@ -6,9 +6,23 @@
 # those of the macOS development host. A host that lacks a backend fails
 # the tests that run it. TYPEC_TEST_REQUIRE_M32, when set and not empty,
 # declares that the host must compile the C headers with -m32.
+# TYPEC_TEST_ARM_GCC names the arm-none-eabi-gcc of short_enums.t;
+# unset, it is the one on the PATH. TYPEC_TEST_REQUIRE_ARM, when set and
+# not empty, declares that the host has both Arm backends of that test.
 
 clang=${TYPEC_TEST_CLANG:-/usr/bin/clang}
 gcc=${TYPEC_TEST_GCC:-/usr/local/bin/gcc-16}
+arm_gcc=${TYPEC_TEST_ARM_GCC:-arm-none-eabi-gcc}
+
+# The Arm backends of short_enums.t, each run where present: Clang where
+# it has the target of a Cortex-M3, and arm_gcc.
+arm_clang_target=--target=thumbv7m-none-eabi
+arm_clang_present() {
+  "$clang" $arm_clang_target -E -x c /dev/null > /dev/null 2>&1
+}
+arm_gcc_present() {
+  command -v "$arm_gcc" > /dev/null 2>&1
+}
 
 # The flags of a second target, for the tests that check two: -m32 where
 # the backend targets x86-64; elsewhere, which has no 32-bit target to
@@ -47,9 +61,19 @@ fi
 unset -f backends_fit
 unset fit_cc other_char
 
+# Reports what the tests could not run on this host, and fails when the
+# host declared that it has it. The subshell bodies keep the variables
+# of the reports out of the tests.
+backends_report() (
+  report_status=0
+  m32_report || report_status=1
+  arm_report || report_status=1
+  return $report_status
+)
+
 # Prints a line when -m32 was dropped from hosted_second_target, and
 # fails instead when TYPEC_TEST_REQUIRE_M32 is set.
-backends_report() {
+m32_report() {
   case " $hosted_second_target " in
   *" -m32 "*) return 0 ;;
   esac
@@ -66,6 +90,32 @@ backends_report() {
     ;;
   esac
 }
+
+# Prints which Arm backends short_enums.t runs and which it skips, so a
+# host without them does not pass that test unnoticed, and fails when one
+# is missing and TYPEC_TEST_REQUIRE_ARM is set.
+arm_report() (
+  arm_missing=
+  if arm_clang_present; then
+    echo "backends.sh: short_enums.t runs $clang $arm_clang_target"
+  else
+    echo "backends.sh: short_enums.t skips $clang," \
+      "which fails under $arm_clang_target"
+    arm_missing=yes
+  fi
+  if arm_gcc_present; then
+    echo "backends.sh: short_enums.t runs $arm_gcc"
+  else
+    echo "backends.sh: short_enums.t skips $arm_gcc, which is not found;" \
+      "TYPEC_TEST_ARM_GCC names it"
+    arm_missing=yes
+  fi
+  if [ -n "$arm_missing" ] && [ -n "${TYPEC_TEST_REQUIRE_ARM:-}" ]; then
+    echo "backends.sh: TYPEC_TEST_REQUIRE_ARM is set, but an Arm" \
+      "backend of short_enums.t is missing" >&2
+    return 1
+  fi
+)
 
 # compile_emitted CC FILE OPTION...: checks the preprocessed text in FILE
 # with backend CC under the strictest user options and OPTION..., reading

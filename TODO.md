@@ -196,14 +196,6 @@ the order of its commits:
 
 ## Target model
 
-- [Medium] `test/run/short_enums.t` lacks four of plan row 4.8's cases:
-  `--print-target` naming the representation, the refusal of a 9-bit
-  bit-field of `enum { A }` under short enumerations only,
-  `-Xclang -fshort-enums`, and the `packed` p7 source compiling. It
-  also passes silently where neither Arm backend is present, and
-  `tools/gate.sh` does not name arm-none-eabi-gcc, so on a host
-  without it on the `PATH` the gate never runs the GCC half; let the
-  gate require the backend or say that it skipped.
 - [Medium] Package 4.6's freestanding check must allow the compiler's
   runtime helpers. As its row reads, a helper is a symbol the program
   did not introduce, yet at -O0 on the Cortex-M3 of Pilot C a Type-C

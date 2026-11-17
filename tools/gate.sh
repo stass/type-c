@@ -16,7 +16,11 @@
 # repository, where NAME is the name of the checkout's directory, so
 # gates of different worktrees do not share them.
 # TYPEC_TEST_CLANG names the Clang of the oracle tests as for the other
-# tests. Exits 0 only when every step passes.
+# tests. The gate first prints the report of test/run/backends.sh: the
+# Arm backends of short_enums.t that run and those skipped, and a dropped
+# -m32; a TYPEC_TEST_REQUIRE_ARM or TYPEC_TEST_REQUIRE_M32 that is set
+# makes a skip of what it names fail the gate. Exits 0 only when every
+# step passes.
 
 set -u
 
@@ -55,7 +59,16 @@ step() {
 	fi
 }
 
+# The cram tests skip a backend that the host lacks, and dune test sends
+# their report to the log; printing it here keeps a skip in sight.
+report_backends() {
+	echo "gate: backends"
+	(cd ./test/run && . ./backends.sh && backends_report) ||
+		die "the report of test/run/backends.sh failed"
+}
+
 require_tools_switch
+report_backends
 mkdir -p "$(dirname "$GATE_LOG")" "$ORACLE_BUILD" || exit 1
 : >"$GATE_LOG"
 
