@@ -25,7 +25,9 @@
 # The loops are those that begin with while, for or do; a loop is
 # calling when its header holds a call of one of names, and holding a try
 # when its body does, a body being the lines that stand deeper than the
-# loop. A try of an inner loop is a try of the outer. The lists are the
+# loop. A try of an inner loop is a try of the outer, and so is a call
+# (loops_calling_in_body, for the loops of the C original, where a call
+# of one of names stands where the port has a try). The lists are the
 # initialiser lists "= { ... try" that the first semicolon after the
 # brace does not precede. Comments and the text of strings are blank for
 # the count.
@@ -136,6 +138,12 @@ function calls_one_of(text,    n, i, word, before, rest, at) {
   return 0
 }
 
+function text_of(from, to,    j, text) {
+  for (j = from; j <= to; j++)
+    text = text code[j] " "
+  return text
+}
+
 function holds_try(from, to,    j) {
   for (j = from; j <= to; j++)
     if (code[j] ~ try_word)
@@ -189,10 +197,13 @@ END {
       loops++
       is_calling = calls_one_of(header_of(i))
       has_try = holds_try(i, body_end(i))
+      in_body = calls_one_of(text_of(i + 1, body_end(i)))
       calling += is_calling
       with_try += has_try
+      body_calling += in_body
       print "L", i, (has_try ? "try" : "plain"),
-        (is_calling ? "calling" : "-"), lines[i]
+        (is_calling ? "calling" : "-"), (in_body ? "body-calls" : "-"),
+        lines[i]
     }
   }
   flat = ""
@@ -210,6 +221,7 @@ END {
   print "M loops", loops + 0
   print "M loops_calling", calling + 0
   print "M loops_with_try", with_try + 0
+  print "M loops_calling_in_body", body_calling + 0
   print "M do_while_tails", tails + 0
   print "M lists_with_try", lists + 0
   print "M pragma_lines", pragmas + 0

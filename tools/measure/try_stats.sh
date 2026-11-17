@@ -20,10 +20,12 @@
 #   shape_statement, shape_initialiser, shape_assignment, shape_other
 #                         the try expressions of a file by where they
 #                         stand on their line (source_shapes.awk)
-#   loops, loops_calling, loops_with_try, do_while_tails
+#   loops, loops_calling, loops_with_try, loops_calling_in_body,
+#   do_while_tails
 #                         the loops of a file, those whose header calls
-#                         a function that returns a result, and those
-#                         whose body holds a try; the lines "} while (" that
+#                         a function that returns a result, those whose
+#                         body holds a try, and those whose body calls
+#                         such a function; the lines "} while (" that
 #                         end a do loop are counted by do_while_tails
 #   lists_with_try        the initialiser lists of a file that hold a try
 #   pragma_lines          its #pragma lines
