@@ -471,11 +471,10 @@ let rows =
          on both, where one mentions a type parameter, such as a \
          function type with a parameter of the type parameter and one \
          without a prototype; an [asm] operand whose type mentions a \
-         type parameter; [_Generic] or [__builtin_types_compatible_p] \
-         where a type in it mentions a type parameter, as design 7.1 \
-         rule 4 defines mentioning; and a declaration in the body that \
-         gives its identifier linkage and has a type that mentions a \
-         type parameter." };
+         type parameter, as design 7.1 rule 4 defines mentioning; a \
+         declaration in the body that gives its identifier linkage; and \
+         [__func__], [__FUNCTION__] or [__PRETTY_FUNCTION__] in the \
+         body where an operation reads its array whole." };
     Live { name = "Type_parameter_constant"; code = 76;
       clause = Some "design 7.1 rule 4";
       meaning =
@@ -485,7 +484,9 @@ let rows =
          array bound, a [case] value, a static initialiser, the width of \
          a bit-field, the value of an enumerator, the operand of \
          [_Static_assert] or of [_Alignas]; and [_Alignas] of a type \
-         that mentions a type parameter." };
+         that mentions a type parameter; and [_Generic] or \
+         [__builtin_types_compatible_p] where a type parameter meets \
+         another type in a comparison that decides." };
     Live { name = "Generic_function_form"; code = 77;
       clause = Some "design 7.1 rule 6";
       meaning =
@@ -494,9 +495,10 @@ let rows =
          declarator that declares a function, with a prototype and \
          neither [()] nor an identifier list, no storage-class specifier \
          but [static], no assembler label, no parameter of a variably \
-         modified type, no structure, union or enumeration defined in \
-         the head, and on a declaration that is not a definition neither \
-         [_Noreturn] nor an attribute." };
+         modified type, no structure, union or enumeration tag declared \
+         or body defined in the head, and on a declaration that is not \
+         a definition neither [_Noreturn] nor an attribute anywhere in \
+         it." };
     Live { name = "Generic_function_agreement"; code = 78;
       clause = Some "design 7.1 rule 7";
       meaning =
@@ -506,6 +508,15 @@ let rows =
          other, declare different types; or a second definition of it; \
          or another declaration of its name at file scope, before it or \
          after it." };
+    Live { name = "Generic_attribute"; code = 79;
+      clause = Some "design 13.3";
+      meaning =
+        "In the definition of a generic type or a generic function, an \
+         attribute or an alignment specifier, read as the attribute \
+         [aligned], whose subject mentions a type parameter or whose \
+         arguments name what the definition declares, where the table \
+         of attributes does not record that both backends take it alike \
+         for every type, kind of subject and argument list." };
   ]
 
 let () =

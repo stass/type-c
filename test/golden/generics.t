@@ -441,7 +441,8 @@ is visible is named.
   $ cat > unread_visible_tag.tc <<'EOF'
   > struct q;
   > type g(T) = struct {
-  >   T v __attribute__((aligned(sizeof(struct q *))));
+  >   T v;
+  >   int n __attribute__((aligned(sizeof(struct q *))));
   > };
   > g(int) x;
   > EOF
@@ -646,7 +647,7 @@ spelling C declares there.
 
   $ cat > aligned.tc <<'EOF'
   > # 1 "c.h" 1
-  > type g(T) = struct { T v __attribute__((aligned(sizeof(option)))); };
+  > type g(T) = struct { T v; int n __attribute__((aligned(sizeof(option)))); };
   > int option;
   > # 2 "aligned.tc" 2
   > g(int) x;

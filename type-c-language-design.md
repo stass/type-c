@@ -4146,15 +4146,15 @@ type parameter, with arguments that name nothing of the definition,
 is outside the rule: `FILE *f __attribute__((cleanup(close_file)));`
 stands in the body of a generic function.
 
-`always_inline`, `cold` and `unused` have the fact: on a function, a
-parameter, an object, a member, a typedef name and in a type name,
-both backends say the same of each for a `short` and for a structure
-(Apple Clang 21, GCC 16). An attribute is
-held not to have it until a measurement with both backends shows that
-they take it alike in all three respects. The table errs to the safe
-side: an attribute that it does not hold, or does not record as taken
-alike, is refused, so a gap in the table costs a refusal and never an
-instance that the backend rejects.
+`always_inline`, `cold`, `noinline` and `unused` have the fact: on a
+function, a parameter, an object, a member, a typedef name and in a
+type name, both backends say the same of each for a `short` and for a
+structure (Apple Clang 21, GCC 16). An attribute is held not to have it
+until a measurement with both backends shows that they take it alike in
+all three respects. The table errs to the safe side: an attribute that
+it does not hold, or does not record as taken alike, is refused, so a
+gap in the table costs a refusal and never an instance that the backend
+rejects.
 
 **Where GCC and Clang differ.** The front end types C as Clang does,
 whichever the backend is. GCC types a few constructs otherwise: the

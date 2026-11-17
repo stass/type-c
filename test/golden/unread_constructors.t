@@ -51,12 +51,12 @@ enumerator at the definition and where lowering writes the instance.
 
   $ cat > moved.tc <<'EOF'
   > enum { A = 8 };
-  > type g(T) = struct { T v __attribute__((aligned(A))); };
+  > type g(T) = struct { T v; int n __attribute__((aligned(A))); };
   > type w = | A | B(int x);
   > g(int) x;
   > EOF
   $ ./golden.exe moved.tc | grep aligned
-  struct g__i { __tc_arg__i v __attribute__ ( ( aligned ( A ) ) ) ; } ;
+  struct g__i { __tc_arg__i v ; int n __attribute__ ( ( aligned ( A ) ) ) ; } ;
 
 Where C declares nothing under the spelling, the name is undeclared, as
 typing finds it in read text; in unread text that is the backend's to

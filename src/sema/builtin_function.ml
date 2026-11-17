@@ -218,7 +218,11 @@ let floating =
         [ "f32"; "f64"; "f32x"; "f64x" ];
     ]
 
-let bits =
+(* The builtins whose result the values of their arguments alone
+   decide, which the check of a generic function may read as it reads
+   an operation (design 7.1 rule 4). Any other builtin may inspect what
+   the values do not say: a size, a class, or what the backend folds. *)
+let decided_by_values =
   List.concat
     [
       integer_family "__builtin_ffs" ~unsigned:false;
@@ -237,12 +241,17 @@ let bits =
             (prototype (Integer Unsigned_short) [ Integer Unsigned_short ]);
         both "__builtin_bswap32" (prototype Uint32 [ Uint32 ]);
         both "__builtin_bswap64" (prototype Uint64 [ Uint64 ]);
-        both "__builtin_add_overflow" (type_generic bool);
-        both "__builtin_sub_overflow" (type_generic bool);
-        both "__builtin_mul_overflow" (type_generic bool);
-        gcc "__builtin_mul_overflow_p" (type_generic bool);
+        both "__builtin_expect" (prototype long [ long; long ]);
       ];
     ]
+
+let overflow =
+  [
+    both "__builtin_add_overflow" (type_generic bool);
+    both "__builtin_sub_overflow" (type_generic bool);
+    both "__builtin_mul_overflow" (type_generic bool);
+    gcc "__builtin_mul_overflow_p" (type_generic bool);
+  ]
 
 (* The _n forms and the fetch operations give the value that the pointer
    points to; the generic forms take pointers to their values instead.
@@ -344,7 +353,6 @@ let control =
     both "__builtin_va_copy" (type_generic Void);
     gcc "__builtin_va_arg_pack" Unknown;
     gcc "__builtin_va_arg_pack_len" (prototype int []);
-    both "__builtin_expect" (prototype long [ long; long ]);
     clang "__builtin_assume" (prototype Void [ bool ]);
     (* The macOS SDK's os_log, whose format must be a string literal. *)
     clang "__builtin_os_log_format_buffer_size" (type_generic Size);
@@ -377,11 +385,15 @@ let not_returning =
   ]
 
 let table =
-  List.concat [ memory_and_strings; object_size_checking; floating; bits;
-                atomics; control; not_returning ]
+  List.concat [ memory_and_strings; object_size_checking; floating;
+                decided_by_values; overflow; atomics; control;
+                not_returning ]
 
 let noreturn name =
   List.exists (fun entry -> entry.name = name) not_returning
+
+let values_decide name =
+  List.exists (fun entry -> entry.name = name) decided_by_values
 
 let offer (target : Target.t) entry =
   match target.backend.compiler with

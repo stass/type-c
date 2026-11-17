@@ -151,7 +151,14 @@ type views
 
 val attribute_view : views -> Tree.attribute -> View.t option
 (** The view at the arguments of an attribute of the unit that [views]
-    were taken in, or [None] for an attribute without arguments. *)
+    were taken in, the operand of an alignment specifier included, or
+    [None] for an attribute without arguments. *)
+
+val attributes_in : views -> Tree.span -> Tree.attribute list
+(** Each attribute that begins within the span, in source order, wherever
+    the grammar puts it, and each alignment specifier there as the
+    attribute [aligned] with its operand as its arguments (design 13.3),
+    at its [_Alignas]. *)
 
 val attributes_within : views -> Tree.span -> (Tree.span * View.t) list
 (** The arguments of each attribute whose arguments begin within the span,

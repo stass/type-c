@@ -377,6 +377,9 @@ type context = {
       (** declares a binding of a match as an object of the type *)
   needs_complete : Ctype.t -> unit;
   block_literal : unit -> unit;
+  subjectless : Tree.attribute list -> unit;
+      (** notes attributes of a label or a null statement, whose subject
+          mentions no type parameter (design 13.3) *)
   views : Parser.views;
   moved_operand :
     Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
@@ -414,9 +417,23 @@ val initialiser :
     the point that sees the object, and so decides whether the [try]
     stands in a position. *)
 
+val refuse_instance_name : context -> Tree.expression -> unit
+(** Refuses the expression typed before, where an operation takes it
+    whole, if it is [__func__], [__FUNCTION__] or [__PRETTY_FUNCTION__]
+    in a generic function, whose array has the length of each instance's
+    name (design 7.1 rule 3). *)
+
+val note_object :
+  context -> Tree.declaration_id -> Ctype.t -> Tree.initialiser -> unit
+(** Records that the object of the declaration, of type [t], has the
+    initialiser typed before, which a use of the object depends on where
+    the object is [const] and the initialiser depends on a type parameter
+    (design 7.1 rule 4). *)
+
 val function_body :
   context ->
   name:string ->
+  in_generic:bool ->
   declarator:Tree.declarator ->
   return_type:Ctype.t Unknown.answer ->
   Tree.block ->
@@ -425,7 +442,8 @@ val function_body :
     whose [return] statements have
     its return type as their target type (design 3.3), or the unknown
     type of the function where typec does not know it. Where the body
-    holds a defer statement, it gives what it records of them. *)
+    holds a defer statement, it gives what it records of them.
+    [in_generic]: the function is the definition of a generic function. *)
 
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)

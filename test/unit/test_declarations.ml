@@ -2969,8 +2969,9 @@ let generic_resolution () =
      not read. *)
   rejects ~file
     ("extern int obj; \
-      type g(T) = struct { T v __attribute__((aligned(__alignof__(obj)))); \
-      }; extern int obj __attribute__((aligned(16))); g(int) x;")
+      type g(T) = struct { T v; \
+      int w __attribute__((aligned(__alignof__(obj)))); }; \
+      extern int obj __attribute__((aligned(16))); g(int) x;")
     added;
   (* An object or a function that the text does not use may be declared
      again inexactly; a typedef name declared before the text may not,
@@ -3019,10 +3020,10 @@ let generic_resolution () =
   rejects ~file aligned "[TC0038]";
   accepts ~file
     "enum { N = 8 }; \
-     type g(T) = struct { T v __attribute__((aligned(N))); }; g(int) x;";
+     type g(T) = struct { T v; int w __attribute__((aligned(N))); }; g(int) x;";
   rejects ~file
     "extern int a[]; \
-     type g(T) = struct { T v __attribute__((aligned(sizeof(a)))); }; \
+     type g(T) = struct { T v; int w __attribute__((aligned(sizeof(a)))); }; \
      int a[4]; g(int) x;"
     "changes the type that the text uses";
   rejects ~file
@@ -3069,7 +3070,8 @@ let generic_resolution () =
   (* A tag in unread text is a use of the tag. *)
   accepts ~file
     "struct s { int a; }; \
-     type g(T) = struct { T v __attribute__((aligned(sizeof(struct s)))); }; \
+     type g(T) = struct { T v; \
+     int w __attribute__((aligned(sizeof(struct s)))); }; \
      struct s; g(int) x;";
   (* The instance of a generic variant that a later declaration
      completes is defined, and checked, where a point first needs it

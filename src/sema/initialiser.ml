@@ -63,21 +63,32 @@ let refuse_variant_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
   | Some _ | None -> ()
 
 (* Design 7.1 rule 3: which subobject an initialiser reaches inside a
-   value of a type parameter depends on the argument, so only the zero
-   initialiser opens one. *)
-let refuse_parameter_opening typing ~zeroes (span : Tree.span) (t : Ctype.t)
-    =
-  if Ctype.is_opaque t && not zeroes then
+   value of a type parameter depends on the argument, so none opens one.
+   The zero initialiser of a type that mentions one is not walked
+   ({!zeroes_dependent}), so the 0 of no other reaches inside. *)
+let refuse_parameter_opening typing (span : Tree.span) (t : Ctype.t) =
+  if Ctype.is_opaque t then
     typing.fail span
       (Rule.message Type_parameter_operation
-         "an initialiser reaches into a value of a type parameter; the \
-          only braced initialisers of one are {0} and {}")
+         "an initialiser reaches into a value of a type parameter, which \
+          only a value of its type or the zero initialiser {0} or {} \
+          initialises")
 
 (* The check of the two functions that open a structure's or union's
    members, {!first_level} and {!designate}. *)
 let refuse_opening typing ~zeroes span t =
   refuse_variant_opening typing ~zeroes span t;
-  refuse_parameter_opening typing ~zeroes span t
+  refuse_parameter_opening typing span t
+
+(* Design 7.1 rule 3: the zero initialiser of an object or subobject
+   whose type mentions a type parameter zeroes it whole, whatever the
+   argument, and matches nothing in its list against a member. An array
+   of unknown size takes its length from its list (6.7.9p22), so its
+   [{0}] is a list of one element, which the walk places. *)
+let zeroes_dependent typing (t : Ctype.t) (list : Tree.initialiser_list) =
+  match t.shape with
+  | Array { length = Unknown; _ } -> false
+  | _ -> Ctype.mentions_opaque typing.tags t && is_zero_initialiser typing list
 
 (* Subobjects (6.7.9p17) *)
 
@@ -500,7 +511,7 @@ let rec place typing ~zeroes ~depth (level, outer)
       ignore (braced typing t list);
       Some (level, outer)
   | Expression_initialiser expression ->
-      let target = scalar_target ~zeroes (target_at typing t) in
+      let target = expression_target typing ~zeroes t in
       let expression_type = lazy (typing.value target expression) in
       let placed =
         place_expression typing ~zeroes ~elided:false ~depth (level, outer)
@@ -508,6 +519,13 @@ let rec place typing ~zeroes ~depth (level, outer)
       in
       ignore (Lazy.force expression_type);
       placed
+
+(* An expression that meets a value of a type parameter takes no target:
+   it initialises the value whole where it has its type, and else enters
+   it, which {!first_level} refuses (design 7.1 rule 3). *)
+and expression_target typing ~zeroes t =
+  if Ctype.is_opaque t then None
+  else scalar_target ~zeroes (target_at typing t)
 
 (* Places [expression], entering the subobject at [level] where its
    braces are elided; [elided] says that the walk has elided the braces
@@ -534,6 +552,9 @@ and place_expression typing ~zeroes ~elided ~depth (level, outer) expression
    the type of the object, completed as for {!initialise}. *)
 and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
   match (t.shape, list.node) with
+  | _ when zeroes_dependent typing t list ->
+      List.iter (untargeted_element typing) list.node;
+      t
   (* 6.7.9p14: a string literal in braces. *)
   | ( Array { element; _ },
       { node =

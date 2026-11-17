@@ -155,34 +155,133 @@ parameter: its type is that of the usual arithmetic conversions.
   conditional.tc:1: a value of a type parameter is a branch of the conditional operator, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
   [1]
 
-A construct that compares types gives the argument's answer where a
-type in it mentions a type parameter.
+A construct that compares types is an error where the argument decides
+the answer: where a type parameter meets another type in a part of the
+comparison that decides it, among the associations of _Generic too.
 
   $ cat > selection.tc <<'EOF'
   > generic(T) int f(int x) { return _Generic(x, T: 1, default: 0); }
   > EOF
   $ ./golden.exe selection.tc
-  selection.tc:1: _Generic compares a type that mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  selection.tc:1: _Generic compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
   [1]
 
   $ cat > compatible.tc <<'EOF'
   > generic(T) int f(void) { return __builtin_types_compatible_p(T, int); }
   > EOF
   $ ./golden.exe compatible.tc
-  compatible.tc:1: __builtin_types_compatible_p compares a type that mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  compatible.tc:1: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > associations.tc <<'EOF'
+  > generic(T) int f(T t) { return _Generic(&t, T *: 1, int *: 2); }
+  > EOF
+  $ ./golden.exe associations.tc
+  associations.tc:1: _Generic compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
   [1]
 
-A declaration in the body that gives its identifier linkage has a type
-that mentions no type parameter, as every instance would declare the
-one object or function again with its own type. A static object has
-no linkage, and a type without a type parameter stands.
+A comparison that a type parameter does not decide stands: a type
+parameter with itself, and two types that differ in a part where no
+type parameter meets another type, as an array and a pointer in
+ARRAY_SIZE.
+
+  $ cat > compared.tc <<'EOF'
+  > generic(T) unsigned long f(T t)
+  > {
+  >     T row[4];
+  >     row[0] = t;
+  >     return 0 * sizeof(char[1 - 2 * __builtin_types_compatible_p(
+  >                __typeof__(row), __typeof__(&row[0]))])
+  >         + _Generic(&t, T *: 1, default: 0)
+  >         + __builtin_types_compatible_p(T (*)(int), int (*)(long));
+  > }
+  > EOF
+  $ ./golden.exe compared.tc
+  compared.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+The argument decides wherever a type parameter enters the comparison,
+not only as a bare parameter: in an instance of a generic type, against
+a type that typec does not know, and as a parameter of a prototype
+compared with a function type without one, whose promoted types the
+argument decides.
+
+  $ cat > instances.tc <<'EOF'
+  > type vector(T) = struct { T *data; unsigned long length; };
+  > generic(T) int f(void)
+  > {
+  >     return __builtin_types_compatible_p(vector(T), vector(int));
+  > }
+  > EOF
+  $ ./golden.exe instances.tc
+  instances.tc:4: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > handles.tc <<'EOF'
+  > type handle(T) = distinct T *;
+  > generic(T) int f(void)
+  > {
+  >     return __builtin_types_compatible_p(handle(T), handle(int));
+  > }
+  > EOF
+  $ ./golden.exe handles.tc
+  handles.tc:4: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > unknown.tc <<'EOF'
+  > generic(T) int f(void)
+  > {
+  >     return __builtin_types_compatible_p(T, _Float16)
+  >         + __builtin_types_compatible_p(T, _Complex int);
+  > }
+  > EOF
+  $ ./golden.exe unknown.tc
+  unknown.tc:3: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > unprototyped.tc <<'EOF'
+  > generic(T) int f(void)
+  > {
+  >     return __builtin_types_compatible_p(void (*)(T), void (*)());
+  > }
+  > EOF
+  $ ./golden.exe unprototyped.tc
+  unprototyped.tc:3: __builtin_types_compatible_p compares a type parameter with another type, which is compatible with it for some arguments and not for others (design 7.1 rule 4) [TC0076]
+  [1]
+
+Two instances that differ in a part that mentions no type parameter
+are incompatible for every argument, and so are two structures of
+different tags, though both hold a type parameter.
+
+  $ cat > tags.tc <<'EOF'
+  > generic(T) int f(T t)
+  > {
+  >     struct a { T x; } u = { t };
+  >     struct b { T y; };
+  >     return _Generic(u, struct b: 1, default: 0);
+  > }
+  > EOF
+  $ ./golden.exe tags.tc
+  tags.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+  $ cat > apart.tc <<'EOF'
+  > type vector(T) = struct { T *data; unsigned long length; };
+  > generic(T) unsigned long f(void)
+  > {
+  >     return sizeof(char[1 - 2 * __builtin_types_compatible_p(
+  >                vector(T) *, vector(T) **)]);
+  > }
+  > EOF
+  $ ./golden.exe apart.tc
+  apart.tc:2: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+No declaration in the body gives its identifier linkage, whatever its
+type, as every instance would declare the one object or function again,
+and a type that the body declares is each instance's own. A static
+object and a pointer to a function have no linkage, and stand.
 
   $ cat > linked.tc <<'EOF'
   > generic(T) T *keep(T *t)
   > {
   >     static T cache;
-  >     extern int count;
-  >     int helper(int);
   >     T (*pick)(T *);
   >     cache = *t;
   >     return &cache;
@@ -192,6 +291,35 @@ no linkage, and a type without a type parameter stands.
   linked.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
   [1]
 
+  $ cat > extern_int.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     extern int count;
+  > }
+  > EOF
+  $ ./golden.exe extern_int.tc
+  extern_int.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > extern_body_type.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     struct s { int a; };
+  >     extern struct s x;
+  > }
+  > EOF
+  $ ./golden.exe extern_body_type.tc
+  extern_body_type.tc:4: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > block_int_function.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     int helper(int);
+  > }
+  > EOF
+  $ ./golden.exe block_int_function.tc
+  block_int_function.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
+  [1]
+
   $ cat > extern_object.tc <<'EOF'
   > generic(T) void f(T t)
   > {
@@ -199,7 +327,7 @@ no linkage, and a type without a type parameter stands.
   > }
   > EOF
   $ ./golden.exe extern_object.tc
-  extern_object.tc:3: a declaration in a generic function gives its identifier linkage and has a type that mentions a type parameter, so every instance would declare one object or function with another type (design 7.1 rule 3) [TC0075]
+  extern_object.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
   [1]
 
   $ cat > block_function.tc <<'EOF'
@@ -209,16 +337,98 @@ no linkage, and a type without a type parameter stands.
   > }
   > EOF
   $ ./golden.exe block_function.tc
-  block_function.tc:3: a declaration in a generic function gives its identifier linkage and has a type that mentions a type parameter, so every instance would declare one object or function with another type (design 7.1 rule 3) [TC0075]
+  block_function.tc:3: a declaration in a generic function gives its identifier linkage, so every instance would declare the one object or function again (design 7.1 rule 3) [TC0075]
   [1]
 
-The only braced initialisers of a type parameter are {0} and {}.
+No initialiser enters a type parameter but the zero initialiser, {0}
+or {}, which zeroes whole any object or subobject whose type mentions
+one, through elided braces too; an expression of the type parameter
+initialises it whole.
+
+  $ cat > zeroed.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     T u = {0};
+  >     T v = {};
+  >     T row[4] = {0};
+  >     T one[1] = {0};
+  >     T both[] = { t, t };
+  >     T *fresh = &(T){0};
+  >     struct { T a; int b; } w = { t, 5 };
+  >     struct { T a; int b; } z = {0};
+  >     struct { T a; int b; } y = { .b = 5 };
+  >     struct { T a; int b; } x = { {0}, 5 };
+  >     struct { T a[2]; int b; } r = { {}, 5 };
+  >     (void)u; (void)v; (void)row; (void)one; (void)both; (void)fresh;
+  >     (void)w; (void)z; (void)y; (void)x; (void)r;
+  > }
+  > EOF
+  $ ./golden.exe zeroed.tc
+  zeroed.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+Any other initialiser that reaches a type parameter is for one of its
+members, in its own braces or through elided ones, and is an error.
 
   $ cat > braced.tc <<'EOF'
   > generic(T) void f(T *p, T t) { T u = { t }; *p = u; }
   > EOF
   $ ./golden.exe braced.tc
-  braced.tc:1: an initialiser reaches into a value of a type parameter; the only braced initialisers of one are {0} and {} (design 7.1 rule 3) [TC0075]
+  braced.tc:1: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > elided_array.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     T both[] = { 0, 0 };
+  > }
+  > EOF
+  $ ./golden.exe elided_array.tc
+  elided_array.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > unsized.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     T one[] = {0};
+  > }
+  > EOF
+  $ ./golden.exe unsized.tc
+  unsized.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > elided_member.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     struct { T a; int b; } w = { 0, 5 };
+  > }
+  > EOF
+  $ ./golden.exe elided_member.tc
+  elided_member.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > designated.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     struct { T a; int b; } y = { .a = 0 };
+  > }
+  > EOF
+  $ ./golden.exe designated.tc
+  designated.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > literal.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     T *q = (T[]){ 0, 0 }; (void)q;
+  > }
+  > EOF
+  $ ./golden.exe literal.tc
+  literal.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > nested.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     T u = { {0} };
+  > }
+  > EOF
+  $ ./golden.exe nested.tc
+  nested.tc:3: an initialiser reaches into a value of a type parameter, which only a value of its type or the zero initialiser {0} or {} initialises (design 7.1 rule 3) [TC0075]
   [1]
 
 Design 7.1 rule 4: sizes, alignments and offsets.
@@ -252,21 +462,21 @@ initialiser, and _Alignas takes no such type.
   > generic(T) void f(T *p) { char b[sizeof(T *)]; (void)b; (void)p; }
   > EOF
   $ ./golden.exe bound.tc
-  bound.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  bound.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
   $ cat > case.tc <<'EOF'
   > generic(T) int f(int x) { switch (x) { case sizeof(T): return 1; } return 0; }
   > EOF
   $ ./golden.exe case.tc
-  case.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  case.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
   $ cat > static_assert.tc <<'EOF'
   > generic(T) void f(T *p) { _Static_assert(sizeof(T) > 0, ""); (void)p; }
   > EOF
   $ ./golden.exe static_assert.tc
-  static_assert.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  static_assert.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
   $ cat > alignas.tc <<'EOF'
@@ -280,7 +490,7 @@ initialiser, and _Alignas takes no such type.
   > generic(T) void f(T *p) { static unsigned long n = sizeof(T); (void)n; (void)p; }
   > EOF
   $ ./golden.exe static.tc
-  static.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  static.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
 A structure declared in the body with a member of a type parameter
@@ -296,7 +506,7 @@ mentions it.
   > }
   > EOF
   $ ./golden.exe local.tc
-  local.tc:4: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  local.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
 An expression depends on a type parameter whether its sizeof is
@@ -306,7 +516,7 @@ evaluated or not.
   > generic(T) int f(int x) { switch (x) { case 1 || sizeof(T): return 1; } return 0; }
   > EOF
   $ ./golden.exe unevaluated.tc
-  unevaluated.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  unevaluated.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
 A value of a type parameter converts to no other type, nor does another
@@ -347,21 +557,21 @@ width, an enumerator's value and an _Alignas expression too.
   > generic(T) void f(T *p) { struct b { unsigned x : sizeof(T); } b = {0}; (void)b; (void)p; }
   > EOF
   $ ./golden.exe width.tc
-  width.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  width.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
   $ cat > enumerator.tc <<'EOF'
   > generic(T) int f(T *p) { enum { size = sizeof(T) }; (void)p; return size; }
   > EOF
   $ ./golden.exe enumerator.tc
-  enumerator.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  enumerator.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
   $ cat > alignas_expression.tc <<'EOF'
   > generic(T) void f(T *p) { _Alignas(sizeof(T)) char c; (void)c; (void)p; }
   > EOF
   $ ./golden.exe alignas_expression.tc
-  alignas_expression.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  alignas_expression.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
 A union with a member of a type parameter mentions it.
@@ -376,7 +586,7 @@ A union with a member of a type parameter mentions it.
   > }
   > EOF
   $ ./golden.exe union.tc
-  union.tc:4: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  union.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
 Two pointers meet, by a conversion or an operation on both, only
@@ -447,7 +657,7 @@ an index of an offsetof included.
   > generic(T) int f(int x, int n) { switch (x) { case n + sizeof(T): return 1; } return 0; }
   > EOF
   $ ./golden.exe order.tc
-  order.tc:1: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  order.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
   $ cat > offsetof_index.tc <<'EOF'
@@ -455,7 +665,267 @@ an index of an offsetof included.
   > generic(T) void f(T *p) { _Static_assert(__builtin_offsetof(struct s, a[sizeof(T)]) > 0, ""); (void)p; }
   > EOF
   $ ./golden.exe offsetof_index.tc
-  offsetof_index.tc:2: the expression holds the size, alignment or offset of a type that mentions a type parameter, so it is no constant expression (design 7.1 rule 4) [TC0076]
+  offsetof_index.tc:2: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+
+Dependence is a fact of a value. Arithmetic on a pointer to a type
+that mentions a type parameter asks for its size, and the address of a
+member of one for an offset, as sizeof does.
+
+  $ cat > pointer_bound.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     char b[(unsigned long)((T *)0 + 1) > 1000 ? 1 : -1];
+  > }
+  > EOF
+  $ ./golden.exe pointer_bound.tc
+  pointer_bound.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > pool_address.tc <<'EOF'
+  > generic(T) T *f(T t)
+  > {
+  >     static T pool[8];
+  >     static T *next = &pool[3];
+  >     return next;
+  > }
+  > EOF
+  $ ./golden.exe pool_address.tc
+  pool_address.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > member_address.tc <<'EOF'
+  > generic(T) unsigned long f(T t)
+  > {
+  >     struct box { T v; int n; };
+  >     static unsigned long at = (unsigned long)&((struct box *)0)->n;
+  >     return at;
+  > }
+  > EOF
+  $ ./golden.exe member_address.tc
+  member_address.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+
+The same constructs over a type that mentions no type parameter stand,
+and so does the address of a static array of a type parameter, which
+asks for no layout.
+
+  $ cat > plain_addresses.tc <<'EOF'
+  > generic(T) T *f(T t)
+  > {
+  >     struct box { int v; int n; };
+  >     static char text[8];
+  >     static char *next = &text[3];
+  >     static unsigned long at = (unsigned long)&((struct box *)0)->n;
+  >     static T pool[8];
+  >     static T *first = pool;
+  >     (void)next;
+  >     (void)at;
+  >     return first;
+  > }
+  > EOF
+  $ ./golden.exe plain_addresses.tc
+  plain_addresses.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+A builtin depends unless the values of its arguments alone decide it.
+
+  $ cat > classify_bound.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     char b[__builtin_object_size(&t, 0) > 1000 ? 1 : -1];
+  > }
+  > EOF
+  $ ./golden.exe classify_bound.tc
+  classify_bound.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > value_builtins.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     static int bits = __builtin_popcount(7) + __builtin_bswap32(1);
+  >     (void)bits;
+  > }
+  > void g(int t) { char b[__builtin_classify_type(t) == 1 ? 1 : -1]; }
+  > EOF
+  $ ./golden.exe value_builtins.tc
+  value_builtins.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+A `const` object carries the dependence of its initialiser, which the
+backends read as a constant; an object that is not `const` is a
+constant to neither, so its use declares a variable length array.
+
+  $ cat > const_bound.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     const int j = sizeof(T) > 1000 ? 1 : -1;
+  >     char b[j];
+  > }
+  > EOF
+  $ ./golden.exe const_bound.tc
+  const_bound.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > const_array_static.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     const int k[2] = { 1, sizeof(T) };
+  >     static int s = k[1];
+  > }
+  > EOF
+  $ ./golden.exe const_array_static.tc
+  const_array_static.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > variable_bound.tc <<'EOF'
+  > generic(T) void f(T t, unsigned long count)
+  > {
+  >     unsigned long n = count * sizeof(T);
+  >     const int four = 4;
+  >     char scratch[n];
+  >     char fixed[four];
+  >     (void)scratch;
+  >     (void)fixed;
+  > }
+  > EOF
+  $ ./golden.exe variable_bound.tc
+  variable_bound.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+Whether an expression that depends is a null pointer constant, which
+of two operands __builtin_choose_expr selects, and the index of a
+designator differ between arguments.
+
+  $ cat > null_pointer.tc <<'EOF'
+  > generic(T) void *f(T *p, int c)
+  > {
+  >     return c ? p : (void *)(sizeof(T) > 1000);
+  > }
+  > EOF
+  $ ./golden.exe null_pointer.tc
+  null_pointer.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > plain_null_pointer.tc <<'EOF'
+  > generic(T) void *f(T *p, int c)
+  > {
+  >     return c ? p : (void *)(sizeof(int) > 1000);
+  > }
+  > EOF
+  $ ./golden.exe plain_null_pointer.tc
+  plain_null_pointer.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+An integer converts to a pointer only as a null pointer constant, so
+each conversion of one that depends refuses it: an initialiser, an
+assignment, an argument, an equality and the integer branch of ?:.
+
+  $ cat > null_initialised.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     T *q = (sizeof(T) > 1000);
+  >     (void)q;
+  > }
+  > EOF
+  $ ./golden.exe null_initialised.tc
+  null_initialised.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_assigned.tc <<'EOF'
+  > generic(T) void f(T *q)
+  > {
+  >     q = (sizeof(T) > 1000);
+  > }
+  > EOF
+  $ ./golden.exe null_assigned.tc
+  null_assigned.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_compared.tc <<'EOF'
+  > generic(T) int f(T *q)
+  > {
+  >     return q == (sizeof(T) > 1000);
+  > }
+  > EOF
+  $ ./golden.exe null_compared.tc
+  null_compared.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_branch.tc <<'EOF'
+  > generic(T) T *f(T *q, int c)
+  > {
+  >     return c ? q : (sizeof(T) > 1000);
+  > }
+  > EOF
+  $ ./golden.exe null_branch.tc
+  null_branch.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_argument.tc <<'EOF'
+  > void g(int *);
+  > generic(T) void f(void)
+  > {
+  >     g(sizeof(T) > 1000);
+  > }
+  > EOF
+  $ ./golden.exe null_argument.tc
+  null_argument.tc:4: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_elided.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     struct { struct { T *q; } in; int b; } s = { sizeof(T) - 4, 5 };
+  > }
+  > EOF
+  $ ./golden.exe null_elided.tc
+  null_elided.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_designated.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     struct { struct { T *q; } in; } s = { .in = sizeof(T) - 4 };
+  > }
+  > EOF
+  $ ./golden.exe null_designated.tc
+  null_designated.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_function.tc <<'EOF'
+  > generic(T) void f(void)
+  > {
+  >     void (*g)(void) = (void *)(sizeof(T) - 4);
+  > }
+  > EOF
+  $ ./golden.exe null_function.tc
+  null_function.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_function_compared.tc <<'EOF'
+  > generic(T) int f(void (*g)(void))
+  > {
+  >     return g == (void *)(sizeof(T) - 4);
+  > }
+  > EOF
+  $ ./golden.exe null_function_compared.tc
+  null_function_compared.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > null_plain.tc <<'EOF'
+  > generic(T) int f(T *q, int c)
+  > {
+  >     T *r = 0;
+  >     q = c ? q : (sizeof(int) > 1000);
+  >     return q == r && r != (sizeof(int) > 1000) && sizeof(T) > 4;
+  > }
+  > EOF
+  $ ./golden.exe null_plain.tc
+  null_plain.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+  $ cat > choose.tc <<'EOF'
+  > generic(T) unsigned long f(T t)
+  > {
+  >     return sizeof(__builtin_choose_expr(sizeof(T) > 1000, (char)0, 0L));
+  > }
+  > EOF
+  $ ./golden.exe choose.tc
+  choose.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > designator_index.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     int a[4] = { [sizeof(T) > 1000] = 1 };
+  > }
+  > EOF
+  $ ./golden.exe designator_index.tc
+  designator_index.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
   [1]
 
 Design 7.1 rule 6: what follows generic( ) is one function, which its
@@ -566,6 +1036,22 @@ may define one, and the head may name one declared before.
   head_parameter_structure.tc:1: the head of a generic function defines no structure, union or enumeration, which every instance would define twice (design 7.1 rule 6) [TC0077]
   [1]
 
+A tag that the head is the first to mention is declared there, in the
+scope of the parameter list or at file scope, and is refused too.
+
+  $ cat > head_parameter_tag.tc <<'EOF'
+  > generic(T) void f(T t, struct s *p);
+  > EOF
+  $ ./golden.exe head_parameter_tag.tc
+  head_parameter_tag.tc:1: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice (design 7.1 rule 6) [TC0077]
+  [1]
+  $ cat > head_return_tag.tc <<'EOF'
+  > generic(T) union u *f(T t);
+  > EOF
+  $ ./golden.exe head_return_tag.tc
+  head_return_tag.tc:1: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice (design 7.1 rule 6) [TC0077]
+  [1]
+
   $ cat > named_tags.tc <<'EOF'
   > struct s { int x; };
   > generic(T) struct s *f(T *t)
@@ -599,11 +1085,70 @@ may define one, and the head may name one declared before.
   > generic(T) struct s;
   > EOF
   $ ./golden.exe tag_only.tc
-  tag_only.tc:1: `generic( )` prefixes one function: its definition, or a declaration with one declarator, which declares a function (design 7.1 rule 6) [TC0077]
+  tag_only.tc:1: the head of a generic function declares no structure, union or enumeration tag, which every instance would declare twice (design 7.1 rule 6) [TC0077]
   [1]
 
 Design 7.1 rule 7: declarations of a generic function agree where they
 have as many type parameters and, by position, declare the same type.
+The name of the function is each instance's own. Where C converts
+__func__, __FUNCTION__ or __PRETTY_FUNCTION__ to a pointer it stands, as
+assert expands to it; where an operation reads its array whole, the
+length is the instance's, and it is refused. Its contents depend on a
+type parameter as those of a `const` object would.
+
+  $ cat > func_pointer.tc <<'EOF'
+  > void puts_name(const char *);
+  > void __assert_rtn(const char *, const char *, int, const char *);
+  > generic(T) void f(T *p)
+  > {
+  >     (__builtin_expect(!(p), 0) ? __assert_rtn(__func__, "f.c", 4, "p")
+  >         : (void)0);
+  >     puts_name(__func__);
+  >     puts_name(__FUNCTION__ + 1);
+  > }
+  > EOF
+  $ ./golden.exe func_pointer.tc
+  func_pointer.tc:3: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+  $ cat > func_size.tc <<'EOF'
+  > generic(T) unsigned long f(T t) { return sizeof __func__; }
+  > EOF
+  $ ./golden.exe func_size.tc
+  func_size.tc:1: __func__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > func_address.tc <<'EOF'
+  > generic(T) void f(T t) { const char (*name)[] = &__FUNCTION__; }
+  > EOF
+  $ ./golden.exe func_address.tc
+  func_address.tc:1: __FUNCTION__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > func_typeof.tc <<'EOF'
+  > generic(T) void f(T t) { __typeof__(__PRETTY_FUNCTION__) copy; }
+  > EOF
+  $ ./golden.exe func_typeof.tc
+  func_typeof.tc:1: __PRETTY_FUNCTION__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > func_array.tc <<'EOF'
+  > generic(T) void f(T t) { char n[] = __func__; }
+  > EOF
+  $ ./golden.exe func_array.tc
+  func_array.tc:1: an array is initialised by an expression that is not a string literal (C11 6.7.9p16)
+  [1]
+  $ cat > func_static.tc <<'EOF'
+  > generic(T) void f(T t) { static int k = __func__[0]; }
+  > EOF
+  $ ./golden.exe func_static.tc
+  func_static.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > plain_name.tc <<'EOF'
+  > const char *g(void) { return __func__; }
+  > unsigned long h(void) { return sizeof __func__; }
+  > generic(T) void f(T t);
+  > EOF
+  $ ./golden.exe plain_name.tc
+  plain_name.tc:3: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
 A declaration in a block hides the name.
 
   $ cat > agree.tc <<'EOF'
@@ -667,8 +1212,8 @@ length or a type that typec does not compute agrees with nothing.
   [1]
 
   $ cat > unknown_type.tc <<'EOF'
-  > generic(T) void f(T t);
-  > generic(T) __attribute__((weird_unknown)) long f(T t, int y) { (void)t; return y; }
+  > generic(T) void f(T t, int y);
+  > generic(T) void f(T t, int y __attribute__((weird_unknown))) { (void)t; (void)y; }
   > EOF
   $ ./golden.exe unknown_type.tc
   unknown_type.tc:2: 'f' is declared again, and whether with the same type depends on the attribute 'weird_unknown', whose type typec does not compute (design 7.1 rule 7) [TC0078]
@@ -722,4 +1267,186 @@ The name of a generic function denotes nothing else at file scope.
   > EOF
   $ ./golden.exe type_after.tc
   type_after.tc:2: `f` is declared twice in one scope, and one of them is a type declaration (design 3.1 rule 5) [TC0003]
+  [1]
+
+Design 13.3, "Attributes in a generic": an attribute whose subject
+mentions a type parameter, or whose arguments name what the definition
+declares, stands only where the table of attributes records that both
+backends take it alike for every type, every kind of subject and every
+argument list. `_Alignas` is read as `aligned`. `noinline`, `cold` and
+`unused` have that fact; on a subject that mentions no type parameter,
+with arguments that name nothing of the definition, any attribute
+stands.
+
+  $ cat > stand_alike.tc <<'EOF'
+  > generic(T) __attribute__((noinline, cold))
+  > void f(T *p __attribute__((unused)))
+  > {
+  >     T o __attribute__((unused));
+  >     (void)o;
+  > }
+  > EOF
+  $ ./golden.exe stand_alike.tc
+  stand_alike.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+  $ cat > stand_other.tc <<'EOF'
+  > struct s;
+  > void close_s(struct s **);
+  > generic(T) void f(T *p)
+  > {
+  >     struct s *h __attribute__((cleanup(close_s))) = 0;
+  >     _Alignas(8) int n __attribute__((aligned(8))) = 0;
+  >     switch (n) { case 1: __attribute__((fallthrough)); default: break; }
+  >     (void)p; (void)h;
+  > }
+  > EOF
+  $ ./golden.exe stand_other.tc
+  stand_other.tc:3: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+  $ cat > member.tc <<'EOF'
+  > generic(T) void f(T *p) { struct { T v __attribute__((aligned(8))); } x; }
+  > EOF
+  $ ./golden.exe member.tc
+  member.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > typedef.tc <<'EOF'
+  > generic(T) void f(T *p) { typedef T u __attribute__((aligned(8))); }
+  > EOF
+  $ ./golden.exe typedef.tc
+  typedef.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > buffer.tc <<'EOF'
+  > generic(T) void f(T t) { char b[8] __attribute__((aligned(sizeof(t)))); }
+  > EOF
+  $ ./golden.exe buffer.tc
+  buffer.tc:1: the attribute 'aligned' names 't', which the definition declares, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > vector.tc <<'EOF'
+  > generic(T) void f(T *p) { (void)sizeof(T __attribute__((vector_size(16)))); }
+  > EOF
+  $ ./golden.exe vector.tc
+  vector.tc:1: the attribute 'vector_size' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > mode.tc <<'EOF'
+  > generic(T) void f(T *p) { T o __attribute__((mode(DI))); }
+  > EOF
+  $ ./golden.exe mode.tc
+  mode.tc:1: the attribute 'mode' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > cleanup.tc <<'EOF'
+  > void g(void *);
+  > generic(T) void f(T *p) { T o __attribute__((cleanup(g))); }
+  > EOF
+  $ ./golden.exe cleanup.tc
+  cleanup.tc:2: the attribute 'cleanup' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > nonnull.tc <<'EOF'
+  > generic(T) __attribute__((nonnull(1))) void f(T *p) { (void)p; }
+  > EOF
+  $ ./golden.exe nonnull.tc
+  nonnull.tc:1: the attribute 'nonnull' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > returns_nonnull.tc <<'EOF'
+  > generic(T) __attribute__((returns_nonnull)) T *f(T *p) { return p; }
+  > EOF
+  $ ./golden.exe returns_nonnull.tc
+  returns_nonnull.tc:1: the attribute 'returns_nonnull' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > alignas.tc <<'EOF'
+  > generic(T) void f(T *p) { _Alignas(8) T o; }
+  > EOF
+  $ ./golden.exe alignas.tc
+  alignas.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > alignas_names.tc <<'EOF'
+  > generic(T) void f(T *p)
+  > {
+  >     enum { A = 8 };
+  >     char y;
+  >     _Alignas(A) char a;
+  >     _Alignas(sizeof(y)) char b;
+  > }
+  > EOF
+  $ ./golden.exe alignas_names.tc
+  alignas_names.tc:5: the attribute 'aligned' names 'A', which the definition declares, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > alignas_tag.tc <<'EOF'
+  > generic(T) void f(T *p)
+  > {
+  >     struct s { double d; };
+  >     _Alignas(struct s) char a;
+  > }
+  > EOF
+  $ ./golden.exe alignas_tag.tc
+  alignas_tag.tc:4: the attribute 'aligned' names 's', which the definition declares, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+  $ cat > pointer.tc <<'EOF'
+  > generic(T) void f(T *p) { T *__attribute__((aligned(8))) q = p; }
+  > EOF
+  $ ./golden.exe pointer.tc
+  pointer.tc:1: the attribute 'aligned' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+
+A declaration that is no definition carries no attribute anywhere in it
+(rule 6).
+
+  $ cat > prototype_inner.tc <<'EOF'
+  > generic(T) void (__attribute__((cold)) f)(T);
+  > EOF
+  $ ./golden.exe prototype_inner.tc
+  prototype_inner.tc:1: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from (design 7.1 rule 6) [TC0077]
+  [1]
+  $ cat > prototype_parameter.tc <<'EOF'
+  > generic(T) void f(T x __attribute__((unused)));
+  > EOF
+  $ ./golden.exe prototype_parameter.tc
+  prototype_parameter.tc:1: `_Noreturn` and attributes stand on the definition of a generic function, which its instances are written from (design 7.1 rule 6) [TC0077]
+  [1]
+  $ cat > generic_type.tc <<'EOF'
+  > type g(T) = struct { T v __attribute__((vector_size(16))); };
+  > EOF
+  $ ./golden.exe generic_type.tc
+  generic_type.tc:1: the attribute 'vector_size' stands on a subject that mentions a type parameter, and the table of attributes does not record that both backends take it alike for every type (design 13.3) [TC0079]
+  [1]
+
+The rest of the uses of a predefined name of the function that design
+7.1 rules 3 and 4 refuse: its alignment, and constants that depend on
+its length or its address.
+
+  $ cat > func_alignof.tc <<'EOF'
+  > generic(T) void f(T *p) { (void)p; (void)__alignof__(__func__); }
+  > EOF
+  $ ./golden.exe func_alignof.tc
+  func_alignof.tc:1: __func__ in a generic function is read as an array, whose length is that of the name of each instance, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  [1]
+  $ cat > func_strlen.tc <<'EOF'
+  > generic(T) void f(T *p) {
+  >     (void)p;
+  >     _Static_assert(__builtin_strlen(__func__) == 1, "length");
+  > }
+  > EOF
+  $ ./golden.exe func_strlen.tc
+  func_strlen.tc:3: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > func_static.tc <<'EOF'
+  > generic(T) void f(T *p) { (void)p; static const char *name = __func__; (void)name; }
+  > EOF
+  $ ./golden.exe func_static.tc
+  func_static.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+
+A builtin called through parentheses depends as its plain call does,
+while one that the values of its arguments decide stands.
+
+  $ cat > paren_builtin.tc <<'EOF'
+  > generic(T) void f(T t) { char b[(__builtin_object_size)(&t, 0) > 1000 ? 1 : -1]; }
+  > EOF
+  $ ./golden.exe paren_builtin.tc
+  paren_builtin.tc:1: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance (design 7.1 rule 4) [TC0076]
+  [1]
+  $ cat > decided_builtin.tc <<'EOF'
+  > generic(T) void f(T *p) { (void)p; char b[__builtin_popcount(3)]; (void)b; }
+  > EOF
+  $ ./golden.exe decided_builtin.tc
+  decided_builtin.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
   [1]

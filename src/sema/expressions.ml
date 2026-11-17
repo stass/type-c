@@ -111,9 +111,11 @@ type try_positions = No_positions | Positions of try_place
 
 (* What encloses the statement being typed: the function, for __func__,
    return and try, the switch or match that case labels need, and the
-   positions of try. [return_type] is [None] outside functions. *)
+   positions of try. [return_type] is [None] outside functions.
+   [in_generic]: the function is the definition of a generic function. *)
 type enclosing = {
   function_name : string option;
+  in_generic : bool;
   return_type : Ctype.t Unknown.answer option;
   case_labels : label_owner;
   try_positions : try_positions;
@@ -314,22 +316,21 @@ type checked_pattern = {
   sub_fields : (Tree.sub_pattern * Ctype.member) list;
 }
 
-(* The spans of the measurements of types that mention a type parameter
-   (design 7.1 rule 4): the last token of each, by its first. Of two that
-   begin at one token, the inner one is kept. *)
-module Measurements = Map.Make (Int)
-
 (* [enclosing] belongs to the walk in progress. Only the reader's failure
    leaves a walk early, and it ends the read, so it is not restored on
    it. [selections] and [compatibilities] hold the answers to the
    constructs that ask whether types are compatible, by the span of the
    construct, and [answered] those that lowering replaces with their
    answer. [types] holds the type of each expression, which [positioned]
-   alone gives, once. *)
+   alone gives, once. [dependences] holds, by the span of each expression
+   that depends on a type parameter, that of the first place in it where
+   the dependence arises, and [dependent_objects] the same of the
+   initialiser of each [const] object (design 7.1 rule 4). *)
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
-  mutable measurements : int Measurements.t;
+  dependences : (Tree.span, Tree.span) Hashtbl.t;
+  dependent_objects : (Tree.declaration_id, Tree.span) Hashtbl.t;
   selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
   answered : (Tree.span, answered) Hashtbl.t;
@@ -341,13 +342,14 @@ type t = {
 }
 
 let outside_functions =
-  { function_name = None; return_type = None; case_labels = No_switch;
-    try_positions = No_positions }
+  { function_name = None; in_generic = false; return_type = None;
+    case_labels = No_switch; try_positions = No_positions }
 
 let create () =
   { types = Hashtbl.create 16;
     constants = Hashtbl.create 16;
-    measurements = Measurements.empty;
+    dependences = Hashtbl.create 16;
+    dependent_objects = Hashtbl.create 16;
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
@@ -394,6 +396,9 @@ type context = {
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
   needs_complete : Ctype.t -> unit;
   block_literal : unit -> unit;
+  subjectless : Tree.attribute list -> unit;
+      (** notes attributes of a label or a null statement, whose subject
+          mentions no type parameter (design 13.3) *)
   views : Parser.views;
   moved_operand :
     Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
@@ -580,12 +585,21 @@ let refuse_type_parameter_branch context span (branch : typed) =
     refuse_type_parameter context span
       "a value of a type parameter is a branch of the conditional operator"
 
-(* Design 7.1 rule 3: a construct that asks whether two types are
-   compatible gives the answer of the argument. *)
-let refuse_type_parameter_comparison context span construct types =
-  if List.exists (Ctype.mentions_opaque context.tags) types then
-    refuse_type_parameter context span
-      (construct ^ " compares a type that mentions a type parameter")
+(* Whether two types are compatible, asked by [construct] at [span],
+   which gives the answer: an error where the argument decides it
+   (design 7.1 rule 4). *)
+let compared context span construct a b =
+  match
+    Ctype.compatible_by_argument context.target context.tags
+      (location_of context span) a b
+  with
+  | Every_argument answer -> answer
+  | Argument_decides ->
+      context.fail span
+        (Rule.message Type_parameter_constant
+           (construct ^ " compares a type parameter with another type, \
+                         which is compatible with it for some arguments \
+                         and not for others"))
 
 (* An assignment, which has stored the value that it gives. *)
 let rec is_assignment (expression : Tree.expression) =
@@ -744,6 +758,59 @@ let pointers_differ context span (a : Ctype.t) (b : Ctype.t) =
   then Some Distinct_gap
   else None
 
+(* Design 7.1 rule 4: the size, alignment or offset of a type that
+   mentions a type parameter differs between arguments, so no constant
+   that C asks for may hold it. *)
+let parameter_dependent =
+  Rule.message Type_parameter_constant
+    "the value depends on a type parameter here, through a layout, a \
+     builtin or a `const` object, and is another constant in each \
+     instance"
+
+let is_plain_void_pointer (t : Ctype.t) =
+  match t.shape with
+  | Pointer { shape = Void; qualifiers; _ } -> qualifiers = Qualifiers.none
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
+  | Array _ | Function _ | Unknown_type _ ->
+      false
+
+(* The first place where the expression at [span], typed before, depends
+   on a type parameter, if it does. *)
+let dependence_at context (span : Tree.span) =
+  Hashtbl.find_opt context.typed.dependences span
+
+(* Refuses the expression at [span] where C asks for a constant, if it
+   depends on a type parameter: whatever its class, that of an instance
+   can differ. *)
+let refuse_dependent_at context span =
+  match dependence_at context span with
+  | Some source -> context.fail source parameter_dependent
+  | None -> ()
+
+(* 6.3.2.3p3: whether a value of type [source] that converts to [target]
+   as if by assignment, or meets it in == or != or as the other branch of
+   ?:, must be a null pointer constant: an integer that meets a pointer,
+   or a void * that meets a pointer to a function (6.5.16.1p1, 6.5.9p2,
+   6.5.15p3). *)
+let asks_null_pointer (target : Ctype.t) (source : Ctype.t) =
+  match (Ctype.unqualified target).shape with
+  | Pointer referenced ->
+      Ctype.is_integer source = Answer true
+      || Ctype.is_function referenced = Answer true
+         && is_plain_void_pointer (Ctype.unqualified source)
+  | Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list | Array _
+  | Function _ | Unknown_type _ ->
+      false
+
+(* Where C asks whether the value at [span] is a null pointer constant,
+   whether the program is valid depends on it, and a value that depends
+   on a type parameter is a constant of value 0 for some arguments and
+   not for others (design 7.1 rule 4). Every conversion and comparison
+   that asks calls this: [refuse_conversion], which each conversion as if
+   by assignment reaches, through elided braces too, == and !=, and ?:. *)
+let refuse_dependent_null context span ~target source =
+  if asks_null_pointer target source then refuse_dependent_at context span
+
 (* Design 7.1 rule 3: a value of a type parameter converts to no other
    type, as a structure does not, though a scalar argument would. *)
 let refuse_type_parameter_conversion context span target (typed : typed) =
@@ -784,6 +851,7 @@ let refuse_conversion context span target (typed : typed) =
             "a value of type %s does not convert to %s without a cast"
             (quote (Type_name.of_ctype source))
             (quote (Type_name.of_ctype target))));
+  refuse_dependent_null context span ~target source;
   refuse_type_parameter_conversion context span target typed
 
 (* Design 13.5: typec answers a construct whose [types], as its text sees
@@ -1081,14 +1149,18 @@ let const_char context span =
 (* 6.4.2.2p1: [__func__] is a [static const char] array that holds the
    name of the function, as [__FUNCTION__] is in GCC and Clang; Clang
    gives [__PRETTY_FUNCTION__] a signature, so its length is the
-   backend's. *)
+   backend's. An instance of a generic function has a name of its own,
+   so its length is the instance's (design 7.1 rule 3). *)
 let predefined context span name =
   let name_array length =
     lvalue
       (checked context span
          (Ctype.array_of context.tags (const_char context span) length))
   in
-  match (name, context.typed.enclosing.function_name) with
+  let enclosing = context.typed.enclosing in
+  match (name, enclosing.function_name) with
+  | ("__func__" | "__FUNCTION__"), Some _ when enclosing.in_generic ->
+      name_array Opaque
   | ("__func__" | "__FUNCTION__"), Some function_name ->
       name_array (Constant (String.length function_name + 1))
   | "__PRETTY_FUNCTION__", Some _ -> name_array Opaque
@@ -1534,13 +1606,6 @@ let binary_type context span (op : Tree.binary_operator) left right =
 
 (* The conditional operator (6.5.15) *)
 
-let is_plain_void_pointer (t : Ctype.t) =
-  match t.shape with
-  | Pointer { shape = Void; qualifiers; _ } -> qualifiers = Qualifiers.none
-  | Void | Arithmetic _ | Enum _ | Pointer _ | Record _ | Distinct _ | Va_list
-  | Array _ | Function _ | Unknown_type _ ->
-      false
-
 (* 6.5.15p6: a pointer to void, qualified as both referenced types are;
    restrict and _Atomic do not apply to void. *)
 let qualified_void_pointer context span (a : Ctype.t) (b : Ctype.t) =
@@ -1629,8 +1694,8 @@ let check_distinct context associations =
     | None -> earlier
     | Some t ->
         let span = association.association_span in
-        if List.exists (fun u -> compatible context span t u = Answer true)
-             earlier
+        let same u = compared context span "_Generic" t u = Answer true in
+        if List.exists same earlier
         then
           context.fail association.association_span
             (Rule.c_text
@@ -1661,7 +1726,7 @@ let select context span controlling_type associations default =
     match association.association_type with
     | None -> ()
     | Some t -> (
-        match compatible context span controlling_type t with
+        match compared context span "_Generic" controlling_type t with
         | Depends_on dependence -> unknown := Some dependence
         | Answer true ->
             compatible_results := association.result :: !compatible_results
@@ -1687,7 +1752,7 @@ let select context span controlling_type associations default =
    which for Clang do not include [_Atomic]. *)
 let types_compatible_answer context span first second =
   match
-    compatible context span
+    compared context span "__builtin_types_compatible_p"
       (Ctype.without_top_qualifiers first)
       (Ctype.without_top_qualifiers second)
   with
@@ -1793,14 +1858,6 @@ let invalid span (failure : Integer_constant.error option) =
 
 let integer value = Integer_expression { value; flaw = None }
 
-(* Design 7.1 rule 4: the size, alignment or offset of a type that
-   mentions a type parameter differs between arguments, so no constant
-   that C asks for may hold it. *)
-let parameter_dependent =
-  Rule.message Type_parameter_constant
-    "the expression holds the size, alignment or offset of a type that \
-     mentions a type parameter, so it is no constant expression"
-
 (* The type whose size, alignment or member offset [whole] is, where it
    is a [sizeof], an [_Alignof] or an [offsetof]. *)
 let measured_type context (whole : Tree.expression) =
@@ -1816,41 +1873,150 @@ let measures_parameter context whole =
   | Some t -> Ctype.mentions_opaque context.tags t
   | None -> false
 
-(* Design 7.1 rule 4: an expression depends on a type parameter where
-   an expression in it, evaluated or not, measures a type that mentions
-   one. Every expression in it lies within its span, so the fact is
-   derived from the spans of such measurements, which [measurements]
-   holds. *)
-let record_measurement context (whole : Tree.expression) =
-  let { Tree.first; last } = whole.span in
-  let inner = function
-    | Some other -> Some (min other last)
-    | None -> Some last
+(* Whether [name], undeclared, is the name of the enclosing function,
+   which differs between the instances of a generic function. *)
+let is_instance_name context name (resolution : Tree.resolution) =
+  match (name, resolution) with
+  | ("__func__" | "__FUNCTION__" | "__PRETTY_FUNCTION__"), Undeclared ->
+      context.typed.enclosing.in_generic
+  | _ -> false
+
+(* Whether the value of [operand] is a pointer into objects of a type
+   that mentions a type parameter, whose arithmetic asks for its size. *)
+let points_to_parameter context operand =
+  match (value_type (operand_typed context operand)).shape with
+  | Pointer target | Array { element = target; _ } ->
+      Ctype.mentions_opaque context.tags target
+  | _ -> false
+
+(* Whether an undeclared [name] names a builtin function of the target,
+   which a call reaches through its callee, parentheses and all. *)
+let is_builtin_function context name =
+  match Builtin_function.find context.target name with
+  | Builtin _ -> true
+  | Of_other_compiler | Of_other_architectures | Not_builtin -> false
+
+(* Design 7.1 rule 4: whether [whole] gives an answer of the argument by
+   itself, apart from its operands: the layout of a type that mentions a
+   type parameter, which pointer arithmetic and the address of a member
+   ask for as [sizeof] does; the name of a builtin that the values of
+   its arguments do not decide, which its call depends through; the
+   value of a [const] object whose initialiser depends; and a statement
+   expression, whose value the check does not follow. *)
+let gives_dependence context (whole : Tree.expression) =
+  let in_generic = context.typed.enclosing.in_generic in
+  match whole.node with
+  | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Alignof_expression _
+  | Offsetof _ ->
+      measures_parameter context whole
+  | Binary ((Add | Subtract), left, right)
+  | Subscript { operand = left; index = right } ->
+      points_to_parameter context left || points_to_parameter context right
+  | Member { operand; _ } | Pointer_member { operand; _ } ->
+      Ctype.mentions_opaque context.tags
+        (operand_typed context operand).expression_type
+  | Identifier { name; resolution = Undeclared }
+    when is_builtin_function context name ->
+      in_generic && not (Builtin_function.values_decide name)
+  | Identifier { resolution = Resolved (In_tree id); _ } ->
+      Hashtbl.mem context.typed.dependent_objects id
+  | Identifier { name; resolution } -> is_instance_name context name resolution
+  | Statement_expression _ -> in_generic
+  | _ -> false
+
+(* The expressions of an initialiser list, designator indices among
+   them. *)
+let rec initialiser_list_expressions (list : Tree.initialiser_list) =
+  List.concat_map
+    (fun (item : Tree.designated_initialiser) ->
+      List.concat_map designator_expressions item.node.designators
+      @ initialiser_expressions item.node.initialiser)
+    list.node
+
+and initialiser_expressions = function
+  | Tree.Expression_initialiser expression -> [ expression ]
+  | Braced list -> initialiser_list_expressions list
+
+and designator_expressions (designator : Tree.designator) =
+  match designator.node with
+  | Index index -> [ index ]
+  | Index_range { low; high } -> [ low; high ]
+  | Member_designator _ -> []
+
+(* The expressions whose values the value of [whole] is computed from,
+   evaluated or not (design 7.1 rule 4). A type name gives a type and no
+   value, so what it holds is no operand. *)
+let value_operands (whole : Tree.expression) =
+  match whole.node with
+  | Identifier _ | Constant _ | Character _ | String _ | Label_address _
+  | Block_literal _ | Sizeof_type _ | Alignof _ | Types_compatible _
+  | Qualified_constructor _ | Statement_expression _ ->
+      []
+  | Parenthesized operand | Sizeof_expression operand
+  | Alignof_expression operand | Unary (_, operand) | Post_increment operand
+  | Post_decrement operand | Cast { operand; _ } | Member { operand; _ }
+  | Pointer_member { operand; _ } | Try { operand; _ }
+  | Va_arg { list = operand; _ } ->
+      [ operand ]
+  | Subscript { operand = left; index = right }
+  | Binary (_, left, right)
+  | Assignment (_, left, right)
+  | Comma (left, right) ->
+      [ left; right ]
+  | Call { callee; arguments } -> callee :: arguments
+  | Conditional { condition; if_true; if_false } ->
+      (condition :: Option.to_list if_true) @ [ if_false ]
+  | Generic { controlling; associations } ->
+      let result (association : Tree.generic_association) =
+        match association.node with
+        | Association (_, result) | Default_association result -> result
+      in
+      controlling :: List.map result associations
+  | Choose { condition; first; second } -> [ condition; first; second ]
+  | Compound_literal { values; _ } -> initialiser_list_expressions values
+  | Offsetof { designators; _ } ->
+      List.concat_map designator_expressions designators
+
+(* The first place where an expression typed before depends on a type
+   parameter, if it does. *)
+let dependence context (expression : Tree.expression) =
+  dependence_at context expression.span
+
+(* Design 7.1 rule 4: an expression depends on a type parameter where it
+   gives an answer of the argument, or where an operand depends. Its
+   operands are typed, and so recorded, before it. *)
+let record_dependence context (whole : Tree.expression) =
+  let source =
+    if gives_dependence context whole then Some whole.span
+    else List.find_map (dependence context) (value_operands whole)
   in
-  if measures_parameter context whole then
-    context.typed.measurements <-
-      Measurements.update first inner context.typed.measurements
+  Option.iter (Hashtbl.replace context.typed.dependences whole.span) source
 
 (* Refuses [expression] where C asks for a constant, if it depends on a
-   type parameter: whatever its class, that of an instance can differ.
-   Spans of expressions nest, and each measurement begins with its own
-   keyword, which begins no expression inside it: so the first
-   measurement that begins within [expression] lies within it, and the
-   search costs a lookup and at most two entries however many the unit
-   holds. *)
+   type parameter: whatever its class, that of an instance can differ. *)
 let refuse_dependent context (expression : Tree.expression) =
-  let { Tree.first; last } = expression.span in
-  let within (_, measured_last) = measured_last <= last in
-  let measurements =
-    Measurements.to_seq_from first context.typed.measurements
-    |> Seq.take_while (fun (measured_first, _) -> measured_first <= last)
-  in
-  match Seq.find within measurements with
-  | Some (measured_first, measured_last) ->
-      context.fail
-        { first = measured_first; last = measured_last }
-        parameter_dependent
-  | None -> ()
+  refuse_dependent_at context expression.span
+
+(* [refuse_dependent_null] for two operands that meet, of == and != or
+   the branches of ?:, each a typed expression with its type. *)
+let operands_meet context (a, (a_type : Ctype.t)) (b, (b_type : Ctype.t)) =
+  refuse_dependent_null context a.Tree.span ~target:b_type a_type;
+  refuse_dependent_null context b.Tree.span ~target:a_type b_type
+
+(* Whether an object of type [t] is [const], or an array of [const]
+   elements, which the backends read as a constant. *)
+let rec is_const_object (t : Ctype.t) =
+  match t.shape with
+  | Array { element; _ } -> is_const_object element
+  | _ -> t.qualifiers.const
+
+let note_object context id t initialiser =
+  if is_const_object t then
+    match
+      List.find_map (dependence context) (initialiser_expressions initialiser)
+    with
+    | Some source -> Hashtbl.replace context.typed.dependent_objects id source
+    | None -> ()
 
 (* The constant of a [sizeof], [_Alignof] or [offsetof] at [span] of the
    type [t], which [known] gives where [t] mentions no type parameter;
@@ -2191,6 +2357,18 @@ let value_source context =
       match Hashtbl.find_opt context.typed.selections selecting.span with
       | Some selection -> selection
       | None -> invalid_arg "Expressions: an untyped selection")
+
+(* Design 7.1 rule 3: the name of the function is read as an array, of
+   the instance's length, by an operation that takes it whole; any other
+   converts it to a pointer to its first character. *)
+let refuse_instance_name context operand =
+  match value_source context operand with
+  | Answer { node = Identifier { name; resolution }; span }
+    when is_instance_name context name resolution ->
+      refuse_type_parameter context span
+        (name ^ " in a generic function is read as an array, whose length \
+                 is that of the name of each instance")
+  | Answer _ | Depends_on _ -> ()
 
 let is_floating_constant context expression =
   match value_source context expression with
@@ -2819,6 +2997,17 @@ let rec zip_positions positions arguments =
   | [], arguments -> List.map (fun _ -> Untargeted) arguments
   | _ :: _, [] -> []
 
+(* The operands of == and != meet as a pointer and an integer that
+   converts to it (6.5.9p2). *)
+let equality_operands context (op : Tree.binary_operator) (left, left_typed)
+    (right, right_typed) =
+  match op with
+  | Equal_to | Not_equal_to ->
+      operands_meet context
+        (left, value_type left_typed)
+        (right, value_type right_typed)
+  | _ -> ()
+
 (* Statements (6.8) and the expressions that hold them *)
 
 (* The value of an expression that an operation reads (design 3.4): the
@@ -2846,16 +3035,17 @@ and positioned context position (expression : Tree.expression) =
     | Some (named, arguments) -> construct context expression named arguments
     | None -> expression_node context position expression
   in
+  Hashtbl.replace context.typed.types expression.span typed;
+  Hashtbl.replace context.typed.constants expression.span
+    (classify context expression typed);
+  (* The conversion reads the dependence of the value. *)
+  record_dependence context expression;
   (match position with
   | Targeted target ->
       (* 6.5.16.1p2, 6.5.2.2p7: converted as if by assignment. *)
       context.needs_complete typed.expression_type;
       refuse_conversion context expression.span target typed
   | Untargeted | Discarded -> ());
-  Hashtbl.replace context.typed.types expression.span typed;
-  Hashtbl.replace context.typed.constants expression.span
-    (classify context expression typed);
-  record_measurement context expression;
   typed
 
 and expression_node context position (whole : Tree.expression) =
@@ -2903,10 +3093,14 @@ and expression_node context position (whole : Tree.expression) =
   (* The value of a postfix operation is no bit-field in Clang. *)
   | Post_increment operand | Post_decrement operand ->
       increment context span ~clause:"6.5.2.4p1" (typed operand)
-  | Unary ((Address as op), operand) -> unary context span op (as_whole operand)
+  | Unary ((Address as op), operand) ->
+      let whole = as_whole operand in
+      refuse_instance_name context operand;
+      unary context span op whole
   | Unary (op, operand) -> unary context span op (typed operand)
   | Sizeof_expression operand ->
       let whole = as_whole operand in
+      refuse_instance_name context operand;
       if designates_bit_field whole then
         context.fail span (Rule.c_text "sizeof of a bit-field (C11 6.5.3.4p1)");
       context.needs_complete whole.expression_type;
@@ -2916,6 +3110,7 @@ and expression_node context position (whole : Tree.expression) =
       value (size_type context span)
   | Alignof_expression operand ->
       context.needs_complete (as_whole operand).expression_type;
+      refuse_instance_name context operand;
       value (size_type context span)
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
@@ -2933,8 +3128,10 @@ and expression_node context position (whole : Tree.expression) =
       context.needs_complete cast_operand.expression_type;
       value (call_or_cast_type context span cast_type)
   | Binary (op, left, right) ->
-      let left = typed left in
-      value (binary_type context span op left (typed right))
+      let left_typed = typed left in
+      let right_typed = typed right in
+      equality_operands context op (left, left_typed) (right, right_typed);
+      value (binary_type context span op left_typed right_typed)
   | Conditional { condition; if_true; if_false } ->
       value (conditional context span position condition if_true if_false)
   | Assignment ((Assign as op), left, right) ->
@@ -2978,8 +3175,6 @@ and expression_node context position (whole : Tree.expression) =
   | Types_compatible (first, second) ->
       let first = type_as_seen context span (context.type_name first) in
       let second = type_as_seen context span (context.type_name second) in
-      refuse_type_parameter_comparison context span
-        "__builtin_types_compatible_p" [ first; second ];
       let answer = types_compatible_answer context span first second in
       record_answer context span [ first; second ]
         ~lowered:(fun compatible -> Compatible compatible)
@@ -3279,7 +3474,6 @@ and generic context span controlling associations =
     controlling_type
     :: List.filter_map (fun a -> a.association_type) associations_typed
   in
-  refuse_type_parameter_comparison context span "_Generic" types;
   let selection =
     select context span controlling_type associations_typed default
   in
@@ -3325,6 +3519,9 @@ and conditional context span position condition if_true if_false =
     | None -> { branch = condition; branch_typed = condition_typed }
   in
   let third = { branch = if_false; branch_typed = branch_typed if_false } in
+  operands_meet context
+    (second.branch, value_type second.branch_typed)
+    (third.branch, value_type third.branch_typed);
   let result = conditional_type context span second third in
   discard_branches context position
     ~need:
@@ -3407,12 +3604,13 @@ and null_pointer_constant context (candidate : Tree.expression) =
 
 (* An operation that fails gives an opaque value rather than an error:
    this is no constant expression context. Whether an operand of unknown
-   type is one is unknown too. *)
+   type is one is unknown too, and whether one that depends on a type
+   parameter is one differs between arguments (design 7.1 rule 4). *)
 and zero_constant context candidate =
   let typed = operand_typed context candidate in
-  match
-    (Ctype.is_integer typed.expression_type, operand_constant context candidate)
-  with
+  let is_integer = Ctype.is_integer typed.expression_type in
+  if is_integer = Answer true then refuse_dependent context candidate;
+  match (is_integer, operand_constant context candidate) with
   | Depends_on _, _ -> Opaque_constant
   | _, Integer_expression { value = Known value; flaw = None }
     when Exact_integer.equal value Exact_integer.zero ->
@@ -3691,6 +3889,9 @@ and standing_statement context standing labels (statement : Tree.statement) =
   match statement.node with
   | Labeled { label; statement = labeled } ->
       label_of context label;
+      (match label.node with
+      | Named_label { attributes; _ } -> context.subjectless attributes
+      | Case_label _ | Case_range _ | Default_label -> ());
       let first =
         match labels with
         | Some (labels : Tree.span) -> labels.first
@@ -3711,8 +3912,8 @@ and standing_statement context standing labels (statement : Tree.statement) =
       holding context place (fun () -> discard context value)
   | Compound block -> block_items context block
   | Computed_goto value -> ignore (expression context value)
-  | Null_statement | Attribute_statement _ | Goto _ | Continue _ | Break _ ->
-      ()
+  | Attribute_statement attributes -> context.subjectless attributes
+  | Null_statement | Goto _ | Continue _ | Break _ -> ()
   | If { condition = Controlling condition; then_branch; else_branch } ->
       scalar ~clause:"6.8.4.1p1" condition;
       typed_statement context then_branch;
@@ -4245,10 +4446,10 @@ let record_defers context ~name ~declarator ~enclosing (block : Tree.block) =
       context.typed.defers <- recorded :: context.typed.defers;
       Some recorded
 
-let function_body context ~name ~declarator ~return_type block =
+let function_body context ~name ~in_generic ~declarator ~return_type block =
   let view = context.typed in
   let enclosing =
-    { function_name = Some name; return_type = Some return_type;
+    { function_name = Some name; in_generic; return_type = Some return_type;
       case_labels = No_switch; try_positions = Positions No_place }
   in
   view.function_tries <- [];

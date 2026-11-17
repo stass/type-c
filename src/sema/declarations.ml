@@ -192,6 +192,9 @@ type state = {
   mutable in_generic_function : bool;
       (* reading a generic function, where a type in an expression may
          depend on a type parameter (design 7.1 rule 4) *)
+  attribute_subjects : (int, bool) Hashtbl.t;
+      (* by the first token of each attribute read, whether its subject
+         mentions a type parameter (design 13.3) *)
   mutable typed : Expressions.t;
   mutable type_names : (Tree.span, Ctype.t) Hashtbl.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
@@ -631,7 +634,8 @@ let prior_linkage state scope span name declared =
 (* What the GNU attributes of a declaration say. [unknown_attribute] is
    the first without an entry in [attribute_effects], [effect_attribute]
    the first with an effect, [marked_attribute] the first with a mark,
-   and [targets] the [target] attributes, latest first. *)
+   [targets] the [target] attributes, latest first, and [attributes]
+   every one, in source order. *)
 type attributed = {
   gnu_noreturn : bool;
   gnu_inline : bool;
@@ -640,6 +644,7 @@ type attributed = {
   effect_attribute : Tree.attribute option;
   marked_attribute : Tree.attribute option;
   targets : Tree.attribute list;
+  attributes : Tree.attribute list;
 }
 
 (* What a list of declaration specifiers says. [storage] excludes
@@ -651,7 +656,7 @@ type specified = {
   base_type : Ctype.t;
   inline : bool;
   noreturn : bool;
-  aligned : Tree.span option;  (** The first alignment specifier. *)
+  alignments : Tree.span list;  (** Each alignment specifier, in order. *)
   attributed : attributed;
   untagged : bool;
       (** The type specifier is a structure, union or enumeration specifier
@@ -814,12 +819,17 @@ type attribute_effect =
    [marked] says that on a declaration of a function it breaks on its own
    the property that the form of a [return] in the scope of a defer
    statement rests on, that the name names exactly one function which
-   [__typeof__] may name (design 13.3, 13.5). *)
+   [__typeof__] may name (design 13.3, 13.5). [alike] says that both
+   backends take it alike on a subject of every type, on every kind of
+   subject and with every argument list, which a measurement with both
+   showed: only such an attribute stands on what mentions a type
+   parameter in the definition of a generic (design 13.3). *)
 type attribute_entry = {
   gnu_name : string;
   attribute_effect : attribute_effect;
   clang_spelling : bool;
   marked : bool;
+  alike : bool;
 }
 
 (* The attribute whose arguments name a version of a function (design
@@ -841,19 +851,21 @@ let overloadable_attribute = "overloadable"
    [__has_c_attribute(clang::name)]. *)
 let attribute_effects =
   let gnu_only gnu_name attribute_effect =
-    { gnu_name; attribute_effect; clang_spelling = false; marked = false }
+    { gnu_name; attribute_effect; clang_spelling = false; marked = false;
+      alike = false }
   in
   let also_clang gnu_name attribute_effect =
-    { gnu_name; attribute_effect; clang_spelling = true; marked = false }
+    { (gnu_only gnu_name attribute_effect) with clang_spelling = true }
   in
   let mark entry = { entry with marked = true } in
+  let alike entry = { entry with alike = true } in
   [
     gnu_only "alloc_align" Neutral;
     gnu_only "alloc_size" Neutral;
     gnu_only "aligned" Neutral;
-    also_clang "always_inline" Neutral;
+    alike (also_clang "always_inline" Neutral);
     mark (also_clang "availability" Neutral);
-    gnu_only "cold" Neutral;
+    alike (gnu_only "cold" Neutral);
     gnu_only "const" Neutral;
     gnu_only "constructor" Neutral;
     mark (also_clang "cpu_dispatch" Neutral);
@@ -871,7 +883,7 @@ let attribute_effects =
     gnu_only "leaf" Neutral;
     gnu_only "malloc" Neutral;
     also_clang "noescape" Neutral;
-    also_clang "noinline" Neutral;
+    alike (also_clang "noinline" Neutral);
     gnu_only "nonnull" Neutral;
     gnu_only "noreturn" Sets_noreturn;
     also_clang "not_tail_called" Neutral;
@@ -887,7 +899,7 @@ let attribute_effects =
     mark (gnu_only "target_clones" Neutral);
     mark (gnu_only "target_version" Neutral);
     mark (also_clang "unavailable" Neutral);
-    gnu_only "unused" Neutral;
+    alike (gnu_only "unused" Neutral);
     gnu_only "used" Neutral;
     gnu_only "visibility" Neutral;
     gnu_only "warn_unused_result" Neutral;
@@ -914,7 +926,7 @@ let find_attribute_entry name =
 let no_attributes =
   { gnu_noreturn = false; gnu_inline = false; overloadable = false;
     unknown_attribute = None; effect_attribute = None;
-    marked_attribute = None; targets = [] }
+    marked_attribute = None; targets = []; attributes = [] }
 
 (* [onto] with the effects of [attributes] applied in source order. *)
 let read_attributes ~onto (attributes : Tree.attribute list) =
@@ -955,7 +967,8 @@ let read_attributes ~onto (attributes : Tree.attribute list) =
         { attributed with
           unknown_attribute = first attributed.unknown_attribute attribute }
   in
-  List.fold_left apply onto attributes
+  let read = List.fold_left apply onto attributes in
+  { read with attributes = onto.attributes @ attributes }
 
 (* An attribute whose effect is not recorded where it stands, as only the
    declaration of a function at file scope records [noreturn],
@@ -989,8 +1002,107 @@ let obscured state attribute (t : Ctype.t) =
       Ctype.unknown (attribute_unknown state attribute (kind_of t))
   | None -> t
 
+(* Design 13.3: records whether the subject of the attributes or
+   alignment specifiers at [firsts] mentions a type parameter. One with
+   several subjects, as among the specifiers of a declaration with
+   several declarators, mentions one where any of them does. *)
+let note_subjects state (firsts : int list) ~mentions =
+  let note first =
+    let earlier =
+      Option.value ~default:false
+        (Hashtbl.find_opt state.attribute_subjects first)
+    in
+    Hashtbl.replace state.attribute_subjects first (earlier || mentions)
+  in
+  List.iter note firsts
+
+let attribute_firsts (attributes : Tree.attribute list) =
+  List.map (fun (attribute : Tree.attribute) -> attribute.span.first)
+    attributes
+
+let note_subject state attributes subject =
+  note_subjects state (attribute_firsts attributes)
+    ~mentions:(Ctype.mentions_opaque state.tags subject)
+
 let obscured_by state attributes t =
+  note_subject state attributes t;
   obscured state (first_unrecorded_attribute attributes) t
+
+(* Whether the token at [index] lies in the definition at [definition]. *)
+let in_definition (definition : Tree.span) index =
+  definition.first <= index && index <= definition.last
+
+(* The first identifier among the arguments of [attribute] that denotes,
+   as an ordinary identifier or a tag, what the definition at
+   [definition] declares, its parameters included (design 13.3). *)
+let names_declared state definition (attribute : Tree.attribute) =
+  let declares view name =
+    let ordinary =
+      match Parser.View.find view name with
+      | Some { declaration = In_tree (Ordinary_at at); _ } ->
+          in_definition definition at
+      | Some { declaration = Builtin _; _ } | None -> false
+    in
+    let tag =
+      match Parser.View.find_tag view name with
+      | Some (Tag_at at) -> in_definition definition at
+      | None -> false
+    in
+    ordinary || tag
+  in
+  let rec first_declared view (arguments : Tree.span) index =
+    if index > arguments.last then None
+    else
+      match state.text.tokens.(index).kind with
+      | Token.Identifier name when declares view name -> Some name
+      | Identifier _ | Number | Character _ | String _ | Punctuator _
+      | Pragma _ | Typec_pragma ->
+          first_declared view arguments (index + 1)
+  in
+  match
+    (attribute.node.arguments, Parser.attribute_view state.views attribute)
+  with
+  | Some arguments, Some view -> first_declared view arguments arguments.first
+  | None, _ | Some _, None -> None
+
+(* Design 13.3, "Attributes in a generic": in the definition at
+   [definition], an attribute whose subject mentions a type parameter,
+   or whose arguments name what the definition declares, stands only
+   where the table records that both backends take it alike. One whose
+   subject no reading noted is refused, so a construct that the reading
+   misses costs a refusal and never an instance that the backend
+   rejects. *)
+let check_generic_attribute state definition (attribute : Tree.attribute) =
+  let name = attribute.node.name.node in
+  let refuse reason =
+    fail state attribute.span
+      (Rule.message Generic_attribute
+         (Printf.sprintf
+            "the attribute %s %s, and the table of attributes does not \
+             record that both backends take it alike for every type"
+            (quote name) reason))
+  in
+  let alike =
+    match find_attribute_entry name with
+    | Some entry -> entry.alike
+    | None -> false
+  in
+  if not alike then begin
+    Option.iter
+      (fun declared ->
+        refuse
+          ("names " ^ quote declared ^ ", which the definition declares"))
+      (names_declared state definition attribute);
+    match Hashtbl.find_opt state.attribute_subjects attribute.span.first with
+    | Some false -> ()
+    | Some true -> refuse "stands on a subject that mentions a type parameter"
+    | None -> refuse "stands where typec does not read its subject"
+  end
+
+let check_generic_attributes state definition =
+  List.iter
+    (check_generic_attribute state definition)
+    (Parser.attributes_in state.views definition)
 
 let with_inner_attributes derived attributes =
   { derived with inner = read_attributes ~onto:derived.inner attributes }
@@ -1004,8 +1116,8 @@ let no_function_specifiers state span specified =
          "a function specifier in the declaration of an identifier that is not \
           a function (C11 6.7.4p1)")
 
-let no_alignment state span specified what =
-  if specified.aligned <> None then
+let no_alignment state span (specified : specified) what =
+  if specified.alignments <> [] then
     fail state span
       (Rule.c_text ("an alignment specifier for " ^ what ^ " (C11 6.7.5p2)"))
 
@@ -1172,30 +1284,17 @@ let declares_generic_function state scope =
 
 (* Design 7.1 rule 3: every declaration of an identifier with linkage
    denotes one object or function (C11 6.2.2p2), which each instance of
-   a generic function would declare again with its own argument in the
-   type. *)
+   a generic function would declare again, and a type that the body
+   declares is each instance's own, so the linkage alone decides. *)
 let refuse_linked_declaration state scope span (declared : Entity.declared) =
-  let linked_type =
-    match declared with
-    | Object { object_type = t; linkage = External | Internal; _ }
-    | Function { function_type = t; linkage = External | Internal; _ } ->
-        Some t
-    | Object { linkage = No_linkage; _ }
-    | Function { linkage = No_linkage; _ }
-    | Typedef _ | Enumerator _ ->
-        None
-  in
-  match linked_type with
-  | Some t
-    when state.in_generic_function && scope = Block_scope
-         && Ctype.mentions_opaque state.tags t ->
-      fail state span
-        (Rule.message Type_parameter_operation
-           "a declaration in a generic function gives its identifier \
-            linkage and has a type that mentions a type parameter, so \
-            every instance would declare one object or function with \
-            another type")
-  | Some _ | None -> ()
+  if state.in_generic_function && scope = Block_scope
+     && linkage_of declared <> No_linkage
+  then
+    fail state span
+      (Rule.message Type_parameter_operation
+         "a declaration in a generic function gives its identifier \
+          linkage, so every instance would declare the one object or \
+          function again")
 
 let unlinked : Entity.declared -> Entity.declared = function
   | Function declared -> Function { declared with linkage = No_linkage }
@@ -1382,10 +1481,7 @@ let rec read_specifiers state (specifiers : Tree.specifiers) =
     base_type;
     inline = List.mem Tree.Inline sorted.function_specifiers;
     noreturn = List.mem Tree.Noreturn sorted.function_specifiers;
-    aligned =
-      (match sorted.alignments with
-      | [] -> None
-      | (first, _) :: _ -> Some first);
+    alignments = List.map fst sorted.alignments;
     attributed;
     untagged = is_untagged sorted.others;
     inexact = specifiers_are_inexact state specifiers;
@@ -1456,14 +1552,14 @@ and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
       checked state span (Ctype.atomic t)
   | Struct_or_union { kind; tag; members; attributes } ->
       let record = record_type state span (record_kind kind) tag members in
-      let attribute = first_unrecorded_attribute attributes in
-      obscured state attribute (Ctype.record record)
+      obscured_by state attributes (Ctype.record record)
   | Enum { tag; enumerators; underlying; attributes } ->
       let fixed = Option.map (fixed_type state span) underlying in
       let attribute =
         first_unrecorded_attribute (enum_attributes ~fixed attributes)
       in
       let enum = enum_type state span ~attribute ~fixed tag enumerators in
+      note_subject state attributes (Ctype.enum enum);
       obscured state attribute (Ctype.enum enum)
   | Typeof_type type_name ->
       let t = read_type_name state type_name in
@@ -1482,7 +1578,9 @@ and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
 
 (* GNU [typeof] of an expression is its type, unconverted. *)
 and typeof_expression state expression =
-  (Expressions.whole_value (typing state) expression).expression_type
+  let typed = Expressions.whole_value (typing state) expression in
+  Expressions.refuse_instance_name (typing state) expression;
+  typed.expression_type
 
 (* 6.7.5p3: the value is the backend's to check, as layout is. A type
    names its alignment (6.7.5p6), which differs between arguments where
@@ -1704,12 +1802,12 @@ and read_member_declarator state specified
         bit_field_width = None }
   | Bit_field { declarator = field; width; attributes } ->
       let specified = for_declarator state specified attributes field in
-      Option.iter
+      List.iter
         (fun span ->
           fail state span
             (Rule.c_text
                "a bit-field has an alignment specifier (C11 6.7.5p2)"))
-        specified.aligned;
+        specified.alignments;
       let derived = declare_type state ~parameter:false specified field in
       refuse_opaque state declarator.span derived.declared_type
         "the type of a bit-field";
@@ -1796,6 +1894,7 @@ and bit_field_width state width =
    does not know might change. Its declaration needs both: an opaque
    value needs its integer type. *)
 and check_enumerator_attributes state (name : Tree.identifier) attributes =
+  note_subjects state (attribute_firsts attributes) ~mentions:false;
   Option.iter
     (fun attribute ->
       fail_needing state name.span
@@ -2013,6 +2112,10 @@ and declare_type state ?definition ?(records_effects = false) ~parameter
     | None -> underived
   in
   let attributed = specified.attributed in
+  note_subjects state
+    (attribute_firsts (attributed.attributes @ derived.inner.attributes)
+    @ List.map (fun (span : Tree.span) -> span.first) specified.alignments)
+    ~mentions:(Ctype.mentions_opaque state.tags derived.declared_type);
   let attribute =
     match Ctype.is_function derived.declared_type with
     | Answer true when records_effects -> attributed.unknown_attribute
@@ -2226,7 +2329,7 @@ and parameter_specifiers state span specifiers =
   if specified.inline || specified.noreturn then
     fail state span
       (Rule.c_text "a parameter has a function specifier (C11 6.7.4p1)");
-  if specified.aligned <> None then
+  if specified.alignments <> [] then
     fail state span
       (Rule.c_text "a parameter has an alignment specifier (C11 6.7.5p2)");
   specified
@@ -2354,7 +2457,7 @@ and read_new_type_name state (type_name : Tree.type_name) =
   let specified =
     read_specifiers state type_name.node.specifier_qualifiers
   in
-  if specified.aligned <> None then
+  if specified.alignments <> [] then
     fail state span
       (Rule.c_text "a type name has an alignment specifier (C11 6.7.5p2)");
   let derived =
@@ -2427,6 +2530,8 @@ and initialised state scope span declared (entity : entity) initialiser =
         Expressions.initialiser (typing state) ~constant object_type
           initialiser
       in
+      Expressions.note_object (typing state) (declared : Tree.declared).id
+        object_type initialiser;
       match object_type.shape with
       | Array { length = Unknown; _ } ->
           let completed_object =
@@ -2792,7 +2897,8 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
       let instance = instance_of state declaration parameters in
       state.applied_at <-
         Ctype.Instances.add instance declaration.span state.applied_at;
-      needs_complete state (instance_type state declaration instance check))
+      needs_complete state (instance_type state declaration instance check));
+  check_generic_attributes state declaration.span
 
 (* Design 10.3, P25: every instance writes the definition as its tokens,
    and a pragma line or a [#] is none that moved text can hold. *)
@@ -3390,6 +3496,9 @@ and typing state : Expressions.context =
     binding = bind_binding state;
     needs_complete = needs_complete state;
     block_literal = (fun () -> note_block_literal state);
+    subjectless =
+      (fun attributes ->
+        note_subjects state (attribute_firsts attributes) ~mentions:false);
     views = state.views;
     moved_operand = type_moved_operand state;
     read_moved =
@@ -3612,7 +3721,8 @@ let read_definition state (definition : Tree.function_definition) =
         Hashtbl.reset state.read_moved;
         within state In_block (fun () ->
             Expressions.function_body (typing state) ~name:entity.name
-              ~declarator ~return_type:returned block)
+              ~in_generic:state.in_generic_function ~declarator
+              ~return_type:returned block)
     | Skipped _ -> None
   in
   Option.iter (check_deferred state) defers;
@@ -3819,6 +3929,7 @@ let read_generic_function state (generic : Tree.generic_function) =
   in
   state.in_generic_function <- true;
   Fun.protect ~finally:(fun () -> state.in_generic_function <- false) read;
+  check_generic_attributes state generic.span;
   Option.iter
     (fun (earlier, _) ->
       check_agreement state span name ~earlier ~later:reference)
@@ -3917,6 +4028,7 @@ let read target text (scopes : Parser.scopes) =
       overloaded = Hashtbl.create 64;
       generic_functions = Hashtbl.create 16;
       in_generic_function = false;
+      attribute_subjects = Hashtbl.create 16;
       typed = Expressions.create ();
       type_names = Hashtbl.create 256;
       type_declarations = Hashtbl.create 16;

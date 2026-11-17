@@ -1170,9 +1170,14 @@ let promoted target tags parameter =
 
 (* The first unknown type that a comparison of two types passed over: the
    verdict that their known parts leave open depends on it. *)
-type dependence = { mutable first_unknown : Unknown.t option }
+type dependence = {
+  mutable first_unknown : Unknown.t option;
+  mutable argument_decides : bool;
+      (** a type parameter met another type, whose comparison the
+          argument decides (design 7.1 rule 4) *)
+}
 
-let no_dependence () = { first_unknown = None }
+let no_dependence () = { first_unknown = None; argument_decides = false }
 
 let passed_over dependence unknown =
   if dependence.first_unknown = None then
@@ -1193,6 +1198,9 @@ type comparison = {
   opaque_lengths_match : bool;
       (** whether an {!Opaque} length matches as [merge_length] matches
           it, where the backend later compares the two types *)
+  by_argument : bool;
+      (** whether a type parameter that meets another type leaves the
+          verdict to the argument, rather than differing from it *)
 }
 
 (* Whether the qualifiers of two return types make their function types
@@ -1220,11 +1228,45 @@ let different_kinds a b =
       a_is_function <> b_is_function
   | (Answer _ | Depends_on _), (Answer _ | Depends_on _) -> false
 
+(* Whether a record or distinct type is an instance of a generic type. *)
+let is_instance t =
+  match t.shape with
+  | Record { record_name = Instance_name _ | Variant_name (Applied _); _ }
+  | Distinct { distinct_instance = Some _; _ } ->
+      true
+  | _ -> false
+
+(* Whether some argument may make two different types the same, where
+   they meet as a whole: one is a type parameter, which stands for any
+   value type; both are instances of generic types and one mentions a
+   type parameter (vector(T) and vector(int)); or one is a type that
+   typec does not know and the other mentions a type parameter. Any
+   other two shapes, two records of different tags among them, differ
+   for every argument, and their parts are compared. *)
+let meets_type_parameter tags a b =
+  let mentions () = mentions_opaque tags a || mentions_opaque tags b in
+  match (a.shape, b.shape) with
+  | Record x, Record y when x.record_id = y.record_id -> false
+  | Distinct x, Distinct y when x.distinct_id = y.distinct_id -> false
+  | _ when is_opaque a || is_opaque b -> true
+  | Record _, Record _ | Distinct _, Distinct _ ->
+      is_instance a && is_instance b && mentions ()
+  | Unknown_type _, _ | _, Unknown_type _ -> mentions ()
+  | ( ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+      | Pointer _ | Array _ | Function _ ),
+      _ ) ->
+      false
+
 (* An unknown type is the composite of itself and any type of its kind,
-   which the backend compares with it. *)
+   which the backend compares with it. Where the argument decides,
+   [compatible] answers false, as no instance is checked against it, and
+   [compatible_by_argument] says so. *)
 let rec merge comparison a b =
   require (not (different_kinds a b));
   match (a.shape, b.shape) with
+  | (Unknown_type _, _ | _, Unknown_type _)
+    when comparison.by_argument && meets_type_parameter comparison.tags a b ->
+      left_to_argument comparison a
   | Unknown_type unknown, _ ->
       passed_over comparison.dependence unknown;
       a
@@ -1235,6 +1277,17 @@ let rec merge comparison a b =
 
 and merge_known comparison a b =
   require (a.qualifiers = b.qualifiers);
+  if comparison.by_argument && meets_type_parameter comparison.tags a b then
+    left_to_argument comparison a
+  else merge_shapes comparison a b
+
+(* A type argument is a value type, which is unqualified (design 3.2),
+   so the qualifiers compared before decide alike for every argument. *)
+and left_to_argument comparison a =
+  comparison.dependence.argument_decides <- true;
+  a
+
+and merge_shapes comparison a b =
   let merge = merge comparison in
   match (a.shape, b.shape) with
   | Void, Void -> a
@@ -1319,6 +1372,13 @@ and merge_parameters comparison a b =
         passed_over comparison.dependence unknown;
         t
   in
+  let matches_promoted t old =
+    if is_opaque t then begin
+      require comparison.by_argument;
+      ignore (left_to_argument comparison t)
+    end
+    else ignore (merge t (promoted old))
+  in
   match (a, b) with
   | Prototype x, Prototype y ->
       require (x.variadic = y.variadic);
@@ -1327,17 +1387,13 @@ and merge_parameters comparison a b =
       Prototype { types; variadic = x.variadic }
   | Prototype prototype, Unspecified | Unspecified, Prototype prototype ->
       require (not prototype.variadic);
-      require (not (List.exists is_opaque prototype.types));
-      List.iter (fun t -> ignore (merge t (promoted t))) prototype.types;
+      List.iter (fun t -> matches_promoted t t) prototype.types;
       Prototype prototype
   | Prototype prototype, Old_style types
   | Old_style types, Prototype prototype ->
       require (not prototype.variadic);
-      require (not (List.exists is_opaque prototype.types));
       require (List.compare_lengths prototype.types types = 0);
-      List.iter2
-        (fun t old -> ignore (merge t (promoted old)))
-        prototype.types types;
+      List.iter2 matches_promoted prototype.types types;
       Prototype prototype
   | Old_style _, (Unspecified | Old_style _) | Unspecified, Unspecified -> a
   | Unspecified, Old_style _ -> b
@@ -1347,7 +1403,7 @@ and merge_parameters comparison a b =
 let composite target tags location a b =
   let comparison =
     { target; tags; dependence = no_dependence (); location;
-      opaque_lengths_match = true }
+      opaque_lengths_match = true; by_argument = false }
   in
   match merge comparison a b with
   | t -> within_limit t
@@ -1356,11 +1412,27 @@ let composite target tags location a b =
 let compatible target tags location a b =
   let dependence = no_dependence () in
   let comparison =
-    { target; tags; dependence; location; opaque_lengths_match = true }
+    { target; tags; dependence; location; opaque_lengths_match = true;
+      by_argument = false }
   in
   match merge comparison a b with
   | _ -> verdict dependence
   | exception Not_compatible -> Answer false
+
+type compatibility = Every_argument of bool Unknown.answer | Argument_decides
+
+(* A part that differs for every argument decides, whatever the parts
+   that a type parameter meets. *)
+let compatible_by_argument target tags location a b =
+  let dependence = no_dependence () in
+  let comparison =
+    { target; tags; dependence; location; opaque_lengths_match = true;
+      by_argument = true }
+  in
+  match merge comparison a b with
+  | _ when dependence.argument_decides -> Argument_decides
+  | _ -> Every_argument (verdict dependence)
+  | exception Not_compatible -> Every_argument (Answer false)
 
 (* The opaque lengths match as [merge_length] matches them, or, where no
    backend compares the types, match no length. *)
@@ -1426,7 +1498,8 @@ and same_parameters comparison a b =
 let same_type ?(exact = false) target tags location a b =
   let dependence = no_dependence () in
   let comparison =
-    { target; tags; dependence; location; opaque_lengths_match = not exact }
+    { target; tags; dependence; location; opaque_lengths_match = not exact;
+      by_argument = false }
   in
   if same comparison a b then verdict dependence else Answer false
 let error_message = function

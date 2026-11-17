@@ -965,16 +965,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   refused (TC0038) and the design allows it. Give the definition check
   the test of rule 4 when generic functions are typed, as their bodies
   need it.
-- [Medium] The definition check of a generic type takes an attribute
-  on a member whose type mentions a type parameter: `type g(T) =
-  struct { T v __attribute__((vector_size(16))); };` is accepted and
-  `g(struct s)` is refused by Apple Clang 21 ("invalid vector element
-  type"). Build the one rule of design 13.3 ("Attributes in a
-  generic") as one check that the definition checks of generic types
-  and of generic functions both call, `_Alignas` included, with the
-  fact in `attribute_effects`. Golden pairs: each refusal that 13.3
-  measures beside the same attribute on a subject that mentions no
-  type parameter, which must stand.
 - [Medium] `Ctype.instance` holds the encodings of its arguments as
   plain strings, so a caller can build one from a string that
   `Encoding.encode` did not make, which need not be self-delimiting.
@@ -1434,80 +1424,54 @@ types (design 13.3).
 - [Low] Each edit of the emitter is wrapped in two line markers, so
   `--emit-c` shows a lowered alias over eight lines. An edit whose text
   and replaced tokens hold no newline could go without them.
-- [High] Package 3.1 scope that design 7.1 adds and that is not built,
-  each with golden pairs:
-  - Initialisers (rule 3). No initialiser enters a type parameter but
-    the zero initialiser, and brace elision into one is an error
-    (`T arr[] = {0, 0}`, `T one[] = {0}`, `{ .a = 0 }`,
-    `(T[]){0, 0}`). The zero initialiser of an object or subobject
-    whose type mentions a type parameter lowers to `{}` under
-    `__extension__` (13.5), with the three refusals of rule 3: a
-    variable length array, a declaration in the first clause of a
-    `for`, an object whose own type is atomic. This is a security
-    item: left as `{0}`, an instance for a union holds stack bytes
-    under GCC 15 and later. Tests, as 13.5 states them: the lowered
-    form in each place and for each type leaves zero, on the backend
-    of each host, every byte that rule 3 promises, which is each byte
-    but those inside a `long double` that hold none of its value; the
-    same test over `{0}` finds a byte that is not zero under GCC 16,
-    and on x86-64 an object of the type `long double` holds one in
-    those 6 bytes after the lowered form, under both backends; the
-    lowered form compiles under `-pedantic-errors` in the four
-    dialects, and the same text without `__extension__` does not.
-  - Dependence as a fact of a value (rule 4). `Integer_constant.t` has
-    `Known` and `Opaque`, and `Expressions.kind` leaves a call and a
-    `const` object to the backend (`Backend_constant`). Give the
-    evaluation the fact: the one function that gives a layout answers
-    that the value depends for a type that mentions a type parameter,
-    in pointer arithmetic and member addresses as in `sizeof`; a call
-    of a builtin depends unless `Builtin_function` records that its
-    arguments' values decide it; a `const` object carries the fact of
-    its initialiser; every operation carries that of its operands.
-    Pairs: each bound of rule 4's measurements is refused, and the
-    same construct over a type that mentions no type parameter, or
-    over an object that is not `const`, stands. Null pointer constant
-    status and `__builtin_choose_expr` by a dependent constant are
-    errors.
-  - Compatibility with three answers (rule 4): `_Generic` and
-    `__builtin_types_compatible_p` are errors only where a comparison
-    meets a type parameter and another type, those among the
-    associations included. Pairs: `_Generic(x, T: 1, default: 0)` is
-    refused and `__builtin_types_compatible_p(__typeof__(row),
-    __typeof__(&row[0]))` stands.
-  - Function names (rules 3 and 4). In the definition of a generic
-    function `__func__`, `__FUNCTION__` and `__PRETTY_FUNCTION__` are
-    valid only where C converts the array to a pointer (C11
-    6.3.2.1p3, `Expressions.value_type`), and every other use is
-    refused with TC0075 and the reason of rule 3: an instance has a
-    name of its own, so the array has another type in each. The name
-    depends on a type parameter, as a `const` object does whose
-    initialiser depends. `Expressions.predefined` gives `__func__`
-    the length of the definition's name, so
-    `_Static_assert(sizeof __func__ == 2, "name length");` in
-    `generic(T) void f(T *p)` passes the check and fails in the
-    instance `f__i` under both backends. Pairs, each of the three
-    names in a generic body: `puts(__func__)` and the `assert` of
-    `<assert.h>` stand; `sizeof __func__`, `&__func__`,
-    `__typeof__(__func__)` and `__alignof__(__func__)` are refused;
-    `_Static_assert(__builtin_strlen(__func__) == 1, "length");` and
-    `static const char *name = __func__;` are refused as constants
-    that depend; the same body without `generic` stands.
-  - The place before an ellipsis (rule 6). Where the parameter list
-    of a generic function ends in an ellipsis, the head is refused if
-    its last named parameter has the type of a type parameter, read
-    from the type and not from its spelling. This is a security item:
-    `va_start` on that parameter is undefined in the instance for
-    `char`, which a call deduces. Pairs: `generic(T) int f(T last,
-    ...);` is refused, as it is with `const T last`, `_Atomic(T)
-    last`, `__typeof__(T) last` and, with `type same(T) = T;`,
-    `same(T) last`; `T *last`, `T last[4]`, `vector(T) last`,
-    `T first, int count, ...` and `void (*log)(T last, ...), ...`
-    stand, as does `int f(char last, ...)` without `generic`. The
-    reason is tested on the backend: C text of the instance for
-    `char` of the refused head, with `va_start(ap, last)` in its
-    body, draws `-Wvarargs` from Apple Clang, and the same text with
-    `int count` before the ellipsis draws nothing.
-  - Attributes: the item on the rule of 13.3 under "Declarations".
+- [High] Package 3.3, the lowering half of design 7.1 rule 3's zero
+  initialiser: the zero initialiser of an object or subobject whose
+  type mentions a type parameter lowers to `{}` under `__extension__`
+  (13.5), with the three refusals of rule 3: a variable length array,
+  a declaration in the first clause of a `for`, an object whose own
+  type is atomic. This is a security item: left as `{0}`, an instance
+  for a union holds stack bytes under GCC 15 and later. Tests, as 13.5
+  states them: the lowered form in each place and for each type leaves
+  zero, on the backend of each host, every byte that rule 3 promises,
+  which is each byte but those inside a `long double` that hold none
+  of its value; the same test over `{0}` finds a byte that is not zero
+  under GCC 16, and on x86-64 an object of the type `long double`
+  holds one in those 6 bytes after the lowered form, under both
+  backends; the lowered form compiles under `-pedantic-errors` in the
+  four dialects, and the same text without `__extension__` does not.
+- [Medium] `Expressions.gives_dependence` lists the constructs that
+  give dependence on a type parameter, where design 7.1 rule 4 wants it
+  from the one place that gives a layout; the list refuses valid
+  programs (`char buf[sizeof w.b];` with a member `b` of a record that holds a `T`,
+  `char b[({ 4; })];`, and a `const volatile` object, which is no
+  constant). A dependent `const` object reaches an `"i"` or `"n"`
+  operand of `__asm__`, which asks for a constant.
+- [Low] Generic functions, readability: `dependent_objects` stores a
+  span that nothing reads; the message of `parameter_dependent` and the
+  meaning of TC0076 name too few sources of dependence; "in a generic
+  function" is held both in `Declarations.state.in_generic_function`
+  and in `Expressions.enclosing.in_generic`.
+- [Medium] GCC 16 warns of `unused` in a type name on a structure
+  (`sizeof(struct s __attribute__((unused)))`, "ignoring attributes
+  applied to 'struct s' after definition") and not on a `short`, so the
+  fact that design 13.3 records of `unused` does not hold under
+  `-Werror` there. Decide whether a warning breaks the fact.
+- [High] Package 3.1, the place before an ellipsis (rule 6). Where
+  the parameter list
+  of a generic function ends in an ellipsis, the head is refused if
+  its last named parameter has the type of a type parameter, read
+  from the type and not from its spelling. This is a security item:
+  `va_start` on that parameter is undefined in the instance for
+  `char`, which a call deduces. Pairs: `generic(T) int f(T last,
+  ...);` is refused, as it is with `const T last`, `_Atomic(T)
+  last`, `__typeof__(T) last` and, with `type same(T) = T;`,
+  `same(T) last`; `T *last`, `T last[4]`, `vector(T) last`,
+  `T first, int count, ...` and `void (*log)(T last, ...), ...`
+  stand, as does `int f(char last, ...)` without `generic`. The
+  reason is tested on the backend: C text of the instance for
+  `char` of the refused head, with `va_start(ap, last)` in its
+  body, draws `-Wvarargs` from Apple Clang, and the same text with
+  `int count` before the ellipsis draws nothing.
 - [High] The instance budget (design 3.5 rule 7), a security item: a
   source of a few lines must not make `typec` read without bound.
   - `Declarations.max_instance_tokens` is 524288, a value taken for
@@ -1539,20 +1503,6 @@ types (design 13.3).
     what the larger value costs it.
   - Package 3.6 measures the tokens that each unit of the container
     library and of the pilot counts (P30).
-- [Medium] Generic functions, from the review of package 3.1:
-  attributes inside the declarator of a generic prototype
-  (`void (__attribute__((cold)) f)(T);`) pass rule 6, which wants one
-  check over every attribute of the declaration. Attribute arguments
-  that C asks to be constant (`aligned(sizeof(x))`, `vector_size`)
-  bypass `refuse_dependent`; the rule of design 13.3 refuses them by
-  the identifiers they name, so they need no evaluation.
-- [Medium] Design 7.1 rule 3 refuses every declaration with linkage in
-  the body of a generic function, whatever its type, and TC0075
-  refuses only one whose type mentions a type parameter:
-  `struct s { int a; }; extern struct s x;` passes, though every
-  instance defines its own `struct s` and two instances declare `x`
-  with two types. Refuse by the linkage alone. Pair: `extern int
-  count;` in a generic body is refused and `static T cache;` stands.
 - [Medium] `Ctype.compatible` answers `Depends_on` for two unknown leaf
   types of one spelling (`_Float16`, `_Complex int`), so
   `pointers_differ` refuses `void (*q)(T, _Float16) = p;` where `p` has
@@ -1567,13 +1517,25 @@ types (design 13.3).
   of function types, and give `Variable` no "same" answer under
   `~exact:true`. Pair: that head is refused and `void (*g)(size_t n,
   T a[n])`, which C adjusts to a pointer, stands.
-- [Low] Design 7.1 rule 6 refuses every tag that the head of a generic
-  function declares, and the parser refuses only one with a body: a
-  tag that a parameter list is the first to mention
-  (`generic(T) void f(T, struct s *p);` where no `s` is visible) has
-  prototype scope, so the prototype and the definition of an instance
-  name two types. Refuse the first mention as design 3.5 rule 8 states
-  it. Pair: that head is refused, and stands after `struct s;`.
+- [Medium] Generic functions: only `_Generic` and
+  `__builtin_types_compatible_p` ask `Ctype.compatible_by_argument`;
+  every other caller of `Ctype.compatible` takes "the argument decides"
+  for "incompatible", so `vector(T) a = vi;` with `vi` a `vector(int)`
+  passes, valid only in the `int` instance, and `vector(T) a[1] =
+  { vi };` initialises `a[0]` whole in that instance and `a[0].data` in
+  the others (`Initialiser.reach_of`). Give `compatible` the three
+  answers, so every caller handles `Argument_decides`, as design 7.1
+  rule 4 asks of one comparison.
+- [Medium] Generic functions: whether the subject of an attribute
+  mentions a type parameter is noted where the attribute is read
+  (`Declarations.note_subjects`), so `struct __attribute__((packed)) s;`
+  before `struct s { char c; T a; }` passes, and Clang carries `packed`
+  onto the definition, where GCC 16 does not. Record the subject and
+  ask `mentions_opaque` in `check_generic_attribute`, after the whole
+  definition is read.
+- [Low] The message of a generic prototype that holds `_Alignas`
+  (`Parser.check_generic_prototype`) says that `_Noreturn` and
+  attributes stand on the definition; C refuses the specifier there.
 - [Low] Generic functions, readability and representation:
   `in_generic_function` is an ambient flag that `earlier_entity` and
   `declare_in` read; pass the fact explicitly from

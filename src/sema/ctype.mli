@@ -647,6 +647,22 @@ val compatible :
     Parts that differ where they are known make two types incompatible
     whatever their unknown parts are. *)
 
+(** The answer of a comparison in the definition of a generic function,
+    where a type parameter stands for every argument (design 7.1 rule
+    4). *)
+type compatibility =
+  | Every_argument of bool Unknown.answer
+      (** the answer of {!compatible}, the same for every argument *)
+  | Argument_decides
+      (** a type parameter meets another type in a part that decides *)
+
+val compatible_by_argument :
+  Target.t -> tags -> Typec_cpp.Location.t -> t -> t -> compatibility
+(** {!compatible}, but that a type parameter compared with another type
+    is compatible with it for some arguments and not for others: the
+    argument decides unless a part where no type parameter meets another
+    type differs. *)
+
 val same_type :
   ?exact:bool ->
   Target.t -> tags -> Typec_cpp.Location.t -> t -> t -> bool Unknown.answer

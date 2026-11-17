@@ -88,6 +88,12 @@ val noreturn : string -> bool
 (** Whether the builtin of the name does not return, as GCC and Clang
     declare it. *)
 
+val values_decide : string -> bool
+(** Whether the values of the arguments alone decide the result of the
+    builtin of the name, as they decide [__builtin_bswap32] and
+    [__builtin_expect], and no size, class or folding of the backend
+    does (design 7.1 rule 4). *)
+
 val c_type : Target.t -> c_type -> (Ctype.t, Ctype.error) result
 val function_type : Target.t -> prototype -> (Ctype.t, Ctype.error) result
 

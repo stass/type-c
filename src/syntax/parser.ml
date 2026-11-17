@@ -112,11 +112,16 @@ type try_views = { place : view; place_before : int; own : view }
    index of a token: at the [(] of the arguments of each attribute, and
    for an attribute the span of its arguments, at each pragma token, at
    each [try], and at each statement that lowering writes around for a
-   defer (parser.mli). *)
+   defer (parser.mli). [occurrences] holds each attribute and alignment
+   specifier by its first token, which {!attributes_in} lists, and
+   [alignments] the scope at the operand of each alignment specifier, by
+   the operand's first token. *)
 type statement_view = { view : view; depth : scope_depth }
 
 type views = {
   attributes : (span * view) Places.t;
+  occurrences : attribute Places.t;
+  alignments : view Places.t;
   pragmas : view Places.t;
   tries : try_views Places.t;
   statements : statement_view Places.t;
@@ -1599,16 +1604,31 @@ let named_tag state (name : identifier) entry =
     fail_claimed state name "tag" "is not available to Type-C text";
   Names entry.tag
 
+(* An instance writes the head of a generic function as its prototype
+   and again at its definition, so a tag that the head declares would
+   name two types, and a body there would define its type twice (design
+   7.1 rule 6). *)
+let refuse_tag_in_generic_head state =
+  if state.in_generic_head then
+    fail state
+      (Rule.message Generic_function_form
+         "the head of a generic function declares no structure, union \
+          or enumeration tag, which every instance would declare twice")
+
+let declared_tag state name ~implicit =
+  refuse_tag_in_generic_head state;
+  declare_tag state name ~implicit
+
 (* A tag that [declares] by its form declares itself in the current
    scope (6.7.2.3p6, p7); any other names the visible tag (p9), or
    declares one where none is visible (p8). *)
 let bound_tag state (name : identifier) ~declares =
   let binding =
-    if declares then declare_tag state name ~implicit:false
+    if declares then declared_tag state name ~implicit:false
     else
       match Scope.find_tag state.scope name.node with
       | Some entry -> named_tag state name entry
-      | None -> declare_tag state name ~implicit:true
+      | None -> declared_tag state name ~implicit:true
   in
   { name; binding }
 
@@ -2209,11 +2229,31 @@ let attribute_name state =
   | End_of_input ->
       fail_expected state "an attribute name"
 
+(* Every attribute and alignment specifier is recorded here, the one
+   place that makes them, so that {!attributes_in} misses none. *)
+let note_occurrence state (attribute : attribute) =
+  state.views <-
+    {
+      state.views with
+      occurrences =
+        Places.add attribute.span.first attribute state.views.occurrences;
+    }
+
+let parsed_attribute state start name arguments =
+  let attribute = finish state start { name; arguments } in
+  note_occurrence state attribute;
+  attribute
+
+let attributes_in (views : views) (span : span) =
+  Places.to_seq_from span.first views.occurrences
+  |> Seq.take_while (fun (first, _) -> first <= span.last)
+  |> Seq.map snd |> List.of_seq
+
 let attribute state =
   let start = state.position in
   let name = attribute_name state in
   let arguments = attribute_arguments state in
-  finish state start { name; arguments }
+  parsed_attribute state start name arguments
 
 (* After the [__attribute__], up to and including its [))]: attributes
    separated by commas, where an empty one is allowed. *)
@@ -2287,7 +2327,7 @@ let standard_attribute state =
   let start = state.position in
   let name = standard_attribute_name state in
   let arguments = attribute_arguments state in
-  Option.map (fun name -> finish state start { name; arguments }) name
+  Option.map (fun name -> parsed_attribute state start name arguments) name
 
 (* From the [[[] to the []]]: attributes separated by commas, where an
    empty one is allowed. *)
@@ -2986,7 +3026,7 @@ and specifier state word ~alone =
         let type_name = type_name state in
         expect state P.Right_paren "`)` after the type name of `_Atomic`";
         Type_specifier (Atomic_type type_name)
-    | Alignas_word -> Alignment_specifier (alignment state)
+    | Alignas_word -> Alignment_specifier (alignment state start)
     | Struct_word kind -> Type_specifier (struct_or_union state kind ~alone)
     | Enum_word -> Type_specifier (enum_specifier state ~alone)
     | Typeof_word -> Type_specifier (typeof_specifier state)
@@ -3055,13 +3095,28 @@ and typeof_specifier state =
   expect state P.Right_paren "`)` after the operand of `typeof`";
   specifier
 
-and alignment state =
+(* Design 13.3 reads an alignment specifier as the attribute [aligned],
+   recorded at its [_Alignas], at [start], with its operand, which typing
+   reads, as its arguments, whose identifiers the rule of a generic reads
+   as those of any attribute. *)
+and alignment state start =
+  let name = finish state start "aligned" in
   expect state P.Left_paren "`(` after `_Alignas`";
+  let view = view_here state in
+  let operand_start = state.position in
   let alignment =
     read_alignment_operand state (fun () ->
         if starts_type_name state 0 then Alignas_type (type_name state)
         else Alignas_expression (constant_expression state))
   in
+  let operand = span_from state operand_start in
+  state.views <-
+    {
+      state.views with
+      alignments = Places.add operand.first view state.views.alignments;
+    };
+  note_occurrence state
+    (finish state start { name; arguments = Some operand });
   expect state P.Right_paren "`)` after the operand of `_Alignas`";
   alignment
 
@@ -4874,7 +4929,7 @@ let check_generic_head state specifiers (first : scoped_declarator) =
 
 (* A declaration that is no definition writes nothing into an instance,
    so it carries nothing that the backend would not be told. *)
-let check_generic_prototype state specifiers (first : scoped_declarator) =
+let check_generic_prototype state start specifiers =
   let refuse token =
     fail_generic_form state token
       "`_Noreturn` and attributes stand on the definition of a generic \
@@ -4882,13 +4937,13 @@ let check_generic_prototype state specifiers (first : scoped_declarator) =
   in
   let carried (specifier : declaration_specifier spanned) =
     match specifier.node with
-    | Function_specifier Noreturn | Attributes _ -> refuse specifier.span.first
+    | Function_specifier Noreturn -> refuse specifier.span.first
     | Storage_class _ | Type_specifier _ | Type_qualifier _
-    | Function_specifier Inline | Alignment_specifier _ ->
+    | Function_specifier Inline | Alignment_specifier _ | Attributes _ ->
         ()
   in
   List.iter carried specifiers;
-  match first.attributes with
+  match attributes_in state.views (span_from state start) with
   | attribute :: _ -> refuse attribute.span.first
   | [] -> ()
 
@@ -4928,7 +4983,7 @@ let generic_form state =
           in
           (Generic_definition definition, first.declarator)
       | Some _ | None ->
-          check_generic_prototype state specifiers first;
+          check_generic_prototype state start specifiers;
           (generic_prototype state start specifiers first, first.declarator))
   | Complete declaration -> fail_one_function state declaration.span.first
 
@@ -5070,7 +5125,9 @@ type scopes = {
 let attribute_view (views : views) (attribute : attribute) =
   Option.map
     (fun (arguments : span) ->
-      snd (Places.find arguments.first views.attributes))
+      match Places.find_opt arguments.first views.alignments with
+      | Some view -> view
+      | None -> snd (Places.find arguments.first views.attributes))
     attribute.node.arguments
 
 let attributes_within (views : views) (span : span) =
@@ -5111,6 +5168,8 @@ let parse_with_scopes ~keywords reader =
       views =
         {
           attributes = Places.empty;
+          occurrences = Places.empty;
+          alignments = Places.empty;
           pragmas = Places.empty;
           tries = Places.empty;
           statements = Places.empty;
