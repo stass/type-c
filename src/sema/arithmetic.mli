@@ -40,17 +40,27 @@ val default_argument_promotion : Target.t -> ?bit_field_width:int -> t -> t
     that holds them all. *)
 type enumerator_range = { negative : bool; width : int }
 
-val enum_compatible_type : Target.t -> enumerator_range -> Integer.t option
-(** The integer type compatible with an enumerated type (C11 6.7.2.2p4),
-    or [None] when no standard integer type holds the values.
-    {e Provisional}: the choice is implementation-defined and no predefined
-    macro states it. The rule is that of GCC and Clang without
-    [-fshort-enums]: the first of [unsigned int], [unsigned long] and
-    [unsigned long long] that holds the values when none is negative, else
-    the first of [int], [long] and [long long]. Wider values are outside
-    the profile: GCC gives the enumeration an [__int128] type, Clang
-    truncates them. [test/run/types.t] checks the rule against both
-    backends on its host. *)
+val enum_compatible_type :
+  Target.t -> packed:bool -> enumerator_range -> Integer.t option
+(** The integer type compatible with an enumerated type without a fixed
+    type (C11 6.7.2.2p4), or [None] when no standard integer type holds
+    the values: the first of a list that holds them (design 13.4). Under
+    the int-sized representation of [target] the list is [unsigned int],
+    [unsigned long] and [unsigned long long] when no value is negative,
+    else [int], [long] and [long long]. Under the short representation,
+    or when the specifier that holds the list is [packed], it begins with
+    [unsigned char] and [unsigned short], or [signed char] and [short].
+    The rule goes by rank, not size, as where [int] has 16 bits.
+    {e Provisional} for the compilers that are not measured. Wider values
+    are outside the profile: GCC gives the enumeration an [__int128]
+    type, Clang truncates them. [test/run/types.t] checks the rule
+    against the backends on its host. *)
+
+val promote_enumeration : Target.t -> Integer.t -> promoted
+(** The integer promotion of an object of an enumerated type compatible
+    with the integer type: [int] where its rank is below that of [int],
+    even where [int] does not hold its values, as Clang for [msp430-elf]
+    promotes [unsigned short] (design 13.4); else as {!promote}. *)
 
 val name : t -> string
 (** The type spelled as in C, such as [_Complex double]. *)

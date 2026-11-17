@@ -11,8 +11,7 @@ backends.sh names, for two targets (its second_target), in C11 so that
 `int ()` declares no prototype.
 
   $ probe() {
-  >   "$@" -std=gnu11 -dM -E -x c /dev/null > macros &&
-  >   ./type_probe.exe macros > probe.c &&
+  >   ./type_probe.exe "$@" -std=gnu11 > probe.c &&
   >   "$@" -std=gnu11 -fsyntax-only probe.c
   > }
   $ . ./backends.sh
@@ -20,3 +19,18 @@ backends.sh names, for two targets (its second_target), in C11 so that
   $ probe "$clang" $second_target
   $ probe "$gcc"
   $ probe "$gcc" $second_target
+
+Under short enumerations the rule begins its lists with the types of
+lower rank than int, and the target query learns that representation. The
+embedded targets are checked where Clang has them, each under both
+representations; msp430 has an int of 16 bits, where the rule goes by rank
+and an enumeration below int promotes to int.
+
+  $ probe "$clang" -fshort-enums
+  $ probe "$gcc" -fshort-enums
+  $ for target in thumbv7m-none-eabi aarch64-none-elf msp430-elf; do
+  >   if "$clang" --target=$target -E -x c /dev/null > /dev/null 2>&1; then
+  >     probe "$clang" --target=$target -fshort-enums || echo "$target short"
+  >     probe "$clang" --target=$target -fno-short-enums || echo "$target int"
+  >   fi
+  > done

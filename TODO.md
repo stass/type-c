@@ -2181,3 +2181,18 @@ types (design 13.3).
   statement is read and the walk that raises `Defer_in_deferred` runs
   after the outer one. Pilot B then undercounts the latter. Check
   "inside a deferred statement" first, at one place (design 6 rule 11).
+
+- [Medium] Constant comparisons promote an enumeration operand by
+  `Arithmetic.promote` of its compatible type
+  (`Integer_constant.compared_type`, reached from `comparison_constant`
+  in src/sema/expressions.ml), while typing promotes it by
+  `Ctype.promoted_arithmetic`: where int has 16 bits,
+  `(enum P)40000 > 0` for `enum __attribute__((packed)) P { PA = 40000 }`
+  is false in Clang for msp430-elf and true in typec. The comparison
+  should take the promoted types from typing, so promotion has one source.
+- [Medium] A block-scope `enum __attribute__((packed)) E;` that names an
+  outer `E` is a new tag in Clang, which carries `packed` to the block's
+  list (`sizeof (enum E) == 1`), and the outer tag in GCC (size 4);
+  typec follows GCC, records the `packed` on the outer enumeration and
+  gives the block's list a known `unsigned int`, where design 13.4 wants
+  an unknown type with either backend.

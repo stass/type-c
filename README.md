@@ -1750,7 +1750,8 @@ as a config file, a wrapper or a target whose default differs, fail in step
 3: the C of a unit with a Type-C construct ends, after a line marker
 for `<typec>` with flag 3, with a static assertion of each such type
 that `typec` assumes, whose message names the option that would break
-it. Flag 3 keeps the user's warning options off typec's own text. An option
+it; that of the enumeration rule also states the representation that
+`typec` expects. Flag 3 keeps the user's warning options off typec's own text. An option
 that changes a macro the model reads, such as
 `-funsigned-char` or `-fshort-wchar`, reaches the target model.
 It refuses `-fpack-struct` without a value, under which GCC
@@ -1791,7 +1792,8 @@ signedness of `char`, the types behind `size_t` and the other standard
 typedefs, the byte order and `__STDC_VERSION__`, one `field: value` per
 line, and last the enumeration representation, `int-sized` or `short`
 (as under `-fshort-enums`), which no macro states: `typec` learns it by
-two compiles of a probe, `BACKEND OPTIONS -fsyntax-only -w -x c -`,
+two compiles of a probe,
+`BACKEND OPTIONS -fsyntax-only -w -dumpdir DIR/ -x c -`,
 each of which compiles under one representation alone. The other
 arguments are the backend options that select the
 target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu17`;

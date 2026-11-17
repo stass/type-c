@@ -47,6 +47,8 @@ the input when the output has another name.
   $ same_outputs $gcc -fstack-usage -fcallgraph-info -o a
   $ same_outputs $clang -g -gsplit-dwarf -o out/prog
   $ same_outputs $gcc -g -gsplit-dwarf -o out/prog
+  $ same_outputs $clang -fshort-enums -o a
+  $ same_outputs $gcc -fshort-enums -fstack-usage -fcallgraph-info -o a
 
 typec leaves nothing in TMPDIR.
 

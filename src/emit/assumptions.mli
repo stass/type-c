@@ -29,9 +29,12 @@ val assertions : Typec_sema.Target.t -> string list
     - an unsuffixed floating constant has type [double] (C11 6.4.4.2p4),
       which GCC's [-fsingle-precision-constant] breaks;
     - an enumeration of the value 0 has the compatible type that
-      {!Typec_sema.Arithmetic.enum_compatible_type} gives it, which
-      [-fshort-enums] narrows. One enumeration stands for every one, as
-      the options that change the rule change it for the whole unit.
+      {!Typec_sema.Arithmetic.enum_compatible_type} gives it under the
+      representation of [target], which [-fshort-enums] or
+      [-fno-short-enums] changes; the message names the representation
+      and the option that gives the other. One enumeration stands for
+      every one, as the options that change the rule change it for the
+      whole unit.
       {e Provisional}: that a target whose rule differs also differs at
       the value 0; [test/run/types.t] run on more targets would settle
       it. Its enumerator, [__tc_enum_probe], is declared at file scope

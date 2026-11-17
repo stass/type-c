@@ -45,7 +45,7 @@
 
 (executable
  (name type_probe)
- (libraries typec_sema))
+ (libraries typec_sema typec_driver))
 
 (cram
  (applies_to types)

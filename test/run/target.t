@@ -184,9 +184,6 @@ and Clang shows it again in the line it quotes.
   > type hue = enum colour;
   > EOF
   $ assumptions() { grep error: log | grep -o 'typec assumes [^"]*'; }
-  $ typec --cc=$clang -Xclang -fshort-enums -c lowered.tc 2> log ||
-  >   assumptions
-  typec assumes an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)
   $ cat > gcc-wrapped <<EOF
   > #!/bin/sh
   > exec "$gcc" -fshort-enums -funsigned-bitfields \
@@ -196,7 +193,29 @@ and Clang shows it again in the line it quotes.
   $ typec --cc=./gcc-wrapped -c lowered.tc 2> log || assumptions
   typec assumes plain int bit-fields are signed (-funsigned-bitfields?)
   typec assumes unsuffixed floating constants are double (-fsingle-precision-constant?)
-  typec assumes an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)
+
+The target query learns the enumeration representation under the options
+and the wrapper that the compile has, so -fshort-enums is no such route;
+the enumeration assertion fails where the compile has another
+representation than the query, and its message states the one that typec
+expects.
+
+  $ typec --cc=$clang -Xclang -fshort-enums -c lowered.tc
+  $ typec --cc=./gcc-wrapped -fno-unsigned-bitfields \
+  >   -fno-single-precision-constant -c lowered.tc
+  $ compile_adds() {
+  >   printf '#!/bin/sh\ncase " $* " in *" -c "*) exec %s "$@" %s;; esac\n' \
+  >     "'$clang'" "$1" > clang-wrapped
+  >   printf 'exec %s "$@"\n' "'$clang'" >> clang-wrapped
+  >   chmod +x clang-wrapped
+  > }
+  $ compile_adds -fshort-enums
+  $ typec --cc=./clang-wrapped -c lowered.tc 2> log || assumptions
+  typec assumes int-sized enumerations: an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)
+  $ compile_adds -fno-short-enums
+  $ typec --cc=./clang-wrapped -fshort-enums -c lowered.tc 2> log ||
+  >   assumptions
+  typec assumes short enumerations: an enumeration of small nonnegative values is compatible with unsigned char (-fno-short-enums?)
 
 The assertions stand under a line marker with flag 3, so the warnings
 that judge the user's code pass over them, as over a system header;

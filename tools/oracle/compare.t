@@ -183,3 +183,19 @@ An allow-list entry needs a reason, and a record line its seven fields:
   $ ./compare.exe "$clang" unit.i bad.records none.allow $options
   compare: bad.records:1: a backslash that starts no escape
   [2]
+
+Under short enumerations, which the target query learns, typec gives an
+enumeration and its promotion the types Clang gives them.
+
+  $ cat > short.i <<'EOF'
+  > # 1 "short.c"
+  > enum small { S0 } s;
+  > enum __attribute__((packed)) wide { W0 = 300 } w;
+  > enum negative { N0 = -1, N1 = 200 } n;
+  > unsigned long f(void) { return sizeof s + sizeof w + +s + w + n + S0; }
+  > EOF
+  $ ./oracle.exe "$clang" short.i short.records $options -fshort-enums
+  short.i: 29 expressions, 0 without a source range
+  $ ./compare.exe "$clang" short.i short.records none.allow $options \
+  >   -fshort-enums
+  short.i: 18 agree, 0 disagree, 0 allowed, 0 unknown, 0 unresolved, 0 Clang-only, 0 typec-only

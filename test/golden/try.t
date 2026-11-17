@@ -1419,13 +1419,13 @@ arithmetic type there converts nothing and stands.
   $ cat > list_unknown.tc <<'EOF'
   > result(double, int) f(void);
   > result(int, int) h(void) {
-  >   enum __attribute__((packed)) e { D };
+  >   enum __attribute__((mode(QI))) e { D };
   >   enum e z[1] = { try f() };
   >   return Ok(0);
   > }
   > EOF
   $ ./golden.exe list_unknown.tc
-  list_unknown.tc:4: error: the type that a braced list converts the value of try to depends on the attribute 'packed' at list_unknown.tc:3, which typec does not type yet [unsupported]
+  list_unknown.tc:4: error: the type that a braced list converts the value of try to depends on the attribute 'mode' at list_unknown.tc:3, which typec does not type yet [unsupported]
   [1]
   $ cat > list_unplaced.tc <<'EOF'
   > result(double, int) f(void);

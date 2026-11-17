@@ -2433,7 +2433,8 @@ let attributes state =
 
 (* C23 attribute specifiers (C23 6.7.13), which typec reads where GCC and
    Clang both do in C11: before the specifiers of a declaration, a
-   parameter or a member, and before the [;] of a null statement. Each
+   parameter or a member, after [enum], and before the [;] of a null
+   statement. Each
    attribute is read as the GNU attribute it means, so that one table of
    effects serves both forms: [gnu::name] is the GNU attribute [name], a
    standard attribute is the GNU attribute of the same meaning, and
@@ -3357,7 +3358,10 @@ and member_declarator state =
    [enum e;] names the visible tag (6.7.2.3p9), as GCC reads it, where
    Clang declares a new one. *)
 and enum_specifier state ~alone =
-  let leading = attributes state in
+  (* C23 6.7.2.2 reads attribute specifiers after [enum], as GCC and
+     Clang do in C11, before the GNU ones, the order GCC takes. *)
+  let standard = standard_attributes state in
+  let leading = standard @ attributes state in
   let tag_name = optional_identifier state in
   let underlying =
     if

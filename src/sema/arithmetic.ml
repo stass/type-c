@@ -77,20 +77,37 @@ let default_argument_promotion target ?bit_field_width arithmetic =
   | Real Float -> Real Double
   | promoted -> promoted
 
-(* Provisional: GCC and Clang without -fshort-enums; see the interface. *)
-let signed_enum_candidates = [ Integer.Int; Long; Long_long ]
+(* The lists of the enumeration rule (design 13.4): the short
+   representation and [packed] put the two types of lower rank than int
+   before the int-sized ones. *)
+let int_sized_signed_candidates = [ Integer.Int; Long; Long_long ]
 
-let unsigned_enum_candidates =
+let int_sized_unsigned_candidates =
   [ Integer.Unsigned_int; Unsigned_long; Unsigned_long_long ]
 
-let enum_compatible_type target range =
-  let candidates =
-    if range.negative then signed_enum_candidates else unsigned_enum_candidates
-  in
+let short_signed_candidates =
+  Integer.Signed_char :: Short :: int_sized_signed_candidates
+
+let short_unsigned_candidates =
+  Integer.Unsigned_char :: Unsigned_short :: int_sized_unsigned_candidates
+
+let enum_candidates (target : Target.t) ~packed ~negative =
+  let short = packed || target.enum_representation = Short in
+  match (short, negative) with
+  | false, false -> int_sized_unsigned_candidates
+  | false, true -> int_sized_signed_candidates
+  | true, false -> short_unsigned_candidates
+  | true, true -> short_signed_candidates
+
+let enum_compatible_type target ~packed range =
   List.find_opt
     (fun integer ->
       holds target integer ~signed:range.negative ~width:range.width)
-    candidates
+    (enum_candidates target ~packed ~negative:range.negative)
+
+let promote_enumeration target integer =
+  if Integer.rank integer < Integer.rank Int then Integer Integer.Int
+  else promote target (Integer integer)
 
 let floating_name = function
   | Float -> "float"

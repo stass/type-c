@@ -271,6 +271,11 @@ type state = {
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
       (* the structure of each [type N;], which its variant completes *)
+  packed_earlier : (int, Tree.attribute) Hashtbl.t;
+      (* by the identity of an enumeration, the first [packed] on a
+         specifier of it without its list: GCC 16 ignores it at the list
+         and Apple Clang 21 carries it there, so it makes the type of a
+         list without [packed] unknown (design 13.4) *)
   generics : (string, generic) Hashtbl.t;
   universe_aliases : (Tree.reference, Tree.type_name) Hashtbl.t;
       (* the type that each non-generic type declaration of the universe
@@ -1023,12 +1028,17 @@ type derived = {
    nothing they compute, [Sets_noreturn] marks a function that does not
    return, as [_Noreturn] does (design 4.4), [Sets_gnu_inline] gives a
    function the GNU89 meaning of [inline] and [extern inline], and
-   [Makes_overload] makes a function one of a Clang overload set. *)
+   [Makes_overload] makes a function one of a Clang overload set and
+   [Packs_enumeration] gives an enumeration the short list of the
+   enumeration rule, which only the specifier that holds its list records
+   (design 13.4); anywhere else it is unknown, as an attribute without
+   an entry is. *)
 type attribute_effect =
   | Neutral
   | Sets_noreturn
   | Sets_gnu_inline
   | Makes_overload
+  | Packs_enumeration
 
 (* An attribute that the declarations accept. [clang_spelling] says that
    Clang also accepts it as [[clang::name]] in a C23 specifier; for any
@@ -1061,7 +1071,8 @@ let overloadable_attribute = "overloadable"
    [aligned] is neutral because typec leaves [_Alignof] and the sizes of
    records and arrays to the backend (design P16) and the attribute does
    not change the size of a scalar; it leaves this table once typec
-   computes a layout. The rest shape diagnostics or code. Any other
+   computes a layout. [packed] shapes the type of an enumeration; the
+   rest shape diagnostics or code. Any other
    attribute may change a type, as [mode] and [vector_size] do, so the
    type it applies to is unknown (design 13.3). The entries with Clang's
    spelling are those for which Apple Clang 21 gives a nonzero
@@ -1105,6 +1116,7 @@ let attribute_effects =
     gnu_only "noreturn" Sets_noreturn;
     also_clang "not_tail_called" Neutral;
     gnu_only "nothrow" Neutral;
+    gnu_only "packed" Packs_enumeration;
     mark (also_clang overloadable_attribute Makes_overload);
     gnu_only "pure" Neutral;
     gnu_only "returns_nonnull" Neutral;
@@ -1160,6 +1172,11 @@ let read_attributes ~onto (attributes : Tree.attribute list) =
         with_effect { attributed with gnu_inline = true } attribute
     | Makes_overload ->
         with_effect { attributed with overloadable = true } attribute
+    | Packs_enumeration ->
+        (* Only an enumeration specifier records it, by
+           [unrecorded_enum_attributes]; elsewhere it is unknown. *)
+        { attributed with
+          unknown_attribute = first attributed.unknown_attribute attribute }
   in
   (* What design 13.5 reads of the attributes of a function. *)
   let with_form_facts attributed attribute entry =
@@ -1199,6 +1216,11 @@ let unrecorded attributed =
 
 let first_unrecorded_attribute attributes =
   unrecorded (read_attributes ~onto:no_attributes attributes)
+
+let packs_enumeration (attribute : Tree.attribute) =
+  match find_attribute_entry attribute.node.name.node with
+  | Some { attribute_effect = Packs_enumeration; _ } -> true
+  | Some _ | None -> false
 
 let attribute_unknown state (attribute : Tree.attribute) kind =
   let construct = "the attribute " ^ quote attribute.node.name.node in
@@ -1803,10 +1825,18 @@ and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
       obscured_by state attributes (Ctype.record record)
   | Enum { tag; enumerators; underlying; attributes } ->
       let fixed = Option.map (fixed_type state span) underlying in
+      let listed = enumerators <> None in
       let attribute =
-        first_unrecorded_attribute (enum_attributes ~fixed attributes)
+        first_unrecorded_attribute
+          (unrecorded_enum_attributes ~fixed ~listed attributes)
       in
-      let enum = enum_type state span ~attribute ~fixed tag enumerators in
+      let packed =
+        if fixed = None then List.find_opt packs_enumeration attributes
+        else None
+      in
+      let enum =
+        enum_type state span ~attribute ~packed ~fixed tag enumerators
+      in
       note_subject state attributes (Ctype.enum enum);
       obscured state attribute (Ctype.enum enum)
   | Typeof_type type_name ->
@@ -1951,8 +1981,9 @@ and note_completed state (span : Tree.span) tag =
     Hashtbl.replace state.external_facts.completed tag (location_of state span)
 
 (* [fixed] is the fixed type of the specifier (C23 6.7.2.2), [attribute]
-   its first attribute that typec does not know. *)
-and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
+   its first attribute whose effect typec does not record there and
+   [packed] its first [packed] where it has no fixed type. *)
+and enum_type state span ~attribute ~packed ~fixed (tag : Tree.tag option)
     enumerators =
   (* GNU: an enumeration declared before its list, which 6.7.2.3p3 does
      not allow, as both backends accept it. *)
@@ -1987,24 +2018,33 @@ and enum_type state span ~attribute ~fixed (tag : Tree.tag option)
       Option.iter (define_fixed_enum state span enum integer) enumerators
   | None, Some enumerators ->
       checked state span (Ctype.check_unfixed_list state.tags enum);
-      define_enum state span ~attribute enum enumerators
-  | None, None -> ());
+      let attribute =
+        match (attribute, packed) with
+        | Some _, _ | None, Some _ -> attribute
+        | None, None -> Hashtbl.find_opt state.packed_earlier enum.enum_id
+      in
+      define_enum state span ~attribute ~packed:(packed <> None) enum
+        enumerators
+  | None, None ->
+      Option.iter
+        (fun packed ->
+          if not (Hashtbl.mem state.packed_earlier enum.enum_id) then
+            Hashtbl.replace state.packed_earlier enum.enum_id packed)
+        packed);
   enum
 
-(* [packed] narrows the integer type of an enumeration to the narrowest
-   that holds its values; a fixed type leaves it nothing to narrow, and
-   GCC and Clang ignore it there. *)
-and enum_attributes ~fixed attributes =
-  match fixed with
-  | None -> attributes
-  | Some _ ->
-      List.filter
-        (fun (attribute : Tree.attribute) ->
-          attribute.node.name.node <> "packed")
-        attributes
+(* The attributes of an enumeration specifier whose effect is not recorded
+   there. [packed] gives the short list to the enumeration whose list it
+   stands with; a fixed type leaves it nothing to narrow, and GCC and
+   Clang ignore it there. On another specifier of an enumeration without
+   a fixed type it is not recorded. *)
+and unrecorded_enum_attributes ~fixed ~listed attributes =
+  if fixed <> None || listed then
+    List.filter (fun attribute -> not (packs_enumeration attribute)) attributes
+  else attributes
 
 (* The integer type of an enumeration, unknown where an attribute that
-   typec does not know may change it, as [packed] and [mode] do. *)
+   typec does not record there may change it, as [mode] does. *)
 and attributed_integer state attribute (integer : Integer.t Unknown.answer) :
     Integer.t Unknown.answer =
   match attribute with
@@ -2175,8 +2215,8 @@ and check_enumerator_attributes state (name : Tree.identifier) attributes =
 (* The value of each enumerator is known: one the backend evaluates would
    decide the integer type of the enumeration, and with it the types and
    sizes that follow, which typec would have to guess (design P16). *)
-and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
-    =
+and define_enum state span ~attribute ~packed enum
+    (enumerators : Tree.enumerator list) =
   let declare (previous, read) (enumerator : Tree.enumerator) =
     let { Tree.name; declared; attributes; value } = enumerator.node in
     check_enumerator_attributes state name attributes;
@@ -2196,16 +2236,21 @@ and define_enum state span ~attribute enum (enumerators : Tree.enumerator list)
   let _, read = List.fold_left declare (None, []) enumerators in
   let values = List.map (fun (_, _, value) -> value) read in
   let integer =
-    attributed_integer state attribute (Answer (enum_integer state span values))
+    attributed_integer state attribute
+      (Answer (enum_integer state span ~packed values))
   in
   checked state span (Ctype.define_enum state.tags enum integer);
   note_completed state span (Ctype.Named_enum enum);
   (* At the closing brace every enumerator takes its final type (C23
-     6.7.2.2): int when all values fit, else the enumerated type. *)
+     6.7.2.2): int when all values fit, else the enumerated type, or its
+     compatible type where that ranks below int, as Clang for msp430-elf
+     gives it (design 13.4). *)
   let all_int = List.for_all (Integer_constant.fits state.target Int) values in
   let final_type, final_integer =
     match (all_int, integer) with
     | true, _ -> (integer_type state span Int, Integer.Int)
+    | false, Answer integer when Integer.rank integer < Integer.rank Int ->
+        (integer_type state span integer, integer)
     | false, Answer integer -> (Ctype.enum enum, integer)
     | false, Depends_on unknown ->
         fail_needing state span
@@ -2318,9 +2363,9 @@ and successor state span (previous_type, previous) =
            "an enumerator value is too large for every integer type (C11 \
             6.7.2.2p2)")
 
-(* The narrowest range of two's complement integers that holds the
-   values. *)
-and enum_integer state span values =
+(* The compatible type of an enumeration of the values, by the
+   narrowest range of two's complement integers that holds them. *)
+and enum_integer state span ~packed values =
   let negative = List.exists Exact_integer.is_negative values in
   let width_of value =
     let magnitude =
@@ -2334,7 +2379,9 @@ and enum_integer state span values =
   let width =
     List.fold_left (fun width value -> Int.max width (width_of value)) 0 values
   in
-  match Arithmetic.enum_compatible_type state.target { negative; width } with
+  match
+    Arithmetic.enum_compatible_type state.target ~packed { negative; width }
+  with
   | Some integer -> integer
   | None ->
       fail state span
@@ -2998,7 +3045,7 @@ and defined_tag_enum state span tag constructors =
   in
   checked state span
     (Ctype.define_enum state.tags enum
-       (Answer (enum_integer state span values)));
+       (Answer (enum_integer state span ~packed:false values)));
   enum
 
 (* The enumerator [N_C] of each constructor, whose value is its index,
@@ -4983,6 +5030,7 @@ let read target text (scopes : Parser.scopes) =
       type_names = Hashtbl.create 256;
       type_declarations = Hashtbl.create 16;
       incomplete_variants = Hashtbl.create 16;
+      packed_earlier = Hashtbl.create 16;
       generics = Hashtbl.create 16;
       universe_aliases = Hashtbl.create 1;
       applied_at = Ctype.Instances.empty;

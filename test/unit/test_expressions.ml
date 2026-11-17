@@ -399,6 +399,18 @@ let builtins () =
   types ~target:ilp32_long_uint32_gcc "__builtin_bswap32(u)" "unsigned long";
   types ~target:int16 "__builtin_bswap16(u)" "unsigned short";
   types ~target:int16_gcc "__builtin_bswap16(u)" "unsigned int";
+  (* Where int has 16 bits, Clang for msp430-elf promotes an object of an
+     unfixed enumeration below int to int, but a constant of its
+     compatible type, and an enumeration with a fixed type, as C does. *)
+  let declarations =
+    "enum __attribute__((packed)) P { PA = 40000 } p; \
+     enum F : unsigned short { FA = 40000 } f; "
+  in
+  types ~target:int16 ~declarations "PA" "unsigned short";
+  types ~target:int16 ~declarations "+PA" "unsigned int";
+  types ~target:int16 ~declarations "+p" "int";
+  types ~target:int16 ~declarations "+f" "unsigned int";
+  types ~target:int16 ~declarations "+FA" "unsigned int";
   rejects "__builtin_abs()" "6.5.2.2p2";
   (* Of one compiler, or of each in its own way. *)
   types ~target:lp64_gcc "__builtin_setjmp" "int (void *)";
@@ -581,7 +593,7 @@ let bit_field_values () =
   (* The width of an enumerated type whose integer type typec does not
      know is unknown too, and so is GCC's type of the bit-field. *)
   let declarations =
-    "enum __attribute__((packed)) p { P0 }; struct { enum p e : 2; } w; "
+    "enum __attribute__((mode(QI))) p { P0 }; struct { enum p e : 2; } w; "
   in
   both ~declarations "w.e" ~clang:"enum p lvalue :2"
     ~gcc:(bit_field_value ^ " lvalue :2");
@@ -648,9 +660,9 @@ let old_style_definitions () =
     ~clang:"int (long)" ~gcc:"int (long)";
   (* A promoted type that depends on an unknown integer type is unknown. *)
   designates
-    "enum __attribute__((packed)) p { P0 }; \
+    "enum __attribute__((mode(QI))) p { P0 }; \
      int f(a) enum p a; { return 0; } int f(); "
-    ~clang:"int (<the attribute 'packed'>)" ~gcc:old_style;
+    ~clang:"int (<the attribute 'mode'>)" ~gcc:old_style;
   (* The uses compare and convert as unprototyped. *)
   let declarations = "int f(a) int a; { return 0; } " in
   both ~declarations "_Generic(f, int (*)(long): 1L, default: 2)"

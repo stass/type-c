@@ -179,8 +179,9 @@ let check_conversion (name, target, a, b, expected) =
        (Arithmetic.usual_arithmetic_conversions target b a)
        expected
 
-(* A target, a range of enumerator values and the compatible type. *)
-let enum_cases : (string * Target.t * Arithmetic.enumerator_range
+(* A target, a range of enumerator values and the compatible type under
+   int-sized enumerations. *)
+let int_sized_enum_cases : (string * Target.t * Arithmetic.enumerator_range
                  * Integer.t option) list =
   [
     ("zero", lp64, { negative = false; width = 0 }, Some Unsigned_int);
@@ -200,8 +201,72 @@ let enum_cases : (string * Target.t * Arithmetic.enumerator_range
     ("signed 65 bits, LP64", lp64, { negative = true; width = 65 }, None);
   ]
 
-let check_enum (name, target, range, expected) =
-  check ("enum, " ^ name) (Arithmetic.enum_compatible_type target range)
+let short_enums (target : Target.t) =
+  { target with enum_representation = Short }
+
+let lp64_short = short_enums lp64
+let ilp32_short = short_enums ilp32
+let int16_short = short_enums int16
+
+(* A target, whether the enumeration is packed, a range of enumerator
+   values and the compatible type. *)
+let short_enum_cases : (string * Target.t * bool * Arithmetic.enumerator_range
+                       * Integer.t option) list =
+  [
+    ("short zero", lp64_short, false, { negative = false; width = 0 },
+     Some Unsigned_char);
+    ("packed zero", lp64, true, { negative = false; width = 0 },
+     Some Unsigned_char);
+    ("packed fixed width", ilp32, true, { negative = false; width = 8 },
+     Some Unsigned_char);
+    ("short 9 bits", ilp32_short, false, { negative = false; width = 9 },
+     Some Unsigned_short);
+    ("short minus one", lp64_short, false, { negative = true; width = 1 },
+     Some Signed_char);
+    ("short signed 9 bits", lp64_short, false, { negative = true; width = 9 },
+     Some Short);
+    ("short signed 17 bits", lp64_short, false,
+     { negative = true; width = 17 }, Some Int);
+    ("short 33 bits", lp64_short, false, { negative = false; width = 33 },
+     Some Unsigned_long);
+    (* By rank and not by size: where int has 16 bits, 256 is unsigned
+       short under short enumerations and unsigned int without. *)
+    ("16-bit int, short 9 bits", int16_short, false,
+     { negative = false; width = 9 }, Some Unsigned_short);
+    ("16-bit int, 9 bits", int16, false, { negative = false; width = 9 },
+     Some Unsigned_int);
+    ("16-bit int, packed 16 bits", int16, true,
+     { negative = false; width = 16 }, Some Unsigned_short);
+    ("16-bit int, packed 17 bits", int16, true,
+     { negative = false; width = 17 }, Some Unsigned_long);
+  ]
+
+let enum_cases =
+  short_enum_cases
+  @ List.map
+      (fun (name, target, range, expected) ->
+        (name, target, false, range, expected))
+      int_sized_enum_cases
+
+let check_enum (name, target, packed, range, expected) =
+  check ("enum, " ^ name)
+    (Arithmetic.enum_compatible_type target ~packed range)
+    expected
+
+(* An object of an enumeration below int promotes to int, also where int
+   does not hold its values, as Clang for msp430 gives it. *)
+let enum_promotion_cases =
+  [
+    ("unsigned char", lp64_short, Integer.Unsigned_char,
+     Arithmetic.Integer Int);
+    ("16-bit int, unsigned short", int16_short, Unsigned_short, Integer Int);
+    ("unsigned int", lp64, Unsigned_int, Integer Unsigned_int);
+    ("unsigned long", lp64_short, Unsigned_long, Integer Unsigned_long);
+  ]
+
+let check_enum_promotion (name, target, integer, expected) =
+  check ("enum promotion, " ^ name)
+    (Arithmetic.promote_enumeration target integer :> Arithmetic.t)
     expected
 
 (* Building types *)
@@ -896,6 +961,7 @@ let () =
     @ List.map check_promotion promotion_cases
     @ List.map check_conversion conversion_cases
     @ List.map check_enum enum_cases
+    @ List.map check_enum_promotion enum_promotion_cases
     @ List.map check_construction construction_errors
     @ List.map check_definition definition_cases
     @ List.map check_composite composite_cases

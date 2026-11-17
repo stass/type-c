@@ -625,6 +625,15 @@ val as_arithmetic : tags -> t -> Arithmetic.t option Unknown.answer
     enumerated type gives its compatible integer type, or [None] while it
     is incomplete. *)
 
+val promoted_arithmetic :
+  Target.t ->
+  tags ->
+  t ->
+  (Arithmetic.t * Arithmetic.promoted) option Unknown.answer
+(** {!as_arithmetic} with the integer promotions of a value of the type
+    (C11 6.3.1.1p2): an enumerated type without a fixed type promotes by
+    {!Arithmetic.promote_enumeration}, any other by {!Arithmetic.promote}. *)
+
 (** {1 Relations and conversions} *)
 
 val unqualified : t -> t

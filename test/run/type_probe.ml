@@ -117,7 +117,8 @@ let enumerator_values { Arithmetic.negative; width } =
 let enumerator_ranges target =
   let widths =
     List.sort_uniq compare
-      (List.map (Target.integer_width target) [ Integer.Int; Long; Long_long ])
+      (List.map (Target.integer_width target)
+         [ Integer.Signed_char; Short; Int; Long; Long_long ])
   in
   let widest = Target.integer_width target Unsigned_long_long in
   let ranges width =
@@ -127,30 +128,42 @@ let enumerator_ranges target =
         { negative = false; width = width + 1 };
         { negative = true; width = width + 1 } ]
   in
-  { Arithmetic.negative = true; width = 1 } :: List.concat_map ranges widths
+  { Arithmetic.negative = false; width = 0 }
+  :: { negative = true; width = 1 }
+  :: List.concat_map ranges widths
+
+(* Declares an enumeration of the range in C and in tags, with [packed]
+   on its list or not, asserts its compatible type and that of its
+   promotion, and returns its type. *)
+let print_enum target tags index (range, packed) =
+  let tag_name = Printf.sprintf "e%d" index in
+  let tag = Ctype.declare_enum tags (Some tag_name) ~at_file_scope:true in
+  let values =
+    List.mapi
+      (fun value_index value ->
+        Printf.sprintf "%s_%d = %s" tag_name value_index value)
+      (enumerator_values range)
+  in
+  let attribute = if packed then "__attribute__((packed)) " else "" in
+  Printf.printf "enum %s%s { %s };\n" attribute tag_name
+    (String.concat ", " values);
+  match Arithmetic.enum_compatible_type target ~packed range with
+  | Some integer ->
+      get (Ctype.define_enum tags tag (Answer integer));
+      let value = "(enum " ^ tag_name ^ ")0" in
+      assert_type value (arithmetic target (Integer integer));
+      let promoted = Arithmetic.promote_enumeration target integer in
+      assert_type ("+" ^ value)
+        (arithmetic target (promoted :> Arithmetic.t));
+      Ctype.enum tag
+  | None -> failwith "no integer type for an enumeration"
 
 (* Declares each enumeration in C and in tags, and returns the types. *)
 let print_enums target tags =
-  List.mapi
-    (fun index range ->
-      let tag_name = Printf.sprintf "e%d" index in
-      let tag = Ctype.declare_enum tags (Some tag_name) ~at_file_scope:true in
-      let values =
-        List.mapi
-          (fun value_index value ->
-            Printf.sprintf "%s_%d = %s" tag_name value_index value)
-          (enumerator_values range)
-      in
-      Printf.printf "enum %s { %s };\n" tag_name (String.concat ", " values);
-      (match Arithmetic.enum_compatible_type target range with
-      | Some integer ->
-          get (Ctype.define_enum tags tag (Answer integer));
-          assert_type
-            ("(enum " ^ tag_name ^ ")0")
-            (arithmetic target (Integer integer))
-      | None -> failwith "no integer type for an enumeration");
-      Ctype.enum tag)
-    (enumerator_ranges target)
+  let ranges = enumerator_ranges target in
+  let plain = List.map (fun range -> (range, false)) ranges in
+  let packed = List.map (fun range -> (range, true)) ranges in
+  List.mapi (print_enum target tags) (plain @ packed)
 
 let compatibility_types target tags enums =
   let int_type = arithmetic target (Integer Int) in
@@ -211,15 +224,12 @@ let print_compatibility target tags types =
         types)
     types
 
-let read_file path = In_channel.with_open_bin path In_channel.input_all
-
+(* The target model as typec's driver queries it of the backend that the
+   command line names with its options. *)
 let () =
-  match Sys.argv with
-  | [| _; dump |] -> (
-      match
-        Target.of_predefined_macros ~enum_representation:Int_sized
-          (read_file dump)
-      with
+  match Array.to_list Sys.argv with
+  | _ :: program :: options -> (
+      match Typec_driver.Target_query.query ~program options with
       | Ok target ->
           let tags = Ctype.create_tags () in
           print_conversions target;
@@ -228,8 +238,9 @@ let () =
           print_compatibility target tags
             (compatibility_types target tags enums)
       | Error error ->
-          prerr_endline (Target.error_message error);
+          prerr_endline
+            (Typec_driver.Target_query.error_message ~program error);
           exit 1)
   | _ ->
-      prerr_endline "usage: type_probe MACRO-DUMP";
+      prerr_endline "usage: type_probe BACKEND [OPTION...]";
       exit 2

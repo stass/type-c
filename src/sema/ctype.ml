@@ -1195,12 +1195,34 @@ let merge_length a b =
   | Variable, (Unknown | Variable) | Unknown, Variable -> Variable
   | Unknown, Unknown -> Unknown
 
+(* Whether the enumeration has no fixed type, whose promotion design 13.4
+   sets apart; one with a fixed type promotes as that type. *)
+let unfixed_enum tags tag =
+  match Ids.find_opt tag.enum_id tags.facts.enums with
+  | Some (Unfixed _) -> true
+  | Some (Fixed _) | None -> false
+
+let promoted_arithmetic target tags t =
+  match (t.shape, as_arithmetic tags t) with
+  | Enum tag, Answer (Some (Integer integer as arithmetic))
+    when unfixed_enum tags tag ->
+      Answer (Some (arithmetic, Arithmetic.promote_enumeration target integer))
+  | _, Answer (Some arithmetic) ->
+      Answer (Some (arithmetic, Arithmetic.promote target arithmetic))
+  | _, Answer None -> Answer None
+  | _, Depends_on unknown -> Depends_on unknown
+
 (* The type of an argument passed for a parameter of this type without a
-   prototype in scope (6.5.2.2p6). *)
+   prototype in scope (6.5.2.2p6): the integer promotions, then [float]
+   to [double]. *)
 let promoted target tags parameter =
-  match as_arithmetic tags parameter with
-  | Answer (Some a) ->
-      let promoted = Arithmetic.default_argument_promotion target a in
+  match promoted_arithmetic target tags parameter with
+  | Answer (Some (_, promoted)) ->
+      (* The promotions leave a promoted type as it is. *)
+      let promoted =
+        Arithmetic.default_argument_promotion target
+          (promoted :> Arithmetic.t)
+      in
       Answer (of_shape (Arithmetic promoted))
   | Answer None -> Answer parameter
   | Depends_on unknown -> Depends_on unknown

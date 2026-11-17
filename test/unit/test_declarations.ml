@@ -966,13 +966,30 @@ let attributes () =
     "object struct s external static";
   enum_integer_of "enum __attribute__((mode(DI))) e { A };" "e"
     "depends on the attribute 'mode'";
+  (* [packed] on the specifier that holds the list gives the short list
+     of the enumeration rule, between [enum] and the tag or after the
+     brace. *)
   enum_integer_of "enum e { A } __attribute__((packed));" "e"
-    "depends on the attribute 'packed'";
+    "unsigned char";
+  enum_integer_of "enum [[gnu::packed]] e { A = -1, B = 128 };" "e" "short";
+  enum_integer_of "enum __attribute__((__packed__)) e { A = 256 };" "e"
+    "unsigned short";
   declares "enum __attribute__((packed)) e { A }; enum e y;" "y"
     "object enum e external static";
-  rejects "enum __attribute__((packed)) e { A = 0x100000000 };"
-    "the type of enumerators that int does not hold depends on the \
-     attribute 'packed'";
+  declares "enum __attribute__((packed)) e { A = 0x100000000 };" "A"
+    "enumerator enum e = 4294967296";
+  (* On an earlier specifier without the list, GCC 16 ignores it and
+     Apple Clang 21 carries it to the list. *)
+  enum_integer_of "enum __attribute__((packed)) e; enum e { A };" "e"
+    "depends on the attribute 'packed'";
+  enum_integer_of
+    "struct s { enum __attribute__((packed)) e *p; }; enum e { A };" "e"
+    "depends on the attribute 'packed'";
+  enum_integer_of
+    "enum __attribute__((packed)) e; enum __attribute__((packed)) e { A };"
+    "e" "unsigned char";
+  enum_integer_of "enum e { A }; enum __attribute__((packed)) e *p;" "e"
+    "unsigned int";
   accepts "enum e { A __attribute__((swift_name(\"a\"))) };";
   rejects "enum e { A __attribute__((mode(DI))) };"
     "the enumerator 'A' depends on the attribute 'mode' at in.c:1";

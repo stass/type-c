@@ -38,20 +38,30 @@ let double_constant =
    integer type holds it, so the rule always gives a type. *)
 let zero_range : Arithmetic.enumerator_range = { negative = false; width = 0 }
 
+(* The representation that the model expects, and the option that would
+   give the other. *)
+let representation_and_option (target : Target.t) =
+  match target.enum_representation with
+  | Int_sized -> ("int-sized", "-fshort-enums")
+  | Short -> ("short", "-fno-short-enums")
+
 let enumeration target =
   let compatible =
     Integer.name
-      (Option.get (Arithmetic.enum_compatible_type target zero_range))
+      (Option.get
+         (Arithmetic.enum_compatible_type target ~packed:false zero_range))
   in
+  let representation, option = representation_and_option target in
   assertion
     ~holds:
       (Printf.sprintf
          "_Generic((enum { __tc_enum_probe })0, %s: 1, default: 0)"
          compatible)
     ~assumes:
-      ("an enumeration of small nonnegative values is compatible with "
-     ^ compatible)
-    ~option:"-fshort-enums"
+      (representation
+     ^ " enumerations: an enumeration of small nonnegative values is \
+        compatible with " ^ compatible)
+    ~option
 
 let assertions target =
   [ signed_bit_field target; double_constant; enumeration target ]

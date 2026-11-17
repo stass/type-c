@@ -1410,9 +1410,8 @@ let value_operand context (t : Ctype.t) =
   | Distinct _ -> Distinct_operand t
   | Void | Arithmetic _ | Enum _ | Record _ | Va_list | Array _ | Function _
     -> (
-      match Ctype.as_arithmetic context.tags t with
-      | Answer (Some arithmetic) ->
-          let promoted = Arithmetic.promote context.target arithmetic in
+      match Ctype.promoted_arithmetic context.target context.tags t with
+      | Answer (Some (arithmetic, promoted)) ->
           Arithmetic_operand { arithmetic; promoted }
       | Answer None -> Other_operand t
       | Depends_on unknown -> Unknown_operand unknown)
