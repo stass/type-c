@@ -1611,6 +1611,20 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
+- [High] A binding copies its field (`const __typeof__(F) x = F;`, the
+  selection-tree row of design 13.5), and binding by reference waits on
+  checked mode (design 12, "Binding by reference"). `examples/smtp`
+  holds its session state in a variant whose payloads carry kilobytes:
+  its port copies about 26 KB of state per match at `-O0` and per RCPT
+  at any level, and its largest frame is 54 KB against the original's
+  28 KB at `-O2` (Clang `-fstack-usage`; about 210 KB against 27 KB on
+  the deepest `-O0` path). A small-stack target such as Pilot C's
+  Cortex-M3 cannot afford that. Decide before Pilot C whether a
+  read-only binding of a field larger than a few words lowers to a
+  pointer to the field (`const T *` behind the name, which C cannot
+  write through), which needs no lifetime rule while the scrutinee is
+  not assigned in the arm, or how else the copy goes.
+
 - [Medium] A generic container hashes and compares an opaque `K` only
   through function pointers it is handed, so the per-type operations
   are indirect calls unless the C compiler propagates the constant
