@@ -4972,7 +4972,12 @@ declaration without the attribute redeclares the one before the
 overloads, as if they were absent, and an overload has no entry in the
 table of names with linkage, since Clang gives it a symbol of its own.
 No declaration is checked against an overload, so the rules that Clang
-puts on an overload set are left to it. A use of the name resolves as
+puts on an overload set are left to it, save one: an overload stands
+beside a function, and one whose name its scope declares as an object,
+a typedef name or an enumerator is an error (C11 6.7p3), as in Clang.
+The check of moved text (13.5) relies on it: each declaration of a
+typedef name that redeclares one names the declaration of the same
+name before it in its scope. A use of the name resolves as
 the parser resolves it, to the last declaration in scope, so a use
 whose declaration is an overload, or follows one in its scope, has an
 unknown type until typing resolves overloads by Clang's rules (0.9b).

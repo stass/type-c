@@ -108,9 +108,12 @@ type redeclarations
 
 val no_redeclarations : redeclarations
 
-val add_redeclared : int -> Entity.t -> redeclarations -> redeclarations
-(** [add_redeclared token entity events] adds the declaration whose name is
-    the token at [token], of [entity] as that declaration records it. *)
+val add_redeclared :
+  Tree.declared -> Entity.t -> redeclarations -> redeclarations
+(** [add_redeclared declared entity events] adds [declared], a
+    declaration of an entity declared before it, of [entity] as that
+    declaration records it; every such declaration is added, as the
+    exact ones of a typedef name say where it was first declared. *)
 
 (** What the check asks of the reader of the unit: its tokens, the
     parser's views of its unread text, what each declaration declares and

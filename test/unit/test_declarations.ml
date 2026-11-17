@@ -1140,8 +1140,10 @@ let overloads () =
     "int f(); __attribute__((overloadable)) int f(long); int f(int); \
      __attribute__((overloadable)) int f(char); int f(long);"
     "6.7p4";
-  (* Nor is an overload checked against the others, which Clang does. *)
-  accepts "int x; __attribute__((overloadable)) int x(void);";
+  (* Nor is an overload checked against the others, which Clang does,
+     save that what it stands beside is a function (C11 6.7p3). *)
+  rejects "int x; __attribute__((overloadable)) int x(void);"
+    "is redeclared as a different kind of identifier";
   (* Clang takes two with the same type as one function; typec gives each
      an entity of its own, and leaves a conflict among them to Clang. *)
   accepts
@@ -3221,6 +3223,116 @@ let generic_resolution () =
     ("type g(T) = struct { T v; " ^ counted ^ " struct node *n; };")
     "the tag 'node' is declared in the scope around the text"
 
+(* Change the seed to draw other inputs; every seed must pass. *)
+let keyed_events_seed = 2026
+
+(* The query of [Keyed_events] reads what a scan of every event in its
+   range reads, on small random inputs, which reach each height of the
+   trie and replace events at an index. *)
+let keyed_events () =
+  let random = Random.State.make [| keyed_events_seed |] in
+  let below bound = Random.State.int random bound in
+  let module Scan = Map.Make (Int) in
+  let check_query events scan span =
+    let from = below (span + 1) and before = below (span + 1) in
+    let key_below = below (span + 2) - 1 in
+    let indexed =
+      List.of_seq (Keyed_events.between events ~from ~before ~key_below)
+    in
+    let read (index, (key, _)) =
+      from <= index && index < before && key < key_below
+    in
+    let scanned =
+      Scan.bindings scan |> List.filter read
+      |> List.map (fun (index, (_, value)) -> (index, value))
+    in
+    if indexed <> scanned then
+      fail_case
+        (Printf.sprintf "keyed events of seed %d" keyed_events_seed)
+        (Printf.sprintf "from %d before %d keys below %d: %d events, not %d"
+           from before key_below (List.length indexed)
+           (List.length scanned))
+  in
+  for _ = 1 to 2000 do
+    let span = 1 + below 70 in
+    let add (events, scan) _ =
+      let index = below span and key = below (span + 2) - 1 in
+      let value = below 1000 in
+      ( Keyed_events.add index ~key value events,
+        Scan.add index (key, value) scan )
+    in
+    let events, scan =
+      List.fold_left add (Keyed_events.empty, Scan.empty)
+        (List.init (below 30) Fun.id)
+    in
+    for _ = 1 to 10 do
+      check_query events scan span
+    done
+  done
+
+(* The window's second clause (design 13.5) reads the inexact
+   redeclarations of typedef names first declared before the window. *)
+let typedef_windows () =
+  let file = "in.tc" in
+  let added = "which may change each type written through it" in
+  (* An exact redeclaration in the window does not move the name's first
+     declaration into it; a builtin's stands before the first token. *)
+  rejects ~file
+    "void f(int c) { typedef int t; defer ; typedef int t; \
+     typedef int t __attribute__((unused)); return; }"
+    added;
+  rejects ~file
+    "typedef int t; type g(T) = struct { T v; }; typedef int t; \
+     typedef int t __attribute__((unused)); g(int) x;"
+    added;
+  rejects ~file
+    "type g(T) = struct { T v; }; \
+     typedef __int128 __int128_t __attribute__((unused)); g(int) x;"
+    added;
+  accepts ~file
+    "type g(T) = struct { T v; }; typedef int t; \
+     typedef int t __attribute__((unused)); g(int) x;";
+  (* A Clang overload stands beside a function alone, so the declaration
+     before a typedef name's in its scope is the typedef name's. *)
+  let other_kind = "is redeclared as a different kind of identifier" in
+  rejects "typedef int f; int f(int) __attribute__((overloadable));"
+    other_kind;
+  rejects "int f; int f(int) __attribute__((overloadable));" other_kind;
+  rejects
+    "void g(void) { typedef int f; \
+     int f(int) __attribute__((overloadable)); }"
+    other_kind;
+  (* So the redeclarations of names first declared in a window cost its
+     check nothing: four times the pairs and places take about four times
+     as long, and sixteen if each check read them all. *)
+  let pair k =
+    Printf.sprintf "typedef int t%d; typedef int t%d __attribute__((unused)); "
+      k k
+  in
+  let repeated count line = String.concat "" (List.init count line) in
+  let exits count =
+    "void f(int c) { defer ; "
+    ^ repeated count (fun k ->
+          pair k ^ Printf.sprintf "if (c == %d) return; " k)
+    ^ "}"
+  in
+  let defers count =
+    "void f(void) { " ^ repeated count (fun k -> "defer ; " ^ pair k)
+    ^ "return; }"
+  in
+  let instances count =
+    "type g(T) = struct { T v; }; " ^ repeated count pair
+    ^ repeated count (fun k ->
+          Printf.sprintf "struct s%d { int a; }; g(struct s%d) x%d; " k k k)
+  in
+  List.iter
+    (fun (name, small, source) ->
+      accepts ~file (source small);
+      reads_in_time ~file ~degree:1 name ~small source)
+    [ ("pairs before exits", 4000, exits);
+      ("defers before pairs", 2000, defers);
+      ("pairs before instances", 2000, instances) ]
+
 let () =
   type_declarations ();
   variants ();
@@ -3271,4 +3383,6 @@ let () =
   generic_function_constants ();
   generic_checks ();
   generic_resolution ();
+  keyed_events ();
+  typedef_windows ();
   if !failures > 0 then exit 1

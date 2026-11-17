@@ -45,28 +45,69 @@ module Events = Map.Make (Int)
 module By_entity = Map.Make (Int)
 module Positions = Set.Make (Int)
 
-(* Indexed by how a check reads them: a use, the token indices of those
-   of its own object or function; every check, those of typedef names
-   in its window. *)
+(* The inexact redeclarations, indexed by how a check reads them. A use
+   reads those of its own object or function: [objects] holds their
+   tokens by entity. Every check reads those of typedef names in its
+   window: [typedefs] keys each by the token of the name's first
+   declaration, which [first_typedef] holds for each typedef name
+   declared again, so that a check passes over the names first declared
+   in its window ([typedefs_within]). *)
 type redeclarations = {
   objects : Positions.t By_entity.t;
-  typedefs : Entity.t Events.t;
+  typedefs : Entity.t Keyed_events.t;
+  first_typedef : int By_entity.t;
 }
 
-let no_redeclarations = { objects = By_entity.empty; typedefs = Events.empty }
+let no_redeclarations =
+  { objects = By_entity.empty;
+    typedefs = Keyed_events.empty;
+    first_typedef = By_entity.empty }
 
-let add_redeclared token (entity : Entity.t) events =
+(* The token of a declaration; a builtin's stands before the first. *)
+let token_of = function
+  | Tree.In_tree (Ordinary_at index) -> index
+  | Builtin _ -> -1
+
+let add_inexact_object token (entity : Entity.t) events =
   let add positions =
     let known = Option.value positions ~default:Positions.empty in
     Some (Positions.add token known)
   in
+  { events with objects = By_entity.update entity.entity add events.objects }
+
+(* Each redeclaration of a typedef name names the declaration before it
+   in its scope ([Tree.declared.earlier]), a typedef declaration of the
+   same entity (C11 6.7p3), so the earliest that they name is the first.
+   The declarations of one scope are read in order, so the first
+   redeclaration, which names the first declaration, is added before
+   any inexact one. A redeclaration that names none stands before every
+   token, so every window reads it. *)
+let add_typedef token (declared : Tree.declared) (entity : Entity.t) events =
+  let follows =
+    match declared.earlier with
+    | Some earlier -> token_of earlier
+    | None -> min_int
+  in
+  let first =
+    match By_entity.find_opt entity.entity events.first_typedef with
+    | Some known -> min known follows
+    | None -> follows
+  in
+  let first_typedef = By_entity.add entity.entity first events.first_typedef in
+  let typedefs =
+    if entity.inexact then
+      Keyed_events.add token ~key:first entity events.typedefs
+    else events.typedefs
+  in
+  { events with first_typedef; typedefs }
+
+let add_redeclared (declared : Tree.declared) (entity : Entity.t) events =
+  let (Ordinary_at token) = declared.id in
   match entity.declared with
-  | Object _ | Function _ ->
-      let objects = By_entity.update entity.entity add events.objects in
-      { events with objects }
-  | Typedef _ ->
-      { events with typedefs = Events.add token entity events.typedefs }
-  | Enumerator _ -> events
+  | (Object _ | Function _) when entity.inexact ->
+      add_inexact_object token entity events
+  | Typedef _ -> add_typedef token declared entity events
+  | Object _ | Function _ | Enumerator _ -> events
 
 type context = {
   tokens : Reader.t;
@@ -406,6 +447,14 @@ let within window events =
   Events.to_seq_from window.first events
   |> Seq.take_while (fun (index, _) -> index < window.after)
 
+(* The inexact redeclarations of typedef names in the window, of names
+   first declared before it. The earlier place stands at or before the
+   window's first token and its view sees only the names declared
+   before it, so the second clause refuses none of the rest. *)
+let typedefs_within window redeclared =
+  Keyed_events.between redeclared.typedefs ~from:window.first
+    ~before:window.after ~key_below:window.first
+
 (* The first inexact redeclaration of [entity] in the window, if any,
    which a refusal cites, as the typedef clause cites its first. *)
 let redeclared_within context window (entity : Entity.t) =
@@ -614,7 +663,7 @@ let check_reading context text place =
     (Parser.pragmas_within context.views text.span);
   Seq.iter
     (check_typedef context text place)
-    (within window context.redeclared.typedefs);
+    (typedefs_within window context.redeclared);
   (* A completion changes nothing for text written after it. *)
   if place_precedes text place then
     Seq.iter

@@ -599,6 +599,12 @@ let composite state span name prior next =
           ^ " is redeclared with an incompatible type (C11 6.7p4)"))
   | Error error -> fail state span (Rule.c_text (Ctype.error_message error))
 
+let refuse_other_kind state span name =
+  fail state span
+    (Rule.c_text
+       (quote name ^ " is redeclared as a different kind of identifier \
+                      (C11 6.7p3)"))
+
 (* A declaration of [name] where [prior] is in the same scope. *)
 let redeclared state span name prior next =
   match (prior, next) with
@@ -640,10 +646,7 @@ let redeclared state span name prior next =
           marked = Entity.both_marks old.marked next.marked;
         }
   | (Object _ | Function _ | Typedef _ | Enumerator _), _ ->
-      fail state span
-        (Rule.c_text
-           (quote name ^ " is redeclared as a different kind of identifier \
-                          (C11 6.7p3)"))
+      refuse_other_kind state span name
 
 (* What [declared] declares [name] as, which the text of a generic's
    definition being read declares (design 13.5). *)
@@ -657,15 +660,20 @@ let bind_entity state name (declared : Tree.declared) entity =
 
 (* An overload (design 13.3) is a new entity, which is not linked under
    its name, and stands beside what a declaration in its place would
-   redeclare. *)
+   redeclare, which must be a function, as the name is one kind of
+   identifier in its scope (C11 6.7p3). *)
 let bind_overload state span name (declared : Tree.declared) ~inexact next =
+  let earlier = earlier_entity state span name declared in
+  (match earlier with
+  | Some { declared = Object _ | Typedef _ | Enumerator _; _ } ->
+      refuse_other_kind state span name
+  | Some { declared = Function _; _ } | None -> ());
   let entity =
     { name; entity = fresh_entity state; declared = next; inexact }
   in
   let reference = Tree.In_tree declared.id in
   bind_entity state name declared entity;
-  Hashtbl.replace state.beside reference
-    (earlier_entity state span name declared);
+  Hashtbl.replace state.beside reference earlier;
   Hashtbl.replace state.overloaded reference ();
   entity
 
@@ -683,13 +691,12 @@ let record state name (declared : Tree.declared) entity =
     Hashtbl.replace state.linked name entity;
   entity
 
-(* [record] of a declaration of an entity declared before it, which an
-   inexact one makes an event of the window of design 13.5. *)
+(* [record] of a declaration of an entity declared before it, which the
+   check of design 13.5 indexes: an inexact one is an event of the
+   window. *)
 let record_again state name (declared : Tree.declared) (entity : entity) =
-  (if entity.inexact then
-     let (Ordinary_at token) = declared.id in
-     state.redeclared_at <-
-       Resolution.add_redeclared token entity state.redeclared_at);
+  state.redeclared_at <-
+    Resolution.add_redeclared declared entity state.redeclared_at;
   record state name declared entity
 
 (* Records what [declared] declares [name] as: a new entity, or [prior],
