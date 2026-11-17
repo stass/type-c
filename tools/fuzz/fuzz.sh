@@ -92,15 +92,29 @@ seeds() {
     done
 }
 
-# The committed seeds of TARGET and the generated ones (in any directory
-# of seeds/, such as the headers that seeds makes), which every target
-# takes since each reads preprocessed text, in a fresh directory, as
-# afl-fuzz -i wants them.
+# The committed seeds of TARGET, which the harness names by kind (fuzz.ml),
+# and the generated ones (in any directory of seeds/, such as the headers
+# that seeds makes), which every target takes since each reads
+# preprocessed text, in a fresh directory, as afl-fuzz -i wants them. A
+# committed seed that is not a regular file, such as a link, is refused,
+# because cp would read what the link names.
 gather_seeds() {
     input=$work/in/$1
     rm -rf "$input"
     mkdir -p "$input"
-    cp "$repo/tools/fuzz/seeds/$1/"* "$input/"
+    # Plain names, so that the unquoted expansion splits them; the
+    # assignment, unlike a command substitution in a for list, stops the
+    # script when the harness fails.
+    kinds=$("$harness" -s "$1")
+    for kind in $kinds; do
+        for seed in "$repo/tools/fuzz/seeds/$kind/"*; do
+            if [ -L "$seed" ] || [ ! -f "$seed" ]; then
+                echo "fuzz.sh: $seed is not a regular file" >&2
+                exit 1
+            fi
+            cp "$seed" "$input/$kind-$(basename "$seed")"
+        done
+    done
     # Only complete seeds: a failed compiler leaves a .part behind.
     for seed in "$work/seeds/"*/*.i; do
         [ -f "$seed" ] || continue

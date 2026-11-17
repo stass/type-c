@@ -9,7 +9,10 @@
    (see crash); the message on standard error says which.
 
    fuzz -t TARGET: prints the time limit of one execution of TARGET in
-   milliseconds, which fuzz.sh gives AFL++. *)
+   milliseconds, which fuzz.sh gives AFL++.
+
+   fuzz -s TARGET: prints the kinds of seed that TARGET reads, one per
+   line, each a directory of tools/fuzz/seeds/. *)
 
 (* A longer input is skipped, not passed to the target. The reader and
    the parser are linear, so a longer input reaches no path a shorter one
@@ -100,8 +103,22 @@ let targets =
 
 let usage () =
   let names = String.concat ", " (List.map fst targets) in
-  prerr_endline ("usage: fuzz [-t] TARGET [FILE]; targets: " ^ names);
+  prerr_endline ("usage: fuzz [-t | -s] TARGET [FILE]; targets: " ^ names);
   exit 2
+
+(* The kinds of seed that a target reads, each a directory of seeds/ named
+   for the first target whose stage reads it. The targets are listed in
+   the order their stages run and each runs the stages of those before
+   it, so a target reads the seeds of its own kind and of every kind
+   before it. fuzz.sh and seeds.t take the seeds of a target from here
+   alone. *)
+let seed_kinds name =
+  let rec up_to = function
+    | [] -> usage ()
+    | (kind, _) :: _ when kind = name -> [ kind ]
+    | (kind, _) :: rest -> kind :: up_to rest
+  in
+  up_to targets
 
 (* The input, or None when it is longer than max_input_bytes. *)
 let read_input channel =
@@ -167,6 +184,8 @@ let () =
   match Array.to_list Sys.argv with
   | [ _; "-t"; name ] ->
       print_endline (string_of_int (target_named name).time_limit_ms)
+  | [ _; "-s"; name ] ->
+      List.iter print_endline (seed_kinds name)
   | [ _; name ] -> run_on_channel (target_named name) stdin
   | [ _; name; path ] ->
       let target = target_named name in

@@ -1,10 +1,26 @@
-Every seed passes the target its directory names: the harness exits 0
-and prints nothing.
+A seed directory is named for the first target that reads its kind of
+input, and each target reads the seeds of its own kind and of every
+kind before it: the lowering target reads the declarations of every
+parser seed, the parser reads every reader seed.
 
   $ for directory in seeds/*/; do
   >   target=$(basename "$directory")
-  >   for seed in "$directory"*; do
-  >     ./fuzz.exe "$target" "$seed" || echo "failed: $seed"
+  >   echo "$target:" $(./fuzz.exe -s "$target")
+  > done
+  lowering: reader parser lowering
+  parser: reader parser
+  reader: reader
+
+Every seed directory names a target, which fuzz.exe refuses otherwise,
+and every seed passes each target that reads it: the harness exits 0 and
+prints nothing.
+
+  $ for directory in seeds/*/; do
+  >   target=$(basename "$directory")
+  >   for kind in $(./fuzz.exe -s "$target"); do
+  >     for seed in seeds/$kind/*; do
+  >       ./fuzz.exe "$target" "$seed" || echo "failed: $target $seed"
+  >     done
   >   done
   > done
 
@@ -15,7 +31,7 @@ The input can also come from standard input.
 A target is chosen by name.
 
   $ ./fuzz.exe lexer seeds/reader/markers.i
-  usage: fuzz [-t] TARGET [FILE]; targets: reader, parser, lowering
+  usage: fuzz [-t | -s] TARGET [FILE]; targets: reader, parser, lowering
   [2]
 
 Only the parser runs on the small stack: the checks and the stages after

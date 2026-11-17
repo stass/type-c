@@ -1221,13 +1221,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Fuzzing
 
-- [Medium] The `lowering` seeds hold every `parser` seed as a symbolic
-  link made by hand, so a new parser seed without its link silently
-  misses the declaration reader, and a checkout without symbolic links
-  turns each into a path the reader refuses. Send every committed seed
-  to every target, as `gather_seeds` in `tools/fuzz/fuzz.sh` already
-  does for the generated ones, have `seeds.t` run each through each,
-  and delete the links.
 - [Low] A resumed instance never reads the seeds again, so new
   committed seeds reach a campaign only through a new instance. Giving
   the main instance `-F` on the seed directory would have AFL++ import

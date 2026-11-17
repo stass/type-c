@@ -153,8 +153,7 @@ does. Each stage must refuse with a printable message or accept;
 lowering must make edits charged at most the output limit (design 3.5
 rule 7), which emission applies without raising. The declaration
 reader runs only there, because the instance budget, not the input,
-bounds its work; the `lowering` seeds therefore hold every `parser`
-seed, as symbolic links. The parser runs on a fiber whose stack is
+bounds its work. The parser runs on a fiber whose stack is
 limited to 32K words (`test/support/small_stack.ml`), which holds its
 deepest nesting (`Parser.max_nesting`), so that recursion growing with
 the input overflows it and is reported. The normal build compiles
@@ -225,10 +224,18 @@ has run before resumes from its own queue and does not read the seeds;
 only an instance new to `out/TARGET`, such as a new secondary, starts
 from the current seeds, and the others take its finds from it.
 
+A committed seed goes to the target of its directory and to every target
+after it in the table of `fuzz.ml`, since each runs the stages of those
+before it: `reader` seeds go to all three targets, `parser` seeds to
+`parser` and `lowering`, `lowering` seeds to `lowering` alone.
+`fuzz.exe -s TARGET` prints the directories a target reads, which
+`fuzz.sh` and `seeds.t` take, so a new seed needs only its file in the
+right directory; `fuzz.sh` refuses a seed that is a link.
+
 The generated seeds, in any directory of `seeds/` there (`seeds/headers`
 for those of `fuzz.sh seeds`; preprocessed units of the corpus under
-16 KiB, thinned with `afl-cmin`, can go in another), go to every target. So
-does the AFL++ dictionary, `fuzz.dict`, which the build generates from
+16 KiB, thinned with `afl-cmin`, can go in another), go to every target.
+So does the AFL++ dictionary, `fuzz.dict`, which the build generates from
 the keyword and punctuator tables of the parser and the reader and the
 pieces of `cc -E` output listed in `dictionary.ml`.
 
