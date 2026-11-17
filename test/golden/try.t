@@ -1438,7 +1438,7 @@ nothing in the scope around it that the left operand would read.
   > }
   > EOF
   $ ./golden.exe operand_declares.tc
-  operand_declares.tc:5: 'K' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 5.1 rule 3, 13.5) [TC0061]
+  operand_declares.tc:5: 'K' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 5.1 rule 3, 13.5) [TC0061]
   [1]
 
 A tag declared before the holder and completed in it before the try is

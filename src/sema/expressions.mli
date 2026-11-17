@@ -351,7 +351,11 @@ val constant : t -> Tree.expression -> constant option
     [views] are those that the parser took in the unit, and
     [moved_operand views ~scope operand type_operand] types the operand
     at [operand] of a [try] with the [views], in the scope [scope], with
-    [type_operand], where lowering moves it (design 5.1 rule 3). *)
+    [type_operand], where lowering moves it (design 5.1 rule 3).
+    [read_moved span read] runs [read], which types the statement of a
+    defer or the operand of a [return] at [span], text that lowering
+    writes at each exit of a scope or in a block of its own (section 6
+    rules 8 and 12), and records the names that it finds there. *)
 type context = {
   typed : t;
   target : Target.t;
@@ -371,6 +375,10 @@ type context = {
   moved_operand :
     Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
     (unit -> typed) -> typed;
+  read_moved : Tree.span -> (unit -> unit) -> unit;
+  label_address : Tree.label_name -> unit;
+      (** notes the label that [&&] takes the address of, a use of its
+          name (design 13.5) *)
 }
 
 val whole_value : context -> Tree.expression -> typed
@@ -406,11 +414,12 @@ val function_body :
   declarator:Tree.declarator ->
   return_type:Ctype.t Unknown.answer ->
   Tree.block ->
-  unit
+  function_defers option
 (** Types the body of the function [name], declared by [declarator],
     whose [return] statements have
     its return type as their target type (design 3.3), or the unknown
-    type of the function where typec does not know it. *)
+    type of the function where typec does not know it. Where the body
+    holds a defer statement, it gives what it records of them. *)
 
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)

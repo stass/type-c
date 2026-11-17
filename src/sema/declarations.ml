@@ -150,7 +150,10 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    generic, by its id, which is the own place of its definition (design
    13.5). [moved] collects what the reading of a generic's definition
    finds in it, none outside one, and [found] the names that each moved
-   text being read uses and declares, innermost first. [redeclared_at]
+   text being read uses and declares, innermost first, and [read_moved]
+   what each deferred statement and operand of a [return] of the
+   function body being read found, by its span, for the checks of
+   design 6 rules 8 and 12 at the end of the body. [redeclared_at]
    and [completed_at] are the events of the window of 13.5 that every
    reading so far has made ({!Resolution.context}). Those of a reading
    of a generic's definition stand at its tokens, not where its
@@ -163,6 +166,7 @@ type state = {
   definition_views : (Tree.declaration_id, Parser.View.t) Hashtbl.t;
   mutable moved : moved option;
   mutable found : found list;
+  read_moved : (Tree.span, found) Hashtbl.t;
   mutable redeclared_at : Resolution.redeclarations;
   mutable completed_at : Ctype.named_tag Resolution.Events.t;
   tags : Ctype.tags;
@@ -3232,6 +3236,13 @@ and typing state : Expressions.context =
     block_literal = (fun () -> note_block_literal state);
     views = state.views;
     moved_operand = type_moved_operand state;
+    read_moved =
+      (fun span read ->
+        let (), found = finding state span read in
+        Hashtbl.replace state.read_moved span found);
+    label_address =
+      (fun { name; label } ->
+        note_use state name.span name.node (Resolution.Label label));
   }
 
 (* The operand at [operand] of a try with the [views], typed with what
@@ -3257,6 +3268,101 @@ and type_moved_operand state (views : Parser.try_views) ~scope operand
   in
   check_moved state text ~at:(Some place);
   typed
+
+(* Design 6 rules 8 and 12, once the body is read: the statement of
+   each defer at each exit of its scope, and the operand of each return
+   in such a scope, whatever the function returns. *)
+and check_deferred state (defers : Expressions.function_defers) =
+  List.iter (check_deferred_statement state) defers.sites;
+  List.iter (check_return_operand state) (returns_in_scopes defers.sites)
+
+(* What the reading of the moved text at [span] found, as [Resolution]
+   reads it, of the [kind]. *)
+and moved_text state kind (span : Tree.span) (own : Parser.statement_view) =
+  let found = Hashtbl.find state.read_moved span in
+  { Resolution.kind;
+    span;
+    scope = own.depth;
+    own_place = own.view;
+    uses = List.rev found.uses;
+    declares = List.rev found.declares }
+
+(* The view that the parser takes at each word and brace where lowering
+   writes around a defer (Parser.statement_view). *)
+and statement_view state index =
+  match Parser.statement_view state.views index with
+  | Some view -> view
+  | None -> invalid_arg "Declarations.statement_view: no view at the token"
+
+(* The clauses that hold whatever the place run once, without a place,
+   so that they hold for a statement that no exit copies as well. *)
+and check_deferred_statement state (site : Reachability.defer_site) =
+  let own = statement_view state site.keyword.first in
+  let text = moved_text state Deferred_statement site.deferred own in
+  check_moved state text ~at:None;
+  List.iter
+    (fun place -> check_moved state text ~at:(Some place))
+    (exit_places state site)
+
+(* The places where lowering writes the copies of the statement (design
+   13.5): in front of the word of each jump that leaves the scope and of
+   the [}] of a block that can complete, and, for the error path of a
+   try, in front of the statement or declaration that holds the try,
+   where its operand and test stand. *)
+and exit_places state (site : Reachability.defer_site) =
+  let place : Reachability.exit -> Resolution.place = function
+    | Jump statement -> place_before state statement.first
+    | Value_return { statement; operand } ->
+        after_operand state statement operand
+    | Error_path try_span -> error_path_place state try_span
+  in
+  let ending =
+    match site.ending with
+    | Completes closing -> [ place_before state closing ]
+    | Cannot_complete _ | Arm_end -> []
+  in
+  List.map place site.exits @ ending
+
+(* Lowering declares nothing at a place of writing that the source
+   does not: [__tc_r] is reserved (design 2.3). *)
+and place_before state index : Resolution.place =
+  let { Parser.view; depth = _ } = statement_view state index in
+  { view; before = index; typedef_names = []; tags = [] }
+
+(* For a [return e;], the copies follow the initialiser or statement
+   that holds [e], so the window of 13.5 runs past [e], while the names
+   in scope are those at the [return] (design 6 rule 12). *)
+and after_operand state (statement : Tree.span) (operand : Tree.span) =
+  let at_return = place_before state statement.first in
+  { at_return with before = operand.last + 1 }
+
+and error_path_place state (try_span : Tree.span) : Resolution.place =
+  match Parser.try_views state.views try_span.first with
+  | Some views ->
+      { view = views.place; before = views.place_before;
+        typedef_names = []; tags = [] }
+  | None -> invalid_arg "Declarations.error_path_place: no view at the try"
+
+(* Each return with an operand in the scope of a defer, once though it
+   leaves several. *)
+and returns_in_scopes sites =
+  let value_return : Reachability.exit -> _ = function
+    | Value_return { statement; operand } -> Some (statement, operand)
+    | Jump _ | Error_path _ -> None
+  in
+  List.concat_map
+    (fun (site : Reachability.defer_site) ->
+      List.filter_map value_return site.exits)
+    sites
+  |> List.sort_uniq (fun ((a : Tree.span), _) ((b : Tree.span), _) ->
+         Int.compare a.first b.first)
+
+(* Lowering writes the return as a block that holds its operand (design
+   6 rule 12), which stays at its own place: the third clause alone. *)
+and check_return_operand state ((statement : Tree.span), operand) =
+  let own = statement_view state statement.first in
+  let text = moved_text state Return_operand operand own in
+  check_moved state text ~at:None
 
 and note_block_literal state =
   let facts = state.external_facts in
@@ -3342,9 +3448,11 @@ let read_function_definition state (definition : Tree.function_definition) =
   | Depends_on _ -> ());
   (match body with
   | Parsed block ->
+      Hashtbl.reset state.read_moved;
       within state In_block (fun () ->
           Expressions.function_body (typing state) ~name:entity.name
             ~declarator ~return_type:returned block)
+      |> Option.iter (check_deferred state)
   | Skipped _ -> ());
   Function_definition entity
 
@@ -3452,6 +3560,7 @@ let read target text (scopes : Parser.scopes) =
       definition_views = Hashtbl.create 16;
       moved = None;
       found = [];
+      read_moved = Hashtbl.create 16;
       redeclared_at = Resolution.no_redeclarations;
       completed_at = Resolution.Events.empty;
       tags;

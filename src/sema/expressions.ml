@@ -390,6 +390,8 @@ type context = {
   moved_operand :
     Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
     (unit -> typed) -> typed;
+  read_moved : Tree.span -> (unit -> unit) -> unit;
+  label_address : Tree.label_name -> unit;
 }
 
 let needing need (unknown : Unknown.t) =
@@ -2734,7 +2736,9 @@ and expression_node context position (whole : Tree.expression) =
       { (value (value_type right)) with bit_field = value_of right.bit_field }
   | Statement_expression block ->
       value (statement_expression context position block)
-  | Label_address _ -> value (void_pointer context span)
+  | Label_address label ->
+      context.label_address label;
+      value (void_pointer context span)
   | Va_arg { list; type_name } ->
       ignore (typed list);
       let t = context.type_name type_name in
@@ -3385,14 +3389,17 @@ and items context = function
 
 (* No try stands in the statement of a defer (design 5.1 rule 4), whose
    statements this gives no positions, and no case or default label in
-   it belongs to a switch around it (6 rule 5). *)
-and deferred_statement context statement =
+   it belongs to a switch around it (6 rule 5). The statement is moved
+   text (6 rule 8). *)
+and deferred_statement context (statement : Tree.statement) =
   let enclosing =
     { context.typed.enclosing with
       try_positions = No_positions;
       case_labels = guarded_from_switch context Deferred_statement }
   in
-  within context enclosing (fun () -> typed_statement context statement)
+  within context enclosing (fun () ->
+      context.read_moved statement.span (fun () ->
+          typed_statement context statement))
 
 (* No case or default label in the scope of a defer belongs to a switch
    around the scope, which would enter it past the defer (design 6 rule
@@ -3507,16 +3514,21 @@ and standing_statement context standing labels (statement : Tree.statement) =
      -Wno-return-mismatch, and GNU C returns a void expression from a
      void function. Either way a void function discards the value; a
      return type that typec does not know is a target, as any other. *)
-  | Return (Some value) when returns_void enclosing -> discard context value
+  (* Lowering writes the operand of a return in the scope of a defer in
+     a block of its own, ahead of the copies (design 6 rule 12). *)
+  | Return (Some value) when returns_void enclosing ->
+      context.read_moved value.span (fun () -> discard context value)
   | Return value ->
       let position =
         match enclosing.return_type with
         | Some (Answer t) -> Targeted t
         | Some (Depends_on _) | None -> Untargeted
       in
-      Option.iter
-        (fun value -> ignore (positioned context position value))
-        value
+      let operand (value : Tree.expression) =
+        context.read_moved value.span (fun () ->
+            ignore (positioned context position value))
+      in
+      Option.iter operand value
   (* Design 3.4: an asm operand takes a value whole, a distinct one too,
      since asm is unchecked and the backend sees the representation. *)
   | Asm { operands; qualifiers = _; template = _ } ->
@@ -3977,15 +3989,17 @@ and subscripted_addressable context (operand : Tree.expression) =
    that the form of a return in their scopes needs (design 13.5). *)
 let record_defers context ~name ~declarator ~enclosing (block : Tree.block) =
   match Reachability.defers (reachability_facts context) block with
-  | [] -> ()
+  | [] -> None
   | sites ->
       let returns =
         if returns_void enclosing then Returns_void else Returns_value
       in
-      context.typed.defers <-
+      let recorded =
         { function_name = name; declarator; body = block.span; returns;
           sites }
-        :: context.typed.defers
+      in
+      context.typed.defers <- recorded :: context.typed.defers;
+      Some recorded
 
 let function_body context ~name ~declarator ~return_type block =
   let view = context.typed in
@@ -3998,5 +4012,5 @@ let function_body context ~name ~declarator ~return_type block =
   | Some { span; diagnostic } -> context.fail span diagnostic
   | None -> ());
   within context enclosing (fun () -> block_items context block);
-  record_defers context ~name ~declarator ~enclosing block;
-  view.tries <- view.function_tries @ view.tries
+  view.tries <- view.function_tries @ view.tries;
+  record_defers context ~name ~declarator ~enclosing block

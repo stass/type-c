@@ -207,16 +207,13 @@ let rows =
          with a body and a tag, or with a body where the definition of \
          an instance does not hold it; an enumeration specifier with a \
          body." };
-    Live { name = "Moved_declaration"; code = 39;
-      clause = Some "design 13.5";
+    Retired { name = "Moved_declaration"; code = 39;
       meaning =
         "A declaration in moved text of a name that is in scope after \
-         the text, such as a tag that the definition of a generic type \
-         is the first to mention in the scope around its structure, \
-         which is file scope (design 3.5 rule 8), or of an object or a \
-         function with linkage, in any scope of the text; or, in the \
-         arguments of an attribute there, a brace or a tag keyword of a \
-         tag that is not visible." };
+         the text, or of an object or a function with linkage, in any \
+         scope of the text; or, in the arguments of an attribute there, \
+         a brace or a tag keyword of a tag that is not visible: refused \
+         under the code of its kind of moved text." };
     Live { name = "Pragma_tokens"; code = 40; clause = Some "design 13.5";
       meaning =
         "A [#pragma] line whose text after [pragma] is no sequence of \
@@ -241,28 +238,31 @@ let rows =
          external declaration that holds it: a type that they name or \
          need complete is not ready there, or the forward declaration of \
          a tag that they write would change a mention before it." };
-    Live { name = "Moved_text"; code = 44; clause = Some "design 13.5";
+    Live { name = "Generic_moved"; code = 44; clause = Some "design 13.5";
       meaning =
-        "A declaration between moved text and a place where lowering \
-         writes it that makes a name of the text read otherwise there: a \
-         name that the text uses denotes another entity or tag, or an \
-         entity of another type, as a typedef name declared again with \
-         an attribute may be, or a name that the text declares for \
-         itself is a typedef name or a tag of the scope around it." };
+        "The definition of a generic, or the one name of an untagged \
+         type that the typedef of a type argument spells, where it breaks \
+         a clause of the resolution property on a fact that typec knows: \
+         a name of the text reads otherwise where lowering writes it, as \
+         another entity or tag, an entity of another type, or a typedef \
+         name or tag of the scope around it in place of a name that the \
+         text declares for itself, or the text declares a name that is in \
+         scope after it, such as a tag that the definition of a generic \
+         type is the first to mention in file scope (design 3.5 rule 8)." };
     Live { name = "Moved_text_unknown"; code = 45;
       clause = Some "design 13.5, P21";
       meaning =
-        "A declaration between moved text and a place where lowering \
-         writes it of an entity that the text uses, where whether the \
-         entity keeps its type depends on a type that typec does not \
-         compute." };
+        "A declaration between moved text of any kind and a place where \
+         lowering writes it of an entity that the text uses, where \
+         whether the entity keeps its type depends on a type that typec \
+         does not compute." };
     Live { name = "Unread_own_name"; code = 46; clause = Some "design 13.5";
       meaning =
         "An identifier in the arguments of an attribute that denotes a \
          generic or a universe name, which lowering writes under a name \
-         of its own: in Type-C text, and in moved text that is C text \
-         where the place that lowering writes it at declares a C entity \
-         of its spelling, which the backend would read." };
+         of its own, in Type-C text. In moved text that is C text, where \
+         the place that lowering writes it at declares a C entity of its \
+         spelling, the refusal carries the code of the kind of text." };
     Live { name = "Generic_pragma"; code = 47;
       clause = Some "design 10.3, P25";
       meaning =
@@ -365,6 +365,19 @@ let rows =
          defer statement, in any text, which no deferred statement can \
          precede; a disputed [break] or [continue] there is refused as \
          [Disputed_jump]." };
+    Live { name = "Deferred_moved"; code = 63;
+      clause = Some "design 6 rule 8, 13.5";
+      meaning =
+        "The statement of a defer, which is moved text, where it breaks \
+         a clause of the resolution property at an exit of its scope on a \
+         fact that typec knows: a declaration between the defer and the \
+         exit makes a name of the statement read otherwise there." };
+    Live { name = "Return_operand_moved"; code = 64;
+      clause = Some "design 6 rule 12, 13.5";
+      meaning =
+        "The operand of a [return] in the scope of a defer statement, \
+         which lowering writes in a block of its own, where it declares a \
+         name that is in scope after the [return]." };
   ]
 
 let () =

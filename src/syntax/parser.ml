@@ -93,20 +93,39 @@ type tag_entry = { tag : tag_id; claimed : bool }
    every view finds them; {!Universe} names the rest. *)
 type scope = (ordinary, tag_entry) Scope.t
 
+(* A label of the body being read, and whether a statement has defined
+   it so far. *)
+type label_entry = { identity : label_id; mutable defined : bool }
+
+module Names = Map.Make (String)
+module Name_set = Set.Make (String)
+
+(* What a name denotes at a point (parser.mli): the scopes open there,
+   and the GNU local labels visible there by name, which a label name
+   denotes before the function's label of its name. Both are persistent,
+   so keeping a view copies nothing. *)
+type view = { scopes : scope; local_labels : label_entry Names.t }
+
+let empty_view = { scopes = Scope.file; local_labels = Names.empty }
+
 (* Values by the index of a token in [Reader.t.tokens]. *)
 module Places = Map.Make (Int)
 
 (* The scopes at a [try]; parser.mli says what they are. *)
-type try_views = { place : scope; place_before : int; own : scope }
+type try_views = { place : view; place_before : int; own : view }
 
 (* The scopes that unread and moved text stands in (design 13.5), by the
    index of a token: at the [(] of the arguments of each attribute, and
-   for an attribute the span of its arguments, at each pragma token, and
-   at each [try]. *)
+   for an attribute the span of its arguments, at each pragma token, at
+   each [try], and at each statement that lowering writes around for a
+   defer (parser.mli). *)
+type statement_view = { view : view; depth : scope_depth }
+
 type views = {
-  attributes : (span * scope) Places.t;
-  pragmas : scope Places.t;
+  attributes : (span * view) Places.t;
+  pragmas : view Places.t;
   tries : try_views Places.t;
+  statements : statement_view Places.t;
 }
 
 (* The innermost statement around the cursor that a break or continue
@@ -130,13 +149,6 @@ type jump_scope =
    match, by the first token of each, latest first. Design 4.3 rule 5
    judges them where the arm ends. *)
 type arm_breaks = { matched : jump_target; mutable leaving : int list }
-
-(* A label of the body being read, and whether a statement has defined
-   it so far. *)
-type label_entry = { identity : label_id; mutable defined : bool }
-
-module Names = Map.Make (String)
-module Name_set = Set.Make (String)
 
 (* The labels of the function body or block literal being read, which is
    their scope (C11 6.2.1p3): the function's by name, the GNU local
@@ -166,7 +178,7 @@ type state = {
   mutable open_brackets : opening list;
       (** read and not yet closed, innermost first *)
   mutable scope : scope;
-  mutable place : scope;
+  mutable place : view;
       (** in front of the innermost external declaration, block item,
           or statement without a substatement after its labels, being
           read: where lowering writes the operand of a [try] that the
@@ -698,7 +710,16 @@ let close state closer =
 let after_last_read state =
   if state.position = 0 then 0 else last_read state + 1
 
-(* Keeps the scope at each pragma token after the last grammar token read
+(* The view at the cursor. *)
+let view_here state =
+  let local_labels =
+    match state.labels with
+    | Some labels -> labels.local_labels
+    | None -> Names.empty
+  in
+  { scopes = state.scope; local_labels }
+
+(* Keeps the view at each pragma token after the last grammar token read
    and before the token at [before], none of which the grammar reads.
    The parser takes the scope that holds at a place before it moves past
    the next grammar token, so a pragma token gets the scope in front of
@@ -708,7 +729,7 @@ let take_pragma_views state ~before =
     state.views <-
       {
         state.views with
-        pragmas = Places.add index state.scope state.views.pragmas;
+        pragmas = Places.add index (view_here state) state.views.pragmas;
       }
   done
 
@@ -1310,7 +1331,7 @@ let begins_defer state =
    reads, and restores the place around it after. *)
 let in_place state read =
   let around = state.place and around_start = state.place_start in
-  state.place <- state.scope;
+  state.place <- view_here state;
   state.place_start <- state.position;
   let result = read state in
   state.place <- around;
@@ -1323,13 +1344,23 @@ let try_prefix state =
   let token = state.grammar.(state.position).index in
   let views =
     { place = state.place; place_before = first_token state state.place_start;
-      own = state.scope }
+      own = view_here state }
   in
   state.views <-
     { state.views with tries = Places.add token views state.views.tries };
   let scope = scope_depth state in
   advance state;
   fun operand -> Tree.Try { operand; scope }
+
+(* The view at the token in front of the cursor, which lowering writes
+   the copies of deferred statements in front of, or which begins text
+   that it writes in a block of its own (design 13.5). *)
+and take_statement_view state =
+  let token = first_token state state.position in
+  let taken = { view = view_here state; depth = scope_depth state } in
+  state.views <-
+    { state.views with
+      statements = Places.add token taken state.views.statements }
 
 (* A variant declares its enumerators for C clients (design 10.1 rule
    6), so Type-C text cannot name them. *)
@@ -2081,22 +2112,21 @@ let skip_balanced state unread expected =
 (* Attributes, GNU (GCC manual 6.39) and C23. *)
 
 (* The arguments of an attribute, if the cursor is at their [(]. The
-   parser does not read them, so it keeps the scope there, under the
+   parser does not read them, so it keeps the view there, under the
    token where their span starts, which says what each identifier among
-   them denotes (design 13.5). A scope is persistent, so keeping one
-   copies nothing. *)
+   them denotes (design 13.5). *)
 let attribute_arguments state =
   if peek state = Punctuator_token P.Left_paren then begin
-    let scope = state.scope in
+    let view = view_here state in
     let arguments =
-      skip_balanced state (Unread_attribute scope)
+      skip_balanced state (Unread_attribute view.scopes)
         "`)` to end the arguments of an attribute"
     in
     state.views <-
       {
         state.views with
         attributes =
-          Places.add arguments.first (arguments, scope) state.views.attributes;
+          Places.add arguments.first (arguments, view) state.views.attributes;
       };
     Some arguments
   end
@@ -4299,6 +4329,7 @@ and read_simple_statement state =
   | Punctuator_token P.Left_bracket when opens_standard_attributes state 0 ->
       attribute_statement state start
   | Keyword_token Keyword.Goto ->
+      take_statement_view state;
       advance state;
       if accept state P.Star then begin
         let target = expression state in
@@ -4311,16 +4342,19 @@ and read_simple_statement state =
         expect state P.Semicolon "`;` after `goto`";
         finish state start (Goto target)
   | Keyword_token Keyword.Continue ->
+      take_statement_view state;
       advance state;
       let loop = continue_target state start in
       expect state P.Semicolon "`;` after `continue`";
       finish state start (Continue { loop })
   | Keyword_token Keyword.Break ->
+      take_statement_view state;
       advance state;
       let leaves = break_target state start in
       expect state P.Semicolon "`;` after `break`";
       finish state start (Break { leaves })
   | Keyword_token Keyword.Return ->
+      take_statement_view state;
       advance state;
       let value =
         optional_expression state P.Semicolon "`;` after `return`"
@@ -4539,6 +4573,7 @@ and block_items state place =
   let rec loop read =
     match peek state with
     | Punctuator_token P.Right_brace ->
+        take_statement_view state;
         advance state;
         close_scope ~scope_end:(last_read state) read
     | End_of_input -> fail_expected state "`}` to end a compound statement"
@@ -4571,6 +4606,7 @@ and read_block_item place state =
 and defer_statement state place =
   let keyword = first_token state state.position in
   refuse_defer_place state place;
+  take_statement_view state;
   advance state;
   let statement =
     as_deferred state (fun () ->
@@ -4702,10 +4738,9 @@ let at_universe_text state =
   peek state <> End_of_input
   && is_universe_text_at state (first_token state state.position)
 
-(* An external declaration and the scope in front of it, which is
-   persistent, so keeping it copies nothing (design 13.5). *)
+(* An external declaration and the view in front of it (design 13.5). *)
 let external_declaration state =
-  let view = state.scope in
+  let view = view_here state in
   if begins_type_declaration state then
     let declaration = type_declaration state in
     Until_scope_end
@@ -4719,7 +4754,7 @@ let external_declaration state =
 let universe_declarations state =
   let rec loop read =
     if at_universe_text state then begin
-      let view = state.scope in
+      let view = view_here state in
       let declaration = type_declaration state in
       let scoped scope_end =
         (({ declaration; scope_end } : scoped_type_declaration), view)
@@ -4766,14 +4801,20 @@ let file_scope_declarations scope =
   }
 
 module View = struct
-  type t = scope
+  type t = view
 
-  let empty = Scope.file
-
-  let find view name = Scope.find view name
+  let empty = empty_view
+  let find view name = Scope.find view.scopes name
 
   let find_tag view name =
-    Option.map (fun (entry : tag_entry) -> entry.tag) (Scope.find_tag view name)
+    Option.map
+      (fun (entry : tag_entry) -> entry.tag)
+      (Scope.find_tag view.scopes name)
+
+  let find_local_label (view : view) name =
+    Option.map
+      (fun (entry : label_entry) -> entry.identity)
+      (Names.find_opt name view.local_labels)
 end
 
 type scopes = {
@@ -4798,7 +4839,15 @@ let attributes_within (views : views) (span : span) =
   |> Seq.map snd |> List.of_seq
 
 let pragma_view (views : views) token = Places.find_opt token views.pragmas
+
+let pragmas_within (views : views) (span : span) =
+  Places.to_seq_from span.first views.pragmas
+  |> Seq.take_while (fun (index, _) -> index <= span.last)
+  |> List.of_seq
 let try_views (views : views) token = Places.find_opt token views.tries
+
+let statement_view (views : views) token =
+  Places.find_opt token views.statements
 
 let parse_with_scopes ~keywords reader =
   let state =
@@ -4809,7 +4858,7 @@ let parse_with_scopes ~keywords reader =
       position = 0;
       open_brackets = [];
       scope = Scope.file;
-      place = Scope.file;
+      place = empty_view;
       place_start = 0;
       jumps = Function_body;
       arm = None;
@@ -4821,6 +4870,7 @@ let parse_with_scopes ~keywords reader =
           attributes = Places.empty;
           pragmas = Places.empty;
           tries = Places.empty;
+          statements = Places.empty;
         };
       generics = Name_set.empty;
       counter = Spanned.counter ~max_depth;

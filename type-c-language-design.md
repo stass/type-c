@@ -1569,9 +1569,10 @@ defer fclose(f);
    label declared with `__label__` is local to its copy and would not
    clash, and neither would an incomplete type; both are refused all
    the same, so that the rule has no exception. A declaration with
-   `extern` defines no object and is allowed, as is a typedef whose
-   specifier declares no type: the typedef itself names a type and
-   declares none (C11 6.7.8p3).
+   `extern` defines no object and this rule allows it, though it
+   declares an entity with linkage, which rule 8 refuses in `S`
+   (13.5). A typedef whose specifier declares no type is allowed: the
+   typedef itself names a type and declares none (C11 6.7.8p3).
 10. Within the scope of a `defer` statement there is no GNU computed
     `goto *e` and no `asm goto`. Both are jumps to labels (4.4) that no
     deferred statement can precede: the first chooses its target when
@@ -1650,15 +1651,17 @@ The measurement of P9 (section 15) counts apart the refusals of rule
 8, of rule 9, of rule 12 and of the form of a `return` on each of its
 grounds (13.5), and their diagnostics tell them apart (13.6). The
 count of a rule reads codes and matches no message text. A failure of the
-resolution property for a deferred statement is a refusal under rule 8
-and carries the code of rule 8: one code, whichever clause of the
+resolution property for a deferred statement is a refusal under rule
+8 and carries the code of rule 8: one code, whichever clause of the
 property fails. Rule 8 has no check of its own for that. The one check
 of the property derives the code from the kind of text that it reads
-(13.5). Rule 9 has one code. Under rule 12, a declaration in the
-operand fails the same check on the operand of a `return` and carries
-the code of that kind of text, and a jump out of the operand a code of
-its own; no other rule has either code. Each refusal of the form of a
-`return` has a code of its own (13.5).
+(13.5). A failure that rests on a type that typec does not compute is
+the exception: it carries the one code of such failures, whatever the
+kind of text, and P21 counts it (13.5). Rule 9 has one code. Under rule
+12, a declaration in the operand fails the same check on the operand of
+a `return` and carries the code of that kind of text, and a jump out of
+the operand a code of its own; no other rule has either code. Each
+refusal of the form of a `return` has a code of its own (13.5).
 
 Rationale for rule 11. C makes the substatement of a selection or
 iteration statement a block of its own (C11 6.8.4p3, 6.8.5p5), so the
@@ -3823,9 +3826,15 @@ cite the property and show it on examples, and what rule 3 of 5.1 and
 rule 12 of section 6 say of a name that the operand declares is the
 third clause on their text. The check is told the kind of text that it
 reads, and a failure carries the code of that kind (13.6): one code for
-each kind, whichever clause fails. A count of the refusals that one of
-those rules makes through the property so reads a code, and no kind
-needs a check of its own to have a code of its own.
+each kind, whichever clause fails. The one name of an untagged type is
+written into an instance as the definition of a generic is, and carries
+its code. A count of the refusals that one of those rules makes through
+the property so reads a code, and no kind needs a check of its own to
+have a code of its own. A failure that rests on a type that typec does
+not compute (*Provisional (P21)*, above) carries instead one code of its
+own, whatever the kind of text, so that the measurement of P21 counts
+those refusals under one code; the count of a kind's rule leaves them
+out.
 
 A place where the text is written is a place in the lowered C. The
 copies of deferred statements stand at one place for each exit (section
@@ -4102,7 +4111,7 @@ numbers refer to the implementation plan.
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions, in a statement or declaration that neither holds nor directly follows a pragma line (5.1) | Stage 2, Pilot B: rewrites the limit forced, and statements refused for a pragma | As specified |
-| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11), and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code; how often each refusal of the form (13.5) rejects a function or a `return`; the returns, and the other jumps that run copies, where the plain statement reports a diagnostic of the list of 13.5 that its block loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
+| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11), and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code, read from their codes, a refusal of the resolution property that rests on an unknown type counted under P21 instead; how often each refusal of the form (13.5) rejects a function or a `return`; the returns, and the other jumps that run copies, where the plain statement reports a diagnostic of the list of 13.5 that its block loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
 | P12 | Instances are per translation unit (7.3) | Stage 3: code size of the library and pilot | Per unit |
@@ -4114,9 +4123,9 @@ numbers refer to the implementation plan.
 | P18 | Lifetimes by homogeneous regions (11.3) | Stage 6: a formal model, then a prototype | No lifetime tier |
 | P19 | `typec` has a C front end of its own (13.1) | Stage 0 gate and its change-of-course condition | Own front end |
 | P20 | `__builtin_va_list` is an opaque type (13.3) | Typing `__builtin_va_arg` and bodies (0.9b, 0.7b): a case that needs the representation | Opaque |
-| P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties, the declarations that the resolution check of 13.5 refuses for one among them | Unknown types stay |
+| P21 | A type that the front end does not compute is unknown, an error only where it is needed (13.3) | Typing bodies (0.9b) and the corpus: points that need an unknown type's properties, the declarations that the resolution check of 13.5 refuses for one among them, read from the one code that such a refusal carries for every kind of moved text | Unknown types stay |
 | P22 | `typec`'s own failures exit with 80, 81 and 82, which no backend uses (13.2) | Corpus runs with GCC and Clang: a backend failure that exits with one of them | As specified |
-| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition. Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
+| P23 | A generic's definition is written as its tokens into each instance, which needs rule 8 of 3.5 (13.5) | Stage 2 pilot: how often rule 8 rejects a type definition, read from the code of the definition of a generic (13.5). Stage 3: how often it rejects code in the container library (package 3.5) and in generic function bodies, where most of its cases arise | As specified |
 | P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
 | P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
 | P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |

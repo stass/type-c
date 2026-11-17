@@ -19,9 +19,13 @@
 open Typec_cpp
 open Typec_syntax
 
-(** The two name spaces that a view holds (C11 6.2.3), with the
-    declaration of a name in one of them. *)
-type declaration = Ordinary of Tree.reference | Tag of Tree.tag_id
+(** The name spaces that a view holds (C11 6.2.3), with the declaration
+    of a name in one of them: for a label, the one that the name of an
+    [&&] denotes at its own place. *)
+type declaration =
+  | Ordinary of Tree.reference
+  | Tag of Tree.tag_id
+  | Label of Tree.label_id
 
 (** A name of the text, at [span], with its declaration at the text's own
     place. *)
@@ -39,17 +43,24 @@ type own = {
   scope : Tree.scope_depth;
 }
 
-(** The kinds of moved text that {!check} reads: the definition of a
-    generic (design 3.5 rule 8) and the operand of a [try] (5.1 rule 3).
-    A failure on the operand of a [try] carries the code of its kind,
-    whichever clause fails; one on the definition of a generic carries
-    the code of the clause. *)
-type kind = Generic_definition | Try_operand
+(** The kinds of text that {!check} reads: the definition of a generic
+    (design 3.5 rule 8), the operand of a [try] (5.1 rule 3), the
+    statement of a defer (6 rule 8) and the operand of a [return] in the
+    scope of a defer, which lowering writes in a block of its own (6
+    rule 12). A failure carries the code of its kind, whichever clause
+    fails, but one that rests on a type that typec does not compute
+    carries the one code of those, across the kinds (P21). *)
+type kind =
+  | Generic_definition
+  | Try_operand
+  | Deferred_statement
+  | Return_operand
 
 (** The moved text: its kind, its tokens, the scope that holds it, the
     view around it at its own place, which is that in front of the
-    declaration that holds a generic's definition and at the operand of
-    a [try], and what its reader found in it: each name that it uses, a
+    declaration that holds a generic's definition, at the operand of a
+    [try], at the [defer] of a deferred statement and at the [return]
+    of its operand, and what its reader found in it: each name that it uses, a
     use of a declaration within the text, such as of a type parameter,
     included, and each name that it declares. A name that the text
     declares in [scope], as a first mention of a tag in a member of a
@@ -137,4 +148,5 @@ val check_spelled :
     argument does (design 10.3): each is a use of its declaration, which
     the text holds none of, and its declaration at [at] is exact, as no
     own place of the text vouches for it. The result is that of
-    {!check}. *)
+    {!check}, under the code of the definition of a generic, which the
+    text is written into an instance with. *)

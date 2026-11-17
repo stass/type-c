@@ -399,12 +399,12 @@ own, and a tag declared before the definition is named by it.
   $ printf 'type link(T) = struct { struct node *next; T v; };\n' \
   >   > first_mention.tc
   $ ./golden.exe first_mention.tc
-  first_mention.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0039]
+  first_mention.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0044]
   [1]
   $ printf 'type step(T) = | Done | Next(struct node *n, T v);\n' \
   >   > first_mention_field.tc
   $ ./golden.exe first_mention_field.tc
-  first_mention_field.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0039]
+  first_mention_field.tc:1: the tag 'node' is declared in the scope around the text, which lowering writes elsewhere or in a block of its own, so the text after it would lose the declaration; declare it before the text (design 13.5) [TC0044]
   [1]
 
 Nor does it declare an object or a function with linkage, even in a
@@ -414,7 +414,7 @@ block of its own, which declares an entity that file scope sees.
   > type g(T) = struct { T t; int a[sizeof(({ extern int o; o; }))]; };
   > EOF
   $ ./golden.exe linked.tc
-  linked.tc:1: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 13.5) [TC0039]
+  linked.tc:1: 'o' is declared with linkage in the text, which lowering writes elsewhere, so the declaration may change it for the text around it there; declare it outside the text (design 13.5) [TC0044]
   [1]
 
 Nor does it hold, in the arguments of an attribute, which typing does
@@ -428,7 +428,7 @@ is visible is named.
   > };
   > EOF
   $ ./golden.exe unread_brace.tc
-  unread_brace.tc:2: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0039]
+  unread_brace.tc:2: a brace in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0044]
   [1]
   $ cat > unread_tag.tc <<'EOF'
   > type g(T) = struct {
@@ -436,7 +436,7 @@ is visible is named.
   > };
   > EOF
   $ ./golden.exe unread_tag.tc
-  unread_tag.tc:2: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0039]
+  unread_tag.tc:2: a tag keyword that names no visible tag in the arguments of an attribute, which typing does not read, may declare a name that the text around it sees, and lowering writes the text elsewhere (design 13.5) [TC0044]
   [1]
   $ cat > unread_visible_tag.tc <<'EOF'
   > struct q;
@@ -652,7 +652,7 @@ spelling C declares there.
   > g(int) x;
   > EOF
   $ ./golden.exe aligned.tc
-  aligned.tc:2: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 (design 13.5) [TC0046]
+  aligned.tc:2: in the instance 'g__i' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 (design 13.5) [TC0044]
   [1]
 
 Type-C text names no generic and no universe name in the arguments of an

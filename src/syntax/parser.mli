@@ -133,6 +133,12 @@ module View : sig
 
   val find_tag : t -> string -> Tree.tag_id option
   (** The tag of the name that is visible. *)
+
+  val find_local_label : t -> string -> Tree.label_id option
+  (** The GNU local label of the name that is visible, declared by
+      [__label__] in a block around the place; [None] where the name
+      denotes the label of that name of the function, or of the block
+      literal, around the place (C11 6.2.1p3). *)
 end
 
 (** The views that the parser takes where unread text stands in a unit,
@@ -152,14 +158,19 @@ val attributes_within : views -> Tree.span -> (Tree.span * View.t) list
     in source order, each with the view at them: every attribute of a
     text, wherever the grammar puts it. *)
 
+val pragmas_within : views -> Tree.span -> (int * View.t) list
+(** The index of each pragma token within the span, in source order, with
+    the view at it, as {!pragma_view} gives it. *)
+
 val pragma_view : views -> int -> View.t option
 (** [pragma_view views index] is the view at the token at [index] in
     [Reader.t.tokens] of the unit that [views] were taken in, if it is a
     pragma token ([Token.Pragma] or [Token.Typec_pragma]), and [None]
     for any other token. A pragma stands between two grammar tokens, and
     its view is the one in front of the grammar token after it, or file
-    scope as the unit leaves it after the last grammar token. In a function body that the parser passes
-    through unread, it is the view where the body starts. *)
+    scope as the unit leaves it after the last grammar token. In a
+    function body that the parser passes through unread, it is the view
+    where the body starts. *)
 
 (** The two views at a [try] of Type-C text (design 5.1 rule 3), which
     the resolution property of design 13.5 compares for its operand.
@@ -182,6 +193,21 @@ val try_views : views -> int -> try_views option
 (** [try_views views index] are the views at the token at [index] in
     [Reader.t.tokens] of the unit that [views] were taken in, if it is
     the word of a {!Tree.Try}, and [None] for any other token. *)
+
+(** The view at a statement of a function body that lowering writes
+    around for a defer (design 13.5), and the depth of the scope there,
+    which a name that the text declares is in scope after where it is
+    declared no deeper ({!Tree.scope_depth}). *)
+type statement_view = { view : View.t; depth : Tree.scope_depth }
+
+val statement_view : views -> int -> statement_view option
+(** [statement_view views index] is the view at the token at [index] in
+    [Reader.t.tokens] of the unit that [views] were taken in, if it is
+    the word of a [defer], [break], [continue], [goto] or [return], or
+    the [}] that ends a compound statement: the own place of a deferred
+    statement and of the operand of a [return], and each place where
+    lowering may write the copies of deferred statements (section 6 rule
+    1). It is [None] for any other token. *)
 
 (** What the parser records of the scopes of a unit beside its tree. *)
 type scopes = {

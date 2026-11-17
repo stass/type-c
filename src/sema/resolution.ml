@@ -4,7 +4,10 @@
 open Typec_cpp
 open Typec_syntax
 
-type declaration = Ordinary of Tree.reference | Tag of Tree.tag_id
+type declaration =
+  | Ordinary of Tree.reference
+  | Tag of Tree.tag_id
+  | Label of Tree.label_id
 type name = { name : string; span : Tree.span; declaration : declaration }
 type own = {
   declared : name;
@@ -13,7 +16,11 @@ type own = {
   scope : Tree.scope_depth;
 }
 
-type kind = Generic_definition | Try_operand
+type kind =
+  | Generic_definition
+  | Try_operand
+  | Deferred_statement
+  | Return_operand
 
 type text = {
   kind : kind;
@@ -70,29 +77,42 @@ type context = {
   same_type : Ctype.t -> Ctype.t -> bool Unknown.answer;
 }
 
+(* Whether a failure rests on facts that typec knows, or on a type that
+   it does not compute (P21), which carries one code across the kinds. *)
+type ground = Known | Unknown_type
+
 (* Raised at the first point of the text that breaks the property, with
-   the rule of the clause that it breaks; caught in [checking]. *)
-exception Reads_otherwise of Tree.span * Rule.t * string
+   the ground of the failure; caught in [checking]. *)
+exception Reads_otherwise of Tree.span * ground * string
 
 let quote = Expressions.quote
 
-let refuse span rule message = raise (Reads_otherwise (span, rule, message))
+let refuse span message = raise (Reads_otherwise (span, Known, message))
 
-(* The rule whose code a failure on a text of [kind] carries, for the
-   rule [clause] of the clause that fails: the code of the kind (design
-   13.5), where the kind has one. *)
-let kind_rule kind clause =
-  match kind with
-  | Generic_definition -> clause
-  | Try_operand -> Rule.Try_moved_operand
+let refuse_unknown span message =
+  raise (Reads_otherwise (span, Unknown_type, message))
+
+(* The code of a kind of moved text, which a failure on it carries
+   whichever clause fails (design 13.5). *)
+let kind_rule : kind -> Rule.t = function
+  | Generic_definition -> Generic_moved
+  | Try_operand -> Try_moved_operand
+  | Deferred_statement -> Deferred_moved
+  | Return_operand -> Return_operand_moved
 
 (* The one failure path: [run] of the clauses, with the failure made a
-   diagnostic under the rule that [rule_of] gives for its clause. *)
-let checking rule_of run =
+   diagnostic under the code of [kind], or under the one code of a
+   failure on an unknown type. *)
+let checking kind run =
   match run () with
   | () -> Ok ()
-  | exception Reads_otherwise (span, clause, message) ->
-      Error (span, Rule.message (rule_of clause) message)
+  | exception Reads_otherwise (span, ground, message) ->
+      let rule =
+        match ground with
+        | Known -> kind_rule kind
+        | Unknown_type -> Rule.Moved_text_unknown
+      in
+      Error (span, Rule.message rule message)
 
 let location_of context index =
   let location = context.tokens.tokens.(index).location in
@@ -101,7 +121,9 @@ let location_of context index =
 (* Where the declaration stands, as a message cites it. *)
 let declared_at context declaration =
   match declaration with
-  | Ordinary (In_tree (Ordinary_at index)) | Tag (Tag_at index) ->
+  | Ordinary (In_tree (Ordinary_at index))
+  | Tag (Tag_at index)
+  | Label (Label_at index) ->
       location_of context index
   | Ordinary (Builtin _) -> "before the first token"
 
@@ -119,13 +141,15 @@ let cite context = function
 let find_lowered lowered name =
   List.find_opt (fun entry -> entry.lowered_name = name) lowered
 
-(* A use of a declaration within the text is its own at every place. *)
+(* A use of a declaration within the text is its own at every place.
+   The first mention of a function's label declares it, wherever that
+   stands, so a label name is checked at every place. *)
 let is_outside text declaration =
   let within index = text.span.first <= index && index <= text.span.last in
   match declaration with
   | Ordinary (In_tree (Ordinary_at index)) | Tag (Tag_at index) ->
       not (within index)
-  | Ordinary (Builtin _) -> true
+  | Ordinary (Builtin _) | Label _ -> true
 
 let type_of (entity : Entity.t) =
   match entity.declared with
@@ -191,13 +215,14 @@ let check_scope text (own : own) =
     let named =
       match own.declared.declaration with
       | Tag _ -> "the tag " ^ quote own.declared.name
+      | Label _ -> "the label " ^ quote own.declared.name
       | Ordinary _ -> quote own.declared.name
     in
-    refuse own.declared.span Moved_declaration
+    refuse own.declared.span
       (Printf.sprintf
          "%s is declared in the scope around the text, which lowering \
-          writes elsewhere, so the text after it would lose the \
-          declaration; declare it before the text"
+          writes elsewhere or in a block of its own, so the text after \
+          it would lose the declaration; declare it before the text"
          named)
 
 (* The third clause on a declaration with linkage, in any scope of the
@@ -206,7 +231,7 @@ let check_scope text (own : own) =
    leaves out the text's own declarations. *)
 let check_linkage (own : own) =
   if own.linked then
-    refuse own.declared.span Moved_declaration
+    refuse own.declared.span
       (Printf.sprintf
          "%s is declared with linkage in the text, which lowering writes \
           elsewhere, so the declaration may change it for the text around \
@@ -214,7 +239,7 @@ let check_linkage (own : own) =
          (quote own.declared.name))
 
 let refuse_unread_declaration index what =
-  refuse { first = index; last = index } Moved_declaration
+  refuse { first = index; last = index }
     (Printf.sprintf
        "%s in the arguments of an attribute, which typing does not read, \
         may declare a name that the text around it sees, and lowering \
@@ -261,13 +286,13 @@ let check_same_type context span name ~declaration (used : Entity.t) there =
   match context.same_type (type_of used) (type_of there) with
   | Answer true -> ()
   | Answer false ->
-      refuse span Moved_text
+      refuse span
         (Printf.sprintf
            "the declaration of %s at %s, between the text and a place where \
             lowering writes it, changes the type that the text uses"
            (quote name) cited)
   | Depends_on unknown ->
-      refuse span Moved_text_unknown
+      refuse_unknown span
         (Printf.sprintf
            "the declaration of %s at %s, between the text and a place where \
             lowering writes it, may change the type that the text uses: \
@@ -275,7 +300,7 @@ let check_same_type context span name ~declaration (used : Entity.t) there =
            (quote name) cited unknown.construct)
 
 let refuse_other_entity context span name cited =
-  refuse span Moved_text
+  refuse span
     (Printf.sprintf
        "%s denotes another entity where lowering writes the text, %s"
        (quote name) (cite context cited))
@@ -297,7 +322,7 @@ let check_ordinary context place span name reference =
       match find_lowered place.typedef_names name with
       | Some lowered -> refuse_other_entity context span name (Lowered lowered)
       | None ->
-          refuse span Moved_text
+          refuse span
             (Printf.sprintf "%s is not visible where lowering writes the text"
                (quote name)))
 
@@ -319,21 +344,38 @@ let check_tag context place span name tag =
   | Some (Source (Tag found)) when found = tag || same_tag context tag found ->
       ()
   | Some cited ->
-      refuse span Moved_text
+      refuse span
         (Printf.sprintf
            "the tag %s denotes another tag where lowering writes the text, %s"
            (quote name) (cite context cited))
   | None ->
-      refuse span Moved_text
+      refuse span
         (Printf.sprintf
            "the tag %s is not visible where lowering writes the text"
            (quote name))
 
-let check_name context place (use : name) =
-  match use.declaration with
-  | Ordinary reference ->
-      check_ordinary context place use.span use.name reference
-  | Tag tag -> check_tag context place use.span use.name tag
+let refuse_other_label (use : name) cited =
+  refuse use.span
+    (Printf.sprintf
+       "the label %s denotes another label where lowering writes the text, \
+        %s"
+       (quote use.name) cited)
+
+(* A label name denotes the innermost GNU local label of its name, or
+   else the label of its name of the function, which is one label at
+   every place of the body (C11 6.2.1p3). So the name of an [&&] reads
+   one label at both places when the local labels of its name visible
+   there agree. A text that declares the local label itself, in a
+   statement expression, is held to the same and may be refused though
+   it would read its own; a deferred statement declares none (design 6
+   rule 9). *)
+let check_label context text place (use : name) =
+  let own = Parser.View.find_local_label text.own_place use.name in
+  match Parser.View.find_local_label place.view use.name with
+  | there when there = own -> ()
+  | Some label ->
+      refuse_other_label use (cite context (Source (Label label)))
+  | None -> refuse_other_label use "the label of the function"
 
 (* A place stands in front of the token [before], so an event at that
    token follows the place. *)
@@ -377,7 +419,7 @@ let earlier_view text place =
 let check_redeclared context window (use : name) (used : Entity.t) =
   match redeclared_within context window used with
   | Some index ->
-      refuse use.span Moved_text
+      refuse use.span
         (Printf.sprintf
            "the declaration of %s at %s, between the text and a place where \
             lowering writes it, gives it a type that may hold an attribute or \
@@ -387,14 +429,15 @@ let check_redeclared context window (use : name) (used : Entity.t) =
   | None -> ()
 
 let check_use context window text place (use : name) =
-  if is_outside text use.declaration then (
-    check_name context place use;
+  if is_outside text use.declaration then
     match use.declaration with
     | Ordinary reference ->
+        check_ordinary context place use.span use.name reference;
         Option.iter
           (check_redeclared context window use)
           (context.entity reference)
-    | Tag _ -> ())
+    | Tag tag -> check_tag context place use.span use.name tag
+    | Label _ -> check_label context text place use
 
 (* Whether [view] gives the name of [entity] that entity. *)
 let denotes context view (entity : Entity.t) =
@@ -410,7 +453,7 @@ let denotes context view (entity : Entity.t) =
    place, and with it every declaration and member written through it. *)
 let check_typedef context text place (index, (typedef : Entity.t)) =
   if denotes context (earlier_view text place) typedef then
-    refuse text.span Moved_text
+    refuse text.span
       (Printf.sprintf
          "the declaration of the typedef name %s at %s, between the text and \
           a place where lowering writes it, gives it a type that may hold an \
@@ -444,7 +487,7 @@ let tag_at_place context place (tag : Ctype.named_tag) =
 let check_completion context text place (index, tag) =
   match tag_at_place context place tag with
   | Some name ->
-      refuse text.span Moved_text
+      refuse text.span
         (Printf.sprintf
            "the tag %s is completed at %s, between a place where lowering \
             writes the text and the text, so it is incomplete there"
@@ -463,7 +506,7 @@ let check_own context text place (own : own) =
       let typedef_before = is_c_typedef own_place in
       match ordinary_at is_c_typedef place name with
       | Some cited when not typedef_before ->
-          refuse span Moved_text
+          refuse span
             (Printf.sprintf
                "the text declares %s for itself, but where lowering writes \
                 it %s is a typedef name, %s"
@@ -472,57 +515,79 @@ let check_own context text place (own : own) =
   | Tag _ when own.implicit -> (
       match tag_at place name with
       | Some cited ->
-          refuse span Moved_text
+          refuse span
             (Printf.sprintf
                "the text declares the tag %s in a scope of its own, but \
                 where lowering writes it the tag is %s"
                (quote name) (cite context cited))
       | None -> ())
-  | Tag _ -> ()
+  | Tag _ | Label _ -> ()
+
+(* Unread text of moved text, which a message names: the arguments of an
+   attribute, or a [#pragma] line (design 13.5). *)
+type unread = { within : string; unread_view : Parser.View.t }
 
 (* Lowering writes a [Parser.own_name] under a name of its own, but
    leaves unread text as the source spells it: the backend reads the
    spelling as the place declares it. The parser refuses one in the
    arguments of an attribute of Type-C text, and a type parameter there
-   in any text, so this check reaches moved text that is C text. *)
-let check_own_spelling context place span name own =
+   in any text, so for an attribute this check reaches moved text that
+   is C text; a pragma line is held to it in any moved text. *)
+let check_own_spelling context place unread span name own =
   match ordinary_at is_c_entity place name with
   | Some cited ->
-      refuse span Unread_own_name
+      refuse span
         (Printf.sprintf
-           "%s in the arguments of an attribute denotes %s, but where \
-            lowering writes the text the backend reads the declaration of \
-            %s there, %s"
-           (quote name) (Parser.own_name_kind own) (quote name)
+           "%s in %s denotes %s, but where lowering writes the text the \
+            backend reads the declaration of %s there, %s"
+           (quote name) unread.within (Parser.own_name_kind own) (quote name)
            (cite context cited))
   | None -> ()
 
 (* An identifier of unread text counts as a use of what it denotes at its
    own place, in either name space, as typec cannot tell which the
    backend reads; one that denotes nothing is a word of the attribute. *)
-let check_unread_identifier context window text place view span name =
-  let found = Parser.View.find view name in
+let check_unread_identifier context window text place unread span name =
+  let found = Parser.View.find unread.unread_view name in
   (match (Parser.own_name found name, found) with
-  | Some own, _ -> check_own_spelling context place span name own
+  | Some own, _ -> check_own_spelling context place unread span name own
   | None, Some { declaration; _ } ->
       let use = { name; span; declaration = Ordinary declaration } in
       check_use context window text place use
   | None, None -> ());
-  match Parser.View.find_tag view name with
+  match Parser.View.find_tag unread.unread_view name with
   | Some tag ->
       check_use context window text place { name; span; declaration = Tag tag }
   | None -> ()
 
-let check_unread context window text place ((arguments : Tree.span), view) =
+let check_attribute context window text place
+    ((arguments : Tree.span), unread_view) =
+  let unread = { within = "the arguments of an attribute"; unread_view } in
   for index = arguments.first to arguments.last do
     match context.tokens.tokens.(index).kind with
     | Identifier name ->
         let span = { Tree.first = index; last = index } in
-        check_unread_identifier context window text place view span name
+        check_unread_identifier context window text place unread span name
     | Number | Character _ | String _ | Punctuator _ | Pragma _ | Typec_pragma
       ->
         ()
   done
+
+(* The identifiers of a pragma line are those among its preprocessing
+   tokens, which the reader keeps on its one token. The parser refuses a
+   line of moved text that is no sequence of them, and lowering moves no
+   [#pragma typec] line. *)
+let check_pragma context window text place (index, unread_view) =
+  let unread = { within = "a `#pragma` line"; unread_view } in
+  let span = { Tree.first = index; last = index } in
+  match context.tokens.tokens.(index).kind with
+  | Pragma (Identifiers names) ->
+      List.iter (check_unread_identifier context window text place unread span)
+        names
+  | Pragma (Not_tokens _)
+  | Typec_pragma | Identifier _ | Number | Character _ | String _
+  | Punctuator _ ->
+      ()
 
 (* The first two clauses and the window, at a place where lowering
    writes the text. *)
@@ -531,8 +596,11 @@ let check_reading context text place =
   List.iter (check_use context window text place) text.uses;
   List.iter (check_own context text place) text.declares;
   List.iter
-    (check_unread context window text place)
+    (check_attribute context window text place)
     (Parser.attributes_within context.views text.span);
+  List.iter
+    (check_pragma context window text place)
+    (Parser.pragmas_within context.views text.span);
   Seq.iter
     (check_typedef context text place)
     (within window context.redeclared.typedefs);
@@ -542,10 +610,16 @@ let check_reading context text place =
       (check_completion context text place)
       (within window context.completed)
 
+(* Lowering writes the operand of a return at its own place, so what it
+   declares with linkage reaches no other text (design 13.5). *)
+let moves = function
+  | Generic_definition | Try_operand | Deferred_statement -> true
+  | Return_operand -> false
+
 let check context text ~at =
-  checking (kind_rule text.kind) (fun () ->
+  checking text.kind (fun () ->
       List.iter (check_scope text) text.declares;
-      List.iter check_linkage text.declares;
+      if moves text.kind then List.iter check_linkage text.declares;
       List.iter
         (check_unread_declarations context)
         (Parser.attributes_within context.views text.span);
@@ -560,7 +634,7 @@ let check_exact context place (use : name) =
   | Some { declaration; _ } -> (
       match context.entity declaration with
       | Some there when there.inexact ->
-          refuse use.span Moved_text
+          refuse use.span
             (Printf.sprintf
                "the declaration of %s at %s gives it a type that may hold an \
                 attribute or `typeof` of an expression, which the text that \
@@ -570,11 +644,21 @@ let check_exact context place (use : name) =
       | Some _ | None -> ())
   | None -> ()
 
-let check_spelled_name context place use =
-  check_name context place use;
-  check_exact context place use
+(* Lowering spells no label. *)
+let check_spelled_name context place (use : name) =
+  match use.declaration with
+  | Ordinary reference ->
+      check_ordinary context place use.span use.name reference;
+      check_exact context place use
+  | Tag tag ->
+      check_tag context place use.span use.name tag;
+      check_exact context place use
+  | Label _ -> ()
 
 (* The first half of the property for a text that lowering makes and
-   that spells [names] of the source. *)
+   that spells [names] of the source. The one name of an untagged type
+   is written into an instance, as the definition of a generic is, and
+   takes its code. *)
 let check_spelled context names ~at =
-  checking Fun.id (fun () -> List.iter (check_spelled_name context at) names)
+  checking Generic_definition (fun () ->
+      List.iter (check_spelled_name context at) names)

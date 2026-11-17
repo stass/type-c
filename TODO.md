@@ -1398,15 +1398,30 @@ types (design 13.3).
   typing path that reads `state.entities` directly would let a name
   escape the check unseen. The parser resolves every name: it could
   record the uses and declarations by span for `Resolution` to read.
-- [Medium] Design 13.5 gives each kind of moved text one code, whichever
-  clause of the resolution property fails, but `Resolution.kind_rule`
-  gives that code to the operand of a `try` alone: the definition of a
-  generic carries the code of the clause (`Moved_declaration`,
-  `Moved_text`, `Moved_text_unknown`), and so does the one name of an
-  untagged type (`check_spelled`). Decide whether those kinds take one
-  code each, and how the measurement of P21, which counts
-  `Moved_text_unknown`, then counts its refusals, a `try` operand's
-  under `Try_moved_operand` included.
+- [Medium] Two extents of a deferred statement: the parser refuses a
+  pragma line without tokens from the `defer` keyword to the end of `S`,
+  but `Resolution` checks the identifiers of the pragma lines within the
+  span of `S` alone, so `defer` followed by `#pragma GCC unroll N` on
+  its own line and then `S` leaves `N` unchecked. Derive the extent
+  from one source (the defer item's span, or that of `S`) for both, and
+  for the lowering that writes the copies.
+- [Medium] `Resolution.check` takes one place or none, so a caller with
+  several places (the exits of a defer) runs the clauses that hold
+  whatever the place once without one and then again at each place.
+  Let it take the list of places, run those clauses once and the
+  reading at each place.
+- [Medium] The check of design 6 rules 8 and 12 looks up, by span, what
+  typing found in each deferred statement and return operand
+  (`Declarations.moved_text`) and the parser's view at each exit
+  (`Parser.statement_view`), and a miss is an internal error: correct
+  only while typing, the parser and `Reachability.defers` agree on the
+  same nodes. Carry the view on the exit, or have typing return what it
+  found keyed by the nodes that reachability reads.
+- [High] Design 6 rule 12 refuses a `goto`, `break` or `continue` that
+  leaves the operand of a `return` in the scope of a defer statement, as
+  one in a statement expression would, under a code of its own; typec
+  does not check it yet. The jumps are those that `Reachability` records
+  inside the operand's span with a destination outside it.
 - [Medium] `Emitter.moved` takes any range, so only the lowering that
   calls it keeps the text of an instance, which needs the packing
   bracket of design 10.3, from being written without one. The lowering
