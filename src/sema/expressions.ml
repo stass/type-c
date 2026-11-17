@@ -3418,6 +3418,67 @@ let call context span callee (callee_typed : typed) arguments =
    (design 3.2 rule 6). This is the one place that decides it. *)
 let discards cast_type = Ctype.is_void cast_type = Answer true
 
+(* Whether [element], the element type of a slice, is [const char], so
+   that the slice is the one a string literal initialises. *)
+let is_const_char (element : Ctype.t) =
+  match element.shape with
+  | Arithmetic (Integer Char) -> element.qualifiers.const
+  | _ -> false
+
+(* What likely makes the value of the [target] slice, if it is one, that
+   a cast to it does not. A variant gets no hint: the cast reaches here
+   only in C text, which names no constructor. *)
+let cast_target_hint context span ~target ~source =
+  let same_type =
+    compatible context span (Ctype.unqualified target)
+      (Ctype.unqualified source)
+    = Answer true
+  in
+  if same_type then "; the value has that type already, so drop the cast"
+  else
+    match slice_of context target with
+    | Some (_, element) when is_const_char element ->
+        "; initialise one instead, as in `str s = \"text\";`, or make \
+         one of an array with `slice_from_array`"
+    | Some _ -> "; make one of an array with `slice_from_array`"
+    | None -> ""
+
+(* What likely reaches a scalar in the value of the [source] variant or
+   slice that a cast of it does not. *)
+let cast_source_hint context source =
+  if slice_of context source <> None then
+    "; its member `data` points to its elements"
+  else if Ctype.as_variant source <> None then
+    "; match it to reach what it holds"
+  else ""
+
+(* C11 6.5.4p2: a cast converts a scalar value to a scalar type, or any
+   value to void. A cast to a type that a variant or an instance is part
+   of, other than a pointer, or of such a value to anything but void,
+   would make the backend name the C encodings of the types, so typec
+   refuses it in any text, a cast to the value's own type included: GNU
+   C takes that one as an extension, of which -pedantic warns in the C
+   encodings, and nothing is lost by the refusal. *)
+let refuse_record_cast context span ~target ~source =
+  let refuse text = context.fail span (Rule.c_text (text ^ " (C11 6.5.4p2)")) in
+  let neither_scalar_nor_void =
+    Ctype.is_scalar target = Answer false && Ctype.is_void target = Answer false
+  in
+  if neither_scalar_nor_void && mentions_type_c_record target then
+    refuse
+      (Printf.sprintf
+         "a cast converts a value only to a scalar type or to void, and %s \
+          is neither%s"
+         (quote (Type_name.of_ctype target))
+         (cast_target_hint context span ~target ~source))
+  else if is_type_c_record source && Ctype.is_void target = Answer false then
+    refuse
+      (Printf.sprintf
+         "a cast converts only a scalar value to a type other than void, \
+          and %s is no scalar type%s"
+         (quote (Type_name.of_ctype source))
+         (cast_source_hint context source))
+
 (* Constructor expressions (design 3.3) *)
 
 (* A constructor that an expression names: the variant's unqualified
@@ -4088,6 +4149,8 @@ and expression_node context position (whole : Tree.expression) =
         else typed operand
       in
       context.needs_complete cast_operand.expression_type;
+      refuse_record_cast context span ~target:cast_type
+        ~source:cast_operand.expression_type;
       value (call_or_cast_type context span cast_type)
   | Binary (op, left, right) ->
       let remedy = variant_remedy op in

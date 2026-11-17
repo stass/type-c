@@ -2301,3 +2301,107 @@ cast, as in C.
   > }
   > EOF
   $ ./golden.exe pointer_valid.tc > /dev/null
+
+A cast converts a scalar value to a scalar type, or any value to void
+(C11 6.5.4p2), so no cast makes a variant or an instance, a slice among
+them, or an array of one, and none converts one to a scalar type. The
+backend would refuse these casts in the C encodings of the types. GNU C
+takes a cast of a structure to its own type as an extension; typec
+refuses that one too, as it says nothing that the value does not.
+
+  $ printf 'str s(void) { return (str)"cast"; }\n' > cast_str.tc
+  $ ./golden.exe cast_str.tc
+  cast_str.tc:1: error: a cast converts a value only to a scalar type or to void, and 'slice(const char)' is neither; initialise one instead, as in `str s = "text";`, or make one of an array with `slice_from_array` (C11 6.5.4p2)
+  [1]
+  $ printf 'slice(int) s(int *p) { return (slice(int))p; }\n' > cast_slice.tc
+  $ ./golden.exe cast_slice.tc
+  cast_slice.tc:1: error: a cast converts a value only to a scalar type or to void, and 'slice(int)' is neither; make one of an array with `slice_from_array` (C11 6.5.4p2)
+  [1]
+  $ { cat conversions.h; printf 'holder(int) c(holder(long) l) { return (holder(int))l; }\n'; } > cast_instance.tc
+  $ ./golden.exe cast_instance.tc
+  cast_instance.tc:7: error: a cast converts a value only to a scalar type or to void, and 'holder(int)' is neither (C11 6.5.4p2)
+  [1]
+  $ { cat conversions.h; printf 'void c(holder(int) *p) { (void)(holder(int)[2])p; }\n'; } > cast_array.tc
+  $ ./golden.exe cast_array.tc
+  cast_array.tc:7: error: a cast converts a value only to a scalar type or to void, and 'holder(int)[2]' is neither (C11 6.5.4p2)
+  [1]
+  $ { cat conversions.h; printf 'holder(int) c(const holder(int) h) { return (holder(int))h; }\n'; } > cast_same.tc
+  $ ./golden.exe cast_same.tc
+  cast_same.tc:7: error: a cast converts a value only to a scalar type or to void, and 'holder(int)' is neither; the value has that type already, so drop the cast (C11 6.5.4p2)
+  [1]
+  $ { cat conversions.h; printf 'holder(int) c(holder(int) h) { return __extension__ (holder(int))h; }\n'; } > cast_extension.tc
+  $ ./golden.exe cast_extension.tc
+  cast_extension.tc:7: error: a cast converts a value only to a scalar type or to void, and 'holder(int)' is neither; the value has that type already, so drop the cast (C11 6.5.4p2)
+  [1]
+  $ printf 'const char *c(str s) { return (const char *)s; }\n' > cast_from_slice.tc
+  $ ./golden.exe cast_from_slice.tc
+  cast_from_slice.tc:1: error: a cast converts only a scalar value to a type other than void, and 'slice(const char)' is no scalar type; its member `data` points to its elements (C11 6.5.4p2)
+  [1]
+  $ { cat conversions.h; printf 'long c(holder(long) h) { return (long)h; }\n'; } > cast_from_instance.tc
+  $ ./golden.exe cast_from_instance.tc
+  cast_from_instance.tc:7: error: a cast converts only a scalar value to a type other than void, and 'holder(long)' is no scalar type (C11 6.5.4p2)
+  [1]
+
+In Type-C text a cast to or from a variant is refused first as an
+operation that opens it.
+
+  $ { cat conversions.h; printf 'int c(option(int) o) { return (int)o; }\n'; } > cast_variant.tc
+  $ ./golden.exe cast_variant.tc
+  cast_variant.tc:7: error: the variant 'option(int)' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  [1]
+
+C text, which may use the structure that a variant lowers to, is held to
+the same rule, as the backend would name the C encodings there too.
+
+  $ cp conversions.h cast_c_text.tc
+  $ cat >> cast_c_text.tc <<'EOF'
+  > holder(long) hl;
+  > typedef holder(int) hint;
+  > # 1 "c.h" 1
+  > hint c(void) { return (hint)hl; }
+  > EOF
+  $ ./golden.exe cast_c_text.tc
+  c.h:1: error: a cast converts a value only to a scalar type or to void, and 'holder(int)' is neither (C11 6.5.4p2)
+  [1]
+  $ cp conversions.h cast_c_from_variant.tc
+  $ cat >> cast_c_from_variant.tc <<'EOF'
+  > typedef result(int, error) rint;
+  > # 1 "c.h" 1
+  > int c(rint r) { return (int)r; }
+  > EOF
+  $ ./golden.exe cast_c_from_variant.tc
+  c.h:1: error: a cast converts only a scalar value to a type other than void, and 'result(int, error)' is no scalar type; match it to reach what it holds (C11 6.5.4p2)
+  [1]
+  $ cp conversions.h cast_c_to_variant.tc
+  $ cat >> cast_c_to_variant.tc <<'EOF'
+  > typedef option(int) oint;
+  > # 1 "c.h" 1
+  > oint d(void) { return (oint)1; }
+  > EOF
+  $ ./golden.exe cast_c_to_variant.tc
+  c.h:1: error: a cast converts a value only to a scalar type or to void, and 'option(int)' is neither (C11 6.5.4p2)
+  [1]
+
+The partners: a cast to void of any value, a cast of a pointer to an
+instance or a slice, a cast of a member, and a pointer cast in a
+generic definition.
+
+  $ cp conversions.h cast_valid.tc
+  $ cat >> cast_valid.tc <<'EOF'
+  > holder(long) hl;
+  > void p(str s, holder(int) h, option(int) o) {
+  >   (void)s;
+  >   (void)h;
+  >   (const void)o;
+  >   holder(int) *q = (holder(int) *)&hl;
+  >   const char *d = (const char *)s.data;
+  >   long v = (long)h.value;
+  >   str *t = (str *)&s;
+  >   (void)q;
+  >   (void)d;
+  >   (void)v;
+  >   (void)t;
+  > }
+  > generic(T) holder(T) *gp(void *x) { return (holder(T) *)x; }
+  > EOF
+  $ ./golden.exe cast_valid.tc > /dev/null

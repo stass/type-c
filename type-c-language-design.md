@@ -1785,6 +1785,20 @@ name (13.6), except in the definition of a generic function where a
 type argument decides whether the types are compatible, which 7.1
 refuses.
 
+No cast converts to or from such a value either: C casts a scalar
+value to a scalar type, and any value to `void` (C11 6.5.4p2). So
+`(str)"text"`, `(option(int))1`, `(int)o` of an option `o` and a cast
+to an array of instances are errors, in any text. The backend would
+refuse these casts in the C encodings of the types, so `typec` refuses
+them itself, as for a conversion. A cast to the value's own type, as
+`(holder(int))h`, is an error as well, under `__extension__` too: ISO
+C refuses it, GNU C takes a cast of a structure to its own type, or of
+a member's type to a union, as an extension, of which `-pedantic`
+warns in the C encodings, and nothing is lost, as `h` says what the
+cast says. A slice is made by initialising one, as in
+`str s = "text";` (section 8), or by `slice_from_array`, and a variant
+by a constructor.
+
 A pointer to a type that a variant or an instance is part of converts
 implicitly only as C11 6.5.16.1p1 lets a pointer convert: to a pointer
 to a compatible type or to `void`, qualified at least as the type it

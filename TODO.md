@@ -520,12 +520,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   string literals (section 8, P13) and generic deduction (7.2) also take
   meaning from the target: before they land, state the rule as the first
   subobject on the elision chain whose type gives the target a meaning.
-- [Medium] A cast to a slice, as `(str)"x"`, is refused by the backend
-  in lowered names instead of by `typec` (Clang: "used type
-  'slice__Kc' where arithmetic or pointer type is required"); refuse a
-  cast to any instance or variant in `typec` in the user's terms, as
-  C11 6.5.4p2 does. Repro in the data repository at
-  `measure/p13/2026-11-17-darwin-x86_64/bugs/`.
 - [Low] `Ctype.first_variant` follows the elision chain that
   `Initialiser.first_level` encodes too. Split a pure first-subobject
   step that both use, keeping the rule 6 refusal at the callers that open
