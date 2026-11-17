@@ -218,11 +218,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   `Return_form.takes_no_parameters` but from the tree in
   `Lowering.parameter_names`. Let the front end hand lowering the value
   returns and the parameter names that the form writes.
-- [Low] GNU `__extension__` makes no node, so `__extension__ try f();`
-  has the tree of `try f();`, and the position rule of design 5.1 rule
-  3 would take a `try` that Appendix A does not derive there. Decide in
-  the design whether a `try` after `__extension__` is in a position, or
-  give `__extension__` a node.
 - [Low] A type name as the controlling operand of `_Generic` (C2y,
   `_Generic(const int, const int: 1, int: 2)`), which GCC 16 and Clang
   accept in gnu11, is a syntax error. Read it, with its type unconverted,
@@ -1739,8 +1734,8 @@ types (design 13.3).
   cleanup resumes the first. Written by hand in the lowered form, the
   resumed `return` yields the later value under Apple Clang 21 at
   `-O0` and under GCC 16 at `-O0` and at `-O2` (`ret.c` beside
-  `longjmp/measure.sh`, design 13.5). The temporary of a `try` is
-  held across the left operand of the assignment that holds the `try`
+  `longjmp/measure.sh`, design 13.5). The temporaries of a prelude
+  are held across the rest of the holder of their `try` expressions
   (design 13.5), which is unmeasured. A value of two parts can come
   apart there: under GCC 16 at `-O2` a resumed slice test had the
   pointer of one evaluation and the length of another (design 13.5),
@@ -1834,24 +1829,17 @@ types (design 13.3).
 - [Medium] Decide whether to offer an option that zeroes padding and the
   inactive part of a variant on construction, against disclosure of stale
   memory (design 10.1 rule 5).
-- [High] `try` inside any expression, as in
-  `fit((long long)try eval(l) + try eval(r))` (owner: the README's first
-  example uses it). Design 5.1 rule 3 holds `try` to three positions,
-  and design 12 lists `try` inside expressions outside the core: move it
-  into section 5, with `try` as a unary operator, so that
-  `try f() + try g()` adds two values. C leaves the order of operands
-  unspecified, so which of `g(x)` and `try f()` runs first in
-  `g(x) + try f()`, and which error the README's `Add` reports when both
-  operands fail, needs a rule: the candidate is to evaluate operands left
-  to right, hoisting each into a temporary while keeping the sequencing
-  of `&&`, `||`, `?:` and `,`. Candidate lowering: a GNU statement
-  expression for each `try` that returns on `Err`, running the deferred
-  statements as a `return` does, over operands hoisted in that order;
-  without the hoisting it is what 5.1 rule 3 refuses inside a statement
-  expression today. The design text to rewrite: 5.1 rule 2 (the void
-  `try` "of the positions of rule 3"), all of rule 3 and its rationale
-  ("Rationale for the positions"), the `try` rows of 13.5 and section
-  15, P8.
+- [High] Build `try` inside expressions, as in
+  `fit((long long)try eval(l) + try eval(r))` (owner: the README's
+  first example uses it): design 5.1 rule 3 and 13.5, plan packages
+  3.11 and 3.12.
+- [Medium] Design 5.1 (the rationale for the order) and 13.5 ("The
+  statement that holds a `try`", "The cost of a prelude") cite
+  measurements of hand-written samples that no script in the
+  repository reproduces: the order of two failing operands under a
+  statement expression, the diagnostics of the prelude and its size
+  against hand-written C. Package 3.12 adds the script under
+  `tools/measure`; have the design cite it.
 - [High] Build nested patterns, as in `case Err(DivByZero):` (owner: the
   README's first example uses them): design 4.7, plan packages 3.7 to
   3.10.

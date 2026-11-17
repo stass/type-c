@@ -246,7 +246,7 @@ condition, with a field list optional in a test (design 4.2, 4.6).
 | 2.1 | Generic type declarations and applications: identity, lazy instantiation and limits. `void` is an argument here wherever the substituted definition is valid C, as in `ptr(void)` with `type ptr(T) = T *;`; a variant field whose type becomes `void` (design 3.5 rule 6) is refused as a construct of package 2.3. The one check of the resolution property (design 13.5), built here and applied to type definitions (rule 8 of design 3.5); packages 2.4 and 2.5 pass the operand of `try`, deferred statements and the operand of a `return` through the same check and add none of their own. The packing bracket with its probe (design 10.3), and the driver's refusal of `-fpack-struct` without a value (design 13.2), in `src/driver/cc_option.ml`. |
 | 2.2 | Instance names and emission order; property tests that the naming is injective. |
 | 2.3 | The universe types `option` and `result`; the variant field whose type becomes `void` (design 3.5 rule 6), which ends the refusal of package 2.1. |
-| 2.4 | `try`: typing, the three positions, lowering; the rule against dropped results. |
+| 2.4 | `try`: typing, lowering, and its first three holders, each with the `try` as the whole of its expression: an expression statement, the right operand of a simple assignment that is one, and the initialiser of a declaration; the rule against dropped results. |
 | 2.5 | `defer`: the rules, the jump constraints, lowering with name hygiene; interplay with `try`, `match` and loops. |
 | 2.6 | Pilot B: a binary reader or a parser with a single error path. |
 
@@ -280,7 +280,10 @@ record of what it found.
 **Purpose.** Design sections 7 and 8, and the nested patterns of
 design 4.7. Nested patterns stand here because their rules read
 the generic types of Stage 2, `option` and `result` among them,
-and the opaque type parameters of package 3.1.
+and the opaque type parameters of package 3.1. `try` inside
+expressions (design 5.1 rule 3) stands here because the container
+library and the README are its first users, and because a `try` in
+a generic function is lowered in an instance of package 3.3.
 
 **Work packages**
 
@@ -296,6 +299,8 @@ and the opaque type parameters of package 3.1.
 | 3.8 | Nested patterns in `match` (design 4.7): the grammar, sub-patterns typed by their position, typed bindings, `*`, bindings at any depth, and the lowering of selection (design 13.5). A negative golden test for each rule. A bare identifier that binds a field of variant type is refused from this package on (design 4.7 rule 3), so the tests that hold one take the typed form. In the README, the `case Err(error):` of the `result` section and the second `match` in its arm become the nested labels `case Err(Missing(name)):` and `case Err(NotANumber(name)):`; the first example, whose `show` writes `case Err(DivByZero):`, and Status say that nested patterns are built. |
 | 3.9 | Nested patterns in the single-pattern test (design 4.6, 4.7 rule 9), in `if` and in `while`: typing, the field list left out at any depth, lowering. |
 | 3.10 | Measurements of nested patterns: selection against hand-written nested `switch` statements, size and speed, on both backends at `-O0` and at `-O2` (P31); the largest selection tree in the container library, the pilot and the tests (P32). |
+| 3.11 | `try` inside expressions (design 5.1 rule 3, 13.5), after packages 3.3 and 3.4: `try` as a unary operator; one function of the typed tree from a `try` to its holder and the operators between them, which gives every refusal of place; one function from a holder to its prelude and its edits, in the order of 5.1; the hoisted operands passed through the one check of the resolution property (package 2.1) and the pragma stretch, with no check of their own; `try-lvalue` and `try-loop`, and `try-void` by the discarded positions of design 5.2. A negative golden test for each refusal, and the tests of package 2.4 that refuse a `try` for its place take the places that stay refused. Before a `try` in a generic function is lowered so, the TODO item on `Moved` edits in the definition of a generic is closed. In the README, the first example and Status say that `try` inside an expression is built. |
+| 3.12 | Measurements of `try` inside expressions, from a script under `tools/measure`: the preludes of the container library, the pilot and the README against the same code with each `try` in a declaration of its own, size and speed, on both backends at `-O0` and at `-O2`, and the holders that hold a side effect before a `try` which C leaves unsequenced with it (P33); the refusals of `try-loop` and what each loop became (P34); the refusals of `try-pragma` (P8). |
 
 **Exit gate**
 
@@ -422,8 +427,62 @@ and the opaque type parameters of package 3.1.
      a tree that is built from the labels in reverse order, fails;
    - the fuzzing of the parser and the checker (Tests) starts from a
      corpus that holds nested patterns.
+6. `try` inside expressions behaves as design 5.1 rule 3 says. Each
+   test has a partner that fails where the rule or the lowered form
+   is missing, and the run tests run on both backends at `-O0` and
+   at `-O2`:
+   - `two(try a(), try b())`, where `a` and `b` both fail, returns
+     the error of `a`; the partner, the lowered text with each
+     `try` written where it stands as a statement expression that
+     returns, gives the error of `b` under GCC;
+   - `emit(out, pos++, try next(in))` with a `next` that fails
+     leaves `pos` as it was; the partner, the same call after
+     `int at = pos++;`, finds it one higher;
+   - `p && try check(p) > 0` with a null `p` is 0 and does not call
+     `check`; the partner, the lowered text without the `if` of the
+     prelude, calls it;
+   - `c ? try f() : (mark(), try g())` calls `f` alone where `c` is
+     not 0, and `mark` and then `g`, each once, where it is; the
+     partners, the lowered text without the `else` and the lowered
+     text that keeps `mark()` in the holder as well, call `g` after
+     `f` and `mark` twice;
+   - a holder of two `try` expressions in the scope of a `defer`
+     statement whose second operand fails runs the deferred
+     statement once, after both operands; the partner, the lowered
+     text without the copies in the second test, does not run it;
+   - `s[i] + try f()` with `i` out of range and an `f` that fails
+     returns the error; the partner, the same with an `f` that
+     succeeds, traps;
+   - the preludes of these tests, and `try f();` with a `T` of
+     `int`, compile without a diagnostic in the ISO and the GNU form
+     of C11 and of C17 under `-pedantic-errors -Wall -Wextra
+     -Wshadow -Wconversion -Wsign-conversion`; the partner, the
+     lowered text of `try f();` with the read of the `Ok` field in
+     the holder, draws `-Wunused-value` from both;
+   - `use((try f()).name)`, where `name` is an array of `char` and
+     `use` takes a `char *`, compiles under `-pedantic-errors`; the
+     partner, the lowered text with a `const` temporary, is refused
+     by both backends;
+   - `x = try c ? f() : g();` is refused as `try-operand`; the
+     partner, `x = try (c ? f() : g());`, compiles and calls one of
+     the two;
+   - each of these is refused under its name, and its partner
+     compiles and runs: `while (try more(r))` (`try-loop`) and
+     `for (;;) { if (!try more(r)) break; }`;
+     `__builtin_constant_p(try f())` (`try-position`) and
+     `__builtin_expect(try f(), 0)`, which calls `f` once;
+     `sizeof(try f())`, `({ try f(); })` and
+     `int a = g(), b = try f();` (`try-position`) and the same
+     with the `try` in a declaration of its own;
+     `&try f()` (`try-lvalue`) and `&x` after `x = try f();`;
+     `x = try v();` with a `T` of `void` (`try-void`) and
+     `c ? try v() : try w();`;
+     `sizeof(enum { K = 5 }) + try g(K)` (`try-name-capture`) and
+     the same with the enumeration declared before the statement;
+   - the fuzzing of the parser and the checker (Tests) starts from a
+     corpus that holds `try` inside expressions.
 
-**Decided at the gate:** P11 to P14, P23, P27, P28, P30 to P32, and whether the
+**Decided at the gate:** P11 to P14, P23, P27, P28, P30 to P34, and whether the
 measured cost of function-pointer operations is evidence for constraints
 (design section 12). **Release 0.3.**
 
