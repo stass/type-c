@@ -963,22 +963,16 @@ is [type-c-language-design.md](type-c-language-design.md).
   refused (TC0038) and the design allows it. Give the definition check
   the test of rule 4 when generic functions are typed, as their bodies
   need it.
-- [Low] Design 7.1 rule 3 allows `{0}` for a type parameter, and Apple
-  Clang 21 refuses that list where the argument is a structure or
-  union whose first member is a structure without members, so such an
-  instance fails in the backend. The rule states the limit and names
-  `{}`. Decide whether a type that begins with a structure without
-  members stays a type argument of a generic function; design 3.2 rule
-  7 says of `{0}` that it zeroes any object, which the same case
-  contradicts for C text.
-- [Medium] An attribute on a member whose type mentions a type
-  parameter can make an application to a value type fail in the
-  backend, against design 3.5 rule 4: `type g(T) = struct { T v
-  __attribute__((vector_size(16))); };` is accepted and `g(struct s)`
-  is refused by Apple Clang 21 ("invalid vector element type"). Design
-  7.1 rule 3 refuses such an attribute in a generic function unless
-  the table of effects records that it asks nothing of the type; say
-  that rule in 3.5 rule 4 and check it in the definition check.
+- [Medium] The definition check of a generic type takes an attribute
+  on a member whose type mentions a type parameter: `type g(T) =
+  struct { T v __attribute__((vector_size(16))); };` is accepted and
+  `g(struct s)` is refused by Apple Clang 21 ("invalid vector element
+  type"). Build the one rule of design 13.3 ("Attributes in a
+  generic") as one check that the definition checks of generic types
+  and of generic functions both call, `_Alignas` included, with the
+  fact in `attribute_effects`. Golden pairs: each refusal that 13.3
+  measures beside the same attribute on a subject that mentions no
+  type parameter, which must stand.
 - [Medium] `Ctype.instance` holds the encodings of its arguments as
   plain strings, so a caller can build one from a string that
   `Encoding.encode` did not make, which need not be self-delimiting.
@@ -1438,46 +1432,79 @@ types (design 13.3).
 - [Low] Each edit of the emitter is wrapped in two line markers, so
   `--emit-c` shows a lowered alias over eight lines. An edit whose text
   and replaced tokens hold no newline could go without them.
-- [High] Package 3.1 scope added by design 7.1 as revised in 9b70e08,
-  not yet built, each with golden pairs: (1) no initialiser enters a
-  type parameter but `{0}`/`{}`, which keeps its reach through elided
-  braces, and brace elision into one is an error (`T arr[] = {0, 0}`,
-  `{ .a = 0 }`, `(T[]){0, 0}`); (2) rule 4 as one statement: null
-  pointer constant status and `__builtin_choose_expr` by a dependent
-  constant are errors; (3) attributes on a declaration whose type
-  mentions a type parameter, unless the 13.3 table of effects marks
-  them as asking nothing of the type, as one named check.
+- [High] Package 3.1 scope that design 7.1 adds and that is not built,
+  each with golden pairs:
+  - Initialisers (rule 3). No initialiser enters a type parameter but
+    the zero initialiser, and brace elision into one is an error
+    (`T arr[] = {0, 0}`, `T one[] = {0}`, `{ .a = 0 }`,
+    `(T[]){0, 0}`). The zero initialiser of an object or subobject
+    whose type mentions a type parameter lowers to `{}` under
+    `__extension__` (13.5), with the three refusals of rule 3: a
+    variable length array, a declaration in the first clause of a
+    `for`, an object whose own type is atomic. This is a security
+    item: left as `{0}`, an instance for a union holds stack bytes
+    under GCC 15 and later. Tests, as 13.5 states them: the lowered
+    form in each place and for each type leaves every byte zero on the
+    backend of each host, and the same test over `{0}` finds a byte
+    that is not zero under GCC 16; the lowered form compiles under
+    `-pedantic-errors` in the four dialects, and the same text without
+    `__extension__` does not.
+  - Dependence as a fact of a value (rule 4). `Integer_constant.t` has
+    `Known` and `Opaque`, and `Expressions.kind` leaves a call and a
+    `const` object to the backend (`Backend_constant`). Give the
+    evaluation the fact: the one function that gives a layout answers
+    that the value depends for a type that mentions a type parameter,
+    in pointer arithmetic and member addresses as in `sizeof`; a call
+    of a builtin depends unless `Builtin_function` records that its
+    arguments' values decide it; a `const` object carries the fact of
+    its initialiser; every operation carries that of its operands.
+    Pairs: each bound of rule 4's measurements is refused, and the
+    same construct over a type that mentions no type parameter, or
+    over an object that is not `const`, stands. Null pointer constant
+    status and `__builtin_choose_expr` by a dependent constant are
+    errors.
+  - Compatibility with three answers (rule 4): `_Generic` and
+    `__builtin_types_compatible_p` are errors only where a comparison
+    meets a type parameter and another type, those among the
+    associations included. Pairs: `_Generic(x, T: 1, default: 0)` is
+    refused and `__builtin_types_compatible_p(__typeof__(row),
+    __typeof__(&row[0]))` stands.
+  - Attributes: the item on the rule of 13.3 under "Declarations".
 - [Medium] Generic functions, from the review of package 3.1:
-  attribute arguments that C asks to be constant
-  (`aligned(sizeof(x))`, `vector_size`) bypass `refuse_dependent`,
-  which wants one funnel for constant arguments; and attributes inside
-  the declarator of a generic prototype (`void (__attribute__((cold))
-  f)(T);`) pass rule 6, which wants one check over every attribute of
-  the declaration.
-- [Medium] A declaration with linkage in the body of a generic function
-  whose type names a tag that the body declares (`struct s { int a; };
-  extern struct s x;`) passes design 7.1 rule 3, though every instance
-  defines its own `struct s` and two instances then declare `x` with two
-  types. Decide whether rule 3 refuses every block-scope declaration with
-  linkage in a generic body, or one whose type mentions a tag of the
-  body as well.
+  attributes inside the declarator of a generic prototype
+  (`void (__attribute__((cold)) f)(T);`) pass rule 6, which wants one
+  check over every attribute of the declaration. Attribute arguments
+  that C asks to be constant (`aligned(sizeof(x))`, `vector_size`)
+  bypass `refuse_dependent`; the rule of design 13.3 refuses them by
+  the identifiers they name, so they need no evaluation.
+- [Medium] Design 7.1 rule 3 refuses every declaration with linkage in
+  the body of a generic function, whatever its type, and TC0075
+  refuses only one whose type mentions a type parameter:
+  `struct s { int a; }; extern struct s x;` passes, though every
+  instance defines its own `struct s` and two instances declare `x`
+  with two types. Refuse by the linkage alone. Pair: `extern int
+  count;` in a generic body is refused and `static T cache;` stands.
 - [Medium] `Ctype.compatible` answers `Depends_on` for two unknown leaf
   types of one spelling (`_Float16`, `_Complex int`), so
   `pointers_differ` refuses `void (*q)(T, _Float16) = p;` where `p` has
   that very type. Let an unknown record whether it can hide a derived
   type, so that a leaf compares with its own spelling, and
   `is_variably_modified` answers for it too.
-- [Low] `Ctype.same_length` takes two variable lengths for the same, and
-  `is_variably_modified` does not descend into function parameters, so
-  design 7.1 rule 7 agrees `void (*g)(T (*)[n])` with
-  `void (*g)(T (*)[n + 1])` against its claim that it reads no bound
-  that is not a constant. Give `Variable` no "same" answer under
-  `~exact:true`.
-- [Low] A tag that the head of a generic function declares in its
-  parameter list without a body (`generic(T) void f(T, struct s *p);`
-  where no `s` is visible) has prototype scope, so the prototype and the
-  definition of an instance would name two types and conflict. Decide
-  whether design 7.1 rule 6 refuses it with the bodies it refuses.
+- [Low] `is_variably_modified` does not descend into function
+  parameters, so the head `generic(T) void f(void (*g)(size_t n,
+  T (*)[n]));` passes design 7.1 rule 6, which refuses a variably
+  modified type at any depth, and `Ctype.same_length` then takes two
+  variable lengths for the same in rule 7. Descend into the parameters
+  of function types, and give `Variable` no "same" answer under
+  `~exact:true`. Pair: that head is refused and `void (*g)(size_t n,
+  T a[n])`, which C adjusts to a pointer, stands.
+- [Low] Design 7.1 rule 6 refuses every tag that the head of a generic
+  function declares, and the parser refuses only one with a body: a
+  tag that a parameter list is the first to mention
+  (`generic(T) void f(T, struct s *p);` where no `s` is visible) has
+  prototype scope, so the prototype and the definition of an instance
+  name two types. Refuse the first mention as design 3.5 rule 8 states
+  it. Pair: that head is refused, and stands after `struct s;`.
 - [Low] Generic functions, readability and representation:
   `in_generic_function` is an ambient flag that `earlier_entity` and
   `declare_in` read; pass the fact explicitly from
