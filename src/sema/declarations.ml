@@ -4178,7 +4178,7 @@ and typing state : Expressions.context =
       (fun attributes ->
         note_subjects state (attribute_firsts attributes) ~mentions:false);
     views = state.views;
-    moved_operand = type_moved_operand state;
+    hoisted_operands = type_hoisted_operands state;
     read_moved =
       (fun span read ->
         let (), found = finding state span read in
@@ -4190,29 +4190,39 @@ and typing state : Expressions.context =
     copy_deferred = charge_copy state;
   }
 
-(* The operand at [operand] of a try with the [views], typed with what
-   it finds, and then the one check of the resolution property (design
-   13.5) on it, at the place in front of its holder where lowering
-   writes it. Lowering declares nothing between the holder and that
-   place: what it declares stands in front of the external declaration,
-   where both places see it. *)
-and type_moved_operand state (views : Parser.try_views) ~scope operand
-    type_operand =
-  let typed, found = finding state operand type_operand in
-  let text =
-    { Resolution.kind = Try_operand;
-      span = operand;
-      scope;
-      own_place = views.own;
-      uses = List.rev found.uses;
-      declares = List.rev found.declares }
+(* A holder of try typed with [type_holder], with what it finds in each
+   of its hoisted [operands] (design 5.1 rule 3), and then the one check
+   of the resolution property (design 13.5) on each, with the views that
+   the parser took at it, at the place in front of the holder where
+   lowering writes it. The operands are found side by side rather than
+   one inside the typing of another, so that a deep nest of tries costs
+   no stack of its own. Lowering declares nothing between the holder and
+   that place: what it declares stands in front of the external
+   declaration, where both places see it. *)
+and type_hoisted_operands state operands type_holder =
+  let found_in ((views : Parser.try_views), operand) =
+    (views, { text_span = operand; uses = []; declares = [] })
   in
-  let place =
-    { Resolution.view = views.place; before = views.place_before;
-      typedef_names = []; tags = [] }
+  let founds = List.map found_in operands in
+  let outer = state.found in
+  state.found <- List.map snd founds @ outer;
+  Fun.protect ~finally:(fun () -> state.found <- outer) type_holder;
+  let check ((views : Parser.try_views), found) =
+    let text =
+      { Resolution.kind = Try_operand;
+        span = found.text_span;
+        scope = views.depth;
+        own_place = views.own;
+        uses = List.rev found.uses;
+        declares = List.rev found.declares }
+    in
+    let place =
+      { Resolution.view = views.place; before = views.place_before;
+        typedef_names = []; tags = [] }
+    in
+    check_moved state text ~at:(Some place)
   in
-  check_moved state text ~at:(Some place);
-  typed
+  List.iter check founds
 
 (* The operand at [operand] of the [slice_from_array] at [whole], typed
    with [read], and then the third clause of the resolution property

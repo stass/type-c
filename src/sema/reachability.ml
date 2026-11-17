@@ -677,7 +677,7 @@ and expression walk (value : Tree.expression) =
   match value.node with
   | Statement_expression b -> block (entering walk b) b
   | Parenthesized inner -> expression walk inner
-  | Try { operand; scope = _ } ->
+  | Try { operand } ->
       (* The error path returns, so it leaves every scope around it
          (design 6 rule 1). *)
       record_exit_here walk (Returns (Error_path value.span));

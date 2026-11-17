@@ -702,7 +702,9 @@ and scalar typing ~zeroes t elements =
       | [] -> ());
       (match first.node.initialiser with
       | Expression_initialiser expression ->
-          ignore (typing.value (scalar_target ~zeroes t) expression);
+          let target = scalar_target ~zeroes t in
+          ignore (typing.value target expression);
+          Option.iter (fun scalar -> typing.converts scalar expression) target;
           typing.initialises expression
       | Braced inner -> ignore (braced typing t inner));
       List.iter (drop_excess typing ~zeroes) rest

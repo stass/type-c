@@ -180,27 +180,33 @@ val pragma_view : views -> int -> View.t option
     function body that the parser passes through unread, it is the view
     where the body starts. *)
 
-(** The two views at a [try] of Type-C text (design 5.1 rule 3), which
-    the resolution property of design 13.5 compares for its operand.
-    [place] is that of a statement or declaration of the positions of
-    rule 3 only where the [try] stands in one; a [try] anywhere else is
-    an error, and its [place] is in front of the innermost block item or
-    statement without a substatement. *)
+(** The views at a hoisted operand of Type-C text (design 5.1 rule 3),
+    which the resolution property of design 13.5 compares for it: at a
+    [try], and at the first token of the first operand of [&&], [||] and
+    [?:] and of the left operand of a comma, which the prelude of a
+    holder may hoist. [place] is that of the holder only where the
+    operand stands in one; anywhere else typing refuses the [try], and
+    [place] is in front of the innermost block item, statement without a
+    substatement, [if] or [switch]. *)
 type try_views = {
   place : View.t;
-      (** in front of the statement or declaration that holds the [try],
-          after the labels of a statement but not those of a [match]
-          arm, which are the arm's: where lowering writes the operand *)
+      (** in front of the statement or declaration that holds the
+          operand, after the labels of a statement but not those of a
+          [match] arm, which are the arm's: where lowering writes it *)
   place_before : int;
       (** the index in [Reader.t.tokens] of the token that [place] stands
           in front of *)
   own : View.t;  (** at the operand, where the source reads it *)
+  depth : Tree.scope_depth;
+      (** of the scope at the operand, which holds a name that it
+          declares *)
 }
 
 val try_views : views -> int -> try_views option
 (** [try_views views index] are the views at the token at [index] in
     [Reader.t.tokens] of the unit that [views] were taken in, if it is
-    the word of a {!Tree.Try}, and [None] for any other token. *)
+    the word of a {!Tree.Try} or the first token of an operand that a
+    holder may hoist, and [None] for any other token. *)
 
 (** The view at a statement of a function body that lowering writes
     around for a defer (design 13.5), and the depth of the scope there,

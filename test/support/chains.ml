@@ -90,9 +90,8 @@ let nesting_chains links =
           ^ repeat links "if (a) break; else " ^ "break; } }";
         lowers = true;
       };
-      (* Typing refuses a try, which the parser reads in the loop of an
-         assignment-expression and, in an operand, in that of a
-         cast-expression. *)
+      (* The parser reads a try in the loop of a cast-expression, and
+         typing places each. *)
       {
         name = "tries";
         file = "in.tc";
@@ -100,16 +99,22 @@ let nesting_chains links =
         lowers = false;
       };
       {
-        name = "tries and assignments";
-        file = "in.tc";
-        text = in_body (repeat (links / 2) "a = try " ^ "a;");
-        lowers = false;
-      };
-      {
         name = "tries among unary operators";
         file = "in.tc";
         text = in_body (repeat (links / 2) "- try " ^ "a;");
         lowers = false;
+      };
+      (* A try in the second operand of each conditional of a chain,
+         which the prelude evaluates under the truth of every first
+         operand before it. *)
+      {
+        name = "tries in a chain of conditionals";
+        file = "in.tc";
+        text =
+          "typedef result(int, int) r; r f(void); r g(int a) { int x = "
+          ^ repeat links "a ? try f() : "
+          ^ "0; return Ok(x); }";
+        lowers = true;
       };
     ]
   in

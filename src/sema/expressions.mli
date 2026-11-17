@@ -308,45 +308,59 @@ type standing = Block_item | Substatement
 (** The expression statement or declaration that holds a [try] in a
     position of design 5.1 rule 3: its span, without the C labels before
     it; the span of those labels, from the first to the last, if it has
-    any; and where it stands. *)
+    any; where it stands; and the expression whose value it discards,
+    that of an expression statement, which lowering casts to void so
+    that the reads that replace its tries draw no warning (13.5). *)
 type holder = {
   statement : Tree.span;
   labels : Tree.span option;
   standing : standing;
+  discarded : Tree.span option;
 }
 
-(** The positions of design 5.1 rule 3: the whole of an expression
-    statement, [try e;]; the whole right operand of a simple assignment
-    that is one; and the whole initialiser of the one declarator of a
-    block-item declaration. *)
-type try_form = Whole_statement | Assigned | Initialiser
+(** How the holder of a [try] takes the value that it reads: as it is;
+    as a slice of the instance with the claimed tag, which the value
+    converts to (section 8 rule 5); or converted to the arithmetic type
+    of the object that it initialises in a braced list, which a
+    temporary of the prelude holds (design 5.1 rule 3, 13.5). *)
+type value_conversion =
+  | Unconverted
+  | To_slice of string
+  | To_arithmetic of Arithmetic.t
+
+(** What the holder of a [try] reads where it stood: the field of the
+    [Ok], or nothing where [T] is void (design 5.1 rule 2, 13.5). *)
+type try_value =
+  | Read of { field : string; conversion : value_conversion }
+  | No_value
 
 (** A [try] (design 5.1) that lowering replaces (13.5): its span and that
-    of its operand; its holder and its position there; the view that
-    the parser took in front of the holder, where lowering writes the
-    operand; the number of its temporary, counted from 0 in each
-    function in source order; the
-    instance of [result] that the operand is, and that the function
-    returns; and the names of the fields of the [Ok] and the [Err] of
-    the operand's type, [None] where the argument is void (design 3.5
-    rule 6); and the claimed tag of the slice instance that its value
-    converts to (section 8 rule 5), if it converts. *)
+    of its operand; the number of its temporary, counted from 0 in each
+    function in the order of 5.1; the instance of [result] that the
+    operand is, and that the function returns; the name of the field of
+    the [Err] of the operand's type, [None] where the argument is void
+    (design 3.5 rule 6); and what the holder reads of it. *)
 type try_site = {
   try_span : Tree.span;
   operand : Tree.span;
-  holder : holder;
-  form : try_form;
-  place : Parser.View.t;
   temporary : int;
   operand_instance : Ctype.instance;
   return_instance : Ctype.instance;
-  ok_field : string option;
   err_field : string option;
-  converted_to : string option;
+  value : try_value;
 }
 
-val tries : t -> try_site list
-(** The tries typed, in source order. *)
+(** A holder of [try] expressions (design 5.1 rule 3): the statement or
+    declaration, its hoisted operands in the order of 5.1, and its
+    tries in the order they were typed. *)
+type try_holder = {
+  holder : holder;
+  hoisted : Try_plan.hoisted list;
+  tries : try_site list;
+}
+
+val try_holders : t -> try_holder list
+(** The holders typed, in source order. *)
 
 (** A slice index [s[i]] (design section 8 rule 1), a [slice_sub]
     (rule 3) or a conversion to a slice of const elements (rule 5): its
@@ -529,9 +543,10 @@ type name_reading = Constructor_word of string | Ordinary_word
     the type to (design 10.3), and [block_literal] is told of each block
     literal, whose body typec does not read, where it stands.
     [views] are those that the parser took in the unit, and
-    [moved_operand views ~scope operand type_operand] types the operand
-    at [operand] of a [try] with the [views], in the scope [scope], with
-    [type_operand], where lowering moves it (design 5.1 rule 3).
+    [hoisted_operands operands type_holder] types a holder of [try] with
+    [type_holder] and then checks each of its hoisted [operands], with
+    the views that the parser took at it, where lowering moves it
+    (design 5.1 rule 3, 13.5).
     [read_moved span read] runs [read], which types the statement of a
     defer or the operand of a [return] at [span], text that lowering
     writes at each exit of a scope or in a block of its own (section 6
@@ -572,9 +587,8 @@ type context = {
       (** notes attributes of a label or a null statement, whose subject
           mentions no type parameter (design 13.3) *)
   views : Parser.views;
-  moved_operand :
-    Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
-    (unit -> typed) -> typed;
+  hoisted_operands :
+    (Parser.try_views * Tree.span) list -> (unit -> unit) -> unit;
   read_moved : Tree.span -> (unit -> unit) -> unit;
   array_operand : whole:Tree.span -> Tree.span -> (unit -> typed) -> typed;
   label_address : Tree.label_name -> unit;

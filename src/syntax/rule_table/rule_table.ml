@@ -318,16 +318,39 @@ let rows =
     Live { constructor = "Try_void"; name = "try-void";
       clause = "design 5.1 rule 2";
       meaning =
-        "A [try] whose value is void other than as the statement \
-         [try e;]." };
+        "A [try] whose value is void where it is not discarded (design \
+         5.2) or cast to [void]." };
     Live { constructor = "Try_position"; name = "try-position";
       clause = "design 5.1 rule 3";
       meaning =
-        "A [try] that is not the whole of an expression statement, the \
-         whole right operand of a simple assignment that is one, or the \
-         whole initialiser of the one declarator of a declaration that \
-         is a block item; so also a [try] in a statement expression or in \
-         a deferred statement (design 5.1 rule 4)." };
+        "A [try] under an operator or in a place that rule 3 does not \
+         name between it and its holder: outside a function body, in a \
+         declaration of more than one declarator, in what C does not \
+         evaluate as a value (a constant expression, a type name, the \
+         operand of [sizeof], [_Alignof] or [__typeof__], an operand of \
+         [_Generic] or [__builtin_choose_expr], the last operand of \
+         [?:] without its second, an argument of a builtin that inspects \
+         more than the values of its arguments), in a statement \
+         expression or in a deferred statement (design 5.1 rule 4)." };
+    Live { constructor = "Try_loop"; name = "try-loop";
+      clause = "design 5.1 rule 3";
+      meaning =
+        "A [try] in the condition of a [while], a [do] or a [for], in a \
+         single-pattern test that is the condition of a [while], or in \
+         the first or third clause of a [for], which a loop evaluates \
+         once for each iteration." };
+    Live { constructor = "Try_lvalue"; name = "try-lvalue";
+      clause = "design 5.1 rule 2";
+      meaning =
+        "A [try], or a member of its value, where C asks for an lvalue: \
+         the operand of [&], [++] or [--] and the left operand of an \
+         assignment." };
+    Live { constructor = "Try_list"; name = "try-list";
+      clause = "design 5.1 rule 3";
+      meaning =
+        "An initialiser of a braced list, of a declaration or of a \
+         compound literal, that holds a [try] and is not itself a [try] \
+         expression, in parentheses or not." };
     Live { constructor = "Try_declaration"; name = "try-declaration";
       clause = "design 5.1 rule 3";
       meaning =
@@ -338,6 +361,13 @@ let rows =
       meaning =
         "A [try] in a statement or declaration that holds a pragma line \
          or directly follows one, its C labels included." };
+    Live { constructor = "Try_lifetime"; name = "try-lifetime";
+      clause = "design 5.1 rule 3";
+      meaning =
+        "A hoisted operand of a holder of [try] that holds an array \
+         member of a value that is no lvalue, other than a member of the \
+         value of a [try], or that is evaluated under a condition and \
+         holds a compound literal." };
     Live { constructor = "Defer_position"; name = "defer-position";
       clause = "design 6 rule 11";
       meaning =
@@ -373,7 +403,8 @@ let rows =
     Live { constructor = "Try_moved_operand"; name = "try-name-capture";
       clause = "design 5.1 rule 3, 13.5";
       meaning =
-        "The operand of a [try], which is moved text, where it breaks \
+        "A hoisted operand of a holder of [try] (design 5.1 rule 3), \
+         which is moved text, where it breaks \
          any clause of the resolution property: a name that it uses \
          reads otherwise in front of the statement or declaration that \
          holds the [try], as one that the holder declares does, or it \

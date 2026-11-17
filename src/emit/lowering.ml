@@ -40,17 +40,27 @@ let replace output ~location text indexes : Emitter.edit list =
       code ~first ~count:1 text
       :: List.map (fun index -> code ~first:index ~count:1 "") rest
 
-let insert output ~before text =
+(* [text] in front of token [before], as part of [extent], the construct
+   that it lowers, so that it moves and goes with that construct's
+   tokens ({!Emitter.edit}). *)
+let insert output ~before ~extent text =
   let tokens = tokens_of output in
-  Emitter.code output
-    (Reader.range tokens ~first:before ~count:0)
-    ~location:tokens.(before).location text
+  Emitter.extended ~extent
+    (Emitter.code output
+       (Reader.range tokens ~first:before ~count:0)
+       ~location:tokens.(before).location text)
 
-(* [text] after token [after], as the end of the construct that ends
-   there, so that it moves with that construct's tokens. *)
-let close output ~after text =
+(* [pieces] in front of token [before], as part of [extent]. *)
+let insert_moved output ~before ~extent pieces =
+  let tokens = tokens_of output in
+  Emitter.extended ~extent
+    (Emitter.moved output (Reader.range tokens ~first:before ~count:0) pieces)
+
+(* [text] after token [after], as the end of [extent], the construct
+   that it lowers. *)
+let close output ~after ~extent text =
   let location = (tokens_of output).(after).location in
-  Emitter.closing output ~after ~location text
+  Emitter.extended ~extent (Emitter.closing output ~after ~location text)
 
 (* The grammar tokens from [first] to [last], without the pragmas
    between them, which stay. *)
@@ -125,7 +135,9 @@ let alias output ~location (declaration : Tree.type_declaration) name
   in
   replace output ~location "typedef"
     (grammar_tokens tokens declaration.span.first before_type)
-  @ [ insert output ~before:name_before name ]
+  @ [ insert output ~before:name_before
+        ~extent:{ first = type_name.span.first; last = name_before }
+        name ]
 
 (* For a variant or a record alias [declaration]: the grammar tokens
    that its forward declaration replaces, and the first token after
@@ -145,7 +157,7 @@ let record_alias output ~location ~name (declaration : Tree.type_declaration)
       (fst (forward_declaration tokens declaration))
   in
   let insert_tag (body : _ Tree.spanned) =
-    insert output ~before:body.span.first name
+    insert output ~before:body.span.first ~extent:specifier.span name
   in
   match tag with
   | Some own -> replace_head ~tag:own.name.node
@@ -442,7 +454,9 @@ let matched_arm output ~cases (arm : Typec_sema.Expressions.matched_arm) =
   replace output ~location
     (cases ^ " " ^ opening)
     (grammar_tokens tokens arm.labels.first arm.labels.last)
-  @ [ close output ~after:arm.arm.last closing ]
+  @ [ close output ~after:arm.arm.last
+        ~extent:{ first = arm.labels.first; last = arm.arm.last }
+        closing ]
 
 (* In a match whose selection tree has one node, the [case] of each
    constructor that an arm takes. *)
@@ -606,10 +620,10 @@ let test_condition output location ~variant
    [controlled_last]: the end of the block around that statement, the
    [check] of the tag, then the [else] statement of an [if], or the end
    of the loop of a [while]. *)
-let false_branch output form ~controlled_last ~check =
+let false_branch output form ~extent ~controlled_last ~check =
   let tokens = tokens_of output in
   let after_controlled text =
-    close output ~after:controlled_last (" }" ^ text)
+    close output ~after:controlled_last ~extent (" }" ^ text)
   in
   match (form : Typec_sema.Expressions.test_form) with
   | If_test { otherwise = None } ->
@@ -620,7 +634,7 @@ let false_branch output form ~controlled_last ~check =
       :: replace output ~location:tokens.(else_token).location
           ("else { " ^ check)
           [ else_token ]
-      @ [ close output ~after:otherwise.last " } }" ]
+      @ [ close output ~after:otherwise.last ~extent " } }" ]
   | While_test -> [ after_controlled (" else { " ^ check ^ "break; } }") ]
 
 let single_pattern_test output matching
@@ -643,7 +657,8 @@ let single_pattern_test output matching
       (held ^ selected
       ^ binding_declarations output held_location test.bindings)
       [ close_paren ]
-  @ false_branch output test.form ~controlled_last:test.controlled.last
+  @ false_branch output test.form ~extent:statement
+      ~controlled_last:test.controlled.last
       ~check
 
 let matching output
@@ -652,38 +667,57 @@ let matching output
   | Arms arms -> match_statement output matching arms
   | Test test -> single_pattern_test output matching test
 
-(* Edits in {!Emitter.in_order}, so that those that a stretch of tokens
-   owns are found by a search, not a scan of all of them. *)
-type ordered_edits = Emitter.edit array
+(* Whether [edit] belongs to the tokens [first] to [last]: whether they
+   hold its extent ({!Emitter.edit}). This is the one test of which
+   edits a stretch of tokens carries along when its text is copied,
+   moved or dropped. *)
+let lies_within ~first ~last (edit : Emitter.edit) =
+  first <= edit.extent.first && edit.extent.last <= last
 
-let order_edits edits : ordered_edits = Array.of_list (Emitter.in_order edits)
-
-(* The edits of [ordered] that tokens [first] to [last] own, in
-   order. *)
-let edits_within (ordered : ordered_edits) ~first ~last =
-  (* The number of edits owned by a token before [index]: those below
-     [low] are, those from [high] on are not. *)
-  let rec owned_before index low high =
+(* The elements of [sorted], an array in order of [begins], the first
+   token of each, that begin at tokens [first] to [last], found by a
+   search, not a scan of all of them. *)
+let beginning_within sorted ~begins ~first ~last =
+  (* The number of elements that begin before [index]: those below
+     [low] do, those from [high] on do not. *)
+  let rec begun_before index low high =
     if low = high then low
     else
       let middle = (low + high) / 2 in
-      if ordered.(middle).owner < index then
-        owned_before index (middle + 1) high
-      else owned_before index low middle
+      if begins sorted.(middle) < index then
+        begun_before index (middle + 1) high
+      else begun_before index low middle
   in
-  let count = Array.length ordered in
-  let start = owned_before first 0 count in
-  let stop = owned_before (last + 1) start count in
-  Array.to_list (Array.sub ordered start (stop - start))
+  let count = Array.length sorted in
+  let start = begun_before first 0 count in
+  let stop = begun_before (last + 1) start count in
+  Array.to_list (Array.sub sorted start (stop - start))
 
-(* The tokens [first] to [last] of a text with the edits that they own
-   in [ordered] applied, as moved text: every token at its own location,
+(* Edits by the first token of their extents. *)
+type held_edits = Emitter.edit array
+
+let hold edits : held_edits =
+  let held = Array.of_list edits in
+  let by_extent (a : Emitter.edit) (b : Emitter.edit) =
+    compare a.extent.first b.extent.first
+  in
+  Array.stable_sort by_extent held;
+  held
+
+(* The edits of [held] that lie within tokens [first] to [last]. *)
+let edits_within (held : held_edits) ~first ~last =
+  let begins (edit : Emitter.edit) = edit.extent.first in
+  beginning_within held ~begins ~first ~last
+  |> List.filter (lies_within ~first ~last)
+
+(* The tokens [first] to [last] of a text with [edits], those that lie
+   within them, applied, as moved text: every token at its own location,
    a pragma line on a line of its own, and the text of each edit at the
    edit's. The moved text of an edit inside, such as the copies that a
    return in the operand of a try runs, moves with it. No [#pragma
    typec] line moves: one of C text is ignored, and Type-C text holds
    one only outside every function (design 13.5). *)
-let moved_text output ordered ~first ~last =
+let moved_text output edits ~first ~last =
   let tokens = tokens_of output in
   let written (edit : Emitter.edit) =
     match edit.text with
@@ -710,7 +744,7 @@ let moved_text output ordered ~first ~last =
     | _ when index > last -> List.concat (List.rev pieces)
     | _ -> from (index + 1) edits (token index :: pieces)
   in
-  from first (edits_within ordered ~first ~last) []
+  from first (Emitter.in_order edits) []
 
 (* Design 13.5: a construct that typec answers, where the backend would
    answer for the representation of a distinct type, is steered to or
@@ -769,8 +803,9 @@ let steered_controlling output (answered : Typec_sema.Expressions.answered) =
   | Compatible _ -> []
   | Selected { controlling; associations; result } ->
       let selected = steering_type (selected_number associations result) in
-      [ insert output ~before:controlling.span.first "((void)(";
-        insert output
+      let extent = answered.construct in
+      [ insert output ~before:controlling.span.first ~extent "((void)(";
+        insert output ~extent
           ~before:(grammar_token_after tokens controlling.span.last)
           (Printf.sprintf "), (%s)0)" selected) ]
 
@@ -826,36 +861,104 @@ let outermost dropped =
   let _, kept = List.fold_left keep (-1, []) (List.stable_sort order dropped) in
   List.rev kept
 
-(* Whether [edit] goes with one of the [dropped] spans: by the tokens it
-   replaces; for a closing insertion by its owner, the last token of
-   what it closes; for another insertion by the place it inserts at,
-   between two tokens, so that one at either edge of a span stays with
-   the tokens kept beside it. *)
+(* Whether [edit] goes with one of the [dropped] spans: whether one of
+   them holds its extent, as {!lies_within} tells. *)
 let goes_with dropped (edit : Emitter.edit) =
-  let first = edit.range.first in
-  if edit.range.count > 0 then
-    covers dropped ~first ~last:(Reader.end_token edit.range)
-  else if edit.owner < first then
-    covers dropped ~first:edit.owner ~last:edit.owner
-  else covers dropped ~first:(first - 1) ~last:first
+  covers dropped ~first:edit.extent.first ~last:edit.extent.last
+
+(* A stretch of tokens whose text moves elsewhere, an operand that a
+   holder of try hoists, its rank, its place in the order of 5.1 among
+   the hoisted operands of its holder, which tells the later of two with
+   one span, and the edits that write what stands in its place
+   ({!replacing}). *)
+type move = { moved : Tree.span; rank : int; replacement : Emitter.edit list }
+
+(* Moves by first token. *)
+type held_moves = move array
+
+let hold_moves moves : held_moves =
+  let held = Array.of_list moves in
+  let by_first a b = compare a.moved.first b.moved.first in
+  Array.stable_sort by_first held;
+  held
+
+(* The [moves] that no other holds, of two with one span the later: a
+   hoisted operand that holds another follows it in the order of 5.1,
+   and a first operand follows a try that is the whole of it. Sorted by
+   first token, longest first and later first, a move is held exactly
+   when it ends no later than the furthest one kept before it. *)
+let outermost_moves moves =
+  let order a b =
+    compare
+      (a.moved.first, b.moved.last, b.rank)
+      (b.moved.first, a.moved.last, a.rank)
+  in
+  let keep (reach, kept) move =
+    if move.moved.last <= reach then (reach, kept)
+    else (move.moved.last, move :: kept)
+  in
+  snd (List.fold_left keep (-1, []) (List.sort order moves))
+
+(* [edits] with the outermost of [moves] in place: the edits that lie
+   within a move go with it, and its replacement takes their place. *)
+let with_moves edits moves =
+  let outer = outermost_moves moves in
+  let spans = cover (List.map (fun move -> move.moved) outer) in
+  List.filter (fun edit -> not (goes_with spans edit)) edits
+  @ List.concat_map (fun move -> move.replacement) outer
+
+(* The moves that a copy applies where they stand inside it: all of
+   them, or in the copy of a hoisted operand those that its holder
+   evaluates before it, of a rank below the operand's. *)
+type applied_moves = Every_move | Ranked_below of int
+
+(* What a copy of source text is made from: the edits of the text, its
+   moves, and those of them that the copy applies. *)
+type source = { held : held_edits; moves : held_moves; applies : applied_moves }
+
+let source edits moves =
+  { held = hold edits; moves = hold_moves moves; applies = Every_move }
+
+(* The one way to copy source text: tokens [first] to [last] as moved
+   text, with exactly the edits that lie within them ({!lies_within}),
+   and the moves inside them in place, each applied once. A copy is
+   made only from a [source] that holds every edit inside it, so no
+   construct copies text that another has yet to lower. *)
+let copy_text output { held; moves; applies } ~first ~last =
+  let begins move = move.moved.first in
+  let ranked move =
+    match applies with
+    | Every_move -> true
+    | Ranked_below rank -> move.rank < rank
+  in
+  let applied move = ranked move && move.moved.last <= last in
+  let inside =
+    List.filter applied (beginning_within moves ~begins ~first ~last)
+  in
+  moved_text output (with_moves (edits_within held ~first ~last) inside)
+    ~first ~last
 
 let dropped_edits output { span; text } =
   let tokens = tokens_of output in
   replace output ~location:tokens.(span.first).location text
     (grammar_tokens tokens span.first span.last)
 
-(* Design 5.1, 13.5: a try becomes a temporary of the operand's result
-   type that holds the operand, and a test of the temporary's tag that
-   only Ok passes, written directly before the statement or declaration
-   that holds the try; the try becomes the read of the Ok field, and a
-   statement [try e;] becomes nothing. The labels of that statement stay
-   in place on a null statement before the temporary, and a statement
-   that is the substatement of another becomes a block around the
-   labels, the temporary, the test and itself, so that the labels stay
-   under the statement around it. The temporary is const and names the
-   instance by its claimed tag, as the copy of a match does. *)
+(* Design 5.1, 13.5: the prelude of a holder of try expressions stands
+   directly before it and evaluates its hoisted operands in the order of
+   5.1: a try as a temporary of the operand's result type and a test of
+   its tag that only Ok passes, a first operand as its truth in an int
+   temporary that conditions what its operator evaluates under an if,
+   and the left operand of a comma as a statement. The holder reads the
+   Ok field, the truth or nothing where each stood. The labels of the
+   holder stay in place on a null statement before the prelude, and a
+   holder that is the substatement of another becomes a block around
+   the labels, the prelude and itself, so that the labels stay under
+   the statement around it. A temporary has no qualifier: the value of a
+   try may hold an array that the holder reads through a pointer. *)
 
+let truth_name number = Printf.sprintf "__tc_c%d" number
 let temporary_name number = Printf.sprintf "__tc_t%d" number
+let value_name number = Printf.sprintf "__tc_v%d" number
 
 (* The constructors of the universe's result (design 3.6). *)
 let result_constructor name =
@@ -921,104 +1024,329 @@ let error_path output ~location ~variant
   @ cleanups
   @ [ try_piece output location return ]
 
-(* The text in front of the holder: the null statement of its labels,
-   the temporary initialised with the operand, which moves with the
-   edits inside it, and the error path, which runs [cleanups]. *)
-let front output ordered ~location ~cleanups
-    (site : Typec_sema.Expressions.try_site) =
+module Plan = Typec_sema.Try_plan
+
+let ok_read (site : Typec_sema.Expressions.try_site) field =
+  field_read ~temporary:(temporary_name site.temporary) ok_constructor field
+
+(* What the holder reads where a try stood: the Ok field, made a slice of
+   the instance it converts to as [tested_conversion] does, the temporary
+   that holds it converted to an arithmetic type, or nothing where T is
+   void; the read has no side effect, so it needs no temporary. *)
+let try_value (site : Typec_sema.Expressions.try_site) =
+  match site.value with
+  | No_value -> "((void)0)"
+  | Read { field; conversion = Unconverted } -> ok_read site field
+  | Read { field; conversion = To_slice converted_to } ->
+      let read = ok_read site field in
+      Printf.sprintf "(struct %s){ %s.data, %s.len }" converted_to read read
+  | Read { field = _; conversion = To_arithmetic _ } ->
+      value_name site.temporary
+
+(* The read of the Ok field of a try that initialises an object in a
+   braced list, and the arithmetic type of the object, in keywords,
+   where the prelude converts the value to it (design 13.5). *)
+let converted_value (site : Typec_sema.Expressions.try_site) =
+  match site.value with
+  | Read { field; conversion = To_arithmetic into } ->
+      Some (ok_read site field, Typec_sema.Arithmetic.name into)
+  | Read { conversion = Unconverted | To_slice _; _ } | No_value -> None
+
+(* The typed try of a holder that a hoisted operand replaces. *)
+let site_of (holder : Typec_sema.Expressions.try_holder)
+    (hoisted : Plan.hoisted) =
+  match
+    List.find_opt
+      (fun (site : Typec_sema.Expressions.try_site) ->
+        site.try_span = hoisted.replaced)
+      holder.tries
+  with
+  | Some site -> site
+  | None -> invalid_arg "Lowering: a hoisted try that typing did not type"
+
+(* The edits that write what the holder reads in place of a hoisted
+   operand: the read of a try, the truth of a first operand, or nothing
+   of the left operand of a comma. *)
+let replacing output holder (hoisted : Plan.hoisted) =
+  let tokens = tokens_of output in
+  let text =
+    match hoisted.form with
+    | Tried _ -> try_value (site_of holder hoisted)
+    | Truth { number } -> truth_name number
+    | Discarded_left -> "(void)0"
+  in
+  replace output ~location:tokens.(hoisted.replaced.first).location text
+    (grammar_tokens tokens hoisted.replaced.first hoisted.replaced.last)
+
+(* The moves of the hoisted operands of [holder], in its order. *)
+let holder_moves output (holder : Typec_sema.Expressions.try_holder) =
+  List.mapi
+    (fun rank (hoisted : Plan.hoisted) ->
+      { moved = hoisted.replaced;
+        rank;
+        replacement = replacing output holder hoisted })
+    holder.hoisted
+
+(* The text of the operand of the hoisted operand at [index] of a
+   holder whose moves are [moves], with the earlier ones that it holds
+   in place, from [held], the edits of the text. *)
+let operand_text output held moves index (hoisted : Plan.hoisted) =
+  copy_text output { held; moves; applies = Ranked_below index }
+    ~first:hoisted.operand.first ~last:hoisted.operand.last
+
+(* The temporary of a try, of the operand's result type named by its
+   claimed tag. *)
+let try_temporary (site : Typec_sema.Expressions.try_site) =
   let variant =
     Typec_sema.Encoding.variant_name (Applied site.operand_instance)
   in
-  let null_statement =
-    match site.holder.labels with
-    | Some _ -> [ try_piece output location ";" ]
+  (variant, Printf.sprintf "struct %s %s" (variant :> string)
+              (temporary_name site.temporary))
+
+(* The prelude of [holder] (design 13.5), from the text of each hoisted
+   operand, [text_of], and the cleanups of the error path of each try,
+   [cleanups_of]. What a truth conditions stands under an if on it, and
+   a temporary assigned under an if is declared before the outermost
+   one. *)
+let prelude output (holder : Typec_sema.Expressions.try_holder) ~text_of
+    ~cleanups_of =
+  let tokens = tokens_of output in
+  let piece (hoisted : Plan.hoisted) text =
+    try_piece output tokens.(hoisted.replaced.first).location text
+  in
+  let declared (hoisted : Plan.hoisted) =
+    match hoisted.form with
+    | Tried { number } ->
+        let site = site_of holder hoisted in
+        let _, declaration = try_temporary site in
+        let value =
+          match converted_value site with
+          | Some (_, type_name) ->
+              [ piece hoisted
+                  (Printf.sprintf "%s %s;" type_name (value_name number)) ]
+          | None -> []
+        in
+        piece hoisted (declaration ^ ";") :: value
+    | Truth { number } ->
+        [ piece hoisted (Printf.sprintf "int %s;" (truth_name number)) ]
+    | Discarded_left -> []
+  in
+  (* The conversion of the value of a try in a braced list after its
+     test, an initialisation or an assignment and no cast, so that C
+     converts there as it would in the list (13.5). *)
+  let converted ~outside number site =
+    match converted_value site with
     | None -> []
+    | Some (read, type_name) ->
+        let name = value_name number in
+        let target =
+          if outside then Printf.sprintf "const %s %s" type_name name
+          else name
+        in
+        [ try_piece output tokens.(site.try_span.first).location
+            (Printf.sprintf "%s = %s;" target read) ]
   in
-  let declaration =
-    Printf.sprintf "const struct %s %s =" (variant :> string)
-      (temporary_name site.temporary)
+  (* The form of a hoisted operand, which outside every if declares its
+     temporary and under one assigns it. *)
+  let evaluated ~outside (hoisted : Plan.hoisted) =
+    let taken ~declaration ~name ~after =
+      let target = if outside then declaration else name in
+      [ piece hoisted (target ^ " = (") ]
+      @ text_of hoisted
+      @ [ piece hoisted after ]
+    in
+    match hoisted.form with
+    | Tried { number } ->
+        let site = site_of holder hoisted in
+        let variant, declaration = try_temporary site in
+        taken ~declaration ~name:(temporary_name number) ~after:");"
+        @ error_path output
+            ~location:tokens.(hoisted.replaced.first).location ~variant site
+            ~cleanups:(cleanups_of site)
+        @ converted ~outside number site
+    | Truth { number } ->
+        let name = truth_name number in
+        taken ~declaration:("const int " ^ name) ~name ~after:") ? 1 : 0;"
+    | Discarded_left ->
+        [ piece hoisted "(void)(" ] @ text_of hoisted @ [ piece hoisted ");" ]
   in
-  let operand =
-    moved_text output ordered ~first:site.operand.first
-      ~last:site.operand.last
+  (* The temporaries of the operands under the outermost condition of
+     [truth], declared before its if; 5.1 evaluates what a first operand
+     conditions right after it, so they follow one another. *)
+  let outermost_truth (hoisted : Plan.hoisted) =
+    match List.rev hoisted.conditions with
+    | [] -> None
+    | (condition : Plan.condition) :: _ -> Some condition.truth
   in
-  null_statement
-  @ [ try_piece output location declaration ]
-  @ operand
-  @ [ try_piece output location ";" ]
-  @ error_path output ~location ~variant site ~cleanups
+  let declarations truth run =
+    let rec gather written = function
+      | hoisted :: later when outermost_truth hoisted = Some truth ->
+          gather (List.rev_append (declared hoisted) written) later
+      | _ -> List.rev written
+    in
+    gather [] run
+  in
+  (* The prelude is written in one pass, with the ifs open around the
+     last operand, innermost first, each with the operand that opened
+     it, whose location its braces take. An operand closes the ifs that
+     it does not stand under and opens the rest of its conditions. *)
+  let shared_depth opened (conditions : Plan.condition list) =
+    let rec drop count list =
+      if count <= 0 then list else drop (count - 1) (List.tl list)
+    in
+    let opened_depth = List.length opened in
+    let depth = List.length conditions in
+    let common = min opened_depth depth in
+    (* Equal innermost conditions name equal lists. *)
+    let rec meet depth opened (conditions : Plan.condition list) =
+      match (opened, conditions) with
+      | (condition, _) :: _, other :: _ when condition = other -> depth
+      | _ :: opened, _ :: conditions -> meet (depth - 1) opened conditions
+      | _ -> 0
+    in
+    meet common
+      (drop (opened_depth - common) opened)
+      (drop (depth - common) conditions)
+  in
+  (* The conditions above the outermost [depth] of [conditions],
+     outermost first. *)
+  let above ~depth conditions =
+    let rec take count conditions outermost_first =
+      match conditions with
+      | condition :: outer when count > 0 ->
+          take (count - 1) outer (condition :: outermost_first)
+      | _ -> outermost_first
+    in
+    take (List.length conditions - depth) conditions []
+  in
+  let rec close count opened written =
+    match opened with
+    | (_, opener) :: outer when count > 0 ->
+        close (count - 1) outer (piece opener "}" :: written)
+    | _ -> written
+  in
+  let if_of opener (condition : Plan.condition) =
+    let name = truth_name condition.truth in
+    match condition.branch with
+    | When_true -> piece opener (Printf.sprintf "if (%s) {" name)
+    | When_false -> piece opener (Printf.sprintf "if (!%s) {" name)
+  in
+  (* The outermost if that an operand opens: the else of the one that
+     it has just closed on the same truth, or an if of its own, after
+     the declarations of what it conditions where it is outside every
+     other. *)
+  let first_opening ~closed ~depth run (hoisted : Plan.hoisted)
+      (condition : Plan.condition) =
+    match closed with
+    | Some ((closed_condition : Plan.condition), opener)
+      when closed_condition.truth = condition.truth
+           && closed_condition.branch = When_true
+           && condition.branch = When_false ->
+        (opener, [ piece opener "else {" ])
+    | _ ->
+        let declared =
+          if depth = 0 then declarations condition.truth run else []
+        in
+        (hoisted, declared @ [ if_of hoisted condition ])
+  in
+  let rec pass opened written = function
+    | [] -> List.rev (close (List.length opened) opened written)
+    | (hoisted : Plan.hoisted) :: later as run ->
+        let depth = shared_depth opened hoisted.conditions in
+        let closing = List.length opened - depth in
+        let closed =
+          if closing = 0 then None else List.nth_opt opened (closing - 1)
+        in
+        let written = close closing opened written in
+        let kept = List.filteri (fun index _ -> index >= closing) opened in
+        let opened, written =
+          match above ~depth hoisted.conditions with
+          | [] -> (kept, written)
+          | outermost :: inner ->
+              let opener, pieces =
+                first_opening ~closed ~depth run hoisted outermost
+              in
+              let opened = (outermost, opener) :: kept in
+              let written = List.rev_append pieces written in
+              List.fold_left
+                (fun (opened, written) condition ->
+                  ( (condition, hoisted) :: opened,
+                    if_of hoisted condition :: written ))
+                (opened, written) inner
+        in
+        let evaluated =
+          evaluated ~outside:(hoisted.conditions = []) hoisted
+        in
+        pass opened (List.rev_append evaluated written) later
+  in
+  pass [] [] holder.hoisted
 
-(* The tokens that the try's value replaces: the try, or for [try e;]
-   the whole statement, so that no read of the Ok field is left as a
-   statement whose value goes unused (-Wunused-value). *)
-let replaced_span (site : Typec_sema.Expressions.try_site) =
-  match site.form with
-  | Whole_statement -> site.holder.statement
-  | Assigned | Initialiser -> site.try_span
-
-(* What replaces [replaced_span]: the read of the Ok field, which an
-   assignment or an initialiser takes only where T is not void, made a
-   slice of the instance it converts to as [tested_conversion] does; the
-   read has no side effect, so it needs no temporary. *)
-let try_value (site : Typec_sema.Expressions.try_site) =
-  let read field =
-    field_read ~temporary:(temporary_name site.temporary) ok_constructor
-      field
-  in
-  match (site.form, site.ok_field, site.converted_to) with
-  | Whole_statement, _, _ -> ""
-  | (Assigned | Initialiser), Some field, None -> read field
-  | (Assigned | Initialiser), Some field, Some converted_to ->
-      let read = read field in
-      Printf.sprintf "(struct %s){ %s.data, %s.len }" converted_to read read
-  | (Assigned | Initialiser), None, _ ->
-      invalid_arg "Lowering: the void value of a try that is no statement"
-
-(* The edits of a try: those in front of its holder and in place of the
-   try, and those after the holder, which close the block of a
-   substatement. *)
+(* The edits of a holder: its prelude, after the null statement of its
+   labels, in front of it, and around it the braces of a substatement. *)
 type try_lowering = {
   opening : Emitter.edit list;
   closing : Emitter.edit list;
 }
 
-let lower_try output ordered ~cleanups_of
-    (site : Typec_sema.Expressions.try_site) =
+let lower_holder output held ~cleanups_of
+    ((holder : Typec_sema.Expressions.try_holder), moves) =
+  let moves = hold_moves moves in
   let tokens = tokens_of output in
-  let { Typec_sema.Expressions.statement; labels; standing } = site.holder in
-  let location = tokens.(site.try_span.first).location in
-  let in_front =
-    Emitter.moved output
-      (Reader.range tokens ~first:statement.first ~count:0)
-      (front output ordered ~location ~cleanups:(cleanups_of site) site)
+  let { Typec_sema.Expressions.statement; labels; standing; discarded } =
+    holder.holder
   in
-  let replaced = replaced_span site in
-  let value =
-    replace output ~location:tokens.(replaced.first).location
-      (try_value site)
-      (grammar_tokens tokens replaced.first replaced.last)
+  let location = tokens.(statement.first).location in
+  let texts =
+    List.mapi
+      (fun index (hoisted : Plan.hoisted) ->
+        (hoisted.operand, operand_text output held moves index hoisted))
+      holder.hoisted
+  in
+  let text_of (hoisted : Plan.hoisted) = List.assoc hoisted.operand texts in
+  let null_statement =
+    match labels with
+    | Some _ -> [ try_piece output location ";" ]
+    | None -> []
+  in
+  let first = (Option.value labels ~default:statement).first in
+  let extent = { statement with first } in
+  let in_front =
+    insert_moved output ~before:statement.first ~extent
+      (null_statement @ prelude output holder ~text_of ~cleanups_of)
+  in
+  (* A discarded value is cast to void, as a read in place of a try
+     would draw -Wunused-value where nothing else reads it. *)
+  let opening_void, closing_void =
+    match discarded with
+    | Some (value : Tree.span) ->
+        ( [ insert output ~before:value.first ~extent "(void)(" ],
+          [ close output ~after:value.last ~extent ")" ] )
+    | None -> ([], [])
   in
   match standing with
-  | Block_item -> { opening = in_front :: value; closing = [] }
+  | Block_item ->
+      { opening = in_front :: opening_void; closing = closing_void }
   | Substatement ->
-      let first = (Option.value labels ~default:statement).first in
-      { opening = insert output ~before:first "{" :: in_front :: value;
-        closing = [ close output ~after:statement.last "}" ] }
+      { opening =
+          [ insert output ~before:first ~extent "{"; in_front ] @ opening_void;
+        closing =
+          closing_void @ [ close output ~after:statement.last ~extent "}" ] }
 
-(* The edits of a text with its tries lowered. The edits inside the
-   tokens that a try replaces go with its operand, which moves, and the
-   try's own replace them. Where another construct inserts at the token
-   where a try's holder begins or ends, the two nest: one that ends
-   where the holder begins closes before the try's opening, and one
-   around the holder closes after the try's block. So the closings of
-   the tries go first and their openings last. [cleanups_of] gives the
+(* The edits of a text with its holders of try lowered. The edits inside
+   the tokens that a hoisted operand replaces go with the operand, which
+   moves, and its replacement takes their place. Where another construct
+   inserts at the token where a holder begins or ends, the two nest: one
+   that ends where the holder begins closes before the prelude, and one
+   around the holder closes after the holder's block. So the closings of
+   the holders go first and their openings last. [cleanups_of] gives the
    cleanups of the error path of a try. *)
-let with_tries output edits tries ~cleanups_of =
-  let replaced = cover (List.map replaced_span tries) in
-  let ordered = order_edits edits in
-  let lowered = List.map (lower_try output ordered ~cleanups_of) tries in
+let with_tries output edits moved_holders ~cleanups_of =
+  let held = hold edits in
+  let lowered =
+    List.map (lower_holder output held ~cleanups_of) moved_holders
+  in
   List.concat_map (fun lowered -> lowered.closing) lowered
-  @ List.filter (fun edit -> not (goes_with replaced edit)) edits
+  @ with_moves edits (List.concat_map snd moved_holders)
   @ List.concat_map (fun lowered -> lowered.opening) lowered
 
 (* Design 6 and 13.5: a defer statement is removed, and a copy of its
@@ -1032,7 +1360,7 @@ let with_tries output edits tries ~cleanups_of =
    of the type [__tc_ret], or in a function that returns void as an
    expression statement. The error path of a try gets its copies where
    the try is lowered ({!with_tries}). A copy of [S] is the text of [S]
-   with the edits that its tokens own; [S] holds no defer (design 6 rule
+   with the edits that lie within it; [S] holds no defer (design 6 rule
    11). *)
 
 module Reachability = Typec_sema.Reachability
@@ -1074,7 +1402,7 @@ let copy output base (site : Reachability.defer_site) =
   in
   let location = tokens.(site.deferred.first).location in
   let moved =
-    moved_text output base ~first:deferred.first ~last:deferred.last
+    copy_text output base ~first:deferred.first ~last:deferred.last
   in
   (defer_piece output location "{" :: moved)
   @ [ defer_piece output location "}" ]
@@ -1105,15 +1433,18 @@ let place_edits output base returns (place, leaving) =
   (* A trap and the error path of a try write no copies here. *)
   let copies () = List.concat_map (copy output base) leaving in
   let at index = tokens.(index).location in
-  let insertion index = Reader.range tokens ~first:index ~count:0 in
+
   let token index = Reader.range tokens ~first:index ~count:1 in
   let piece index text = defer_piece output (at index) text in
   match (place : Reachability.place) with
   | Block_end closing ->
-      [ Emitter.moved output (insertion closing) (copies ()) ]
-  | Trap closing -> [ insert output ~before:closing trap ]
+      [ insert_moved output ~before:closing
+          ~extent:{ first = closing; last = closing } (copies ()) ]
+  | Trap closing ->
+      [ insert output ~before:closing
+          ~extent:{ first = closing; last = closing } trap ]
   | Left_by (Jump jump) ->
-      [ Emitter.moved output (insertion jump.first)
+      [ insert_moved output ~before:jump.first ~extent:jump
           (piece jump.first "{" :: copies ());
         Emitter.code output (token jump.last) ~location:(at jump.last) "; }" ]
   | Left_by (Value_return { statement; operand = _ }) ->
@@ -1235,8 +1566,8 @@ let error_path_cleanups output base
 
 (* The edits of a text with the defers of its functions lowered, and
    the declarations of [__tc_ret] by body. The statements go, and the
-   edits that their tokens own go with them, to their copies, which
-   [base], the ordered [edits], gives. [dropped] is the text that
+   edits that lie within them go with them, to their copies, which
+   [base], the source of the copies, gives. [dropped] is the text that
    lowering drops, whose own edits delete a defer in it. *)
 let with_defers output edits ~base ~dropped
     (functions : Typec_sema.Expressions.function_defers list) =
@@ -1290,7 +1621,8 @@ let tested_index output n ~(whole : Tree.span) ~slice ~(index : Tree.span) =
   let tokens = tokens_of output in
   let location = tokens.(index.first).location in
   let s = Printf.sprintf "__tc_s%d" n and i = Printf.sprintf "__tc_i%d" n in
-  insert output ~before:whole.first (Printf.sprintf "(*((void)(%s = (" s)
+  insert output ~before:whole.first ~extent:whole
+    (Printf.sprintf "(*((void)(%s = (" s)
   :: replace output ~location
        (Printf.sprintf ")), (void)(%s = (__typeof__(%s))(" i i)
        (between tokens ~after:slice index)
@@ -1333,7 +1665,8 @@ let untested output ((checked : Expressions.slice_check), _) =
   let location = tokens.(whole.first).location in
   match checked.check with
   | Index { slice; index } ->
-      insert output ~before:whole.first "(*((void)__builtin_trap(), &("
+      insert output ~before:whole.first ~extent:whole
+        "(*((void)__builtin_trap(), &("
       :: replace output ~location ").data[+("
            (between tokens ~after:slice index)
       @ replace output ~location ")]))" [ whole.last ]
@@ -1346,8 +1679,9 @@ let untested output ((checked : Expressions.slice_check), _) =
           (Printf.sprintf "), (struct %s){ 0 })" checked.instance)
           [ whole.last ]
   | Conversion { converted_to } ->
-      [ insert output ~before:whole.first "((void)__builtin_trap(), (void)(";
-        close output ~after:whole.last
+      [ insert output ~before:whole.first ~extent:whole
+          "((void)__builtin_trap(), (void)(";
+        close output ~after:whole.last ~extent:whole
           (Printf.sprintf "), (struct %s){ 0 })" converted_to) ]
 
 (* The conversion of section 8 rule 5 over the temporary of test [n]: the
@@ -1355,8 +1689,9 @@ let untested output ((checked : Expressions.slice_check), _) =
    members, as C converts the pointer. *)
 let tested_conversion output n ~(whole : Tree.span) ~converted_to =
   let s = Printf.sprintf "__tc_s%d" n in
-  [ insert output ~before:whole.first (Printf.sprintf "((void)(%s = (" s);
-    close output ~after:whole.last
+  [ insert output ~before:whole.first ~extent:whole
+      (Printf.sprintf "((void)(%s = (" s);
+    close output ~after:whole.last ~extent:whole
       (Printf.sprintf ")), (struct %s){ %s.data, %s.len })" converted_to s s) ]
 
 (* Check [n] of a function body as its test, and the declarations of
@@ -1437,10 +1772,10 @@ let replace_moved output ~location pieces indexes =
    element, which the typedef of the instance's argument names, plus a
    term of the value 0 whose array type has a negative size where an
    element has none, which the backend refuses (section 8 rule 2). *)
-let array_length output ordered ~location ~element (operand : Tree.span) =
+let array_length output source ~location ~element (operand : Tree.span) =
   let piece code = Emitter.Piece (Emitter.generated output location code) in
   let copy =
-    moved_text output ordered ~first:operand.first ~last:operand.last
+    copy_text output source ~first:operand.first ~last:operand.last
   in
   (piece "sizeof(" :: copy)
   @ [ piece
@@ -1476,7 +1811,7 @@ let string_making output ~outer ~opening ~location (literal : Tree.span) =
   let after = grammar_tokens tokens (literal.last + 1) outer.last in
   let opening_edits =
     match before with
-    | [] -> [ insert output ~before:literal.first opening ]
+    | [] -> [ insert output ~before:literal.first ~extent:outer opening ]
     | _ -> replace output ~location opening before
   in
   (* Without parentheses to replace, the count follows the last piece,
@@ -1494,7 +1829,7 @@ let string_making output ~outer ~opening ~location (literal : Tree.span) =
    and [(] become the opening of its compound literal or braced list,
    and its [)], with the parentheses around a braced list, the closing.
    The operands keep their tokens, each in parentheses. *)
-let operator_making output ordered ~outer ~opening ~location
+let operator_making output source ~outer ~opening ~location
     (making : Expressions.slice_making) first_operand =
   let tokens = tokens_of output and span = making.span in
   let opening_edits =
@@ -1506,7 +1841,7 @@ let operator_making output ordered ~outer ~opening ~location
   match (making.making, making.instance.arguments) with
   | From_array { operand }, [ argument ] ->
       let element = Typec_sema.Encoding.argument_name argument in
-      let length = array_length output ordered ~location ~element operand in
+      let length = array_length output source ~location ~element operand in
       opening_edits
       @ replace_moved output ~location
           ((piece "), " :: length) @ [ piece " }" ])
@@ -1519,27 +1854,29 @@ let operator_making output ordered ~outer ~opening ~location
       invalid_arg "Lowering.operator_making: no operator over a slice"
 
 (* The edits of one slice that [making] makes. *)
-let slice_making output ordered (making : Expressions.slice_making) =
+let slice_making output source (making : Expressions.slice_making) =
   let location = (tokens_of output).(making.span.first).location in
   let outer, opening = slice_opening making in
   match making.making with
   | From_string { literal } ->
       string_making output ~outer ~opening ~location literal
   | From_array { operand } ->
-      operator_making output ordered ~outer ~opening ~location making operand
+      operator_making output source ~outer ~opening ~location making operand
   | Unchecked { pointer; _ } ->
-      operator_making output ordered ~outer ~opening ~location making pointer
+      operator_making output source ~outer ~opening ~location making pointer
 
 (* [edits] with those of the slices that [makings] make, each innermost
    first, so that the copy of an operand holds the edits of those inside
-   it; an edit that [kept] refuses goes, as from [undeferred]. *)
-let with_slice_makings output edits ~kept makings =
+   it, and the [moves] of try inside it; an edit that [kept] refuses
+   goes, as from [undeferred]. *)
+let with_slice_makings output edits ~kept ~moves makings =
   let width (making : Expressions.slice_making) =
     making.span.last - making.span.first
   in
   let innermost_first a b = compare (width a) (width b) in
   let add edits making =
-    edits @ List.filter kept (slice_making output (order_edits edits) making)
+    let source = { held = hold edits; moves; applies = Every_move } in
+    edits @ List.filter kept (slice_making output source making)
   in
   List.fold_left add edits (List.stable_sort innermost_first makings)
 
@@ -1560,7 +1897,7 @@ let body_blocks output (declarations : (Tree.span * string Lazy.t) list) =
         declarations
     in
     let location = tokens.(body.first).location in
-    [ insert output ~before:body.first
+    [ insert output ~before:body.first ~extent:body
         ("{ " ^ Emitter.joined output location ~separator:" " Lazy.force own);
       Emitter.code output
         (Reader.range tokens ~first:body.last ~count:1)
@@ -1638,9 +1975,6 @@ let text_edits output ~declarations ~void_field_spans ~replaced
   let constructions = Typec_sema.Expressions.constructions typed in
   let heads = cover (List.map (construction_head tokens) constructions) in
   let in_head { span; _ } = covers heads ~first:span.first ~last:span.last in
-  (* An insertion before the first token of a void field would survive
-     its removal ({!goes_with}); none stands there, since a field begins
-     with a specifier, before which no lowering inserts. *)
   let removed span = { span; text = "" } in
   let dropped, extensions =
     with_extensions output holders
@@ -1674,25 +2008,32 @@ let text_edits output ~declarations ~void_field_spans ~replaced
     @ List.concat_map (zero_list output) zero_initialisers
     @ extensions
   in
+  (* The moves of the tries come first, as a copy of text that holds a
+     try writes what its holder reads there. *)
+  let moved_holders =
+    List.map
+      (fun holder -> (holder, holder_moves output holder))
+      (Typec_sema.Expressions.try_holders typed)
+  in
+  let moves = List.concat_map snd moved_holders in
   let undeferred =
     with_slice_makings output
       (List.concat_map (dropped_edits output) dropped
       @ List.filter kept lowered)
-      ~kept (Expressions.slice_makings typed)
+      ~kept ~moves:(hold_moves moves) (Expressions.slice_makings typed)
   in
   let functions = Typec_sema.Expressions.defers typed in
   (* The copies of a deferred statement, at its exits and on the error
-     path of a try, are its text with the edits that its tokens own,
+     path of a try, are its text with the edits that lie within it,
      which lowering the defers moves out of the text. *)
-  let base = order_edits undeferred in
+  let base = source undeferred moves in
   (* The defers go before the tries, so that a jump in the operand of a
      try runs its copies wherever the operand moves. *)
   let deferred, return_typedefs =
     with_defers output undeferred ~base ~dropped:dropped_spans functions
   in
   let blocks = body_blocks output (return_typedefs @ slice_temporaries) in
-  with_tries output (deferred @ blocks)
-    (Typec_sema.Expressions.tries typed)
+  with_tries output (deferred @ blocks) moved_holders
     ~cleanups_of:(error_path_cleanups output base functions)
 
 let named (span, name) = { span; text = name }
@@ -1710,7 +2051,8 @@ let generic_text output edits ~first ~last =
     | Piece piece -> piece
     | Pragma_line _ -> invalid_arg "Lowering: a pragma line in a generic"
   in
-  moved_text output (order_edits edits) ~first ~last |> List.map bracketed
+  copy_text output (source edits []) ~first ~last
+  |> List.map bracketed
 
 (* The generic type's definition under the instance's name, with each
    type parameter and application written as the name that the reading
@@ -1749,7 +2091,11 @@ let added_static output (definition : Tree.function_definition) =
     | None -> declarator.span.first
   in
   if List.exists is_static specifiers then []
-  else [ insert output ~before "static" ]
+  else
+    (* It belongs to the token it precedes, which each text of the
+       declaration, the prototype and the definition, holds. *)
+    [ insert output ~before ~extent:{ first = before; last = before }
+        "static" ]
 
 (* A function instance (design 7.3, 10.3): the generic function's
    definition, without [generic(T)], as a [static] function under the

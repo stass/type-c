@@ -302,8 +302,7 @@ let rec expression reader (e : expression) =
   | Assignment (operator, left, right) ->
       here (assignment_label operator) [ sub left; sub right ]
   | Comma (left, right) -> here "," [ sub left; sub right ]
-  | Try { operand; scope = Scope_depth depth } ->
-      here (Printf.sprintf "try:%d" depth) [ sub operand ]
+  | Try { operand } -> here "try" [ sub operand ]
   | Statement_expression body -> here "({})" [ block reader body ]
   | Label_address label -> here "label-address" [ label_name label ]
   | Va_arg { list; type_name = t } ->

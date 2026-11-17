@@ -138,16 +138,26 @@ type text =
     are kept. Only {!code}, {!closing}, {!bracketed} and {!moved} make
     one.
 
-    An edit belongs to one token, its [owner], so that lowering moves it
-    with every range of tokens that holds that token: the first token it
-    replaces, or the token an insertion goes in front of, except that a
-    closing insertion ({!closing}) belongs to the token it follows, as
-    it ends the construct that ends there. *)
+    An edit has an [owner], the token that orders it ({!in_order}): the
+    first token it replaces, or the token an insertion goes in front of,
+    except that a closing insertion ({!closing}) has the token it
+    follows. It belongs to its [extent], the tokens of the construct
+    that it lowers, and moves or goes with every span of tokens that
+    holds its extent: the tokens it replaces, or, for an insertion, the
+    construct that {!extended} names. A place between two tokens can
+    begin one construct and end another, so only the construct says
+    which; an insertion that names none belongs to its owner alone. *)
 type edit = private {
   range : Typec_cpp.Reader.range;
   text : text;
   owner : int;
+  extent : Typec_syntax.Tree.span;
 }
+
+val extended : edit -> extent:Typec_syntax.Tree.span -> edit
+(** [extended edit ~extent] is [edit] belonging to [extent], the
+    construct that it lowers. [Invalid_argument] unless [extent] holds
+    the edit's own extent. *)
 
 val code : output -> Typec_cpp.Reader.range ->
   location:Typec_cpp.Location.t -> string -> edit
@@ -182,8 +192,11 @@ val in_order : edit list -> edit list
 (** [edits] in the order in which they apply: by the first token of
     their ranges, an insertion before a token ahead of an edit that
     replaces it, a closing insertion after a token ahead of an insertion
-    before the next, and edits of one range and owner in the order of
-    the list. Their owners follow the same order. *)
+    before the next; of two insertions at one place, the one whose
+    extent holds the other's ahead of it before a token and behind it
+    after one, as the construct around the other opens first and closes
+    last; and other edits of one range and owner in the order of the
+    list. Their owners follow the same order. *)
 
 (** What lowering makes of a unit: its edits, and the declarations that
     follow its text, the static assertions of {!Assumptions}. *)

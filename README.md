@@ -18,20 +18,16 @@ with `try` and `defer`. Its compiler, `typec`, takes the command line of
 compiler. A C11 file is already a Type-C file, so a program adopts it
 one file at a time.
 
-Type-C is early: every example on this page but the first works today;
-the first previews two planned features, and the rest of the language
-is designed but not built yet ([Status](#status)).
+Type-C is early: every example on this page works today, and the rest
+of the language is designed but not built yet ([Status](#status)).
 
 ## A first look
 
 An evaluator of arithmetic expression trees, which reports a division
-by zero or an overflow as a value instead of crashing. This example
-uses a feature that is planned but not built yet, `try` inside an
-expression, and nested patterns, which are built, as in
-`case Err(DivByZero):`; every other C and Type-C example in this
-README is checked by its tests.
+by zero or an overflow as a value instead of crashing. Like every C
+and Type-C example in this README, it is checked by the tests.
 
-<!-- untested: planned syntax -->
+<!-- file: eval.tc -->
 ```c
 #include <limits.h>
 #include <stdio.h>
@@ -101,9 +97,11 @@ main(void)
 }
 ```
 
-It prints:
+It builds with the options of `cc` and prints:
 
-```text
+```console
+$ typec -std=c11 -Wall -Wextra -o eval eval.tc
+$ ./eval
 14
 division by zero
 ```
@@ -118,18 +116,16 @@ What it shows:
   no `default`. Add a `Sub` case to `expr`, and the build stops at the
   `match` in `eval` until it handles `Sub`
   ([Variants and `match`](#variants-and-match)). In `show`,
-  `Err(DivByZero)` nests one pattern in another, which is planned:
-  today a pattern binds the fields of one constructor, and `show` would
-  match the error in a second `match`.
+  `Err(DivByZero)` nests one pattern in another, so one `match` tells
+  the errors apart.
 - **`result` and `try`.** `result(int, eval_error)` is a variant that
   every Type-C file has: `Ok` of an `int`, or `Err` of an `eval_error`.
   `try eval(l)` gives the value of an `Ok`, or returns that `Err` from
   the function at once: the division by zero inside `bad` comes up
   through the `Mul` above it to `show`
-  ([`result` and `try`](#result-and-try)). Today `try` stands only as a
-  whole statement, assignment or initialiser, as in
-  `d = try eval(r);`; inside an expression, as in
-  `try eval(l) + try eval(r)`, it is planned.
+  ([`result` and `try`](#result-and-try)). `try` stands inside an
+  expression, as in `try eval(l) + try eval(r)`: the operands of the
+  tries run first, left to right, and the first error returns.
 - **No runtime.** `typec` writes C: a variant becomes a structure of a
   tag and a union of the fields of its cases, a `match` a `switch` on
   the tag, and `try` an early return
@@ -1235,7 +1231,7 @@ pair(void)
   {
     int a, b;
 
-    const struct result__i5error __tc_t0 = acquire(1);
+    struct result__i5error __tc_t0 = (acquire(1));
     if (__tc_t0.tag != result__i5error_Ok) {
       if (__tc_t0.tag != result__i5error_Err)
         __builtin_trap();
@@ -1244,7 +1240,7 @@ pair(void)
     }
     a = __tc_t0.u.Ok.value;
 
-    const struct result__i5error __tc_t1 = acquire(2);
+    struct result__i5error __tc_t1 = (acquire(2));
     if (__tc_t1.tag != result__i5error_Ok) {
       if (__tc_t1.tag != result__i5error_Err)
         __builtin_trap();
@@ -1479,7 +1475,9 @@ and `defer`. Stage 2's gate rests on
 
 Stage 3 is in progress, and **not ready to use** yet. Slices with
 checked indexing are built,
-`slice(uint8_t) bytes = slice_from_array(buffer);`, and generic
+`slice(uint8_t) bytes = slice_from_array(buffer);`, and so is `try`
+inside an expression, `return fit(try eval(l) + try eval(r));`, which
+[design 5.1](type-c-language-design.md#51-try) specifies; generic
 functions are not yet:
 `generic(T) T *vector_last(vector(T) *v);`.
 
@@ -1487,11 +1485,6 @@ Nested patterns, which
 [design 4.7](type-c-language-design.md#47-nested-patterns) specifies,
 are built in `match`, such as `case Err(DivByZero):`, and in the
 single-pattern test, such as `while (case At(*Cons(h, t)) = c)`.
-
-Planned, and previewed by [A first look](#a-first-look): `try` inside
-any expression, which the
-[design](type-c-language-design.md#12-outside-the-core) lists outside
-the core until it adopts it.
 
 Designed and **not yet implemented**: a checked mode, whose rules are
 provisional, that rules out specific classes of memory errors in the

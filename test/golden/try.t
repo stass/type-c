@@ -1,16 +1,17 @@
 SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-A try stands in three positions (design 5.1 rule 3): the whole of an
-expression statement, the whole right operand of a simple assignment
-that is one, and the whole initialiser of the one declarator of a
-declaration that is a block item. Lowering writes a temporary that
-holds the operand and its test before the statement or declaration
-that holds the try, and the Ok field where the try stood (design 13.5).
+A try stands in the expression of its holder (design 5.1 rule 3): an
+expression statement, a block-item declaration of one declarator, a
+return, the controlling expression of an if or a switch, the scrutinee
+of a match and the operand of a test of an if. Lowering writes its
+prelude before the holder, a temporary that holds the operand and its
+test for each try, and the Ok field where the try stood (design 13.5).
 The error path traps on a tag that is neither Ok nor Err, and returns
-the Err built from the temporary. A statement try e; reads no field and
-leaves nothing after the test; a void T has no Ok field, and a void E
-no Err field, so the Err is built without one.
+the Err built from the temporary. A try whose value is discarded, as in
+the statement try e;, reads no field and leaves ((void)0); a void T has
+no Ok field, and a void E no Err field, so the Err is built without
+one.
 
   $ cat > statement.tc <<'EOF'
   > result(void, int) g(void);
@@ -53,13 +54,13 @@ no Err field, so the Err is built without one.
    h(void) {
     
   # 3 "statement.tc"
-  const struct result__vi __tc_t0 = g ( ) ; if (__tc_t0.tag != result__vi_Ok) { if (__tc_t0.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__vi __tc_t0 = ( g ( ) ); if (__tc_t0.tag != result__vi_Ok) { if (__tc_t0.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 3 "statement.tc"
   
   # 3 "statement.tc"
-  
+  ((void)0)
   # 3 "statement.tc"
-  
+  ;
     return 
   # 4 "statement.tc"
   ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
@@ -128,13 +129,13 @@ read of the field is left as a statement of its own.
    h(void) {
     
   # 3 "discarded.tc"
-  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 3 "discarded.tc"
   
   # 3 "discarded.tc"
-  
+  ((void)0)
   # 3 "discarded.tc"
-  
+  ;
     return 
   # 4 "discarded.tc"
   ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
@@ -202,7 +203,7 @@ read of the field is left as a statement of its own.
     int x;
     
   # 4 "assignment.tc"
-  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 4 "assignment.tc"
   x = 
   # 4 "assignment.tc"
@@ -274,7 +275,7 @@ read of the field is left as a statement of its own.
    h(void) {
     
   # 3 "declaration.tc"
-  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 3 "declaration.tc"
   int x = 
   # 3 "declaration.tc"
@@ -356,7 +357,7 @@ holds one as any block does.
     case 1:
     again: 
   # 6 "labelled.tc"
-  ; const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  ; struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 6 "labelled.tc"
   x = 
   # 6 "labelled.tc"
@@ -452,7 +453,7 @@ holds one as any block does.
   
       
   # 5 "arm.tc"
-  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 5 "arm.tc"
   int w = 
   # 5 "arm.tc"
@@ -573,7 +574,7 @@ that the labels stay under the statement around it.
   # 6 "substatement.tc"
   
   # 6 "substatement.tc"
-  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 6 "substatement.tc"
   x = 
   # 6 "substatement.tc"
@@ -591,13 +592,13 @@ that the labels stay under the statement around it.
   # 8 "substatement.tc"
   again: 
   # 8 "substatement.tc"
-  ; const struct result__vi __tc_t1 = g ( ) ; if (__tc_t1.tag != result__vi_Ok) { if (__tc_t1.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
+  ; struct result__vi __tc_t1 = ( g ( ) ); if (__tc_t1.tag != result__vi_Ok) { if (__tc_t1.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
   # 8 "substatement.tc"
   
   # 8 "substatement.tc"
-  
+  ((void)0)
   # 8 "substatement.tc"
-  
+  ;
     
   # 8 "substatement.tc"
   }
@@ -608,13 +609,13 @@ that the labels stay under the statement around it.
   # 9 "substatement.tc"
   
   # 9 "substatement.tc"
-  const struct result__vi __tc_t2 = g ( ) ; if (__tc_t2.tag != result__vi_Ok) { if (__tc_t2.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); }
+  struct result__vi __tc_t2 = ( g ( ) ); if (__tc_t2.tag != result__vi_Ok) { if (__tc_t2.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); }
   # 9 "substatement.tc"
   
   # 9 "substatement.tc"
-  
+  ((void)0)
   # 9 "substatement.tc"
-  
+  ;
     
   # 9 "substatement.tc"
   }
@@ -689,7 +690,7 @@ without one. The Ok of the operand's type may be a result of its own.
    h(void) {
     
   # 3 "void_error.tc"
-  const struct result__iv __tc_t0 = f ( ) ; if (__tc_t0.tag != result__iv_Ok) { if (__tc_t0.tag != result__iv_Err) __builtin_trap(); return ((struct result__lv){ .tag = result__lv_Err }); }
+  struct result__iv __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__iv_Ok) { if (__tc_t0.tag != result__iv_Err) __builtin_trap(); return ((struct result__lv){ .tag = result__lv_Err }); }
   # 3 "void_error.tc"
   long x = 
   # 3 "void_error.tc"
@@ -768,7 +769,7 @@ without one. The Ok of the operand's type may be a result of its own.
    h(void) {
     
   # 3 "nested.tc"
-  const struct result__I6resulticEi __tc_t0 = f ( ) ; if (__tc_t0.tag != result__I6resulticEi_Ok) { if (__tc_t0.tag != result__I6resulticEi_Err) __builtin_trap(); return ((struct result__ci){ .tag = result__ci_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__I6resulticEi __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__I6resulticEi_Ok) { if (__tc_t0.tag != result__I6resulticEi_Err) __builtin_trap(); return ((struct result__ci){ .tag = result__ci_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 3 "nested.tc"
   
   # 3 "nested.tc"
@@ -897,7 +898,7 @@ name of an instance in it move with it.
    h(const void *p) {
     
   # 3 "moved.tc"
-  const struct result__ii __tc_t0 = f ( ((struct option__i){ .tag = option__i_Some, .u.Some = {  1  } }) , ( const option__l * ) p ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( f ( ((struct option__i){ .tag = option__i_Some, .u.Some = {  1  } }) , ( const option__l * ) p ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 3 "moved.tc"
   int x = 
   # 3 "moved.tc"
@@ -906,7 +907,7 @@ name of an instance in it move with it.
   ;
     
   # 4 "moved.tc"
-  const struct result__ii __tc_t1 = f ( ((struct option__i){ .tag = option__i_None }) , p ) ; if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
+  struct result__ii __tc_t1 = ( f ( ((struct option__i){ .tag = option__i_None }) , p ) ); if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
   # 4 "moved.tc"
   int y = 
   # 4 "moved.tc"
@@ -986,7 +987,7 @@ neither.
    h(void) {
     
   # 3 "qualified.tc"
-  const struct result__ii __tc_t0 = r ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__li){ .tag = result__li_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( r ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__li){ .tag = result__li_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 3 "qualified.tc"
   int x = 
   # 3 "qualified.tc"
@@ -1062,7 +1063,8 @@ neither.
   void_error_type.tc:3: error: the error type of the operand of try is not the one that the function returns; no error type converts to another [try-error-type]
   [1]
 
-Only the statement try e; holds a void value (rule 2).
+A try of a void T stands only where its value is discarded or cast to
+void (rule 2).
 
   $ cat > void_value.tc <<'EOF'
   > result(void, int) g(void);
@@ -1073,116 +1075,591 @@ Only the statement try e; holds a void value (rule 2).
   > }
   > EOF
   $ ./golden.exe void_value.tc
-  void_value.tc:4: error: the value of try is void, which only the statement try e; discards [try-void]
+  void_value.tc:4: error: the value of try is void, which stands only where a value is discarded or cast to void [try-void]
   [1]
 
-Anywhere else a try is one error.
+A try stands under any operator of C that evaluates its operand as a
+value, and its prelude evaluates the tries of the holder first, in the
+order of the source, one inside another's operand first. The holder
+reads each where it stood.
 
   $ cat > compound.tc <<'EOF'
   > result(int, int) f(void);
-  > result(int, int) h(void) {
-  >   int x = 0;
-  >   x += try f();
-  >   return Ok(x);
-  > }
-  > EOF
-  $ ./golden.exe compound.tc
-  compound.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
-
-  $ cat > chained.tc <<'EOF'
-  > result(int, int) f(void);
-  > result(int, int) h(void) {
-  >   int x, y;
-  >   x = y = try f();
-  >   return Ok(x);
-  > }
-  > EOF
-  $ ./golden.exe chained.tc
-  chained.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
-
-  $ cat > parenthesised.tc <<'EOF'
-  > result(int, int) f(void);
-  > result(int, int) h(void) {
-  >   int x;
-  >   x = (try f());
-  >   return Ok(x);
-  > }
-  > EOF
-  $ ./golden.exe parenthesised.tc
-  parenthesised.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
-
-  $ cat > parenthesised_assignment.tc <<'EOF'
-  > result(int, int) f(void);
-  > result(int, int) h(void) {
-  >   int x;
-  >   (x = try f());
-  >   return Ok(x);
-  > }
-  > EOF
-  $ ./golden.exe parenthesised_assignment.tc
-  parenthesised_assignment.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
-
-  $ cat > comma.tc <<'EOF'
-  > result(int, int) f(void);
-  > result(int, int) h(void) {
-  >   int x, y = 0;
-  >   x = try f(), y;
-  >   return Ok(x);
-  > }
-  > EOF
-  $ ./golden.exe comma.tc
-  comma.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
-
-  $ cat > operand_of_operator.tc <<'EOF'
-  > result(int, int) f(void);
-  > result(int, int) h(void) {
-  >   int x = 1;
-  >   x = x + try f();
-  >   return Ok(x);
-  > }
-  > EOF
-  $ ./golden.exe operand_of_operator.tc
-  operand_of_operator.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
-
-  $ cat > argument.tc <<'EOF'
-  > result(int, int) f(void);
   > int k(int);
   > result(int, int) h(void) {
-  >   int x = k(try f());
+  >   int x = 0, y = 0;
+  >   x += k(try f()) + try f(), y;
   >   return Ok(x);
   > }
   > EOF
-  $ ./golden.exe argument.tc
-  argument.tc:4: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
+  $ ./golden.exe compound.tc | grep -v '^#'
+  
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  
+  result__ii
+   f(void);
+  int k(int);
+  
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  
+  result__ii
+   h(void) {
+    int x = 0, y = 0;
+    
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); } struct result__ii __tc_t1 = ( f ( ) ); if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
+  x += k(
+  __tc_t0.u.Ok.value
+  ) + 
+  __tc_t1.u.Ok.value
+  , y;
+    return 
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  x
+   } })
+  ;
+  }
+  
+  struct __tc_pack_probe_1 { char c; int i; };
+  struct __tc_pack_probe_2 { char c; int i; };
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
 
-  $ cat > condition.tc <<'EOF'
+  $ cat > nested.tc <<'EOF'
   > result(int, int) f(void);
+  > result(int, int) g(int);
   > result(int, int) h(void) {
-  >   if (try f())
+  >   if (try g(try f()))
   >     return Ok(1);
-  >   return Ok(0);
-  > }
-  > EOF
-  $ ./golden.exe condition.tc
-  condition.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
-  [1]
-
-  $ cat > return.tc <<'EOF'
-  > result(int, int) f(void);
-  > result(int, int) h(void) {
   >   return Ok(try f());
   > }
   > EOF
-  $ ./golden.exe return.tc
-  return.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  $ ./golden.exe nested.tc | grep -v '^#'
+  
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  
+  result__ii
+   f(void);
+  
+  result__ii
+   g(int);
+  
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  
+  result__ii
+   h(void) {
+    
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); } struct result__ii __tc_t1 = ( g ( __tc_t0.u.Ok.value ) ); if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
+  if (
+  __tc_t1.u.Ok.value
+  )
+      return 
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  1
+   } })
+  ;
+    
+  struct result__ii __tc_t2 = ( f ( ) ); if (__tc_t2.tag != result__ii_Ok) { if (__tc_t2.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); }
+  return 
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  
+  __tc_t2.u.Ok.value
+  
+   } })
+  ;
+  }
+  
+  struct __tc_pack_probe_1 { char c; int i; };
+  struct __tc_pack_probe_2 { char c; int i; };
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+The first operand of &&, || and ?:, and the left operand of a comma,
+whose other operand holds a try, is evaluated with the tries, once, and
+the try under an if on its truth (design 13.5).
+
+  $ cat > conditions.tc <<'EOF'
+  > typedef struct q q;
+  > result(int, int) check(q *);
+  > result(int, int) f(void);
+  > result(int, int) h2(void);
+  > void use(q *);
+  > void g(void);
+  > result(int, int) h(q *p, int c) {
+  >   int x;
+  >   if (p && try check(p) > 0)
+  >     use(p);
+  >   x = c ? try f() : (g(), try h2());
+  >   x = try f() || (x && try f());
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe conditions.tc | grep -v '^#'
+  typedef struct q q;
+  
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  
+  result__ii
+   check(q *);
+  
+  result__ii
+   f(void);
+  
+  result__ii
+   h2(void);
+  void use(q *);
+  void g(void);
+  
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  
+  result__ii
+   h(q *p, int c) {
+    int x;
+    
+  const int __tc_c0 = ( p ) ? 1 : 0; struct result__ii __tc_t0; if (__tc_c0) { __tc_t0 = ( check ( p ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); } }
+  if (
+  __tc_c0
+   && 
+  __tc_t0.u.Ok.value
+   > 0)
+      use(p);
+    
+  const int __tc_c1 = ( c ) ? 1 : 0; struct result__ii __tc_t1; struct result__ii __tc_t2; if (__tc_c1) { __tc_t1 = ( f ( ) ); if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); } } else { (void)( g ( ) ); __tc_t2 = ( h2 ( ) ); if (__tc_t2.tag != result__ii_Ok) { if (__tc_t2.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); } }
+  x = 
+  __tc_c1
+   ? 
+  __tc_t1.u.Ok.value
+   : (
+  (void)0
+  , 
+  __tc_t2.u.Ok.value
+  );
+    
+  struct result__ii __tc_t3 = ( f ( ) ); if (__tc_t3.tag != result__ii_Ok) { if (__tc_t3.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t3.u.Err.error } }); } const int __tc_c2 = ( __tc_t3.u.Ok.value ) ? 1 : 0; int __tc_c3; struct result__ii __tc_t4; if (!__tc_c2) { __tc_c3 = ( x ) ? 1 : 0; if (__tc_c3) { __tc_t4 = ( f ( ) ); if (__tc_t4.tag != result__ii_Ok) { if (__tc_t4.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t4.u.Err.error } }); } } }
+  x = 
+  __tc_c2
+   || (
+  __tc_c3
+   && 
+  __tc_t4.u.Ok.value
+  );
+    return 
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  x
+   } })
+  ;
+  }
+  
+  struct __tc_pack_probe_1 { char c; int i; };
+  struct __tc_pack_probe_2 { char c; int i; };
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+A try of a void T stands where its value is discarded: the holder
+reads nothing of it.
+
+  $ cat > discarded.tc <<'EOF'
+  > result(void, int) v(void);
+  > result(void, int) w(void);
+  > result(int, int) h(int c) {
+  >   int n = 0;
+  >   try v(), n++;
+  >   c ? try v() : try w();
+  >   (void)try v();
+  >   return Ok(n);
+  > }
+  > EOF
+  $ ./golden.exe discarded.tc | grep -v '^#'
+  
+  typedef void __tc_arg__v; typedef int __tc_arg__i; struct result__vi; typedef struct result__vi result__vi;
+  
+  result__vi
+   v(void);
+  
+  result__vi
+   w(void);
+  
+  struct result__ii; typedef struct result__ii result__ii;
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
+  
+  result__ii
+   h(int c) {
+    int n = 0;
+    
+  struct result__vi __tc_t0 = ( v ( ) ); if (__tc_t0.tag != result__vi_Ok) { if (__tc_t0.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  
+  ((void)0)
+  , n++;
+    
+  const int __tc_c0 = ( c ) ? 1 : 0; struct result__vi __tc_t1; struct result__vi __tc_t2; if (__tc_c0) { __tc_t1 = ( v ( ) ); if (__tc_t1.tag != result__vi_Ok) { if (__tc_t1.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); } } else { __tc_t2 = ( w ( ) ); if (__tc_t2.tag != result__vi_Ok) { if (__tc_t2.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); } }
+  
+  (void)(
+  
+  __tc_c0
+   ? 
+  ((void)0)
+   : 
+  ((void)0)
+  
+  )
+  ;
+    
+  struct result__vi __tc_t3 = ( v ( ) ); if (__tc_t3.tag != result__vi_Ok) { if (__tc_t3.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t3.u.Err.error } }); }
+  (void)
+  ((void)0)
+  ;
+    return 
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  n
+   } })
+  ;
+  }
+  
+  struct __tc_pack_probe_1 { char c; int i; };
+  struct __tc_pack_probe_2 { char c; int i; };
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+A try that is an initialiser of a braced list is a whole initialiser.
+
+  $ cat > list.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(void) {
+  >   int a[2] = { try f(), (try f()) };
+  >   return Ok(a[1]);
+  > }
+  > EOF
+  $ ./golden.exe list.tc | grep -v '^#'
+  
+  typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
+  
+  result__ii
+   f(void);
+  
+  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  
+  result__ii
+   h(void) {
+    
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); } struct result__ii __tc_t1 = ( f ( ) ); if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); }
+  int a[2] = { 
+  __tc_t0.u.Ok.value
+  , (
+  __tc_t1.u.Ok.value
+  ) };
+    return 
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+  a[1]
+   } })
+  ;
+  }
+  
+  struct __tc_pack_probe_1 { char c; int i; };
+  struct __tc_pack_probe_2 { char c; int i; };
+  _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+A try that initialises an object of another arithmetic type in a
+braced list has its value converted in the prelude, after its test
+(design 5.1 rule 3, 13.5): a temporary __tc_v of the object's type in
+keywords takes it, an enumerated type as its compatible integer type
+and a bit-field as its declared type, where braces are elided too. A
+try of the object's own type, d below and the int of list.tc above,
+and one whose value is no arithmetic type, keep the read of the Ok
+field. Under a condition the temporary is declared before the if and
+assigned in it.
+
+  $ cat > list_conversion.tc <<'EOF'
+  > result(double, int) f(void);
+  > struct t { int n; };
+  > result(struct t, int) k(void);
+  > enum e { A, B };
+  > struct s { float x; enum e k; unsigned b : 3; _Bool t; double d; };
+  > struct p { float x; float y; };
+  > result(int, int) h(int c) {
+  >   float a[2] = { try f(), (try f()) };
+  >   struct s v = { try f(), try f(), try f(), try f(), try f() };
+  >   struct p ps[1] = { try f(), { try f() } };
+  >   struct t w[1] = { try k() };
+  >   int x = { try f() };
+  >   int y = c ? (int[]){ try f() }[0] : 0;
+  >   return Ok(x + y + (int)a[0] + (int)v.x + (int)ps[0].y + w[0].n);
+  > }
+  > EOF
+  $ ./golden.exe list_conversion.tc | sed -n '/h(int c)/,$p' | tr ';' '\n' \
+  >   | grep -E '__tc_v|^ *__tc_t[0-9]+\.u\.Ok|= \{ *$|\? \(int' \
+  >   | sed 's/^[ }]*//'
+  const float __tc_v0 = __tc_t0.u.Ok.value
+  const float __tc_v1 = __tc_t1.u.Ok.value
+  float a[2] = { 
+  __tc_v0
+  __tc_v1
+  const float __tc_v2 = __tc_t2.u.Ok.value
+  const unsigned int __tc_v3 = __tc_t3.u.Ok.value
+  const unsigned int __tc_v4 = __tc_t4.u.Ok.value
+  const _Bool __tc_v5 = __tc_t5.u.Ok.value
+  struct s v = { 
+  __tc_v2
+  __tc_v3
+  __tc_v4
+  __tc_v5
+  __tc_t6.u.Ok.value
+  const float __tc_v7 = __tc_t7.u.Ok.value
+  const float __tc_v8 = __tc_t8.u.Ok.value
+  struct p ps[1] = { 
+  __tc_v7
+  __tc_v8
+  struct t w[1] = { 
+  __tc_t9.u.Ok.value
+  const int __tc_v10 = __tc_t10.u.Ok.value
+  int x = { 
+  __tc_v10
+  int __tc_v11
+  __tc_v11 = __tc_t11.u.Ok.value
+  ? (int[]){ 
+  __tc_v11
+  ((struct result__ii){ .tag = result__ii_Ok, .u.Ok = { 
+
+The type that the value converts to is one that typec computes (design
+5.1 rule 5): neither an enumerated type whose integer type an attribute
+that typec does not type decides, nor the type of an object that
+follows a position or a member that typec does not compute. A try of no
+arithmetic type there converts nothing and stands.
+
+  $ cat > list_unknown.tc <<'EOF'
+  > result(double, int) f(void);
+  > result(int, int) h(void) {
+  >   enum __attribute__((packed)) e { D };
+  >   enum e z[1] = { try f() };
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe list_unknown.tc
+  list_unknown.tc:4: error: the type that a braced list converts the value of try to depends on the attribute 'packed' at list_unknown.tc:3, which typec does not type yet [unsupported]
   [1]
+  $ cat > list_unplaced.tc <<'EOF'
+  > result(double, int) f(void);
+  > result(int, int) h(void) {
+  >   float a[4] = { [sizeof(_Float16)] = 0, try f() };
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe list_unplaced.tc
+  list_unplaced.tc:3: error: the type of the object that try initialises in a braced list, which its value converts to, depends on a position or a type that typec does not compute; give the try a declaration of its own [unsupported]
+  [1]
+  $ cat > list_unknown_member.tc <<'EOF'
+  > result(double, int) f(void);
+  > result(int, int) h(void) {
+  >   struct q { float x; _Float16 h; } v = { 0, try f() };
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe list_unknown_member.tc
+  list_unknown_member.tc:3: error: the type of the object that try initialises in a braced list, which its value converts to, depends on a position or a type that typec does not compute; give the try a declaration of its own [unsupported]
+  [1]
+  $ cat > list_unplaced_record.tc <<'EOF'
+  > struct t { int n; };
+  > result(struct t, int) k(void);
+  > result(int, int) h(void) {
+  >   struct t v[2] = { [sizeof(_Float16)] = { 0 }, try k() };
+  >   return Ok(v[1].n);
+  > }
+  > EOF
+  $ ./golden.exe list_unplaced_record.tc | grep -c '__tc_t0.u.Ok.value'
+  1
+
+An initialiser of a list that holds a try and is no try itself is an
+error (try-list).
+
+  $ cat > list_part.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(void) {
+  >   int a[2] = { 0, try f() + 1 };
+  >   return Ok(a[1]);
+  > }
+  > EOF
+  $ ./golden.exe list_part.tc
+  list_part.tc:3: error: an initialiser of a braced list that holds try is itself a try expression; give the rest of it a declaration of its own [try-list]
+  [1]
+
+A hoisted operand holds no object whose life lowering would end before
+the source does (design 5.1 rule 3, try-lifetime). A compound literal
+lives until its block ends, and one in a hoisted operand that is
+evaluated under a condition would end its life with the if of the
+prelude, before consume reads it.
+
+  $ cat > lifetime.h <<'EOF'
+  > struct s { int a[2]; };
+  > struct s make(void);
+  > struct msg { int kind; };
+  > void consume(int *p);
+  > result(int *, int) wrap(int *p);
+  > result(struct s, int) made(void);
+  > result(int, int) send(struct msg *m);
+  > result(int, int) read_value(int *p);
+  > EOF
+  $ cat lifetime.h - > literal_conditioned.tc <<'EOF'
+  > result(int, int) h(int c) {
+  >   consume(c ? try wrap((int[]){7}) : 0);
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe literal_conditioned.tc
+  literal_conditioned.tc:10: error: a compound literal in an operand that the prelude of try evaluates under a condition would end its life with the if of the prelude; give it a declaration before the holder [try-lifetime]
+  [1]
+  $ cat lifetime.h - > literal_and.tc <<'EOF'
+  > result(int, int) h(int c) {
+  >   c && try read_value(((struct s){{1}}).a);
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe literal_and.tc
+  literal_and.tc:10: error: a compound literal in an operand that the prelude of try evaluates under a condition would end its life with the if of the prelude; give it a declaration before the holder [try-lifetime]
+  [1]
+
+Under no condition a hoisted operand is written in the block of its
+holder, where a compound literal lives as long as in the source, and so
+does one under a condition inside the operand.
+
+  $ cat lifetime.h - > literal.tc <<'EOF'
+  > result(int, int) h(int c) {
+  >   consume(try wrap((int[]){7}));
+  >   try send(&(struct msg){ .kind = 1 });
+  >   consume(try wrap(c ? (int[]){7} : 0));
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe literal.tc | grep -o '__tc_t[0-9] = ( [^;]* );'
+  __tc_t0 = ( wrap ( ( int [ ] ) { 7 } ) );
+  __tc_t1 = ( send ( & ( struct msg ) { . kind = 1 } ) );
+  __tc_t2 = ( wrap ( c ? ( int [ ] ) { 7 } : 0 ) );
+
+An array member of a value that is no lvalue lives in a temporary
+object until its full expression ends, and a hoisted operand is a full
+expression of its own, under a condition or not.
+
+  $ cat lifetime.h - > array_value.tc <<'EOF'
+  > result(int, int) h(void) {
+  >   consume(try wrap(make().a));
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe array_value.tc
+  array_value.tc:10: error: an array member of a value that is no lvalue, in an operand that the prelude of try evaluates, would end its life with that operand; give the value a declaration before the holder [try-lifetime]
+  [1]
+  $ cat lifetime.h - > array_comma.tc <<'EOF'
+  > result(int, int) h(void) {
+  >   int *p;
+  >   (p = make().a, try read_value(p));
+  >   return Ok(*p);
+  > }
+  > EOF
+  $ ./golden.exe array_comma.tc
+  array_comma.tc:11: error: an array member of a value that is no lvalue, in an operand that the prelude of try evaluates, would end its life with that operand; give the value a declaration before the holder [try-lifetime]
+  [1]
+  $ cat lifetime.h - > array_conditioned.tc <<'EOF'
+  > result(int, int) h(int c) {
+  >   consume(c ? try wrap(make().a) : 0);
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe array_conditioned.tc
+  array_conditioned.tc:10: error: an array member of a value that is no lvalue, in an operand that the prelude of try evaluates, would end its life with that operand; give the value a declaration before the holder [try-lifetime]
+  [1]
+
+The array of a declared object stands, and so does an array member of
+the value of a try, which the prelude holds in an object of the
+holder's block.
+
+  $ cat lifetime.h - > array_object.tc <<'EOF'
+  > result(int, int) h(void) {
+  >   struct s m = make();
+  >   consume(try wrap(m.a));
+  >   consume(try wrap((try made()).a));
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe array_object.tc | grep -o '__tc_t[0-9] = ( [^;]* );'
+  __tc_t0 = ( wrap ( m . a ) );
+  __tc_t1 = ( made ( ) );
+  __tc_t2 = ( wrap ( ( __tc_t1.u.Ok.value ) . a ) );
+
+Whether a member of a value that is no lvalue is an array is a question
+that a type typec does not compute cannot answer (design 5.1 rule 5).
+
+  $ cat > member_unknown.tc <<'EOF'
+  > struct o { _Float16 h; };
+  > struct o odd(void);
+  > result(int, int) take(_Float16 h);
+  > result(int, int) h(void) {
+  >   try take(odd().h);
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe member_unknown.tc
+  member_unknown.tc:5: error: whether a member of a value that is no lvalue, in an operand that the prelude of try evaluates, is an array depends on '_Float16' at member_unknown.tc:1, which typec does not type yet [unsupported]
+  [1]
+
+The value of a try is no lvalue (try-lvalue).
+
+  $ cat > lvalue.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(void) {
+  >   int *p = &(try f());
+  >   return Ok(*p);
+  > }
+  > EOF
+  $ ./golden.exe lvalue.tc
+  lvalue.tc:3: error: the value of try is no lvalue, which the operand of &, ++ or -- and the left operand of an assignment are; give it an object of its own [try-lvalue]
+  [1]
+
+A loop evaluates its condition once for each iteration (try-loop).
+
+  $ cat > loop.tc <<'EOF'
+  > result(int, int) more(void);
+  > result(int, int) h(void) {
+  >   while (try more())
+  >     ;
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe loop.tc
+  loop.tc:3: error: a loop evaluates its condition and the clauses of a for once for each iteration, and the tries of a holder once before it; hold the try in the body [try-loop]
+  [1]
+
+What C does not evaluate as a value takes no try (try-position): the
+operand of sizeof, a builtin that inspects its argument, and the last
+operand of ?: without its second.
+
+  $ cat > sizeof.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(void) {
+  >   int x = sizeof(try f());
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe sizeof.tc
+  sizeof.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  [1]
+
+  $ cat > inspected.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(void) {
+  >   int x = __builtin_constant_p(try f());
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe inspected.tc
+  inspected.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  [1]
+
+  $ cat > omitted.tc <<'EOF'
+  > result(int, int) f(void);
+  > result(int, int) h(int c) {
+  >   int x = c ?: try f();
+  >   return Ok(x);
+  > }
+  > EOF
+  $ ./golden.exe omitted.tc
+  omitted.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
+  [1]
+
+Nor do the clauses of a for, a statement expression, a declaration of
+more than one declarator, or file scope.
 
   $ cat > for_clause.tc <<'EOF'
   > result(int, int) f(void);
@@ -1193,7 +1670,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe for_clause.tc
-  for_clause.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  for_clause.tc:3: error: a loop evaluates its condition and the clauses of a for once for each iteration, and the tries of a holder once before it; hold the try in the body [try-loop]
   [1]
 
   $ cat > statement_expression.tc <<'EOF'
@@ -1204,7 +1681,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe statement_expression.tc
-  statement_expression.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  statement_expression.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > declarators.tc <<'EOF'
@@ -1215,7 +1692,7 @@ Anywhere else a try is one error.
   > }
   > EOF
   $ ./golden.exe declarators.tc
-  declarators.tc:3: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  declarators.tc:3: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > file_scope.tc <<'EOF'
@@ -1223,7 +1700,7 @@ Anywhere else a try is one error.
   > int x = try f();
   > EOF
   $ ./golden.exe file_scope.tc
-  file_scope.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  file_scope.tc:2: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
   [1]
 
 A declaration that holds a try declares an automatic object, whose type
@@ -1277,7 +1754,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_before.tc
-  pragma_before.tc:4: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
+  pragma_before.tc:4: error: a pragma line stands in or directly before the holder of try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_before_label.tc <<'EOF'
@@ -1290,7 +1767,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_before_label.tc
-  pragma_before_label.tc:5: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
+  pragma_before_label.tc:5: error: a pragma line stands in or directly before the holder of try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_inside.tc <<'EOF'
@@ -1303,7 +1780,7 @@ pragma takes the next statement out.
   > }
   > EOF
   $ ./golden.exe pragma_inside.tc
-  pragma_inside.tc:3: error: a pragma line stands in or directly before the statement or declaration that holds try; give the pragma or the try a statement of its own [try-pragma]
+  pragma_inside.tc:3: error: a pragma line stands in or directly before the holder of try; give the pragma or the try a statement of its own [try-pragma]
   [1]
 
   $ cat > pragma_then_null.tc <<'EOF'
@@ -1349,7 +1826,7 @@ pragma takes the next statement out.
     ;
     
   # 5 "pragma_then_null.tc"
-  const struct result__ii __tc_t0 = f ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( f ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 5 "pragma_then_null.tc"
   int x = 
   # 5 "pragma_then_null.tc"
@@ -1636,7 +2113,7 @@ ends inside the operand.
    h(int n) {
     
   # 4 "reads_alike.tc"
-  const struct result__ii __tc_t0 = g ( ( wide ) n + ( { int y = 1 ; y ; } ) ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
+  struct result__ii __tc_t0 = ( g ( ( wide ) n + ( { int y = 1 ; y ; } ) ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); }
   # 4 "reads_alike.tc"
   int x = 
   # 4 "reads_alike.tc"

@@ -106,8 +106,13 @@ let empty_view = { scopes = Scope.file; local_labels = Names.empty }
 (* Values by the index of a token in [Reader.t.tokens]. *)
 module Places = Map.Make (Int)
 
-(* The scopes at a [try]; parser.mli says what they are. *)
-type try_views = { place : view; place_before : int; own : view }
+(* The scopes at a hoisted operand; parser.mli says what they are. *)
+type try_views = {
+  place : view;
+  place_before : int;
+  own : view;
+  depth : scope_depth;
+}
 
 (* The scopes that unread and moved text stands in (design 13.5), by the
    index of a token: at the [(] of the arguments of each attribute, and
@@ -1326,7 +1331,7 @@ module Deferred = struct
     | Alignof_expression operand
     | Member { operand; member = _ }
     | Pointer_member { operand; member = _ }
-    | Try { operand; scope = _ } ->
+    | Try { operand } ->
         expression operand
     | Sizeof_type name | Alignof name -> type_name name
     | Slice_operation operation ->
@@ -1426,19 +1431,37 @@ let in_place state read =
   state.place_start <- around_start;
   result
 
+(* The views of a hoisted operand of Type-C text that begins at the
+   cursor, in [state.place]; [hoist] records them once the operator that
+   hoists the operand is read, since an operand of [&&], [||], [?:] or a
+   comma is known to be a first operand only after it (design 5.1 rule
+   3). *)
+let hoistable state =
+  let start = state.position and place_start = state.place_start in
+  let place = state.place and own = view_here state in
+  let depth = scope_depth state in
+  fun () ->
+    let token = first_token state start in
+    let views =
+      { place; place_before = first_token state place_start; own; depth }
+    in
+    if is_type_c_text_at state token then
+      state.views <-
+        { state.views with tries = Places.add token views state.views.tries }
+
+(* At an [if] or a [switch], which holds a [try] in its controlling
+   expression with its prelude in front of it, after its labels (design
+   5.1 rule 3, 13.5): the place of the operands that it hoists. *)
+let holds_place state =
+  state.place <- view_here state;
+  state.place_start <- state.position
+
 (* At the [try] that [begins_try] recognises: records its views and
    returns the node it makes of its operand. *)
 let try_prefix state =
-  let token = state.grammar.(state.position).index in
-  let views =
-    { place = state.place; place_before = first_token state state.place_start;
-      own = view_here state }
-  in
-  state.views <-
-    { state.views with tries = Places.add token views state.views.tries };
-  let scope = scope_depth state in
+  hoistable state ();
   advance state;
-  fun operand -> Tree.Try { operand; scope }
+  fun operand -> Tree.Try { operand }
 
 (* The view at the token in front of the cursor, which lowering writes
    the copies of deferred statements in front of, or which begins text
@@ -2555,9 +2578,8 @@ let measure_operator = function
    other expression ends before the assignment operator. *)
 let is_unary_expression expression =
   match expression.node with
-  | Binary _ | Conditional _ | Cast _ | Assignment _ | Comma _ | Try _ ->
-      false
-  | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
+  | Binary _ | Conditional _ | Cast _ | Assignment _ | Comma _ -> false
+  | Try _ | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
   | Generic _ | Compound_literal _ | Qualified_constructor _ | Subscript _
   | Slice_operation _
   | Call _ | Instance _ | Member _ | Pointer_member _ | Post_increment _
@@ -3612,40 +3634,37 @@ and designator state =
 
 and expression state =
   let start = state.position in
+  let hoist = hoistable state in
   let rec loop left =
-    if accept state P.Comma then
+    if accept state P.Comma then begin
+      hoist ();
       let right = assignment_expression state in
       loop (finish state start (Comma (left, right)))
+    end
     else left
   in
   loop (assignment_expression state)
 
 and constant_expression state = conditional_expression state
 
-(* Assignment is right-associative, and a [try] takes the
-   assignment-expression after it (design Appendix A): the targets and
-   the [try]s are collected in a loop as prefixes of the value after
-   them, and the nodes made from the right. *)
+(* Assignment is right-associative: the targets are collected in a loop
+   as prefixes of the value after them, and the nodes made from the
+   right. *)
 and assignment_expression state =
   let rec collect prefixes =
     let start = state.position in
-    if begins_try state then
-      let apply = try_prefix state in
-      collect ((start, apply) :: prefixes)
-    else
-      let operand = conditional_expression state in
-      match assignment_operator (peek state) with
-      | Some operator when is_unary_expression operand ->
-          advance state;
-          let assign right = Assignment (operator, operand, right) in
-          collect ((start, assign) :: prefixes)
-      | Some _ ->
-          fail state
-            (Rule.c_text
-               (Printf.sprintf
-                  "the left operand of %s is not a unary expression"
-                  (found state)))
-      | None -> (operand, prefixes)
+    let operand = conditional_expression state in
+    match assignment_operator (peek state) with
+    | Some operator when is_unary_expression operand ->
+        advance state;
+        let assign right = Assignment (operator, operand, right) in
+        collect ((start, assign) :: prefixes)
+    | Some _ ->
+        fail state
+          (Rule.c_text
+             (Printf.sprintf "the left operand of %s is not a unary expression"
+                (found state)))
+    | None -> (operand, prefixes)
   in
   let value, prefixes = collect [] in
   List.fold_left
@@ -3657,8 +3676,10 @@ and assignment_expression state =
 and conditional_expression state =
   let rec collect branches =
     let start = state.position in
+    let hoist = hoistable state in
     let condition = binary_expression state lowest_precedence in
     if accept state P.Question then begin
+      hoist ();
       let if_true = middle_operand state in
       expect state P.Colon "`:` in a conditional expression";
       collect ((start, condition, if_true) :: branches)
@@ -3680,9 +3701,11 @@ and middle_operand state =
    precedences. *)
 and binary_expression state minimum =
   let start = state.position in
+  let hoist = hoistable state in
   let rec loop left =
     match binary_operator (peek state) with
     | Some (operator, precedence) when precedence >= minimum ->
+        if operator = Logical_and || operator = Logical_or then hoist ();
         advance state;
         let right = binary_expression state (precedence + 1) in
         loop (finish state start (Binary (operator, left, right)))
@@ -3697,9 +3720,8 @@ and binary_expression state minimum =
    unary-expression, where [(] type-name [)] can only begin a compound
    literal; GNU [__extension__] makes no node and takes a
    cast-expression. GNU [&&] label is a whole unary-expression. A [try]
-   here is one that the grammar does not derive (design 5.1 rule 3): it
-   takes a cast-expression, as a unary operator does, so that typing
-   can refuse it where it stands. *)
+   takes a cast-expression, as a unary operator does (design 5.1 rule
+   3, Appendix A). *)
 and cast_expression state =
   let rec collect prefixes ~cast_allowed =
     let start = state.position in
@@ -4456,6 +4478,7 @@ and open_statements state opened =
      reads a defer itself. *)
   | _ when begins_defer state -> refuse_defer_as_statement state opened
   | Keyword_token Keyword.If ->
+      holds_place state;
       advance state;
       open_block_statement ~body_jumps:outer_jumps (fun () ->
           let condition =
@@ -4465,6 +4488,7 @@ and open_statements state opened =
           let statement_scope = state.scope in
           fun () -> Open_if { condition = condition (); statement_scope })
   | Keyword_token Keyword.Switch ->
+      holds_place state;
       advance state;
       open_block_statement
         ~body_jumps:

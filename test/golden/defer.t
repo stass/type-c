@@ -272,7 +272,7 @@ which would otherwise jump without the qualifier.
   > void f(void) { defer try g(); }
   > EOF
   $ ./golden.exe try.tc
-  try.tc:1: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  try.tc:1: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
   [1]
 
   $ cat > disputed.tc <<'EOF'
@@ -1828,7 +1828,7 @@ in front of the statement or declaration that holds the try.
     {
       
   # 7 "declared_by_try.tc"
-  const struct result__ii __tc_t0 = rd ( ) ; if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap();
+  struct result__ii __tc_t0 = ( rd ( ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap();
   # 5 "declared_by_try.tc"
   { use ( x ) ; }
   # 7 "declared_by_try.tc"

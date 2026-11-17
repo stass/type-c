@@ -676,6 +676,64 @@ is [type-c-language-design.md](type-c-language-design.md).
   `(slice(const int))slice_from_array(a)` for an `int a[3]` to a
   function that takes a `slice(const int)`.
 
+- [Medium] `place_declared_try` checks the declared object at the first
+  `initialiser` call in the holder, so a compound literal in a
+  variably modified declarator (`int (*p)[n++ + 0*sizeof((int[]){1})]
+  = try f();`) takes the check and the object goes unchecked. Key the
+  check to the holder's own initialiser, and keep the holder's state
+  per holder rather than in mutable fields of the view.
+- [High] typec crashes (`Invalid_argument "Expressions: a hoisted
+  operand without views"`) on a first operand that begins with
+  `__extension__` or with C text from a header:
+  `int x = __extension__ c && try f();`. The parser records the views
+  at its cursor (`hoistable`) and typing looks them up by
+  `span.first`; key both from one source, and refuse a missing view by
+  name.
+- [High] `if (c) if (case Ok(w) = try f(c)) n = w;` emits invalid C:
+  the holder's closing `}` and the pattern test's tail are insertions
+  after one token, and `with_tries` puts the holders' closings first.
+  Let `Emitter.in_order` nest closings at one token by their extents.
+- [Medium] `c ? try f() : 0, g();` draws `-Wunused-value` on the read
+  in the branch: the void cast covers a conditional only as a
+  statement's value. Have typing record every discarded conditional
+  whose branch reads a try, and cast each to void.
+- [Medium] GCC 16 at `-O1`/`-Os` warns `maybe-uninitialized` on a
+  temporary assigned under an if in a prelude
+  (`int y = (c || try f()) + (d ? try g() : try f());`), which fails
+  `-Werror`. Initialise such temporaries or document it, and run GCC
+  at `-O1` in the run tests.
+- [Low] A chain of 3000 `a ? try f() :` exceeds Clang's bracket depth
+  of 2048; refuse past a named bound or document it.
+- [Low] Per-holder quadratic costs: `Try_plan.expression` appends with
+  `@` on left-nested chains, `site_of` and `text_of` search lists,
+  `refuse_short_lived` filters every hoisted operand, and the prelude
+  measures the open conditions per operand.
+- [Low] Readability in try lowering: `prelude` is long and reads
+  `opened` by position in four places; `hoisted_operands` returns unit
+  and forces a `ref` and an `invalid_arg`; `refuse_not_held` takes a
+  `try_place` and rejects `Held`.
+- [Medium] A copy of source text (`Lowering.copy_text`) is made from
+  the edits collected when it is made, so its correctness rests on the
+  order of the stages in `text_edits`: slice makings, then defers, then
+  tries, each copying text before the later stages add edits inside it.
+  Make a copy name its span and resolve every copy once, against the
+  final set of edits, so that the order cannot matter.
+- [Medium] Typing a holder whose expression hoists N operands costs
+  O(uses x N): `Declarations.holding` filters every moved text being
+  read for each use of a name. A `?:` chain of tries at the parser's
+  depth bound takes 20 s, and `test_deep_trees` pays it. Index the moved
+  texts, which nest, by token, so a use finds those that hold it along
+  one chain.
+- [Low] A `slice_from_array` nested in the operand of another is copied
+  into the outer one's length as well as its data, so N nested makings
+  write 2^N copies of the innermost operand.
+- [Low] `Lowering.with_slice_makings` holds the edits afresh for each
+  making, O(M E log E) for M makings among E edits.
+- [Low] `(void)(c ? try e() : try e2())` is refused as `try-void`,
+  though the branches of a void conditional are discarded (5.2), and
+  `__real__ (try f()) = 1.0` is accepted, as `Try_plan` drops the
+  lvalue under `__real__` and `__imag__`.
+
 ## Declarations
 
 - [Low] Every point that needs a type complete must call
@@ -1666,13 +1724,6 @@ types (design 13.3).
   `pointers_differ` a flat match and raise the parameter gap before
   `crosses` in `refuse_conversion`; `object_of_first` and the
   untargeted-argument message want plainer wording.
-- [Medium] Before a `try` in a generic function is lowered:
-  `Lowering.moved_text` refuses a `Moved` edit inside the definition of
-  a generic (`invalid_arg`), as its pieces may be pragma lines that a
-  bracket cannot hold, though design 10.3 refuses a generic that holds
-  a pragma. Decide how the operand gets into the bracket: a function of
-  the emitter from moved text without pragma lines to pieces, or a
-  lowering of `try` there without `Moved`.
 - [Low] The resolution check sees a name of moved text only where
   typing passes it to `Declarations.note_use` or `note_own`, so a
   typing path that reads `state.entities` directly would let a name

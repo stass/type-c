@@ -270,12 +270,11 @@ and expression_node =
     }
   | Assignment of assignment_operator * expression * expression
   | Comma of expression * expression
-  | Try of { operand : expression; scope : scope_depth }
+  | Try of { operand : expression }
       (** Type-C's [try] (design 5.1), in Type-C text where no
-          declaration hides the word: its operand, and the scope that
-          holds it, which holds the operand that lowering moves (13.5).
-          The parser reads one wherever it stands, and typing refuses
-          one outside the positions of rule 3. *)
+          declaration hides the word, and its operand. The parser reads
+          one wherever it stands, and typing refuses one outside the
+          places of rule 3. *)
   | Statement_expression of block  (** GNU [(] compound-statement [)] *)
   | Label_address of label_name
       (** GNU [&&] label: the label's address, a [void *] *)

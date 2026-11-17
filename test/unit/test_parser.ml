@@ -2010,40 +2010,40 @@ let type_declaration_cases =
    depth of the scope that holds it. *)
 let try_cases =
   [
-    case "a try in each of its three positions"
+    case "a try in three holders"
       "int f(void); void g(int x) { try f(); x = try f(); int y = try f(); }"
       "(declaration (int) (function f (void))) | (define (void) (function g \
-       (int x)) (block (expr (try:2 (call f))) (expr (= x (try:2 (call f)))) \
-       (declaration (int) (init y (try:2 (call f))))))";
-    case "the operand of a try is an assignment expression"
+       (int x)) (block (expr (try (call f))) (expr (= x (try (call f)))) \
+       (declaration (int) (init y (try (call f))))))";
+    case "a try binds as a unary operator, before an assignment"
       "int f(void); void g(int a, int b) { a = try b = f() + 1; }"
       "(declaration (int) (function f (void))) | (define (void) (function g \
-       (int a) (int b)) (block (expr (= a (try:2 (= b (+ (call f) 1)))))))";
+       (int a) (int b)) (block (expr (= a (= (try b) (+ (call f) 1))))))";
+    case "a try binds as a unary operator, before a conditional"
+      "int f(void); void g(int a, int c) { a = try c ? f() : f(); }"
+      "(declaration (int) (function f (void))) | (define (void) (function g \
+       (int a) (int c)) (block (expr (= a (?: (try c) (call f) (call \
+       f))))))";
     case "a try of a try" "void g(int a) { try try a; }"
-      "(define (void) (function g (int a)) (block (expr (try:2 (try:2 \
+      "(define (void) (function g (int a)) (block (expr (try (try \
        a)))))";
     case "a comma ends the operand of a try"
       "int f(void); void g(int x) { x = try f(), x; }"
       "(declaration (int) (function f (void))) | (define (void) (function g \
-       (int x)) (block (expr (, (= x (try:2 (call f))) x))))";
+       (int x)) (block (expr (, (= x (try (call f))) x))))";
     case "a try in an operand takes a cast expression"
       "int f(void); void g(int a) { a = a + try f() * 2; a = -try f(); a = \
        sizeof try f(); }"
       "(declaration (int) (function f (void))) | (define (void) (function g \
-       (int a)) (block (expr (= a (+ a (* (try:2 (call f)) 2)))) (expr (= a \
-       (- (try:2 (call f))))) (expr (= a (sizeof (try:2 (call f)))))))";
+       (int a)) (block (expr (= a (+ a (* (try (call f)) 2)))) (expr (= a \
+       (- (try (call f))))) (expr (= a (sizeof (try (call f)))))))";
     case "a try in a return statement"
       "int f(void) { return try f(); }"
-      "(define (int) (function f (void)) (block (return (try:2 (call f)))))";
-    case "a try records the depth of the scope that holds it"
-      "int f(void); void g(void) { { int n = try f(); } }"
-      "(declaration (int) (function f (void))) | (define (void) (function g \
-       (void)) (block (block (declaration (int) (init n (try:3 (call \
-       f)))))))";
-    case "a try in a substatement records the depth of its scope"
+      "(define (int) (function f (void)) (block (return (try (call f)))))";
+    case "a try in a substatement"
       "int f(void); void g(int x) { if (x) x = try f(); }"
       "(declaration (int) (function f (void))) | (define (void) (function g \
-       (int x)) (block (if x (expr (= x (try:4 (call f)))) _)))";
+       (int x)) (block (if x (expr (= x (try (call f)))) _)))";
     case "a declaration hides try in an operand"
       "void g(int try) { try = try + 1; }"
       "(define (void) (function g (int try)) (block (expr (= try (+ try \
@@ -2056,9 +2056,9 @@ let try_span_cases =
   [
     case "spans of try" "void g(int a) { a = try a + 1; a = -try a; }"
       "(define@66-86 (void@66-66) (function@67-71 g@67-67 (@69-70 int@69-69 \
-       a@70-70)) (block@72-86 (expr@73-79 (=@73-78 a@73-73 (try:2@75-78 \
-       (+@76-78 a@76-76 1@78-78)))) (expr@80-85 (=@80-84 a@80-80 (-@82-84 \
-       (try:2@83-84 a@84-84))))))";
+       a@70-70)) (block@72-86 (expr@73-79 (=@73-78 a@73-73 (+@75-78 \
+       (try@75-76 a@76-76) 1@78-78))) (expr@80-85 (=@80-84 a@80-80 (-@82-84 \
+       (try@83-84 a@84-84))))))";
   ]
 
 let type_c_error_cases =

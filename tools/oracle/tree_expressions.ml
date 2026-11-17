@@ -19,7 +19,7 @@ let rec expression visit (e : Tree.expression) =
   | Unary (_, operand)
   | Sizeof_expression operand
   | Alignof_expression operand
-  | Try { operand; scope = _ } ->
+  | Try { operand } ->
       expression visit operand
   | Generic { controlling; associations } ->
       expression visit controlling;

@@ -33,10 +33,13 @@ open Typec_syntax
       of the subobject where the walk meets it or, where that
       subobject's braces may be elided, of the first variant inside it;
       [None] for an excess one.
-    - [converts] checks the implicit conversion of an expression that
-      [value] has typed to the scalar type that it initialises, which is
-      not its target type where the walk has elided braces around the
-      scalar.
+    - [converts] takes an expression of a braced list that [value] has
+      typed and the scalar type that it initialises, which is not its
+      target type where the walk has elided braces around the scalar:
+      it checks the implicit conversion, and a [try] there converts its
+      value (design 5.1 rule 3). The walk calls it for each expression
+      that initialises a scalar it knows, but for the 0 of [{0}] in an
+      object of a distinct type.
     - [initialises] checks an expression that [value] has typed and that
       initialises a subobject, as an excess one does not.
     - [source] gives the expression whose value an expression is,

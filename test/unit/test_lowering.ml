@@ -294,6 +294,26 @@ let many_tries () =
   grows_linearly "the time to lower many tries" ~small
     (fun count -> ignore (emitted (source count)))
 
+(* The prelude of a chain of conditionals with a try in each second
+   operand evaluates each try under the truths of every first operand
+   before it. It is written in one pass over them, so the time to lower
+   the chain grows no faster than the square of its length. *)
+let tries_in_a_chain_of_conditionals () =
+  let source count =
+    "result(int, int) f(void);\nresult(int, int) g(int a) {\n  int x = "
+    ^ String.concat "" (List.init count (fun _ -> "a ? try f() : "))
+    ^ "0;\n  return Ok(x);\n}\n"
+  in
+  match
+    Timing.outgrows ~degree:2 ~small:400
+      (fun count -> ignore (emitted (source count)))
+  with
+  | None -> ()
+  | Some times ->
+      incr failures;
+      Printf.eprintf "FAIL: the time to lower a chain of conditionals\n  %s\n"
+        times
+
 (* The cleanups of the error paths are indexed by try once, so the time
    to lower many tries in the scope of a defer is linear in the tries,
    not in their square. *)
@@ -758,6 +778,7 @@ let () =
   many_void_fields ();
   void_fields ();
   many_tries ();
+  tries_in_a_chain_of_conditionals ();
   many_tries_in_a_defer_scope ();
   many_defers ();
   defers ();

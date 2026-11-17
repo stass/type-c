@@ -250,7 +250,7 @@ let pragma_cases =
    one. *)
 let try_names reader views names index (token : Token.t) =
   match (token.kind, Parser.try_views views index) with
-  | Token.Identifier "try", Some { place; own; place_before = _ } ->
+  | Token.Identifier "try", Some { place; own; place_before = _; depth = _ } ->
       Some (show_view reader names place ^ " / " ^ show_view reader names own)
   | Token.Identifier "try", None -> Some "no view"
   | _, Some _ -> Some "a view at a token that is no try"

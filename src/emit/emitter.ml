@@ -170,7 +170,16 @@ type text =
   | Bracketed of { location : Location.t; pieces : piece list }
   | Moved of moved_pieces
 
-type edit = { range : Reader.range; text : text; owner : int }
+type edit = {
+  range : Reader.range;
+  text : text;
+  owner : int;
+  extent : Tree.span;
+}
+
+let own_extent owner (range : Reader.range) : Tree.span =
+  if range.count = 0 then { first = owner; last = owner }
+  else { first = range.first; last = Reader.end_token range }
 
 (* A line marker for [location], on a line of its own. It repeats the
    flags in effect at [location] and no enter or return flag, so the
@@ -305,23 +314,37 @@ let made_edit output edit =
 let code output (range : Reader.range) ~location code =
   check_own_text ~caller:"Emitter.code" code;
   made_edit output
-    { range; text = Code { location; code }; owner = range.first }
+    { range;
+      text = Code { location; code };
+      owner = range.first;
+      extent = own_extent range.first range }
 
 let closing output ~after ~location code =
   check_own_text ~caller:"Emitter.closing" code;
   made_edit output
     { range = Reader.range output.unit.tokens ~first:(after + 1) ~count:0;
       text = Code { location; code };
-      owner = after }
+      owner = after;
+      extent = { first = after; last = after } }
 
 let bracketed output ~(at : Tree.anchor) ~location pieces =
   made_edit output
     { range = Reader.range output.unit.tokens ~first:at.before ~count:0;
       text = Bracketed { location; pieces };
-      owner = at.before }
+      owner = at.before;
+      extent = { first = at.before; last = at.before } }
 
 let moved output (range : Reader.range) pieces =
-  made_edit output { range; text = Moved pieces; owner = range.first }
+  made_edit output
+    { range;
+      text = Moved pieces;
+      owner = range.first;
+      extent = own_extent range.first range }
+
+let extended edit ~(extent : Tree.span) =
+  if extent.first > edit.extent.first || edit.extent.last > extent.last then
+    invalid_arg "Emitter.extended: an extent that does not hold the edit's";
+  { edit with extent }
 
 type lowered = { edits : edit list; assertions : string list }
 
@@ -370,13 +393,23 @@ let is_bracketed edit =
 let probes edits =
   if List.exists is_bracketed edits then [ packing_probe ] else []
 
+(* Of two insertions at one place, the one whose construct holds the
+   other's opens first and closes last. *)
+let nesting a b =
+  if a.owner < a.range.first then compare b.extent.first a.extent.first
+  else compare b.extent.last a.extent.last
+
 let in_order edits =
-  List.stable_sort
-    (fun a b ->
+  let order a b =
+    match
       compare
         (a.range.first, a.range.count, a.owner)
-        (b.range.first, b.range.count, b.owner))
-    edits
+        (b.range.first, b.range.count, b.owner)
+    with
+    | 0 when a.range.count = 0 -> nesting a b
+    | by_place -> by_place
+  in
+  List.stable_sort order edits
 
 (* Reader.rewrite checks that the ranges do not overlap. *)
 let emit (unit : Reader.t) { edits; assertions } =

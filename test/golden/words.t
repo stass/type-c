@@ -63,7 +63,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int g(void) { { int try = 0; try++; } return try f(); }
   > EOF
   $ ./golden.exe block.tc
-  block.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  block.tc:2: error: the operand of try is of no result type [try-operand]
   [1]
   $ cat > before.tc <<'EOF'
   > int f(void);
@@ -71,7 +71,7 @@ declaration of it begins. A parameter `try` does not hide `defer`.
   > int try;
   > EOF
   $ ./golden.exe before.tc
-  before.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  before.tc:2: error: the operand of try is of no result type [try-operand]
   [1]
   $ printf 'void f(int try) { defer f(try); }\n' > defer.tc
   $ ./golden.exe defer.tc
@@ -116,14 +116,14 @@ A `try` takes an operand.
   > int g(void) { int n = 1; n = n + try f(); return n; }
   > EOF
   $ ./golden.exe operand.tc
-  operand.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  operand.tc:2: error: the operand of try is of no result type [try-operand]
   [1]
   $ cat > measured.tc <<'EOF'
   > int f(void);
   > unsigned long g(void) { return sizeof try f(); }
   > EOF
   $ ./golden.exe measured.tc
-  measured.tc:2: error: try stands in none of its positions: a whole expression statement, the whole right operand of a simple assignment that is one, or the whole initialiser of a declaration in a block; give it a statement or declaration of its own [try-position]
+  measured.tc:2: error: try stands in no holder, or under an operator or in a place that design 5.1 rule 3 does not name; give it a statement or declaration of its own [try-position]
   [1]
   $ printf 'void f(void) { try; }\n' > bare.tc
   $ ./golden.exe bare.tc

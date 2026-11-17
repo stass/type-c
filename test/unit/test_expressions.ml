@@ -854,8 +854,7 @@ let dropped_results () =
   accepts_source ~file:"in.tc"
     (declarations ^ "\n# 1 \"c.h\" 1\nvoid t(void) { f(); r; }\n")
 
-(* Design 5.1: try, which typing accepts and the front end refuses until
-   lowering writes it. *)
+(* Design 5.1: where typing places a try, and what it refuses. *)
 let tries () =
   let declarations =
     "int x, y, c; result(int, int) f(void); result(void, int) g(void); \
@@ -918,37 +917,64 @@ let tries () =
   refuses "int v = try g()" "try-void";
   refuses "try nested()" "discarded-result";
   accepts "result(int, int) inner = try nested()";
-  (* Rule 3: anywhere else, one error. *)
-  position "x += try f()";
-  position "x = y = try f()";
-  position "x = (try f())";
-  position "(x = try f())";
-  position "(try g())";
-  position "x = try f(), y";
-  position "x, try g()";
-  position "x = -try f()";
-  position "x = x + try f()";
+  (* Rule 3: anywhere in the expression of a holder, under the operators
+     that it names. *)
+  accepts "x += try f()";
+  accepts "x = y = try f()";
+  accepts "x = (try f())";
+  accepts "(x = try f())";
+  accepts "(try g())";
+  accepts "x = try f(), y";
+  accepts "x, try g()";
+  accepts "x = -try f()";
+  accepts "x = x + try f()";
+  accepts "x = k(try f())";
+  accepts "x = c ? try f() : 0";
+  accepts "x = c && try f() > 0 || try f()";
+  accepts "x = try f() ?: 1";
+  accepts "try try nested()";
+  accepts "x = try from(try f())";
+  accepts "x = __builtin_expect(try f(), 0)";
+  accepts "c ? try g() : try g()";
+  accepts "(void)try g()";
+  accepts "if (try f()) ;";
+  accepts "if (c) ; else if (try f()) ;";
+  accepts "switch (try f()) ;";
+  accepts "return Ok(try f())";
+  accepts "match (try nested()) { default: break; }";
+  accepts "if (case Ok(v) = try nested()) ;";
+  accepts "int a[1] = { try f() }";
+  accepts "int a[2] = { (try f()), [1] = { try f() } }";
+  accepts "int *p = (int[]){ try f() }";
+  accepts "x = *(int *)try at(&x)";
+  accepts "x = (try at(&x)) != 0";
+  refuses "x = try c ? f() : f()" "try-operand";
   position "x = sizeof try f()";
-  position "x = k(try f())";
-  position "x = c ? try f() : 0";
-  position "try try nested()";
-  position "x = try k(try f())";
-  position "if (try f()) ;";
-  position "while (try f()) ;";
-  position "switch (try f()) ;";
-  position "for (int i = try f(); ; ) ;";
-  position "for (x = try f(); ; ) ;";
-  position "for (; ; x = try f()) ;";
-  position "return Ok(try f())";
-  position "match (try nested()) { default: ; }";
-  position "if (case Ok(v) = try nested()) ;";
+  position "x = c ?: try f()";
+  position "x = __builtin_constant_p(try f())";
+  position "x = _Alignof(int[try f()])";
+  refuses "while (try f()) ;" "try-loop";
+  refuses "do ; while (try f())" "try-loop";
+  refuses "while (case Ok(v) = try nested()) ;" "try-loop";
+  refuses "for (int i = try f(); ; ) ;" "try-loop";
+  refuses "for (x = try f(); ; ) ;" "try-loop";
+  refuses "for (; try f(); ) ;" "try-loop";
+  refuses "for (; ; x = try f()) ;" "try-loop";
+  accepts "for (;;) { if (!try f()) break; }";
+  refuses "&try f()" "try-lvalue";
+  refuses "try f() = 1" "try-lvalue";
+  refuses "(try f())++" "try-lvalue";
+  refuses "--(try f())" "try-lvalue";
+  refuses "int a[1] = { (try f()) + 1 }" "try-list";
+  refuses "int a[2] = { 0, { k(try f()) } }" "try-list";
+  refuses "x = ((int[]){ k(try f()) })[0]" "try-list";
   position "({ try g(); })";
   position "x = ({ int v = try f(); v; })";
   position "x = ({ x = try f(); x; })";
   position "typeof(try f()) v = 0";
   position "int u = 0, v = try f()";
-  position "int a[1] = { try f() }";
   position "int a[try f()]";
+  position "int a[2] = { [try f()] = 1 }";
   refuses "static int v = try f()" "try-declaration";
   refuses "_Thread_local static int v = try f()" "try-declaration";
   refuses "int (*p)[n] = try f()" "try-declaration";
@@ -969,6 +995,8 @@ let tries () =
          { a[K] = try from(sizeof(enum { K = 5 })); }";
   moved "x = try from(sizeof(struct fresh { int m; }))";
   moved "x = try from(sizeof(struct fresh *))";
+  moved "x = sizeof(enum { K = 5 }) && try from(0)";
+  moved "x = (sizeof(enum { K = 5 }), try from(0))";
   moved "struct p { int m; } *v = try at(sizeof(struct p))";
   moved "typedef char t; { long t = try from(sizeof(t)); }";
   accepts "int fresh = try from(n)";
@@ -994,6 +1022,9 @@ let tries () =
   refuses ("switch (c) {" ^ pragma ^ "case 1: x = try f(); }") "try-pragma";
   refuses ("if (c)" ^ pragma ^ "x = try f()") "try-pragma";
   refuses ("{" ^ pragma ^ "x = try f(); }") "try-pragma";
+  refuses ("if (try f()" ^ pragma ^ ") ;") "try-pragma";
+  refuses ("if (c)" ^ pragma ^ "if (try f()) ;") "try-pragma";
+  accepts ("if (try f())" ^ pragma ^ ";");
   accepts (pragma ^ "; x = try f()");
   accepts ("x = try f();" ^ pragma ^ ";");
   accepts ("result(int, int) r = f(); match (r) {" ^ pragma
@@ -1008,15 +1039,17 @@ let tries () =
   accepts "a: x = ({ 1; }); typeof(({ int k = 0; k; })) v = try f()";
   accepts "int a[1]; a[({ int k = 0; k; })] = try f()"
 
-(* The sites of the tries that typing accepts: each with its holder, a
-   temporary counted from 0 in each function, its instances and whether
-   Ok and Err have fields. *)
+(* The holders of the tries that typing accepts: each with its standing
+   and labels, and its hoisted operands in the order of design 5.1, each
+   try with its temporary, counted from 0 in each function, its
+   instances, whether Ok and Err have fields and whether the holder
+   reads its value. *)
 let try_sites () =
   let source =
     "result(int, int) f(void); result(void, long) g(void); \
      result(int, void) e(void); \
      result(int, int) one(int c) { int v = try f(); if (c) l: v = try f(); \
-     return Ok(v); } \
+     v = c && (v || try f()) ? try f() : (c, try f()); return Ok(v); } \
      result(char, long) two(void) { try g(); return Ok(0); } \
      result(char, void) three(void) { int w = try e(); return Ok(w); }"
   in
@@ -1024,29 +1057,65 @@ let try_sites () =
     | Block_item -> "item"
     | Substatement -> "sub"
   in
-  let describe (site : Expressions.try_site) =
-    let field = Option.value ~default:"-" in
-    Printf.sprintf "%d %s%s %s %s %s %s" site.temporary
-      (standing site.holder.standing)
-      (if Option.is_some site.holder.labels then " labelled" else "")
+  let condition (condition : Try_plan.condition) =
+    Printf.sprintf "%s%d"
+      (match condition.branch with When_true -> "+" | When_false -> "-")
+      condition.truth
+  in
+  let try_site (site : Expressions.try_site) =
+    let value =
+      match site.value with
+      | Read { field; conversion = Unconverted } -> field
+      | Read { field; conversion = To_slice tag } -> field ^ ">" ^ tag
+      | Read { field; conversion = To_arithmetic into } ->
+          field ^ ">" ^ Arithmetic.name into
+      | No_value -> "unread"
+    in
+    Printf.sprintf "%s %s %s %s"
       (String.concat "," site.operand_instance.arguments)
       (String.concat "," site.return_instance.arguments)
-      (field site.ok_field) (field site.err_field)
+      value
+      (Option.value ~default:"-" site.err_field)
+  in
+  let describe (holder : Expressions.try_holder) =
+    let hoisted (hoisted : Try_plan.hoisted) =
+      let conditions = List.rev_map condition hoisted.conditions in
+      let form =
+        match hoisted.form with
+        | Tried { number } ->
+            let site =
+              List.find
+                (fun (site : Expressions.try_site) ->
+                  site.try_span = hoisted.replaced)
+                holder.tries
+            in
+            Printf.sprintf "t%d %s" number (try_site site)
+        | Truth { number } -> Printf.sprintf "c%d" number
+        | Discarded_left -> "left"
+      in
+      String.concat " " (conditions @ [ form ])
+    in
+    Printf.sprintf "%s%s: %s"
+      (standing holder.holder.standing)
+      (if Option.is_some holder.holder.labels then " labelled" else "")
+      (String.concat "; " (List.map hoisted holder.hoisted))
   in
   match read ~file:"in.tc" lp64 source with
   | Error error -> fail_case source (Reader.error_message error)
   | Ok (_, result) ->
       let actual =
-        List.map describe (Expressions.tries (Declarations.typed result))
+        List.map describe (Expressions.try_holders (Declarations.typed result))
       in
       let expected =
-        [ "0 item i,i i,i value error";
-          "1 sub labelled i,i i,i value error";
-          "0 item v,l c,l - error";
-          "0 item i,v c,v value -" ]
+        [ "item: t0 i,i i,i value error";
+          "sub labelled: t1 i,i i,i value error";
+          "item: c0; +0 c1; +0 -1 t2 i,i i,i value error; c2; +2 t3 i,i i,i \
+           value error; -2 left; -2 t4 i,i i,i value error";
+          "item: t0 v,l c,l unread error";
+          "item: t0 i,v c,v value -" ]
       in
       if actual <> expected then
-        fail_case source (String.concat "; " actual)
+        fail_case source (String.concat " | " actual)
 
 (* 6.8.1p3, 6.8.6.1p1: a label is defined once in its scope, the
    function or the block of a GNU local label, and a goto or an asm goto
