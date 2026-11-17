@@ -1622,17 +1622,6 @@ types (design 13.3).
 - [Low] P10 was decided on instance names read in lldb (design 15).
   Read them under gdb on a GCC build as well: an instance, its tags by
   name, and a value of it.
-- [Medium] Design 13.5 ("An index or a `slice_sub` that C does not
-  evaluate") judges whether C evaluates the operand of a `sizeof` or
-  of a `__typeof__` by the type that typing gives the operand. Design
-  13.3 does not say what type an expression has where C takes the type
-  from the value of a layout constant, which `typec` holds opaque
-  (P16): a conditional whose arm is a null pointer constant only where
-  `sizeof(int) - 4` is 0, the choice of `__builtin_choose_expr` on
-  such a condition. A wrong type there makes a wrong judgement, which
-  traps at an index in range. State in 13.3 that such a type is
-  unknown (P21), so that the operand counts as evaluated; the gate of
-  Stage 3 tests the conditional.
 - [Low] Design section 8 rule 2 refuses a label of the function in the
   operand of a `slice_from_array`, as the third clause of the
   resolution property on a name in scope after the text (design 13.5,
@@ -1658,9 +1647,19 @@ types (design 13.3).
   `-O0` and under GCC 16 at `-O0` and at `-O2` (`ret.c` beside
   `longjmp/measure.sh`, design 13.5). The temporary of a `try` is
   held across the left operand of the assignment that holds the `try`
-  (design 13.5), which is unmeasured. Go through the lowered forms for
-  such values and state one rule for all of them in section 14, with
-  rule 10 of section 8 as its case for slices.
+  (design 13.5), which is unmeasured. A value of two parts can come
+  apart there: under GCC 16 at `-O2` a resumed slice test had the
+  pointer of one evaluation and the length of another (design 13.5),
+  and a `result` in `__tc_r` is a tag and a payload. Go through the
+  lowered forms for such values and state one rule for all of them in
+  section 14, with rule 10 of section 8 as its case for slices.
+- [Low] Design 13.5 (the constructor row) gives the braced list to an
+  initialiser of an object "declared with the variant's type". `typec`
+  writes it for an object of a compatible type under any qualifier,
+  and keeps the compound literal for an atomic object, which Clang
+  gives no braced list (`initialises_whole` in
+  `src/sema/expressions.ml`). State that condition in the row; the
+  row of `slice_from_array` takes its condition from there.
 - [Medium] Returning a `result` by value costs code. In Pilot B the
   text of `toml.tc` is 11.9% larger under GCC 16 (2192 bytes) and 2.8%
   larger under Apple Clang 21 (528 bytes) than the `goto cleanup`

@@ -288,7 +288,7 @@ record of what it found.
 | 3.3 | Instantiation and emission: per-unit instances, typedef substitution, recursion limit, and rule 8 of design 3.5 for function definitions (P23). |
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
-| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. |
+| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches when its evaluation is resumed after its function has evaluated it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
 
 **Exit gate**
 
@@ -308,11 +308,15 @@ record of what it found.
      file scope and draw no diagnostic; the partner, an index out of
      range in a `sizeof` whose operand is a variable length array,
      traps;
+   - `sizeof(s[c])` with `c` of type `char` draws no diagnostic under
+     `-Wall`; the partner, the lowered text without the unary plus of
+     its index, is reported under `-Wchar-subscripts`;
    - an index in range stores once where C evaluates the operand of a
-     `sizeof` by the value of a layout constant alone,
-     `sizeof(*(c ? (int (*)[s[i] = 5])p : (void *)(sizeof(int) - 4)))`;
-     the partner, the same index out of range, traps and stores
-     nothing;
+     `sizeof` by the value of a layout constant that `typec` holds
+     opaque (design 13.3),
+     `sizeof(*(c ? (int (*)[s[i] = 5])p : (void *)(sizeof(struct four) - 4)))`
+     with one `int` in `struct four`; the partner, the same index out
+     of range, traps and stores nothing;
    - the form of an index and of a `slice_sub` that C does not
      evaluate, taken from the lowered text and compiled in an operand
      that C evaluates, traps before it evaluates an operand; the
@@ -323,21 +327,26 @@ record of what it found.
    - `slice_from_array` initialises an object of file scope under
      `-pedantic-errors`; the partner, an index that C evaluates in the
      head of a function, is refused;
+   - a `slice(int)` converts to `slice(const int)` in an argument, an
+     assignment and a `return`, with an operand that counts its
+     evaluations evaluated once, and
+     `slice(const int) c = slice_from_array(a);` initialises an object
+     of file scope under `-pedantic-errors`; the partner, the lowered
+     text with the compound literal of `slice(int)` in that
+     initialiser, is refused by both backends;
+   - a `slice_from_array` in a return type and in the size of a member
+     compiles without a diagnostic; the partner, one in a parameter
+     list, is refused;
    - `slice_from_array` of an array of `int` compiles without a
      diagnostic; the partner, one of an array whose elements have size
      0, a structure without members and `int[sizeof(int) - 4]`, is
      refused by both backends with the message of design 13.5, in a
      block and at file scope;
-   - under AddressSanitizer, an index whose operand returns a second
-     time reads its element again where its function has not begun to
-     evaluate it in between, with `setjmp` in a statement expression
-     and with a call of `getcontext` as the operand; the partner
-     evaluates the index in between over an array that the program
-     then frees, and the resumed evaluation reads the freed array at
-     `-O0` under both backends. The partner is the limit of design
-     section 8 rule 10 and shows that the first run was resumed inside
-     the index; it runs at `-O0` alone, since Apple Clang 21 at `-O2`
-     reads the live array there (design 13.5).
+   - an index whose operand returns a second time reaches the element
+     of its index again where its function has not begun to evaluate
+     it in between, with `setjmp` in a statement expression and with a
+     call of `getcontext` as the operand; the partner, the same run
+     with an index out of range at the second return, traps.
 4. The measurements of 3.6 are written up.
 
 **Decided at the gate:** P11 to P14, P23, P27, P28, and whether the
