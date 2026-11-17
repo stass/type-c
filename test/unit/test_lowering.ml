@@ -62,6 +62,14 @@ let compares name actual expected =
 let lowers name source expected =
   compares name (words (emitted source)) expected
 
+(* [run] takes time about linear in its size, from [small] on. *)
+let grows_linearly name ~small run =
+  match Timing.outgrows ~degree:1 ~small run with
+  | None -> ()
+  | Some times ->
+      incr failures;
+      Printf.eprintf "FAIL: %s\n  %s\n" name times
+
 (* Design 13.5: a compound literal, or in an initialiser the braced list
    alone; the arguments keep their tokens. *)
 let constructors () =
@@ -172,21 +180,17 @@ let anchors () =
 (* Every application is a range that lowering replaces, so the time to
    lower a unit is linear in its applications, not in their square. *)
 let many_applications () =
-  let count = 20000 in
-  let source =
+  let source count =
     "type box(T) = struct { T value; };\n"
     ^ String.concat "" (List.init count (fun _ -> "box(int) *p;\n"))
   in
-  let started = Sys.time () in
-  let _, _, edits = lowered source in
-  let took = Sys.time () -. started in
+  let small = 5000 in
+  let _, _, edits = lowered (source small) in
   compares "the edits of many applications"
     (string_of_int (List.length edits))
-    (string_of_int (count + 2));
-  if took > 2.0 then
-    compares "the time to lower many applications"
-      (Printf.sprintf "%.1f s" took)
-      "under 2 s"
+    (string_of_int (small + 2));
+  grows_linearly "the time to lower many applications" ~small
+    (fun count -> ignore (lowered (source count)))
 
 (* The words of [text] from the first [first] to the [last] after it,
    inclusive; empty where either is missing. *)
@@ -222,22 +226,19 @@ let lowers_instance case source name expected =
    set, so the time to lower a variant is linear in its fields, not in
    their square. *)
 let many_void_fields () =
-  let count = 32000 in
-  let fields = List.init count (fun index -> Printf.sprintf "T x%d" index) in
-  let source =
+  let source count =
+    let fields = List.init count (Printf.sprintf "T x%d") in
     "type many(T) = | A(" ^ String.concat ", " fields ^ ");\nmany(void) m;\n"
   in
-  let started = Sys.time () in
-  let text = emitted source in
-  let took = Sys.time () -. started in
+  let small = 8000 in
   compares "the instance without its many void fields"
-    (between (words text) ~first:"enum many__v_tag" ~last:"#pragma pack(pop)")
+    (between
+       (words (emitted (source small)))
+       ~first:"enum many__v_tag" ~last:"#pragma pack(pop)")
     "enum many__v_tag { many__v_A }; struct many__v { enum many__v_tag tag; \
      }; #pragma pack(pop)";
-  if took > 2.0 then
-    compares "the time to lower many void fields"
-      (Printf.sprintf "%.1f s" took)
-      "under 2 s"
+  grows_linearly "the time to lower many void fields" ~small
+    (fun count -> ignore (emitted (source count)))
 
 let void_fields () =
   let two = "type two(A, B) = | Two(A a, B b) | One(A only);\n" in
@@ -274,50 +275,41 @@ let void_fields () =
    so the time to lower a function is linear in its tries, not in their
    square. *)
 let many_tries () =
-  let count = 16000 in
-  let source =
+  let source count =
     "result(int, int) f(void) {\n"
     ^ String.concat ""
         (List.init count (fun _ -> "  try result(int, int).Ok(1);\n"))
     ^ "  return Ok(0);\n}\n"
   in
-  let started = Sys.time () in
-  let text = emitted source in
-  let took = Sys.time () -. started in
-  let last = Printf.sprintf "struct result__ii __tc_t%d" (count - 1) in
+  let small = 4000 in
+  let last = Printf.sprintf "struct result__ii __tc_t%d" (small - 1) in
   compares "the temporary of the last of many tries"
-    (between (words text) ~first:last ~last:"=")
+    (between (words (emitted (source small))) ~first:last ~last:"=")
     (last ^ " =");
-  if took > 2.0 then
-    compares "the time to lower many tries"
-      (Printf.sprintf "%.1f s" took)
-      "under 2 s"
+  grows_linearly "the time to lower many tries" ~small
+    (fun count -> ignore (emitted (source count)))
 
 (* Design 6 and 13.5: each exit of the scope of a defer runs a copy of
    its statement, as a block, innermost and latest first; a jump that
    runs copies becomes a block that holds them and then the jump. *)
 let many_defers () =
-  let count = 16000 in
-  let source =
+  let source count =
     "void g(int);\nvoid f(int c) {\n"
     ^ String.concat ""
         (List.init count (fun index ->
              Printf.sprintf "  defer g(%d);\n" index))
     ^ "}\n"
   in
-  let started = Sys.time () in
-  let text = words (emitted source) in
-  let took = Sys.time () -. started in
+  let small = 4000 in
+  let text = words (emitted (source small)) in
   let ending = "{ g ( 1 ) ; } { g ( 0 ) ; } }" in
   compares "the copy of the first of many defers runs last"
     (String.sub text
        (String.length text - String.length ending)
        (String.length ending))
     ending;
-  if took > 2.0 then
-    compares "the time to lower many defers"
-      (Printf.sprintf "%.1f s" took)
-      "under 2 s"
+  grows_linearly "the time to lower many defers" ~small
+    (fun count -> ignore (emitted (source count)))
 
 let trap = "__builtin_trap();"
 
