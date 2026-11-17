@@ -1287,12 +1287,13 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   fail on a busy host. Compare counts of work (allocated words, or
   steps counted by the lowering) instead of time, or take the least of
   several runs.
-- [Medium] The colima disk of `tools/hosts/run.sh` filled up ("No space
-  left on device", 43 GB of images reclaimable), so the Debian run
-  could not start; have the script prune the images it built before,
-  or say in docs/development.md how to.
 - [Low] Two runs of `tools/hosts/freebsd.sh` on one `DIR` at once are
   not guarded: each empties the other's source and corpus.
+- [Low] Two runs of `tools/hosts/run.sh` for one host from trees with
+  different Dockerfiles remove each other's image after building their
+  own, so the second build can remove the first's image before its
+  container starts ("No such image"), and the two rebuild on every
+  alternation.
 - [Medium] `tools/hosts/run.sh` (`take_results`, `changed_records`) and
   `tools/hosts/freebsd.sh` (`check_records`, `copy_records`) each check
   and copy the records a host sends back, in different ways, and

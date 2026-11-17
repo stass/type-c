@@ -11,8 +11,9 @@
 # platform: the script builds its image and runs the suite in a container
 # of it, with the source mounted read-only and no network, the container
 # removed afterwards. The image is tagged by the content of the
-# Dockerfile (typec-host-HOST:HASH), so that images of different
-# Dockerfiles live side by side; the build cache spares an unchanged one. A
+# Dockerfile (typec-host-HOST:HASH), so an edited Dockerfile gets a new
+# image and the build cache spares an unchanged one; after each build the
+# host's images of other Dockerfiles are removed. A
 # platform that the machine does not run itself needs emulation in Docker
 # (binfmt and qemu-user), and the suite is slow there. The FreeBSD host
 # is a script, which no container gives, and is run with LOG. Either kind
@@ -141,6 +142,23 @@ build_image() {
     < "$dockerfile" > "$log" 2>&1; then
     fail "the image does not build; see $log"
   fi
+  remove_older_images
+}
+
+# Removes this host's images built from earlier Dockerfiles, so that
+# each edit of a Dockerfile does not leave a stale image behind. Only
+# the repository named for this host is touched. The removal is best
+# effort: an image that a container still uses, or any other failure of
+# docker, leaves it in place with a warning and does not stop the run.
+remove_older_images() {
+  docker images --format '{{.Repository}}:{{.Tag}}' "typec-host-$host" |
+    while read -r older; do
+      if [ "$older" = "$image" ]; then
+        continue
+      fi
+      docker rmi "$older" > /dev/null ||
+        echo "$host: could not remove $older" >&2
+    done
 }
 
 # Whether qemu-user runs the host: its platform is not the Docker
