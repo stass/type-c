@@ -243,9 +243,13 @@ the instance for `unsigned char` is the only one that is built.
 
 ## Size
 
-The bytes of machine code, the `__text` section, of each core on the
-x86-64 macOS host, with Apple Clang 21 and GCC 16, measured with
-`size -m`:
+The bytes of machine code of each core: on the x86-64 macOS host with
+Apple Clang 21 and GCC 16, the `__text` section that `size -m` gives;
+for a Cortex-M3 (`-mcpu=cortex-m3`), with Arm GNU GCC 14.2 and with
+Apple Clang 21 `--target=thumbv7m-none-eabi`, the sum of the sizes of
+the functions, which `nm -S` gives. The Arm GCC builds both cores with
+`-fno-short-enums`, as `typec` does not take the short enumerations
+that `arm-none-eabi` has by default.
 
 | | `original/firmware.o` | `firmware.o` | growth |
 |---|---:|---:|---:|
@@ -253,20 +257,107 @@ x86-64 macOS host, with Apple Clang 21 and GCC 16, measured with
 | Clang `-O2` | 5057 | 5386 | 7% |
 | GCC `-Os` | 1214 | 1618 | 33% |
 | GCC `-O2` | 2790 | 3140 | 13% |
+| Cortex-M3, GCC `-Os` | 792 | 1288 | 63% |
+| Cortex-M3, Clang `-Os` | 1674 | 1440 | -14% |
 
 The constant strings are the same or smaller in the port, and its
-zeroed data is 8 to 32 bytes smaller: the line has no byte for a NUL.
+zeroed data is up to 32 bytes smaller: the line has no byte for a NUL.
 GCC also writes unwind tables, `__eh_frame`, at `-Os` of 368 bytes for
 the original and 600 for the port; firmware turns them off with
 `-fno-asynchronous-unwind-tables`.
 
-The growth is the checks and their calls of `panic`, and the parser:
-`next_word` keeps a length with each word, and `parse` returns a
-`result` by value. Both compilers inline the parser into `fw_poll`,
-which GCC at `-Os` makes 1075 bytes in the port and 766 in the
-original. GCC at `-Os` also keeps the port's `ring_put` and `ring_get`
-as functions of their own, `static inline` as they are in both
-versions, where it inlines the original's.
+### Where the bytes go
+
+Each share below is the bytes that one change to a scratch copy of
+the port removes, the changes made one after the other, so the shares
+add up to the growth:
+
+1. **Checks**: in `firmware.tc` and `ring.tci`, every checked index
+   `s[i]` read as `s.data[i]`, and every `slice_sub` written as a
+   `slice_unchecked`.
+2. **`result`**: in `firmware.tc`, the parser rewritten to return an
+   `int` and to write the command through a pointer, as the
+   original's does.
+3. **Tag traps**: in the C that `typec` writes, the trap of a `match`
+   on an invalid tag, `default: __tc_trap();`, taken out.
+4. **The rest**: what remains against the original. It is not a
+   measured cause: it holds the differences in inlining too, and is
+   negative where those make the port smaller.
+
+Built as the `Makefile` builds them, with the compiler's own inlining
+(M3 is the Cortex-M3 at `-Os`):
+
+| | Clang `-Os` | Clang `-O2` | GCC `-Os` | GCC `-O2` | M3 GCC | M3 Clang |
+|---|---:|---:|---:|---:|---:|---:|
+| growth | -3 | 329 | 404 | 350 | 496 | -234 |
+| checks | 62 | 409 | 47 | 950 | 104 | 48 |
+| `result` | 32 | 0 | 10 | 192 | 28 | 64 |
+| tag traps | 18 | -23 | 13 | -32 | 0 | -36 |
+| the rest | -115 | -57 | 334 | -760 | 364 | -310 |
+
+Built with `-fno-inline`, so that each function is set against its
+counterpart:
+
+| | Clang `-Os` | Clang `-O2` | GCC `-Os` | GCC `-O2` | M3 GCC | M3 Clang |
+|---|---:|---:|---:|---:|---:|---:|
+| growth | 489 | 480 | 448 | 653 | 608 | 292 |
+| checks | 48 | 48 | 68 | 0 | 44 | 16 |
+| `result` | 58 | 80 | 76 | 144 | 108 | 58 |
+| tag traps | 24 | 32 | 26 | 47 | 20 | 4 |
+| the rest | 359 | 320 | 278 | 462 | 436 | 214 |
+
+GCC at `-O2` starts each function at 16 bytes, so its column counts
+padding, which can hide a small share whole: the 0 of its checks is
+two builds of the same size, 2489 bytes.
+
+- **Inlining decides the totals.** Function for function the port is
+  26% to 64% larger at `-Os`. At `-Os` Clang inlines nearly all of it
+  into `fw_poll` and the port comes out the same size or smaller; so the 0%
+  of Clang `-Os` and the -14% of the Cortex-M3 are the inliner's, not a
+  program as small as the original. GCC keeps the port's `ring_put` and
+  `ring_get` out of line at `-Os`, where it inlines the original's, but
+  that saves bytes: forced inline, the port grows to 1694 bytes; forced
+  out of line, the original shrinks to 1154.
+- **The checks** are a compare, a branch and a call of `panic` each,
+  8 bytes in `ring_get` on the Cortex-M3: 3% to 8% of the port at
+  `-Os`. At `-O2` they change what is inlined. Without them GCC
+  keeps `put_string` out of line and `fw_poll` falls from 2352 bytes
+  to 1264, so the port ends 600 bytes smaller than the original.
+- **The `result`** is a structure of a tag and a union holding the
+  command, which holds a `str`: 32 bytes on x86-64 and 16 on the
+  Cortex-M3, returned through a hidden pointer and copied for the
+  `match` in `end_line`. The original returns an `enum` in a register.
+- **Tag traps** cost bytes only where the variant comes from a call
+  that is not inlined; inlined, the compiler sees the tag and drops
+  the trap, and the code can come out larger without it.
+- **The rest** is mostly the parser. With `-fno-inline`, `parse`,
+  `parse_get`, `parse_set`, `next_word` and `equal` are 136 to 261
+  bytes of it at `-Os`. A word is a `str` of two machine words, so
+  `equal` takes four arguments where the original takes two, and
+  `next_word` returns a `str`, which the Cortex-M3 calling convention
+  returns through memory, as it does any structure over 4 bytes. A
+  command holds a `str`, and `execute` takes the command by value.
+  An `option(unsigned char)` is 8 bytes, as its tag is an `int`. On
+  x86-64 it comes back in a register; on the Cortex-M3 `ring_get`
+  returns it through memory, and `fw_tx` turns it
+  back into `-1`: with `-fno-inline`, 44 bytes on the Cortex-M3 where
+  the original's `fw_tx` is a jump to `ring_get`, 8 bytes.
+
+What `typec` writes around these adds nothing measurable. A checked
+index copies the slice into a temporary, which every compiler removes;
+the check left is the compare and the branch. A constructor is a
+compound literal, which zeroes the bytes of the union that the variant
+does not use; setting only the tag and the variant's member instead
+makes GCC `-Os` 73 bytes larger when done in the 11 `return`
+statements, and 213 when done in every constructor. The size of the
+tags does matter:
+with every tag of the lowered C an `unsigned char`, the port shrinks
+by 39 bytes under GCC `-Os`, 64 under GCC `-O2` and 112 on the
+Cortex-M3 with GCC, and by 0 to 4 under Clang (`TODO.md`).
+
+The scratch copies, the scripts and the sizes of every function are in
+`/Volumes/Optaine/ringbuf-growth` (its `README`), outside the
+repository.
 
 ## Where the port differs
 

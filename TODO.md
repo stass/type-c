@@ -2064,9 +2064,33 @@ types (design 13.3).
   the record puts it down to the return of a structure of a tag and a
   union where the C returns an `int` or a pointer, and under GCC most
   of the growth is in functions that hold no `defer` (`parse_array`
-  +432, `next_token` +208). Measure whether a `result` whose error
-  type has no fields could be returned as a bare pointer or `int`
-  (design 3.5, 13.4), which is one of the compact layouts of design 12.
+  +432, `next_token` +208). `examples/ringbuf` measures the same cost
+  alone: its parser returns `result(command, parse_error)`, 32 bytes on
+  x86-64 and 16 on a Cortex-M3, through a hidden pointer, and rewriting
+  it to return an `int` and write the command through a pointer, as the
+  C does, saves 58 to 144 bytes of machine code with `-fno-inline` (76 under
+  GCC 16 `-Os`, 108 under Arm GCC 14.2 `-Os`) and 0 to 192 as built
+  (README there, "Where the bytes go"). Measure whether a `result`
+  whose error type has no fields could be returned as a bare pointer or
+  `int` (design 3.5, 13.4), which is one of the compact layouts of
+  design 12.
+- [Medium] Every tag of a variant is an `enum`, the size of an `int`,
+  so `option(unsigned char)` is 8 bytes:
+  `struct option__h { enum option__h_tag tag; union { struct {
+  __tc_arg__h value ; } Some; } u; };` in the C of `examples/ringbuf`.
+  On a Cortex-M3 the calling convention returns a structure over 4
+  bytes through memory, so `ring_get` stores the tag and the byte to
+  the caller's stack, where the C returns `-1` in a register. With
+  every tag of that lowered C changed to `unsigned char`, the port's
+  machine code shrinks by 112 bytes of 1288 under Arm GCC 14.2 `-Os`, 39 of
+  1618 under GCC 16 `-Os`, 64 of 3140 under GCC 16 `-O2`, and 0 to 4
+  under Apple Clang 21. The tag of the `option` alone gains nothing
+  under Arm GCC (+28 bytes): GCC builds the two-byte return on the
+  stack. This is evidence for the "Compact layouts" row of design 12,
+  an ABI change, so opt-in; decide whether it comes in, and whether
+  it follows the short-enum representation. Scripts and data:
+  `/Volumes/Optaine/ringbuf-growth/tools/bytetag-all.sed`, results in
+  `base/low/byteall.*.txt` there.
 - [Medium] Alpine packages no csmith (3.24), so the csmith recipe
   fails to set up in the Alpine host images (`prepare.sh: csmith is not
   installed`). Build a pinned csmith from source in alpine.Dockerfile, or
