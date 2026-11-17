@@ -233,6 +233,10 @@ type scopes = {
   declarations : (Tree.external_declaration Tree.item * View.t) list;
       (** the unit's own external declarations in order, each with the
           view in front of it, which is file scope there *)
+  at_end : Tree.anchor * View.t;
+      (** the place after the last token, with the view there, which is
+          file scope as the unit leaves it: where a header defines the
+          instances that it names (design 9.3) *)
   views : views;
   longest_type_name : int;
       (** the bytes of the longest name of a type declaration or a

@@ -491,6 +491,14 @@ let trial tags read =
   let before = tags.facts in
   Fun.protect ~finally:(fun () -> tags.facts <- before) read
 
+let attempt tags read =
+  let before = tags.facts in
+  match read () with
+  | result -> result
+  | exception failure ->
+      tags.facts <- before;
+      raise failure
+
 let set_deferred tags deferred = tags.facts <- { tags.facts with deferred }
 
 (* The instance that a record is, whose definition may be deferred. *)

@@ -136,32 +136,13 @@ is [type-c-language-design.md](type-c-language-design.md).
 `typec --emit-c-header` writes the redirect, the guard, the macro probe
 and the runs of the interface's own lowered text in macro brackets
 between its include lines, the definition of each instance under its
-guard where a point needs it complete, the packing probe named for
-the header, and under `--trap-function` the trap's prototype and its
-definition under the guard of the trap function (design 9.3). The rest
-of the package, in the order of its commits:
+guard where a point needs it complete, and at its end that of each
+other instance that its own applications name where the definition
+reads there, the packing probe named for the header, and under
+`--trap-function` the trap's prototype and its definition under the
+guard of the trap function (design 9.3). The rest of the package, in
+the order of its commits:
 
-- [High] Instances at the end of the header: define there, each under
-  its `__tc_instance__` guard, every instance that an application in the
-  declarations of the interface names, that no point of the header
-  needed complete, and whose definition finds complete all that it
-  needs there; leave the others declared (design 9.3, second bullet).
-  The header now defines an instance only where a point needs it
-  complete, as a unit does, so a client that needs complete an instance
-  that the header passes by pointer finds it incomplete. It takes a
-  query of `Declarations` for the instances that the interface's own
-  applications name (not those that only generic declarations or
-  generated definitions name), read complete at an anchor after the
-  last declaration as a trial that leaves an instance declared where
-  its definition fails, and lowering's texts at that anchor
-  (`Reader.rewrite` has no insertion after the last token, so the text
-  goes after the rewritten text, as `Emitter.header_text` writes the
-  probe). `Declarations.read ~product:Header_text` is where the reading
-  goes. It needs a place after the last declaration: the parser takes
-  a view in front of each external declaration and none at the end
-  (`Parser.scopes`), and `Tree.anchor` names no place after the last
-  token. `in_trial` restores the placements, so the trial that keeps a
-  definition that reads is a trial, then the reading again for real.
 - [High] Layout typedefs: the `__tc_layout__` typedef of each declared
   instance, pointing to the `__tc_digest__` tag of the BLAKE2b-128
   digest of its definition's tokens (9.3, 13.5). Waits on the

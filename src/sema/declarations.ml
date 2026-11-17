@@ -70,21 +70,24 @@ module Encodings = Set.Make (String)
 (* The instances used so far, the encodings of the arguments whose
    typedefs a text declares, the texts of instances met so far, latest
    first, the names that lowering writes for the applications of the
-   unit's own text, the reading of each instance's definition, and the
-   instances of generic functions used so far, latest first, as one
-   value that a trial restores. *)
+   unit's own text, the first application in the main file's own text of
+   each instance that one names, with the instance's type, the reading of
+   each instance's definition, and the instances of generic functions
+   used so far, latest first, as one value that a reading forgotten
+   restores ([forgetting]). *)
 type placements = {
   used : unit Ctype.Instances.t;
   typedefs : Encodings.t;
   texts : placement list;
   names : (Tree.span * string) list;
+  applications : (Tree.span * Ctype.t) Ctype.Instances.t;
   readings : instance_text Ctype.Instances.t;
   functions : function_instance list;
 }
 
 let no_placements =
   { used = Ctype.Instances.empty; typedefs = Encodings.empty; texts = [];
-    names = [];
+    names = []; applications = Ctype.Instances.empty;
     readings = Ctype.Instances.empty;
     functions = [] }
 
@@ -209,8 +212,8 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    are being read (rule 7), none outside one.
    [instance_bytes] counts the bytes of the text that the readings for
    instances so far give their instances, those of definition checks
-   included, which a trial does not undo, and [copy_bytes] those of the
-   copies of deferred statements that the exits so far run.
+   included, which no reading forgotten undoes, and [copy_bytes] those
+   of the copies of deferred statements that the exits so far run.
    [longest_instance_code] is the most bytes of the code of one instance
    that the unit has encoded so far, which the bound of rule 7 holds.
    [external_facts] are those of the external declaration being read,
@@ -422,6 +425,11 @@ exception Failed of error
    application (design 3.5 rule 5), which no enclosing instance reports
    again at its own; caught in [read]. *)
 exception Instance_failed of error
+
+(* The instance budget passed (design 3.5 rule 7), which bounds all the
+   reading of a unit, so that no reading that may fail and be forgotten
+   catches it; caught in [read]. *)
+exception Over_budget of error
 
 (* The index of the latest state-setting pragma line before the first
    token, which no token has. *)
@@ -3254,21 +3262,35 @@ and refuse_unmovable state (span : Tree.span) =
             which the text of its instances cannot hold")
   done
 
-(* [read ()] as a trial, after which the tags and the latest application
-   of each instance are as they were before it. The entities and tags
+(* What a reading that is to be forgotten may change of where texts
+   stand: the latest application of each instance, the placements, the
+   names declared at the place of the texts, and the queue of function
+   instances, which is empty before it, so that one it leaves unread is
+   dropped with the reading that queued it. The function that forgets
+   them; the tags are the caller's ([Ctype.trial], [Ctype.attempt]). *)
+and forgetting state =
+  if state.queued <> [] then
+    invalid_arg "Declarations.forgetting: a queued function instance";
+  let applied_at = state.applied_at and placements = state.placements in
+  let facts = state.external_facts in
+  let texts_at = facts.texts_at in
+  fun () ->
+    state.applied_at <- applied_at;
+    state.placements <- placements;
+    facts.texts_at <- texts_at;
+    state.queued <- []
+
+(* [read ()] as a trial, after which the tags and what [forgetting]
+   names are as they were before it. The entities and tags
    that the check declares stay, unreachable: each reading of the text
    declares them again, and rule 4 lets no body in it complete a tag
    declared outside. A trial is a check at file scope, where no reading
    has queued a function instance, and it reads those that it queues. *)
 and in_trial : 'a. state -> (unit -> 'a) -> 'a =
  fun state read ->
-  (* The drain below reads only what the trial queues. *)
-  if state.queued <> [] then invalid_arg "Declarations.in_trial: queued";
-  let applied_at = state.applied_at and placements = state.placements in
-  let trial = state.trial in
+  let forget = forgetting state and trial = state.trial in
   let restore () =
-    state.applied_at <- applied_at;
-    state.placements <- placements;
+    forget ();
     state.trial <- trial
   in
   state.trial <- true;
@@ -3291,7 +3313,23 @@ and applied_type state span name written =
   List.iter2 (refuse_inexact state) written arguments;
   let applied = application state span declaration instance arguments in
   note_name state span (Encoding.instance_name instance);
+  note_own_application state span instance applied;
   applied
+
+(* The first application of [instance] in the main file's own text, of
+   which a header defines the instances at its end (design 9.3): not one
+   in the text of an instance, which is that instance's, nor one in an
+   included interface, whose header defines it. *)
+and note_own_application state (span : Tree.span) instance applied =
+  let placements = state.placements in
+  let in_main = File.is_main state.text.tokens.(span.first).owner in
+  let first = not (Ctype.Instances.mem instance placements.applications) in
+  if Option.is_none state.moved && in_main && first then
+    state.placements <-
+      { placements with
+        applications =
+          Ctype.Instances.add instance (span, applied)
+            placements.applications }
 
 (* The type of an instance applied at [span], whose arguments are
    [arguments] with the places that an error in them is reported at. *)
@@ -3962,7 +4000,7 @@ and instances_refusal state { depth = _; began; first; defining; applied } =
       (quote (Type_name.of_instance defining))
       instance_budget (cause state first) began.file began.line
   in
-  Instance_failed
+  Over_budget
     { location = location_of state applied;
       message = Rule.text (Rule.c_text message) }
 
@@ -4909,6 +4947,33 @@ let read_external state ((item : Tree.external_declaration Tree.item), view) =
   Expressions.refuse_untested_outside (typing state);
   read
 
+(* [read ()], kept where it reads and forgotten where it fails, as if it
+   had not been read ([forgetting]), but for its charge to the instance
+   budget: the work was done. The entities and tags that it declares
+   stay, unreachable, as after a trial ([in_trial]). *)
+let attempt state read =
+  let forget = forgetting state in
+  match Ctype.attempt state.tags read with
+  | () -> ()
+  | exception (Failed _ | Instance_failed _) -> forget ()
+
+(* Design 9.3: a header defines at its end each instance that the main
+   file's own text applies, as a need of it complete there would, in the
+   order of their first applications; one whose definition fails there
+   stays declared. A need of an instance that is defined already defines
+   nothing. *)
+let define_named_instances state (at, view) =
+  state.external_facts <- declaration_state state.tags (Some at) view;
+  let by_first_application ((a : Tree.span), _) ((b : Tree.span), _) =
+    compare a.first b.first
+  in
+  let define (_, applied) =
+    attempt state (fun () -> needs_complete state applied)
+  in
+  List.iter define
+    (List.sort by_first_application
+       (List.map snd (Ctype.Instances.bindings state.placements.applications)))
+
 (* A generic of the universe text (design 3.6), which the emitted C does
    not hold: it is no type declaration that lowering replaces. Only its
    definition check, a trial, reads at its anchor, and a trial places no
@@ -5073,7 +5138,11 @@ let read target ~product text (scopes : Parser.scopes) =
   declare_builtin_typedefs state;
   let read_all () =
     List.iter (read_universe_generic state) scopes.universe;
-    List.map (read_external state) scopes.declarations
+    let items = List.map (read_external state) scopes.declarations in
+    (match product with
+    | Header_text -> define_named_instances state scopes.at_end
+    | Unit_text -> ());
+    items
   in
   let end_deferral () = Ctype.end_deferral state.tags in
   match Fun.protect ~finally:end_deferral read_all with
@@ -5087,4 +5156,5 @@ let read target ~product text (scopes : Parser.scopes) =
            type_declarations; instance_bytes; copy_bytes;
            longest_instance_code; zero_initialisers;
            tag_max = int_max target }
-  | exception (Failed error | Instance_failed error) -> Error error
+  | exception (Failed error | Instance_failed error | Over_budget error) ->
+      Error error

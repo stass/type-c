@@ -142,9 +142,10 @@ val excerpt : t -> first:int -> last:int -> string
     source. *)
 
 (** The [count] tokens from the token [first], or the place in front of
-    the token [first] when [count] is 0: what a replacement replaces.
-    Only {!range} makes one, so it lies within the tokens it was made
-    from. *)
+    the token [first] when [count] is 0: what a replacement replaces;
+    or the place after the last token, where [first] is the number of
+    tokens and [count] 0. Only {!range} and {!end_place} make one, so it
+    lies within the tokens it was made from. *)
 type range = private { first : int; count : int }
 
 val range : Token.t array -> first:int -> count:int -> range
@@ -153,9 +154,18 @@ val range : Token.t array -> first:int -> count:int -> range
     tokens and [count] is at least 0 and at most the tokens from
     [first]. *)
 
+val end_place : Token.t array -> range
+(** The place after the last token of [tokens], the end of the text: an
+    insertion there follows every byte of it. *)
+
+val is_at_end : Token.t array -> range -> bool
+(** Whether a range of [tokens] is {!end_place}, where no token
+    follows. *)
+
 val end_token : range -> int
 (** The token on whose line a range ends: its last token, or the token
-    in front of which an insertion goes. *)
+    in front of which an insertion goes. A range at the end
+    ({!is_at_end}) has none, and gets the number of tokens. *)
 
 (** [text] in place of the tokens of [range]. *)
 type replacement = { range : range; text : string }
@@ -172,7 +182,8 @@ val rewrite : t -> replacement list -> string
     made from the tokens of [result], and none may start at a token of
     the universe text. Each starts at or after the token after the range
     before it, [first + count], so they do not overlap and insertions in
-    front of one token keep their order; [Invalid_argument] otherwise. *)
+    front of one token keep their order; [Invalid_argument] otherwise.
+    An insertion at the end goes after every byte of the text. *)
 
 val length : t -> int
 (** [length result] is the bytes of the text as [cc -E] wrote it that

@@ -48,6 +48,10 @@ let universe = { name = "<universe>"; system_header = false; origin = Universe }
 (** Whether [file] is {!universe}, which owns the universe text alone. *)
 let is_universe file = file == universe
 
+(** Whether [file] is the main file, which holds the text of the
+    interface where the unit is one (design 9.3). *)
+let is_main file = file.origin = Main
+
 (** The suffix of a Type-C source file and of a Type-C interface (design
     2.1). *)
 let source_suffix = ".tc"
@@ -77,7 +81,7 @@ let module_name ~suffix name =
 let implements ~declaring file =
   match module_name ~suffix:interface_suffix declaring.name with
   | Some interface ->
-      file.origin = Main
+      is_main file
       && module_name ~suffix:source_suffix file.name = Some interface
   | None -> false
 

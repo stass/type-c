@@ -174,7 +174,7 @@ let current_owner state =
    include stack. *)
 let main_at_bottom stack =
   match stack with
-  | [ (main : File.t) ] when main.origin = File.Main -> Some main
+  | [ main ] when File.is_main main -> Some main
   | _ -> None
 
 (* The text of the interface is what the output holds while its main file
@@ -925,16 +925,28 @@ let range (tokens : Token.t array) ~first ~count =
   then invalid_arg "Reader.range: outside the tokens";
   { first; count }
 
+let end_place (tokens : Token.t array) =
+  { first = Array.length tokens; count = 0 }
+
+let is_at_end (tokens : Token.t array) range =
+  range.first = Array.length tokens
+
 let end_token range =
   if range.count = 0 then range.first else range.first + range.count - 1
 
-(* The bytes of the text that a range replaces, as (start, stop). *)
-let replaced_bytes (tokens : Token.t array) range =
-  let start = tokens.(range.first).start in
-  if range.count = 0 then (start, start)
+(* The bytes of the text that a range replaces, as (start, stop); an
+   insertion at the end goes after every byte of the text. *)
+let replaced_bytes (result : t) range =
+  let tokens = result.tokens in
+  if is_at_end tokens range then
+    let length = String.length result.text.bytes in
+    (length, length)
   else
-    let last = tokens.(end_token range) in
-    (start, last.start + last.length)
+    let start = tokens.(range.first).start in
+    if range.count = 0 then (start, start)
+    else
+      let last = tokens.(end_token range) in
+      (start, last.start + last.length)
 
 (* The universe text holds no definition line (File.universe_text), so
    each line counted is in the unit's own text. *)
@@ -971,7 +983,7 @@ let rewrite (result : t) replacements =
   let apply (next, copied, lines) { range; text } =
     if range.first < next then
       invalid_arg "Reader.rewrite: replacements out of order";
-    let start, stop = replaced_bytes result.tokens range in
+    let start, stop = replaced_bytes result range in
     if start < own_start then
       invalid_arg "Reader.rewrite: a replacement in the universe";
     let lines = copy lines ~from:copied ~upto:start in

@@ -4050,10 +4050,18 @@ differ as well, and the paragraphs after them state how.
   needs it complete (10.3); a client may need complete an instance that
   the header only passes by pointer. So the header defines at its end
   every instance that an application in the declarations of `M.tci`
-  names and that it has not defined, provided that everything the
-  definition needs complete is complete there. An instance that fails
-  this is left with its declaration alone. An instance that only a
-  generated definition names is written as in a translation unit:
+  names and that it has not defined, provided that its definition
+  reads there: everything that it needs complete is complete there, and
+  it reads without error, as a need of it complete there would read it
+  (10.3, 13.5). An instance that fails this is left with its
+  declaration alone, with no message, as a translation unit leaves an
+  instance that no point needs complete: the header defines such an
+  instance for the convenience of a client, so its failure there is no
+  error of the interface. The reading that fails is forgotten but for
+  its charge to the instance budget (3.5 rule 7), which bounds the work
+  of every reading, so passing the budget there is an error of the
+  header, as it is of a unit. An instance that only a generated
+  definition names is written as in a translation unit:
   declared, and defined where that definition needs it complete. An
   application inside a generic declaration of `M.tci` is of that
   kind, whether it names a type parameter or not: the declaration is

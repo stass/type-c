@@ -268,6 +268,8 @@ the text, and the client finds the layout that a Type-C unit finds.
   $ grep '__tc_instance__\|__tc_pack_probe_.*{' left.h
   #ifndef __tc_instance__vec__i
   #define __tc_instance__vec__i
+  #ifndef __tc_instance__link__i
+  #define __tc_instance__link__i
   struct __tc_pack_probe_1__left { char c ; int i ; } ;
   struct __tc_pack_probe_2__left { char c ; int i ; } ;
   $ cat > layout.tc <<'EOF'
@@ -308,6 +310,71 @@ the text, and the client finds the layout that a Type-C unit finds.
   >       set -- $order
   >       "$cc" -std=$std $strict $hostile -DFIRST="$1" -DSECOND="$2" \
   >         pair.c layout.o -o pair && ./pair || echo "failed: $cc $std"
+  >     done
+  >   done
+  > done
+
+A header defines at its end, each under its guard, the instances that
+its interface names and that no point of it needed complete, where
+their definitions find complete what they need, so a client may use by
+value an instance that the interface passes by pointer alone. An
+instance whose argument is incomplete at the end stays declared, and an
+instance that only an included interface names is no instance of the
+header's. Two headers that define one at their ends are included
+together in either order.
+
+  $ cat > hold.tci <<'EOF'
+  > #ifndef HOLD_TCI
+  > #define HOLD_TCI
+  > #include "vec.tci"
+  > struct secret;
+  > void hold_fill(vec(long) *v);
+  > void hold_keep(link(struct secret) *l);
+  > void hold_list(link(int) *l);
+  > #endif
+  > EOF
+  $ cat > grip.tci <<'EOF'
+  > #ifndef GRIP_TCI
+  > #define GRIP_TCI
+  > #include "hold.tci"
+  > void grip_take(const vec(long) *v);
+  > #endif
+  > EOF
+  $ for name in hold grip; do typec --emit-c-header $name.tci; done
+  $ grep '__tc_instance__' hold.h grip.h
+  hold.h:#ifndef __tc_instance__vec__l
+  hold.h:#define __tc_instance__vec__l
+  hold.h:#ifndef __tc_instance__link__i
+  hold.h:#define __tc_instance__link__i
+  grip.h:#ifndef __tc_instance__vec__l
+  grip.h:#define __tc_instance__vec__l
+  $ cat > held.tc <<'EOF'
+  > #include <stddef.h>
+  > #include "hold.h"
+  > const size_t held[] = { sizeof(vec(long)), offsetof(vec(long), cap) };
+  > EOF
+  $ cat > hold.c <<'EOF'
+  > #include <stddef.h>
+  > #include <stdio.h>
+  > #include FIRST
+  > #include SECOND
+  > extern const size_t held[2];
+  > void hold_fill(vec__l *v) { v->len = 1; }
+  > int main(void) {
+  >   vec__l v = { 0, 0, 0 };
+  >   hold_fill(&v);
+  >   if (sizeof v != held[0] || offsetof(vec__l, cap) != held[1])
+  >     printf("layout: %zu, %zu\n", sizeof v, offsetof(vec__l, cap));
+  >   return v.len - 1;
+  > }
+  > EOF
+  $ typec -c held.tc
+  $ for cc in "$clang" "$gcc"; do
+  >   for std in c11 gnu17; do
+  >     for order in '"hold.h" "grip.h"' '"grip.h" "hold.h"'; do
+  >       set -- $order
+  >       "$cc" -std=$std $strict -DFIRST="$1" -DSECOND="$2" \
+  >         hold.c held.o -o hold && ./hold || echo "failed: $cc $std"
   >     done
   >   done
   > done

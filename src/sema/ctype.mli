@@ -323,6 +323,11 @@ val trial : tags -> (unit -> 'a) -> 'a
     from the ids that it used: a generic's definition check defines no
     instance (design 3.5 rule 7). *)
 
+val attempt : tags -> (unit -> 'a) -> 'a
+(** [read ()], after which the tags hold what they held before it where
+    it raised, apart from the ids that it used, and what it made of them
+    where it returned. *)
+
 val define_instance : tags -> t -> instance option
 (** A need of [t] complete (design 10.3): runs the deferred definition of
     the instance that [t] is, or is an array of, and gives the instance

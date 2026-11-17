@@ -998,8 +998,8 @@ type external_declaration =
 (** A place where emission may put a packing bracket (design 10.3): an
     insertion in front of the token [before]. Private, so that only the
     parser names one, at an {!item} ({!anchor},
-    {!after_forward_declaration}), and none stands inside an
-    expression. *)
+    {!after_forward_declaration}) or after the last token
+    ([Parser.scopes]), and none stands inside an expression. *)
 type anchor = Anchor.t = private { before : int }
 
 (** An external declaration of the unit. Private, so that only the

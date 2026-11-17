@@ -237,22 +237,25 @@ let marker_line (location : Location.t) =
    the edit stands in a line. *)
 let marker location = "\n" ^ marker_line location ^ "\n"
 
-(* The presumed location of the line where the replaced bytes end: no
-   token of cc -E output spans lines and markers stand on lines of their
-   own, so it is the location of the last token replaced, or of the token
-   an insertion precedes, and the rest of that line is in its state. *)
-let end_location (tokens : Token.t array) range =
-  tokens.(Reader.end_token range).location
+(* The marker of the presumed location of the line where the replaced
+   bytes end: no token of cc -E output spans lines and markers stand on
+   lines of their own, so it is the location of the last token replaced,
+   or of the token an insertion precedes, and the rest of that line is in
+   its state. An insertion at the end has no text after it to place, and
+   ends the last line of the text. *)
+let end_marker (tokens : Token.t array) range =
+  if Reader.is_at_end tokens range then "\n"
+  else marker tokens.(Reader.end_token range).location
 
 (* The line markers between tokens of one file enter and leave other
-   files in pairs, so a range in one file drops whole pairs. *)
+   files in pairs, so a range in one file drops whole pairs; an insertion
+   drops none, and may stand at the end, where no token is. *)
 let in_one_file (tokens : Token.t array) (range : Reader.range) =
-  let owner = tokens.(range.first).owner in
-  let rec from index =
+  let rec from owner index =
     index = range.first + range.count
-    || (tokens.(index).owner == owner && from (index + 1))
+    || (tokens.(index).owner == owner && from owner (index + 1))
   in
-  from range.first
+  range.count = 0 || from tokens.(range.first).owner range.first
 
 let check_one_file tokens edit =
   if not (in_one_file tokens edit.range) then
@@ -334,12 +337,10 @@ let written = function
   | Moved pieces -> "\n" ^ String.concat "\n" (moved_lines (Lazy.force pieces))
 
 (* The edit as the backend reads it: its text, which begins with a
-   marker, then a marker for the location where the replaced tokens
-   end. *)
+   marker, then a marker for the location where the replaced tokens end,
+   if text follows. *)
 let replacement (tokens : Token.t array) edit : Reader.replacement =
-  let text =
-    written edit.text ^ marker (end_location tokens edit.range)
-  in
+  let text = written edit.text ^ end_marker tokens edit.range in
   { range = edit.range; text }
 
 (* The bytes of [lines] with a line break in front of each, as [written]
@@ -382,7 +383,7 @@ let bracket_frame_bytes location texts =
    code and a bracket as they are made, moved text when its pieces
    are. *)
 let charge_edit output location (range : Reader.range) ~frame =
-  let after = marker (end_location output.unit.tokens range) in
+  let after = end_marker output.unit.tokens range in
   charge output location (frame + String.length after)
 
 let code output (range : Reader.range) ~location code =
@@ -404,8 +405,14 @@ let closing output ~after ~location code =
     extent = { first = after; last = after };
     encloses = false }
 
+(* The insertion at an anchor; the parser names the place after the last
+   token by one ([Parser.scopes]), and nothing else makes a range there. *)
+let anchored (tokens : Token.t array) (at : Tree.anchor) =
+  if at.before = Array.length tokens then Reader.end_place tokens
+  else Reader.range tokens ~first:at.before ~count:0
+
 let bracketed output ~(at : Tree.anchor) ~location texts =
-  let range = Reader.range output.unit.tokens ~first:at.before ~count:0 in
+  let range = anchored output.unit.tokens at in
   charge_edit output location range
     ~frame:(bracket_frame_bytes location texts);
   { range;
@@ -519,9 +526,7 @@ let first_own_token (tokens : Token.t array) =
 (* The first token of the main file, where the text of an interface
    stands (design 9.3): the header writes no token of an included file. *)
 let first_main_token (tokens : Token.t array) =
-  Array.find_index
-    (fun (token : Token.t) -> token.owner.origin = File.Main)
-    tokens
+  Array.find_index (fun (token : Token.t) -> File.is_main token.owner) tokens
 
 (* Whether [edit] goes in front of an insertion before the token
    [first]: it begins before that token, or closes the construct that

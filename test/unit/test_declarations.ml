@@ -2772,8 +2772,9 @@ let generic_placement () =
   accepts ~file (in_c ("struct X; " ^ probe))
 
 (* Reads [source] as Type-C text for lp64, and gives with what it read
-   the index of the external declaration that an anchor stands at. *)
-let read_type_c source =
+   the index of the external declaration that an anchor stands at: the
+   number of them for the anchor after the last token. *)
+let read_type_c ?(product = Declarations.Unit_text) source =
   let file = "in.tc" in
   let text =
     match Reader.read ~name:file (Preprocessed.text ~name:file source) with
@@ -2789,16 +2790,17 @@ let read_type_c source =
   let items = List.map fst scopes.declarations in
   let declaration_at (anchor : Tree.anchor) =
     let starts_before item = (Tree.anchor item).before <= anchor.before in
-    List.length (List.filter starts_before items) - 1
+    if anchor.before = Array.length text.tokens then List.length items
+    else List.length (List.filter starts_before items) - 1
   in
-  (declaration_at, Declarations.read lp64 ~product:Unit_text text scopes)
+  (declaration_at, Declarations.read lp64 ~product text scopes)
 
 (* [source]'s texts of instances in the order they stand: each instance
    name, whether the text is the typedefs of its arguments, with the tag
    lines before each, its declaration or its definition, and the index
    of the external declaration whose anchor it stands at. *)
-let placements source =
-  let declaration_at, read = read_type_c source in
+let placements ?product source =
+  let declaration_at, read = read_type_c ?product source in
   match read with
   | Error error ->
       fail_case source (Reader.error_message error);
@@ -2872,6 +2874,10 @@ let placement_indexes () =
   let expect source expected =
     if placements source <> expected then fail_case source "placements"
   in
+  let expect_header source expected =
+    if placements ~product:Header_text source <> expected then
+      fail_case source "placements of a header"
+  in
   (* A use under a pointer defines nothing; the block object does. *)
   expect
     (box ^ " struct s { int a; }; box(struct s) *p; \
@@ -2899,6 +2905,50 @@ let placement_indexes () =
       ("box__i", "defined", 1) ];
   (* A definition check places nothing. *)
   expect (box ^ " type wrap(T) = struct { box(T) b; };") [];
+  (* A header defines after its last token each instance that its own
+     applications name and no point needed complete, and the instances
+     that their definitions need, but not those that only they name
+     (design 9.3); a unit defines none there. *)
+  let named =
+    " type g(T) = struct { g(g(T)) *next; T v; }; void f(g(int) *p);"
+  in
+  let under_pointer =
+    [ ("g__i", "__tc_arg__i", 1); ("g__i", "declared", 1) ]
+  in
+  expect named under_pointer;
+  expect_header named
+    (under_pointer
+    @ [ ("g__I1giE", "struct g__i; __tc_arg__I1giE", 2);
+        ("g__I1giE", "declared", 2); ("g__i", "defined", 2) ]);
+  (* An instance that a point defined is not defined again, and one whose
+     definition needs an incomplete type stays declared. *)
+  expect_header
+    (box ^ " struct s; box(int) b; box(struct s) *p; void f(box(int) *q);")
+    [ ("box__i", "__tc_arg__i", 2); ("box__i", "declared", 2);
+      ("box__i", "defined", 2);
+      ("box__T1s", "struct s; __tc_arg__T1s", 3);
+      ("box__T1s", "declared", 3) ];
+  (* One whose definition does not read at the end, as a declaration
+     between it and there would capture a name of it (13.5), stays
+     declared, and leaves no text there. *)
+  expect_header
+    (box ^ " extern int n; type g(T) = struct { T v; char c[sizeof n]; }; \
+            extern int n __attribute__((aligned(8))); \
+            void f(g(int) *p); void h(box(int) *q);")
+    [ ("g__i", "__tc_arg__i", 4); ("g__i", "declared", 4);
+      ("box__i", "declared", 5); ("box__i", "defined", 6) ];
+  (* Two that fail in a row leave nothing of their readings at the end,
+     not even the instance that one of them defined before it failed,
+     and one after them is defined. *)
+  expect_header
+    (box ^ " type pair(T, U) = struct { box(T) t; U u; }; struct s; \
+            void f(pair(int, struct s) *p); void g(pair(long, struct s) *q); \
+            void h(box(char) *r);")
+    [ ("pair__iT1s", "__tc_arg__i struct s; __tc_arg__T1s", 3);
+      ("pair__iT1s", "declared", 3);
+      ("pair__lT1s", "__tc_arg__l", 4); ("pair__lT1s", "declared", 4);
+      ("box__c", "__tc_arg__c", 5); ("box__c", "declared", 5);
+      ("box__c", "defined", 6) ];
   (* An argument's typedef stands once, at the first use of an instance
      that takes it, before the texts that reading the definition puts
      there; a tag line stands before it for every structure or union

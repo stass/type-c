@@ -5371,10 +5371,10 @@ let universe_declarations state =
   loop []
 
 (* The generics of the universe text and the unit's own external
-   declarations, each with the scope in front of it; file scope opens
-   inside the universe scope after the generics. Both scopes close with
-   the text, whose last tokens may be pragma tokens, which stand in file
-   scope. *)
+   declarations, each with the scope in front of it, and the place after
+   the last token with the scope there; file scope opens inside the
+   universe scope after the generics. Both scopes close with the text,
+   whose last tokens may be pragma tokens, which stand in file scope. *)
 let translation_unit state ~keywords =
   let universe = universe_declarations state in
   state.scope <- initial_scope keywords ~universe:state.scope;
@@ -5385,8 +5385,9 @@ let translation_unit state ~keywords =
   let own = loop [] in
   let tokens = Array.length state.reader.tokens in
   take_pragma_views state ~before:tokens;
+  let at_end = (Anchor.before tokens, view_here state) in
   let scope_end = tokens - 1 in
-  (close_scope ~scope_end universe, close_scope ~scope_end own)
+  (close_scope ~scope_end universe, close_scope ~scope_end own, at_end)
 
 type file_scope = {
   ordinary : (string * reference) list;
@@ -5426,6 +5427,7 @@ type scopes = {
   file_scope : file_scope;
   universe : (scoped_type_declaration item * View.t) list;
   declarations : (external_declaration item * View.t) list;
+  at_end : anchor * View.t;
   views : views;
   longest_type_name : int;
 }
@@ -5498,7 +5500,7 @@ let parse_with_scopes ~keywords reader =
     refuse_pragma_macros state;
     translation_unit state ~keywords
   with
-  | universe, declarations ->
+  | universe, declarations, at_end ->
       (* Every scope the unit opens is closed, so [state.scope] is file
          scope as the unit leaves it. *)
       let file_scope = file_scope_declarations state.scope in
@@ -5510,6 +5512,7 @@ let parse_with_scopes ~keywords reader =
           file_scope;
           universe;
           declarations;
+          at_end;
           views = state.views;
           longest_type_name = state.longest_type_name;
         }

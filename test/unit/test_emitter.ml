@@ -267,6 +267,26 @@ let () =
     = emit unit [ replacement; insertion ]);
   check "replacement past the last token" (outside ~first:9 ~count:3);
   check "insertion after the last token" (outside ~first:11 ~count:0);
+  let at_end =
+    made unit (fun output ->
+        Emitter.code output (Reader.end_place unit.tokens) ~location:(at 3)
+          "int w;")
+  in
+  check "an insertion at the end ends the last line"
+    (emit unit [ at_end ] = source ^ "\n# 3 \"a.c\"\nint w;\n");
+  check "an insertion at the end after one in front of the last token"
+    (emit unit [ at_end; edit unit ~first:10 ~count:0 (at 2) "" ]
+    = "# 1 \"a.c\"\n\
+       int x = 1;\n\
+       # 1 \"h.h\" 1 3\n\
+       int y;\n\
+       # 2 \"a.c\" 2\n\
+       int z\n\
+       # 2 \"a.c\"\n\n\
+       # 2 \"a.c\"\n\
+       ;\n\n\
+       # 3 \"a.c\"\n\
+       int w;\n");
   check "range before the first token" (outside ~first:(-1) ~count:1);
   check "negative count" (outside ~first:8 ~count:(-1));
   check "an edit that spans files"
