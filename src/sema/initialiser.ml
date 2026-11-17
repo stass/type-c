@@ -48,12 +48,10 @@ let is_zero_initialiser typing (list : Tree.initialiser_list) =
   | _ -> false
 
 (* Type-C text reaches the tag and fields of a variant only through
-   constructors and matching (rule 6): an initialiser at [span] does not
-   open a variant's members, but where [zeroes] says it is the zero
-   initialiser that zeroes them (rule 7). The two functions that open a
-   structure's or union's members, {!first_level} and {!designate}, ask
-   it. *)
-let refuse_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
+   constructors and matching (design 3.2 rule 6): an initialiser at
+   [span] does not open a variant's members but where [zeroes] says it is
+   the zero initialiser that zeroes them (rule 7). *)
+let refuse_variant_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
   match Ctype.as_variant t with
   | Some name when typing.type_c_text span && not zeroes ->
       typing.fail span
@@ -63,6 +61,23 @@ let refuse_opening typing ~zeroes (span : Tree.span) (t : Ctype.t) =
                initialisers of a variant are {0} and {}"
               (Encoding.variant_name name :> string)))
   | Some _ | None -> ()
+
+(* Design 7.1 rule 3: which subobject an initialiser reaches inside a
+   value of a type parameter depends on the argument, so only the zero
+   initialiser opens one. *)
+let refuse_parameter_opening typing ~zeroes (span : Tree.span) (t : Ctype.t)
+    =
+  if Ctype.is_opaque t && not zeroes then
+    typing.fail span
+      (Rule.message Type_parameter_operation
+         "an initialiser reaches into a value of a type parameter; the \
+          only braced initialisers of one are {0} and {}")
+
+(* The check of the two functions that open a structure's or union's
+   members, {!first_level} and {!designate}. *)
+let refuse_opening typing ~zeroes span t =
+  refuse_variant_opening typing ~zeroes span t;
+  refuse_parameter_opening typing ~zeroes span t
 
 (* Subobjects (6.7.9p17) *)
 

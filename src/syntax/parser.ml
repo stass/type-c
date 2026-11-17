@@ -73,14 +73,8 @@ type ordinary = { declaration : reference; kind : kind }
 
 (* What the definition of a generic type allows at the cursor (design 3.5
    rule 4): a structure or union body only where the definition of an
-   instance holds it, and no type parameter inside an [_Alignas]. The
-   scope of its type parameters, at [parameter_depth], stands where file
-   scope stands in the C that the text lowers to (rule 8). *)
-type generic_place = {
-  bodies_allowed : bool;
-  in_alignment : bool;
-  parameter_depth : int;
-}
+   instance holds it, and no type parameter inside an [_Alignas]. *)
+type generic_place = { bodies_allowed : bool; in_alignment : bool }
 
 (* A tag in scope: its declaration, and whether a type declaration
    claims it for the C that it lowers to (design 10.1 rule 6, 10.2). *)
@@ -189,6 +183,15 @@ type state = {
   mutable labels : body_labels option;  (** [None] outside every body *)
   mutable generic : generic_place option;
       (** [None] outside the definition of a generic type *)
+  mutable parameter_depth : int option;
+      (** the depth of the scope of the type parameters of the generic,
+          type or function, being read, which stands where file scope
+          stands in the C that the text lowers to (design 3.5 rule 8);
+          [None] outside one *)
+  mutable names_generic_function : bool;
+      (** whether the next declarator at [parameter_depth] declares the
+          name of a generic function, which is declared in the file
+          scope around its type parameters (design 7.1 rule 1) *)
   mutable in_type_argument : bool;  (** design 3.5 rule 2 *)
   mutable views : views;  (** taken so far *)
   mutable generics : Name_set.t;
@@ -925,29 +928,45 @@ let refuse_second_definition state (name : identifier) kind earlier =
    stands for file scope. *)
 let scope_depth state =
   let depth = Scope.depth state.scope in
-  match state.generic with
-  | Some { parameter_depth; _ } -> Scope_depth (depth - parameter_depth + 1)
+  match state.parameter_depth with
+  | Some parameter_depth -> Scope_depth (depth - parameter_depth + 1)
   | None -> Scope_depth depth
+
+(* Whether a declarator at the cursor declares the name of a generic
+   function, in the file scope around the scope of its type parameters
+   (design 7.1 rule 1): the first one at their depth, and no other. *)
+let declares_outside state =
+  let outside =
+    state.names_generic_function
+    && state.parameter_depth = Some (Scope.depth state.scope)
+  in
+  if outside then state.names_generic_function <- false;
+  outside
 
 (* The declaration [id] of an ordinary identifier in the innermost
    scope, which redeclares [earlier]. *)
 let declared_here state id ~earlier = { id; scope = scope_depth state; earlier }
 
 (* Declares the ordinary identifier [name] in the innermost scope, where
-   its scope begins. *)
-let declare state ~kind (name : identifier) =
+   its scope begins, or, [outside], in the scope around it. *)
+let declare_in state ~outside ~kind (name : identifier) =
   let id = Ordinary_at (token_of name) in
   if claims_enumerator state name.node then
     fail_claimed state name "enumerator" "is declared again";
   refuse_instance_name state (token_of name) name.node ~what:"the name"
     ~use:"declared";
-  let earlier = Scope.find_in_innermost state.scope name.node in
+  let declaring = if outside then Scope.outer state.scope else state.scope in
+  let earlier = Scope.find_in_innermost declaring name.node in
   refuse_second_definition state name kind earlier;
   if is_generic kind then claim_instance_space state name;
+  let binding = { declaration = In_tree id; kind } in
   state.scope <-
-    Scope.declare state.scope name.node { declaration = In_tree id; kind };
+    (if outside then Scope.declare_outside state.scope name.node binding
+     else Scope.declare state.scope name.node binding);
   declared_here state id
     ~earlier:(Option.map (fun ordinary -> ordinary.declaration) earlier)
+
+let declare state ~kind name = declare_in state ~outside:false ~kind name
 
 (* The kind of the name of a type declaration with [parameters] type
    parameters at [stage]. *)
@@ -2840,8 +2859,31 @@ let declare_type_parameter state (name : identifier) : parameter_name =
   if Scope.find_in_innermost state.scope name.node <> None then
     fail_at_token state (token_of name)
       (Rule.message One_definition
-         (quoted name.node ^ " names two type parameters of one generic type"));
+         (quoted name.node ^ " names two type parameters of one generic"));
   { name; declared = declare state ~kind:Type_parameter name }
+
+(* After the [(] of the type parameters of a generic (design 3.5, 7.1):
+   the parameters, to the [)], declared in the innermost scope. *)
+let type_parameter_list state =
+  let rec parameters declared =
+    let name = identifier state "the name of a type parameter" in
+    let declared = declare_type_parameter state name :: declared in
+    if accept state P.Comma then parameters declared
+    else begin
+      expect state P.Right_paren "`,` or `)` after a type parameter";
+      List.rev declared
+    end
+  in
+  parameters []
+
+(* Runs [parse] with the scope at the cursor standing for file scope, as
+   that of the type parameters of a generic does (design 3.5 rule 8). *)
+let with_parameter_scope state parse =
+  let saved = state.parameter_depth in
+  state.parameter_depth <- Some (Scope.depth state.scope);
+  let result = parse () in
+  state.parameter_depth <- saved;
+  result
 
 (* At the [(] after the name of a generic type, which is declared at file
    scope only, where its instances are emitted (design 3.1), and has no
@@ -2864,17 +2906,9 @@ let generic_head state (checked : Spelling.type_name spanned) =
       (Rule.message Generic_universe_name
          (quoted name.node ^ " is a universe name, which no generic type has"));
   advance state;
-  let rec parameters declared =
-    let name = identifier state "the name of a type parameter" in
-    let declared = declare_type_parameter state name :: declared in
-    if accept state P.Comma then parameters declared
-    else begin
-      expect state P.Right_paren "`,` or `)` after a type parameter";
-      List.rev declared
-    end
-  in
   let parameter_names, parameter_frame =
-    run_in_scope state (inner_scope state) (fun () -> parameters [])
+    run_in_scope state (inner_scope state) (fun () ->
+        type_parameter_list state)
   in
   { parameter_names; parameter_frame }
 
@@ -2888,12 +2922,10 @@ let in_definition state head ~bodies_allowed parse =
   | None -> parse ()
   | Some { parameter_frame; _ } ->
       let scope = reentered_scope state ~inner:parameter_frame in
-      let parameter_depth = Scope.depth scope in
-      let generic =
-        Some { bodies_allowed; in_alignment = false; parameter_depth }
-      in
+      let generic = Some { bodies_allowed; in_alignment = false } in
       in_scope state scope (fun () ->
-          with_generic state ~in_type_argument:false generic parse)
+          with_parameter_scope state (fun () ->
+              with_generic state ~in_type_argument:false generic parse))
 
 (* The grammar: declarations, expressions and statements, which nest in
    each other through statement expressions. *)
@@ -3874,7 +3906,7 @@ and scoped_declarator state specifiers =
   let asm_label = asm_label state in
   let trailing = attributes state in
   let declared =
-    declare state
+    declare_in state ~outside:(declares_outside state)
       ~kind:(declared_kind specifiers)
       (named_identifier state declarator)
   in
@@ -4727,16 +4759,15 @@ let function_definition state start specifiers (first : scoped_declarator)
         let declarations = parameter_declarations state in
         (declarations, function_body state))
   in
-  Function_definition
-    (finish state start
-       {
-         specifiers;
-         declarator = first.declarator;
-         declared = first.declared;
-         attributes = first.attributes;
-         declarations;
-         body;
-       })
+  finish state start
+    {
+      specifiers;
+      declarator = first.declarator;
+      declared = first.declared;
+      attributes = first.attributes;
+      declarations;
+      body;
+    }
 
 (* [__extension__] may come before every external declaration of C; the
    node holds it in its span. A function definition has no asm label: GCC
@@ -4764,9 +4795,154 @@ let c_external_declaration state =
               { named_function = Some named; asm_label = None; _ } as first;
           }
         when begins_definition state named ->
-          function_definition state start specifiers first named
+          Function_definition
+            (function_definition state start specifiers first named)
       | declaration_start ->
           External_declaration (declaration_of_start state declaration_start))
+
+(* A generic function (design 7.1) is recognised by position, as a type
+   declaration is: [generic] and [(] where an external declaration
+   begins, except where [generic] is visible as a typedef name (design
+   2.3). C11 has no implicit [int], so no C declaration begins so. *)
+let generic_word = "generic"
+
+let begins_generic_function state =
+  peek state = Identifier_token generic_word
+  && peek_at state 1 = Punctuator_token P.Left_paren
+  && not (is_typedef_name state generic_word)
+
+(* Design 7.1 rule 6: what follows [generic( )] is one function that
+   its instances are written from. *)
+let fail_generic_form state token reason =
+  fail_at_token state token (Rule.message Generic_function_form reason)
+
+let fail_one_function state token =
+  fail_generic_form state token
+    "`generic( )` prefixes one function: its definition, or a \
+     declaration with one declarator, which declares a function"
+
+(* What every declaration of a generic function meets: a prototype, an
+   instance's own, which deduction reads (7.2); internal linkage, which
+   every instance has; and an instance's own name. *)
+let check_generic_head state specifiers (first : scoped_declarator) =
+  let at_declarator = first_token state first.declarator_start in
+  (match first.named_function with
+  | Some { parameters = Prototype _; _ } -> ()
+  | Some { parameters = Identifier_list _; _ } ->
+      fail_generic_form state at_declarator
+        "a generic function has a prototype, `(void)` where it takes no \
+         argument, and neither `()` nor an identifier list"
+  | None -> fail_one_function state at_declarator);
+  let storage (specifier : declaration_specifier spanned) =
+    match specifier.node with
+    | Storage_class Static -> ()
+    | Storage_class _ ->
+        fail_generic_form state specifier.span.first
+          "`static` is the only storage class of a generic function, \
+           whose instances have internal linkage"
+    | Type_specifier _ | Type_qualifier _ | Function_specifier _
+    | Alignment_specifier _ | Attributes _ ->
+        ()
+  in
+  List.iter storage specifiers;
+  match first.asm_label with
+  | Some _ ->
+      fail_generic_form state at_declarator
+        "an assembler label would give every instance of a generic \
+         function one name"
+  | None -> ()
+
+(* A declaration that is no definition writes nothing into an instance,
+   so it carries nothing that the backend would not be told. *)
+let check_generic_prototype state specifiers (first : scoped_declarator) =
+  let refuse token =
+    fail_generic_form state token
+      "`_Noreturn` and attributes stand on the definition of a generic \
+       function, which its instances are written from"
+  in
+  let carried (specifier : declaration_specifier spanned) =
+    match specifier.node with
+    | Function_specifier Noreturn | Attributes _ -> refuse specifier.span.first
+    | Storage_class _ | Type_specifier _ | Type_qualifier _
+    | Function_specifier Inline | Alignment_specifier _ ->
+        ()
+  in
+  List.iter carried specifiers;
+  match first.attributes with
+  | attribute :: _ -> refuse attribute.span.first
+  | [] -> ()
+
+(* The one declarator of a generic prototype, after its first. *)
+let generic_prototype state start specifiers first =
+  let declaration =
+    declaration_of_start state (First_declarator { start; specifiers; first })
+  in
+  match declaration.node with
+  | Declaration { specifiers; declarators = [ declarator ] }
+    when Option.is_none declarator.node.initialiser ->
+      Generic_prototype { specifiers; declarator }
+  | Declaration { declarators = [ declarator ]; _ } ->
+      fail_one_function state declarator.span.first
+  | Declaration { declarators = _ :: second :: _; _ } ->
+      fail_one_function state second.span.first
+  | Declaration { declarators = []; _ } | Static_assert _ ->
+      fail_one_function state declaration.span.first
+
+(* What follows the type parameters of a generic function: the
+   definition or the declaration of one function, and the declarator of
+   its name. *)
+let generic_form state =
+  match declaration_start state with
+  | First_declarator { start; specifiers; first } -> (
+      check_generic_head state specifiers first;
+      match first.named_function with
+      | Some named when begins_definition state named ->
+          let definition =
+            function_definition state start specifiers first named
+          in
+          (Generic_definition definition, first.declarator)
+      | Some _ | None ->
+          check_generic_prototype state specifiers first;
+          (generic_prototype state start specifiers first, first.declarator))
+  | Complete declaration -> fail_one_function state declaration.span.first
+
+(* The function's name, which is declared at file scope, meets the rules
+   of a type name there, as its instances are named as those of a
+   generic type are (design 7.1 rule 1, 3.1 rules 6 and 7), and claims
+   the names of its instances (10.3). *)
+let check_generic_name state declarator =
+  match Tree.declared_identifier declarator with
+  | None -> fail_one_function state (first_token state state.position)
+  | Some name -> (
+      match Spelling.type_name ~at_file_scope:true name.node with
+      | Ok _ -> claim_instance_space state name
+      | Error reason ->
+          fail_at_token state (token_of name)
+            (Rule.message Type_name_spelling
+               (Printf.sprintf "%s cannot name a generic function%s"
+                  (quoted name.node) reason)))
+
+(* At the [generic] that [begins_generic_function] recognises. The type
+   parameters are declared in a scope of their own, which stands for
+   file scope while the function is read (design 3.5 rule 8), and the
+   function in file scope around it. *)
+let generic_function state =
+  let start = state.position in
+  advance state;
+  advance state;
+  let (type_parameters, (generic, declarator)), left =
+    run_in_scope state (inner_scope state) (fun () ->
+        let type_parameters = type_parameter_list state in
+        let form =
+          with_parameter_scope state (fun () ->
+              state.names_generic_function <- true;
+              generic_form state)
+        in
+        (type_parameters, form))
+  in
+  state.scope <- Scope.outer left;
+  check_generic_name state declarator;
+  finish state start ({ type_parameters; generic } : generic_function_node)
 
 (* Whether the cursor is at the universe text, which stands in front of
    the unit's own text where the reader holds it (design 13.3). *)
@@ -4781,6 +4957,8 @@ let external_declaration state =
     let declaration = type_declaration state in
     Until_scope_end
       (fun scope_end -> (Type_declaration { declaration; scope_end }, view))
+  else if begins_generic_function state then
+    Complete (Generic_function (generic_function state), view)
   else Complete (c_external_declaration state, view)
 
 (* The generics of the universe text, latest first, each with the scope
@@ -4900,6 +5078,8 @@ let parse_with_scopes ~keywords reader =
       arm = None;
       labels = None;
       generic = None;
+      parameter_depth = None;
+      names_generic_function = false;
       in_type_argument = false;
       views =
         {

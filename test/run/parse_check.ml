@@ -23,6 +23,7 @@ let span_of = function
   | Tree.External_declaration declaration -> declaration.span
   | Tree.Type_declaration { declaration; _ } -> declaration.span
   | Tree.Function_definition definition -> definition.span
+  | Tree.Generic_function generic -> generic.span
   | Tree.Top_level_asm assembler -> assembler.span
   | Tree.Empty_declaration span -> span
 
@@ -66,6 +67,7 @@ let describe = function
       ^ Option.value (Tree.declared_name declarator) ~default:"?"
   | Tree.Type_declaration { declaration = { node = { name; _ }; _ }; _ } ->
       "type " ^ (name.node :> string)
+  | Tree.Generic_function _ -> "generic function"
   | Tree.Top_level_asm _ -> "assembler"
   | Tree.Empty_declaration _ -> "empty declaration"
 

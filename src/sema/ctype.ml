@@ -86,11 +86,12 @@ type held = Const_member | Flexible_array_member
 (* The members in order; those with a position, which are those that an
    initialiser reaches; every member by name, those of anonymous members
    included; the first member, at any depth, of a kind that [held]
-   names; whether it holds a variant at any depth; and the first variant
-   on the chain of its first subobjects (see [first_variant]). The last
-   three are found from the answers stored for the records among the
-   members, so that no question walks the members of a record again and
-   a record held twice costs once. *)
+   names; whether it holds a variant at any depth; the first variant on
+   the chain of its first subobjects (see [first_variant]); and whether
+   the type of a member mentions a type parameter. The last four are
+   found from the answers stored for the records among the members, so
+   that no question walks the members of a record again and a record
+   held twice costs once. *)
 type record_definition = {
   members : member list;
   positions : member array;
@@ -98,6 +99,7 @@ type record_definition = {
   holds : held option Unknown.answer;
   holds_variant : bool;
   first_variant : t option;
+  mentions_parameter : bool;
 }
 
 type constructor = {
@@ -467,7 +469,8 @@ let declare_opaque tags name =
   let record = new_record tags Struct (Opaque_name name) ~at_file_scope:true in
   add_record_definition tags record.record_id
     { members = []; positions = [||]; by_name = Names.empty;
-      holds = Answer None; holds_variant = false; first_variant = None };
+      holds = Answer None; holds_variant = false; first_variant = None;
+      mentions_parameter = false };
   record
 
 let trial tags read =
@@ -660,26 +663,6 @@ let is_opaque t =
   | Function _ | Unknown_type _ ->
       false
 
-let rec mentions_opaque t =
-  match t.shape with
-  | Pointer referenced | Array { element = referenced; _ } ->
-      mentions_opaque referenced
-  | Function { return; parameters } ->
-      List.exists mentions_opaque (return :: parameter_types parameters)
-  | Record
-      { record_name = Instance_name instance | Variant_name (Applied instance);
-        _ }
-  | Distinct { distinct_instance = Some instance; _ } ->
-      instance.mentions_parameter
-  | Record { record_name = Opaque_name _; _ } -> true
-  | Record
-      { record_name =
-          Anonymous | Named _ | Variant_name (Declared _) | Alias_name _;
-        _ }
-  | Distinct { distinct_instance = None; _ }
-  | Void | Arithmetic _ | Enum _ | Va_list | Unknown_type _ ->
-      false
-
 let rec mentions_distinct t =
   match t.shape with
   | Distinct _ -> true
@@ -723,6 +706,31 @@ let enum_integer tags tag =
 (* A record is complete once defined; only [define_instance] defines a
    deferred instance (design 10.3). *)
 let record_definition tags tag = Ids.find_opt tag.record_id tags.facts.records
+
+(* Design 7.1 rule 4 reads the structure of a type, members included,
+   and not its layout. A definition is final, so its [mentions_parameter]
+   never goes stale; a record that a member points to counts as it was
+   defined when the member was. *)
+let rec mentions_opaque tags t =
+  let mentions = mentions_opaque tags in
+  match t.shape with
+  | Pointer referenced | Array { element = referenced; _ } ->
+      mentions referenced
+  | Function { return; parameters } ->
+      List.exists mentions (return :: parameter_types parameters)
+  | Record
+      { record_name = Instance_name instance | Variant_name (Applied instance);
+        _ }
+  | Distinct { distinct_instance = Some instance; _ } ->
+      instance.mentions_parameter
+  | Record { record_name = Opaque_name _; _ } -> true
+  | Record tag -> (
+      match record_definition tags tag with
+      | Some definition -> definition.mentions_parameter
+      | None -> false)
+  | Distinct { distinct_instance = None; _ }
+  | Void | Arithmetic _ | Enum _ | Va_list | Unknown_type _ ->
+      false
 
 let record_members tags tag =
   Option.map (fun definition -> definition.members) (record_definition tags tag)
@@ -1058,7 +1066,11 @@ let definition_of target tags tag members =
     by_name;
     holds = first_held tags members;
     holds_variant = members_hold_variant tags members;
-    first_variant = first_member_variant tags with_position }
+    first_variant = first_member_variant tags with_position;
+    mentions_parameter =
+      List.exists
+        (fun member -> mentions_opaque tags member.member_type)
+        members }
 
 let define_record target tags tag members =
   match definition_of target tags tag members with
@@ -1178,6 +1190,9 @@ type comparison = {
   tags : tags;
   dependence : dependence;
   location : Typec_cpp.Location.t;
+  opaque_lengths_match : bool;
+      (** whether an {!Opaque} length matches as [merge_length] matches
+          it, where the backend later compares the two types *)
 }
 
 (* Whether the qualifiers of two return types make their function types
@@ -1290,7 +1305,9 @@ and merge_function comparison a b parameters =
 (* 6.7.6.3p15 and 6.2.7p3: a prototype gives the composite its parameter
    types; without one the parameters are not compared, except that an
    old-style definition must match a prototype in count and promoted
-   types. *)
+   types. A parameter of a type parameter matches no promoted type, which
+   is the parameter's own type for some arguments and not for others
+   (design 7.1 rule 3). *)
 and merge_parameters comparison a b =
   let merge = merge comparison in
   (* A parameter is compared with its promoted type, which may depend on
@@ -1310,11 +1327,13 @@ and merge_parameters comparison a b =
       Prototype { types; variadic = x.variadic }
   | Prototype prototype, Unspecified | Unspecified, Prototype prototype ->
       require (not prototype.variadic);
+      require (not (List.exists is_opaque prototype.types));
       List.iter (fun t -> ignore (merge t (promoted t))) prototype.types;
       Prototype prototype
   | Prototype prototype, Old_style types
   | Old_style types, Prototype prototype ->
       require (not prototype.variadic);
+      require (not (List.exists is_opaque prototype.types));
       require (List.compare_lengths prototype.types types = 0);
       List.iter2
         (fun t old -> ignore (merge t (promoted old)))
@@ -1326,28 +1345,37 @@ and merge_parameters comparison a b =
 (* A composite can exceed both types in size, as when each gives
    parameter types the other lacks, so it passes the limit again. *)
 let composite target tags location a b =
-  let comparison = { target; tags; dependence = no_dependence (); location } in
+  let comparison =
+    { target; tags; dependence = no_dependence (); location;
+      opaque_lengths_match = true }
+  in
   match merge comparison a b with
   | t -> within_limit t
   | exception Not_compatible -> Error Incompatible
 
 let compatible target tags location a b =
   let dependence = no_dependence () in
-  let comparison = { target; tags; dependence; location } in
+  let comparison =
+    { target; tags; dependence; location; opaque_lengths_match = true }
+  in
   match merge comparison a b with
   | _ -> verdict dependence
   | exception Not_compatible -> Answer false
 
-(* The opaque lengths match as [merge_length] matches them. *)
-let same_length a b =
+(* The opaque lengths match as [merge_length] matches them, or, where no
+   backend compares the types, match no length. *)
+let same_length comparison a b =
   let is_constant = function
-    | Constant _ | Opaque -> true
+    | Constant _ -> true
+    | Opaque -> comparison.opaque_lengths_match
     | Unknown | Variable -> false
   in
   let merges () =
     match merge_length a b with _ -> true | exception Not_compatible -> false
   in
-  a = b || (is_constant a && is_constant b && merges ())
+  match (a, b) with
+  | Opaque, _ | _, Opaque -> is_constant a && is_constant b && merges ()
+  | _ -> a = b || (is_constant a && is_constant b && merges ())
 
 (* Whether the known parts of two types are the same; the dependence of
    [comparison] notes the unknown parts. *)
@@ -1366,7 +1394,7 @@ and same_shape comparison a b =
   match (a.shape, b.shape) with
   | Pointer x, Pointer y -> same x y
   | Array x, Array y ->
-      same_length x.length y.length && same x.element y.element
+      same_length comparison x.length y.length && same x.element y.element
   | Function x, Function y ->
       same_return comparison x.return y.return
       && same_parameters comparison x.parameters y.parameters
@@ -1395,9 +1423,11 @@ and same_parameters comparison a b =
   | Unspecified, Unspecified -> true
   | (Prototype _ | Old_style _ | Unspecified), _ -> false
 
-let same_type target tags location a b =
+let same_type ?(exact = false) target tags location a b =
   let dependence = no_dependence () in
-  let comparison = { target; tags; dependence; location } in
+  let comparison =
+    { target; tags; dependence; location; opaque_lengths_match = not exact }
+  in
   if same comparison a b then verdict dependence else Answer false
 let error_message = function
   | Too_large ->

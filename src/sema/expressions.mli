@@ -345,7 +345,8 @@ val constant : t -> Tree.expression -> constant option
 (** What the declaration reader gives typing. [fail] reports the first
     error at the start of a span and does not return; [entity] gives what
     a resolved use of a name denotes, and [overloaded] whether it names
-    a Clang overload set (design 13.3); [type_name] reads a type name, once,
+    a Clang overload set (design 13.3), and [generic_function] whether it
+    names a generic function (design 7.1); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
     block, binding its identifiers and typing its initialisers, and
     [type_declaration] a type declaration there. [needs_complete] is
@@ -368,6 +369,7 @@ type context = {
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
+  generic_function : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;

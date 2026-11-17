@@ -869,10 +869,31 @@ and function_definition_node = {
   body : function_body;
 }
 
+(** A generic function (design 7.1): [generic], its type parameters,
+    which are type names in the rest of it, and the one function that it
+    defines or declares at file scope. *)
+type generic_function = generic_function_node spanned
+
+and generic_function_node = {
+  type_parameters : parameter_name list;
+      (** at least one, in order, with distinct names *)
+  generic : generic_form;
+}
+
+and generic_form =
+  | Generic_definition of function_definition
+  | Generic_prototype of {
+      specifiers : specifiers;
+      declarator : init_declarator;
+          (** the one declarator, which declares a function with a
+              prototype, without an asm label or an initialiser *)
+    }
+
 type external_declaration =
   | External_declaration of declaration
   | Type_declaration of scoped_type_declaration
   | Function_definition of function_definition
+  | Generic_function of generic_function
   | Top_level_asm of assembler spanned  (** GNU [asm (...);] *)
   | Empty_declaration of span  (** a GNU [;] alone *)
 
@@ -903,6 +924,7 @@ let first_token = function
   | External_declaration declaration -> declaration.span.first
   | Type_declaration { declaration; _ } -> declaration.span.first
   | Function_definition definition -> definition.span.first
+  | Generic_function generic -> generic.span.first
   | Top_level_asm assembler -> assembler.span.first
   | Empty_declaration span -> span.first
 
@@ -938,5 +960,5 @@ let after_forward_declaration (item : external_declaration item) =
     when declaration.node.type_parameters = [] ->
       Option.map Anchor.before (forward_declaration_end declaration)
   | Type_declaration _ | External_declaration _ | Function_definition _
-  | Top_level_asm _ | Empty_declaration _ ->
+  | Generic_function _ | Top_level_asm _ | Empty_declaration _ ->
       None

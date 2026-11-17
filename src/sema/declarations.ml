@@ -16,6 +16,16 @@ type item =
   | Function_definition of entity
   | Type_declaration of entity
   | Generic_declaration
+  | Generic_function_declaration
+
+(* What a declaration of a generic function gives the declarations of it
+   after it (design 7.1 rule 7), beside its entity, which holds the type
+   it declares: the opaque records of its type parameters, in order, and
+   whether it or a declaration before it is the definition. *)
+type generic_function = {
+  parameter_records : Ctype.record_tag list;
+  defined : bool;
+}
 
 type argument_typedef = {
   name : string;
@@ -177,6 +187,11 @@ type state = {
   at_file_scope : (string, entity) Hashtbl.t;
   beside : (Tree.reference, entity option) Hashtbl.t;
   overloaded : (Tree.reference, unit) Hashtbl.t;
+  generic_functions : (Tree.reference, generic_function) Hashtbl.t;
+      (* each declaration of a generic function (design 7.1) *)
+  mutable in_generic_function : bool;
+      (* reading a generic function, where a type in an expression may
+         depend on a type parameter (design 7.1 rule 4) *)
   mutable typed : Expressions.t;
   mutable type_names : (Tree.span, Ctype.t) Hashtbl.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
@@ -411,12 +426,27 @@ let referenced state span name reference =
   | Some entity -> entity
   | None -> not_read state span name
 
+(* Design 7.1 rule 7: when declarations of a generic function agree. *)
+let refuse_generic_agreement state span name reason =
+  fail state span
+    (Rule.message Generic_function_agreement
+       (Printf.sprintf "%s %s" (quote name) reason))
+
+let other_declaration =
+  "is a generic function, so no other declaration of its name stands at \
+   file scope"
+
 (* The entity that the declaration of [name] at [span] redeclares: none
    where it is the first in its scope. An overload in between is passed
-   over. *)
+   over. A declaration of a generic function makes no entity that
+   another declaration redeclares: its declarations agree by rule 7 of
+   design 7.1 alone, which [read_generic_function] checks. *)
 let earlier_entity state span name (declared : Tree.declared) =
   match declared.earlier with
   | None -> None
+  | Some earlier when Hashtbl.mem state.generic_functions earlier ->
+      if state.in_generic_function then None
+      else refuse_generic_agreement state span name other_declaration
   | Some earlier -> (
       match Hashtbl.find_opt state.beside earlier with
       | Some passed_over -> passed_over
@@ -1134,12 +1164,25 @@ let note_at_file_scope state scope (entity : entity) =
   if scope = File_scope && has_linkage entity.declared then
     Hashtbl.replace state.at_file_scope entity.name entity
 
+(* Whether a declarator in [scope] declares the function of a generic
+   function, which instances alone stand for in the lowered C (design 7.1
+   rule 8): an entity that no declaration links to, nor a block sees. *)
+let declares_generic_function state scope =
+  state.in_generic_function && scope = File_scope
+
+let unlinked : Entity.declared -> Entity.declared = function
+  | Function declared -> Function { declared with linkage = No_linkage }
+  | (Object _ | Typedef _ | Enumerator _) as declared -> declared
+
 (* Records what a declarator declares in [scope]. *)
 let declare_in state scope span specified declared (derived : derived) =
   match derived.name with
   | Some name -> (
       let next =
         declared_as state scope span specified name declared derived
+      in
+      let next =
+        if declares_generic_function state scope then unlinked next else next
       in
       let has_linkage = has_linkage next in
       let inexact = specified.inexact in
@@ -1413,11 +1456,19 @@ and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
 and typeof_expression state expression =
   (Expressions.whole_value (typing state) expression).expression_type
 
-(* 6.7.5p3: the value is the backend's to check, as layout is. *)
+(* 6.7.5p3: the value is the backend's to check, as layout is. A type
+   names its alignment (6.7.5p6), which differs between arguments where
+   the type mentions a type parameter (design 7.1 rule 4). *)
 and alignment state (alignment : Tree.alignment) =
   match alignment with
   | Alignas_type type_name ->
-      needs_complete state (read_type_name state type_name)
+      let t = read_type_name state type_name in
+      if Ctype.mentions_opaque state.tags t then
+        fail state type_name.span
+          (Rule.message Type_parameter_constant
+             "the type of `_Alignas` mentions a type parameter, so the \
+              alignment differs between arguments");
+      needs_complete state t
   | Alignas_expression expression -> (
       match constant_expression state expression with
       | Constant _ -> ()
@@ -3287,7 +3338,7 @@ and refuse_opaque state span t construct =
    on one (design 7.1 rule 4), as that of [sizeof (T)] does. *)
 and expression_type_name state (type_name : Tree.type_name) =
   let t = read_type_name state type_name in
-  if Ctype.mentions_opaque t then
+  if Ctype.mentions_opaque state.tags t && not state.in_generic_function then
     fail state type_name.span
       (Rule.message Generic_definition
          "a type in an expression in the definition of a generic type \
@@ -3303,6 +3354,7 @@ and typing state : Expressions.context =
     fail = (fun span diagnostic -> fail state span diagnostic);
     entity = referenced state;
     overloaded = Hashtbl.mem state.overloaded;
+    generic_function = Hashtbl.mem state.generic_functions;
     type_name = expression_type_name state;
     declaration = read_block_declaration state;
     type_declaration =
@@ -3572,14 +3624,17 @@ let refuse_return_form state (definition : Tree.function_definition)
 
 (* The definition is read as a text whose own names [finding] collects,
    which the form of a return in the scope of a defer reads. *)
-let read_function_definition state (definition : Tree.function_definition) =
+let define_function state (definition : Tree.function_definition) =
   let defined, found =
     finding state definition.span (fun () -> read_definition state definition)
   in
   Option.iter
     (refuse_return_form state definition defined ~owns:found.declares)
     defined.defers;
-  Function_definition defined.entity
+  defined.entity
+
+let read_function_definition state definition =
+  Function_definition (define_function state definition)
 
 (* Design 10.3: a variant, or a record alias, that is no generic lowers
    to a forward declaration [struct X; typedef struct X X;] first, which
@@ -3607,6 +3662,123 @@ let texts_anchor item =
   | Some after -> after
   | None -> Tree.anchor item
 
+(* The declaration of the function of a generic function. *)
+let generic_declared (form : Tree.generic_form) =
+  match form with
+  | Generic_definition { span; node = { declarator; declared; _ } } ->
+      (span, declarator, declared)
+  | Generic_prototype { declarator; specifiers = _ } ->
+      (declarator.span, declarator.node.declarator, declarator.node.declared)
+
+(* The generic function that the declaration [declared] of [name] at
+   [span], with [count] type parameters, redeclares, if any: one that
+   agrees in its number of type parameters and is not defined twice
+   (design 7.1 rule 7). *)
+let earlier_generic state span name (declared : Tree.declared) ~count
+    ~definition =
+  match declared.earlier with
+  | None -> None
+  | Some earlier -> (
+      match Hashtbl.find_opt state.generic_functions earlier with
+      | None -> refuse_generic_agreement state span name other_declaration
+      | Some generic when List.length generic.parameter_records <> count ->
+          refuse_generic_agreement state span name
+            "is declared again with another number of type parameters"
+      | Some generic when generic.defined && definition ->
+          refuse_generic_agreement state span name "is defined again"
+      | Some generic -> Some (earlier, generic))
+
+(* The type that the declaration [reference] of a generic function, read
+   before, declares. *)
+let generic_function_type state reference =
+  match Hashtbl.find_opt state.entities reference with
+  | Some { declared = Function { function_type; _ }; _ } -> function_type
+  | Some { declared = Object _ | Typedef _ | Enumerator _; _ } | None ->
+      invalid_arg "Declarations: a generic function that declares no function"
+
+(* Design 7.1 rule 7: two declarations agree where, with each type
+   parameter of one read as the one at the same position of the other,
+   they declare the same type, as two definitions of a typedef name
+   must; compatible types do not agree, so a use is checked against one
+   type whichever declaration it follows. *)
+let check_agreement state span name ~earlier ~later =
+  match
+    Ctype.same_type ~exact:true state.target state.tags
+      (location_of state span)
+      (generic_function_type state earlier)
+      (generic_function_type state later)
+  with
+  | Answer true -> ()
+  | Answer false ->
+      refuse_generic_agreement state span name
+        "is declared again with another type"
+  | Depends_on unknown ->
+      refuse_generic_agreement state span name
+        (Printf.sprintf
+           "is declared again, and whether with the same type depends on \
+            %s, whose type typec does not compute"
+           unknown.construct)
+
+(* Design 7.1: each type parameter is a typedef name of an opaque value
+   type (rule 2): its own in the first declaration, and in a later one
+   that of the earlier declaration at the same position (rule 7). The
+   function is read once, against those, where it stands (rule 3).
+   Every use of its name is refused until calls are built, which the
+   recursion of its body may make. *)
+let read_generic_function state (generic : Tree.generic_function) =
+  let { Tree.type_parameters; generic = form } = generic.node in
+  let span, declarator, declared = generic_declared form in
+  let name = Option.value ~default:"" (Tree.declared_name declarator) in
+  let definition =
+    match form with
+    | Generic_definition _ -> true
+    | Generic_prototype _ -> false
+  in
+  let earlier =
+    earlier_generic state span name declared
+      ~count:(List.length type_parameters) ~definition
+  in
+  let parameter_records =
+    match earlier with
+    | Some (_, earlier) -> earlier.parameter_records
+    | None ->
+        List.map
+          (fun (parameter : Tree.parameter_name) ->
+            Ctype.declare_opaque state.tags parameter.name.node)
+          type_parameters
+  in
+  let bind (parameter : Tree.parameter_name) record =
+    Hashtbl.replace state.entities (Tree.In_tree parameter.declared.id)
+      { name = parameter.name.node; entity = fresh_entity state;
+        declared = Typedef { typedef_type = Ctype.record record };
+        inexact = false }
+  in
+  List.iter2 bind type_parameters parameter_records;
+  let reference = Tree.In_tree declared.id in
+  let defined =
+    match earlier with
+    | Some (_, earlier) -> definition || earlier.defined
+    | None -> definition
+  in
+  Hashtbl.replace state.generic_functions reference
+    { parameter_records; defined };
+  let read () =
+    match form with
+    | Generic_definition definition -> ignore (define_function state definition)
+    | Generic_prototype { specifiers; declarator } ->
+        let specified =
+          declaration_specifiers state specifiers [ declarator ]
+        in
+        ignore (read_init_declarator state File_scope specified declarator)
+  in
+  state.in_generic_function <- true;
+  Fun.protect ~finally:(fun () -> state.in_generic_function <- false) read;
+  Option.iter
+    (fun (earlier, _) ->
+      check_agreement state span name ~earlier ~later:reference)
+    earlier;
+  Generic_function_declaration
+
 let read_external state ((item : Tree.external_declaration Tree.item), view) =
   state.external_facts <-
     declaration_state state.tags (Some (texts_anchor item)) view;
@@ -3618,6 +3790,7 @@ let read_external state ((item : Tree.external_declaration Tree.item), view) =
       match read_type_declaration state declaration with
       | Some entity -> Type_declaration entity
       | None -> Generic_declaration)
+  | Generic_function generic -> read_generic_function state generic
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
 (* A generic of the universe text (design 3.6), which the emitted C does
@@ -3695,6 +3868,8 @@ let read target text (scopes : Parser.scopes) =
       at_file_scope = Hashtbl.create 1024;
       beside = Hashtbl.create 64;
       overloaded = Hashtbl.create 64;
+      generic_functions = Hashtbl.create 16;
+      in_generic_function = false;
       typed = Expressions.create ();
       type_names = Hashtbl.create 256;
       type_declarations = Hashtbl.create 16;

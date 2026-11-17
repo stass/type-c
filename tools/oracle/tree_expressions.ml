@@ -270,10 +270,18 @@ let function_definition visit (definition : function_definition) =
   | Parsed body -> block visit body
   | Skipped _ -> ()
 
+let generic_function visit (generic : generic_function) =
+  match generic.node.generic with
+  | Generic_definition definition -> function_definition visit definition
+  | Generic_prototype { specifiers = declared; declarator } ->
+      specifiers visit declared;
+      init_declarator visit declarator
+
 let external_declaration visit = function
   | External_declaration d -> declaration visit d
   | Type_declaration { declaration; _ } -> type_declaration visit declaration
   | Function_definition definition -> function_definition visit definition
+  | Generic_function generic -> generic_function visit generic
   | Top_level_asm code -> assembler visit code.node
   | Empty_declaration _ -> ()
 

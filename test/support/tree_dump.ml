@@ -763,19 +763,33 @@ let function_body reader = function
   | Parsed body -> block reader body
   | Skipped span -> node span "{...}" []
 
+let function_definition reader ({ span; node = definition } :
+                                  function_definition) =
+  node span "define"
+    ([
+       group (specifiers reader definition.specifiers);
+       declared_declarator reader definition.declarator definition.declared;
+     ]
+    @ attribute_group reader definition.attributes
+    @ List.map (declaration reader) definition.declarations
+    @ [ function_body reader definition.body ])
+
+let generic_function reader ({ span; node = generic } : generic_function) =
+  let parameter (parameter : parameter_name) = leaf parameter.name.node in
+  let form =
+    match generic.generic with
+    | Generic_definition definition -> function_definition reader definition
+    | Generic_prototype { specifiers = list; declarator } ->
+        node span "declaration"
+          [ group (specifiers reader list); init_declarator reader declarator ]
+  in
+  node span "generic" (List.map parameter generic.type_parameters @ [ form ])
+
 let external_declaration reader = function
   | External_declaration d -> declaration reader d
   | Type_declaration { declaration; _ } -> type_declaration reader declaration
-  | Function_definition { span; node = definition } ->
-      node span "define"
-        ([
-           group (specifiers reader definition.specifiers);
-           declared_declarator reader definition.declarator
-             definition.declared;
-         ]
-        @ attribute_group reader definition.attributes
-        @ List.map (declaration reader) definition.declarations
-        @ [ function_body reader definition.body ])
+  | Function_definition definition -> function_definition reader definition
+  | Generic_function generic -> generic_function reader generic
   | Top_level_asm { span; node = a } -> node span "asm" (assembler reader a)
   | Empty_declaration span -> node span ";" []
 

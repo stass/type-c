@@ -362,10 +362,11 @@ val declare_opaque : tags -> string -> record_tag
 val is_opaque : t -> bool
 (** Whether [t], qualified or not, is an opaque value type. *)
 
-val mentions_opaque : t -> bool
-(** Whether an opaque value type is part of [t], as
-    {!mentions_distinct} reads "part", or an argument of an instance
-    that [t] is. *)
+val mentions_opaque : tags -> t -> bool
+(** Whether [t] mentions a type parameter (design 7.1 rule 4): an opaque
+    value type is part of [t], as {!mentions_distinct} reads "part", an
+    argument of an instance that [t] is, or the type of a member of a
+    structure or union that [t] is. *)
 
 (** A constructor of a variant: its name and its fields in order, whose
     position in the list of its variant is its tag (design 10.1 rule 1).
@@ -647,11 +648,14 @@ val compatible :
     whatever their unknown parts are. *)
 
 val same_type :
+  ?exact:bool ->
   Target.t -> tags -> Typec_cpp.Location.t -> t -> t -> bool Unknown.answer
 (** Whether two types are the same (6.7p3), as for the redefinition of a
     typedef name, asked at [location]: equal, but that an {!Opaque} length
     is the same as any constant one, which the backend checks, and that
-    the qualifiers of return types compare as for {!compatible}. *)
+    the qualifiers of return types compare as for {!compatible}. [exact]
+    (default false), where no backend compares the two types later: an
+    {!Opaque} length is the same as no length. *)
 
 val composite :
   Target.t -> tags -> Typec_cpp.Location.t -> t -> t -> (t, error) result

@@ -224,7 +224,7 @@ let instance (type written) tags (generic : Typec_syntax.Spelling.type_name)
   match List.map encode_argument arguments with
   | encodings ->
       let mentions_parameter =
-        List.exists (fun (_, t) -> Ctype.mentions_opaque t) arguments
+        List.exists (fun (_, t) -> Ctype.mentions_opaque tags t) arguments
       in
       Ok { Ctype.generic; arguments = encodings; mentions_parameter }
   | exception Argument_refused (written, no_row) -> Error (written, no_row)

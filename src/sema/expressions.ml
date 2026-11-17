@@ -324,6 +324,7 @@ type checked_pattern = {
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
+  mutable measurements : Tree.span list;
   selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
   answered : (Tree.span, answered) Hashtbl.t;
@@ -341,6 +342,7 @@ let outside_functions =
 let create () =
   { types = Hashtbl.create 16;
     constants = Hashtbl.create 16;
+    measurements = [];
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
@@ -380,6 +382,7 @@ type context = {
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
+  generic_function : Tree.reference -> bool;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;
@@ -539,6 +542,46 @@ let refuse_variant context (span : Tree.span) (t : Ctype.t) =
               (quoted_variant name)))
   | Some _ | None -> ()
 
+(* Design 7.1 rule 3: an instance of a generic function is its text with
+   each type parameter naming its argument, so a use of a type parameter
+   that C refuses of a structure, or types otherwise for another value
+   type, is refused where the check reads it. *)
+let refuse_type_parameter context (span : Tree.span) use =
+  context.fail span
+    (Rule.message Type_parameter_operation
+       (use ^ ", which is not valid C of one meaning for every value type"))
+
+let read_type_parameter context span =
+  refuse_type_parameter context span
+    "a value of a type parameter is the operand of an operation"
+
+(* The operations that read a value as an operand: all but those that
+   take it whole (design 7.1 rule 3). *)
+let refuse_type_parameter_operand context span (t : Ctype.t) =
+  if Ctype.is_opaque t then read_type_parameter context span
+
+(* Design 7.1 rule 3: an asm constraint depends on the size and kind of
+   its operand, which differ between arguments. *)
+let refuse_type_parameter_asm context span (t : Ctype.t) =
+  if Ctype.mentions_opaque context.tags t then
+    refuse_type_parameter context span
+      "an asm operand has a type that mentions a type parameter"
+
+(* Provisional (design 7.1 rule 3): the conditional operator gives
+   two values of a type parameter the type of the usual arithmetic
+   conversions, which differs between arguments. *)
+let refuse_type_parameter_branch context span (branch : typed) =
+  if Ctype.is_opaque branch.expression_type then
+    refuse_type_parameter context span
+      "a value of a type parameter is a branch of the conditional operator"
+
+(* Design 7.1 rule 3: a construct that asks whether two types are
+   compatible gives the answer of the argument. *)
+let refuse_type_parameter_comparison context span construct types =
+  if List.exists (Ctype.mentions_opaque context.tags) types then
+    refuse_type_parameter context span
+      (construct ^ " compares a type that mentions a type parameter")
+
 (* An assignment, which has stored the value that it gives. *)
 let rec is_assignment (expression : Tree.expression) =
   match expression.node with
@@ -628,6 +671,7 @@ let refuse_distinct context span (distinct : Ctype.distinct) =
 let read_operand context span ~reads (typed : typed) =
   context.needs_complete typed.expression_type;
   let typed = as_seen context span typed in
+  refuse_type_parameter_operand context span typed.expression_type;
   match Ctype.as_distinct typed.expression_type with
   | Some distinct when not reads -> refuse_distinct context span distinct
   | Some _ | None -> typed
@@ -649,33 +693,72 @@ let refuse_mixed context span (t : Ctype.t) =
 
 let differs context span a b = compatible context span a b = Answer false
 
-(* Design 3.4: [D *] and [U *] are incompatible. GNU C only warns where
-   two pointers to incompatible types meet, and the backend, which sees
-   U for D, does not even warn, so typec decides: in Type-C text two
-   pointers whose referenced types [a] and [b] mention a distinct type
-   meet only where those are compatible or one is void. This is the one
-   rule for conversions and for the operations on two pointers. *)
+(* Why two pointers do not meet. *)
+type pointer_gap =
+  | Distinct_gap
+      (** Design 3.4: [D *] and [U *] are incompatible. GNU C only warns
+          where two pointers to incompatible types meet, and the backend,
+          which sees U for D, does not even warn, so typec decides in
+          Type-C text. *)
+  | Parameter_gap
+      (** Design 7.1 rule 3: pointers to incompatible types where one
+          mentions a type parameter are compatible for some arguments
+          alone, as pointers to [void (T)] and to [void ()] are where [T]
+          is a structure. *)
+
+(* The one rule for conversions and for the operations on two pointers:
+   two pointers whose referenced types [a] and [b] mention a distinct
+   type or a type parameter meet only where those are compatible or one
+   is void. *)
 let pointers_differ context span (a : Ctype.t) (b : Ctype.t) =
   let a = Ctype.unqualified a and b = Ctype.unqualified b in
-  Ctype.is_void a = Answer false
-  && Ctype.is_void b = Answer false
-  && (Ctype.mentions_distinct a || Ctype.mentions_distinct b)
-  && differs context span a b
+  let gap =
+    if Ctype.is_void a <> Answer false || Ctype.is_void b <> Answer false
+    then None
+    else if
+      Ctype.mentions_opaque context.tags a
+      || Ctype.mentions_opaque context.tags b
+    then Some Parameter_gap
+    else if Ctype.mentions_distinct a || Ctype.mentions_distinct b then
+      Some Distinct_gap
+    else None
+  in
+  match gap with
+  | Some _ when differs context span a b -> gap
+  | Some _ | None -> None
+
+let pointer_parameter_gap =
+  "pointers to incompatible types meet where one mentions a type parameter"
+
+(* Design 7.1 rule 3: a value of a type parameter converts to no other
+   type, as a structure does not, though a scalar argument would. *)
+let refuse_type_parameter_conversion context span target (typed : typed) =
+  let source = value_type typed in
+  if
+    (Ctype.is_opaque target || Ctype.is_opaque source)
+    && differs context span target source
+  then
+    refuse_type_parameter context span
+      "a value converts to or from a type parameter of another type"
 
 (* Design 3.4: Type-C text converts no value implicitly to or from a
-   distinct type, nor a pointer to a type with one in it to another
-   pointer but by [pointers_differ]. The backend sees a distinct type as
-   its representation (design 10.2), so it cannot refuse these
-   conversions; the others are its own. A value converts only to a
-   scalar: towards a structure or an array it initialises a member
-   through elided braces, which the initialiser checks where it places
-   the value, or the backend refuses it. *)
-let refuse_distinct_conversion context span target (typed : typed) =
+   distinct type, nor a pointer but as [pointers_differ] allows. The
+   backend sees a distinct type as its representation (design 10.2), so
+   it cannot refuse these conversions; the others are its own. A value
+   converts only to a scalar: towards a structure or an array it
+   initialises a member through elided braces, which the initialiser
+   checks where it places the value, or the backend refuses it. *)
+let refuse_conversion context span target (typed : typed) =
   let target = Ctype.unqualified target in
   let source = value_type typed in
   let crosses =
     match (target.shape, source.shape) with
-    | Pointer t, Pointer s -> pointers_differ context span t s
+    | Pointer t, Pointer s -> (
+        match pointers_differ context span t s with
+        | Some Parameter_gap ->
+            refuse_type_parameter context span pointer_parameter_gap
+        | Some Distinct_gap -> true
+        | None -> false)
     | (Record _ | Array _), _ -> false
     | _ ->
         (Ctype.as_distinct target <> None || Ctype.as_distinct source <> None)
@@ -687,7 +770,8 @@ let refuse_distinct_conversion context span target (typed : typed) =
          (Printf.sprintf
             "a value of type %s does not convert to %s without a cast"
             (quote (Type_name.of_ctype source))
-            (quote (Type_name.of_ctype target))))
+            (quote (Type_name.of_ctype target))));
+  refuse_type_parameter_conversion context span target typed
 
 (* Design 13.5: typec answers a construct whose [types], as its text sees
    them, have a distinct type in them, which only Type-C text sees, and
@@ -771,20 +855,23 @@ let operand context (typed : typed) =
   | None, Not_bit_field ->
       value_operand context (value_type typed)
 
-(* Refuses an operation at [span] in Type-C text on two pointers that
-   [pointers_differ] keeps apart. *)
+(* Refuses an operation at [span] on two pointers that [pointers_differ]
+   keeps apart, a distinct type in Type-C text only. *)
 let refuse_mixed_pointers context span left right =
   match (left, right) with
-  | Pointer_operand a, Pointer_operand b
-    when is_type_c_text context span
-         && pointers_differ context span a.referenced b.referenced ->
-      context.fail span
-        (Rule.message Distinct_operation
-           (Printf.sprintf
-              "the pointers %s and %s are not compatible; a cast crosses \
-               between them"
-              (quote (Type_name.of_ctype a.pointer))
-              (quote (Type_name.of_ctype b.pointer))))
+  | Pointer_operand a, Pointer_operand b -> (
+      match pointers_differ context span a.referenced b.referenced with
+      | Some Parameter_gap ->
+          refuse_type_parameter context span pointer_parameter_gap
+      | Some Distinct_gap when is_type_c_text context span ->
+          context.fail span
+            (Rule.message Distinct_operation
+               (Printf.sprintf
+                  "the pointers %s and %s are not compatible; a cast \
+                   crosses between them"
+                  (quote (Type_name.of_ctype a.pointer))
+                  (quote (Type_name.of_ctype b.pointer))))
+      | Some Distinct_gap | None -> ())
   | _ -> ()
 
 let is_integer : Arithmetic.t -> bool = function
@@ -820,6 +907,7 @@ let require_modifiable context span ~clause (typed : typed) =
              ("the operand is not a modifiable lvalue (C11 " ^ clause ^ ")"))
 
 let require_scalar context span ~clause typed =
+  refuse_type_parameter_operand context span typed.expression_type;
   match operand context typed with
   | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
   | Unknown_operand _ ->
@@ -1035,6 +1123,12 @@ let function_designator context span ~old_style_definition (t : Ctype.t) =
 let identifier context span name (resolution : Tree.resolution) =
   match resolution with
   | Undeclared -> predefined context span name
+  | Resolved reference when context.generic_function reference ->
+      context.fail span
+        (Rule.message Not_implemented
+           (quote name
+          ^ " is a generic function, whose calls and instances typec does \
+             not build yet (design 7.2; work package 3.2)"))
   | Resolved reference -> (
       match (context.entity span name reference).declared with
       (* typec does not resolve overloads, so the one a use names is
@@ -1664,7 +1758,8 @@ let part context role operand =
   match operand_constant context operand with
   | Integer_expression { value; flaw } ->
       Part (value, if role = Evaluated then flaw else None)
-  | (Not_integer _ | Unevaluable _) as broken -> Breaks broken
+  | (Not_integer _ | Unevaluable _) as broken ->
+      Breaks broken
 
 (* The constant of an operation of class [kind] whose operand [broken] is
    no integer constant expression. *)
@@ -1685,6 +1780,55 @@ let invalid span (failure : Integer_constant.error option) =
     failure
 
 let integer value = Integer_expression { value; flaw = None }
+
+(* Design 7.1 rule 4: the size, alignment or offset of a type that
+   mentions a type parameter differs between arguments, so no constant
+   that C asks for may hold it. *)
+let parameter_dependent =
+  Rule.message Type_parameter_constant
+    "the expression holds the size, alignment or offset of a type that \
+     mentions a type parameter, so it is no constant expression"
+
+(* The type whose size, alignment or member offset [whole] is, where it
+   is a [sizeof], an [_Alignof] or an [offsetof]. *)
+let measured_type context (whole : Tree.expression) =
+  match whole.node with
+  | Sizeof_expression operand | Alignof_expression operand ->
+      Some (operand_typed context operand).expression_type
+  | Sizeof_type type_name | Alignof type_name | Offsetof { type_name; _ } ->
+      Some (context.type_name type_name)
+  | _ -> None
+
+let measures_parameter context whole =
+  match measured_type context whole with
+  | Some t -> Ctype.mentions_opaque context.tags t
+  | None -> false
+
+(* Design 7.1 rule 4: an expression depends on a type parameter where
+   an expression in it, evaluated or not, measures a type that mentions
+   one. Every expression in it lies within its span, so the fact is
+   derived from the spans of such measurements, which [measurements]
+   holds, latest first. *)
+let record_measurement context (whole : Tree.expression) =
+  if measures_parameter context whole then
+    context.typed.measurements <- whole.span :: context.typed.measurements
+
+(* Refuses [expression] where C asks for a constant, if it depends on a
+   type parameter: whatever its class, that of an instance can differ. *)
+let refuse_dependent context (expression : Tree.expression) =
+  let { Tree.first; last } = expression.span in
+  let within (measurement : Tree.span) =
+    first <= measurement.first && measurement.last <= last
+  in
+  match List.find_opt within (List.rev context.typed.measurements) with
+  | Some measurement -> context.fail measurement parameter_dependent
+  | None -> ()
+
+(* The constant of a [sizeof], [_Alignof] or [offsetof] at [span] of the
+   type [t], which [known] gives where [t] mentions no type parameter;
+   [refuse_dependent] refuses one that does where it would be read. *)
+let measured context (t : Ctype.t) known =
+  if Ctype.mentions_opaque context.tags t then integer Opaque else known ()
 
 (* The integer type that typing gives an integer constant expression,
    the one source of its type, as C text sees a distinct type (design
@@ -1960,6 +2104,32 @@ let conditional_constant context span typed condition second third =
       | Breaks broken, _ | Part _, Breaks broken ->
           broken_by broken (kind roles))
 
+(* 7.19p3: an [offsetof] is an integer constant expression where each
+   index of its member designator is one. *)
+let offsetof_constant context designators =
+  let index (designator : Tree.designator) =
+    match designator.node with
+    | Index index -> [ index ]
+    | Index_range { low; high } -> [ low; high ]
+    | Member_designator _ -> []
+  in
+  let indices = List.concat_map index designators in
+  let parts = List.map (part context Evaluated) indices in
+  let broken =
+    List.find_map (function Breaks broken -> Some broken | Part _ -> None) parts
+  in
+  let flaw =
+    List.fold_left
+      (fun flaw -> function
+        | Part (_, next) -> first_flaw flaw next
+        | Breaks _ -> flaw)
+      None parts
+  in
+  match broken with
+  | Some broken ->
+      broken_by broken (combined (List.map (operand_kind context) indices))
+  | None -> Integer_expression { value = Opaque; flaw }
+
 (* 6.6p3: a comma operator only where it is not evaluated. *)
 let comma_constant context span left right =
   match (part context Not_evaluated left, part context Not_evaluated right) with
@@ -2121,12 +2291,22 @@ let classify_node context (whole : Tree.expression) typed =
       itself Not_constant
   | Sizeof_expression operand ->
       let operand_type = (operand_typed context operand).expression_type in
-      size_constant context span typed operand_type
+      measured context operand_type (fun () ->
+          size_constant context span typed operand_type)
   | Sizeof_type type_name ->
-      size_constant context span typed (context.type_name type_name)
+      let t = context.type_name type_name in
+      measured context t (fun () -> size_constant context span typed t)
   (* [offsetof] expands to [__builtin_offsetof], an integer constant
      (C11 7.19p3). *)
-  | Alignof _ | Alignof_expression _ | Offsetof _ -> integer Opaque
+  | Alignof type_name ->
+      measured context (context.type_name type_name) (fun () ->
+          integer Opaque)
+  | Offsetof { type_name; designators; member = _ } ->
+      measured context (context.type_name type_name) (fun () ->
+          offsetof_constant context designators)
+  | Alignof_expression operand ->
+      let operand_type = (operand_typed context operand).expression_type in
+      measured context operand_type (fun () -> integer Opaque)
   | Cast { type_name; operand } ->
       cast_constant context span typed (context.type_name type_name) operand
   | Binary (Logical_and, left, right) ->
@@ -2165,6 +2345,7 @@ let classify context (whole : Tree.expression) typed =
 (* 6.7.9p4, 6.5.2.5p3: an initialiser that no backend takes as
    constant. *)
 let require_constant context (expression : Tree.expression) =
+  refuse_dependent context expression;
   if operand_kind context expression = Not_constant then
     context.fail expression.span
       (Rule.c_text
@@ -2196,12 +2377,16 @@ let fail_builtin_argument context span name requirement =
    Clang keeps a qualifier of any other referenced type that a typedef
    gives it and drops one written in the pointer's declarator; Ctype does
    not tell them apart, so such a qualified type gives an unknown result.
-   _Atomic, which Clang's __c11 builtins drop, does not count. *)
+   _Atomic, which Clang's __c11 builtins drop, does not count. Every such
+   builtin reads the object as a scalar, which a type parameter is not
+   (design 7.1 rule 3). *)
 let object_of_first context span name first =
   let qualified (qualifiers : Qualifiers.t) =
     qualifiers.const || qualifiers.volatile || qualifiers.restrict
   in
   match operand context first with
+  | Pointer_operand { referenced; _ } when Ctype.is_opaque referenced ->
+      read_type_parameter context span
   | Pointer_operand { referenced = { shape = Distinct _; _ } as referenced; _ }
     ->
       value (Ctype.unqualified referenced)
@@ -2244,6 +2429,7 @@ let choice context span condition first second =
       (unknown_at context span "the condition of __builtin_choose_expr"
          Object_or_function)
   in
+  refuse_dependent context condition;
   match operand_constant context condition with
   | Integer_expression { value = Known value; flaw = None } ->
       if Exact_integer.equal value Exact_integer.zero then Unknown.Answer second
@@ -2636,11 +2822,12 @@ and positioned context position (expression : Tree.expression) =
   | Targeted target ->
       (* 6.5.16.1p2, 6.5.2.2p7: converted as if by assignment. *)
       context.needs_complete typed.expression_type;
-      refuse_distinct_conversion context expression.span target typed
+      refuse_conversion context expression.span target typed
   | Untargeted | Discarded -> ());
   Hashtbl.replace context.typed.types expression.span typed;
   Hashtbl.replace context.typed.constants expression.span
     (classify context expression typed);
+  record_measurement context expression;
   typed
 
 and expression_node context position (whole : Tree.expression) =
@@ -2705,6 +2892,8 @@ and expression_node context position (whole : Tree.expression) =
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
       refuse_variant context span cast_type;
+      if Ctype.is_opaque cast_type then
+        refuse_type_parameter context span "a cast to a type parameter";
       Option.iter
         (fun distinct ->
           refuse_private_creation context span cast_type
@@ -2742,6 +2931,10 @@ and expression_node context position (whole : Tree.expression) =
   | Va_arg { list; type_name } ->
       ignore (typed list);
       let t = context.type_name type_name in
+      (* 7.16.1.1p2: the promoted type of an argument is not [t] for
+         every value type. *)
+      if Ctype.is_opaque t then
+        refuse_type_parameter context span "va_arg of a type parameter";
       context.needs_complete t;
       value (Ctype.unqualified t)
   | Offsetof { type_name; member; designators } ->
@@ -2757,6 +2950,8 @@ and expression_node context position (whole : Tree.expression) =
   | Types_compatible (first, second) ->
       let first = type_as_seen context span (context.type_name first) in
       let second = type_as_seen context span (context.type_name second) in
+      refuse_type_parameter_comparison context span
+        "__builtin_types_compatible_p" [ first; second ];
       let answer = types_compatible_answer context span first second in
       record_answer context span [ first; second ]
         ~lowered:(fun compatible -> Compatible compatible)
@@ -2954,11 +3149,20 @@ and prototype_positions context (callee : typed) arguments =
 
 (* Design 3.4: a value of a distinct type passes only to a parameter of
    its type, not through [...] or to a function without a prototype,
-   where the default argument promotions would convert it. *)
+   where the default argument promotions would convert it; nor does a
+   value of a type parameter, which they convert for some arguments
+   (design 7.1 rule 3). *)
 and argument context position argument =
   match position with
   | Targeted _ -> positioned context position argument
-  | Untargeted | Discarded -> expression context argument
+  | Untargeted | Discarded ->
+      let typed = whole_value context argument in
+      if Ctype.is_opaque typed.expression_type then
+        refuse_type_parameter context argument.span
+          "a value of a type parameter is an argument that no parameter \
+           type receives, which the default argument promotions or a \
+           builtin read by its type";
+      read_operand context argument.span ~reads:false typed
 
 (* GNU [__real__] and [__imag__] and the operators of 6.5.3. *)
 and unary context span (op : Tree.unary_operator) typed =
@@ -3047,6 +3251,7 @@ and generic context span controlling associations =
     controlling_type
     :: List.filter_map (fun a -> a.association_type) associations_typed
   in
+  refuse_type_parameter_comparison context span "_Generic" types;
   let selection =
     select context span controlling_type associations_typed default
   in
@@ -3101,6 +3306,8 @@ and conditional context span position condition if_true if_false =
 
 (* 6.5.15p3 to p6: the type of a conditional of these branches. *)
 and conditional_type context span second third =
+  refuse_type_parameter_branch context span second.branch_typed;
+  refuse_type_parameter_branch context span third.branch_typed;
   let branch_operand branch =
     context.needs_complete branch.branch_typed.expression_type;
     operand context (as_seen context span branch.branch_typed)
@@ -3182,7 +3389,9 @@ and zero_constant context candidate =
   | _, Integer_expression { value = Known value; flaw = None }
     when Exact_integer.equal value Exact_integer.zero ->
       Null
-  | _, (Integer_expression { value = Opaque; _ } | Unevaluable _) ->
+  | _,
+      ( Integer_expression { value = Opaque; _ }
+      | Unevaluable _ ) ->
       Opaque_constant
   | _, (Integer_expression _ | Not_integer _) -> Not_null
 
@@ -3306,6 +3515,7 @@ and integer_constant context candidate =
 
 (* The type and value of an integer constant expression typed before. *)
 and constant_value context candidate =
+  refuse_dependent context candidate;
   match operand_constant context candidate with
   | Integer_expression { value; flaw = None } -> (
       match integer_type_of context (operand_typed context candidate) with
@@ -3344,7 +3554,7 @@ and initialiser context ~constant t initialiser =
     (positioned context position initialising).expression_type
   in
   let converts scalar initialising =
-    refuse_distinct_conversion context initialising.Tree.span scalar
+    refuse_conversion context initialising.Tree.span scalar
       (operand_typed context initialising)
   in
   let initialises initialising =
@@ -3536,7 +3746,9 @@ and standing_statement context standing labels (statement : Tree.statement) =
         (fun (operands : Tree.asm_operands) ->
           List.iter
             (fun (operand : Tree.asm_operand) ->
-              ignore (whole_value context operand.node.value))
+              let typed = whole_value context operand.node.value in
+              refuse_type_parameter_asm context operand.span
+                typed.expression_type)
             (operands.outputs @ operands.inputs))
         operands
 
@@ -3725,8 +3937,9 @@ and non_zero_constant context condition =
   match constant context.typed condition with
   | Some (Integer_expression { value; flaw = None }) ->
       Integer_constant.truth value = Some true
-  | Some (Integer_expression { flaw = Some _; _ } | Not_integer _
-         | Unevaluable _)
+  | Some
+      ( Integer_expression { flaw = Some _; _ }
+      | Not_integer _ | Unevaluable _ )
   | None ->
       false
 

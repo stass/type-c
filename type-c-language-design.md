@@ -1927,6 +1927,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      hold, or does not record as asking nothing, is refused, so a gap
      in the table costs a refusal and never an instance that the
      backend rejects.
+   - An `__asm__` operand whose type mentions a type parameter, a `T *`
+     too: its constraint asks of the operand a size and a kind, which
+     differ between instances.
 4. A type *mentions* a type parameter where it is one, is derived from a
    type that mentions one, is a type application with an argument that
    mentions one, or is a structure or union with a member whose type

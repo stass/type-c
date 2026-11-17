@@ -1242,8 +1242,8 @@ let describe_constant (constant : Expressions.constant) =
   | Not_integer { kind; _ } -> kind_name kind
   | Unevaluable _ -> "unevaluable"
 
-let classes ?parameters body expected =
-  let source = in_function ?parameters body in
+let classes ?declarations ?parameters body expected =
+  let source = in_function ?declarations ?parameters body in
   match read lp64 source with
   | Error error -> fail_case source ("error: " ^ Reader.error_message error)
   | Ok (unit, result) -> (
@@ -1294,6 +1294,14 @@ let constants () =
   classes "_Generic(1, int: 2, default: x)" "integer 2";
   classes "(struct s *)0 == 0" "backend";
   classes "sizeof (struct s)" "integer opaque";
+  (* 7.19p3: offsetof is an integer constant where its indices are. *)
+  let indexed = prelude ^ "struct w { int a[4]; }; " in
+  classes ~declarations:indexed "__builtin_offsetof (struct w, a[1])"
+    "integer opaque";
+  classes ~declarations:indexed ~parameters:"int n"
+    "__builtin_offsetof (struct w, a[n])" "not constant";
+  classes ~declarations:indexed "__builtin_offsetof (struct w, a[(0, 1)])"
+    "integer opaque comma";
   classes "(typeof(half))1" "unevaluable";
   (* 6.6p3: an operand that is not evaluated may be anything. *)
   classes "sizeof (x = 1)" "integer 4";

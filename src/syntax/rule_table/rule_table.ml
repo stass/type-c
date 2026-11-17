@@ -451,6 +451,57 @@ let rows =
          block or a statement or declaration that holds an exit: a copy \
          of the deferred statement would be compiled under other pragmas \
          than the defer statement." };
+    Live { name = "Type_parameter_operation"; code = 75;
+      clause = Some "design 7.1 rule 3";
+      meaning =
+        "In a generic function, a use of a value of a type parameter \
+         that C refuses of a structure, or that would have another type \
+         or meaning where the argument is another value type: an \
+         operand of an operator other than unary [&], [sizeof], \
+         [_Alignof], the comma and assignment; a member access, a call \
+         or a truth test of it; a cast of it other than to void, and a \
+         cast to the type parameter; an argument that no parameter type \
+         receives, which the default argument promotions take, through \
+         [...] or to a function without a prototype, or a builtin reads \
+         by its type, and [va_arg] of the type parameter; a \
+         branch of the conditional operator (provisional); a braced \
+         initialiser of it other than [{0}] and [{}]; a builtin that \
+         reads the object a pointer to it points to; two pointers to \
+         incompatible types that meet, by a conversion or an operation \
+         on both, where one mentions a type parameter, such as a \
+         function type with a parameter of the type parameter and one \
+         without a prototype; an [asm] operand whose type mentions a \
+         type parameter; and [_Generic] or \
+         [__builtin_types_compatible_p] where a type in it mentions a \
+         type parameter (design 7.1 rule 4)." };
+    Live { name = "Type_parameter_constant"; code = 76;
+      clause = Some "design 7.1 rule 4";
+      meaning =
+        "In a generic function, an expression that depends on a type \
+         parameter, holding [sizeof], [_Alignof] or [offsetof] of a type \
+         that mentions one, where C asks for a constant expression: an \
+         array bound, a [case] value, a static initialiser, the width of \
+         a bit-field, the value of an enumerator, the operand of \
+         [_Static_assert] or of [_Alignas]; and [_Alignas] of a type \
+         that mentions a type parameter." };
+    Live { name = "Generic_function_form"; code = 77;
+      clause = Some "design 7.1 rule 6";
+      meaning =
+        "What follows [generic( )] is not one function that an instance \
+         can be written from: a definition, or a declaration with one \
+         declarator that declares a function, with a prototype and \
+         neither [()] nor an identifier list, no storage-class specifier \
+         but [static], no assembler label, and on a declaration that is \
+         not a definition neither [_Noreturn] nor an attribute." };
+    Live { name = "Generic_function_agreement"; code = 78;
+      clause = Some "design 7.1 rule 7";
+      meaning =
+        "Two declarations of a generic function that do not agree: they \
+         have different numbers of type parameters, or, with each type \
+         parameter of one read as the one at the same position of the \
+         other, declare different types; or a second definition of it; \
+         or another declaration of its name at file scope, before it or \
+         after it." };
   ]
 
 let () =

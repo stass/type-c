@@ -963,15 +963,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   refused (TC0038) and the design allows it. Give the definition check
   the test of rule 4 when generic functions are typed, as their bodies
   need it.
-- [Medium] The opaque value type of a definition check is a structure
-  without members (`Ctype.declare_opaque`), which is exact for generic
-  types but not for the bodies of generic functions. Design 7.1 rules
-  2 and 3 type a type parameter as a complete structure whose members
-  cannot be named and list what a value of it may do: a structure
-  without members may be passed through `...`, which rule 3 refuses,
-  and is refused the initialiser `{0}`, which rule 3 allows as the
-  zero initialiser. Give it a shape of its own when generic functions
-  are typed.
 - [Low] Design 7.1 rule 3 allows `{0}` for a type parameter, and Apple
   Clang 21 refuses that list where the argument is a structure or
   union whose first member is a structure without members, so such an
@@ -1401,11 +1392,6 @@ types (design 13.3).
   record's members, as `Initialiser` checks it, deciding the text by the
   member's token rather than the first token of the operation (a line
   marker inside an expression makes them differ).
-- [Medium] When generic functions are built (Stage 2), check a generic
-  function's name as a file-scope type name (design 7.1 rule 1) and
-  have its declaration claim the names of its instances as a generic
-  type's does (`claim_instance_space` in `src/syntax/parser.ml`, design
-  10.3), which only a declaration of a generic type reaches.
 - [Low] A type argument that carries a nullability qualifier of Clang
   or a keyword of an address space is refused (design 3.5 rule 2),
   because the encodings of design 10.3 have no row for either. If a
@@ -1452,6 +1438,42 @@ types (design 13.3).
 - [Low] Each edit of the emitter is wrapped in two line markers, so
   `--emit-c` shows a lowered alias over eight lines. An edit whose text
   and replaced tokens hold no newline could go without them.
+- [High] Package 3.1 scope added by design 7.1 as revised in 9b70e08,
+  not yet built, each with golden pairs: (1) no initialiser enters a
+  type parameter but `{0}`/`{}`, which keeps its reach through elided
+  braces, and brace elision into one is an error (`T arr[] = {0, 0}`,
+  `{ .a = 0 }`, `(T[]){0, 0}`); (2) a declaration in the body that gives
+  its identifier linkage has a type that mentions no type parameter
+  (`extern T x;`, `T helper(T);`; `static T cache;` stands); (3) rule 4
+  as one statement: null pointer constant status and
+  `__builtin_choose_expr` by a dependent constant are errors; (4)
+  attributes on a declaration whose type mentions a type parameter,
+  unless the 13.3 table of effects marks them as asking nothing of the
+  type, as one named check; (5) variably modified parameter types in
+  the head (`T (*m)[n]`).
+- [Medium] Generic functions, from the review of package 3.1:
+  `pointers_differ` reports no gap where compatibility with a type
+  parameter is unknown (`T *` against `_Complex int *`), though rule 3
+  needs `Answer true`; `refuse_dependent` scans every measurement of
+  the view for each constant, quadratic on long input (index the spans
+  by `first`); attribute arguments that C asks to be constant
+  (`aligned(sizeof(x))`, `vector_size`) bypass `refuse_dependent`,
+  which wants one funnel for constant arguments; attributes inside the
+  declarator of a generic prototype (`void (__attribute__((cold))
+  f)(T);`) pass rule 6, which wants one check over every attribute of
+  the declaration; and whether the head may define a tag or an
+  enumeration, which an instance would define twice, is an open design
+  question (`generic(T) enum E { A } f(T);` is accepted and `A` then
+  vanishes).
+- [Low] Generic functions, readability and representation:
+  `in_generic_function` is an ambient flag that `earlier_entity` and
+  `declare_in` read; pass the fact explicitly from
+  `read_generic_function`. `generic_function` could hold its function
+  type, recorded after reading, removing `generic_function_type`'s
+  `invalid_arg`. Split `read_generic_function` into named steps; make
+  `pointers_differ` a flat match and raise the parameter gap before
+  `crosses` in `refuse_conversion`; `object_of_first` and the
+  untargeted-argument message want plainer wording.
 - [Medium] Before a `try` in a generic function is lowered:
   `Lowering.moved_text` refuses a `Moved` edit inside the definition of
   a generic (`invalid_arg`), as its pieces may be pragma lines that a

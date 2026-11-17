@@ -47,6 +47,9 @@ type item =
   | Type_declaration of entity  (** a typedef name (design 3.1) *)
   | Generic_declaration
       (** a generic type (design 3.5), whose name alone is no type *)
+  | Generic_function_declaration
+      (** a generic function (design 7.1), whose name alone is no
+          function *)
 
 (** The typedef [name] of an argument (design 10.3), written as [line],
     after the lines that declare the tags it names. *)

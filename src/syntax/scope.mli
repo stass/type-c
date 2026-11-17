@@ -54,6 +54,16 @@ val declare : ('ordinary, 'tag) t -> string -> 'ordinary -> ('ordinary, 'tag) t
 (** Declares an ordinary identifier in the innermost scope, in place of
     any declaration of it there. *)
 
+val outer : ('ordinary, 'tag) t -> ('ordinary, 'tag) t
+(** The scopes around the innermost one, which is not file scope. *)
+
+val declare_outside :
+  ('ordinary, 'tag) t -> string -> 'ordinary -> ('ordinary, 'tag) t
+(** Declares an ordinary identifier in the scope around the innermost
+    one, which is not file scope, and makes it visible in the innermost
+    too: the scope of the type parameters of a generic function stands
+    inside file scope, which declares the function (design 7.1). *)
+
 val declared_in_innermost : ('ordinary, 'tag) t -> (string * 'ordinary) list
 (** The ordinary identifiers that the innermost scope declares, sorted by
     name, each with its declaration there. *)

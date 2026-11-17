@@ -123,6 +123,19 @@ let declare scopes name binding =
       instance_spaces = add_to_space name level.instance_spaces;
     }
 
+(* The scopes around the innermost one. *)
+let outer = function
+  | _ :: (_ :: _ as outer) -> outer
+  | [ _ ] | [] -> invalid_arg "Scope.outer"
+
+(* [name] declared in the scope around the innermost one and visible in
+   both: the scope of the type parameters of a generic function stands
+   inside file scope, which declares the function. *)
+let declare_outside scopes name binding =
+  let inner = innermost scopes in
+  { inner with visible = add_ordinary name binding inner.visible }
+  :: declare (outer scopes) name binding
+
 let find_tag scopes name = Names.find_opt name (innermost scopes).visible.tags
 
 let find_tag_in_innermost scopes name =
