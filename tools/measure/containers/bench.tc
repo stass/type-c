@@ -1,0 +1,166 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * The benchmark of the container library: bench N ROUNDS runs ROUNDS
+ * rounds of the phases of a vector(int) of N elements and of a region,
+ * and of those of a map(int, int) in bench_map.tc, each round with the
+ * same random numbers, and prints the time and checksum of each phase
+ * over all rounds.  The two sums go over the elements through the
+ * checked indexes of a slice and through the unchecked ones of the data
+ * pointer.  bench.c is the C twin.
+ */
+
+#include <stdio.h>
+
+#include "bench.tci"
+
+struct point {
+	int	x;
+	int	y;
+};
+
+static unsigned long long
+sum_checked(slice(int) items)
+{
+	unsigned long long sum;
+	size_t i;
+
+	sum = 0;
+	for (i = 0; i < items.len; i++)
+		sum += (unsigned)items[i];
+	return (sum);
+}
+
+static unsigned long long
+sum_unchecked(const vector(int) *v)
+{
+	unsigned long long sum;
+	size_t i;
+
+	sum = 0;
+	for (i = 0; i < v->length; i++)
+		sum += (unsigned)v->data[i];
+	return (sum);
+}
+
+static result(void, container_error)
+run_vector(size_t n)
+{
+	vector(int) v;
+	unsigned long long sum;
+	long long start;
+	uint32_t seed;
+	size_t i;
+
+	seed = BENCH_SEED;
+	vector_init(&v);
+	defer vector_free(&v);
+
+	start = now_ns();
+	for (i = 0; i < n; i++)
+		try vector_push(&v, (int)(next_random(&seed) >> 1));
+	phase_done(PHASE_VECTOR_PUSH, start, v.length);
+
+	start = now_ns();
+	sum = 0;
+	for (i = 0; i < n; i++) {
+		match (vector_get(&v, next_random(&seed) % n)) {
+		case Some(x):
+			sum += (unsigned)x;
+			break;
+		case None:
+			break;
+		}
+	}
+	phase_done(PHASE_VECTOR_GET, start, sum);
+
+	start = now_ns();
+	sum = sum_checked(vector_items(&v));
+	phase_done(PHASE_SUM_CHECKED, start, sum);
+
+	start = now_ns();
+	sum = sum_unchecked(&v);
+	phase_done(PHASE_SUM_UNCHECKED, start, sum);
+
+	start = now_ns();
+	try vector_append(&v, vector_items(&v));
+	phase_done(PHASE_VECTOR_APPEND, start, v.length);
+
+	start = now_ns();
+	sum = 0;
+	while (v.length > 0) {
+		match (vector_pop(&v)) {
+		case Some(x):
+			sum += (unsigned)x;
+			break;
+		case None:
+			break;
+		}
+	}
+	phase_done(PHASE_VECTOR_POP, start, sum);
+	return (Ok);
+}
+
+static result(void, container_error)
+run_region(size_t n)
+{
+	region r;
+	struct point *p;
+	unsigned long long sum;
+	long long start;
+	size_t i;
+
+	region_init(&r, 4096);
+	defer region_release(&r);
+
+	start = now_ns();
+	sum = 0;
+	for (i = 0; i < n; i++) {
+		p = region_new(struct point)(&r);
+		if (p == NULL)
+			return (Err(OutOfMemory));
+		p->x = (int)(i % 1000);
+		p->y = (int)(i % 7);
+		sum += (unsigned)(p->x + p->y);
+	}
+	phase_done(PHASE_REGION_NEW, start, sum);
+	return (Ok);
+}
+
+static int
+failed(result(void, container_error) r)
+{
+
+	match (r) {
+	case Ok:
+		return (0);
+	case Err(e):
+		match (e) {
+		case OutOfMemory:
+			fprintf(stderr, "bench: out of memory\n");
+			break;
+		case TooLarge:
+			fprintf(stderr, "bench: too large\n");
+			break;
+		}
+		return (1);
+	}
+}
+
+int
+main(int argc, char **argv)
+{
+	size_t n, rounds, round;
+
+	if (!bench_arguments(argc, argv, &n, &rounds))
+		return (2);
+	for (round = 0; round < rounds; round++)
+		if (failed(run_vector(n)) || failed(run_region(n)) ||
+		    failed(run_map(n)))
+			return (1);
+	print_phases();
+	return (0);
+}

@@ -570,3 +570,32 @@ qualifier of a pmu event, which the script checks: FreeBSD's libpmc
 drops the qualifiers of pmu-events names and counts kernel mode too
 until a fix (`pmu_parse_qualifiers` in `lib/libpmc/libpmc.c`) reaches
 it. p620 runs a libpmc and an `hwpmc` module built with that fix.
+
+`tools/measure/containers/` holds a benchmark of the container library
+of `test/run/containers.t` (package 3.6). `bench N ROUNDS` runs ROUNDS
+rounds of the phases of a `vector(int)`, a region and a `map(int, int)`
+of N elements and prints the nanoseconds and a checksum of each phase
+over all rounds; `bench.tc` and `bench_map.tc` both instantiate
+`vector(int)`. `bench.c` and `bench_map.c` do the same over
+`containers.h` and `containers.c`, a hand-written C twin of the library
+whose vector and map are declared and defined for each element type by
+macros, built twice: with external functions defined once in
+`containers.c`, and with `-DCONTAINERS_INLINE`, static inline functions
+defined in each unit, as Type-C defines its instances.
+`bench_common.c`, plain C linked into every program, holds the phases,
+the random numbers and the clock. `sum_checked` and `sum_unchecked` sum
+the vector through the checked indexes of a slice and through its data
+pointer. `tools/measure/containers.sh OUT [CC...]` builds the three
+programs with each backend (by default those of `test/run/backends.sh`)
+at `-O0` and `-O2`, checks that they print the same checksums, and
+writes a CSV to `OUT`, outside the repository, with the objects in
+`OUT.build`: the bytes of machine code of each object and program, the
+best of `RUNS` compile times of each unit and of `typec --emit-c`, the
+best of `RUNS` times of each phase for each `N:ROUNDS` of `SIZES`, and
+what `typec --stats` reports for each Type-C unit, the test's own units
+included. It runs on macOS, reading Mach-O sizes with `size -m`, and on
+ELF hosts with `size -A`.
+
+```sh
+tools/measure/containers.sh /Volumes/Optaine/measure-3.6/run/results.csv
+```

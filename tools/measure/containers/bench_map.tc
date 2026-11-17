@@ -1,0 +1,74 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * The map phases of a round of the benchmark: N puts of keys below 2 N,
+ * so some repeat, N lookups of which about half find their key, and a
+ * walk of the entries.  The keys are in a vector(int), whose instances
+ * this unit holds as well as bench.tc.  bench_map.c is the C twin.
+ */
+
+#include "bench.tci"
+
+static void
+add_value(const int *key, int *value, void *total)
+{
+
+	(void)key;
+	*(unsigned long long *)total += (unsigned)*value;
+}
+
+/* A random key below 2 n, which BENCH_MAX_N keeps within an int. */
+static int
+random_key(uint32_t *seed, size_t n)
+{
+
+	return ((int)(next_random(seed) % (2 * n)));
+}
+
+result(void, container_error)
+run_map(size_t n)
+{
+	map(int, int) m;
+	vector(int) keys;
+	unsigned long long sum;
+	long long start;
+	uint32_t seed;
+	size_t i, hits;
+
+	seed = BENCH_SEED;
+	map_init(&m, hash_int, equal_int);
+	defer map_free(&m);
+	vector_init(&keys);
+	defer vector_free(&keys);
+	for (i = 0; i < n; i++)
+		try vector_push(&keys, random_key(&seed, n));
+
+	start = now_ns();
+	for (i = 0; i < n; i++)
+		try map_put(&m, keys.data[i], (int)i);
+	phase_done(PHASE_MAP_PUT, start, m.count);
+
+	start = now_ns();
+	sum = 0;
+	hits = 0;
+	for (i = 0; i < n; i++) {
+		match (map_get(&m, random_key(&seed, n))) {
+		case Some(value):
+			sum += (unsigned)value;
+			hits++;
+			break;
+		case None:
+			break;
+		}
+	}
+	phase_done(PHASE_MAP_GET, start, sum + hits);
+
+	start = now_ns();
+	sum = 0;
+	map_each(&m, add_value, &sum);
+	phase_done(PHASE_MAP_EACH, start, sum);
+	return (Ok);
+}

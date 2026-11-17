@@ -1,0 +1,16 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/* The units of the Type-C benchmark; bench.h is that of the C twins. */
+
+#ifndef BENCH_TCI
+#define	BENCH_TCI
+
+#include "bench_common.h"
+#include "containers.tci"
+
+result(void, container_error)	run_map(size_t n);
+
+#endif /* !BENCH_TCI */
