@@ -44,3 +44,7 @@ let definition = function
   | Function name ->
       [ Printf.sprintf "%s { _Noreturn void %s(void); %s(); %s; }"
           trap_function_head name name builtin_call ]
+
+let definition_guard = function
+  | Builtin -> None
+  | Function name -> Some (trap_function ^ "__" ^ name)

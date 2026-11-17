@@ -126,7 +126,15 @@ type function_instance = {
   anchor : Tree.anchor;
 }
 
+(** What the unit is read for: a C unit, or the header of an interface
+    (design 9.3), which lowering writes with the definition of each
+    instance under its guard. *)
+type product = Unit_text | Header_text
+
 type t
+
+val product : t -> product
+(** The product that {!read} was given. *)
 
 val tags : t -> Ctype.tags
 val items : t -> item list
@@ -237,6 +245,8 @@ val types_compatible : t -> Tree.expression -> bool Unknown.answer option
 (** The answer of a [__builtin_types_compatible_p] that the reader has
     typed; see {!Expressions.types_compatible}. *)
 
-val read : Target.t -> Reader.t -> Parser.scopes -> (t, error) result
-(** [read target text scopes] reads the unit whose external declarations
-    [scopes] holds, parsed from [text], for [target]. *)
+val read :
+  Target.t -> product:product -> Reader.t -> Parser.scopes -> (t, error) result
+(** [read target ~product text scopes] reads the unit whose external
+    declarations [scopes] holds, parsed from [text], for [target], as
+    [product]. *)

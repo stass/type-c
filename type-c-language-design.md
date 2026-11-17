@@ -4007,8 +4007,11 @@ The header's skeleton, in order:
 #ifndef __tc_module__M          /* the guard of the header (13.5) */
 #define __tc_module__M
 /* the macro probe of the macro brackets */
-/* the lowered declarations of M.tci, with its #include lines in place */
+/* the lowered declarations of M.tci, with its #include lines in place
+   and, under --trap-function, the prototype of __tc_trap in front of
+   its first token */
 /* the instances that it defines at its end, each under its own guard */
+/* the definition of __tc_trap under its guard, under --trap-function */
 /* the enumeration assertion */
 /* the probe of 10.3, where it holds a packing bracket */
 /* (all of the above after the macro probe but the include lines: in
@@ -4088,6 +4091,18 @@ keeps no later header from defining it: with `struct s` incomplete in
 defined by `b.h`, whichever comes first. The guard of a header and the
 guard of an instance are names of different kinds (13.5), so the two
 never meet.
+
+Under `--trap-function=name` (10.5), the lowered inline functions of a
+header call `__tc_trap`, which the header declares as a unit does: its
+prototype in front of the first token of the text of the interface,
+after the include lines before it, which C lets be declared again, and its definition after the text, between `#ifndef T`,
+`#define T` and `#endif`, where the macro `T` is the guard of the trap
+function, named by the scheme of 13.5 from `name`. Two headers of one
+trap function can then be included together, and the first defines
+`__tc_trap`. Two of different trap functions define it twice, which the
+client's compiler refuses, rather than letting one header's functions
+call the other's trap function with no message. A header writes neither
+with the builtin trap, nor where lowering writes no trap for its unit.
 
 The layout typedef tells two definitions of an instance apart where its
 name does not: two libraries may each define a generic `vec` in a
@@ -5242,7 +5257,8 @@ declaration in a block may hide `name` where a trap stands, so a trap
 does not call it there. It calls `__tc_trap`, a name reserved to typec
 that nothing hides (13.5). A unit with a Type-C construct declares it
 at file scope in front of its own text and defines it after that text,
-both under the marker of typec's text (13.4):
+both under the marker of typec's text (13.4); a header guards the
+definition (9.3):
 
 ```c
 static inline _Noreturn void __tc_trap(void);
@@ -8594,6 +8610,9 @@ the others of its kind:
 - the include guard of the definition of an instance in an emitted
   header (9.3): `instance`, then the instance name, as in
   `__tc_instance__vector__i` for `vector(int)`;
+- the include guard of the definition of `__tc_trap` in an emitted
+  header (9.3, 10.5): `trap`, then the name of the trap function, as in
+  `__tc_trap__stop` under `--trap-function=stop`;
 - the layout typedef of an instance in an emitted header (9.3):
   `layout`, then the instance name, as in `__tc_layout__vector__i`;
 - the tag of the structure that a layout typedef points to (9.3):
@@ -8626,7 +8645,7 @@ headers that write one definition of an instance write one layout
 typedef, and two that write different ones write two that C refuses
 together; a header whose step reads the generic of an instance
 declared alone has no definition to digest and writes no layout
-typedef for it (9.3). The two kinds of guard and the macro of the
+typedef for it (9.3). The three kinds of guard and the macro of the
 macro probe are the only macros that a header defines, and the probe
 undefines its own before the first run. Each stands only in the
 directives and probe lines that `typec` writes, never among the tokens
@@ -8654,7 +8673,8 @@ braced list, each with the number of its `try`, and
 evaluates (above); they share its blocks and take the number that
 tells them apart. `__tc_trap` is the function that every trap calls
 under `--trap-function` (10.5), declared once in front of a unit's own
-text and defined once after it. `__tc_s0`,
+text and defined once after it, in a header under the guard of the trap
+function (9.3). `__tc_s0`,
 `__tc_i0`, `__tc_lo0` and `__tc_hi0` and so on are the temporaries of
 the test and of the conversion of a slice (above), declared where
 `__tc_ret` is, with the number of their test or conversion.

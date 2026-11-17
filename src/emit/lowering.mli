@@ -22,18 +22,12 @@
     definitions, as moved text in packing brackets, at the anchors that
     their placements name. *)
 
-(** What the lowered text becomes: a C unit, or the text of the header of
-    an interface (design 9.3), which writes each definition of an
-    instance under its guard ({!Emitter.Guarded}). *)
-type product = Unit_text | Header_text
-
 val edits :
   Typec_cpp.Reader.t ->
   trap:Trap.t ->
-  product:product ->
   Typec_sema.Declarations.t ->
   (Emitter.edit list * int, Typec_cpp.Reader.error) result
-(** [edits text ~trap ~product declarations] lowers the unit [text] that
+(** [edits text ~trap declarations] lowers the unit [text] that
     [declarations] read: its type declarations, constructor expressions,
     match statements, single-pattern tests and answered constructs, and
     the instances that it uses. Every trap is {!Trap.call} of [trap]. An
@@ -48,3 +42,18 @@ val edits :
     is made, and the edits come with the bytes charged to it; the error
     is at the first that would pass it. The texts of the instances are
     made first, in the order of their placements. *)
+
+val header_text :
+  Typec_cpp.Reader.t ->
+  trap:Trap.t ->
+  header_module:string ->
+  Typec_sema.Declarations.t ->
+  (string * int, Typec_cpp.Reader.error) result
+(** [header_text text ~trap ~header_module declarations] is {!edits} for
+    the header of an interface (design 9.3), whose [declarations] were read
+    as {!Typec_sema.Declarations.Header_text}: the lowered text that
+    {!Emitter.header_text} writes from them for the header's module
+    [header_module], with each definition of an instance under its guard
+    ({!Emitter.Guarded}), and the bytes charged. {!edits} takes the
+    declarations of a unit alone, and this function those of a header;
+    [Invalid_argument] for the other. *)

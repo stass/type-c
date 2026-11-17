@@ -33,8 +33,7 @@ let emit reader (lowered, counts) =
 
 let check_parsed reader (_unit, scopes) =
   match
-    Front_end.lower_parsed lp64 ~trap:Typec_emit.Trap.builtin
-      ~product:Unit_text reader scopes
+    Front_end.lower_parsed lp64 ~trap:Typec_emit.Trap.builtin reader scopes
   with
   | Ok lowered_with_counts -> emit reader lowered_with_counts
   | Error error -> Property.check_refusal error

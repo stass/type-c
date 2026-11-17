@@ -63,7 +63,7 @@ let read ?(file = "in.c") target source =
   | Ok (unit, scopes) ->
       Result.map
         (fun result -> (unit, result))
-        (Declarations.read target text scopes)
+        (Declarations.read target ~product:Unit_text text scopes)
   | Error error -> Error error
 
 (* The last expression statement of the body of the last function

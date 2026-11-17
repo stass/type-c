@@ -33,7 +33,7 @@ let read dialect target ~name contents =
   let* text = Reader.read ~name contents in
   let keywords = Target.keywords target dialect in
   let* unit, scopes = Parser.parse_with_scopes ~keywords text in
-  let* declarations = Declarations.read target text scopes in
+  let* declarations = Declarations.read target ~product:Unit_text text scopes in
   Ok { target; text; unit; declarations }
 
 type expression = { first : int; limit : int; typed : Expressions.typed }

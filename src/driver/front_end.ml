@@ -101,36 +101,47 @@ let parse dialect target text =
   let keywords = Typec_sema.Target.keywords target dialect in
   Typec_syntax.Parser.parse_with_scopes ~keywords text
 
-let lower_parsed target ~trap ~product text
-    (scopes : Typec_syntax.Parser.scopes) =
-  let* declarations = Declarations.read target text scopes in
-  let* edits, output_bytes =
-    Typec_emit.Lowering.edits text ~trap ~product declarations
+(* The counts of a unit that [declarations] read from [text], whose
+   lowering charged [output_bytes]. *)
+let counts_of text (scopes : Typec_syntax.Parser.scopes) declarations
+    ~output_bytes =
+  {
+    unit_bytes = Typec_cpp.Reader.length text;
+    instance_bytes = Declarations.instance_bytes declarations;
+    copy_bytes = Declarations.copy_bytes declarations;
+    output_bytes;
+    output_limit = Typec_sema.Output_limit.of_unit text;
+    longest_instance_code = Declarations.longest_instance_code declarations;
+    longest_name = scopes.longest_type_name;
+    slices = count_slice_checks (Declarations.slice_checks declarations);
+    selection = largest_selection (Declarations.selection_sizes declarations);
+    preludes = count_try_holders (Declarations.try_holders declarations);
+  }
+
+let lower_parsed target ~trap text scopes =
+  let* declarations =
+    Declarations.read target ~product:Unit_text text scopes
   in
-  let slices = count_slice_checks (Declarations.slice_checks declarations) in
-  let counts =
-    {
-      unit_bytes = Typec_cpp.Reader.length text;
-      instance_bytes = Declarations.instance_bytes declarations;
-      copy_bytes = Declarations.copy_bytes declarations;
-      output_bytes;
-      output_limit = Typec_sema.Output_limit.of_unit text;
-      longest_instance_code = Declarations.longest_instance_code declarations;
-      longest_name = scopes.longest_type_name;
-      slices;
-      selection =
-        largest_selection (Declarations.selection_sizes declarations);
-      preludes = count_try_holders (Declarations.try_holders declarations);
-    }
+  let* edits, output_bytes =
+    Typec_emit.Lowering.edits text ~trap declarations
   in
   let lowered : Typec_emit.Emitter.lowered =
     { trap; edits; assertions = assertions target edits }
   in
-  Ok (lowered, counts)
+  Ok (lowered, counts_of text scopes declarations ~output_bytes)
 
 let lower dialect target ~trap text =
   let* _unit, scopes = parse dialect target text in
-  lower_parsed target ~trap ~product:Unit_text text scopes
+  lower_parsed target ~trap text scopes
+
+let lower_header target ~trap ~header_module text scopes =
+  let* declarations =
+    Declarations.read target ~product:Header_text text scopes
+  in
+  let* header_text, output_bytes =
+    Typec_emit.Lowering.header_text text ~trap ~header_module declarations
+  in
+  Ok (header_text, counts_of text scopes declarations ~output_bytes)
 
 let counts_line counts =
   Printf.sprintf

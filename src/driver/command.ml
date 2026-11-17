@@ -217,18 +217,14 @@ let emit_header ~null ~stats ~trap (target : Target.t)
   in
   refuse_on_error
     (Typec_emit.Header.check_interface ~source:translation.source read tree);
-  let lowered, counts =
+  let header_text, counts =
     refuse_on_error
-      (Front_end.lower_parsed target ~trap ~product:Header_text read.unit
-         scopes)
+      (Front_end.lower_header target ~trap
+         ~header_module:(Typec_emit.Header.module_name plan.name)
+         read.unit scopes)
   in
   if stats then report_counts translation counts;
-  let lowered_read =
-    read_lowered translation
-      (Typec_emit.Emitter.header_text read.unit
-         ~header_module:(Typec_emit.Header.module_name plan.name)
-         lowered.edits)
-  in
+  let lowered_read = read_lowered translation header_text in
   write_header translation.emitted
     (refuse_on_error (Typec_emit.Header.write plan.name lowered_read))
 

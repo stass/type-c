@@ -88,7 +88,10 @@ let no_placements =
     readings = Ctype.Instances.empty;
     functions = [] }
 
+type product = Unit_text | Header_text
+
 type t = {
+  product : product;
   tags : Ctype.tags;
   items : item list;
   placements : placements;
@@ -104,6 +107,7 @@ type t = {
     (Tree.declaration_id, Expressions.zero_initialiser list) Hashtbl.t;
 }
 
+let product result = result.product
 let tags result = result.tags
 let items result = result.items
 let placements result = List.rev result.placements.texts
@@ -4999,7 +5003,7 @@ let latest_state_pragmas (tokens : Token.t array) declarations =
   done;
   latest
 
-let read target text (scopes : Parser.scopes) =
+let read target ~product text (scopes : Parser.scopes) =
   let tags = Ctype.create_tags () in
   let state =
     {
@@ -5060,7 +5064,7 @@ let read target text (scopes : Parser.scopes) =
             zero_initialisers; _ } =
         state
       in
-      Ok { tags; items; placements; entities; tag_types; linked; typed;
+      Ok { product; tags; items; placements; entities; tag_types; linked; typed;
            type_declarations; instance_bytes; copy_bytes;
            longest_instance_code; zero_initialisers }
   | exception (Failed error | Instance_failed error) -> Error error

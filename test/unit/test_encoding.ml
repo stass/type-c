@@ -25,7 +25,7 @@ let read ~file source =
   | Ok (_, ({ Parser.file_scope; _ } as scopes)) ->
       Result.map
         (fun result -> (file_scope, result))
-        (Declarations.read lp64 text scopes)
+        (Declarations.read lp64 ~product:Unit_text text scopes)
   | Error error -> Error error
 
 (* The encoding of the typedef name [t] that [source] declares at file

@@ -692,16 +692,16 @@ let () =
    ends with the packing probe under names of the header. *)
 let () =
   let anchor = Tree.anchor (List.nth (declarations unit) 2) in
-  let bracketed =
+  let text =
     made unit (fun output ->
-        Emitter.bracketed output ~at:anchor ~location:(at 2)
-          [ Guarded
-              { instance = c_name "s";
-                pieces =
-                  [ Emitter.generated output (at 2) "struct s { int n; };" ] }
-          ])
+        Emitter.header_text output ~header_module:"m"
+          [ Emitter.bracketed output ~at:anchor ~location:(at 2)
+              [ Guarded
+                  { instance = c_name "s";
+                    pieces =
+                      [ Emitter.generated output (at 2)
+                          "struct s { int n; };" ] } ] ])
   in
-  let text = Emitter.header_text unit ~header_module:"m" [ bracketed ] in
   check "a guarded definition in a header's text"
     (contains text
        "#pragma pack()\n#ifndef __tc_instance__s\n# 2 \"a.c\"\n\
@@ -709,6 +709,35 @@ let () =
   check "the probe of a header's text is named for the header"
     (contains text "struct __tc_pack_probe_1__m { char c; int i; };"
     && contains text "_Alignof(struct __tc_pack_probe_2__m)")
+
+(* Design 9.3, 10.5: where lowering wrote a trap, a header's text
+   declares the trap of a trap function in front of the main file's text
+   and defines it after the text under a guard named for the function;
+   a text without a trap and the builtin trap have neither. *)
+let () =
+  let trap_function = Option.get (Trap.calling "f") in
+  let header trap ~calls =
+    let lowered output =
+      let code = if calls then Emitter.trap_call output ^ ";" else ";" in
+      Emitter.header_text output ~header_module:"m"
+        [ Emitter.code output (Reader.range unit.tokens ~first:0 ~count:0)
+            ~location:(at 1) code ]
+    in
+    fst (Result.get_ok (Emitter.limited unit ~trap lowered))
+  in
+  let text = header trap_function ~calls:true in
+  check "the trap's prototype in front of a header's text"
+    (contains text
+       "static inline _Noreturn void __tc_trap(void);\n# 1 \"a.c\"\n");
+  check "the trap's definition after a header's text, under its guard"
+    (contains text
+       "\n#ifndef __tc_trap__f\nstatic inline _Noreturn void \
+        __tc_trap(void) { _Noreturn void f(void); f(); __builtin_trap(); }\n\
+        #endif\n");
+  check "no trap in a header's text without a trap"
+    (not (contains (header trap_function ~calls:false) "__tc_trap"));
+  check "no declarations of the builtin trap in a header's text"
+    (not (contains (header Trap.builtin ~calls:true) "__tc_trap"))
 
 (* Design 3.5 rule 7: an output is charged what emission writes for the
    unit, its own text and each edit with its markers and pragmas, and

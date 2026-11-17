@@ -25,7 +25,7 @@ let read ?(file = "in.c") target source =
   | Ok (_, ({ Parser.file_scope; _ } as scopes)) ->
       Result.map
         (fun result -> (file_scope, result))
-        (Declarations.read target text scopes)
+        (Declarations.read target ~product:Unit_text text scopes)
   | Error error -> Error error
 
 (* What [name] denotes at file scope at the end of what [read] read. *)
@@ -2770,7 +2770,7 @@ let read_type_c source =
     let starts_before item = (Tree.anchor item).before <= anchor.before in
     List.length (List.filter starts_before items) - 1
   in
-  (declaration_at, Declarations.read lp64 text scopes)
+  (declaration_at, Declarations.read lp64 ~product:Unit_text text scopes)
 
 (* [source]'s texts of instances in the order they stand: each instance
    name, whether the text is the typedefs of its arguments, with the tag

@@ -93,13 +93,23 @@ val parse :
 val lower_parsed :
   Typec_sema.Target.t ->
   trap:Typec_emit.Trap.t ->
-  product:Typec_emit.Lowering.product ->
   Typec_cpp.Reader.t ->
   Typec_syntax.Parser.scopes ->
   (Typec_emit.Emitter.lowered * counts, Typec_cpp.Reader.error) result
-(** [lower_parsed target ~trap ~product text scopes] is {!lower} of
-    [text] after {!parse} gave [scopes], lowered for [product]: the stages
-    after the parser. *)
+(** [lower_parsed target ~trap text scopes] is {!lower} of [text] after
+    {!parse} gave [scopes]: the stages after the parser. *)
+
+val lower_header :
+  Typec_sema.Target.t ->
+  trap:Typec_emit.Trap.t ->
+  header_module:string ->
+  Typec_cpp.Reader.t ->
+  Typec_syntax.Parser.scopes ->
+  (string * counts, Typec_cpp.Reader.error) result
+(** [lower_header target ~trap ~header_module text scopes] is the lowered
+    text of the interface [text], after {!parse} gave [scopes], from which
+    its header takes its runs ({!Typec_emit.Lowering.header_text}), and
+    the unit's counts; or the first error. It has no effects. *)
 
 val lower :
   Typec_syntax.Keyword_set.dialect ->

@@ -311,3 +311,115 @@ the text, and the client finds the layout that a Type-C unit finds.
   >     done
   >   done
   > done
+
+Under --trap-function, a header whose lowered text traps declares
+__tc_trap in front of its text and defines it at its end under a guard
+named for the trap function (design 9.3, 10.5). Two headers of one trap
+function are included together, and the first defines it; two of
+different trap functions fail to compile together. With the builtin
+trap, a header declares nothing of it.
+
+  $ cat > coin.tci <<'EOF'
+  > #ifndef COIN_TCI
+  > #define COIN_TCI
+  > type coin = | Heads(int n) | Tails(int n);
+  > static inline int coin_value(coin c) {
+  >   match (c) {
+  >   case Heads(n):
+  >     return n;
+  >   case Tails(n):
+  >     return -n;
+  >   }
+  > }
+  > #endif
+  > EOF
+  $ cat > die.tci <<'EOF'
+  > #ifndef DIE_TCI
+  > #define DIE_TCI
+  > type die = | One(int n) | Two(int n);
+  > static inline int die_value(die d) {
+  >   match (d) {
+  >   case One(n):
+  >     return n;
+  >   case Two(n):
+  >     return 2 * n;
+  >   }
+  > }
+  > #endif
+  > EOF
+  $ typec --emit-c-header -o plain.h coin.tci
+  $ grep -c __tc_trap plain.h
+  0
+  [1]
+  $ typec --trap-function=stop --emit-c-header coin.tci
+  $ typec --trap-function=stop --emit-c-header die.tci
+  $ grep '__tc_trap' coin.h
+  #pragma push_macro("__tc_trap")
+  #undef __tc_trap
+  static inline _Noreturn void __tc_trap ( void ) ;
+  return n ; } __tc_trap ( ) ; }
+  return - n ; } __tc_trap ( ) ; }
+  default : __tc_trap ( ) ; } }
+  #ifndef __tc_trap__stop
+  #define __tc_trap__stop
+  static inline _Noreturn void __tc_trap ( void ) { _Noreturn void stop ( void ) ; stop ( ) ; __builtin_trap ( ) ; }
+  #pragma pop_macro("__tc_trap")
+  $ cat > toss.c <<'EOF'
+  > #include <stdio.h>
+  > #include <stdlib.h>
+  > #include "coin.h"
+  > #include "die.h"
+  > _Noreturn void stop(void) { exit(3); }
+  > int main(void) {
+  >   coin c = { .tag = coin_Tails, .u.Tails.n = 2 };
+  >   die d = { .tag = die_Two, .u.Two.n = 3 };
+  >   printf("%d\n", coin_value(c) + die_value(d));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in "$clang" "$gcc"; do
+  >   for std in c11 gnu17; do
+  >     "$cc" -std=$std $strict toss.c -o toss && ./toss ||
+  >       echo "failed: $cc $std"
+  >   done
+  > done
+  4
+  4
+  4
+  4
+  $ typec --trap-function=halt --emit-c-header die.tci
+  $ for cc in "$clang" "$gcc"; do
+  >   "$cc" -std=c11 $strict -c toss.c -o toss.o 2>&1 |
+  >     grep -c 'redefinition of .__tc_trap'
+  > done
+  1
+  1
+
+A header whose interface includes another declares the trap in front of
+its own text, after the edits of the included text.
+
+  $ cat > flip.tci <<'EOF'
+  > #include "coin.tci"
+  > static inline int flip_value(coin c) {
+  >   match (c) {
+  >   case Heads(n):
+  >     return -n;
+  >   case Tails(n):
+  >     return n;
+  >   }
+  > }
+  > EOF
+  $ typec --trap-function=stop --emit-c-header flip.tci
+  $ cat > flip.c <<'EOF'
+  > #include <stdio.h>
+  > #include <stdlib.h>
+  > #include "flip.h"
+  > _Noreturn void stop(void) { exit(3); }
+  > int main(void) {
+  >   coin c = { .tag = coin_Tails, .u.Tails.n = 2 };
+  >   printf("%d\n", coin_value(c) + flip_value(c));
+  >   return 0;
+  > }
+  > EOF
+  $ "$clang" -std=c11 $strict flip.c -o flip && ./flip
+  0

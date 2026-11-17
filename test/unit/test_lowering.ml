@@ -15,8 +15,9 @@ open Typec_test_support
 
 let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
-(* The text that [source] is read to, its tree and its declarations. *)
-let read source =
+(* The text that [source] is read to, its tree and its declarations, read
+   for [product]. *)
+let read ?(product = Declarations.Unit_text) source =
   let text =
     let preprocessed = Preprocessed.text ~name:"in.tc" source in
     match Reader.read ~name:"in.tc" preprocessed with
@@ -30,15 +31,23 @@ let read source =
     | Error error -> failwith (Parser.error_message error)
   in
   let unit = List.map fst scopes.declarations in
-  match Declarations.read lp64 text scopes with
+  match Declarations.read lp64 ~product text scopes with
   | Ok declarations -> (text, unit, declarations)
   | Error error -> failwith (Reader.error_message error)
 
 (* The text that [source] is read to, its tree and its edits. *)
-let lowered ?(product = Lowering.Unit_text) source =
+let lowered source =
   let text, unit, declarations = read source in
-  match Lowering.edits text ~trap:Trap.builtin ~product declarations with
+  match Lowering.edits text ~trap:Trap.builtin declarations with
   | Ok (edits, _) -> (text, unit, edits)
+  | Error error -> failwith (Reader.error_message error)
+
+(* The lowered text of the header of the interface [source], of the
+   module [m], whose traps call as [trap] does. *)
+let header_text ?(trap = Trap.builtin) source =
+  let text, _, declarations = read ~product:Header_text source in
+  match Lowering.header_text text ~trap ~header_module:"m" declarations with
+  | Ok (text, _) -> text
   | Error error -> failwith (Reader.error_message error)
 
 let emitted source =
@@ -241,9 +250,8 @@ let header_guards () =
   let source =
     "type box(T) = struct { T value; };\nstruct s { box(int) b; };\n"
   in
-  let text, _, edits = lowered ~product:Header_text source in
   compares "the guarded definition of an instance in a header"
-    (words (Emitter.header_text text ~header_module:"m" edits))
+    (words (header_text source))
     "#pragma pack(push) #pragma pack() typedef int __tc_arg__i; struct \
      box__i; typedef struct box__i box__i; #ifndef __tc_instance__box__i \
      struct box__i { __tc_arg__i value ; } ; #endif #pragma pack(pop) struct \
@@ -713,7 +721,7 @@ let holds text part =
 let over_limit name source =
   let text, _, declarations = read source in
   match
-    Lowering.edits text ~trap:Trap.builtin ~product:Unit_text declarations
+    Lowering.edits text ~trap:Trap.builtin declarations
   with
   | Ok _ -> fails name "lowered"
   | Error { message; _ } ->
@@ -724,7 +732,7 @@ let over_limit name source =
 let under_limit name source =
   let text, _, declarations = read source in
   match
-    Lowering.edits text ~trap:Trap.builtin ~product:Unit_text declarations
+    Lowering.edits text ~trap:Trap.builtin declarations
   with
   | Ok _ -> ()
   | Error error -> fails name (Reader.error_message error)
@@ -784,7 +792,7 @@ let deep_patterns () =
   in
   let before = Gc.allocated_bytes () in
   ignore
-    (Lowering.edits text ~trap:Trap.builtin ~product:Unit_text declarations);
+    (Lowering.edits text ~trap:Trap.builtin declarations);
   let allocated = Gc.allocated_bytes () -. before in
   if allocated > deep_pattern_allocation then
     fails "the allocation of lowering a deep pattern over a long field"

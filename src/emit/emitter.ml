@@ -16,14 +16,15 @@ type moved_piece = Piece of piece | Pragma_line of pragma_line
 (* The pieces of a moved edit, made and charged when first forced. *)
 type moved_pieces = moved_piece list Lazy.t
 
-(* The output of a unit as lowering makes it: how it traps; the bytes
-   charged so far, which only [charge] raises, and the limit they are
-   held to; and the pieces of each moved edit, latest first, which
-   [limited] forces so that every edit is charged before the charge is
-   read. *)
+(* The output of a unit as lowering makes it: how it traps, and whether
+   lowering has written a trap; the bytes charged so far, which only
+   [charge] raises, and the limit they are held to; and the pieces of
+   each moved edit, latest first, which [limited] forces so that every
+   edit is charged before the charge is read. *)
 type output = {
   unit : Reader.t;
   trap : Trap.t;
+  mutable trap_called : bool;
   limit : int;
   mutable charged : int;
   mutable moved : moved_pieces list;
@@ -43,6 +44,16 @@ let over_limit output location : Reader.error =
   in
   { location; message = Rule.text (Rule.c_text message) }
 
+(* Forcing pieces may make more moved edits, which are forced in turn,
+   until none is left unmade. *)
+let rec force_moved output =
+  match output.moved with
+  | [] -> ()
+  | moved ->
+      output.moved <- [];
+      List.iter (fun pieces -> ignore (Lazy.force pieces)) (List.rev moved);
+      force_moved output
+
 (* The text of the unit outside its edits is at most the unit's own, so
    that is charged before anything is made. *)
 let limited unit ~trap make =
@@ -50,23 +61,14 @@ let limited unit ~trap make =
   let output =
     { unit;
       trap;
+      trap_called = false;
       limit = Output_limit.of_unit unit;
       charged = size;
       moved = [] }
   in
-  (* Forcing pieces may make more moved edits, which are forced in
-     turn, until none is left unmade. *)
-  let rec force_moved () =
-    match output.moved with
-    | [] -> ()
-    | moved ->
-        output.moved <- [];
-        List.iter (fun pieces -> ignore (Lazy.force pieces)) (List.rev moved);
-        force_moved ()
-  in
   let made_in_full () =
     let made = make output in
-    force_moved ();
+    force_moved output;
     made
   in
   match made_in_full () with
@@ -75,7 +77,9 @@ let limited unit ~trap make =
 
 let unit output = output.unit
 
-let trap output = output.trap
+let trap_call output =
+  output.trap_called <- true;
+  Trap.call output.trap
 
 (* A piece is written on the line of its run (see [moved_lines]). *)
 let made_piece output piece =
@@ -512,21 +516,40 @@ let first_own_token (tokens : Token.t array) =
   Array.find_index (fun (token : Token.t) -> not (File.is_universe token.owner))
     tokens
 
-(* The trap's prototype stands in front of the first token of the
-   unit's own text, where no edit begins before it, and is typec's text
-   as the assertions are; the marker after it restores the presumed
-   location of that token. Edits stand at the unit's own tokens, so
-   there is one wherever an edit calls the trap. *)
-let prototype_replacement (tokens : Token.t array) prototype =
-  match (prototype, first_own_token tokens) with
-  | [], _ | _, None -> []
+(* The first token of the main file, where the text of an interface
+   stands (design 9.3): the header writes no token of an included file. *)
+let first_main_token (tokens : Token.t array) =
+  Array.find_index
+    (fun (token : Token.t) -> token.owner.origin = File.Main)
+    tokens
+
+(* Whether [edit] goes in front of an insertion before the token
+   [first]: it begins before that token, or closes the construct that
+   ends at the token before it. *)
+let precedes_insertion ~first edit =
+  edit.range.first < first || (edit.range.first = first && edit.owner < first)
+
+(* The replacements of [edits], in order, with the trap's prototype in
+   front of the token [first]. The prototype is typec's text as the
+   assertions are; the marker after it restores the presumed location of
+   that token. An interface's included text precedes its own, so edits
+   may stand in front of the prototype. Edits stand at the unit's own
+   tokens, so there is a token [first] wherever an edit calls the
+   trap. *)
+let with_prototype (tokens : Token.t array) prototype ~first edits =
+  let replacements = List.map (replacement tokens) in
+  match (prototype, first) with
+  | [], _ | _, None -> replacements edits
   | _ :: _, Some first ->
       let text =
         marker assertions_location
         ^ String.concat "\n" prototype
         ^ marker tokens.(first).location
       in
-      [ { Reader.range = Reader.range tokens ~first ~count:0; text } ]
+      let before, after = List.partition (precedes_insertion ~first) edits in
+      replacements before
+      @ ({ Reader.range = Reader.range tokens ~first ~count:0; text }
+        :: replacements after)
 
 (* The trap is a fact that the edits rest on, as the probe is, so
    emission writes its prototype and definition where there are edits. *)
@@ -535,18 +558,41 @@ let trap_lines trap edits =
   | [] -> ([], [])
   | _ :: _ -> (Trap.prototype trap, Trap.definition trap)
 
+(* In a header, the definition of the trap stands under its guard, as
+   another header may define it too (design 9.3); the builtin trap has
+   none. *)
+let guarded_trap_definition trap =
+  match Trap.definition_guard trap with
+  | None -> []
+  | Some guard ->
+      (("#ifndef " ^ guard) :: Trap.definition trap) @ [ guard_closing ]
+
+(* A header writes the trap's declarations only where lowering wrote a
+   trap, so that a header that traps nowhere never clashes with another
+   of a different trap function. Moved edits write theirs when forced,
+   so all are forced before this is read. *)
+let header_trap_lines output =
+  if output.trap_called then
+    (Trap.prototype output.trap, guarded_trap_definition output.trap)
+  else ([], [])
+
 (* Reader.rewrite checks that the ranges do not overlap. *)
-let header_text (unit : Reader.t) ~header_module edits =
+let header_text output ~header_module edits =
+  force_moved output;
+  let unit = output.unit in
   let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;
-  Reader.rewrite unit (List.map (replacement unit.tokens) edits)
-  ^ assertion_block (probes ~suffix:("__" ^ header_module) edits)
+  let prototype, definition = header_trap_lines output in
+  Reader.rewrite unit
+    (with_prototype unit.tokens prototype
+       ~first:(first_main_token unit.tokens) edits)
+  ^ assertion_block (definition @ probes ~suffix:("__" ^ header_module) edits)
 
 let emit (unit : Reader.t) { trap; edits; assertions } =
   let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;
   let prototype, definition = trap_lines trap edits in
   Reader.rewrite unit
-    (prototype_replacement unit.tokens prototype
-    @ List.map (replacement unit.tokens) edits)
+    (with_prototype unit.tokens prototype
+       ~first:(first_own_token unit.tokens) edits)
   ^ assertion_block (assertions @ definition @ probes ~suffix:"" edits)

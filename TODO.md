@@ -136,9 +136,10 @@ is [type-c-language-design.md](type-c-language-design.md).
 `typec --emit-c-header` writes the redirect, the guard, the macro probe
 and the runs of the interface's own lowered text in macro brackets
 between its include lines, the definition of each instance under its
-guard where a point needs it complete, and the packing probe named for
-the header (design 9.3). The rest of the package, in
-the order of its commits:
+guard where a point needs it complete, the packing probe named for
+the header, and under `--trap-function` the trap's prototype and its
+definition under the guard of the trap function (design 9.3). The rest
+of the package, in the order of its commits:
 
 - [High] Instances at the end of the header: define there, each under
   its `__tc_instance__` guard, every instance that an application in the
@@ -155,18 +156,12 @@ the order of its commits:
   its definition fails, and lowering's texts at that anchor
   (`Reader.rewrite` has no insertion after the last token, so the text
   goes after the rewritten text, as `Emitter.header_text` writes the
-  probe).
-- [High] The trap in a header: under `--trap-function`, a lowered
-  inline body of the interface calls `__tc_trap`, which the header
-  neither declares nor defines. A unit declares it in front of its text
-  and defines it after; a header that did so would clash with another
-  header's definition, so the definition needs a guard, which 13.5 does
-  not name. Proposed: the prototype in front of the header's text
-  (repeatable) and the definition at its end under a guard named for
-  the trap function (`__tc_trap__name`), so that two headers of one
-  trap function share one definition and two of different ones fail to
-  compile together rather than one calling the other's function.
-  Needs the owner's decision on the guard and its name.
+  probe). `Declarations.read ~product:Header_text` is where the reading
+  goes. It needs a place after the last declaration: the parser takes
+  a view in front of each external declaration and none at the end
+  (`Parser.scopes`), and `Tree.anchor` names no place after the last
+  token. `in_trial` restores the placements, so the trial that keeps a
+  definition that reads is a trial, then the reading again for real.
 - [High] Layout typedefs: the `__tc_layout__` typedef of each declared
   instance, pointing to the `__tc_digest__` tag of the BLAKE2b-128
   digest of its definition's tokens (9.3, 13.5). Waits on the
@@ -189,6 +184,14 @@ the order of its commits:
 - [High] The enumeration assertion of 13.4 at the end of every emitted
   header, named for the header (`__tc_enum_probe__M`), with the message
   of the model's representation (design 9.3, 13.4; plan 4.8).
+- [Low] `Trap.calling` takes a name of typec's reserved `__tc_` space:
+  `--trap-function=__tc_trap` defines `__tc_trap` as calling itself, so
+  a trap recurses instead of trapping. Refuse the reserved prefix, with
+  the message of `Invalid_trap_function`.
+- [Medium] `Lowering.edits` and `Lowering.header_text` check at run time
+  that their declarations were read for their product
+  (`Declarations.product`); a phantom parameter of `Declarations.t`
+  would make the mismatch fail to compile.
 - [Low] `Reader.read_interface` passes over, unchecked, a token or an
   include line at the bottom of the main file before the text of the
   interface begins (before the marker of its line 1). No supported
@@ -204,13 +207,6 @@ the order of its commits:
   `read_preprocessed`, `Pipeline.plan_header` fills a `shape` with
   values of a translation to reuse its helpers, and `Invocation` defines
   `given` twice: factor them.
-- [Medium] `Front_end.lower_parsed ~product:Header_text` must be paired
-  with `Emitter.header_text`, and `Unit_text` with `Emitter.emit`, and
-  nothing ties the two: a header lowered as a unit writes its
-  definitions unguarded. Lowering could mark every definition and let
-  the emission entry decide whether to guard it, if the output limit's
-  charge of the guard lines can follow (`Emitter.limited` knows no
-  product).
 - [Medium] The writer reads the lowered text of the interface again
   (`Reader.read_interface` of `Emitter.applied`) to meet each token
   that it writes as a token, since the text of an edit is a string.

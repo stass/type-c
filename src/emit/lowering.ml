@@ -375,7 +375,7 @@ let construction_head (tokens : Token.t array)
 
 (* The trap of design 10.5 as an expression of type void, which every
    trap that lowering writes is, and as a statement. *)
-let trap output = Trap.call (Emitter.trap output)
+let trap output = Emitter.trap_call output
 
 let trap_statement output = trap output ^ ";"
 
@@ -2247,16 +2247,13 @@ let split_type_declarations declarations =
   List.partition_map split
     (Typec_sema.Declarations.type_declarations declarations)
 
-type product = Unit_text | Header_text
-
 (* What the texts of the placements are written from: the output of the
-   unit, what its reading found, its type declarations with no type
-   parameters, and what the lowered text becomes. *)
+   unit, what its reading found, and its type declarations with no type
+   parameters. *)
 type instance_context = {
   output : Emitter.output;
   declarations : Typec_sema.Declarations.t;
   named_types : (Spelling.c_name * Tree.type_declaration) list;
-  product : product;
 }
 
 (* Design 10.3: each typedef after the lines that declare its tags. *)
@@ -2373,7 +2370,7 @@ let application_location context
    definition so that two headers that define one can be included
    together (design 9.3); the rest of the texts may be repeated. *)
 let definition_text context instance pieces : Emitter.bracketed_text =
-  match context.product with
+  match Typec_sema.Declarations.product context.declarations with
   | Unit_text -> Unguarded pieces
   | Header_text ->
       Guarded
@@ -2460,8 +2457,24 @@ let unit_edits context ~generic_types =
     ~zero_initialisers:[]
     (Typec_sema.Declarations.typed declarations)
 
-let edits (text : Reader.t) ~trap ~product declarations =
+let all_edits output declarations =
+  let named_types, generic_types = split_type_declarations declarations in
+  let context = { output; declarations; named_types } in
+  instance_brackets context @ unit_edits context ~generic_types
+
+(* The product was decided when the declarations were read, so an entry
+   given those of the other product is a bug of its caller's. *)
+let check_product ~caller product declarations =
+  if Typec_sema.Declarations.product declarations <> product then
+    invalid_arg (caller ^ ": declarations read for another product")
+
+let edits (text : Reader.t) ~trap declarations =
+  check_product ~caller:"Lowering.edits" Typec_sema.Declarations.Unit_text
+    declarations;
+  Emitter.limited text ~trap (fun output -> all_edits output declarations)
+
+let header_text (text : Reader.t) ~trap ~header_module declarations =
+  check_product ~caller:"Lowering.header_text"
+    Typec_sema.Declarations.Header_text declarations;
   Emitter.limited text ~trap (fun output ->
-      let named_types, generic_types = split_type_declarations declarations in
-      let context = { output; declarations; named_types; product } in
-      instance_brackets context @ unit_edits context ~generic_types)
+      Emitter.header_text output ~header_module (all_edits output declarations))

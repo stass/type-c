@@ -106,7 +106,8 @@ let () =
         or_exit Parser.error_message (Parser.parse_with_scopes ~keywords text)
       in
       let result =
-        or_exit Reader.error_message (Declarations.read target text scopes)
+        or_exit Reader.error_message
+          (Declarations.read target ~product:Unit_text text scopes)
       in
       print_string contents;
       List.iter (print_identifier result) file_scope.ordinary

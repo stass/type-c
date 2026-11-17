@@ -218,10 +218,10 @@ let add_whole_line run text =
   close_line run;
   run.lines <- text :: run.lines
 
-(* The guard of an instance's definition is the one name of a run that
-   the macro bracket does not name, so that it stays defined after the
-   run (design 9.3); lowering writes no #define, which the reader would
-   take for a macro's definition. *)
+(* The guard of an instance's or the trap's definition is a name of a
+   run that the macro bracket does not name, so that it stays defined
+   after the run (design 9.3); lowering writes no #define, which the
+   reader would take for a macro's definition. *)
 let add_guard_line run : Reader.guard_line -> unit = function
   | If_not_defined { name; _ } ->
       add_whole_line run ("#ifndef " ^ name);

@@ -37,3 +37,10 @@ val definition : t -> string list
     {!builtin}; for a trap function [name], that of [__tc_trap], which
     declares [_Noreturn void name(void)] in its body, calls it, then
     [__builtin_trap()]. *)
+
+val definition_guard : t -> string option
+(** [definition_guard trap] is the include guard of {!definition} in the
+    header of an interface (design 9.3, 13.5): none for {!builtin};
+    [__tc_trap__name] for a trap function [name], so that two headers of
+    one trap function define [__tc_trap] once and two of different ones
+    fail to compile together. *)
