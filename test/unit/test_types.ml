@@ -776,6 +776,56 @@ let declaration_facts () =
        (Type_name.declaration (array int_type (Constant 3)) "a")
        "int a[3]"
 
+(* An instance of the generic [g] at [arguments], a structure, which
+   [level] tells apart from the other instances of a test. *)
+let instance_type level arguments =
+  let generic =
+    match Typec_syntax.Spelling.type_name ~at_file_scope:true "g" with
+    | Ok name -> name
+    | Error _ -> failwith "instance_type: no generic name"
+  in
+  let instance : Ctype.instance =
+    { generic; arguments = [ string_of_int level ];
+      argument_types = arguments; mentions_parameter = false }
+  in
+  Ctype.record (Ctype.declare_instance tags Struct instance ~define:ignore)
+
+(* A type whose spelling grows [width] times at each of [depth] levels,
+   as each level names the one below it [width] times. *)
+let rec crafted_type ~width depth =
+  if depth = 0 then int_type
+  else
+    let below = crafted_type ~width (depth - 1) in
+    instance_type depth (List.init width (fun _ -> below))
+
+(* Its whole spelling is millions of bytes; naming it may cost no more
+   than this many bytes, whatever its depth. *)
+let naming_allocation = 100_000.
+
+(* Every name that a diagnostic shows costs a bounded text, and a small
+   type is named whole. *)
+let bounded_names () =
+  let crafted = crafted_type ~width:4 10 in
+  let before = Gc.allocated_bytes () in
+  let name = Type_name.of_ctype crafted in
+  let allocated = Gc.allocated_bytes () -. before in
+  let small = instance_type 0 [ int_type; pointer char_type ] in
+  let accented = String.concat "" (List.init 150 (fun _ -> "\xc3\xa9")) in
+  let cut = Shown.cut accented in
+  check "a crafted type is named within a small allocation"
+    (allocated <= naming_allocation) true
+  && check "a crafted type's name is cut"
+       (String.length name <= Shown.max_length
+       && String.ends_with ~suffix:"..." name)
+       true
+  && check "a small instance is named whole" (Type_name.of_ctype small)
+       "g(int, char *)"
+  && check "a cut name ends at a character"
+       (String.length cut <= Shown.max_length
+       && String.is_valid_utf_8 cut
+       && String.ends_with ~suffix:"..." cut)
+       true
+
 (* Types that typec does not compute: each question that depends on one
    answers so, and the known parts still decide what they can. *)
 let unknown_facts () =
@@ -842,7 +892,7 @@ let () =
       member_facts (); doubling_typedefs (); oversized_composite ();
       enum_integer_composite_with_gcc (); return_qualifiers ();
       unsigned_short_parameter ();
-      declaration_facts () ]
+      declaration_facts (); bounded_names () ]
     @ List.map check_promotion promotion_cases
     @ List.map check_conversion conversion_cases
     @ List.map check_enum enum_cases

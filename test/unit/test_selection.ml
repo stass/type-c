@@ -64,7 +64,7 @@ let missing_values tree =
             })
         constructors
 
-let spelling = Selection.spelling ~most:max_int
+let spelling = Selection.spelling
 
 let missing tree = List.map spelling (missing_values tree)
 
@@ -418,7 +418,7 @@ let missing_in_linear_time () =
      match Selection.missing (wide_miss small_miss) with
      | Values { named; more } ->
          List.map spelling named
-         = List.map (wide_value small_miss) first
+         = List.map (fun i -> Shown.cut (wide_value small_miss i)) first
          && more = small_miss - 1 - Selection.max_named
      | Nothing_missing | Scrutinee_constructors _ -> false);
   check "a few values missing are each named"
@@ -486,7 +486,9 @@ let missing_of_many_fields () =
          List.length named = 8
          && List.for_all
               (fun value ->
-                String.length (Selection.spelling ~most:64 value) = 65)
+                let spelled = Selection.spelling value in
+                String.length spelled <= Shown.max_length
+                && String.ends_with ~suffix:"..." spelled)
               named
      | Nothing_missing | Scrutinee_constructors _ | Values _ -> false)
 

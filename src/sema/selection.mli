@@ -144,8 +144,7 @@ val defaulted : t -> Ctype.constructor list
     takes: those of the root's branches that are a leaf of the
     [default]. *)
 
-val spelling : most:int -> value -> string
+val spelling : value -> string
 (** [value] as it is written in a label, [Err(Overflow)] or
-    [Add(_, *Num(_))], cut after [most] + 1 bytes, so that a caller that
-    shows [most] can tell that it was cut; the work does not grow beyond
-    that. *)
+    [Add(_, *Num(_))], cut as {!Shown.cut} cuts a name; the work does not
+    grow beyond that. *)

@@ -32,20 +32,23 @@ let length_text = function
   | Unknown -> ""
   | Variable -> "*"
 
-(* A type that is not derived: its qualifiers, its name, then whatever
-   declarator the derivations above it have built. An array suffix follows
-   the name directly, as in Clang's diagnostics. *)
-let specified qualifiers name declarator =
-  let specifier = String.concat " " (qualifier_words qualifiers @ [ name ]) in
-  if declarator = "" || String.starts_with ~prefix:"[" declarator then
-    specifier ^ declarator
-  else specifier ^ " " ^ declarator
+(* What the declarator to the right of a type's specifier starts with,
+   which decides the spaces around it: a specifier is followed by a space
+   unless nothing or an array suffix follows it, as in Clang's
+   diagnostics, and a pointer's qualifiers by one unless nothing does. *)
+type start = Nothing | Bracket | Other
 
-let pointer_declarator qualifiers declarator =
-  match (qualifier_words qualifiers, declarator) with
-  | [], _ -> "*" ^ declarator
-  | words, "" -> "*" ^ String.concat " " words
-  | words, _ -> "*" ^ String.concat " " words ^ " " ^ declarator
+(* The start of a declarator that starts with [start] once a suffix that
+   starts with [suffix] is written after it. *)
+let with_suffix start ~suffix =
+  match start with Nothing -> suffix | Bracket | Other -> start
+
+let words add qualifiers ~separator =
+  List.iteri
+    (fun index word ->
+      if index > 0 then add separator;
+      add word)
+    (qualifier_words qualifiers)
 
 (* The array and function suffixes bind tighter than the pointer prefix
    (6.7.6), so a pointer to either is parenthesized. *)
@@ -100,89 +103,138 @@ let lowered_name tags t =
   | Unknown_type _ ->
       invalid_arg "Type_name.lowered_name"
 
-(* The declarator grows outward from the name as the type is unwrapped
-   from the outermost derivation to the specifier; [named] spells a
-   structure, union, enumeration or distinct type. *)
-let rec declared ~named t declarator =
-  let declaration = declared ~named in
+(* A declaration is written from left to right: what the derivations of
+   its type write before the name ([left], whose innermost part is the
+   specifier), the name, then what they write after it ([right]).
+   [named] writes a structure, union, enumeration or distinct type. *)
+let rec declared ~named add t name =
+  let start = if name = "" then Nothing else Other in
+  left ~named add t start;
+  add name;
+  right ~named add t
+
+(* [start] is that of the declarator that the derivations above [t] and
+   the name write between [left] and [right] of [t]. *)
+and left ~named add t start =
   match t.shape with
   | Pointer referenced ->
-      let declarator = pointer_declarator t.qualifiers declarator in
-      let declarator =
-        if parenthesized_under_pointer referenced then "(" ^ declarator ^ ")"
-        else declarator
-      in
-      declaration referenced declarator
-  | Array { element; length } ->
-      declaration element (declarator ^ "[" ^ length_text length ^ "]")
-  | Function { return; parameters } ->
-      declaration return
-        (declarator ^ "(" ^ parameter_list ~named parameters ^ ")")
-  | Void -> specified t.qualifiers "void" declarator
+      left ~named add referenced Other;
+      if parenthesized_under_pointer referenced then add "(";
+      add "*";
+      words add t.qualifiers ~separator:" ";
+      if qualifier_words t.qualifiers <> [] && start <> Nothing then add " "
+  | Array { element; _ } ->
+      left ~named add element (with_suffix start ~suffix:Bracket)
+  | Function { return; _ } ->
+      left ~named add return (with_suffix start ~suffix:Other)
+  | Void -> specifier add t.qualifiers start (fun () -> add "void")
   | Arithmetic arithmetic ->
-      specified t.qualifiers (Arithmetic.name arithmetic) declarator
+      specifier add t.qualifiers start (fun () ->
+          add (Arithmetic.name arithmetic))
   | Enum _ | Record _ | Distinct _ ->
-      specified t.qualifiers (named t) declarator
+      specifier add t.qualifiers start (fun () -> named add t)
   | Va_list ->
-      specified t.qualifiers Typec_syntax.Builtin_typedef.va_list_name
-        declarator
+      specifier add t.qualifiers start (fun () ->
+          add Typec_syntax.Builtin_typedef.va_list_name)
   | Unknown_type unknown ->
-      specified t.qualifiers ("<" ^ unknown.construct ^ ">") declarator
+      specifier add t.qualifiers start (fun () ->
+          add ("<" ^ unknown.construct ^ ">"))
 
-and parameter_list ~named = function
-  | Prototype { types = []; variadic = false } -> "void"
+and right ~named add t =
+  match t.shape with
+  | Pointer referenced ->
+      if parenthesized_under_pointer referenced then add ")";
+      right ~named add referenced
+  | Array { element; length } ->
+      add ("[" ^ length_text length ^ "]");
+      right ~named add element
+  | Function { return; parameters } ->
+      add "(";
+      parameter_list ~named add parameters;
+      add ")";
+      right ~named add return
+  | Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+  | Unknown_type _ ->
+      ()
+
+and parameter_list ~named add = function
+  | Prototype { types = []; variadic = false } -> add "void"
   | Prototype { types; variadic } ->
-      let ellipsis = if variadic then [ "..." ] else [] in
-      let parameter t = declared ~named t "" in
-      String.concat ", " (List.map parameter types @ ellipsis)
-  | Unspecified | Old_style _ -> ""
+      let parameter t () = declared ~named add t "" in
+      let ellipsis = if variadic then [ (fun () -> add "...") ] else [] in
+      separated add (List.map parameter types @ ellipsis)
+  | Unspecified | Old_style _ -> ()
+
+(* A type that is not derived: its qualifiers, its name, then the space
+   before the declarator. *)
+and specifier add qualifiers start write_name =
+  words add qualifiers ~separator:" ";
+  if qualifier_words qualifiers <> [] then add " ";
+  write_name ();
+  if start = Other then add " "
+
+and separated add writes =
+  List.iteri
+    (fun index write ->
+      if index > 0 then add ", ";
+      write ())
+    writes
 
 (* How a diagnostic names a structure, union, enumeration or distinct
    type: by its tag, or by the name of its declaration. An instance is
    named by its application, with typedef names expanded, not by the C
    name that it lowers to (design 10.3). *)
-let rec shown_name t =
+let rec shown_name add t =
   match t.shape with
-  | Enum tag -> tag_name "enum" tag.enum_name
+  | Enum tag -> add (tag_name "enum" tag.enum_name)
   (* A type parameter is named as the generic names it. *)
-  | Record { record_name = Opaque_name name; _ } -> name
+  | Record { record_name = Opaque_name name; _ } -> add name
   (* A type declaration's structure is named as the declaration names it. *)
-  | Record { record_name = Alias_name name; _ } -> name
-  | Record { record_name = Variant_name name; _ } -> of_variant name
+  | Record { record_name = Alias_name name; _ } -> add name
+  | Record { record_name = Variant_name name; _ } -> variant_text add name
   | Record { record_name = Instance_name instance; _ }
   | Distinct { distinct_instance = Some instance; _ } ->
-      application_text instance
+      application_text add instance
   | Record tag ->
-      tag_name (record_keyword tag.kind) (record_tag_name tag.record_name)
-  | Distinct distinct -> distinct.distinct_name
+      add (tag_name (record_keyword tag.kind) (record_tag_name tag.record_name))
+  | Distinct distinct -> add distinct.distinct_name
   | Void | Arithmetic _ | Pointer _ | Va_list | Array _ | Function _
   | Unknown_type _ ->
       invalid_arg "Type_name.shown_name"
 
-and application_text (instance : Ctype.instance) =
-  let argument t = declared ~named:shown_name t "" in
-  (instance.generic :> string)
-  ^ "("
-  ^ String.concat ", " (List.map argument instance.argument_types)
-  ^ ")"
+and application_text add (instance : Ctype.instance) =
+  let argument t () = declared ~named:shown_name add t "" in
+  add (instance.generic :> string);
+  add "(";
+  separated add (List.map argument instance.argument_types);
+  add ")"
 
-and of_variant (name : Ctype.variant_name) =
+and variant_text add (name : Ctype.variant_name) =
   match name with
-  | Declared declared -> (declared :> string)
-  | Applied instance -> application_text instance
+  | Declared declared -> add (declared :> string)
+  | Applied instance -> application_text add instance
 
-let of_instance = application_text
-let declaration t name = declared ~named:shown_name t name
+(* Every name that a diagnostic shows is written through [Shown.bounded],
+   so that a type of any size costs a bounded text to name. *)
+let of_instance instance =
+  Shown.bounded (fun add -> application_text add instance)
+
+let of_variant name = Shown.bounded (fun add -> variant_text add name)
+
+let declaration t name =
+  Shown.bounded (fun add -> declared ~named:shown_name add t name)
+
 let of_ctype t = declaration t ""
 
 type lowered = { text : string; spelled : Ctype.typedef_name list }
 
 let lowered_declaration tags t name =
+  let buffer = Buffer.create 64 in
   let spelled = ref [] in
-  let named t =
+  let named add t =
     let text, typedef = lowered_name tags t in
     Option.iter (fun typedef -> spelled := typedef :: !spelled) typedef;
-    text
+    add text
   in
-  let text = declared ~named t name in
-  { text; spelled = List.rev !spelled }
+  declared ~named (Buffer.add_string buffer) t name;
+  { text = Buffer.contents buffer; spelled = List.rev !spelled }

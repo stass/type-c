@@ -276,11 +276,7 @@ type answer =
   | Compatible of bool
 type answered = { construct : Tree.span; answer : answer }
 
-let max_quoted = 64
-
-let quote text =
-  if String.length text <= max_quoted then "'" ^ text ^ "'"
-  else "'" ^ String.sub text 0 max_quoted ^ "...'"
+let quote text = "'" ^ Shown.cut text ^ "'"
 
 let quoted_variant name = quote (Type_name.of_variant name)
 
@@ -5875,7 +5871,7 @@ and constructor_list names ~more =
 and value_list values ~more =
   listed ~one:"the value" ~several:"the values" ~more
     (List.map
-       (fun value -> quote (Selection.spelling ~most:max_quoted value))
+       (fun value -> quote (Selection.spelling value))
        values)
 
 (* The quoted names [quoted], after the noun [one] or [several], and the

@@ -454,21 +454,9 @@ let missing tree =
               named;
           more }
 
-(* Raised once a spelling holds more than the bytes asked for. *)
-exception Spelled
-
-let spelling ~most value =
-  let text = Buffer.create 64 in
-  let add piece =
-    let room = most - Buffer.length text in
-    if String.length piece <= room then Buffer.add_string text piece
-    else begin
-      Buffer.add_substring text piece 0 (room + 1);
-      raise Spelled
-    end
-  in
-  (* Each field adds at least one byte, so a long field list is cut
-     after the bytes asked for. *)
+(* Each field adds at least one byte, so [Shown.bounded] stops a long
+   field list once the text is cut. *)
+let write_value add value =
   let rec write = function
     | Unread -> add "_"
     | Holds { constructor; through_pointer; read } ->
@@ -494,5 +482,6 @@ let spelling ~most value =
         write Unread;
         read
   in
-  (try write value with Spelled -> ());
-  Buffer.contents text
+  write value
+
+let spelling value = Shown.bounded (fun add -> write_value add value)

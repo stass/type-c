@@ -442,19 +442,6 @@ let declaration_state tags (anchor : Tree.anchor option) view =
     texts_at = { view; before; typedef_names = []; tags = [] };
     instance_uses = [] }
 
-(* An application can be long, so its name is cut to this many bytes,
-   at a character, before a message quotes it. *)
-let max_shown_name = 200
-
-let shown_instance instance =
-  let name = Type_name.of_instance instance in
-  let is_continuation index = Char.code name.[index] land 0xC0 = 0x80 in
-  let rec cut length =
-    if length > 0 && is_continuation length then cut (length - 1)
-    else String.sub name 0 length ^ "..."
-  in
-  if String.length name <= max_shown_name then name else cut max_shown_name
-
 let in_instance_definition state = Option.is_some state.nesting
 
 (* The tokens of a generic's definition, which each reading of it reads
@@ -2104,7 +2091,7 @@ and fail_completed_here state nesting t (completed : Location.t) =
       "the instance %s needs %s complete where its text stands, before \
        the external declaration that completes it at %s:%d; complete it \
        in an earlier one"
-      (quote (shown_instance nesting.defining))
+      (quote (Type_name.of_instance nesting.defining))
       (quote (Type_name.of_ctype t))
       completed.file completed.line
   in
@@ -3776,7 +3763,7 @@ and instance_error state application instance (error : error) =
     location = location_of state application;
     message =
       Printf.sprintf "in the instance %s that this %s names, at %s:%d: %s"
-        (quote (shown_instance instance))
+        (quote (Type_name.of_instance instance))
         (cause state instance) error.location.file error.location.line
         error.message;
   }
@@ -3790,7 +3777,7 @@ and fail_nesting state application instance (link : nesting) =
           instances that each define the next, which the %s at %s:%d \
           began; a chain holds at most %d"
          (cause state instance)
-         (quote (shown_instance instance))
+         (quote (Type_name.of_instance instance))
          max_nesting (cause state link.first) began.file began.line
          max_nesting)
   in
@@ -3810,7 +3797,7 @@ and instances_refusal state { depth = _; began; first; defining; applied } =
        unit, those that definition checks read included, in a chain of \
        instances that the %s at %s:%d began"
       (cause state defining)
-      (quote (shown_instance defining))
+      (quote (Type_name.of_instance defining))
       instance_budget (cause state first) began.file began.line
   in
   Instance_failed
@@ -3989,7 +3976,7 @@ and refuse_inline_use state span instance =
        (Printf.sprintf
           "an inline definition of a function with external linkage uses \
            the instance %s, which has internal linkage (C11 6.7.4p3)"
-          (quote (shown_instance instance))))
+          (quote (Type_name.of_instance instance))))
 
 and used_arguments (used : function_instance) =
   List.map (fun t -> (used.first_use, t)) used.type_arguments
@@ -4083,7 +4070,7 @@ and refuse_state_pragmas state span (used : function_instance)
              and the `#pragma` line at %s:%d, which sets state, stands \
              between that place and the definition of its generic, whose \
              pragmas the instance is compiled under"
-            (quote (shown_instance used.instance))
+            (quote (Type_name.of_instance used.instance))
             location.file location.line))
 
 (* The head of a function definition: its specifiers and the type that

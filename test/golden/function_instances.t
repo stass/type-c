@@ -187,7 +187,7 @@ chain is refused at the call in the definition, with no use of `deep`.
   > generic(T) void deep(T *p) { deep(&p); }
   > EOF
   $ ./golden.exe deep.tc
-  deep.tc:1: error: the use would define the instance 'deep(T *********************************************************...' after a chain of 64 instances that each define the next, which the use at deep.tc:1 began; a chain holds at most 64 [instance-nesting]
+  deep.tc:1: error: the use would define the instance 'deep(T *****************************************************************)' after a chain of 64 instances that each define the next, which the use at deep.tc:1 began; a chain holds at most 64 [instance-nesting]
   [1]
   $ cat > same.tc <<'EOF'
   > generic(T) void same(T *p) { same(p); }

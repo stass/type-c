@@ -447,6 +447,9 @@ is [type-c-language-design.md](type-c-language-design.md).
   - The parser quotes names with backticks, the typing stages with
     single quotes as GCC and Clang do; pick one, in `Parser.quoted`
     and the parser's literal backticks (about 260 golden lines).
+    `Parser.quoted` also cuts at 40 bytes, which may split a UTF-8
+    sequence, where the typing stages cut with `Shown.cut`; one cut
+    goes with the one quoting.
 - [Medium] The `Unknown_type` arm of `Expressions.generic_call` types
   no callee at all and may be unreachable, as `generic-function-form`
   refuses the function types that could reach it: show it reachable
@@ -645,17 +648,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] The diagnostics of a qualified constructor `T.C` quote only the
   first token of `T`, so `list(int).None` reports that "the variant
   'list'" has no constructor `None`. Quote the whole type name.
-- [Low] Names in diagnostics are cut in two ways: `Expressions.quote`
-  at 64 bytes, which may split a UTF-8 sequence, and
-  `Declarations.shown_instance` at 200 bytes on a character boundary;
-  the variant message of `Initialiser.refuse_opening` cuts none, and an
-  instance name may be thousands of bytes long. Use one cut, on a
-  character boundary, everywhere a name is quoted. `Type_name.of_ctype`
-  also builds the whole spelling before `quote` cuts it, and an
-  instance is spelled by its application, several times its encoding:
-  a crafted type of 4096 nodes, each an instance of 800 arguments,
-  takes about 290 MB to name in a message. Give `Type_name` a capped
-  buffer, as `Encoding.add` has, so every message is bounded at once.
 - [Medium] Two guarantees of the names derived from an instance rest on
   callers, not on types: `Spelling.instance` takes the encodings of the
   arguments as plain strings, and `Ctype.instance` is a public record,
