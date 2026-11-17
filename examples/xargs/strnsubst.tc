@@ -1,0 +1,81 @@
+/* $xMach: strnsubst.c,v 1.3 2002/02/23 02:10:24 jmallett Exp $ */
+
+/*
+ * Copyright (c) 2002 J. Mallett.  All rights reserved.
+ * You may do whatever you want with this file as long as
+ * the above copyright and this notice remain intact, along
+ * with the following statement:
+ * 	For the man who taught me vi, and who got too old, too young.
+ */
+
+#include <err.h>
+#include <stdlib.h>
+#include <string.h>
+
+result(char *, void)	strnsubst(const char *, const char *, const char *,
+			    size_t);
+
+/*
+ * Returns a string consisting of s1 with match replaced with replstr as
+ * many times as it occurs, in memory of maxsize bytes that the caller
+ * frees.  If replstr is NULL, then that internally is changed to a
+ * nil-string, so that we can still pretend to do somewhat meaningful
+ * substitution.  If maxsize is 0, s1 is duplicated unchanged.
+ *
+ * Returns Err, and no string, if the constructed string with its NUL
+ * would be more than maxsize bytes large.
+ */
+result(char *, void)
+strnsubst(const char *s1, const char *match, const char *replstr,
+    size_t maxsize)
+{
+	slice(char) s2;		/* zeroed, so NUL-terminated past len */
+	size_t len, n;		/* the bytes of s2 in use; of the next part */
+	const char *this;
+	char *buf;
+
+	/*
+	 * If maxsize is 0 then set it to the length of s1, because we have
+	 * to duplicate s1.
+	 */
+	if (maxsize == 0) {
+		match = NULL;
+		maxsize = strlen(s1) + 1;
+	}
+	buf = calloc(1, maxsize);
+	if (buf == NULL)
+		err(1, "calloc");
+	/* The last byte, for the NUL, lies outside every copy. */
+	s2 = slice_unchecked(buf, maxsize - 1);
+	len = 0;
+
+	if (replstr == NULL)
+		replstr = "";
+
+	if (match == NULL) {
+		n = strlen(s1);
+		memcpy(slice_sub(s2, 0, n).data, s1, n);
+		return (Ok(s2.data));
+	}
+
+	for (;;) {
+		this = strstr(s1, match);
+		if (this == NULL)
+			break;
+		if ((len + strlen(s1) + strlen(replstr) -
+		    strlen(match) + 1) > maxsize) {
+			free(s2.data);
+			return (Err);
+		}
+		n = (size_t)(this - s1);
+		memcpy(slice_sub(s2, len, len + n).data, s1, n);
+		len += n;
+		n = strlen(replstr);
+		memcpy(slice_sub(s2, len, len + n).data, replstr, n);
+		len += n;
+		s1 = this + strlen(match);
+	}
+	n = strlen(s1);
+	memcpy(slice_sub(s2, len, len + n).data, s1, n);
+	return (Ok(s2.data));
+}
