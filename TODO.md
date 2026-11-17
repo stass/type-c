@@ -657,6 +657,15 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Declarations
 
+- [Low] Every point that needs a type complete must call
+  `needs_complete` (`src/sema/declarations.ml`) to define a generic
+  type's instance that only a pointer has met; the type argument of a
+  generic function was a point that did not, and refused
+  `box(option(int)) a; clear(&a);` for `type box(T) = struct { T *items; };`.
+  The list of callers holds by review. Make the question itself define
+  the instance: one query of completeness, used by `Value_type` and
+  every other check, that goes through `Ctype.define_instance`, so no
+  check can ask whether a type is complete without defining it.
 - [Medium] A `#pragma pack` line in force at the definition of a
   generic (function or type) is not carried to its instances: every
   instance stands in the bracket of design 10.3 and has the packing of

@@ -105,3 +105,30 @@ its one use defines 1023 instances.
   > done
   ok
   ok
+
+A type argument is defined where the instance needs it complete,
+though the instance of a generic type that holds it only through a
+pointer left it undefined: deduced, written, and deduced in the
+reading of another instance.
+
+  $ cat > pointer_member.tc <<'EOF'
+  > type box(T) = struct { T *items; };
+  > generic(T) void clear(box(T) *b) { b->items = 0; }
+  > generic(T) void clear_options(box(option(T)) *b) { clear(b); }
+  > static void (*clear_long)(box(option(long)) *) = clear(option(long));
+  > int main(void) {
+  >   box(option(int)) a;
+  >   box(option(char)) c;
+  >   box(option(long)) l;
+  >   clear(&a);
+  >   clear_options(&c);
+  >   clear_long(&l);
+  >   return a.items != 0 || c.items != 0 || l.items != 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o pointer_member pointer_member.tc &&
+  >     ./pointer_member && echo ok
+  > done
+  ok
+  ok

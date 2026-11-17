@@ -3796,6 +3796,9 @@ and check_type_argument state span (argument : Expressions.type_argument) =
     | Deduced t -> t
   in
   refuse_changed_mention state (span, t);
+  (* A value type is complete, so the argument is a point that needs it
+     so: an application that only a pointer has met is defined here. *)
+  needs_complete state t;
   let refuse problem =
     fail state span
       (Rule.message Type_argument
