@@ -3635,7 +3635,10 @@ third.
   first (C11 6.8.6.4p1), the block that is said next would lose the
   backend's diagnostic, and an unknown type does not say which case it
   is. In a function that returns a value the form needs no type of `e`,
-  so an operand of unknown type is no error there.
+  so an operand of unknown type is no error there. A return type that
+  the front end does not know may be void, so the first `return e;` in
+  the scope of a `defer` statement is the point that needs the answer,
+  and it is refused there as 13.3 says.
 
 Each refusal of the form has a code of its own (13.6), so that a count
 tells them apart: one for each of the two refusals that follow from the

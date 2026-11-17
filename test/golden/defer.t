@@ -1092,3 +1092,277 @@ operand that only uses a tag declares nothing.
   $ ./golden.exe return_uses.tc
   return_uses.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
   [1]
+
+A function that returns a value and holds a `return e;` in the scope of
+a defer statement names its return type through a call of its own name
+(design 13.5). Where that call cannot be written, the function is
+refused, each case with a code of its own; a function without such a
+`return` is not.
+
+  $ cat > form_allowed.tc <<'EOF'
+  > void g(void);
+  > int f(int a, char *b) { defer g(); return a + *b; }
+  > int h(void) { defer g(); return 1; }
+  > void v(int) { defer g(); return; }
+  > long w(int w) { if (w) return 1; { defer g(); } return 0; }
+  > void x(void) { defer g(); return g(); }
+  > EOF
+  $ ./golden.exe form_allowed.tc
+  form_allowed.tc:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+The parameter list declares the function's own name, which would hide
+the function at the call, as a parameter or as an enumeration constant.
+
+  $ cat > own_name.tc <<'EOF'
+  > void g(void);
+  > long f(int f) { defer g(); return f; }
+  > EOF
+  $ ./golden.exe own_name.tc
+  own_name.tc:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  [1]
+
+  $ cat > own_enumerator.tc <<'EOF'
+  > void g(void);
+  > long f(enum { f } e) { defer g(); return e; }
+  > EOF
+  $ ./golden.exe own_enumerator.tc
+  own_enumerator.tc:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  [1]
+
+  $ cat > own_name_c.tc <<'EOF'
+  > # 1 "own_name_c.tc"
+  > # 1 "c.h" 1
+  > void g(void);
+  > long f(int f) { _Defer g(); return f; }
+  > # 2 "own_name_c.tc" 2
+  > EOF
+  $ ./golden.exe own_name_c.tc
+  c.h:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  [1]
+
+  $ cat > own_name_old_style.tc <<'EOF'
+  > void g(void);
+  > long f(f) long f; { defer g(); return f; }
+  > EOF
+  $ ./golden.exe own_name_old_style.tc
+  own_name_old_style.tc:2: the parameter list declares 'f', the name of the function, which hides the function from the call of it that the form of a `return e;` in the scope of a `defer` statement writes; rename it (design 13.5) [TC0065]
+  [1]
+
+A name that a nested parameter list declares hides nothing at the call.
+
+  $ cat > own_name_nested.tc <<'EOF'
+  > void g(void);
+  > long f(long (*p)(int f)) { defer g(); return p(0); }
+  > EOF
+  $ ./golden.exe own_name_nested.tc
+  own_name_nested.tc:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+A prototype scope of the head other than the parameter list, as that of
+a returned function pointer or of a member, is another scope.
+
+  $ cat > head_prototypes.tc <<'EOF'
+  > void g(void);
+  > long (*f(int a))(int f) { defer g(); return 0; }
+  > long (*h(int a))(int b) { int b = a; defer g(); return 0; }
+  > long (*k(int a))(struct s *b) { struct s { int x; }; defer g(); return 0; }
+  > struct r { int (*fp)(int x); } m(int a) {
+  >   int x = a;
+  >   defer g();
+  >   return (struct r){0};
+  > }
+  > EOF
+  $ ./golden.exe head_prototypes.tc
+  head_prototypes.tc:2: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+The outermost block of the body declares a name that the parameter list
+declares. C refuses an ordinary identifier there and lets a tag be
+completed, which the body's block of its own would make another tag.
+
+  $ cat > redeclared_tag.tc <<'EOF'
+  > void g(void);
+  > int f(struct s *p) {
+  >   struct s { int a; };
+  >   defer g();
+  >   return p->a;
+  > }
+  > EOF
+  $ ./golden.exe redeclared_tag.tc
+  redeclared_tag.tc:3: the outermost block of the body declares 's' again, which the parameter list declares; the form of a `return e;` in the scope of a `defer` statement puts the body in a block of its own, where this would declare another (design 13.5) [TC0066]
+  [1]
+
+  $ cat > redeclared_ordinary.tc <<'EOF'
+  > void g(void);
+  > int f(int a) { int a = 0; defer g(); return a; }
+  > EOF
+  $ ./golden.exe redeclared_ordinary.tc
+  redeclared_ordinary.tc:2: 'a' is declared twice in one scope without linkage (C11 6.7p3)
+  [1]
+
+A tag that an inner block declares is another tag in C as well.
+
+  $ cat > inner_tag.tc <<'EOF'
+  > void g(void);
+  > int f(struct s *p) {
+  >   { struct s { int b; }; }
+  >   defer g();
+  >   return p != 0;
+  > }
+  > EOF
+  $ ./golden.exe inner_tag.tc
+  inner_tag.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+Two declarations of the function carry `target` attributes whose
+arguments differ, token for token: they declare two versions.
+
+  $ cat > target_versions.tc <<'EOF'
+  > void g(void);
+  > int f(void) __attribute__((target("avx2,fma")));
+  > __attribute__((target("fma,avx2"))) int f(void) { defer g(); return 1; }
+  > EOF
+  $ ./golden.exe target_versions.tc
+  target_versions.tc:3: 'f' is declared with `target` attributes whose arguments differ, as versions of one function, which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot name (design 13.5) [TC0067]
+  [1]
+
+  $ cat > target_same.tc <<'EOF'
+  > void g(void);
+  > int f(void) __attribute__((target("avx2")));
+  > __attribute__((target("avx2"))) int f(void) { defer g(); return 1; }
+  > EOF
+  $ ./golden.exe target_same.tc
+  target_same.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+The `target` attributes of one declaration are one fact of it.
+
+  $ cat > target_pair.tc <<'EOF'
+  > void g(void);
+  > int f(int a) __attribute__((target("avx2"), target("fma")));
+  > __attribute__((target("avx2"), target("fma"))) int f(int a) {
+  >   defer g();
+  >   return a;
+  > }
+  > EOF
+  $ ./golden.exe target_pair.tc
+  target_pair.tc:4: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+A declaration of the function carries a marked attribute (design 13.3),
+under any of its spellings, or follows a Clang overload of its name.
+
+  $ cat > marked.tc <<'EOF'
+  > void g(void);
+  > __attribute__((overloadable)) int f(int a) { defer g(); return a; }
+  > EOF
+  $ ./golden.exe marked.tc
+  marked.tc:2: a declaration of 'f' carries the attribute 'overloadable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  [1]
+
+  $ cat > marked_earlier.tc <<'EOF'
+  > void g(void);
+  > [[clang::availability(macos, introduced = 10.15)]] int f(int a);
+  > int f(int a) { defer g(); return a; }
+  > EOF
+  $ ./golden.exe marked_earlier.tc
+  marked_earlier.tc:3: a declaration of 'f' carries the attribute 'clang::availability', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  [1]
+
+  $ cat > marked_beside.tc <<'EOF'
+  > void g(void);
+  > int f(long a) __attribute__((overloadable));
+  > int f(int a) { defer g(); return a; }
+  > EOF
+  $ ./golden.exe marked_beside.tc
+  marked_beside.tc:3: a declaration of 'f' carries the attribute 'overloadable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  [1]
+
+  $ cat > marked_inner.tc <<'EOF'
+  > void g(void);
+  > int (__attribute__((unavailable)) f)(int a) { defer g(); return a; }
+  > EOF
+  $ ./golden.exe marked_inner.tc
+  marked_inner.tc:2: a declaration of 'f' carries the attribute 'unavailable', with which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes may name more than one function or be an error (design 13.5) [TC0068]
+  [1]
+
+A parameter has no name; `(void)` has none to give.
+
+  $ cat > unnamed.tc <<'EOF'
+  > void g(void);
+  > int f(int a, char *) { defer g(); return a; }
+  > EOF
+  $ ./golden.exe unnamed.tc
+  unnamed.tc:2: a parameter without a name, of which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot pass an lvalue; name it (design 13.5) [TC0069]
+  [1]
+
+  $ cat > unnamed_only.tc <<'EOF'
+  > void g(void);
+  > int f(int) { defer g(); return 1; }
+  > EOF
+  $ ./golden.exe unnamed_only.tc
+  unnamed_only.tc:2: a parameter without a name, of which the call of 'f' that the form of a `return e;` in the scope of a `defer` statement writes cannot pass an lvalue; name it (design 13.5) [TC0069]
+  [1]
+
+  $ cat > void_typedef.tc <<'EOF'
+  > typedef void nothing;
+  > void g(void);
+  > int f(nothing) { defer g(); return 1; }
+  > EOF
+  $ ./golden.exe void_typedef.tc
+  void_typedef.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]
+
+In a function that returns void, the operand of a `return e;` is a void
+expression, in Type-C text and in C text.
+
+  $ cat > void_value.tc <<'EOF'
+  > void g(void);
+  > void f(int c) { defer g(); if (c) return g(); return c; }
+  > EOF
+  $ ./golden.exe void_value.tc
+  void_value.tc:2: a `return e;` of a value in the scope of a `defer` statement, in a function that returns void: lowering writes it as the statement `e;`, which loses C's diagnostic of the return (C11 6.8.6.4p1) (design 13.5) [TC0070]
+  [1]
+
+  $ cat > void_value_c.tc <<'EOF'
+  > # 1 "void_value_c.tc"
+  > # 1 "c.h" 1
+  > void g(void);
+  > void f(int c) { _Defer g(); return c; }
+  > # 2 "void_value_c.tc" 2
+  > EOF
+  $ ./golden.exe void_value_c.tc
+  c.h:2: a `return e;` of a value in the scope of a `defer` statement, in a function that returns void: lowering writes it as the statement `e;`, which loses C's diagnostic of the return (C11 6.8.6.4p1) (design 13.5) [TC0070]
+  [1]
+
+  $ cat > void_unknown.tc <<'EOF'
+  > typedef int vector __attribute__((vector_size(16)));
+  > vector h(void);
+  > void g(void);
+  > void f(void) { defer g(); return h(); }
+  > EOF
+  $ ./golden.exe void_unknown.tc
+  void_unknown.tc:4: a `return e;` in the scope of a `defer` statement, in a function that returns void, whose operand depends on the attribute 'vector_size' at void_unknown.tc:1: typec cannot tell whether it is void, which lowering needs to know (design 13.5) [TC0070]
+  [1]
+
+A return type that typec does not know may be void, so a `return e;`
+depends on it.
+
+  $ cat > unknown_return.tc <<'EOF'
+  > typedef int vector __attribute__((vector_size(16)));
+  > void g(void);
+  > vector f(vector v) { defer g(); return v; }
+  > EOF
+  $ ./golden.exe unknown_return.tc
+  unknown_return.tc:3: the form of a `return e;` in the scope of a `defer` statement depends on the attribute 'vector_size' at unknown_return.tc:1, which typec does not type yet (design 13.3) [TC0031]
+  [1]
+
+  $ cat > unknown_bare_return.tc <<'EOF'
+  > typedef int vector __attribute__((vector_size(16)));
+  > void g(void);
+  > vector f(int) { defer g(); return; }
+  > EOF
+  $ ./golden.exe unknown_bare_return.tc
+  unknown_bare_return.tc:3: lowering of `defer` is not complete yet (design 13.5; work package 2.5) [TC0023]
+  [1]

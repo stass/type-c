@@ -69,6 +69,8 @@ let describe (declared : Entity.declared) =
         gnu_inline;
         overload;
         old_style_definition = _;
+        targets = _;
+        marked = _;
       } ->
       String.concat " "
         ([ "function"; Type_name.of_ctype function_type; linkage_name linkage ]

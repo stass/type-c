@@ -210,17 +210,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   leaves recording them to each caller (`block`, `arm`). Let `sequence`
   record its own, and derive the sentinel from the parse, which sees
   every `Block_defer`, while it stands.
-- [High] The refusals of the form of a `return e;` in the scope of a
-  defer (design 13.5, each with its code in 13.6) are not made: a
-  parameter without a name, on which `Lowering.parameter_name` raises
-  (one sole unnamed parameter is taken for `(void)`), a parameter
-  that declares the function's own name (`long f(int f)`), a
-  redeclaration of a parameter in the outermost block of the body, a
-  function whose return type typing does not know but the backend
-  reads as void (`void __tc_r` would follow),
-  the `target` and marked attributes, and a `return e;` of a non-void or
-  unknown `e` in a void function. The front end refuses every defer
-  (TC0023) until they are.
+- [Low] Two places decide what the form of a `return e;` in the scope
+  of a defer needs (design 13.5): `Return_form` refuses for every value
+  return of the sites, `Lowering.function_edits` writes `__tc_ret` for
+  those that lowering keeps, so a return in text that lowering drops (an
+  answered `__builtin_types_compatible_p` type name) is refused though
+  it needs nothing; and `(void)` is told from the type in
+  `Return_form.takes_no_parameters` but from the tree in
+  `Lowering.parameter_names`. Let the front end hand lowering the value
+  returns and the parameter names that the form writes.
 - [Low] GNU `__extension__` makes no node, so `__extension__ try f();`
   has the tree of `try f();`, and the position rule of design 5.1 rule
   3 would take a `try` that Appendix A does not derive there. Decide in

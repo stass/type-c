@@ -975,35 +975,9 @@ let place_edits (text : Reader.t) base returns (place, leaving) =
           @ [ defer_piece (at statement.last) form.returned ]) ]
   | Left_by (Error_path _) -> []
 
-let rec names_directly (declarator : Tree.declarator) =
-  match declarator.node with
-  | Name _ -> true
-  | Parenthesized_declarator { inner; _ } -> names_directly inner
-  | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
-
-(* The parameter list of the function that a definition's declarator
-   declares: that of the function derivation of its name. *)
-let rec definition_parameters (declarator : Tree.declarator) =
-  match declarator.node with
-  | Function { inner = Some inner; parameters } when names_directly inner ->
-      parameters
-  | Parenthesized_declarator { inner; _ }
-  | Pointer { inner = Some inner; _ }
-  | Block_pointer { inner = Some inner; _ }
-  | Array { inner = Some inner; _ }
-  | Function { inner = Some inner; _ } ->
-      definition_parameters inner
-  | Name _
-  | Pointer { inner = None; _ }
-  | Block_pointer { inner = None; _ }
-  | Array { inner = None; _ }
-  | Function { inner = None; _ } ->
-      invalid_arg "Lowering: a definition that declares no function"
-
 (* The name of a parameter that the call of [__tc_ret] passes an lvalue
-   of. A parameter without a name is a refusal of the form of 13.5
-   (TODO.md), which the front end's refusal of every defer (TC0023)
-   keeps from the backend. *)
+   of. The front end refuses a parameter without a name in a function
+   that gets [__tc_ret] (Return_form), but that of [(void)]. *)
 let parameter_name (parameter : Tree.parameter) =
   let name =
     match parameter.node.declarator with
@@ -1015,8 +989,8 @@ let parameter_name (parameter : Tree.parameter) =
   | None -> invalid_arg "Lowering: a parameter without a name"
 
 (* The parameters that the call passes: none for [(void)], the one
-   parameter that has no declarator, and the named ones of a variadic
-   function. *)
+   parameter without a declarator that the front end lets through, and
+   the named ones of a variadic function. *)
 let parameter_names : Tree.parameters -> string list = function
   | Identifier_list names ->
       List.map (fun (name : Tree.parameter_name) -> name.name.node) names
@@ -1036,7 +1010,7 @@ let return_type_edits (text : Reader.t)
   let tokens = text.tokens in
   let lvalue name = Printf.sprintf "*(__typeof__(%s) *)0" name in
   let arguments =
-    parameter_names (definition_parameters defers.declarator)
+    parameter_names (Tree.defined_function defers.declarator).parameters
     |> List.map lvalue |> String.concat ", "
   in
   let typedef =

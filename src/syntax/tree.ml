@@ -775,6 +775,34 @@ let rec declared_identifier declarator =
 let declared_name declarator =
   Option.map (fun name -> name.node) (declared_identifier declarator)
 
+let rec names_directly (declarator : declarator) =
+  match declarator.node with
+  | Name _ -> true
+  | Parenthesized_declarator { inner; _ } -> names_directly inner
+  | Pointer _ | Block_pointer _ | Array _ | Function _ -> false
+
+(** The function derivation of the name that a definition's declarator
+    declares: its span, from the name to the [)] of its parameter list,
+    and that list. *)
+type defined_function = { derivation : span; parameters : parameters }
+
+let rec defined_function (declarator : declarator) =
+  match declarator.node with
+  | Function { inner = Some inner; parameters } when names_directly inner ->
+      { derivation = declarator.span; parameters }
+  | Parenthesized_declarator { inner; _ }
+  | Pointer { inner = Some inner; _ }
+  | Block_pointer { inner = Some inner; _ }
+  | Array { inner = Some inner; _ }
+  | Function { inner = Some inner; _ } ->
+      defined_function inner
+  | Name _
+  | Pointer { inner = None; _ }
+  | Block_pointer { inner = None; _ }
+  | Array { inner = None; _ }
+  | Function { inner = None; _ } ->
+      invalid_arg "Tree: a definition that declares no function"
+
 (** The identity that a break or continue leaving the loop, switch or
     match [statement] names. *)
 let jump_target_of statement = Statement_at statement.span.first

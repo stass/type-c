@@ -150,10 +150,11 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    generic, by its id, which is the own place of its definition (design
    13.5). [moved] collects what the reading of a generic's definition
    finds in it, none outside one, and [found] the names that each moved
-   text being read uses and declares, innermost first, and [read_moved]
-   what each deferred statement and operand of a [return] of the
-   function body being read found, by its span, for the checks of
-   design 6 rules 8 and 12 at the end of the body. [redeclared_at]
+   text, or function definition, being read uses and declares,
+   innermost first, and [read_moved] what each deferred statement and
+   operand of a [return] of the function body being read found, by its
+   span, for the checks of design 6 rules 8 and 12 at the end of the
+   body. [redeclared_at]
    and [completed_at] are the events of the window of 13.5 that every
    reading so far has made ({!Resolution.context}). Those of a reading
    of a generic's definition stand at its tokens, not where its
@@ -212,9 +213,11 @@ and moved = {
   mutable void_field_spans : Tree.span list;
 }
 
-(* The names that the reading of the moved text at [text_span] finds in
-   it, latest first: those that it uses and those that it declares,
-   which the resolution property checks (design 13.5). *)
+(* The names that the reading of the text at [text_span] finds in it,
+   latest first: those that it uses and those that it declares, which
+   the resolution property checks of a moved text, and the form of a
+   return in the scope of a defer of a function definition (design
+   13.5). *)
 and found = {
   text_span : Tree.span;
   mutable uses : Resolution.name list;
@@ -388,7 +391,7 @@ let note_own state span name declaration ~scope ~implicit ~linked =
   let note found = found.declares <- own :: found.declares in
   List.iter note (holding state span)
 
-(* [read] of the moved text at [text_span], with what it finds. *)
+(* [read] of the text at [text_span], with what it finds. *)
 let finding state text_span read =
   let found = { text_span; uses = []; declares = [] } in
   let outer = state.found in
@@ -483,6 +486,8 @@ let redeclared state span name prior next =
           inline = old.inline || next.inline;
           noreturn = old.noreturn || next.noreturn;
           gnu_inline = old.gnu_inline || next.gnu_inline;
+          targets = Entity.both_targets old.targets next.targets;
+          marked = Entity.both_marks old.marked next.marked;
         }
   | (Object _ | Function _ | Typedef _ | Enumerator _), _ ->
       fail state span
@@ -595,13 +600,16 @@ let prior_linkage state scope span name declared =
 
 (* What the GNU attributes of a declaration say. [unknown_attribute] is
    the first without an entry in [attribute_effects], [effect_attribute]
-   the first with an effect. *)
+   the first with an effect, [marked_attribute] the first with a mark,
+   and [targets] the [target] attributes, latest first. *)
 type attributed = {
   gnu_noreturn : bool;
   gnu_inline : bool;
   overloadable : bool;
   unknown_attribute : Tree.attribute option;
   effect_attribute : Tree.attribute option;
+  marked_attribute : Tree.attribute option;
+  targets : Tree.attribute list;
 }
 
 (* What a list of declaration specifiers says. [storage] excludes
@@ -754,9 +762,9 @@ type derived = {
   declared_type : Ctype.t;
   parameter_qualifiers : Qualifiers.t;
   defines : bool;
-  inner_effect : Tree.attribute option;
-      (* The first attribute with an effect inside the declarator, which
-         GCC and Clang move to a function that the declarator declares. *)
+  inner : attributed;
+      (* What the attributes inside the declarator say, which GCC and
+         Clang move to a function that the declarator declares. *)
 }
 
 (* What a GNU attribute does to the declarations: [Neutral] changes
@@ -772,12 +780,25 @@ type attribute_effect =
 
 (* An attribute that the declarations accept. [clang_spelling] says that
    Clang also accepts it as [[clang::name]] in a C23 specifier; for any
-   other name Clang ignores that spelling, as it does [clang::noreturn]. *)
+   other name Clang ignores that spelling, as it does [clang::noreturn].
+   [marked] says that on a declaration of a function it breaks on its own
+   the property that the form of a [return] in the scope of a defer
+   statement rests on, that the name names exactly one function which
+   [__typeof__] may name (design 13.3, 13.5). *)
 type attribute_entry = {
   gnu_name : string;
   attribute_effect : attribute_effect;
   clang_spelling : bool;
+  marked : bool;
 }
+
+(* The attribute whose arguments name a version of a function (design
+   13.5). *)
+let target_attribute = "target"
+
+(* The attribute that makes a function one of an overload set (design
+   13.3). *)
+let overloadable_attribute = "overloadable"
 
 (* The GNU attributes that the declarations accept, each with its effect.
    [aligned] is neutral because typec leaves [_Alignof] and the sizes of
@@ -790,25 +811,26 @@ type attribute_entry = {
    [__has_c_attribute(clang::name)]. *)
 let attribute_effects =
   let gnu_only gnu_name attribute_effect =
-    { gnu_name; attribute_effect; clang_spelling = false }
+    { gnu_name; attribute_effect; clang_spelling = false; marked = false }
   in
   let also_clang gnu_name attribute_effect =
-    { gnu_name; attribute_effect; clang_spelling = true }
+    { gnu_name; attribute_effect; clang_spelling = true; marked = false }
   in
+  let mark entry = { entry with marked = true } in
   [
     gnu_only "alloc_align" Neutral;
     gnu_only "alloc_size" Neutral;
     gnu_only "aligned" Neutral;
     also_clang "always_inline" Neutral;
-    also_clang "availability" Neutral;
+    mark (also_clang "availability" Neutral);
     gnu_only "cold" Neutral;
     gnu_only "const" Neutral;
     gnu_only "constructor" Neutral;
-    also_clang "cpu_dispatch" Neutral;
-    also_clang "cpu_specific" Neutral;
+    mark (also_clang "cpu_dispatch" Neutral);
+    mark (also_clang "cpu_specific" Neutral);
     gnu_only "deprecated" Neutral;
     gnu_only "destructor" Neutral;
-    gnu_only "diagnose_if" Neutral;
+    mark (gnu_only "diagnose_if" Neutral);
     also_clang "disable_tail_calls" Neutral;
     also_clang "enum_extensibility" Neutral;
     also_clang "flag_enum" Neutral;
@@ -824,17 +846,17 @@ let attribute_effects =
     gnu_only "noreturn" Sets_noreturn;
     also_clang "not_tail_called" Neutral;
     gnu_only "nothrow" Neutral;
-    also_clang "overloadable" Makes_overload;
+    mark (also_clang overloadable_attribute Makes_overload);
     gnu_only "pure" Neutral;
     gnu_only "returns_nonnull" Neutral;
     gnu_only "section" Neutral;
     gnu_only "sentinel" Neutral;
     gnu_only "swift_attr" Neutral;
     gnu_only "swift_name" Neutral;
-    gnu_only "target" Neutral;
-    gnu_only "target_clones" Neutral;
-    gnu_only "target_version" Neutral;
-    also_clang "unavailable" Neutral;
+    gnu_only target_attribute Neutral;
+    mark (gnu_only "target_clones" Neutral);
+    mark (gnu_only "target_version" Neutral);
+    mark (also_clang "unavailable" Neutral);
     gnu_only "unused" Neutral;
     gnu_only "used" Neutral;
     gnu_only "visibility" Neutral;
@@ -861,7 +883,8 @@ let find_attribute_entry name =
 
 let no_attributes =
   { gnu_noreturn = false; gnu_inline = false; overloadable = false;
-    unknown_attribute = None; effect_attribute = None }
+    unknown_attribute = None; effect_attribute = None;
+    marked_attribute = None; targets = [] }
 
 (* [onto] with the effects of [attributes] applied in source order. *)
 let read_attributes ~onto (attributes : Tree.attribute list) =
@@ -870,15 +893,34 @@ let read_attributes ~onto (attributes : Tree.attribute list) =
     { attributed with
       effect_attribute = first attributed.effect_attribute attribute }
   in
+  let with_effect_of attributed attribute = function
+    | Neutral -> attributed
+    | Sets_noreturn ->
+        with_effect { attributed with gnu_noreturn = true } attribute
+    | Sets_gnu_inline ->
+        with_effect { attributed with gnu_inline = true } attribute
+    | Makes_overload ->
+        with_effect { attributed with overloadable = true } attribute
+  in
+  (* What design 13.5 reads of the attributes of a function. *)
+  let with_form_facts attributed attribute entry =
+    let marked_attribute =
+      if entry.marked then first attributed.marked_attribute attribute
+      else attributed.marked_attribute
+    in
+    let targets =
+      if entry.gnu_name = target_attribute then attribute :: attributed.targets
+      else attributed.targets
+    in
+    { attributed with marked_attribute; targets }
+  in
   let apply attributed (attribute : Tree.attribute) =
     match find_attribute_entry attribute.node.name.node with
-    | Some { attribute_effect = Neutral; _ } -> attributed
-    | Some { attribute_effect = Sets_noreturn; _ } ->
-        with_effect { attributed with gnu_noreturn = true } attribute
-    | Some { attribute_effect = Sets_gnu_inline; _ } ->
-        with_effect { attributed with gnu_inline = true } attribute
-    | Some { attribute_effect = Makes_overload; _ } ->
-        with_effect { attributed with overloadable = true } attribute
+    | Some entry ->
+        let attributed =
+          with_effect_of attributed attribute entry.attribute_effect
+        in
+        with_form_facts attributed attribute entry
     | None ->
         { attributed with
           unknown_attribute = first attributed.unknown_attribute attribute }
@@ -920,12 +962,8 @@ let obscured state attribute (t : Ctype.t) =
 let obscured_by state attributes t =
   obscured state (first_unrecorded_attribute attributes) t
 
-let with_inner_effect derived attributes =
-  match derived.inner_effect with
-  | Some _ -> derived
-  | None ->
-      let read = read_attributes ~onto:no_attributes attributes in
-      { derived with inner_effect = read.effect_attribute }
+let with_inner_attributes derived attributes =
+  { derived with inner = read_attributes ~onto:derived.inner attributes }
 
 (* Identifiers declared at file scope or in a block *)
 
@@ -965,6 +1003,39 @@ let is_old_style_definition (t : Ctype.t) =
   | Array _ | Unknown_type _ ->
       false
 
+(* The spellings of the argument tokens of a [target] attribute, which
+   design 13.5 compares token for token. *)
+let target_spellings state (attribute : Tree.attribute) =
+  match attribute.node.arguments with
+  | None -> []
+  | Some { first; last } ->
+      List.init (last - first + 1) (fun offset ->
+          Reader.spelling state.text state.text.tokens.(first + offset))
+
+(* What a declaration of a function says of the property that design
+   13.5 rests on, from the attributes [outer] around its declarator and
+   [inner] inside it: its [target] attributes, and its first marked
+   attribute, or [overloadable] where it follows an overload of its name
+   in its scope (design 13.3). *)
+let form_facts state (declared : Tree.declared) ~outer ~inner =
+  (* The arguments of each attribute run from [(] to [)], so the tokens
+     of all of them, together, are one fact of the declaration. *)
+  let targets =
+    match List.rev outer.targets @ List.rev inner.targets with
+    | [] -> Entity.Untargeted
+    | attributes ->
+        Targeted (List.concat_map (target_spellings state) attributes)
+  in
+  let marked =
+    match (outer.marked_attribute, inner.marked_attribute) with
+    | Some (attribute : Tree.attribute), _ | None, Some attribute ->
+        Some attribute.node.name.node
+    | None, None when follows_overload state declared ->
+        Some overloadable_attribute
+    | None, None -> None
+  in
+  (targets, marked)
+
 let function_declared state scope span specified name declared
     (derived : derived) storage =
   (* Its noreturn, gnu_inline and overload would be guessed false. *)
@@ -973,11 +1044,14 @@ let function_declared state scope span specified name declared
       fail_needing state span
         ("the declaration of the function " ^ quote name)
         (attribute_unknown state attribute Unknown_function))
-    derived.inner_effect;
+    derived.inner.effect_attribute;
   if specified.thread_local then
     fail state span
       (Rule.c_text "a function declared _Thread_local (C11 6.7.1p4)");
   no_alignment state span specified "a function";
+  let targets, marked =
+    form_facts state declared ~outer:specified.attributed ~inner:derived.inner
+  in
   (* An overload redeclares nothing, so it has no visible declaration to
      take a linkage from. *)
   let declared =
@@ -995,6 +1069,8 @@ let function_declared state scope span specified name declared
       gnu_inline = specified.inline && specified.attributed.gnu_inline;
       overload = specified.attributed.overloadable;
       old_style_definition = is_old_style_definition derived.declared_type;
+      targets;
+      marked;
     }
 
 (* 6.2.2p3-p6, 6.2.4, 6.7.1p3: the linkage and storage duration of an
@@ -1849,7 +1925,7 @@ and declare_type state ?definition ?(records_effects = false) ~parameter
   let underived =
     { name = None; declared_type = specified.base_type;
       parameter_qualifiers = Qualifiers.none; defines = false;
-      inner_effect = None }
+      inner = no_attributes }
   in
   let derived =
     match declarator with
@@ -1916,7 +1992,7 @@ and read_derivation state ~parameter ~definition ~nearest
         let declared_type =
           obscured_by state attributes derived.declared_type
         in
-        { (with_inner_effect derived attributes) with declared_type }
+        { (with_inner_attributes derived attributes) with declared_type }
   | Pointer { qualifiers; attributes; inner = _ } ->
       fun derived ->
         let pointer =
@@ -1927,7 +2003,7 @@ and read_derivation state ~parameter ~definition ~nearest
           checked state span (Ctype.qualify qualifiers pointer)
         in
         let declared_type = obscured_by state attributes declared_type in
-        { (with_inner_effect derived attributes) with declared_type }
+        { (with_inner_attributes derived attributes) with declared_type }
   (* Clang's block pointer, whose type typec does not model. *)
   | Block_pointer { qualifiers = _; attributes; inner = _ } ->
       fun derived ->
@@ -1935,7 +2011,7 @@ and read_derivation state ~parameter ~definition ~nearest
           unknown_type state span "a block pointer" Unknown_object
         in
         let declared_type = obscured_by state attributes declared_type in
-        { (with_inner_effect derived attributes) with declared_type }
+        { (with_inner_attributes derived attributes) with declared_type }
   | Array { inner = _; qualifiers; size } ->
       let adjusted = parameter && nearest in
       let qualified = qualifiers <> [] in
@@ -3406,9 +3482,19 @@ let return_type (function_type : Ctype.t) : Ctype.t Unknown.answer =
   | Array _ ->
       invalid_arg "Declarations: a function definition of no function type"
 
+(* What reading a function definition gives: the entity, the type that
+   the definition declares, its return type, and its defer statements
+   where its body holds one. *)
+type defined = {
+  entity : entity;
+  function_type : Ctype.t;
+  return_type : Ctype.t Unknown.answer;
+  defers : Expressions.function_defers option;
+}
+
 (* 6.9.1. The body is typed where the definition stands, so that it sees
    the unit as of that point. *)
-let read_function_definition state (definition : Tree.function_definition) =
+let read_definition state (definition : Tree.function_definition) =
   let {
     Tree.specifiers;
     declarator;
@@ -3446,15 +3532,60 @@ let read_function_definition state (definition : Tree.function_definition) =
   (match returned with
   | Answer t -> needs_complete state t
   | Depends_on _ -> ());
-  (match body with
-  | Parsed block ->
-      Hashtbl.reset state.read_moved;
-      within state In_block (fun () ->
-          Expressions.function_body (typing state) ~name:entity.name
-            ~declarator ~return_type:returned block)
-      |> Option.iter (check_deferred state)
-  | Skipped _ -> ());
-  Function_definition entity
+  let defers =
+    match body with
+    | Parsed block ->
+        Hashtbl.reset state.read_moved;
+        within state In_block (fun () ->
+            Expressions.function_body (typing state) ~name:entity.name
+              ~declarator ~return_type:returned block)
+    | Skipped _ -> None
+  in
+  Option.iter (check_deferred state) defers;
+  { entity; function_type = derived.declared_type; return_type = returned;
+    defers }
+
+(* Design 13.5: the refusals of the form of a [return e;] in the scope of
+   a defer statement in a definition whose body holds one, which [owns]
+   are the names it declares. *)
+let refuse_return_form state (definition : Tree.function_definition)
+    (defined : defined) ~owns defers =
+  let { Tree.declared; declarations; _ } = definition.node in
+  let targets, marked =
+    match defined.entity.declared with
+    | Function { targets; marked; _ } -> (targets, marked)
+    | Object _ | Typedef _ | Enumerator _ ->
+        invalid_arg "Declarations: a function definition of no function"
+  in
+  let (Ordinary_at token) = declared.id in
+  let name =
+    Spanned.identifier { first = token; last = token } defined.entity.name
+  in
+  (* The parameter list is the scope just inside the one that declares
+     the function. *)
+  let (Scope_depth depth) = declared.scope in
+  let form =
+    { Return_form.name; function_type = defined.function_type;
+      return_type = defined.return_type; targets; marked;
+      declaration_list =
+        List.map (fun (declaration : Tree.declaration) -> declaration.span)
+          declarations;
+      scope = Scope_depth (depth + 1); owns; defers }
+  in
+  match Return_form.refusal state.typed form with
+  | Some (span, diagnostic) -> fail state span diagnostic
+  | None -> ()
+
+(* The definition is read as a text whose own names [finding] collects,
+   which the form of a return in the scope of a defer reads. *)
+let read_function_definition state (definition : Tree.function_definition) =
+  let defined, found =
+    finding state definition.span (fun () -> read_definition state definition)
+  in
+  Option.iter
+    (refuse_return_form state definition defined ~owns:found.declares)
+    defined.defers;
+  Function_definition defined.entity
 
 (* Design 10.3: a variant, or a record alias, that is no generic lowers
    to a forward declaration [struct X; typedef struct X X;] first, which

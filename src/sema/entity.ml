@@ -10,6 +10,24 @@ type linkage = External | Internal | No_linkage
 (** The storage duration of an object (6.2.4). *)
 type storage = Static_storage | Thread_storage | Automatic_storage
 
+(** The [target] attributes of the declarations of a function that a
+    declaration sees, which decide whether its name names one version of
+    it (design 13.5): none, all with the argument tokens [spellings], or
+    two whose arguments differ token for token. *)
+type targets = Untargeted | Targeted of string list | Versioned
+
+(** [targets] of two declarations of one function seen together. *)
+let both_targets earlier later =
+  match (earlier, later) with
+  | Untargeted, targets | targets, Untargeted -> targets
+  | Targeted a, Targeted b when a = b -> earlier
+  | Targeted _, Targeted _ | Versioned, _ | _, Versioned -> Versioned
+
+(** The first marked attribute of two declarations of one function seen
+    together. *)
+let both_marks earlier later =
+  match earlier with Some _ -> earlier | None -> later
+
 type declared =
   | Object of {
       object_type : Ctype.t;
@@ -39,6 +57,13 @@ type declared =
           (** This declaration is a definition with a non-empty identifier
               list (6.9.1p6), whose uses see no prototype in Clang
               (DR 316). *)
+      targets : targets;
+      marked : string option;
+          (** The name of the first attribute that the table of attributes
+              marks (design 13.3) in a declaration that this one sees, or
+              ["overloadable"] where it follows an overload of its name in
+              its scope: the name then may name more than one function, or
+              a mention of it may be an error (13.5). *)
     }
   | Typedef of { typedef_type : Ctype.t }
   | Enumerator of { enumerator_type : Ctype.t; value : Integer_constant.t }

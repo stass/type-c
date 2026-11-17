@@ -378,6 +378,45 @@ let rows =
         "The operand of a [return] in the scope of a defer statement, \
          which lowering writes in a block of its own, where it declares a \
          name that is in scope after the [return]." };
+    Live { name = "Return_own_name"; code = 65; clause = Some "design 13.5";
+      meaning =
+        "A function that returns a value and holds a [return e;] in the \
+         scope of a defer statement, whose parameter list declares the \
+         function's own name, as a parameter or an enumeration \
+         constant." };
+    Live { name = "Return_parameter_redeclared"; code = 66;
+      clause = Some "design 13.5";
+      meaning =
+        "A declaration in the outermost block of the body of a function \
+         that returns a value and holds a [return e;] in the scope of a \
+         defer statement, of a name that the parameter list declares in \
+         the same name space: a tag, as C refuses an ordinary \
+         identifier there (C11 6.7p3)." };
+    Live { name = "Return_target_versions"; code = 67;
+      clause = Some "design 13.5";
+      meaning =
+        "A function that returns a value and holds a [return e;] in the \
+         scope of a defer statement, two of whose declarations in scope at \
+         the definition carry [target] attributes whose arguments differ \
+         token for token." };
+    Live { name = "Return_marked_attribute"; code = 68;
+      clause = Some "design 13.5";
+      meaning =
+        "A function that returns a value and holds a [return e;] in the \
+         scope of a defer statement, one of whose declarations in scope at \
+         the definition carries an attribute that the table of attributes \
+         marks (design 13.3), or that follows a Clang overload of its \
+         name." };
+    Live { name = "Return_unnamed_parameter"; code = 69;
+      clause = Some "design 13.5";
+      meaning =
+        "A function that returns a value and holds a [return e;] in the \
+         scope of a defer statement, with a parameter that has no name." };
+    Live { name = "Return_void_value"; code = 70; clause = Some "design 13.5";
+      meaning =
+        "A [return e;] in the scope of a defer statement, in a function \
+         that returns void, where [e] is not a void expression or has a \
+         type that typec does not know (design 13.3)." };
   ]
 
 let () =

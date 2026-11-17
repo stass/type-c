@@ -315,6 +315,10 @@ val find : t -> Tree.expression -> typed option
     expression it selects, and the associations it does not select are
     typed as well, as C requires them to be valid. *)
 
+val find_at : t -> Tree.span -> typed option
+(** {!find} of the expression at the span, for a reader that holds the
+    span alone, as {!Reachability.exit} does. *)
+
 (** The answers to the constructs that ask whether two types are
     compatible, which the front end gives where a Type-C type is involved
     (design 13.5): each is the answer, or the unknown type that it depends

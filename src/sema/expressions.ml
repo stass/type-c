@@ -350,8 +350,8 @@ let create () =
     function_tries = [];
     defers = [] }
 
-let find view (expression : Tree.expression) =
-  Hashtbl.find_opt view.types expression.span
+let find_at view span = Hashtbl.find_opt view.types span
+let find view (expression : Tree.expression) = find_at view expression.span
 
 let constant view (expression : Tree.expression) =
   Hashtbl.find_opt view.constants expression.span
