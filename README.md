@@ -1708,9 +1708,13 @@ all of them. A unit that typec refuses reports none.
 
 A `.tc` input refuses the option that stops the backend at
 preprocessing (`-E`), the options that change the preprocessed text
-(`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-dD`, `-dM` and the like,
-`-traditional-cpp`, `-fdirectives-only`), `-save-temps`, `-###`, `-ansi`,
-`--` and response files (`@FILE`), with a usage error naming the option.
+(`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-traditional-cpp`,
+`-fdirectives-only`), every `-d` option of dumps (`-dD`, `-dM`, `-dI`
+and the like), `-save-temps`, `-###`, `-ansi`, `--`, the options that
+name a file of further options (response files, `@FILE`, `-specs=` and
+`--config=`) and the queries that print a fact of the backend
+(`-print-file-name=` and every other `-print-` option, `-dumpmachine`),
+with a usage error naming the option.
 It refuses a long option, spelled with `--`, that it does not know, as
 GCC reads `--NAME` as `-fNAME` and accepts abbreviations, so that
 `--preprocess`, `--write-user-dep` or `--short-enums` cannot reach the

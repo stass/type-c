@@ -4749,6 +4749,42 @@ language is defined here and not by the tool.
   `--include-directory` and `--target=`, and an option the table lacks
   fails loudly rather than reaching a step whose meaning it changes.
   Without a `.tc` input every option reaches the backend unchanged.
+- With a `.tc` input, three more families of options are refused, each
+  by a rule rather than a list of its members. An option that names a
+  file of further options, a response file (`@FILE`), a GCC spec file
+  (`-specs=`, `--specs`) or a Clang configuration file (`--config=`) or
+  its directory (`--config-user-dir=`, `--config-system-dir=`), can add
+  any option, `-E` included, to every step, and `typec` reads no such
+  file. Every option that starts with `-d` is refused, as is GCC's
+  `--dump`: GCC and Clang read the letters after `-d` as dumps, of
+  which `-dD`, `-dM`, `-dN`, `-dU` and `-dI` change the preprocessed
+  text, in any combination such as `-dDI`, and releases add letters.
+  The options of other meaning spelled with `-d`, such as `-dumpbase`,
+  `-dependency-file` and `-dead_strip`, have entries of their own in
+  the table, which win as the longer spelling. Every option that starts
+  with `-print-` or `--print-`, and `-dumpmachine`, `-dumpversion`,
+  `-dumpfullversion` and `-dumpspecs`, is a query of the backend. GCC 16
+  and Clang 21 print the answer of a query and compile nothing, but for
+  three that serve other languages and print beside a compile: Clang's
+  `-print-ivar-layout` and `-print-rocm-search-dirs` and GCC's
+  `-print-objc-runtime-info`. `typec` refuses a query with a `.tc` input
+  rather than answering it, since a command that both asks and names a
+  `.tc` input has no use, and answering it would be a second way to run
+  the backend; without a `.tc` input the query reaches the backend,
+  which answers it. `typec`'s own `--print-target` is spelled out in the
+  table and passes.
+- These refusals name, before anything runs, the options that the
+  command line shows. Options still reach every step by routes that it
+  does not show: a `specs` file in a directory of `-B` or `--prefix` or
+  of `GCC_EXEC_PREFIX`, Clang's default configuration files (which
+  `--no-default-config` turns off and so passes), and `-Xclang`, `-Wp,`
+  or `-Xpreprocessor` with `-dD`. Refusing `-B` would break cross and
+  linker setups, and the other routes are the environment of the
+  backend, so `typec` leaves them open. The reader refuses the
+  preprocessed text that they change and the assertions of 13.4 catch a
+  type that they change; another change, such as an `-E` that a spec
+  file adds to the compile step, is the backend's own configuration,
+  which `typec` does not inspect.
 - Subprocesses are started with argument vectors, never through a shell.
   Intermediate files live in a private temporary directory.
 - A backend step that fails ends `typec` with the backend's own status,

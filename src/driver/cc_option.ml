@@ -61,9 +61,17 @@ let stops_at_preprocessing =
 let changes_preprocessed_text =
   "the preprocessed text must keep its line markers and nothing else"
 
-let dumps_by_letters =
-  "GCC reads it as -d, whose -dD and -dM change the preprocessed text; \
-   write -d and its letters"
+let dumps =
+  "the letters after -d select dumps, and some, such as -dD, -dM and -dI, \
+   change the preprocessed text"
+
+let prints_a_fact =
+  "it asks the backend to print a fact of itself; run it without the .tc \
+   input"
+
+let names_options_to_add =
+  "it names a file, or a directory of files, of options that the backend \
+   adds to every step, which typec does not read"
 
 let keeps_intermediate_files =
   "typec keeps no intermediate files; --emit-c writes the C"
@@ -92,7 +100,10 @@ let pack_struct =
    An unknown option spelled with one '-' is Common, so a Common option
    of that spelling needs an entry only when it takes a separate value.
    An unknown long option is refused (see [classify]), so each long
-   option that passes has an entry. *)
+   option that passes has an entry. The Joined entries -d, -print- and
+   --print- refuse every option that they start: an option of other
+   meaning spelled the same way passes through a longer entry of its
+   own. *)
 let table =
   List.concat
     [
@@ -129,9 +140,8 @@ let table =
       entries (Refused stops_at_preprocessing) Flag [ "-E" ];
       entries (Refused changes_preprocessed_text) Flag
         [
-          "-P"; "-C"; "-CC"; "-fuse-line-directives"; "-dD"; "-dM"; "-dN";
-          "-dI"; "-dU"; "-traditional"; "-traditional-cpp";
-          "-fdirectives-only"; "-fpreprocessed";
+          "-P"; "-C"; "-CC"; "-fuse-line-directives"; "-traditional";
+          "-traditional-cpp"; "-fdirectives-only"; "-fpreprocessed";
         ];
       entries (Refused keeps_intermediate_files) Flag [ "-save-temps" ];
       entries (Refused keeps_intermediate_files) Joined [ "-save-temps=" ];
@@ -141,7 +151,31 @@ let table =
         Flag [ "-ansi" ];
       entries (Refused "typec does not read the inputs after it") Flag
         [ "--" ];
-      long_entries (Refused dumps_by_letters) [ "--dump" ];
+      (* GCC and Clang read the letters after -d, or after GCC's --dump,
+         as dumps to make, and new letters come with new releases, so
+         every letter is refused rather than those known to change the
+         preprocessed text. *)
+      entries (Refused dumps) Joined [ "-d" ];
+      long_entries (Refused dumps) [ "--dump" ];
+      (* A query prints a fact of the backend, mostly in place of a
+         compile. GCC accepts --print-NAME for each -print-NAME, so
+         --print- is the one Joined long entry not made by
+         [long_joined_entries]: it must match every --print-NAME. The
+         -print- options that print beside a compile serve other
+         languages: Clang's -print-ivar-layout and
+         -print-rocm-search-dirs, GCC's -print-objc-runtime-info. *)
+      entries (Refused prints_a_fact) Joined [ "-print-"; "--print-" ];
+      long_entries (Refused prints_a_fact)
+        [ "--print-file-name"; "--print-prog-name" ];
+      entries (Refused prints_a_fact) Flag
+        [ "-dumpmachine"; "-dumpversion"; "-dumpfullversion"; "-dumpspecs" ];
+      (* GCC's spec files and Clang's configuration files, as a response
+         file does, can add any option, -E included, to every step. *)
+      entries (Refused names_options_to_add) (Separate 1) [ "-specs" ];
+      entries (Refused names_options_to_add) Joined [ "-specs=" ];
+      long_entries (Refused names_options_to_add) [ "--specs"; "--config" ];
+      long_joined_entries (Refused names_options_to_add)
+        [ "--config-system-dir"; "--config-user-dir" ];
       (* Options that change a type of C but no macro the target model
          reads, so the model would disagree with the backend, or that
          make the backend ignore what typec writes. Each is refused
@@ -188,13 +222,14 @@ let table =
          reads by default whatever the locale. *)
       entries Preprocess Joined [ "-finput-charset=" ];
       (* Linking. *)
-      entries Link Joined_or_separate [ "-l"; "-L"; "-T" ];
+      entries Link Joined_or_separate
+        [ "-l"; "-L"; "-T"; "-dylinker_install_name" ];
       entries Link (Separate 1)
         [
           "-alias_list"; "-allowable_client"; "-arch_only"; "-assert"; "-b";
           "-bundle_loader"; "-client_name"; "-compatibility_version";
           "-current_version"; "-defsym"; "-dylib_file";
-          "-dylinker_install_name"; "-e"; "-exported_symbols_list";
+          "-e"; "-exported_symbols_list";
           "-filelist"; "-force_load"; "-framework"; "-h"; "-image_base";
           "-init"; "-install_name"; "-lazy_framework"; "-lazy_library";
           "-multiply_defined"; "-multiply_defined_unused"; "-pagezero_size";
@@ -218,12 +253,14 @@ let table =
       entries Link Joined [ "-Wl,"; "-fuse-ld=" ];
       long_joined_entries Link [ "--ld-path"; "--unwindlib" ];
       entries Link Joined_and_separate [ "-Xoffload-linker" ];
-      (* -object would otherwise read as -o with the value "bject". *)
+      (* -object would otherwise read as -o with the value "bject", and
+         the Darwin options -dynamic, -dylinker and -dead_strip as -d. *)
       entries Link Flag
         [
           "-object"; "-static"; "-shared"; "-rdynamic"; "-pie"; "-no-pie";
           "-nostdlib"; "-nostartfiles"; "-nodefaultlibs"; "-nolibc";
           "-static-libgcc"; "-shared-libgcc"; "-bundle"; "-dynamiclib";
+          "-dynamic"; "-dylinker"; "-dead_strip";
         ];
       (* Every step. *)
       entries Architecture (Separate 1) [ "-arch" ];
@@ -239,9 +276,9 @@ let table =
           "-Xmicrosoft-windows-sdk-version"; "-Xmicrosoft-windows-sys-root";
           "-mllvm"; "-mmlir"; "-meabi"; "-mthread-model"; "-mtarget-linker";
           "-aux-info"; "-dumpbase"; "-dumpbase-ext"; "-dumpdir"; "-wrapper";
-          "-truncate"; "-specs"; "-ivfsoverlay"; "-vfsoverlay";
+          "-truncate"; "-ivfsoverlay"; "-vfsoverlay";
           "-iapinotes-modules"; "-resource-dir"; "-working-directory";
-          "-serialize-diagnostics"; "-gen-cdb-fragment-path"; "-dsym-dir";
+          "-serialize-diagnostics"; "-gen-cdb-fragment-path";
           "-index-store-path"; "-index-unit-output-path";
           "-fdepscan-share-identifier"; "-fmodules-user-build-path";
           "-fmodule-implementation-of"; "-fdebug-compilation-dir";
@@ -253,13 +290,13 @@ let table =
           "--machine";
         ];
       entries Common (Separate 2) [ "-fdepscan-prefix-map" ];
+      entries Common Joined_or_separate [ "-dsym-dir" ];
       long_entries Common
         [
-          "--param"; "--prefix"; "--sysroot"; "--specs"; "--config";
-          "--stdlib"; "--cstdlib"; "--for-assembler";
-          "--print-file-name"; "--print-prog-name"; "--bootclasspath";
-          "--CLASSPATH"; "--classpath"; "--encoding"; "--extdirs"; "--mhwdiv";
-          "--output-class-directory"; "--resource";
+          "--param"; "--prefix"; "--sysroot"; "--stdlib"; "--cstdlib";
+          "--for-assembler"; "--bootclasspath"; "--CLASSPATH"; "--classpath";
+          "--encoding"; "--extdirs"; "--mhwdiv"; "--output-class-directory";
+          "--resource";
         ];
       entries Common Joined_and_separate
         [ "-Xarch_"; "-Xopenmp-target="; "-Xoffload-compiler" ];
@@ -270,6 +307,8 @@ let table =
       long_joined_entries Common
         [ "--target"; "--gcc-toolchain"; "--gcc-install-dir"; "--gcc-triple" ];
       entries Common Flag [ "--coverage" ];
+      (* It keeps Clang from reading its default configuration files. *)
+      entries Common Flag [ "--no-default-config" ];
     ]
 
 (* The response file of GCC and Clang, @FILE, holds more arguments. *)

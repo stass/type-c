@@ -79,17 +79,68 @@ let () =
       ("--unwindlib=libgcc", (Link, 0, "libgcc"));
       ("--target", (Refused "", 0, ""));
       ("--include-dir=x", (Refused "", 0, ""));
+      (* GCC reads --dump as -d. Every -d form is refused, as the letters
+         after -d select dumps and -dD, -dM and -dI change the
+         preprocessed text; the options spelled with -d that name
+         something else pass. *)
       ("--dump=M", (Refused "", 0, ""));
+      ("--dump", (Refused "", 1, ""));
+      ("-d", (Refused "", 0, ""));
+      ("-dD", (Refused "", 0, ""));
+      ("-dI", (Refused "", 0, ""));
+      ("-dDI", (Refused "", 0, ""));
+      ("-dA", (Refused "", 0, ""));
+      ("-dumpbasex", (Refused "", 0, ""));
+      ("-dumpbase", (Common, 1, ""));
+      ("-dumpdir", (Common, 1, ""));
+      ("-dumpbase-ext", (Common, 1, ""));
+      ("-dsym-dir", (Common, 1, ""));
+      ("-dsym-dirx", (Common, 0, "x"));
+      ("-darwin-target-variant", (Common, 1, ""));
+      ("-darwin-target-variant-triple", (Common, 1, ""));
+      ("-dependency-dot", (Preprocess, 1, ""));
+      ("-dylib_file", (Link, 1, ""));
+      ("-dylinker_install_name", (Link, 1, ""));
+      ("-dylinker_install_namex", (Link, 0, "x"));
+      ("-dependency-file", (Preprocess, 1, ""));
+      ("-dynamiclib", (Link, 0, ""));
+      ("-dead_strip", (Link, 0, ""));
+      ("-dynamic", (Link, 0, ""));
+      ("-dylinker", (Link, 0, ""));
+      (* A file of further options can add any option to every step. *)
+      ("-specs", (Refused "", 1, ""));
+      ("-specs=my.specs", (Refused "", 0, ""));
+      ("--specs", (Refused "", 1, ""));
+      ("--specs=my.specs", (Refused "", 0, ""));
+      ("--config", (Refused "", 1, ""));
+      ("--config=my.cfg", (Refused "", 0, ""));
+      ("--config-user-dir=.", (Refused "", 0, ""));
+      ("--config-system-dir=.", (Refused "", 0, ""));
+      ("--no-default-config", (Common, 0, ""));
+      (* A query prints its answer and compiles nothing. *)
+      ("-print-file-name=libc.a", (Refused "", 0, ""));
+      ("--print-file-name=libc.a", (Refused "", 0, ""));
+      ("--print-file-name", (Refused "", 1, ""));
+      ("-print-prog-name=ld", (Refused "", 0, ""));
+      ("--print-prog-name=ld", (Refused "", 0, ""));
+      ("--print-prog-name", (Refused "", 1, ""));
+      ("-print-search-dirs", (Refused "", 0, ""));
+      ("--print-search-dirs", (Refused "", 0, ""));
+      ("-print-target-triple", (Refused "", 0, ""));
+      ("-dumpmachine", (Refused "", 0, ""));
+      ("-dumpversion", (Refused "", 0, ""));
+      ("--print-target", (Typec Print_target, 0, ""));
     ]
   in
   List.iter
     (fun (argument, expected) ->
-      let role, _, _ = expected in
+      let role, separate_values, _ = expected in
       let passed =
         match role with
         | Cc_option.Refused _ -> (
             match Cc_option.classify argument with
-            | { role = Refused _; separate_values = 0; _ } -> true
+            | { role = Refused _; separate_values = values; _ } ->
+                values = separate_values
             | _ -> false)
         | _ -> classified argument expected
       in
@@ -98,12 +149,6 @@ let () =
   check "a response file is refused"
     (match Cc_option.classify "@args" with
     | { role = Refused _; _ } -> true
-    | _ -> false);
-  (* GCC reads --dump as -d, whose -dD and -dM change the preprocessed
-     text. *)
-  check "--dump is refused"
-    (match Cc_option.classify "--dump" with
-    | { role = Refused _; separate_values = 1; _ } -> true
     | _ -> false)
 
 (* Reading a command line. *)
@@ -409,6 +454,10 @@ let () =
   check "-P" (refused [ "x.tc"; "-P" ]);
   check "@file" (refused [ "x.tc"; "@args" ]);
   check "--preprocess" (refused [ "--preprocess"; "x.tc" ]);
+  check "-specs" (refused [ "-specs"; "my.specs"; "x.tc" ]);
+  check "--config=" (refused [ "x.tc"; "--config=my.cfg" ]);
+  check "-dDI" (refused [ "-dDI"; "x.tc" ]);
+  check "--print-file-name=" (refused [ "--print-file-name=libc.a"; "x.tc" ]);
   check "-o without a value" (fails [ "x.tc"; "-o" ] (Missing_value "-o"));
   check "-o with -c and two inputs"
     (fails [ "-c"; "x.tc"; "y.c"; "-o"; "x.o" ] Output_for_several_inputs);

@@ -21,15 +21,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
-- [Medium] Three option classes still reach every step of a `.tc`
-  pipeline although they can change its meaning: `-specs=` and
-  `--config=` name a file that adds any option to every step (as a
-  refused response file can); a multi-letter `-d` (`-dDI`) reaches the
-  `-E` step and only the reader stops it; `--print-file-name=` and
-  `--print-prog-name=` pass as common and fail later with a confusing
-  message. Refuse them by name with a `.tc` input, as e6922be does for
-  unknown long options.
-
 - [Low] The tests of the build rules (`make_rule.t`, `ninja_rule.t`,
   `cmake_rule.t`) run only where the host has the tool: the Alpine image
   has no make, and no host image has ninja or CMake. Add them to the

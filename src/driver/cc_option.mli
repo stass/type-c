@@ -11,7 +11,10 @@
     step, which is right for the options that select the target, the
     code or the warnings. A long option, spelled with ["--"], that is not
     in the table is [Refused]: GCC reads abbreviations of long options
-    and [--NAME] as [-fNAME], so its meaning cannot be known. *)
+    and [--NAME] as [-fNAME], so its meaning cannot be known. Every
+    option that starts with [-d] (dumps), [-print-] or [--print-]
+    (queries) is [Refused] too, except those of other meaning that the
+    table names, such as [-dumpbase]. *)
 
 (** The output a compilation stops at. *)
 type stop =

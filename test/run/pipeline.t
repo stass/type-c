@@ -225,6 +225,49 @@ backend.
   $ typec --cc=$clang --std c17 -c x.tc
   $ typec --cc=$gcc --short-enums -c twice.c
 
+A file of further options, as -specs= and --config= name, can add any
+option to every step, as a response file can, so typec refuses it with
+a .tc input. So it does every -d form: the letters after -d select
+dumps, and -dD, -dM and -dI change the preprocessed text, while the
+options spelled with -d that name something else, such as -dead_strip,
+pass. A query of the backend, such as -print-file-name= or
+-dumpmachine, prints its answer and compiles nothing, so typec refuses
+it with a .tc input and passes it on without one.
+
+  $ typec --cc=$gcc -specs=my.specs -c x.tc
+  typec: -specs=my.specs cannot be used with a .tc input: it names a file, or a directory of files, of options that the backend adds to every step, which typec does not read
+  [81]
+  $ typec --cc=$gcc --specs my.specs -c x.tc
+  typec: --specs cannot be used with a .tc input: it names a file, or a directory of files, of options that the backend adds to every step, which typec does not read
+  [81]
+  $ typec --cc=$clang --config=my.cfg -c x.tc
+  typec: --config=my.cfg cannot be used with a .tc input: it names a file, or a directory of files, of options that the backend adds to every step, which typec does not read
+  [81]
+  $ typec --cc=$clang --config my.cfg -c x.tc
+  typec: --config cannot be used with a .tc input: it names a file, or a directory of files, of options that the backend adds to every step, which typec does not read
+  [81]
+  $ typec --cc=$gcc -dDI -c x.tc
+  typec: -dDI cannot be used with a .tc input: the letters after -d select dumps, and some, such as -dD, -dM and -dI, change the preprocessed text
+  [81]
+  $ typec --cc=$clang -dI -c x.tc
+  typec: -dI cannot be used with a .tc input: the letters after -d select dumps, and some, such as -dD, -dM and -dI, change the preprocessed text
+  [81]
+  $ typec --cc=$clang -dead_strip -c x.tc
+  $ typec --cc=$gcc -dead_strip -c x.tc
+  $ typec --cc=$gcc --print-file-name=libfoo.a -c x.tc
+  typec: --print-file-name=libfoo.a cannot be used with a .tc input: it asks the backend to print a fact of itself; run it without the .tc input
+  [81]
+  $ typec --cc=$clang -print-prog-name=ld x.tc
+  typec: -print-prog-name=ld cannot be used with a .tc input: it asks the backend to print a fact of itself; run it without the .tc input
+  [81]
+  $ typec --cc=$gcc -dumpmachine -c x.tc
+  typec: -dumpmachine cannot be used with a .tc input: it asks the backend to print a fact of itself; run it without the .tc input
+  [81]
+  $ typec --cc=$gcc -print-file-name=libfoo.a
+  libfoo.a
+  $ typec --cc=$clang --print-file-name libfoo.a
+  libfoo.a
+
 The options inside -Wp, and after -Xpreprocessor reach the -E step
 unseen, so the reader refuses the text they change: text without line
 markers, in which no token can be placed in its file, and text that
