@@ -682,15 +682,18 @@ is [type-c-language-design.md](type-c-language-design.md).
   = try f();`) takes the check and the object goes unchecked. Key the
   check to the holder's own initialiser, and keep the holder's state
   per holder rather than in mutable fields of the view.
-- [Medium] `c ? try f() : 0, g();` draws `-Wunused-value` on the read
-  in the branch: the void cast covers a conditional only as a
-  statement's value. Have typing record every discarded conditional
-  whose branch reads a try, and cast each to void.
 - [Medium] GCC 16 at `-O1`/`-Os` warns `maybe-uninitialized` on a
   temporary assigned under an if in a prelude
   (`int y = (c || try f()) + (d ? try g() : try f());`), which fails
   `-Werror`. Initialise such temporaries or document it, and run GCC
   at `-O1` in the run tests.
+- [Medium] A discarded expression whose effects all move to the prelude
+  lowers to reads with none: `c && try f();` becomes
+  `__tc_c0 && __tc_t0.u.Ok.value;`, which Clang reports under
+  `-Wunused-value` (`-Werror` fails). Only a discarded conditional is
+  cast to void. Decide the cast at the funnel of discarded values
+  (`Expressions.discard`) for any read of a try whose value flows into
+  the discarded value, as `Discarded_branch` names its conditional.
 - [Low] A chain of 3000 `a ? try f() :` exceeds Clang's bracket depth
   of 2048; refuse past a named bound or document it.
 - [Low] Per-holder quadratic costs: `Try_plan.expression` appends with

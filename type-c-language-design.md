@@ -5716,11 +5716,13 @@ expression statement or a left operand of a comma that only reads it
 under `-Wall` (`-Wunused-value`). A branch of a discarded conditional
 is the exception where `T` is not `void`: `((void)0)` there would give
 the conditional one void branch and one that is not, which C11
-6.5.15p3 refuses, so the holder reads the field there. An expression
-statement whose value is such a conditional, alone or as the right
-operand of a comma, is cast to `void`, which keeps the read from
+6.5.15p3 refuses, so the holder reads the field there. A conditional
+whose value is discarded, wherever it stands, is cast to `void` where
+the holder reads a `try` in its branch, which keeps the read from
 drawing `-Wunused-value` and says that the value is dropped on
-purpose.
+purpose; a conditional in a branch of another is cast with it. The
+cast lowers the source in place, so one inside a hoisted operand moves
+with the operand.
 
 The labels of the holder stay in place on a null statement, `L: ;`,
 and the prelude and the holder follow it. No block is then made around

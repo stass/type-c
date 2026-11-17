@@ -308,14 +308,11 @@ type standing = Block_item | Substatement
 (** The expression statement or declaration that holds a [try] in a
     position of design 5.1 rule 3: its span, without the C labels before
     it; the span of those labels, from the first to the last, if it has
-    any; where it stands; and the expression whose value it discards,
-    that of an expression statement, which lowering casts to void so
-    that the reads that replace its tries draw no warning (13.5). *)
+    any; and where it stands. *)
 type holder = {
   statement : Tree.span;
   labels : Tree.span option;
   standing : standing;
-  discarded : Tree.span option;
 }
 
 (** How the holder of a [try] takes the value that it reads: as it is;
@@ -339,7 +336,10 @@ type try_value =
     function in the order of 5.1; the instance of [result] that the
     operand is, and that the function returns; the name of the field of
     the [Err] of the operand's type, [None] where the argument is void
-    (design 3.5 rule 6); and what the holder reads of it. *)
+    (design 3.5 rule 6); what the holder reads of it; and [void_cast], the
+    conditional whose value is discarded and in whose branch the holder
+    reads it, which lowering casts to void so that the read draws no
+    -Wunused-value (13.5). *)
 type try_site = {
   try_span : Tree.span;
   operand : Tree.span;
@@ -348,6 +348,7 @@ type try_site = {
   return_instance : Ctype.instance;
   err_field : string option;
   value : try_value;
+  void_cast : Tree.span option;
 }
 
 (** A holder of [try] expressions (design 5.1 rule 3): the statement or

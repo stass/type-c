@@ -1287,7 +1287,7 @@ let lower_holder output held ~cleanups_of
     ((holder : Typec_sema.Expressions.try_holder), moves) =
   let moves = hold_moves moves in
   let tokens = tokens_of output in
-  let { Typec_sema.Expressions.statement; labels; standing; discarded } =
+  let { Typec_sema.Expressions.statement; labels; standing } =
     holder.holder
   in
   let location = tokens.(statement.first).location in
@@ -1312,28 +1312,36 @@ let lower_holder output held ~cleanups_of
       (insert_moved output ~before:statement.first ~extent
          (null_statement @ prelude output holder ~text_of ~cleanups_of))
   in
-  (* A discarded value is cast to void, as a read in place of a try
-     would draw -Wunused-value where nothing else reads it. *)
-  let void_cast =
-    match discarded with
-    | Some (value : Tree.span) ->
-        [ insert output ~before:value.first ~extent:value "(void)(";
-          close output ~after:value.last ~extent:value ")" ]
-    | None -> []
-  in
   match standing with
-  | Block_item -> in_front :: void_cast
+  | Block_item -> [ in_front ]
   | Substatement ->
       [ around (insert output ~before:first ~extent "{");
         in_front;
         around (close output ~after:statement.last ~extent "}") ]
-      @ void_cast
 
-(* The edits of a text with its holders of try lowered. The edits inside
-   the tokens that a hoisted operand replaces go with the operand, which
-   moves, and its replacement takes their place. [cleanups_of] gives the
-   cleanups of the error path of a try. *)
+(* The casts to void of the discarded conditionals in whose branches
+   [holder] reads a try, where the read would draw -Wunused-value. *)
+let void_casts output (holder : Typec_sema.Expressions.try_holder) =
+  let cast (value : Tree.span) =
+    [ insert output ~before:value.first ~extent:value "(void)(";
+      close output ~after:value.last ~extent:value ")" ]
+  in
+  List.filter_map
+    (fun (site : Typec_sema.Expressions.try_site) -> site.void_cast)
+    holder.tries
+  |> List.sort_uniq compare
+  |> List.concat_map cast
+
+(* The edits of a text with its holders of try lowered. The casts to
+   void lower the source in place, so one inside a hoisted operand moves
+   with it like the other edits inside the tokens that it replaces;
+   its replacement takes their place. [cleanups_of] gives the cleanups
+   of the error path of a try. *)
 let with_tries output edits moved_holders ~cleanups_of =
+  let casts =
+    List.concat_map (fun (holder, _) -> void_casts output holder) moved_holders
+  in
+  let edits = edits @ casts in
   let held = hold edits in
   with_moves edits (List.concat_map snd moved_holders)
   @ List.concat_map (lower_holder output held ~cleanups_of) moved_holders

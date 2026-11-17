@@ -1289,15 +1289,11 @@ reads nothing of it.
     
   const int __tc_c0 = ( c ) ? 1 : 0; struct result__vi __tc_t1; struct result__vi __tc_t2; if (__tc_c0) { __tc_t1 = ( v ( ) ); if (__tc_t1.tag != result__vi_Ok) { if (__tc_t1.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); } } else { __tc_t2 = ( w ( ) ); if (__tc_t2.tag != result__vi_Ok) { if (__tc_t2.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); } }
   
-  (void)(
-  
   __tc_c0
    ? 
   ((void)0)
    : 
   ((void)0)
-  
-  )
   ;
     
   struct result__vi __tc_t3 = ( v ( ) ); if (__tc_t3.tag != result__vi_Ok) { if (__tc_t3.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t3.u.Err.error } }); }

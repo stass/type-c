@@ -1028,3 +1028,87 @@ inside the substatement that holds it.
   > done
   tested: 5 labelled: 5 tested: 10 labelled: 10 tested: 5 labelled: 5 tested: error 3 labelled: error 3
   tested: 5 labelled: 5 tested: 10 labelled: 10 tested: 5 labelled: 5 tested: error 3 labelled: error 3
+
+A conditional whose value is discarded and whose branch reads a try is
+cast to void wherever it stands, so the read draws no -Wunused-value:
+on the left of a comma in a statement (left) and in an initialiser
+(initialised), around a conditional in its branch (inner), and inside
+an operand that the holder hoists, whose cast moves with it (moved,
+nested, operand).
+
+  $ cat > voids.tc <<'EOF'
+  > #include <stdio.h>
+  > typedef result(int, int) result_int;
+  > static int calls;
+  > static result_int f(int n) {
+  >   calls++;
+  >   if (n >= 0)
+  >     return Ok(n);
+  >   return Err(-n);
+  > }
+  > static int g(void) {
+  >   calls += 10;
+  >   return 7;
+  > }
+  > static result_int left(int c, int n) {
+  >   c ? try f(n) : 0, g();
+  >   return Ok(calls);
+  > }
+  > static result_int initialised(int c, int n) {
+  >   int x = (c ? try f(n) : 0, g());
+  >   return Ok(x + calls);
+  > }
+  > static result_int inner(int c, int d, int n) {
+  >   c ? (d ? try f(n) : 0) : g();
+  >   return Ok(calls);
+  > }
+  > static result_int moved(int c, int n) {
+  >   (c ? try f(n) : 0), try f(n + 1);
+  >   return Ok(calls);
+  > }
+  > static result_int nested(int c, int d, int n) {
+  >   c ? (d ? try f(n) : 0, g()) : 0, try f(n + 1);
+  >   return Ok(calls);
+  > }
+  > static result_int operand(int c, int n) {
+  >   int x = try (c ? try f(n) : 0, f(n + 2));
+  >   return Ok(x * 100 + calls);
+  > }
+  > static void show(const char *name, result_int r) {
+  >   match (r) {
+  >   case Ok(v):
+  >     printf("%s: %d\n", name, v);
+  >     break;
+  >   case Err(e):
+  >     printf("%s: error %d\n", name, e);
+  >     break;
+  >   }
+  > }
+  > int main(void) {
+  >   calls = 0;
+  >   show("moved", moved(1, 2));
+  >   show("moved", moved(0, -2));
+  >   calls = 0;
+  >   show("nested", nested(1, 1, 3));
+  >   show("nested", nested(1, 0, -3));
+  >   calls = 0;
+  >   show("operand", operand(1, 4));
+  >   show("operand", operand(1, -4));
+  >   calls = 0;
+  >   show("left", left(1, 2));
+  >   show("left", left(1, -3));
+  >   calls = 0;
+  >   show("initialised", initialised(0, 2));
+  >   calls = 0;
+  >   show("inner", inner(1, 1, 4));
+  >   show("inner", inner(0, 1, 4));
+  >   show("inner", inner(1, 1, -5));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o voids voids.tc && ./voids |
+  >     paste -s -d ' ' -
+  > done
+  moved: 2 moved: error 1 nested: 12 nested: error 2 operand: 602 operand: error 4 left: 11 left: error 3 initialised: 17 inner: 1 inner: 11 inner: error 5
+  moved: 2 moved: error 1 nested: 12 nested: error 2 operand: 602 operand: error 4 left: 11 left: error 3 initialised: 17 inner: 1 inner: 11 inner: error 5

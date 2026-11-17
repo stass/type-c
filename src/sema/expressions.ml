@@ -59,7 +59,6 @@ type holder = {
   statement : Tree.span;
   labels : Tree.span option;
   standing : standing;
-  discarded : Tree.span option;
 }
 
 type value_conversion =
@@ -79,6 +78,7 @@ type try_site = {
   return_instance : Ctype.instance;
   err_field : string option;
   value : try_value;
+  void_cast : Tree.span option;
 }
 
 type try_holder = {
@@ -409,15 +409,16 @@ end
    unqualified constructor (design 3.3), or none. A [Discarded] position
    has none and discards the value (6.3.2.2p1), which a conditional of a
    type that typec does not know needs to tell (design 5.2). A
-   [Discarded_branch] is a branch of a conditional that stands where its
-   value is discarded: its value is discarded too, but a try there reads
-   its value, as C gives both branches of a conditional one type
-   (6.5.15p3, design 13.5). *)
+   [Discarded_branch] is a branch of the conditional at [cast], which
+   stands where its value is discarded: its value is discarded too, but
+   a try there reads its value, as C gives both branches of a
+   conditional one type (6.5.15p3), and lowering casts that conditional
+   to void so that the read draws no -Wunused-value (design 13.5). *)
 type position =
   | Untargeted
   | Targeted of Ctype.t
   | Discarded
-  | Discarded_branch
+  | Discarded_branch of { cast : Tree.span }
 
 (* The position of an operand whose value is that of the expression
    around it, which stands in [position]: the association that a
@@ -426,12 +427,15 @@ type position =
    type, as design 3.3 gives neither one. *)
 let value_position = function
   | Discarded -> Discarded
-  | Discarded_branch -> Discarded_branch
+  | Discarded_branch _ as branch -> branch
   | Untargeted | Targeted _ -> Untargeted
 
-(* The position of a branch of a conditional that stands in [position]. *)
-let branch_position = function
-  | Discarded | Discarded_branch -> Discarded_branch
+(* The position of a branch of the conditional at [conditional], which
+   stands in [position]; a conditional in a branch of a discarded one is
+   cast with it. *)
+let branch_position ~(conditional : Tree.span) = function
+  | Discarded -> Discarded_branch { cast = conditional }
+  | Discarded_branch _ as branch -> branch
   | (Untargeted | Targeted _) as position -> position
 
 (* Where a pattern stands, which decides whether it may omit the field
@@ -2167,7 +2171,7 @@ let discard_branches context position ~need discards branches =
   let diagnostic =
     match (discards, position) with
     | Unknown.Answer true, _ -> Some dropped_result
-    | Depends_on unknown, (Discarded | Discarded_branch) ->
+    | Depends_on unknown, (Discarded | Discarded_branch _) ->
         Some (needing need unknown)
     | Answer false, _ | Depends_on _, (Untargeted | Targeted _) -> None
   in
@@ -3264,7 +3268,7 @@ let target_constructor context position (span : Tree.span) name =
       context.needs_complete t;
       Option.bind (Ctype.constructors context.tags t) (fun constructors ->
           named_in t constructors name)
-  | Targeted _ | Untargeted | Discarded | Discarded_branch -> None
+  | Targeted _ | Untargeted | Discarded | Discarded_branch _ -> None
 
 (* The constructor that the name at the start of [span] denotes, as the
    first reading of the name decided: an instance of a generic function
@@ -3475,17 +3479,6 @@ let holding context ?(declaration = false) (holder : holder) ~stretch_last
       view.holder_short_lived <- [];
       typed
 
-(* Design 13.5: the expression of an expression statement whose value
-   is a conditional, where a read in place of a try in a branch would
-   draw -Wunused-value, and which lowering casts to void; none where the
-   value is something else. *)
-let rec read_where_discarded (value : Tree.expression) =
-  match (Try_plan.without_parentheses value).node with
-  | Conditional _ -> Some value.span
-  | Comma (_, right) ->
-      Option.map (fun _ -> value.span) (read_where_discarded right)
-  | _ -> None
-
 (* Types a statement whose expressions refuse every try as [place]. *)
 let refusing context place type_statement =
   let enclosing = context.typed.enclosing in
@@ -3639,10 +3632,10 @@ let try_value context span position ok_field =
   match (ok_field, position) with
   | Some (field : Ctype.member), Discarded ->
       (Ctype.unqualified field.member_type, No_value)
-  | Some field, (Untargeted | Targeted _ | Discarded_branch) ->
+  | Some field, (Untargeted | Targeted _ | Discarded_branch _) ->
       ( Ctype.unqualified field.member_type,
         Read { field = field_name field; conversion = Unconverted } )
-  | None, (Discarded | Discarded_branch) -> (Ctype.void, No_value)
+  | None, (Discarded | Discarded_branch _) -> (Ctype.void, No_value)
   | None, (Untargeted | Targeted _) ->
       context.fail span
         (Rule.message Try_void
@@ -3744,7 +3737,7 @@ and positioned context position (expression : Tree.expression) =
   record_dependence context expression;
   match position with
   | Targeted target -> assigned context expression ~target typed
-  | Untargeted | Discarded | Discarded_branch -> typed
+  | Untargeted | Discarded | Discarded_branch _ -> typed
 
 (* 6.5.16.1p2, 6.5.2.2p7: [typed], the value of [expression], converted
    to [target] as if by assignment. Apart from [positioned], which
@@ -3955,6 +3948,11 @@ and try_expression context position (whole : Tree.expression) operand =
   context.needs_complete operand_type;
   let ok_field = result_field context operand_type Ctype.result_ok in
   let value_type, read = try_value context span position ok_field in
+  let void_cast =
+    match (position, read) with
+    | Discarded_branch { cast }, Read _ -> Some cast
+    | (Untargeted | Targeted _ | Discarded | Discarded_branch _), _ -> None
+  in
   let temporary =
     match hoisted.form with
     | Tried { number } -> number
@@ -3970,7 +3968,8 @@ and try_expression context position (whole : Tree.expression) operand =
       err_field =
         Option.map field_name
           (result_field context operand_type Ctype.result_err);
-      value = read }
+      value = read;
+      void_cast }
   in
   view.holder_tries <- site :: view.holder_tries;
   value value_type
@@ -4299,7 +4298,7 @@ and prototype_positions context (callee : typed) arguments =
 and argument context position argument =
   match position with
   | Targeted _ -> positioned context position argument
-  | Untargeted | Discarded | Discarded_branch ->
+  | Untargeted | Discarded | Discarded_branch _ ->
       let typed = whole_value context argument in
       if Ctype.is_opaque typed.expression_type then
         refuse_type_parameter context argument.span
@@ -4436,7 +4435,9 @@ and compound_literal context (whole : Tree.expression) type_name values =
 and conditional context span position condition if_true if_false =
   let condition_typed = whole_value context condition in
   require_scalar context condition.span ~clause:"6.5.15p2" condition_typed;
-  let branch_typed = positioned context (branch_position position) in
+  let branch_typed =
+    positioned context (branch_position ~conditional:span position)
+  in
   let second =
     match if_true with
     | Some branch -> { branch; branch_typed = branch_typed branch }
@@ -4979,8 +4980,7 @@ and block_declaration context (declaration : Tree.declaration) =
       holding context ~declaration:true
         { statement = declaration.span;
           labels = None;
-          standing = Block_item;
-          discarded = None }
+          standing = Block_item }
         ~stretch_last:declaration.span.last (Initialiser initialiser) declare
   | Declaration _ | Static_assert _ -> declare ()
 
@@ -4997,7 +4997,7 @@ and standing_statement context standing labels (statement : Tree.statement) =
       (whole_value context condition)
   in
   let holder =
-    { statement = statement.span; labels; standing; discarded = None }
+    { statement = statement.span; labels; standing }
   in
   (* Rule 3: the holder of the tries of an expression that a [)] ends, as
      a controlling expression, a scrutinee or the operand of a test. *)
@@ -5021,9 +5021,8 @@ and standing_statement context standing labels (statement : Tree.statement) =
         (Some { first; last = label.span.last })
         labeled
   | Expression_statement value ->
-      holding context
-        { holder with discarded = read_where_discarded value }
-        ~stretch_last:statement.span.last (Expression value)
+      holding context holder ~stretch_last:statement.span.last
+        (Expression value)
         (fun () -> discard context value)
   | Compound block -> block_items context block
   | Computed_goto value -> ignore (expression context value)
