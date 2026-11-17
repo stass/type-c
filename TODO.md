@@ -430,12 +430,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   integer too large) is refused as reaching into the variant rather
   than with the constant's own error.
 - [Medium] Design 13.5 says a constructor inside an initialiser lowers
-  to its braced list so that static initialisers stay constant; one in
-  parentheses (`static e x = (B(1));`) or reached through elided braces
-  (`static struct w q = { e.A };`), and one for an atomic object
-  (`static _Atomic e g = A;`), lower to a compound literal, which
-  `gcc -pedantic` calls not constant. Narrow the 13.5 row or drop the
-  parentheses and add the elided braces in the lowering.
+  to its braced list so that static initialisers stay constant, and
+  that the list replaces the initialiser with its parentheses. `typec`
+  keeps the compound literal for one in parentheses
+  (`static e x = (B(1));`, and `Some((B(1)))` in an initialiser), for
+  one reached through elided braces (`static struct w q = { e.A };`)
+  and for an atomic object (`static _Atomic e g = A;`), which
+  `gcc -pedantic` calls not constant. Drop the parentheses in the
+  lowering, and add the elided braces or narrow the 13.5 row for them.
 - [Medium] `Expressions.constructor_argument` repeats `Initialiser`'s
   rule that a structure is initialised whole when its type is
   compatible (6.7.9p13). Check the arguments as the initialiser of the
@@ -1696,9 +1698,23 @@ types (design 13.3).
   (design 13.5), which is unmeasured. A value of two parts can come
   apart there: under GCC 16 at `-O2` a resumed slice test had the
   pointer of one evaluation and the length of another (design 13.5),
-  and a `result` in `__tc_r` is a tag and a payload. Go through the
-  lowered forms for such values and state one rule for all of them in
-  section 14, with rule 10 of section 8 as its case for slices.
+  and a `result` in `__tc_r` is a tag and a payload. Rule 10 states
+  its limit over the full expression that holds the index. Go through
+  the lowered forms for such values and state one rule of that shape
+  for all of them in section 14, with rule 10 of section 8 as its case
+  for slices.
+- [Low] `slice_from_array(a).len` is a member of a compound literal
+  and no constant expression (design section 8 rule 2, 13.5). An
+  array of that size, `char b[slice_from_array(a).len];`, is a
+  variable length array; Apple Clang 21 in the GNU form of C, the
+  default of `typec`, computes the size as a constant and warns of
+  that without an option (`-Wgnu-folding-constant`), which is an error
+  under `-pedantic-errors`, so this lowered text does not compile
+  under that option as design 2.4 says all of it does. Decide whether
+  the length of a `slice_from_array` is a constant expression of
+  Type-C, lowered as the quotient alone where a constant is wanted,
+  or whether 2.4 names the case; `sizeof(a) / sizeof(a[0])` is the
+  constant meanwhile.
 - [Low] Design 13.5 (the constructor row) gives the braced list to an
   initialiser of an object "declared with the variant's type". `typec`
   writes it for an object of a compatible type under any qualifier,

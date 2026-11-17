@@ -288,7 +288,7 @@ record of what it found.
 | 3.3 | Instantiation and emission: per-unit instances, typedef substitution, the nesting limit and the instance budget of design 3.5 rule 7, and rule 8 of design 3.5 for function definitions (P23). |
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
-| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The tokens that each unit of the library and of the pilot counts for its instances, against the instance budget of design 3.5 rule 7 (P30). The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches when its evaluation is resumed after its function has evaluated it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
+| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The tokens that each unit of the library and of the pilot counts for its instances, against the instance budget of design 3.5 rule 7 (P30). The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches, and where a call stores through the address of an element that it holds across another argument, when the full expression that holds the index is resumed after its function has begun to evaluate it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
 
 **Exit gate**
 
@@ -327,21 +327,37 @@ record of what it found.
    - `slice_from_array` initialises an object of file scope under
      `-pedantic-errors`; the partner, an index that C evaluates in the
      head of a function, is refused;
+   - an initialiser of file scope in parentheses,
+     `slice(int) b = (slice_from_array(a));` and `static e x = (B(1));`,
+     and a `slice_from_array` as the argument of a constructor,
+     `option(str) o = Some(slice_from_array(letters));`, compile under
+     `-pedantic-errors` on both backends and hold their values; the
+     partner, the lowered text with the compound literal inside the
+     parentheses and as the payload, is refused by GCC;
    - a `slice(int)` converts to `slice(const int)` in an argument, an
-     assignment and a `return`, with an operand that counts its
-     evaluations evaluated once, and
+     assignment, a `return` and either operand of a conditional
+     operator whose other operand is a `slice(const int)`, with an
+     operand that counts its evaluations evaluated once, and
      `slice(const int) c = slice_from_array(a);` initialises an object
-     of file scope under `-pedantic-errors`; the partner, the lowered
+     of file scope under `-pedantic-errors`; the partners, the lowered
      text with the compound literal of `slice(int)` in that
-     initialiser, is refused by both backends;
-   - a `slice_from_array` in a return type and in the size of a member
-     compiles without a diagnostic; the partner, one in a parameter
-     list, is refused;
+     initialiser and with the operands of the conditional operator as
+     the source has them, are refused by both backends;
+   - a `slice(const int[4])` that `slice_from_array` makes of an array
+     declared `const` compiles under `-pedantic-errors` on both
+     backends and indexes its rows; the partner, the conversion of a
+     `slice(int[4])` to it, of an operand and of a `slice_from_array`,
+     is refused by `typec` with its own message, and the lowered text
+     of that conversion, written by hand, is refused by GCC under
+     `-pedantic-errors`;
    - `slice_from_array` of an array of `int` compiles without a
-     diagnostic; the partner, one of an array whose elements have size
-     0, a structure without members and `int[sizeof(int) - 4]`, is
-     refused by both backends with the message of design 13.5, in a
-     block and at file scope;
+     diagnostic under `-pedantic-errors -Wall -Wextra` in a block, at
+     file scope, in a return type, in the size of a member and in a
+     parameter list, `void f(char x[sizeof(slice_from_array(a))])`;
+     the partner, one of an array whose elements have size 0, a
+     structure without members and `int[sizeof(struct four) - 4]`, is
+     refused by both backends for the negative size of an array
+     (design 13.5), in a block, at file scope and in a parameter list;
    - an index whose operand returns a second time reaches the element
      of its index again where its function has not begun to evaluate
      it in between, with `setjmp` in a statement expression and with a
