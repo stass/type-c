@@ -305,16 +305,19 @@ a generic function is lowered in an instance of package 3.3.
 
 **Measurements of 3.6.** The raw data and the numbers are in the data
 repository, at `/Volumes/Optaine/type-c-corpus/measure/3.6/2026-11-17-darwin-x86_64/`
-(its README, commit DATA_COMMIT), from Type-C commits `26e07f6dfb08` and
-`3b9eee224275`. No unit of the library or of Pilot B is refused by
+(its README, commit 904a955), from Type-C commits `26e07f6dfb08`,
+`3b9eee224275` and `9497e3289a0a`. No unit of the library or of Pilot B is refused by
 `instance-pragma` or `slice-check-place`; no index or `slice_sub` of
 either stands where C does not evaluate it; the library holds 15 tested
 indexes, 2 `slice_sub`s and 2 conversions over its six units, the pilot
 no slice; no test holds a call or a statement expression in an operand
 after the first, so volatile temporaries for those alone cost nothing.
-The long double record of the zero initialiser is not taken:
-`test/run/zero_initialisers.t` is not on master. The record of design
-section 8 rule 10 is `resume.csv` there.
+The `long double` bytes that the zero initialiser leaves are
+`zero.csv`: of the 6 bytes of a `long double` that hold no value, 6
+stay under Clang at each level and, under GCC 16, 0 at `-O0` and 4 at
+`-O2` and `-O3`; of the 12 of the complex type, 12 under Clang, 6 and 8
+under GCC 16, in the places the file names. The record of design
+section 8 rule 10 is `resume.csv`.
 
 **Exit gate**
 
