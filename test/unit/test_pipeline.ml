@@ -23,7 +23,15 @@ let () =
       ("-ofile", (Output, 0, "file"));
       ("-MF", (Dependency Dependency_file, 1, ""));
       ("-MFdeps", (Dependency Dependency_file, 0, "deps"));
-      ("-M", (Refused "", 0, ""));
+      ("-M", (Dependency Print_rule, 0, ""));
+      ("-MM", (Dependency Print_rule, 0, ""));
+      ("--dependencies", (Dependency Print_rule, 0, ""));
+      ("--user-dependencies", (Dependency Print_rule, 0, ""));
+      ("--write-dependencies", (Dependency Write_dependencies, 0, ""));
+      ("--write-user-dependencies", (Dependency Write_dependencies, 0, ""));
+      ("--print-missing-file-dependencies",
+        (Dependency Dependency_detail, 0, ""));
+      ("-E", (Refused "", 0, ""));
       ("-fpack-struct", (Refused "", 0, ""));
       ("-fpack-struct=2", (Common, 0, ""));
       ("-std=c11", (Dialect, 0, "c11"));
@@ -114,6 +122,9 @@ let planned ?emit_c words =
 (* A command for GCC, which gets no option of typec's own. *)
 let for_gcc = Option.map (fun (command : Pipeline.command) -> command Gcc)
 
+let finals_for_gcc (plan : Pipeline.t) =
+  List.map (fun (command : Pipeline.command) -> command Gcc) plan.finals
+
 let only_translation (plan : Pipeline.t) =
   match plan.translations with
   | [ translation ] -> translation
@@ -143,7 +154,7 @@ let () =
     && translation.emitted = File "/T/1/x.c");
   check "-c -o: target options are the compile step's"
     (plan.target_options = [ "-std=gnu17"; quiet; "-O2" ]);
-  check "-c -o: no final command" (Option.is_none plan.final)
+  check "-c -o: no final command" (plan.finals = [])
 
 (* The compile step reads typec's output, which is UTF-8 whatever the
    source's encoding. *)
@@ -186,8 +197,8 @@ let () =
 let () =
   let plan = planned [ "x.tc"; "-Iinc"; "y.c"; "-o"; "prog"; "-lm" ] in
   check "link with a .c input"
-    (for_gcc plan.final
-    = Some [ "cc"; "/T/1.o"; "-Iinc"; "y.c"; "-o"; "prog"; "-lm" ]);
+    (finals_for_gcc plan
+    = [ [ "cc"; "/T/1.o"; "-Iinc"; "y.c"; "-o"; "prog"; "-lm" ] ]);
   check "link: compile to the temporary object"
     (for_gcc (only_translation plan).compile
     = Some
@@ -197,12 +208,13 @@ let () =
         ]);
   let plan = planned [ "-Iinc"; "-MD"; "a.tc"; "b.tc"; "-lm" ] in
   check "link .tc inputs only: the final command compiles"
-    (for_gcc plan.final
-    = Some
+    (finals_for_gcc plan
+    = [
         [
           "cc"; "-std=gnu17"; "-x"; "cpp-output"; "/T/1/a.c"; "-x";
           "cpp-output"; "/T/2/b.c"; "-lm";
-        ]);
+        ];
+      ]);
   check "link .tc inputs only: no compile step"
     (List.for_all
        (fun (t : Pipeline.translation) -> Option.is_none t.compile)
@@ -214,8 +226,8 @@ let () =
     (List.map (fun (t : Pipeline.translation) -> t.source) plan.translations
     = [ "a.tc"; "b.tc" ]);
   check "-c with a .c input"
-    (for_gcc (planned [ "-c"; "x.tc"; "y.c"; "-O2" ]).final
-    = Some [ "cc"; "-c"; "y.c"; "-O2" ])
+    (finals_for_gcc (planned [ "-c"; "x.tc"; "y.c"; "-O2" ])
+    = [ [ "cc"; "-c"; "y.c"; "-O2" ] ])
 
 (* Clang's steps quiet its warning about unused options, which GCC does
    not know. Clang reads no trigraph in the emitted C, after the user's
@@ -223,6 +235,9 @@ let () =
 let () =
   let for_clang =
     Option.map (fun (command : Pipeline.command) -> command Clang)
+  in
+  let finals_for_clang (plan : Pipeline.t) =
+    List.map (fun (command : Pipeline.command) -> command Clang) plan.finals
   in
   let plan = planned [ "-trigraphs"; "-c"; "x.tc" ] in
   check "Clang: preprocess quiets unused options"
@@ -239,15 +254,16 @@ let () =
           "cpp-output"; "/T/1/x.c"; "-fno-trigraphs";
         ]);
   check "Clang: the final command compiles without trigraphs"
-    (for_clang (planned [ "x.tc" ]).final
-    = Some
+    (finals_for_clang (planned [ "x.tc" ])
+    = [
         [
           "cc"; "-std=gnu17"; quiet; "-x"; "cpp-output"; "/T/1/x.c";
           "-fno-trigraphs";
-        ]);
+        ];
+      ]);
   let plan = planned [ "x.tc"; "y.c" ] in
   check "Clang: the final command that links objects is the same"
-    (for_clang plan.final = for_gcc plan.final)
+    (finals_for_clang plan = finals_for_gcc plan)
 
 let () =
   let preprocess words = (only_translation (planned words)).preprocess Gcc in
@@ -276,7 +292,67 @@ let () =
     = [
         "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MF"; "d"; "-x"; "c";
         "x.tc";
-      ])
+      ]);
+  check "--write-dependencies is -MD"
+    (preprocess [ "--write-dependencies"; "-c"; "x.tc"; "-o"; "x.o" ]
+    = [
+        "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "--write-dependencies";
+        "-MF"; "x.d"; "-MQ"; "x.o"; "-x"; "c"; "x.tc";
+      ]);
+  let plan = planned [ "--write-user-dependencies"; "-c"; "x.tc" ] in
+  check "--write-user-dependencies: not compile or the target query"
+    (for_gcc (only_translation plan).compile
+     = Some
+         [
+           "cc"; "-std=gnu17"; "-c"; "-o"; "x.o"; "-x"; "cpp-output";
+           "/T/1/x.c";
+         ]
+    && plan.target_options = [ "-std=gnu17"; quiet ])
+
+(* With -M or -MM the -E step of each .tc input prints its rule where -o
+   says, and the other inputs get the command line without the .tc
+   ones. *)
+let () =
+  let printed = planned [ "-MM"; "-MP"; "-Iinc"; "-c"; "x.tc" ] in
+  check "-MM: no translation" (printed.translations = []);
+  check "-MM: the -E step prints the rule"
+    (finals_for_gcc printed
+    = [
+        [
+          "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-MM"; "-MP"; "-Iinc";
+          "-x"; "c"; "x.tc";
+        ];
+      ]);
+  check "-M -o: the rule goes to the file"
+    (finals_for_gcc (planned [ "-M"; "x.tc"; "-o"; "x.d" ])
+    = [
+        [
+          "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-M"; "-o"; "x.d"; "-x";
+          "c"; "x.tc";
+        ];
+      ]);
+  check "-M -MD: the backend names the file and target"
+    (finals_for_gcc (planned [ "-M"; "-MD"; "x.tc"; "-o"; "x.d" ])
+    = [
+        [
+          "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-M"; "-MD"; "-o"; "x.d";
+          "-x"; "c"; "x.tc";
+        ];
+      ]);
+  check "-M: the other inputs follow"
+    (finals_for_gcc (planned [ "-M"; "x.tc"; "-DX"; "y.c" ])
+    = [
+        [
+          "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17"; "-M"; "-DX"; "-x"; "c";
+          "x.tc";
+        ];
+        [ "cc"; "-M"; "-DX"; "y.c" ];
+      ]);
+  check "-M -o with two inputs"
+    (plan [ "-M"; "x.tc"; "y.c"; "-o"; "deps" ]
+    = Error Output_for_several_inputs);
+  check "--emit-c with -MM"
+    (plan ~emit_c:true [ "-MM"; "x.tc" ] = Error Emit_c_rules)
 
 let () =
   let emitted words = (only_translation (planned ~emit_c:true words)).emitted in
@@ -285,7 +361,7 @@ let () =
   check "--emit-c compiles nothing"
     (let plan = planned ~emit_c:true [ "x.tc" ] in
      Option.is_none (only_translation plan).compile
-     && Option.is_none plan.final);
+     && plan.finals = []);
   check "--emit-c target options"
     ((planned ~emit_c:true [ "-m32"; "-std=c11"; "x.tc" ]).target_options
     = [ quiet; "-m32"; "-std=c11" ])

@@ -3,8 +3,14 @@
 
 # readme.sh FAMILY BACKEND README: checks that the examples of README
 # hold on BACKEND, of FAMILY clang or gcc, in a directory of its own
-# named after FAMILY, and prints what differs. The README marks its
-# examples with a comment line right before the opening fence:
+# named after FAMILY, and prints what differs.
+#
+# readme.sh --files README DIRECTORY: writes the files of README into
+# DIRECTORY and runs nothing, for a test that uses them otherwise, such
+# as the build rules that README shows.
+#
+# The README marks its examples with a comment line right before the
+# opening fence:
 #
 # - "<!-- file: NAME -->" writes the block to NAME, a relative path of
 #   letters, digits and "_./-" that does not climb with "..";
@@ -26,14 +32,15 @@
 # its exit status in brackets when that is not 0. Blocks of other
 # kinds, such as sh, are not run.
 
-family=$1
-backend=$2
-readme=$3
-case $family in
-clang | gcc) ;;
-*) echo "readme.sh: FAMILY is clang or gcc, not $family" >&2; exit 1 ;;
-esac
-work=work-$family
+if [ "$1" = --files ]; then
+  family= readme=$2 work=$3
+else
+  family=$1 backend=$2 readme=$3 work=work-$1
+  case $family in
+  clang | gcc) ;;
+  *) echo "readme.sh: FAMILY is clang or gcc, not $family" >&2; exit 1 ;;
+  esac
+fi
 mkdir "$work" || exit 1
 
 # The awk program reads the README a line at a time. Outside a block,
@@ -117,6 +124,9 @@ awk -v work="$work" -v family="$family" '
       fail("a console marker for neither clang nor gcc: " marked)
   }
 ' "$readme" || exit 1
+if [ -z "$family" ]; then
+  exit 0
+fi
 
 cd "$work" || exit 1
 TYPEC_CC=$backend

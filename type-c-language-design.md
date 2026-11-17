@@ -4630,8 +4630,15 @@ language is defined here and not by the tool.
 - `typec` accepts the command line of the C compiler. Inputs with the
   suffix `.tc` go through the pipeline above; every other input and option
   is handed to the C compiler unchanged. `typec` therefore replaces `cc` in
-  a makefile rule and works under make, ninja and cmake. Dependency files
-  (`-MD`) come from the preprocessing step and name the real output.
+  a makefile rule and works under make, ninja and cmake. Dependencies
+  come from the preprocessing step, which gets the dependency options:
+  with `-MD` or `-MMD` its file names the real output, and with `-M` or
+  `-MM` it prints the rule in place of the preprocessed text and nothing
+  is compiled. The rule of a `.tc` file thus names it and every header
+  and `.tci` interface that it includes, as the backend names those of a
+  `.c` file. `typec` writes no dependency file of its own: it reads no
+  file but the preprocessed text, and a second writer would repeat the
+  backend's rules for quoting and for `-MP`, `-MG` and `-MT`.
 - The *backend* is the C compiler named by `--cc=` or `TYPEC_CC`, by default
   `cc`. GCC and Clang are supported, from the releases that 13.3 names.
 - A backend that runs `typec` again, such as a `cc` first on `PATH` that

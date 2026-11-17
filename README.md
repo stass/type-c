@@ -897,13 +897,8 @@ unknown: mul 3
 A command added to `command` later, such as `Mul(long n)`, stops the
 build at every `match` that does not handle it.
 
-In a build, `CC=typec` compiles `main.c` and every other C file as the
-C compiler does, since `typec` hands them to it untouched. The build
-also needs a rule for the `.tc` file, as make has none built in: in a
-GNU Makefile, `%.o: %.tc` with the command
-`$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<`, and in other build systems
-their own form of it. Documented rules for make,
-ninja and CMake are plan package 4.3, not done yet.
+A build compiles `calc.tc` with `typec`, and its other files as before
+([In a build](#in-a-build)).
 
 A C11 translation unit is a Type-C unit with the same meaning
 ([design 2.2](type-c-language-design.md#22-type-c-is-a-superset-of-c11)):
@@ -970,6 +965,86 @@ but the debug information is not yet that of a direct compile: with
 Clang it names a temporary file as the compilation unit, and on macOS a
 command that links a `.tc` input with other inputs loses the `.dSYM` of
 `-g` ([TODO.md](TODO.md#driver)).
+
+### In a build
+
+In a build, `typec` is the C compiler, with the backend that `TYPEC_CC`
+names ([Choosing the backend](#choosing-the-backend)). It hands
+`main.c` and every other C file to the backend untouched, so a build
+tool needs to learn only that a `.tc` file is compiled as a `.c` file
+is. The dependency options (`-M`, `-MM`, `-MD`, `-MMD`, `-MF`, `-MT`,
+`-MQ`, `-MP`) work as for a `.c` file: the rule of `calc.o` names
+`calc.tc` and every header and `.tci` interface that it includes, so
+make or ninja rebuilds `calc.o` when one of them changes, and nothing
+when none does.
+
+In a GNU Makefile, the rule for a `.tc` file is make's built-in rule
+for a `.c` file:
+
+<!-- file: Makefile -->
+```
+CC = typec
+CFLAGS = -Wall -Wextra
+CPPFLAGS = -MMD -MP
+objects = main.o calc.o
+
+calc: $(objects)
+	$(LINK.o) $^ $(LDLIBS) -o $@
+
+%.o: %.tc
+	$(COMPILE.c) $(OUTPUT_OPTION) $<
+
+-include $(objects:.o=.d)
+```
+
+With ninja, whose `deps = gcc` reads the same dependency files:
+
+<!-- file: build.ninja -->
+```
+cflags = -Wall -Wextra
+
+rule cc
+  command = typec $cflags -MMD -MF $out.d -c $in -o $out
+  depfile = $out.d
+  deps = gcc
+
+rule link
+  command = typec $in -o $out
+
+build main.o: cc main.c
+build calc.o: cc calc.tc
+build calc: link main.o calc.o
+```
+
+In CMake, a file of rules that CMake reads when it enables C makes
+`.tc` a suffix of C sources:
+
+<!-- file: typec.cmake -->
+```
+list(APPEND CMAKE_C_SOURCE_FILE_EXTENSIONS tc)
+```
+
+<!-- file: CMakeLists.txt -->
+```
+cmake_minimum_required(VERSION 3.20)
+set(CMAKE_USER_MAKE_RULES_OVERRIDE_C
+    ${CMAKE_CURRENT_SOURCE_DIR}/typec.cmake)
+project(calc C)
+add_executable(calc main.c calc.tc)
+```
+
+```sh
+cmake -G Ninja -DCMAKE_C_COMPILER=typec -B build
+cmake --build build
+```
+
+The `LANGUAGE C` property on `calc.tc` would not do: with it, CMake
+puts `-x c` before the file, and `typec` then hands it to the backend
+as C, as the C compiler would take it. The tests
+[`make_rule.t`](test/run/make_rule.t),
+[`ninja_rule.t`](test/run/ninja_rule.t) and
+[`cmake_rule.t`](test/run/cmake_rule.t) build with these rules on both
+backends, where the host has the tool.
 
 ## What typec reports
 
@@ -1599,6 +1674,10 @@ input is thus compiled exactly as without `typec`.
 With `-MD` or `-MMD` the dependency file comes from step 1, named as cc
 names it: after `-MF`, else after `-o` with the suffix `.d`, else after
 the input; its target is the `-MT` or `-MQ` value, else the real output.
+With `-M` or `-MM` the command line compiles nothing: step 1 of each
+`.tc` input prints its rule in place of the preprocessed text, to the
+`-o` file or stdout, and one more backend command gets the command line
+without the `.tc` inputs, when other inputs remain, to print theirs.
 
 `--emit-c` stops after step 2 and writes the C to the `-o` file, or to
 stdout; the command line then has exactly one input, a `.tc` file.
@@ -1622,8 +1701,8 @@ that C does not evaluate) and `slice_late_calls` (the tested indexes and
 `slice_sub`s with a call or a statement expression in an operand after
 the first). A unit that typec refuses reports none.
 
-A `.tc` input refuses the options that stop the backend at
-preprocessing (`-E`, `-M`, `-MM`), that change the preprocessed text
+A `.tc` input refuses the option that stops the backend at
+preprocessing (`-E`), the options that change the preprocessed text
 (`-P`, `-C`, `-CC`, `-fuse-line-directives`, `-dD`, `-dM` and the like,
 `-traditional-cpp`, `-fdirectives-only`), `-save-temps`, `-###`, `-ansi`,
 `--` and response files (`@FILE`), with a usage error naming the option.

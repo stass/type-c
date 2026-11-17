@@ -20,7 +20,7 @@ type translation = {
 type t = {
   target_options : string list;
   translations : translation list;
-  final : command option;
+  finals : command list;
 }
 
 type error =
@@ -29,6 +29,7 @@ type error =
   | Missing_value of string
   | Output_for_several_inputs
   | Emit_c_inputs
+  | Emit_c_rules
   | Several_architectures of string list
 
 (* Raised at the first reason the command line has no pipeline and
@@ -167,17 +168,27 @@ let goal_of arguments =
   else if stops Object then Stopped Object
   else Linked
 
-let check_outputs ~emit_c ~goal ~output arguments =
+(* -M and -MM stop cc before any other output: it prints the rule of
+   each input instead. *)
+let prints_rules arguments = has_role (Dependency Print_rule) arguments
+
+(* Whether the command line makes an output of each input, which one -o
+   cannot name when there are several. *)
+let output_of_each_input ~rules = function
+  | Stopped (Object | Assembly) -> true
+  | Linked | Stopped Syntax_check -> rules
+
+let check_outputs ~emit_c ~rules ~goal ~output arguments =
   let several_inputs = input_count arguments > 1 in
   if emit_c then begin
+    if rules then raise (Failed Emit_c_rules);
     if several_inputs || not (has_type_c_input arguments) then
       raise (Failed Emit_c_inputs)
   end
-  else
-    match (goal, output) with
-    | Stopped (Object | Assembly), Some _ when several_inputs ->
-        raise (Failed Output_for_several_inputs)
-    | _ -> ()
+  else if
+    several_inputs && Option.is_some output
+    && output_of_each_input ~rules goal
+  then raise (Failed Output_for_several_inputs)
 
 let preprocessing_role : Cc_option.role -> bool = function
   | Preprocess | Dependency _ | Common | Architecture | Dialect | Keywords _
@@ -292,6 +303,10 @@ let without_trigraphs : Target.compiler -> string list = function
 
 let as_preprocessed file = [ "-x"; "cpp-output"; file ]
 
+let output_option = function
+  | Some output -> [ "-o"; output ]
+  | None -> []
+
 (* A backend command that compiles emitted C: [words] gives its options
    and inputs for the compiler, and the backend reads the C as typec's
    reader did. *)
@@ -308,12 +323,27 @@ let compile_command shape arguments ~linked_object source emitted_file =
           source
       @ as_preprocessed emitted_file)
 
-let preprocess_command shape arguments source compiler =
+(* The -E step of [source] with the options of the command line that
+   matter to preprocessing, and [outputs] before the input. *)
+let preprocessing_command shape arguments ~outputs source compiler =
   (shape.program :: "-E" :: type_c_macro
    :: with_standard shape compiler
         (options_where preprocessing_role arguments))
-  @ dependency_options ~output:shape.output arguments source
-  @ [ "-x"; "c"; source ]
+  @ outputs @ [ "-x"; "c"; source ]
+
+(* The -E step that a translation reads, whose dependency file is the
+   one that cc would write when it compiles. *)
+let preprocess_command shape arguments source =
+  preprocessing_command shape arguments source
+    ~outputs:(dependency_options ~output:shape.output arguments source)
+
+(* Under -M or -MM the -E step prints the rule in place of the
+   preprocessed text, where -o says. It gets -o and the dependency
+   options as given, so the backend names the rule's target and any
+   dependency file as it does for a C source. *)
+let rule_command shape arguments source =
+  preprocessing_command shape arguments source
+    ~outputs:(output_option shape.output)
 
 (* [linked_object] is the object that the step makes when the command
    line links. *)
@@ -365,9 +395,16 @@ let final_compiles ~emit_c ~goal arguments =
   (not emit_c) && goal = Linked
   && input_count (without_type_c_inputs arguments) = 0
 
-let final_command shape ~objects ~emitted_files arguments =
+(* The command line without its .tc inputs, for the backend to do with
+   the other inputs what it would without typec, when there are any. *)
+let other_inputs_commands shape arguments =
   let others = without_type_c_inputs arguments in
-  let other_inputs = input_count others > 0 in
+  if input_count others = 0 then []
+  else
+    [ same_for_every_compiler (shape.program :: Command_line.words others) ]
+
+let final_commands shape ~objects ~emitted_files arguments =
+  let other_inputs = input_count (without_type_c_inputs arguments) > 0 in
   let link_options = function
     | Command_line.Option option -> linking_role option.role
     | _ -> true
@@ -375,33 +412,77 @@ let final_command shape ~objects ~emitted_files arguments =
   let linked =
     if other_inputs then arguments else List.filter link_options arguments
   in
-  if shape.emit_c then None
+  if shape.emit_c then []
   else
     match shape.goal with
     | Linked when shape.final_compiles ->
         let compiled =
           with_replaced_inputs (List.map as_preprocessed emitted_files) linked
         in
-        Some
-          (emitted_c_command shape (fun compiler ->
-               with_standard shape compiler compiled))
+        [
+          emitted_c_command shape (fun compiler ->
+              with_standard shape compiler compiled);
+        ]
     | Linked ->
         let objects = List.map (fun file -> [ file ]) objects in
         let words = with_replaced_inputs objects linked in
-        Some (same_for_every_compiler (shape.program :: words))
-    | Stopped _ when other_inputs ->
-        let words = Command_line.words others in
-        Some (same_for_every_compiler (shape.program :: words))
-    | Stopped _ -> None
+        [ same_for_every_compiler (shape.program :: words) ]
+    | Stopped _ -> other_inputs_commands shape arguments
+
+(* The plan of a command line that compiles: a translation of each .tc
+   input, then the command that links or compiles the rest. *)
+let compilation_plan shape arguments =
+  (* The number of a .tc input, from 1, names its files. *)
+  let sources =
+    List.mapi (fun index source -> (index + 1, source))
+      (type_c_sources arguments)
+  in
+  let objects =
+    List.map (fun (index, _) -> object_file shape.temp_dir index) sources
+  in
+  let translations =
+    List.map2
+      (fun (index, source) linked_object ->
+        translation shape arguments ~linked_object index source)
+      sources objects
+  in
+  (* Only --emit-c writes to stdout, and it has no final command, so
+     the list has a file for each .tc input when the final reads it. *)
+  let emitted_files =
+    List.filter_map
+      (fun translation ->
+        match translation.emitted with
+        | File file -> Some file
+        | Standard_output -> None)
+      translations
+  in
+  {
+    target_options = target_options shape arguments;
+    translations;
+    finals = final_commands shape ~objects ~emitted_files arguments;
+  }
+
+(* The plan of a command line with -M or -MM, which translates nothing:
+   the rule of each .tc input, then those of the other inputs. *)
+let rules_plan shape arguments =
+  let rules =
+    List.map (rule_command shape arguments) (type_c_sources arguments)
+  in
+  {
+    target_options = target_options shape arguments;
+    translations = [];
+    finals = rules @ other_inputs_commands shape arguments;
+  }
 
 let plan ~program ~emit_c ~temp_dir arguments =
   try
     refuse_unusable_options arguments;
     refuse_several_architectures arguments;
     let dialect = dialect_of arguments in
+    let rules = prints_rules arguments in
     let goal = goal_of arguments in
     let output = last_value Output arguments in
-    check_outputs ~emit_c ~goal ~output arguments;
+    check_outputs ~emit_c ~rules ~goal ~output arguments;
     let standard =
       if has_role Dialect arguments then [] else [ "-std=" ^ default_standard ]
     in
@@ -417,36 +498,8 @@ let plan ~program ~emit_c ~temp_dir arguments =
         dialect;
       }
     in
-    (* The number of a .tc input, from 1, names its files. *)
-    let sources =
-      List.mapi (fun index source -> (index + 1, source))
-        (type_c_sources arguments)
-    in
-    let objects =
-      List.map (fun (index, _) -> object_file temp_dir index) sources
-    in
-    let translations =
-      List.map2
-        (fun (index, source) linked_object ->
-          translation shape arguments ~linked_object index source)
-        sources objects
-    in
-    (* Only --emit-c writes to stdout, and it has no final command, so
-       the list has a file for each .tc input when the final reads it. *)
-    let emitted_files =
-      List.filter_map
-        (fun translation ->
-          match translation.emitted with
-          | File file -> Some file
-          | Standard_output -> None)
-        translations
-    in
-    Ok
-      {
-        target_options = target_options shape arguments;
-        translations;
-        final = final_command shape ~objects ~emitted_files arguments;
-      }
+    if rules then Ok (rules_plan shape arguments)
+    else Ok (compilation_plan shape arguments)
   with Failed error -> Error error
 
 let error_message = function
@@ -459,8 +512,10 @@ let error_message = function
         standard
   | Missing_value option -> Printf.sprintf "missing argument to %s" option
   | Output_for_several_inputs ->
-      "cannot specify -o with -c or -S and more than one input"
+      "cannot specify -o with -c, -S or -M and more than one input"
   | Emit_c_inputs -> "--emit-c needs exactly one input, a .tc file"
+  | Emit_c_rules ->
+      "--emit-c cannot be used with -M or -MM: it writes the C, not a rule"
   | Several_architectures names ->
       Printf.sprintf
         "-arch cannot name several architectures (%s) with a .tc input: \

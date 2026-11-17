@@ -165,11 +165,11 @@ let run_plan ~program ~stats (plan : Pipeline.t) =
   let target = query_target ~program plan.target_options in
   with_file "/dev/null" [ Unix.O_RDONLY ] (fun null ->
       List.iter (translate ~null ~stats target) plan.translations);
-  Option.iter
+  List.iter
     (fun final ->
       run_step ~stdin:Unix.stdin ~stdout:Unix.stdout
         (final target.backend.compiler))
-    plan.final
+    plan.finals
 
 let run_pipeline (invocation : Invocation.t) temp_dir =
   let emit_c = invocation.action = Invocation.Emit_c in

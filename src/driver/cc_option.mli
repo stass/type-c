@@ -18,6 +18,9 @@ type stop =
 
 (** What a dependency option does. *)
 type dependency =
+  | Print_rule
+      (** [-M], [-MM]: print the rule of the [-E] step instead of
+          compiling *)
   | Write_dependencies  (** [-MD], [-MMD]: write a dependency file *)
   | Dependency_file  (** [-MF FILE]: name it *)
   | Dependency_target  (** [-MT TARGET], [-MQ TARGET]: name its target *)

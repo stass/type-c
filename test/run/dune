@@ -121,3 +121,23 @@
 (cram
  (applies_to readme)
  (deps readme.sh ../../README.md))
+
+; make_rule.t, ninja_rule.t and cmake_rule.t build with the rules that
+; README.md shows, each where the host has its build tool.
+
+(cram
+ (applies_to make_rule ninja_rule cmake_rule)
+ (deps calc_example.sh readme.sh ../../README.md))
+
+(cram
+ (applies_to make_rule)
+ (enabled_if %{bin-available:make}))
+
+(cram
+ (applies_to ninja_rule)
+ (enabled_if %{bin-available:ninja}))
+
+(cram
+ (applies_to cmake_rule)
+ (enabled_if
+  (and %{bin-available:cmake} %{bin-available:ninja})))

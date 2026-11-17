@@ -154,6 +154,34 @@ names it, and its target is the real output.
   $ typec --cc=$clang -MD -c x.tc && grep -c ' x.h' x.d
   1
 
+The long forms of the options are the same options, and only the
+preprocessing step gets them: the target query and the compile step of
+Clang would each write a dependency file of their own.
+
+  $ typec --cc=$clang --write-user-dependencies -c x.tc -o out/long.o
+  $ cat out/long.d
+  out/long.o: x.tc x.h
+  $ ls *.d
+  x.d
+
+-M and -MM print the rule of the preprocessing step and compile
+nothing, as cc does for a .c input: to stdout, or to the file of -o or
+-MF. The other inputs get the command line without the .tc ones.
+
+  $ typec --cc=$clang -MM -c x.tc
+  x.o: x.tc x.h
+  $ typec --cc=$gcc -MM -MT t -o out/rule x.tc && cat out/rule
+  t: x.tc x.h
+  $ typec --cc=$clang --user-dependencies -MP -MF out/rules x.tc twice.c
+  $ cat out/rules
+  twice.o: twice.c
+  $ typec --cc=$gcc -MM x.tc twice.c
+  x.o: x.tc x.h
+  twice.o: twice.c
+  $ typec --cc=$clang -M -o out/rule x.tc twice.c
+  typec: cannot specify -o with -c, -S or -M and more than one input
+  [81]
+
 The dialect is C11 or C17 (design 2.4), and options that would stop the
 backend at preprocessing or change the preprocessed text are refused
 with a .tc input. Without one they reach the backend as they are.

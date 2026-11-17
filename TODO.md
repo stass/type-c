@@ -21,13 +21,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
-- [Medium] A build system that does not know `.tc` can bypass `typec`
-  without a word: CMake with `set_source_files_properties(calc.tc
-  PROPERTIES LANGUAGE C)` puts `-x c` before the input, so `typec`
-  hands it to the backend as C, and a `.tc` file with no Type-C
-  construct yet builds as plain C (CMake 4.4 without the property drops
-  the file). Plan package 4.3 should give each build system a rule that
-  reaches the `.tc` pipeline and a test that fails when it does not.
+- [Medium] A long option that the table lacks is Common and reaches
+  every step: `--preprocess` (GCC's `-E`) passes the refusal of `-E` and
+  compiles nothing, `--ansi` fails with a misleading message, and GCC's
+  abbreviations, such as `--write-user-dep`, leave a stray dependency
+  file of the target query. Map each long spelling to its short form
+  in `Cc_option.classify`, from one table of GCC's and Clang's aliases,
+  or refuse an unknown `--` option with a `.tc` input.
+- [Low] The tests of the build rules (`make_rule.t`, `ninja_rule.t`,
+  `cmake_rule.t`) run only where the host has the tool: the Alpine image
+  has no make, and no host image has ninja or CMake. Add them to the
+  images and to the FreeBSD host so that every host runs the rules.
 - [Low] `Target_query.query` starts and waits for the backend itself,
   so in a compilation it hands the backend `typec`'s stdin, not
   `/dev/null`, and does not pass on a caught signal as `Process.wait`

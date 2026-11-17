@@ -27,7 +27,11 @@
     dependency file ([-MD], [-MMD]) comes from the [-E] step, named as cc
     names it: after [-MF], else after [-o] with [.d] for its suffix, else
     after the input; its target is the [-MT] or [-MQ] values, else the
-    [-o] value, else the input's object. *)
+    [-o] value, else the input's object. With [-M] or [-MM] the command
+    line compiles nothing: the [-E] step of each [.tc] input prints its
+    rule in place of the preprocessed text, to the [-o] file or stdout,
+    and then a final command does the same for the other inputs, as cc
+    does for C sources. *)
 
 (** Where the emitted C goes. *)
 type destination = File of string | Standard_output
@@ -68,7 +72,10 @@ type t = {
           of the compilation, and the query runs before the backend's
           family is known *)
   translations : translation list;
-  final : command option;
+  finals : command list;
+      (** the backend commands after the translations, in order: with
+          [-M] or [-MM] the rule of each [.tc] input; then the one that
+          links, or compiles the other inputs *)
 }
 
 (** Why a command line with a [.tc] input has no pipeline. *)
@@ -77,8 +84,9 @@ type error =
   | Unaccepted_standard of string  (** the value of [-std=] *)
   | Missing_value of string  (** the option that lacks it *)
   | Output_for_several_inputs
-      (** [-o] with [-c] or [-S] and more than one input *)
+      (** [-o] with [-c], [-S], [-M] or [-MM] and more than one input *)
   | Emit_c_inputs  (** [--emit-c] without exactly one input, a [.tc] *)
+  | Emit_c_rules  (** [--emit-c] with [-M] or [-MM] *)
   | Several_architectures of string list
       (** the distinct [-arch] names, in order, when there are several *)
 

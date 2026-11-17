@@ -4,6 +4,7 @@
 type stop = Object | Assembly | Syntax_check
 
 type dependency =
+  | Print_rule
   | Write_dependencies
   | Dependency_file
   | Dependency_target
@@ -101,14 +102,20 @@ let table =
       entries (Keywords Gnu) Flag [ "-fasm" ];
       entries (Keywords Iso) Flag [ "-fno-asm" ];
       (* Dependencies. *)
-      entries (Dependency Write_dependencies) Flag [ "-MD"; "-MMD" ];
+      entries (Dependency Print_rule) Flag
+        [ "-M"; "-MM"; "--dependencies"; "--user-dependencies" ];
+      entries (Dependency Write_dependencies) Flag
+        [
+          "-MD"; "-MMD"; "--write-dependencies"; "--write-user-dependencies";
+        ];
       entries (Dependency Dependency_file) Joined_or_separate [ "-MF" ];
       entries (Dependency Dependency_target) Joined_or_separate
         [ "-MT"; "-MQ" ];
-      entries (Dependency Dependency_detail) Flag [ "-MP"; "-MG"; "-MV" ];
+      entries (Dependency Dependency_detail) Flag
+        [ "-MP"; "-MG"; "-MV"; "--print-missing-file-dependencies" ];
       entries (Dependency Dependency_detail) Joined_or_separate [ "-MJ" ];
       (* Options that the pipeline cannot follow. *)
-      entries (Refused stops_at_preprocessing) Flag [ "-E"; "-M"; "-MM" ];
+      entries (Refused stops_at_preprocessing) Flag [ "-E" ];
       entries (Refused changes_preprocessed_text) Flag
         [
           "-P"; "-C"; "-CC"; "-fuse-line-directives"; "-dD"; "-dM"; "-dN";
