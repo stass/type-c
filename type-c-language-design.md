@@ -5621,24 +5621,22 @@ writes three forms, each with the hoisted operand `e` in parentheses:
 - for the left operand of a comma, the operand as a statement,
   `(void)(e);`.
 
-A temporary that the prelude assigns under an `if` and that the holder
-reads is declared with the value 0 directly before the outermost such
-`if`, `struct R __tc_t1 = { 0 };` or `int __tc_c1 = 0;`, and the form
-assigns it, `__tc_t1 = (e);`. Every other temporary is declared where
-the form assigns it, with its value: one whose value the holder
-discards or converts is read only inside its `if`. Without the value
-0, GCC 16 from `-O1` warns that the holder may read the temporary
-uninitialised (`-Wmaybe-uninitialized`), as it cannot tell that the
-holder reads it only where the `if` assigned it, and so fails a build
-under `-Werror`. No form without an initialiser escapes the warning:
-GCC 16 also flags a scalar copy of the `Ok` field made inside the `if`
-and read by the holder. The value is not free everywhere: on x86-64,
-for the six such temporaries of two functions, GCC 16 writes 12 more
-instructions at `-Os`, none more at `-O2` and 8 fewer at `-O1`, and
-Apple Clang 21 writes 2 more instructions at `-Os` and none more at
-`-O2`. The holder
-follows the prelude with three edits: the
-read of the `Ok` field where a `try` stood, `__tc_t0.u.Ok.value`; the
+A temporary that the prelude assigns under an `if` and that a read
+outside that `if` may reach (a truth, a converted value, or a `try`
+whose value is a read of its temporary) is declared with the value 0
+directly before the outermost such `if`, `struct R __tc_t1 = { 0 };`
+or `int __tc_c1 = 0;`, and the form assigns it, `__tc_t1 = (e);`.
+Every other temporary is declared where the form assigns it, with its
+value: one whose value is discarded or converted is read only inside
+its `if`. Without the value 0, GCC 16 from `-O1` warns that the holder
+may read the temporary uninitialised (`-Wmaybe-uninitialized`), as it
+cannot tell that the holder reads it only where the `if` assigned it,
+and so fails a build under `-Werror`. No form without an initialiser
+escapes the warning: GCC 16 also flags a scalar copy of the `Ok` field
+made inside the `if` and read by the holder. The value costs a few
+instructions at `-Os` and none at `-O2`. The holder follows the
+prelude with three edits: the read of the `Ok` field where a `try`
+stood, `__tc_t0.u.Ok.value`; the
 temporary where a first operand stood, `__tc_c0`; and `(void)0` where
 the left operand of a comma stood. A hoisted operand that holds a
 `try` or a first operand is written with the same edits. So

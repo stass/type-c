@@ -1126,8 +1126,9 @@ let try_temporary (site : Typec_sema.Expressions.try_site) =
   (variant, Printf.sprintf "struct %s %s" (variant :> string)
               (temporary_name site.temporary))
 
-(* Whether the holder reads the temporary of the try of [site] itself,
-   rather than nothing or the converted value. *)
+(* Whether the value of the try of [site] is a read of its temporary,
+   rather than nothing or the converted value: a read that may stand
+   outside the if that assigns the temporary. *)
 let holder_reads_temporary (site : Typec_sema.Expressions.try_site) =
   match site.value with
   | Read { conversion = Unconverted | To_slice _; _ } -> true
