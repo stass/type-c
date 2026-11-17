@@ -1,0 +1,48 @@
+<!--
+SPDX-License-Identifier: BSD-2-Clause
+Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+-->
+
+# Examples
+
+Programs that a C programmer would write anyway, written in Type-C, each
+beside the C that it ports or competes with. Each says what the Type-C
+version changes, what it costs in lines, and where it behaves
+differently, and each runs a check that compares the two.
+
+| Example | What it shows |
+|---|---|
+| [`cut`](cut/) | FreeBSD's `cut(1)`, ported: lists read as `str` slices, errors as `result` and `try`, a `defer` for the line buffer, and the option flags as a variant that `match` takes apart. Its check runs both programs over the same command lines. |
+
+## Building one
+
+Each example is a directory with a Makefile for GNU make (`gmake` on
+FreeBSD) that builds with `typec` as the C compiler and the rule of the
+main [README](../README.md#in-a-build). The C original builds with the
+same `typec`, which hands a `.c` file to the C compiler untouched.
+
+```sh
+export PATH=/path/to/typec/bin:$PATH
+cd cut
+make                    # CC = typec, CFLAGS = -O2 -Wall -Wextra -Werror
+make check              # build both programs, then compare them
+make CC=/path/to/typec  # a typec that is not on PATH
+TYPEC_CC=gcc-14 make clean check
+```
+
+`TYPEC_CC` names the C compiler that `typec` runs, `cc` when it is unset
+([Choosing the backend](../README.md#choosing-the-backend)).
+
+The test [`test/run/examples.t`](../test/run/examples.t) builds every
+example with Clang and with GCC, at `-O0` and at `-O2`, with
+`-Wall -Wextra -Werror`, and runs its `make check`.
+
+## Adding one
+
+An example is a directory here with a `README.md`, its Type-C source,
+the C that it compares with, and a Makefile with the targets `all`,
+`check` and `clean`, where `check` builds what it needs and exits 0 when
+the two programs agree. `examples.t` finds every directory and prints
+what each `check` prints, so a new example shows up there as a new line
+of expected output. C code taken from elsewhere keeps its license and
+notice, and its README names where it comes from and at which revision.

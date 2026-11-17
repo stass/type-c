@@ -143,6 +143,15 @@
  (applies_to ninja_rule)
  (enabled_if %{bin-available:ninja}))
 
+; examples.t builds and checks each program of examples/ with its
+; Makefile.
+
+(cram
+ (applies_to examples)
+ (deps
+  (source_tree ../../examples))
+ (enabled_if %{bin-available:make}))
+
 (cram
  (applies_to cmake_rule)
  (enabled_if

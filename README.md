@@ -1506,6 +1506,9 @@ types, and the long options, spelled with `--`, that it does not
 know. The C compiler is `cc` unless `--cc=PATH` or
 `TYPEC_CC` names another ([choosing it](#choosing-the-backend)).
 
+[`examples/`](examples/) holds larger programs, each beside the C that
+it ports, such as FreeBSD's `cut(1)`.
+
 ## Building and testing
 
 Requirements: OCaml 5.4 and dune 3; the tests also need a C compiler as
