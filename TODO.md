@@ -15,7 +15,9 @@ is [type-c-language-design.md](type-c-language-design.md).
   locally at `/Volumes/Optaine/type-c-corpus`, with no remote, and its
   README says what it holds. Pilot B's repository,
   `/Volumes/Optaine/type-c-pilot-b`, is local in the same way, and
-  design 15 cites its record by commit. (`tools/hosts` runs the Linux
+  design 15 cites its record by commit. The review of diagnostics,
+  `/Volumes/Optaine/diag-review`, is no repository yet, so TODO.md
+  cites it by path alone; make it one. (`tools/hosts` runs the Linux
   hosts in containers, the arm64 ones under emulation, and the FreeBSD
   one over ssh, on a machine of the owner's.)
 
@@ -35,12 +37,15 @@ those of the sites. The first part of the review, 45 mutations of
 Pilot B and the container library, is `/Volumes/Optaine/diag-review/
 review.md`; the probes of the items marked "probe", one common mistake
 of a C programmer each, are in `/Volumes/Optaine/diag-review/probes`
-(`probe.sh`, `probe2.sh`, `probe3.sh`, output in `out2.txt`). Read
+(`probe.sh`, `probe2.sh` and `probe3.sh`, run with `TYPEC` naming the
+`typec` under review; their output is in `out2.txt`, `out-probe2.txt`
+and `out-probe3.txt`). Read
 well already, saying what, where and what to write: a missed
 constructor, a dropped result, a result assigned to a C type, `try`
 outside a result function or on an option, `try` of a void result, a
 `switch` or `==` on a variant, a `break` that leaves an arm early, a
-jump into or out of a deferred statement. No message cites the design.
+jump into or out of a deferred statement. No message cites a design
+section.
 The items are ordered by how often real code meets them.
 
 - [Medium] An operation on a distinct type does not name the
@@ -49,21 +54,25 @@ The items are ordered by how often real code meets them.
   takes no such operation; a cast to its underlying type crosses to
   it [distinct-operation]". Proposed: "'++' is not defined on the
   distinct type 'idx'; cast to 'int' and back: 'i = (idx)((int)i +
-  1)'", and for an index "an index of the distinct type 'idx'; cast it
-  to 'int'". Source: Pilot A (15 increments, 7 index casts, 17 casts
-  to print, casts to compare against `int` limits); probe.
-- [Medium] A C idiom on a variant gets no type or no fix. `if (v)` and
-  `if (f())` on a result give C's "the operand is not of scalar type
-  (C11 6.8.4.1p1)", naming no type; `v.r`, `f() < 0`, `!o` and `o + 1`
-  give "the variant 'result(int, err)' takes no such operation; Type-C
-  text reaches its tag and fields only through constructors and
-  matching [variant-operation]", which names no operator and uses the
-  design's "Type-C text"; only `==` and `!=` get the hint of the
-  single-pattern test. Proposed: name the operator and the variant,
-  "'<' is not defined on the variant 'result(int, err)'"; then the fix
-  by what was written: for a condition, a comparison or `!`, "test it
-  with 'if (case Ok(v) = f())'"; for `.r`, "'r' is a field of
-  'Circle'; bind it with 'if (case Circle(r) = v)'". Source: Pilot A
+  1)'", and for an index "an index may not be of the distinct type
+  'idx'; cast it to 'int'". Source: Pilot A (15 increments, 7 index
+  casts, 17 casts to print, casts to compare against `int` limits);
+  probe.
+- [Medium] A C idiom on a variant gets no type or no fix. `if (v)`,
+  `while (v)` and `if (f())` on a variant give C's "the operand is not
+  of scalar type (C11 6.8.4.1p1)", naming no type. `f() < 0` on a
+  `result(int, err)`, `s.r` on a `shape`, and `!o` and `o + 1` on an
+  `option(int)` give, each naming its own variant, "the variant
+  'option(int)' takes no such
+  operation; Type-C text reaches its tag and fields only through
+  constructors and matching [variant-operation]", which names no
+  operator and uses the design's "Type-C text"; `==` and `!=` get the
+  same words and add the hint of the single-pattern test. Proposed, for
+  every operator: "'<' is not defined on the variant 'result(int,
+  err)'", then the fix by what was written: for a condition or a
+  comparison of a result, "test it with 'if (case Ok(v) = f())'"; for
+  `!o`, "test it with 'if (case None = o)'"; for `s.r`, "'r' is a field
+  of 'Circle'; bind it with 'if (case Circle(r) = s)'". Source: Pilot A
   (49 accessor calls and 92 predicate calls stand where C read the
   field or the tag); review cases 19 and 35; probe.
 - [Medium] A binding in an arm of several labels: `case Circle(x): case
@@ -95,7 +104,9 @@ The items are ordered by how often real code meets them.
   undeclared name: `r` after `if (case Circle(r) = s) ...;`, or `r` of
   the Circle arm used in the Square arm, gives "'r' is not declared
   (C11 6.5.1p2)". Proposed, when a pattern of the function binds the
-  name: "'r' is bound only in the arm of 'Circle(r)' at line 12".
+  name: "'r' is bound only in the arm of 'Circle(r)' at line 12", and
+  for a single-pattern test "'r' is bound only in the statement of the
+  test 'if (case Circle(r) = s)' at line 12".
   Source: Pilot A (gate-6 injection, "'addr' is not declared"); the
   smtp example's README quotes it (`from` in `rset`); probe.
 - [Medium] A constructor where no variant of it is the target type. A
@@ -164,9 +175,19 @@ The items are ordered by how often real code meets them.
   'shape *', not a variant type; a pointer is not dereferenced
   implicitly [match-scrutinee]". Proposed: add "; write 'match (*s)'".
   Source: probe.
-- [Low] Messages print types without their typedef names: `str` as
-  `slice(const char)`, `size_t` as `unsigned long`. Source: review
-  cases 01, 04 and 22; probe.
+- [Low] Messages print types without their typedef names: `try` of a
+  `word_length(...)` gives "the operand of try is of type 'unsigned
+  long', not a result type", and a slice of strings prints as
+  'slice(slice(const char))'. Proposed: print the type as the source
+  spelled it, 'size_t' and 'slice(str)'. Source: review cases 01, 04
+  and 22; probe.
+- [Low] `typec`'s own diagnostics give the file and the line, no
+  column, where the backend's give one: `p05.tc:2: error: ...` beside
+  Clang's `p19.tc:2:48: warning: ...`. The first part of the review
+  ("Columns") measured what recovering them costs and recommends
+  printing the source line instead (the item on design 13.6 under
+  "Reader of preprocessed text"); decide there. Source: Pilot A
+  (`private-creation`); probe.
 - [Low] The parser quotes names with backticks, the typing stages with
   single quotes as GCC and Clang do, and some typing messages use
   backticks too (`[early-break]`, `[deferred-exit]`); pick one, in
