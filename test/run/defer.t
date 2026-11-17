@@ -226,6 +226,129 @@ out of it gives each back.
   resource: 6 live 0 open 0
   resource: 101 live 0 open 0
 
+A jump that stands before a defer statement in its block runs no copy
+of it, and a defer statement that a path does not reach has no copy on
+that path: one in the body of an `if` or of a loop that may not run. The
+log shows the cleanups that did run.
+
+  $ cat > reached.tc <<'EOF'
+  > #include <stdio.h>
+  > #include <string.h>
+  > static char log_text[64];
+  > static void note(const char *text) {
+  >   strncat(log_text, text, sizeof log_text - strlen(log_text) - 1);
+  > }
+  > static void show(const char *name) {
+  >   printf("%s: %s\n", name, log_text);
+  >   log_text[0] = '\0';
+  > }
+  > static int return_before(int c) {
+  >   defer note("o");
+  >   if (c)
+  >     return 1;
+  >   defer note("i");
+  >   return 2;
+  > }
+  > static void break_before(void) {
+  >   for (int i = 0; i < 3; i++) {
+  >     defer note("o");
+  >     if (i == 1)
+  >       break;
+  >     defer note("d");
+  >     note("b");
+  >   }
+  >   note(".");
+  > }
+  > static void continue_before(void) {
+  >   for (int i = 0; i < 3; i++) {
+  >     defer note("o");
+  >     if (i == 1)
+  >       continue;
+  >     defer note("d");
+  >     note("b");
+  >   }
+  >   note(".");
+  > }
+  > static void goto_before(int c) {
+  >   {
+  >     defer note("o");
+  >     if (c)
+  >       goto out;
+  >     defer note("d");
+  >     note("b");
+  >   }
+  > out:
+  >   note(".");
+  > }
+  > static int in_if(int c) {
+  >   if (c) {
+  >     defer note("d");
+  >     if (c > 1)
+  >       return 2;
+  >     note("b");
+  >   }
+  >   note(".");
+  >   return 0;
+  > }
+  > static void in_loop(int n) {
+  >   for (int i = 0; i < n; i++) {
+  >     defer note("d");
+  >     note("b");
+  >   }
+  >   note(".");
+  > }
+  > int main(void) {
+  >   return_before(1);
+  >   show("return taken");
+  >   return_before(0);
+  >   show("return passed");
+  >   break_before();
+  >   show("break");
+  >   continue_before();
+  >   show("continue");
+  >   goto_before(1);
+  >   show("goto taken");
+  >   goto_before(0);
+  >   show("goto passed");
+  >   in_if(0);
+  >   show("if skipped");
+  >   in_if(1);
+  >   show("if entered");
+  >   in_if(2);
+  >   show("if returned");
+  >   in_loop(0);
+  >   show("loop skipped");
+  >   in_loop(2);
+  >   show("loop entered");
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags $sanitize -o reached reached.tc && ./reached
+  > done
+  return taken: o
+  return passed: io
+  break: bdoo.
+  continue: bdoobdo.
+  goto taken: o.
+  goto passed: bdo.
+  if skipped: .
+  if entered: bd.
+  if returned: d
+  loop skipped: .
+  loop entered: bdbd.
+  return taken: o
+  return passed: io
+  break: bdoo.
+  continue: bdoobdo.
+  goto taken: o.
+  goto passed: bdo.
+  if skipped: .
+  if entered: bd.
+  if returned: d
+  loop skipped: .
+  loop entered: bdbd.
+
 A pragma that applies to the loop after it is copied with the deferred
 statement to each exit, and both backends compile each copy.
 

@@ -768,6 +768,252 @@ the rule.
   # 12 "scope_ended.tc" 2
   }
 
+A jump that stands before the defer statement in its block runs no copy
+of it, whichever of return, break, continue and goto it is; the defer
+statements of the scopes around it run as usual.
+
+  $ cat > jump_before.tc <<'EOF'
+  > void g(void);
+  > void h(void);
+  > int ret(int c) {
+  >   defer h();
+  >   if (c)
+  >     return 1;
+  >   defer g();
+  >   return 2;
+  > }
+  > void brk(int c) {
+  >   for (;;) {
+  >     defer h();
+  >     if (c)
+  >       break;
+  >     defer g();
+  >   }
+  > }
+  > void cont(int c) {
+  >   for (; c; c--) {
+  >     defer h();
+  >     if (c > 1)
+  >       continue;
+  >     defer g();
+  >   }
+  > }
+  > void go(int c) {
+  >   {
+  >     defer h();
+  >     if (c)
+  >       goto out;
+  >     defer g();
+  >   }
+  > out:;
+  > }
+  > EOF
+  $ ./golden.exe jump_before.tc
+  # 1 "jump_before.tc"
+  void g(void);
+  void h(void);
+  int ret(int c) 
+  # 3 "jump_before.tc"
+  { typedef __typeof__(((__typeof__(ret) *)0)(*(__typeof__(c) *)0)) __tc_ret;
+  # 3 "jump_before.tc"
+  {
+    
+  # 4 "jump_before.tc"
+  
+  # 4 "jump_before.tc"
+  
+    if (c)
+      
+  # 6 "jump_before.tc"
+  { __tc_ret __tc_r = (
+  # 6 "jump_before.tc"
+   1
+  # 6 "jump_before.tc"
+  );
+  # 4 "jump_before.tc"
+  { h ( ) ; }
+  # 6 "jump_before.tc"
+  return __tc_r; }
+  # 6 "jump_before.tc"
+  
+    
+  # 7 "jump_before.tc"
+  
+  # 7 "jump_before.tc"
+  
+    
+  # 8 "jump_before.tc"
+  { __tc_ret __tc_r = (
+  # 8 "jump_before.tc"
+   2
+  # 8 "jump_before.tc"
+  );
+  # 7 "jump_before.tc"
+  { g ( ) ; }
+  # 4 "jump_before.tc"
+  { h ( ) ; }
+  # 8 "jump_before.tc"
+  return __tc_r; }
+  # 8 "jump_before.tc"
+  
+  
+  # 9 "jump_before.tc"
+  __builtin_trap();
+  # 9 "jump_before.tc"
+  
+  # 9 "jump_before.tc"
+  } }
+  # 9 "jump_before.tc"
+  
+  void brk(int c) {
+    for (;;) {
+      
+  # 12 "jump_before.tc"
+  
+  # 12 "jump_before.tc"
+  
+      if (c)
+        
+  # 14 "jump_before.tc"
+  {
+  # 12 "jump_before.tc"
+  { h ( ) ; }
+  # 14 "jump_before.tc"
+  break
+  # 14 "jump_before.tc"
+  ; }
+  # 14 "jump_before.tc"
+  
+      
+  # 15 "jump_before.tc"
+  
+  # 15 "jump_before.tc"
+  
+    
+  # 15 "jump_before.tc"
+  { g ( ) ; }
+  # 12 "jump_before.tc"
+  { h ( ) ; }
+  # 16 "jump_before.tc"
+  }
+  }
+  void cont(int c) {
+    for (; c; c--) {
+      
+  # 20 "jump_before.tc"
+  
+  # 20 "jump_before.tc"
+  
+      if (c > 1)
+        
+  # 22 "jump_before.tc"
+  {
+  # 20 "jump_before.tc"
+  { h ( ) ; }
+  # 22 "jump_before.tc"
+  continue
+  # 22 "jump_before.tc"
+  ; }
+  # 22 "jump_before.tc"
+  
+      
+  # 23 "jump_before.tc"
+  
+  # 23 "jump_before.tc"
+  
+    
+  # 23 "jump_before.tc"
+  { g ( ) ; }
+  # 20 "jump_before.tc"
+  { h ( ) ; }
+  # 24 "jump_before.tc"
+  }
+  }
+  void go(int c) {
+    {
+      
+  # 28 "jump_before.tc"
+  
+  # 28 "jump_before.tc"
+  
+      if (c)
+        
+  # 30 "jump_before.tc"
+  {
+  # 28 "jump_before.tc"
+  { h ( ) ; }
+  # 30 "jump_before.tc"
+  goto out
+  # 30 "jump_before.tc"
+  ; }
+  # 30 "jump_before.tc"
+  
+      
+  # 31 "jump_before.tc"
+  
+  # 31 "jump_before.tc"
+  
+    
+  # 31 "jump_before.tc"
+  { g ( ) ; }
+  # 28 "jump_before.tc"
+  { h ( ) ; }
+  # 32 "jump_before.tc"
+  }
+  out:;
+  }
+
+Control that jumps into the scope of a defer statement from outside it
+is refused: by a goto after the block of the scope has ended, by an
+`asm goto` before the defer, and by a goto from the scope of a defer to
+the scope of one nested in it (design 6 rule 5).
+
+  $ cat > goto_after_scope.tc <<'EOF'
+  > void g(void);
+  > void f(int c) {
+  >   {
+  >     defer g();
+  >   back:
+  >     g();
+  >   }
+  >   if (c)
+  >     goto back;
+  > }
+  > EOF
+  $ ./golden.exe goto_after_scope.tc
+  goto_after_scope.tc:9: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  [1]
+
+  $ cat > asm_goto_into_scope.tc <<'EOF'
+  > void g(void);
+  > void f(void) {
+  >   asm goto ("" : : : : in);
+  >   defer g();
+  > in:
+  >   g();
+  > }
+  > EOF
+  $ ./golden.exe asm_goto_into_scope.tc
+  asm_goto_into_scope.tc:3: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  [1]
+
+  $ cat > goto_into_nested.tc <<'EOF'
+  > void g(void);
+  > void f(int c) {
+  >   defer g();
+  >   if (c)
+  >     goto in;
+  >   {
+  >     defer g();
+  >   in:
+  >     g();
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe goto_into_nested.tc
+  goto_into_nested.tc:5: a jump into the scope of a defer statement from outside it (design 6 rule 5) [TC0060]
+  [1]
+
 The statement S of a defer is moved text, written again at each exit of
 its scope, and passes the one check of the resolution property there
 (design 6 rule 8, 13.5): a declaration that would make a name of S read
