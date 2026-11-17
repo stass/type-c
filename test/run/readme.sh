@@ -20,7 +20,18 @@
 #   can be laid out for reading;
 # - "<!-- console: FAMILY -->" runs the console block on FAMILY only;
 # - "<!-- untested: REASON -->" skips the c block, which shows Type-C
-#   that typec does not build yet.
+#   that typec does not build yet;
+# - "<!-- stage: NAME -->", NAME of letters, digits and "_", starts a
+#   directory NAME. It begins as a copy of the files that the page
+#   writes into the stage before, made while the page is read and so
+#   before any command runs: what the commands of one stage make or
+#   change does not reach the next, and a command must not depend on it.
+#   The file markers after the stage marker write into NAME, and the
+#   commands after it run there. A page that grows one program through
+#   its chapters shows each file whole where it changes, and a file
+#   shown again replaces its namesake. Files written before the first
+#   stage marker belong to no stage. A page with no stage marker works
+#   in one directory.
 #
 # Every c block carries a file, emit-c or untested marker, and a fence
 # of a language other than c, console, sh or text is an error, so that
@@ -59,7 +70,11 @@ awk -v work="$work" -v family="$family" '
       fail("a file name outside the allowed set: " name)
     return name
   }
+  function staged_name(name) {
+    return stage == "" ? name : stage "/" name
+  }
   function open_file(name, directory) {
+    name = staged_name(name)
     if (name in written)
       fail("a file written twice: " name)
     written[name] = 1
@@ -88,24 +103,48 @@ awk -v work="$work" -v family="$family" '
     } else if (kind == "emit-c") {
       block = "copied"
       target = open_file(checked_name(marked) ".emitted")
-      print marked > (work "/emit-c.list")
+      print staged_name(marked) > (work "/emit-c.list")
     } else if (language == "console") {
       if (kind != "console" || marked == family)
         block = "console"
     }
   }
 
-  block != "" && /^```/ { block = ""; next }
+  block != "" && /^```/ {
+    if (block == "copied")
+      close(target)
+    block = ""
+    next
+  }
   block == "copied" { print > target; next }
   block == "console" {
-    if (/^\$ /)
+    if (/^\$ /) {
       print substr($0, 3) > (work "/commands")
+      print (stage == "" ? "." : stage) > (work "/directories")
+    }
     print > (work "/expected")
     next
   }
   block == "skipped" { next }
   /^```/ { open_block(substr($0, 4)); next }
   marker != "" { fail("a marker that no fence follows: " marker) }
+  /^<!-- stage:/ {
+    if ($0 !~ /^<!-- stage: [A-Za-z0-9_]+ -->$/)
+      fail("a marker that does not parse: " $0)
+    previous = stage
+    stage = $0
+    sub(/^<!-- stage: /, "", stage)
+    sub(/ -->$/, "", stage)
+    if (stage in stages)
+      fail("a stage named twice: " stage)
+    stages[stage] = 1
+    if (system("mkdir " work "/" stage) != 0)
+      fail("cannot make the directory of stage " stage)
+    if (previous != "" &&
+        system("cp -R " work "/" previous "/. " work "/" stage) != 0)
+      fail("cannot copy stage " previous " to " stage)
+    next
+  }
   /^<!-- untested:/ {
     if ($0 !~ /^<!-- untested: [^ ].* -->$/)
       fail("a marker that does not parse: " $0)
@@ -133,15 +172,15 @@ TYPEC_CC=$backend
 export TYPEC_CC
 cc() { "$backend" "$@"; }
 
-touch commands expected emit-c.list
-while IFS= read -r command; do
+touch commands directories expected emit-c.list
+while IFS= read -r command && IFS= read -r directory <&3; do
   printf '$ %s\n' "$command"
-  (eval "$command") < /dev/null 2>&1
+  (cd "$directory" && eval "$command") < /dev/null 2>&1 3<&-
   status=$?
   if [ "$status" -ne 0 ]; then
     echo "[$status]"
   fi
-done < commands > actual
+done < commands 3< directories > actual
 diff -u expected actual
 
 # The tokens of a C text, one per line, so that white space and the

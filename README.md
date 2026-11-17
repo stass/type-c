@@ -134,7 +134,9 @@ What it shows:
   the C compiler that builds it.
 
 [What Type-C adds to C](#what-type-c-adds-to-c) explains each new piece,
-and shows the mistakes each one rules out.
+and shows the mistakes each one rules out. The
+[tutorial](docs/tutorial.md) grows a C program into Type-C one feature
+at a time.
 
 ## Why Type-C
 
@@ -1466,12 +1468,11 @@ and `defer`. Stage 2's gate rests on
 [Pilot B](#measured-on-a-real-library).
 
 Stage 3 is in progress, and **not ready to use** yet. Slices with
-checked indexing are built,
-`slice(uint8_t) bytes = slice_from_array(buffer);`, and so is `try`
-inside an expression, `return fit(try eval(l) + try eval(r));`, which
-[design 5.1](type-c-language-design.md#51-try) specifies; generic
-functions are not yet:
-`generic(T) T *vector_last(vector(T) *v);`.
+checked indexing and `str` are built,
+`slice(uint8_t) bytes = slice_from_array(buffer);`, and so are generic
+functions, `generic(T) T *vector_last(vector(T) *v);`, and `try` inside
+an expression, `return fit(try eval(l) + try eval(r));`, which
+[design 5.1](type-c-language-design.md#51-try) specifies.
 
 Nested patterns, which
 [design 4.7](type-c-language-design.md#47-nested-patterns) specifies,
