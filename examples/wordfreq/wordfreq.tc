@@ -1,0 +1,206 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ *
+ * wordfreq: count the words of the standard input and print the most
+ * frequent ones, with the generic map of map.tci as the table.  A word
+ * is a run of ASCII letters, folded to lower case.  It is
+ * original/wordfreq.c in Type-C.
+ */
+
+#include <ctype.h>
+#include <err.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include "map.tci"
+
+/* A word and its count, as print_top sorts them. */
+struct count {
+	str word;
+	int count;
+};
+
+static void usage(void);
+
+/*
+ * strdup for a str, which the C library lacks.  A word is never empty,
+ * so malloc returns NULL here only when it fails.
+ */
+static option(str)
+str_dup(str s)
+{
+	char *p;
+
+	if ((p = malloc(s.len)) == NULL)
+		return (None);
+	memcpy(p, s.data, s.len);
+	return (Some(slice_unchecked((const char *)p, s.len)));
+}
+
+/* strcmp for a str, which the C library lacks. */
+static int
+str_compare(str a, str b)
+{
+	size_t len;
+	int order;
+
+	len = a.len;
+	if (b.len < len)
+		len = b.len;
+	if ((order = memcmp(a.data, b.data, len)) != 0)
+		return (order);
+	if (a.len != b.len)
+		return (a.len < b.len ? -1 : 1);
+	return (0);
+}
+
+static void
+count_word(map(str, int) *h, str word)
+{
+	if (case Some(count) = map_get(h, word)) {
+		(*count)++;
+		return;
+	}
+	match (str_dup(word)) {
+	case None:
+		err(1, "strdup");
+		break;
+	case Some(key):
+		if (case Err(NoMemory) = map_put(h, key, 1))
+			errx(1, "out of memory");
+		break;
+	}
+}
+
+static void
+count_line(map(str, int) *h, slice(char) line)
+{
+	size_t i, start;
+
+	i = 0;
+	while (i < line.len) {
+		if (!isalpha((unsigned char)line[i])) {
+			i++;
+			continue;
+		}
+		start = i;
+		while (i < line.len && isalpha((unsigned char)line[i])) {
+			line[i] = (char)tolower((unsigned char)line[i]);
+			i++;
+		}
+		count_word(h, slice_sub(line, start, i));
+	}
+}
+
+static void
+count_file(map(str, int) *h, FILE *fp)
+{
+	char *line = NULL;
+	size_t size = 0;
+	ssize_t len;
+
+	while ((len = getline(&line, &size, fp)) >= 0)
+		count_line(h, slice_unchecked(line, (size_t)len));
+	if (ferror(fp))
+		err(1, "stdin");
+	free(line);
+}
+
+/* The most frequent word first, and words of one count in order. */
+static int
+compare_counts(const void *a, const void *b)
+{
+	const struct count *x = a, *y = b;
+
+	if (x->count != y->count)
+		return (x->count > y->count ? -1 : 1);
+	return (str_compare(x->word, y->word));
+}
+
+static void
+print_top(map(str, int) *h, size_t top)
+{
+	slice(struct count) counts;
+	struct count *p;
+	size_t i, n, k;
+
+	if (h->size == 0)
+		return;
+	if ((p = calloc(h->size, sizeof(*p))) == NULL)
+		err(1, "calloc");
+	counts = slice_unchecked(p, h->size);
+	n = 0;
+	for (k = 0; k < h->slots.len; k++) {
+		if (!h->slots[k].used)
+			continue;
+		counts[n].word = h->slots[k].key;
+		counts[n].count = h->slots[k].val;
+		n++;
+	}
+	qsort(counts.data, n, sizeof(counts[0]), compare_counts);
+	if (top > n)
+		top = n;
+	/* A str has no NUL for %s, and %.*s takes an int length. */
+	for (i = 0; i < top; i++) {
+		printf("%7d ", counts[i].count);
+		fwrite(counts[i].word.data, 1, counts[i].word.len, stdout);
+		putchar('\n');
+	}
+	free(counts.data);
+}
+
+static void
+free_words(map(str, int) *h)
+{
+	size_t k;
+
+	for (k = 0; k < h->slots.len; k++)
+		if (h->slots[k].used)
+			free((char *)h->slots[k].key.data);
+	map_free(h);
+}
+
+int
+main(int argc, char *argv[])
+{
+	map(str, int) h;
+	char *end;
+	long top;
+	int ch;
+
+	top = 10;
+	while ((ch = getopt(argc, argv, "n:")) != -1)
+		switch (ch) {
+		case 'n':
+			errno = 0;
+			top = strtol(optarg, &end, 10);
+			if (*optarg == '\0' || *end != '\0' || top < 0 ||
+			    errno != 0)
+				errx(1, "%s: invalid count", optarg);
+			break;
+		default:
+			usage();
+		}
+	if (argc != optind)
+		usage();
+
+	h = map_new(str, int)(str_hash, str_equal);
+	count_file(&h, stdin);
+	print_top(&h, (size_t)top);
+	free_words(&h);
+	if (fflush(stdout) != 0)
+		err(1, "stdout");
+	return (0);
+}
+
+static void
+usage(void)
+{
+	(void)fprintf(stderr, "usage: wordfreq [-n count]\n");
+	exit(1);
+}

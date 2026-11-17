@@ -19,6 +19,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   hosts in containers, the arm64 ones under emulation, and the FreeBSD
   one over ssh, on a machine of the owner's.)
 
+## Documents
+
+- [Medium] `docs/tutorial.md`, section 6, gives
+  `printf("%.*s", (int)s.len, s.data)` as the spelling that prints a
+  `str`. The cast wraps for a `str` of 2 GiB or more, and a negative
+  precision means none, so `printf` reads past the end looking for a
+  NUL. Teach `fwrite(s.data, 1, s.len, stdout)` instead, as
+  `examples/wordfreq` prints its words, or a checked helper.
+
 ## Driver
 
 - [Low] `typec --cc=clang` fails with a backend error on the valid C
@@ -1551,6 +1560,15 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
+- [Medium] A generic container hashes and compares an opaque `K` only
+  through function pointers it is handed, so the per-type operations
+  are indirect calls unless the C compiler propagates the constant
+  pointer. `examples/wordfreq` measures it: Clang inlines them and the
+  generic map beats `khash` by 10%; GCC 14 keeps the calls and the map
+  is 18% slower, 5 points of it the index checks. Decide whether
+  Type-C binds such operations at instantiation (a function parameter
+  that each instance fixes, so the lowering calls it by name), or
+  documents the cost.
 - [Medium] What a renamed C file loses is spread over design 2.2, 2.3,
   2.4, 13.2 and 13.3, and the README's "Adopting one file" repeats it
   by hand; the refusal of a source character that is not valid UTF-8

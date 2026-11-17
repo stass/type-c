@@ -16,6 +16,7 @@ differently, and each runs a check that compares the two.
 | [`dns`](dns/) | A parser of DNS responses, beside the careful C it ports function for function: every error a `result` that `try` hands up in place of 24 tests for `-1`, the record data a variant in place of a tagged union, and the message a slice, so that a length check left out traps instead of leaking the heap. Its check runs both programs over real and malformed messages. |
 | [`queue`](queue/) | A round-robin job scheduler on BSD `sys/queue.h` tail queues, beside the same program on `list(T)`, a typed list written once as generic functions: what the types catch of the classic `TAILQ` mistakes, what they do not, and what a list that owns its nodes costs against an intrusive one. Its check runs both over the same inputs. |
 | [`ringbuf`](ringbuf/) | Firmware with no C library: a UART's byte rings and a line-command parser, built with `-ffreestanding` and `--trap-function=panic`. The ring is generic over a slice, a command is a variant parsed into a `result`, and words are `str`. Its check proves with `nm` that each object needs only its board, and runs both over the same bytes. |
+| [`wordfreq`](wordfreq/) | A word counter on klib's `khash.h`, beside the same program on a generic `map(K, V)` written in the example: what the generic code costs in size and time on Clang and GCC, and the key type mixup that `khash`'s macros let through and the type checker stops. Its check runs both programs over the same texts. |
 
 ## Building one
 

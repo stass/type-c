@@ -31,18 +31,22 @@ gmake where make is another, as on FreeBSD.
   dns: 27 cases agree with original/dns
   queue: 8 inputs agree with original/sched
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
+  wordfreq: 30 cases agree with original/wordfreq
   $ check "$clang" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
   queue: 8 inputs agree with original/sched
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
+  wordfreq: 30 cases agree with original/wordfreq
   $ check "$gcc" -O0
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
   queue: 8 inputs agree with original/sched
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
+  wordfreq: 30 cases agree with original/wordfreq
   $ check "$gcc" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
   dns: 27 cases agree with original/dns
   queue: 8 inputs agree with original/sched
   ringbuf: the objects need only the board; 23 cases agree with original/driver, 5 as expected
+  wordfreq: 30 cases agree with original/wordfreq

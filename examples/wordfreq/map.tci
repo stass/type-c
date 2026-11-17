@@ -1,0 +1,151 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ *
+ * A hash map of keys K to values V, the generic counterpart of
+ * original/khash.h for wordfreq.tc: open addressing in a table of a
+ * power of two slots, probed in steps of 1, 2, 3 and on, as khash
+ * probes.  A K is opaque to generic code, which cannot hash or compare
+ * it, so a map holds the two functions that do.  There is no deletion,
+ * which wordfreq does not need.
+ */
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+type map_slot(K, V) = struct {
+	K key;
+	V val;
+	bool used;
+};
+
+type map(K, V) = struct {
+	slice(map_slot(K, V)) slots;
+	size_t size;
+	uint32_t (*hash)(K);
+	bool (*equal)(K, K);
+};
+
+type map_error = | NoMemory;
+
+/* The slots of the first table, a power of two as every table is. */
+enum { MAP_FIRST_SLOTS = 4 };
+
+/* An empty map, which allocates its table at the first map_put. */
+generic(K, V) map(K, V)
+map_new(uint32_t (*hash)(K), bool (*equal)(K, K))
+{
+	map(K, V) m = {.hash = hash, .equal = equal};
+
+	return (m);
+}
+
+/*
+ * The value of key, if the map has it.  The pointer is good until the
+ * next map_put, which can move the table.
+ */
+generic(K, V) option(V *)
+map_get(map(K, V) *m, K key)
+{
+	size_t mask, i, step;
+
+	if (m->slots.len == 0)
+		return (None);
+	mask = m->slots.len - 1;
+	i = m->hash(key) & mask;
+	for (step = 1; m->slots[i].used; step++) {
+		if (m->equal(m->slots[i].key, key))
+			return (Some(&m->slots[i].val));
+		i = (i + step) & mask;
+	}
+	return (None);
+}
+
+/*
+ * Stores val for key, in the slot of key or in the first free slot of
+ * its probe, which a table under the load limit always has.  A slot
+ * that has the key keeps its own copy of the key, not this one.
+ */
+generic(K, V) void
+map_place(map(K, V) *m, K key, V val)
+{
+	size_t mask, i, step;
+
+	mask = m->slots.len - 1;
+	i = m->hash(key) & mask;
+	for (step = 1; m->slots[i].used; step++) {
+		if (m->equal(m->slots[i].key, key)) {
+			m->slots[i].val = val;
+			return;
+		}
+		i = (i + step) & mask;
+	}
+	m->slots[i].key = key;
+	m->slots[i].val = val;
+	m->slots[i].used = true;
+	m->size++;
+}
+
+/* Moves the entries to a table of twice the slots. */
+generic(K, V) result(void, map_error)
+map_grow(map(K, V) *m)
+{
+	slice(map_slot(K, V)) old = m->slots;
+	map_slot(K, V) *slots;
+	size_t n, i;
+
+	n = MAP_FIRST_SLOTS;
+	if (old.len > 0)
+		n = old.len * 2;
+	if ((slots = calloc(n, sizeof(*slots))) == NULL)
+		return (Err(NoMemory));
+	m->slots = slice_unchecked(slots, n);
+	m->size = 0;
+	for (i = 0; i < old.len; i++)
+		if (old[i].used)
+			map_place(m, old[i].key, old[i].val);
+	free(old.data);
+	return (Ok);
+}
+
+/*
+ * Stores val for key.  The table doubles when the entry would fill
+ * more than three quarters of it, where khash's doubles at 0.77, so
+ * that a probe ends soon.
+ */
+generic(K, V) result(void, map_error)
+map_put(map(K, V) *m, K key, V val)
+{
+	if ((m->size + 1) * 4 > m->slots.len * 3)
+		try map_grow(m);
+	map_place(m, key, val);
+	return (Ok);
+}
+
+/* Frees the table and leaves m an empty map. */
+generic(K, V) void
+map_free(map(K, V) *m)
+{
+	free(m->slots.data);
+	*m = map_new(K, V)(m->hash, m->equal);
+}
+
+/* khash's X31 hash of a C string, kh_str_hash_func, for a str. */
+static inline uint32_t
+str_hash(str s)
+{
+	uint32_t h = 0;
+	size_t i;
+
+	for (i = 0; i < s.len; i++)
+		h = (h << 5) - h + (uint32_t)s[i];
+	return (h);
+}
+
+static inline bool
+str_equal(str a, str b)
+{
+	return (a.len == b.len && memcmp(a.data, b.data, a.len) == 0);
+}
