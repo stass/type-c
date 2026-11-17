@@ -10,24 +10,151 @@ test/run/readme.sh says how the blocks are marked.
 
 # Type-C
 
-Type-C is C11 with the types C is missing: variants checked by `match`,
-distinct types for ids and units, and generic types. Its compiler,
-`typec`, takes the command line of `cc`, turns Type-C into C that you
-can read, and hands that to your C compiler.
+Type-C is C11 with the types C is missing: variants that `match` checks,
+distinct types for ids and units, generic types, and errors as values
+with `try` and `defer`. Its compiler, `typec`, takes the command line of
+`cc`, turns Type-C into C that you can read, and hands that C to your C
+compiler. A C11 file is already a Type-C file, so a program adopts it
+one file at a time.
 
-You adopt it one file at a time, with no rewrite: rename one `.c` file
-of your program to `.tc`, build with `CC=typec`, and use the new types
-in that file where they help. The file keeps its meaning
-([the fine print](#adopting-one-file)), and everything else stays as it
-is: your headers, your other C files, your libraries, your debugger and
-your ABI. Your build system needs a rule that compiles a `.tc` file,
-and the fine print lists the few options that such a file refuses.
-There is no runtime, no library to link and no hidden allocation;
-nothing is added at run time but the checks of the Type-C that you
-write.
+Type-C is early: the examples on this page work today, and the rest of
+the language is designed but not built yet ([Status](#status)).
 
-Type-C is early: the examples below work today, and the rest of the
-language is designed but not built yet ([Status](#status)).
+## A first look
+
+A program that adds up the bytes that one user uploaded, from a log of
+events. `user_id` is a distinct type, `event` and `log_error` are
+variants, `result(event, log_error)` is an instance of a generic type
+that every Type-C file has, `try` passes an error on to the caller, and
+`defer` closes the log on every way out of the function:
+
+<!-- file: uploads.tc -->
+```c
+#include <stdio.h>
+
+type user_id = distinct unsigned;
+
+type event = | Login(user_id user) | Upload(user_id user, long bytes);
+
+type log_error = | CannotOpen | BadLine(int number);
+
+static result(event, log_error) parse(const char *line, int number) {
+  unsigned user;
+  long bytes;
+  if (sscanf(line, "upload %u %ld", &user, &bytes) == 2)
+    return Ok(Upload((user_id)user, bytes));
+  if (sscanf(line, "login %u", &user) == 1)
+    return Ok(Login((user_id)user));
+  return Err(BadLine(number));
+}
+
+static result(long, log_error) uploaded(const char *path, user_id user) {
+  FILE *log = fopen(path, "r");
+  if (!log)
+    return Err(CannotOpen);
+  defer fclose(log);
+  char line[128];
+  long total = 0;
+  for (int number = 1; fgets(line, sizeof line, log); number++) {
+    event e = try parse(line, number);
+    if (case Upload(who, bytes) = e)
+      if (who == user)
+        total += bytes;
+  }
+  return Ok(total);
+}
+
+int main(void) {
+  match (uploaded("events.log", (user_id)7)) {
+  case Ok(total):
+    printf("user 7 uploaded %ld bytes\n", total);
+    return 0;
+  case Err(error):
+    match (error) {
+    case CannotOpen:
+      fprintf(stderr, "cannot open events.log\n");
+      break;
+    case BadLine(number):
+      fprintf(stderr, "events.log:%d: not an event\n", number);
+      break;
+    }
+    return 1;
+  }
+}
+```
+
+<!-- file: events.log -->
+```text
+login 7
+upload 7 1200
+login 3
+upload 3 50
+upload 7 300
+```
+
+```console
+$ typec -std=c11 -Wall -Wextra uploads.tc -o uploads
+$ ./uploads
+user 7 uploaded 1500 bytes
+$ echo "upload seven" >> events.log
+$ ./uploads
+events.log:6: not an event
+[1]
+```
+
+The rest is C: the headers, `sscanf`, `FILE *`, the loop, and the C
+compiler that builds it. [What Type-C adds to C](#what-type-c-adds-to-c)
+explains each new piece, and shows the mistakes each one rules out.
+
+## Why Type-C
+
+- **It stays C.** A C11 file keeps its meaning
+  ([principle 2](#principles)). Type-C keeps C's declarations,
+  statements, pointers, preprocessor and headers, and adds only what C
+  has no way to say: closed sums, distinct types, type parameters,
+  errors as values and cleanups.
+- **It does not redo what C already does.** No module system, build
+  tool or package manager of its own: a program stays translation
+  units, headers and the build it has, and Type-C interfaces are
+  headers that `#include` reads.
+- **No runtime.** No hidden allocation, garbage collector, exceptions
+  or runtime library, and nothing added to the link;
+  [principle 4](#principles) lists the few places where `typec` adds
+  code that the source does not spell out.
+- **One toolchain.** `typec` writes C and hands it to your GCC or Clang:
+  the same headers, the same compiler, the same options but
+  [a few](#adopting-one-file), the same ABI, and the same debugger,
+  which steps through the lines of the `.tc` file (with
+  [gaps](#adopting-one-file) in the debug information still).
+- **Adopt it one file at a time.** Rename one `.c` file to `.tc`, build
+  with `CC=typec` and a build rule for `.tc` files, and use the new
+  types where they help. The other files do not change
+  ([Adopting one file](#adopting-one-file)).
+- **Not another language at the boundary.** Rust, Zig and OCaml call
+  C through bindings or stubs, and C code gains their checks only when
+  it is rewritten in them; C++ compiles only some C. Type-C's checks
+  start in the one file that you rename. Safe Rust and OCaml are memory
+  safe, and Type-C is not ([Why not just...](#why-not-just)).
+- **Costs measured against hand-written C.** On a real library, the
+  Type-C rewrite parses as fast as a hand-written C twin, within the
+  noise of the measurement, and its object code is 2.8% (Clang) to
+  11.9% (GCC) larger
+  ([Measured on a real library](#measured-on-a-real-library)).
+- **Claims only what is checked.** Each guarantee says what it depends
+  on ([principle 5](#principles)), and the tests check each code example
+  on this page, on GCC and Clang.
+
+## What Type-C adds to C
+
+Each feature below rules out a kind of mistake that C compiles without
+a word: as an error that the section shows, or by making the mistake
+impossible to write. Where a C warning catches a form of it, the
+section says which. The messages are those that `typec` prints, with
+its exit
+status in brackets ([What typec reports](#what-typec-reports)). The
+cases of a variant are its *constructors*, as the messages call them.
+
+### Variants and `match`
 
 A tagged union in C, with two bugs:
 
@@ -61,8 +188,7 @@ $ cc -std=c11 -Wall -Wextra -c shape.c
 ```
 
 The same in Type-C. Each field belongs to its case, so the wrong-member
-read cannot be written, and the forgotten case stops the build (with
-exit status 80, shown in brackets):
+read cannot be written, and the forgotten case stops the build:
 
 <!-- file: area.tc -->
 ```c
@@ -90,13 +216,488 @@ typec: area.tc:7: the match does not cover the constructor 'Triangle' of the var
 C's `-Wall` warns of a forgotten enumerator only in a `switch` with no
 `default`, and only when the kind has an enumeration type; a `default`
 written for a kind that is none of the three, or an `int` kind, hides
-it. Nothing in C catches the wrong-member read. A `match` needs no
-`default`: it stops the program on such a value, and a case added
-later is an error at every `match` that misses it.
+it (`-Wswitch-enum` warns with the `default` too). No flag that
+[`test/run/comparison.t`](test/run/comparison.t) tries warns of the
+wrong-member read. A `match` needs no `default`: it stops the program
+on a value whose tag is none of the cases, and a case added later is an
+error at every `match` that misses it.
 
-## One file of an existing program
+### Asking about one case: `if (case ...)`
 
-A small C program: `main.c` calls `calc.c` through `calc.h`.
+`if (case ...)` tests for one case and binds its fields, and
+`while (case ...)` loops while it holds. Outside them and `match`,
+Type-C code cannot name a field at all:
+
+<!-- file: token.tc -->
+```c
+type token = | Number(long value) | Name(const char *text);
+
+long number_value(token t) {
+  if (case Number(value) = t)
+    return value;
+  return 0;
+}
+```
+
+A field read as C reads a member of the union:
+
+<!-- file: peek.tc -->
+```c
+type token = | Number(long value) | Name(const char *text);
+
+long number_value(token t) {
+  return t.u.Number.value;
+}
+```
+
+```console
+$ typec -c token.tc
+$ typec -c peek.tc
+typec: peek.tc:4: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
+[80]
+```
+
+### No fall-through
+
+An arm of a `match` that can run into the next one is an error: it ends
+in `break`, `return`, `continue`, `goto` or a call that does not
+return.
+
+<!-- file: cost.tc -->
+```c
+type op = | Load(int address) | Add(int operands);
+
+int cost(op o) {
+  int c = 0;
+  match (o) {
+  case Load(_):
+    c = 2;
+  case Add(n):
+    c += n;
+    break;
+  }
+  return c;
+}
+```
+
+```console
+$ typec -c cost.tc
+typec: cost.tc:6: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
+[80]
+```
+
+In C, GCC's `-Wextra` warns of a missing `break`, and Clang does with
+`-Wimplicit-fallthrough`.
+
+### Distinct types
+
+A distinct type has the representation of another type but does not
+convert to it, or from it, without a cast. Ids and units that C would
+mix become an error:
+
+<!-- file: ids.tc -->
+```c
+type user_id = distinct unsigned;
+type group_id = distinct unsigned;
+
+int is_member(user_id u, group_id g);
+
+int may_read(user_id u, group_id g) {
+  return is_member(g, u);  /* swapped */
+}
+```
+
+```console
+$ typec -c ids.tc
+typec: ids.tc:7: a value of type 'group_id' does not convert to 'user_id' without a cast (design 3.4) [TC0012]
+[80]
+```
+
+With C's `typedef`, the swap compiles, and no warning flag that
+`comparison.t` tries catches it:
+
+<!-- file: ids.c -->
+```c
+typedef unsigned user_id;
+typedef unsigned group_id;
+
+int is_member(user_id u, group_id g);
+
+int may_read(user_id u, group_id g) {
+  return is_member(g, u);  /* swapped */
+}
+```
+
+```console
+$ cc -std=c11 -Wall -Wextra -c ids.c
+```
+
+### Private types and interfaces
+
+An interface file, `.tci`, is a header for Type-C: other files include
+it with `#include`. A `private` type in it can be made only in the
+interface and in the source file of the same name, here `port.tc`;
+other files use ports and read their value. So, short of C code or
+reinterpreted storage ([limits](#limits-of-the-checks)), every port but
+the zero value, `{0}`, comes from `port_parse`.
+
+<!-- file: include/port.tci -->
+```c
+#include <stdint.h>
+
+type port = private distinct uint16_t;
+
+port port_parse(const char *text);  /* {0} when text is no port */
+```
+
+<!-- file: port.tc -->
+```c
+#include <stdlib.h>
+#include "port.tci"
+
+port port_parse(const char *text) {
+  char *end;
+  long n = strtol(text, &end, 10);
+  if (end == text || *end != '\0' || n < 1 || n > 65535)
+    return (port){0};
+  return (port)n;
+}
+```
+
+<!-- file: server.tc -->
+```c
+#include <stdlib.h>
+#include "port.tci"
+
+port port_from_argument(const char *argument) {
+  return (port)atoi(argument);  /* skips the check */
+}
+```
+
+```console
+$ typec -Iinclude -c port.tc
+$ typec -Iinclude -c server.tc
+typec: server.tc:5: the distinct type 'port' is private to 'include/port.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
+[80]
+```
+
+In C, the rule is a comment:
+
+<!-- file: port.h -->
+```c
+#include <stdint.h>
+
+typedef uint16_t port;  /* make one with port_parse only */
+
+port port_parse(const char *text);
+```
+
+<!-- file: server.c -->
+```c
+#include <stdlib.h>
+#include "port.h"
+
+port port_from_argument(const char *argument) {
+  return atoi(argument);  /* skips the check */
+}
+```
+
+```console
+$ cc -std=c11 -Wall -Wextra -c server.c
+```
+
+### Generic types
+
+A type can take type parameters, instead of holding a `void *`.
+`list(int)` and `list(double)` are different types, so a list of prices
+cannot reach a function that sums integers. Each `list(int)` names the
+same type, wherever it is written.
+
+<!-- file: list.tc -->
+```c
+type list(T) = | Nil | Cons(T head, list(T) *tail);
+
+int sum(list(int) l) {
+  int total = 0;
+  while (case Cons(head, tail) = l) {
+    total += head;
+    l = *tail;
+  }
+  return total;
+}
+
+int sum_prices(list(double) prices) {
+  return sum(prices);
+}
+```
+
+Each instance of a generic type is a C structure of its own, so it is
+the C compiler that refuses `list(double)` where `list(int)` is wanted.
+Clang says (it quotes a fragment of the line, which
+[TODO.md](TODO.md) tracks):
+
+<!-- console: clang -->
+```console
+$ typec -c list.tc
+list.tc:13:14: error: passing 'list__d' (aka 'struct list__d') to parameter of incompatible type 'list__i' (aka 'struct list__i')
+   13 |   return sum(prices);
+      |              ^~~~~~
+list.tc:3:2: note: passing argument to parameter 'l' here
+    3 |  l) {
+      |  ^
+1 error generated.
+[1]
+```
+
+The C list of `void *` takes any element:
+
+<!-- file: list.c -->
+```c
+struct list {
+  void *head;
+  struct list *tail;
+};
+
+int sum(struct list l) {
+  int total = 0;
+  for (struct list *p = &l; p; p = p->tail)
+    total += *(int *)p->head;
+  return total;
+}
+
+int sum_prices(struct list prices) {
+  return sum(prices);  /* a list of doubles */
+}
+```
+
+```console
+$ cc -std=c11 -Wall -Wextra -c list.c
+```
+
+### `option`
+
+`option(T)` is a generic variant that every Type-C file has: `None`, or
+`Some` of a value. It replaces the `-1` or `NULL` that means "not
+found", which a caller can forget to test:
+
+<!-- file: find.tc -->
+```c
+#include <stddef.h>
+
+option(size_t) find(const int *items, size_t n, int wanted) {
+  for (size_t i = 0; i < n; i++)
+    if (items[i] == wanted)
+      return Some(i);
+  return None;
+}
+
+size_t index_or_end(const int *items, size_t n, int wanted) {
+  if (case Some(i) = find(items, n, wanted))
+    return i;
+  return n;
+}
+```
+
+```console
+$ typec -std=c11 -Wall -Wextra -c find.tc
+```
+
+### `result` and `try`
+
+`result(T, E)` is another generic variant that every Type-C file has:
+`Ok` of a value, or `Err` of an error, which can be a variant with
+fields of its own. `try` gives the value of a `result`, or returns its
+error from the function at once:
+
+<!-- file: size.tc -->
+```c
+#include <stdio.h>
+#include <stdlib.h>
+
+type setting_error =
+  | Missing(const char *name)
+  | NotANumber(const char *name);
+
+static result(long, setting_error) setting(const char *name) {
+  const char *text = getenv(name);
+  if (!text)
+    return Err(Missing(name));
+  char *end;
+  long n = strtol(text, &end, 10);
+  if (end == text || *end != '\0')
+    return Err(NotANumber(name));
+  return Ok(n);
+}
+
+static result(long, setting_error) area(void) {
+  long width = try setting("WIDTH");
+  long height = try setting("HEIGHT");
+  return Ok(width * height);
+}
+
+int main(void) {
+  match (area()) {
+  case Ok(n):
+    printf("%ld\n", n);
+    return 0;
+  case Err(error):
+    match (error) {
+    case Missing(name):
+      fprintf(stderr, "%s is not set\n", name);
+      return 1;
+    case NotANumber(name):
+      fprintf(stderr, "%s is not a number\n", name);
+      return 1;
+    }
+  }
+}
+```
+
+```console
+$ typec -std=c11 -Wall -Wextra size.tc -o size
+$ WIDTH=3 HEIGHT=4 ./size
+12
+$ WIDTH=3 ./size
+HEIGHT is not set
+[1]
+$ WIDTH=3 HEIGHT=four ./size
+HEIGHT is not a number
+[1]
+```
+
+### A dropped result is an error
+
+A call that drops a `result`, as a statement of its own, is an error:
+
+<!-- file: backup.tc -->
+```c
+type copy_error = | CannotOpen | CannotRead | CannotWrite;
+
+result(void, copy_error) copy_file(const char *from, const char *to);
+
+void backup(void) {
+  copy_file("notes.txt", "notes.bak");
+}
+```
+
+```console
+$ typec -c backup.tc
+typec: backup.tc:6: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+[80]
+```
+
+C drops a return code without a word unless its function is declared
+`[[nodiscard]]` (C23) or `warn_unused_result`, and then it warns.
+
+### `defer`
+
+C releases resources at one label that each error path must jump to;
+here an error path written later returns past it:
+
+<!-- file: copy.c -->
+```c
+#include <stdio.h>
+
+int copy_file(const char *from, const char *to) {
+  int status = -1;
+  FILE *out = NULL;
+  FILE *in = fopen(from, "rb");
+  if (!in)
+    goto done;
+  out = fopen(to, "wb");
+  if (!out)
+    goto done;
+  char buffer[4096];
+  size_t n;
+  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
+    if (fwrite(buffer, 1, n, out) != n)
+      return -1;  /* leaks in and out */
+  if (ferror(in) || fflush(out) != 0)
+    goto done;
+  status = 0;
+done:
+  if (out)
+    fclose(out);
+  if (in)
+    fclose(in);
+  return status;
+}
+```
+
+```console
+$ cc -std=c11 -Wall -Wextra -c copy.c
+```
+
+A `defer`, written on the line after an acquisition, releases the
+resource at every exit after it: each exit runs the deferred statements
+in force there, in reverse order, so the `return` in the loop closes
+both files. A deferred statement cannot report an error, so the
+function flushes `out` itself before its last exit:
+
+<!-- file: copy.tc -->
+```c
+#include <stdio.h>
+
+type copy_error = | CannotOpen | CannotRead | CannotWrite;
+
+static result(FILE *, copy_error) open_file(const char *path,
+                                            const char *mode) {
+  FILE *f = fopen(path, mode);
+  if (!f)
+    return Err(CannotOpen);
+  return Ok(f);
+}
+
+result(void, copy_error) copy_file(const char *from, const char *to) {
+  FILE *in = try open_file(from, "rb");
+  defer fclose(in);
+  FILE *out = try open_file(to, "wb");
+  defer fclose(out);
+  char buffer[4096];
+  size_t n;
+  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
+    if (fwrite(buffer, 1, n, out) != n)
+      return Err(CannotWrite);
+  if (ferror(in))
+    return Err(CannotRead);
+  if (fflush(out) != 0)
+    return Err(CannotWrite);
+  return Ok;
+}
+```
+
+```console
+$ typec -std=c11 -Wall -Wextra -c copy.tc
+```
+
+`typec` writes a copy of each deferred statement at each exit
+([What the C looks like](#what-the-c-looks-like)). An analyzer finds
+some leaks of C by following paths: GCC's `-fanalyzer` reports both of
+`copy.c`.
+
+<!-- console: gcc -->
+```console
+$ cc -std=c11 -fanalyzer -c copy.c 2>&1 | grep -o "leak of FILE '[a-z]*'"
+leak of FILE 'in'
+leak of FILE 'out'
+```
+
+### Limits of the checks
+
+A `match` with a `default` covers a new case as C's `default` does; but
+a `default` that covers no case is refused, so one cannot be written
+"just in case" before the case exists. A value whose tag is none of its
+cases, which C code, casts and unions can make, stops the program when
+it is matched, at run time. `private` binds Type-C files only: C code
+reads and writes the layout as C does, the zero value is open to every
+file, and Type-C code that reinterprets storage, as `*(port *)p` does,
+is not refused. The guarantees and what each depends on are in [design
+14](type-c-language-design.md#14-guarantees).
+
+## Adopting one file
+
+Type-C enters a program one file at a time. Take a small C program:
+`main.c` calls `calc.c` through `calc.h`.
 
 <!-- file: calc.h -->
 ```c
@@ -204,281 +805,6 @@ GNU Makefile, `%.o: %.tc` with the command
 their own form of it. Documented rules for make,
 ninja and CMake are plan package 4.3, not done yet.
 
-## A short tour
-
-The cases of a variant are its *constructors*, as the messages of
-`typec` call them.
-
-**Ask about one case.** `if (case ...)` tests for one case and binds its
-fields. Outside it and `match`, Type-C code cannot name a field at all.
-
-<!-- file: token.tc -->
-```c
-type token = | Number(long value) | Name(const char *text);
-
-long number_value(token t) {
-  if (case Number(value) = t)
-    return value;
-  return 0;
-}
-```
-
-**No fall-through.** An arm of a `match` that can run into the next one
-is an error: it ends in `break`, `return`, `continue`, `goto` or a call
-that does not return.
-
-<!-- file: cost.tc -->
-```c
-type op = | Load(int address) | Add(int operands);
-
-int cost(op o) {
-  int c = 0;
-  match (o) {
-  case Load(_):
-    c = 2;
-  case Add(n):
-    c += n;
-    break;
-  }
-  return c;
-}
-```
-
-**Ids that do not mix.** A distinct type has the representation of
-another type but does not convert to it, or from it, without a cast.
-Swapped arguments become an error:
-
-<!-- file: ids.tc -->
-```c
-type user_id = distinct unsigned;
-type group_id = distinct unsigned;
-
-int is_member(user_id u, group_id g);
-
-int may_read(user_id u, group_id g) {
-  return is_member(g, u);  /* swapped */
-}
-```
-
-**Generic types instead of `void *`.** `list(int)` and `list(double)`
-are different types, so a list of prices cannot reach a function that
-sums integers. Each `list(int)` names the same type, wherever it is
-written.
-
-<!-- file: list.tc -->
-```c
-type list(T) = | Nil | Cons(T head, list(T) *tail);
-
-int sum(list(int) l) {
-  int total = 0;
-  while (case Cons(head, tail) = l) {
-    total += head;
-    l = *tail;
-  }
-  return total;
-}
-
-int sum_prices(list(double) prices) {
-  return sum(prices);
-}
-```
-
-**A value that may be missing.** `option(T)` is a generic variant that
-every Type-C file has: `None`, or `Some` of a value.
-
-<!-- file: find.tc -->
-```c
-#include <stddef.h>
-
-option(size_t) find(const int *items, size_t n, int wanted) {
-  for (size_t i = 0; i < n; i++)
-    if (items[i] == wanted)
-      return Some(i);
-  return None;
-}
-```
-
-**Errors as values, cleanups on every exit.** `result(T, E)` is another
-generic variant that every Type-C file has: `Ok` of a value, or `Err`
-of an error. C releases resources at one label that each error path must jump
-to; here an error path written later returns past it:
-
-<!-- file: copy.c -->
-```c
-#include <stdio.h>
-
-int copy_file(const char *from, const char *to) {
-  int status = -1;
-  FILE *out = NULL;
-  FILE *in = fopen(from, "rb");
-  if (!in)
-    goto done;
-  out = fopen(to, "wb");
-  if (!out)
-    goto done;
-  char buffer[4096];
-  size_t n;
-  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
-    if (fwrite(buffer, 1, n, out) != n)
-      return -1;  /* leaks in and out */
-  if (ferror(in) || fflush(out) != 0)
-    goto done;
-  status = 0;
-done:
-  if (out)
-    fclose(out);
-  if (in)
-    fclose(in);
-  return status;
-}
-```
-
-In Type-C, `try` gives the value of a `result` or returns its error. A
-`defer`, written on the line after an acquisition, releases the
-resource at every exit after it: each exit runs the deferred statements
-in force there, in reverse order, so the `return` in the loop closes
-both files. A deferred statement cannot report an error, so the
-function flushes `out` itself before its last exit:
-
-<!-- file: copy.tc -->
-```c
-#include <stdio.h>
-
-type copy_error = | CannotOpen | CannotRead | CannotWrite;
-
-static result(FILE *, copy_error) open_file(const char *path,
-                                            const char *mode) {
-  FILE *f = fopen(path, mode);
-  if (!f)
-    return Err(CannotOpen);
-  return Ok(f);
-}
-
-result(void, copy_error) copy_file(const char *from, const char *to) {
-  FILE *in = try open_file(from, "rb");
-  defer fclose(in);
-  FILE *out = try open_file(to, "wb");
-  defer fclose(out);
-  char buffer[4096];
-  size_t n;
-  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
-    if (fwrite(buffer, 1, n, out) != n)
-      return Err(CannotWrite);
-  if (ferror(in))
-    return Err(CannotRead);
-  if (fflush(out) != 0)
-    return Err(CannotWrite);
-  return Ok;
-}
-```
-
-`typec` writes a copy of each deferred statement at each exit
-([What the C looks like](#what-the-c-looks-like)). And a `result` cannot
-be ignored by accident: a call that drops one, as the statement
-`copy_file(from, to);` does, is an error. C drops a return code without
-a word unless its function is declared `[[nodiscard]]` (C23) or
-`warn_unused_result`, and then it warns.
-
-**Types that only their owner can make.** A `private` type can be made
-only in its interface and in the source file of the same name, here
-`port.tc`; other files use ports and read their value. So, short of C
-code or reinterpreted storage ([limits](#what-typec-reports)), every
-port but the zero value, `{0}`, comes from `port_parse`.
-
-<!-- file: include/port.tci -->
-```c
-#include <stdint.h>
-
-type port = private distinct uint16_t;
-
-port port_parse(const char *text);  /* {0} when text is no port */
-```
-
-<!-- file: server.tc -->
-```c
-#include <stdlib.h>
-#include "port.tci"
-
-port port_from_argument(const char *argument) {
-  return (port)atoi(argument);  /* skips the check */
-}
-```
-
-## Measured on a real library
-
-Pilot B, the plan's test of Stage 2 on real code
-([plan, Stage 2](type-c-implementation-plan.md#stage-2-generic-types-result-try-and-defer)),
-rewrote the parser of tomlc99, a TOML library in C (`toml.c`, 2392
-lines), with `result`, `try` and `defer`. Its header `toml.h`, its C
-programs and its tests did not change and link against the Type-C
-object. The pilot's repository is not published; the numbers here are
-from its record.
-
-Fault injection fails each allocation of a parse in turn, one run for
-each. Over the library's 62 example files, 1416 runs, the original
-went wrong in 34: 25 leaks and 9 uses after free, from two defects in
-the code that grows an array or a table. The rewrite went wrong in
-none, built by Clang or GCC, and the address, undefined behavior and
-leak sanitizers reported nothing. Over the 146 files of
-toml-spec-tests, 18847 runs, the original leaked in 1022, 1000 of them
-in one deeply nested file, and crashed in 9; the rewrite did neither.
-
-`try` and `defer` did not remove the defects by themselves. A variant
-of the rewrite whose three faulty functions only put a `try` in place
-of each `if (!x) return` kept all 34 bad runs. Adding a `defer` that
-frees each new object until it is linked into the tree removed the 25
-leaks but not the 9 uses after free, which came from the order of the
-steps: the old buffer of an array was freed before its new element
-existed. Reordering the steps, so that each grown buffer is stored and
-counted before the next allocation, removed them. The language puts
-the question "who owns this object if this step fails?" at every
-`try`; the rewrite had to answer it.
-
-What it costs, at `-O2 -g`, against a hand-written C version of the
-same rewrite with a `goto cleanup` where Type-C has a `defer`:
-
-| | Apple Clang 21 | GCC 16 |
-| --- | --- | --- |
-| text of `toml.o`, over the `goto` version | +528 bytes, +2.8% | +2192 bytes, +11.9% |
-| of which cleanups repeated at each exit | 208 bytes, 1.1% of text | 368 bytes, 2.0% of text |
-| text of `toml.o`, over the original `toml.c` | +480 bytes, +2.6% | +656 bytes, +3.3% |
-| 20 parses of a 1.3 MB document, `goto` version | 0.868 s | 0.962 s |
-| the same, Type-C | 0.870 s | 0.960 s |
-
-The record does not split the rest of the growth further and puts most
-of it down to the representation of `result`, a structure of a tag and
-a union returned by value where the C returns an `int` or a pointer;
-returning a result whose error has no fields as the bare value is open
-in [TODO.md](TODO.md). Parse times are the best
-of five rounds, and repeated runs move each by 2 to 3 percent, more
-than any gap between the versions. Error paths were not timed.
-
-## Try it
-
-You need OCaml, dune and a GCC or Clang, of the releases that
-[Building and testing](#building-and-testing) names. From a checkout,
-with the examples above saved under their names:
-
-```sh
-dune build --root .
-export PATH="$PWD/_build/install/default/bin:$PATH"
-typec -c area.tc         # the error above
-typec -c shape.c         # a C file compiles as with cc
-typec --emit-c token.tc  # print the C that typec hands to cc
-```
-
-`typec` takes the command line of `cc` and hands an input that is not a
-`.tc` file to the C compiler untouched, so an existing build runs with
-`CC=typec` and its C files compile as before. With a `.tc` input it
-refuses the few options that it cannot follow, such as `-E`, which
-stops before the C it writes, or `-fshort-enums`, which changes C's
-types. The C compiler is `cc` unless `--cc=PATH` or
-`TYPEC_CC` names another ([choosing it](#choosing-the-backend)).
-
-## In detail
-
-### Adopting one file
-
 A C11 translation unit is a Type-C unit with the same meaning
 ([design 2.2](type-c-language-design.md#22-type-c-is-a-superset-of-c11)):
 each Type-C construct begins with tokens that C refuses, and the words
@@ -513,7 +839,7 @@ The fine print, for a `.tc` file:
   ([TODO.md](TODO.md) tracks the table).
 - A source character that is not valid UTF-8, such as a Latin-1 byte in
   a string literal, is refused.
-- A universe name (`option`, `result`, `slice`, `str` and the like) as
+- A universe name (`option` or `result`) as
   a parameter of an old-style definition is an error: the name is a
   typedef name in a `.tc` file, and C11 6.9.1p6 forbids one there
   (design 2.2).
@@ -545,245 +871,17 @@ Clang it names a temporary file as the compilation unit, and on macOS a
 command that links a `.tc` input with other inputs loses the `.dSYM` of
 `-g` ([TODO.md](TODO.md#driver)).
 
-### What typec reports
+## What typec reports
 
 `typec` stops at the first error it finds, with the file and line, a
 message, the section of the [design](type-c-language-design.md) that
-states the rule, and the rule's code. These are the errors of the tour.
-[`test/run/readme.t`](test/run/readme.t) checks the files and the
-output shown on this page on GCC and Clang.
+states the rule, and the rule's code, and exits with status 80. An error
+that the C compiler finds in the C that `typec` writes, as with the
+generic types above, comes with the C compiler's message and status.
+[`test/run/readme.t`](test/run/readme.t) checks the files and the output
+shown on this page on GCC and Clang.
 
-<details>
-<summary>The error of each example of the tour</summary>
-
-A `match` that misses a case, as above:
-
-```console
-$ typec -c area.tc
-typec: area.tc:7: the match does not cover the constructor 'Triangle' of the variant 'shape' (design 4.2 rule 1) [TC0018]
-[80]
-```
-
-A field read outside `match` and `if (case ...)`, as C reads a member
-of the union:
-
-<!-- file: peek.tc -->
-```c
-type token = | Number(long value) | Name(const char *text);
-
-long number_value(token t) {
-  return t.u.Number.value;
-}
-```
-
-```console
-$ typec -c token.tc
-$ typec -c peek.tc
-typec: peek.tc:4: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching (design 3.2 rule 6) [TC0007]
-[80]
-```
-
-An arm that falls into the next:
-
-```console
-$ typec -c cost.tc
-typec: cost.tc:6: the end of the match arm can be reached (design 4.3 rule 1) [TC0021]
-[80]
-```
-
-Swapped ids:
-
-```console
-$ typec -c ids.tc
-typec: ids.tc:7: a value of type 'group_id' does not convert to 'user_id' without a cast (design 3.4) [TC0012]
-[80]
-```
-
-A value made outside its owner:
-
-<!-- file: port.tc -->
-```c
-#include <stdlib.h>
-#include "port.tci"
-
-port port_parse(const char *text) {
-  long n = strtol(text, NULL, 10);
-  if (n < 1 || n > 65535)
-    return (port){0};
-  return (port)n;
-}
-```
-
-```console
-$ typec -Iinclude -c port.tc
-$ typec -Iinclude -c server.tc
-typec: server.tc:5: the distinct type 'port' is private to 'include/port.tci', so only the text of its owner creates its values (design 9.2 rule 1) [TC0013]
-[80]
-```
-
-`option` compiles as any other variant:
-
-```console
-$ typec -std=c11 -Wall -Wextra -c find.tc
-```
-
-So does `result`, with `try` and `defer`:
-
-```console
-$ typec -std=c11 -Wall -Wextra -c copy.tc
-```
-
-A dropped result:
-
-<!-- file: backup.tc -->
-```c
-type copy_error = | CannotOpen | CannotRead | CannotWrite;
-
-result(void, copy_error) copy_file(const char *from, const char *to);
-
-void backup(void) {
-  copy_file("notes.txt", "notes.bak");
-}
-```
-
-```console
-$ typec -c backup.tc
-typec: backup.tc:6: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
-[80]
-```
-
-Each instance of a generic type is a C structure of its own, so it is
-the C compiler that refuses `list(double)` where `list(int)` is wanted.
-Clang says (it quotes a fragment of the line, which
-[TODO.md](TODO.md) tracks):
-
-<!-- console: clang -->
-```console
-$ typec -c list.tc
-list.tc:13:14: error: passing 'list__d' (aka 'struct list__d') to parameter of incompatible type 'list__i' (aka 'struct list__i')
-   13 |   return sum(prices);
-      |              ^~~~~~
-list.tc:3:2: note: passing argument to parameter 'l' here
-    3 |  l) {
-      |  ^
-1 error generated.
-[1]
-```
-
-</details>
-
-The C versions of these mistakes compile with `-Wall -Wextra`, on both
-compilers, without a word:
-
-<details>
-<summary>The C of each mistake</summary>
-
-<!-- file: token.c -->
-```c
-enum token_kind { TOKEN_NUMBER, TOKEN_NAME };
-
-struct token {
-  enum token_kind kind;
-  union {
-    struct { long value; } number;
-    struct { const char *text; } name;
-  } u;
-};
-
-long number_value(struct token t) {
-  return t.u.number.value;
-}
-```
-
-<!-- file: ids.c -->
-```c
-typedef unsigned user_id;
-typedef unsigned group_id;
-
-int is_member(user_id u, group_id g);
-
-int may_read(user_id u, group_id g) {
-  return is_member(g, u);  /* swapped */
-}
-```
-
-<!-- file: list.c -->
-```c
-struct list {
-  void *head;
-  struct list *tail;
-};
-
-int sum(struct list l) {
-  int total = 0;
-  for (struct list *p = &l; p; p = p->tail)
-    total += *(int *)p->head;
-  return total;
-}
-
-int sum_prices(struct list prices) {
-  return sum(prices);  /* a list of doubles */
-}
-```
-
-<!-- file: port.h -->
-```c
-#include <stdint.h>
-
-typedef uint16_t port;  /* make one with port_parse only */
-
-port port_parse(const char *text);
-```
-
-<!-- file: server.c -->
-```c
-#include <stdlib.h>
-#include "port.h"
-
-port port_from_argument(const char *argument) {
-  return atoi(argument);  /* skips the check */
-}
-```
-
-```console
-$ cc -std=c11 -Wall -Wextra -c token.c
-$ cc -std=c11 -Wall -Wextra -c ids.c
-$ cc -std=c11 -Wall -Wextra -c list.c
-$ cc -std=c11 -Wall -Wextra -c server.c
-$ cc -std=c11 -Wall -Wextra -c copy.c
-```
-
-</details>
-
-C's warnings catch some forms of these mistakes, and
-[`test/run/comparison.t`](test/run/comparison.t) records which, on both
-compilers: `-Wall` warns of a `switch` on an enumeration that misses an
-enumerator, unless it has a `default`; `-Wswitch-enum` warns with the
-`default` too; GCC's `-Wextra` warns of a missing `break`, and Clang
-does with `-Wimplicit-fallthrough`. No flag tried warns of a member
-read under the wrong tag, of swapped ids or of a value made outside its
-module. An analyzer finds some of them by following paths: GCC's
-`-fanalyzer` reports both leaks of `copy.c`.
-
-<!-- console: gcc -->
-```console
-$ cc -std=c11 -fanalyzer -c copy.c 2>&1 | grep -o "leak of FILE '[a-z]*'"
-leak of FILE 'in'
-leak of FILE 'out'
-```
-
-Type-C has limits here too. A `match` with a `default` covers a new
-case as C's `default` does; but a `default` that covers no case is
-refused, so one cannot be written "just in case" before the case
-exists. A value whose tag is none of its cases, which C code, casts and
-unions can make, stops the program when it is matched, at run time.
-`private` binds Type-C files only: C code reads and writes the layout
-as C does, the zero value is open to every file, and Type-C code that
-reinterprets storage, as `*(port *)p` does, is not refused. The
-guarantees and what each depends on are in
-[design 14](type-c-language-design.md#14-guarantees).
-
-### What the C looks like
+## What the C looks like
 
 `typec` writes plain C11 with the GNU extensions that GCC and Clang
 share, and `--emit-c` prints it. A variant is a structure of an
@@ -986,7 +1084,7 @@ compilers and compared in code size and in the instructions they retire
 The cost of the checks themselves, and what is not measured yet, are
 open in [TODO.md](TODO.md).
 
-### Using Type-C types from C
+## Using Type-C types from C
 
 C code sees what
 [design 10.6](type-c-language-design.md#106-what-c-code-sees) lists: a
@@ -1049,7 +1147,56 @@ written by hand
 ([design 9.3](type-c-language-design.md#93-c-clients), plan package
 4.1).
 
-### Principles
+## Measured on a real library
+
+Pilot B, the plan's test of Stage 2 on real code
+([plan, Stage 2](type-c-implementation-plan.md#stage-2-generic-types-result-try-and-defer)),
+rewrote the parser of tomlc99, a TOML library in C (`toml.c`, 2392
+lines), with `result`, `try` and `defer`. Its header `toml.h`, its C
+programs and its tests did not change and link against the Type-C
+object. The pilot's repository is not published; the numbers here are
+from its record.
+
+Fault injection fails each allocation of a parse in turn, one run for
+each. Over the library's 62 example files, 1416 runs, the original
+went wrong in 34: 25 leaks and 9 uses after free, from two defects in
+the code that grows an array or a table. The rewrite went wrong in
+none, built by Clang or GCC, and the address, undefined behavior and
+leak sanitizers reported nothing. Over the 146 files of
+toml-spec-tests, 18847 runs, the original leaked in 1022, 1000 of them
+in one deeply nested file, and crashed in 9; the rewrite did neither.
+
+`try` and `defer` did not remove the defects by themselves. A variant
+of the rewrite whose three faulty functions only put a `try` in place
+of each `if (!x) return` kept all 34 bad runs. Adding a `defer` that
+frees each new object until it is linked into the tree removed the 25
+leaks but not the 9 uses after free, which came from the order of the
+steps: the old buffer of an array was freed before its new element
+existed. Reordering the steps, so that each grown buffer is stored and
+counted before the next allocation, removed them. The language puts
+the question "who owns this object if this step fails?" at every
+`try`; the rewrite had to answer it.
+
+What it costs, at `-O2 -g`, against a hand-written C version of the
+same rewrite with a `goto cleanup` where Type-C has a `defer`:
+
+| | Apple Clang 21 | GCC 16 |
+| --- | --- | --- |
+| text of `toml.o`, over the `goto` version | +528 bytes, +2.8% | +2192 bytes, +11.9% |
+| of which cleanups repeated at each exit | 208 bytes, 1.1% of text | 368 bytes, 2.0% of text |
+| text of `toml.o`, over the original `toml.c` | +480 bytes, +2.6% | +656 bytes, +3.3% |
+| 20 parses of a 1.3 MB document, `goto` version | 0.868 s | 0.962 s |
+| the same, Type-C | 0.870 s | 0.960 s |
+
+The record does not split the rest of the growth further and puts most
+of it down to the representation of `result`, a structure of a tag and
+a union returned by value where the C returns an `int` or a pointer;
+returning a result whose error has no fields as the bare value is open
+in [TODO.md](TODO.md). Parse times are the best
+of five rounds, and repeated runs move each by 2 to 3 percent, more
+than any gap between the versions. Error paths were not timed.
+
+## Principles
 
 One line each on the principles of
 [design section 1](type-c-language-design.md#1-principles), which states
@@ -1082,7 +1229,7 @@ them in full:
 9. **Language before machinery.** The design defines the meaning, not
    what an implementation makes easy.
 
-### Why not just...
+## Why not just...
 
 **...turn on more warnings, or run an analyzer?** Use them: Type-C code
 still gets the warnings of the C compiler. Warnings see only the forms
@@ -1092,18 +1239,20 @@ module. An analyzer finds what the paths it explores reach. In Type-C
 these mistakes are type errors that every build checks, with no extra
 tool.
 
-**...use Rust or Zig?** Both have exhaustive tagged unions and generic
-types, and Rust's safe code is memory safe, which Type-C is not
-([design 14](type-c-language-design.md#14-guarantees)). Both call C, but
-C code gains their checks only when it is rewritten in their language,
-and the build gains their toolchain and a boundary between the
-languages: Rust reads C's declarations through `extern "C"`
-blocks, written by hand or generated by bindgen, and Zig translates C
-headers into Zig. `typec` is a tool to add too, but in Type-C the checks
-start in the one file you rename. It includes the same headers as they
-are, is compiled by the same C compiler, and gives an object with the C
-ABI, which links with the rest as before
-([One file of an existing program](#one-file-of-an-existing-program)).
+**...use Rust, Zig or OCaml?** All three have tagged unions whose
+matches are checked for missing cases, and generic types, and safe Rust
+and OCaml are memory safe, which Type-C is not ([design
+14](type-c-language-design.md#14-guarantees)). All three call C, but C
+code gains their checks only when it is rewritten in their language, and
+the build gains their toolchain and a boundary between the languages:
+Rust reads C's declarations through `extern "C"` blocks, written by hand
+or generated by bindgen, Zig translates C headers into Zig, and OCaml
+calls C through stubs written against its runtime, which brings a
+garbage collector. `typec` is a tool to add too, but in Type-C the
+checks start in the one file you rename. It includes the same headers as
+they are, is compiled by the same C compiler, and gives an object with
+the C ABI, which links with the rest as before ([Adopting one
+file](#adopting-one-file)).
 
 **...use C++?** `std::variant`, `enum class` and templates do much of
 this, in another language. A C file is not always a C++ file
@@ -1119,27 +1268,49 @@ call. The usual fix declares each instance once by name, by hand. A
 generic type such as `vector(int)` is one type wherever it is written. A
 macro cannot check a `switch` either.
 
-### Status
+## Status
 
 Type-C is in development: the [design](type-c-language-design.md)
 specifies the whole language, and the
 [plan](type-c-implementation-plan.md) builds it in stages, each ending
 in a measured gate. Stages 1 and 2 are built and have met their gates:
 variants, `match` and `if (case ...)`, distinct types, `private` and
-interface files (`.tci`), generic types, `option` and `result`, `try`,
-which returns the error of a `result` or gives its value
-(`uint32_t n = try read_u32(r);`), and `defer`, which runs a statement
-when its block is left (`defer fclose(f);`). Stage 2's gate rests
-on [Pilot B](#measured-on-a-real-library).
+interface files (`.tci`), generic types, `option` and `result`, `try`
+and `defer`. Stage 2's gate rests on
+[Pilot B](#measured-on-a-real-library).
 
-Coming next, designed and **not yet implemented**:
+Stage 3 is in progress, and **not ready to use** yet:
 
-- Stage 3, generic functions:
+- generic functions:
   `generic(T) T *vector_last(vector(T) *v);`
-- Stage 3, slices with checked indexing:
+- slices with checked indexing:
   `slice(uint8_t) bytes = slice_from_array(buffer);`
-- a checked mode, whose rules are provisional, that rules out specific
-  classes of memory errors in the functions it covers.
+
+Designed and **not yet implemented**: a checked mode, whose rules are
+provisional, that rules out specific classes of memory errors in the
+functions it covers.
+
+## Try it
+
+You need OCaml, dune and a GCC or Clang, of the releases that
+[Building and testing](#building-and-testing) names. From a checkout,
+with the examples above saved under their names:
+
+```sh
+dune build --root .
+export PATH="$PWD/_build/install/default/bin:$PATH"
+typec -c area.tc         # a match that misses a case
+typec -c shape.c         # a C file compiles as with cc
+typec --emit-c token.tc  # print the C that typec hands to cc
+```
+
+`typec` takes the command line of `cc` and hands an input that is not a
+`.tc` file to the C compiler untouched, so an existing build runs with
+`CC=typec` and its C files compile as before. With a `.tc` input it
+refuses the few options that it cannot follow, such as `-E`, which
+stops before the C it writes, or `-fshort-enums`, which changes C's
+types. The C compiler is `cc` unless `--cc=PATH` or
+`TYPEC_CC` names another ([choosing it](#choosing-the-backend)).
 
 ## Building and testing
 
