@@ -356,8 +356,8 @@ by 39 bytes under GCC `-Os`, 64 under GCC `-O2` and 112 on the
 Cortex-M3 with GCC, and by 0 to 4 under Clang (`TODO.md`).
 
 The scratch copies, the scripts and the sizes of every function are in
-`/Volumes/Optaine/ringbuf-growth` (its `README`), outside the
-repository.
+`/Volumes/Optaine/ringbuf-growth` (its `README`), a repository of its
+own, at commit `bfa192d`.
 
 ## Where the port differs
 
