@@ -2367,8 +2367,8 @@ let instance_declaration context location instance
 
 (* Step 1 of a function instance: its prototype, the head of the
    generic's definition. *)
-let function_prototype context location instance =
-  let definition, reading = function_definition context instance in
+let function_prototype context location instance
+    ((definition : Tree.function_definition), reading) =
   let body_first =
     match definition.node.body with
     | Parsed block -> block.span.first
@@ -2406,17 +2406,47 @@ let definition_text context instance pieces : Emitter.bracketed_text =
       Guarded
         { instance = Typec_sema.Encoding.instance_c_name instance; pieces }
 
+(* The span of the definition of a generic, none for a generic type
+   that the unit declares alone (design 3.1 rule 4). *)
+let definition_span (generic : Typec_sema.Declarations.generic_definition) =
+  match generic with
+  | Type_generic { node = { definition = Incomplete_variant; _ }; _ } -> None
+  | Type_generic declaration -> Some declaration.span
+  | Function_generic { span; _ } -> Some span
+
+(* A header declares each instance with its layout typedef, where its
+   step reads the generic defined (design 9.3); a C unit writes none. *)
+let layout_typedef context location instance generic =
+  let output = context.output in
+  match
+    ( Typec_sema.Declarations.product context.declarations,
+      definition_span generic )
+  with
+  | Unit_text, _ | Header_text, None -> []
+  | Header_text, Some span ->
+      let definition = Layout.definition_text (Emitter.unit output) span in
+      let name = Typec_sema.Encoding.instance_c_name instance in
+      [ Emitter.generated output location (Layout.typedef name ~definition) ]
+
 let placement_text context (placement : Typec_sema.Declarations.placement) :
     Emitter.bracketed_text =
   let location = application_location context placement in
+  let instance = placement.instance in
   match placement.step with
   | Typedefs typedefs ->
       Unguarded (argument_typedefs context location typedefs)
   | Declared { generic } ->
+      let latest =
+        Typec_sema.Declarations.latest_generic context.declarations generic
+      in
       Unguarded
-        (instance_declaration context location placement.instance generic)
+        (instance_declaration context location instance generic
+        @ layout_typedef context location instance (Type_generic latest))
   | Prototype ->
-      Unguarded (function_prototype context location placement.instance)
+      let ((_, reading) as definition) = function_definition context instance in
+      Unguarded
+        (function_prototype context location instance definition
+        @ layout_typedef context location instance reading.generic)
   | Defined ->
       definition_text context placement.instance
         (instance_rest context location placement.instance)

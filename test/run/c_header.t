@@ -314,11 +314,61 @@ the text, and the client finds the layout that a Type-C unit finds.
   >   done
   > done
 
+Each header writes with the declaration of an instance its layout
+typedef, of a pointer to a structure whose tag holds the digest of the
+definition of the instance's generic (design 9.3). Two headers that
+reach one definition write one, which C lets them repeat, as left.h and
+right.h do above. A second library whose vector.tci defines a generic
+vec of its own writes another definition of vec(int) under the same
+name, and a client that includes its header with left.h fails to
+compile on the layout typedef, in either order, rather than taking the
+first definition for both.
+
+  $ layouts() {
+  >   grep -oh 'struct __tc_digest__[0-9a-f]* \* __tc_layout__[a-zA-Z0-9_]*' \
+  >     "$@" | sort -u
+  > }
+  $ layouts left.h right.h
+  struct __tc_digest__43767039c7f63fb6cd06d693c1ba41d2 * __tc_layout__vec__i
+  struct __tc_digest__75d53cead16f94a95c10e912d4c342ec * __tc_layout__link__i
+  $ cat > vector.tci <<'EOF'
+  > #ifndef VECTOR_TCI
+  > #define VECTOR_TCI
+  > type vec(T) = struct { int len; T *data; };
+  > void vector_take(vec(int) *v);
+  > #endif
+  > EOF
+  $ typec --emit-c-header vector.tci
+  $ cat > clash.c <<'EOF'
+  > #include FIRST
+  > #include SECOND
+  > int main(void) { return 0; }
+  > EOF
+  $ for cc in "$clang" "$gcc"; do
+  >   for std in c11 gnu17; do
+  >     for order in '"left.h" "vector.h"' '"vector.h" "left.h"'; do
+  >       set -- $order
+  >       "$cc" -std=$std $strict -DFIRST="$1" -DSECOND="$2" -c clash.c \
+  >         -o clash.o 2>&1 | grep -A1 'error:' |
+  >         grep -q '__tc_layout__vec__i' && echo refused
+  >     done
+  >   done
+  > done
+  refused
+  refused
+  refused
+  refused
+  refused
+  refused
+  refused
+  refused
+
 A header defines at its end, each under its guard, the instances that
 its interface names and that no point of it needed complete, where
 their definitions find complete what they need, so a client may use by
 value an instance that the interface passes by pointer alone. An
-instance whose argument is incomplete at the end stays declared, and an
+instance whose argument is incomplete at the end stays declared, with
+its layout typedef, and an
 instance that only an included interface names is no instance of the
 header's. Two headers that define one at their ends are included
 together in either order.
@@ -348,6 +398,10 @@ together in either order.
   hold.h:#define __tc_instance__link__i
   grip.h:#ifndef __tc_instance__vec__l
   grip.h:#define __tc_instance__vec__l
+  $ layouts hold.h
+  struct __tc_digest__43767039c7f63fb6cd06d693c1ba41d2 * __tc_layout__vec__l
+  struct __tc_digest__75d53cead16f94a95c10e912d4c342ec * __tc_layout__link__T6secret
+  struct __tc_digest__75d53cead16f94a95c10e912d4c342ec * __tc_layout__link__i
   $ cat > held.tc <<'EOF'
   > #include <stddef.h>
   > #include "hold.h"

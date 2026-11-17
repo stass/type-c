@@ -91,6 +91,11 @@ let no_placements =
     readings = Ctype.Instances.empty;
     functions = [] }
 
+(* A generic type: its latest declaration, and whether it is an alias
+   whose text is inexact (design 3.5 rule 2), read where the definition
+   stands, as nothing later changes what the text names there. *)
+type generic = { declaration : Tree.type_declaration; inexact : bool }
+
 type product = Unit_text | Header_text
 
 type t = {
@@ -103,6 +108,7 @@ type t = {
   linked : (string, entity) Hashtbl.t;
   typed : Expressions.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
+  generics : (string, generic) Hashtbl.t;
   instance_bytes : int;
   tag_max : Exact_integer.t;
   copy_bytes : int;
@@ -152,6 +158,11 @@ let type_declarations result =
   |> List.sort (fun (a : Tree.type_declaration) b ->
          compare a.span.first b.span.first)
 
+let latest_generic result (generic : Tree.type_declaration) =
+  match Hashtbl.find_opt result.generics (generic.node.name.node :> string) with
+  | Some { declaration; _ } -> declaration
+  | None -> invalid_arg "Declarations.latest_generic: no generic"
+
 let typed result = result.typed
 let instance_bytes result = result.instance_bytes
 let tag_max result = result.tag_max
@@ -178,11 +189,6 @@ type error = Reader.error = { location : Location.t; message : string }
    p4 allow by the scope they are in: no variable length at file scope,
    and [*] only in a parameter list that is not that of a definition. *)
 type place = At_file_scope | In_prototype | In_definition | In_block
-
-(* A generic type: its latest declaration, and whether it is an alias
-   whose text is inexact (design 3.5 rule 2), read where the definition
-   stands, as nothing later changes what the text names there. *)
-type generic = { declaration : Tree.type_declaration; inexact : bool }
 
 (* The reader follows the links that the parser records in the tree
    (design 13.3): [entities] holds what each declaration that it has read
@@ -5148,12 +5154,12 @@ let read target ~product text (scopes : Parser.scopes) =
   match Fun.protect ~finally:end_deferral read_all with
   | items ->
       let { tags; entities; tag_types; linked; typed; type_declarations;
-            placements; instance_bytes; copy_bytes; longest_instance_code;
-            zero_initialisers; _ } =
+            generics; placements; instance_bytes; copy_bytes;
+            longest_instance_code; zero_initialisers; _ } =
         state
       in
       Ok { product; tags; items; placements; entities; tag_types; linked; typed;
-           type_declarations; instance_bytes; copy_bytes;
+           type_declarations; generics; instance_bytes; copy_bytes;
            longest_instance_code; zero_initialisers;
            tag_max = int_max target }
   | exception (Failed error | Instance_failed error | Over_budget error) ->

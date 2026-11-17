@@ -334,21 +334,27 @@ and the runs of the interface's own lowered text in macro brackets
 between its include lines, the definition of each instance under its
 guard where a point needs it complete, and at its end that of each
 other instance that its own applications name where the definition
-reads there, the packing probe named for the header, and under
-`--trap-function` the trap's prototype and its definition under the
-guard of the trap function (design 9.3). The rest of the package, in
-the order of its commits:
+reads there, the layout typedef of each instance that it declares
+whose generic the step reads defined, the packing probe named for the
+header, and under `--trap-function` the trap's prototype and its
+definition under the guard of the trap function (design 9.3). The rest
+of the package, in the order of its commits:
 
-- [High] Layout typedefs: the `__tc_layout__` typedef of each declared
-  instance, pointing to the `__tc_digest__` tag of the BLAKE2b-128
-  digest of its definition's tokens (9.3, 13.5). Waits on the
-  short-enum design, which changes the text that is digested. Until it
-  lands, the guard of an instance merges two different definitions of
-  one instance name in a C client with no message: two libraries whose
-  `vec.tci` and `vector.tci` each define a generic `vec` write two
-  `vec__i`, and the second header's guard skips its own, so its
-  functions see the first layout. Without the guards the client failed
-  with a redefinition.
+- [Medium] A layout digest covers its generic's tokens alone, so an
+  instance that one header defines and another only declares hides a
+  difference in a generic that its definition applies: with `inner(T)`
+  defined two ways and one `outer(T) = struct { inner(T) i; }`, a header
+  that cannot define `outer(struct op)` writes `outer`'s layout typedef
+  with the other's digest and none for `inner`, and the client compiles
+  (design 9.3, section 14). Digesting with the generic's tokens those of
+  every generic that it applies, transitively and in one order, closes
+  it without reading the definition.
+- [Low] The digested tokens are the `-E` step's, so one generic that two
+  headers reach through different backends or macro environments
+  (`INT_MAX` spelt `2147483647` by Clang and `0x7fffffff` by GCC,
+  `__FILE__` through another include path) gets two digests, and a
+  client that includes both is refused. Design 9.3 states the
+  assumption; a normal form of constants would lift part of it.
 - [High] Dependency options: `-MQ` with the header's path by default,
   `M.h.d` for `-MD` and `-MMD` without `-MF`, `-M` and `-MM` printing
   the rule and writing no header, `-o` with them refused, and `-o -`

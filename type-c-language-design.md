@@ -4082,10 +4082,11 @@ differ as well, and the paragraphs after them state how.
   instance, which is part of the declaration of an instance: the header
   writes it wherever it declares one, whether an application in
   `M.tci` names the instance or a generated definition does, and
-  whether the header defines it or not. It is a typedef named
-  for the instance of a pointer to a structure that no text defines,
-  whose tag holds a digest of the text of the instance's definition
-  (13.5). An instance of a generic that the step reads declared and
+  whether the header defines it or not, with the prototype of a
+  function instance as with the declaration of a type instance. It is
+  a typedef named for the instance of a pointer to a structure that no
+  text defines, whose tag holds a digest of the text of the definition
+  of the instance's generic (13.5). An instance of a generic that the step reads declared and
   not defined, as `type list(T);` (3.1 rule 4), has no text of a
   definition: the header declares it and writes no layout typedef.
 
@@ -4143,15 +4144,44 @@ first, with no message. That is a limitation (section 14): the refusal
 holds for an instance whose generic each header's step reads defined.
 
 The digest is BLAKE2b with a 128-bit result, which the OCaml library
-provides as `Digest.BLAKE128`, of the tokens of the definition as
-lowering writes them, each followed by one space. The text is a
-function of the definition of the generic and the arguments alone, so
-a header that cannot write the definition, because something that it
-needs complete is incomplete there, still computes its digest. Two
-definitions that differ share a digest with a chance too small to
-matter. A release of `typec` that writes one definition with other
-tokens makes headers that the headers of another release refuse in one
-client, so a program writes its headers with one release.
+provides as `Digest.BLAKE128`, of the tokens of the definition of the
+instance's generic, from its first token to its last: the declaration
+of a generic type that defines it, which is the variant that completes
+an incomplete one where one does, or the text of a generic function
+from its `generic`. Each token is spelled as lowering spells it, an
+identifier in UTF-8 whatever universal character names spell it, and
+is followed by one space, so the white space between the tokens
+changes nothing. The arguments need no part of the text, as the name
+of the typedef holds their encodings (10.3). The text is thus the
+generic's alone, and a header computes the digest of each instance
+that it declares without reading the definition for the instance:
+one that it cannot define, because something that the definition
+needs complete is incomplete there, and one that only a generated
+definition names included. Lowering writes the definition of an
+instance from that text and the arguments, so one text is one
+definition within one release of `typec`. Two texts that differ only
+in what lowering writes alike, as the name of a type parameter, are
+refused together all the same, which is the cost of a text that needs
+no reading. The tokens are those of the step's `-E` output, so one
+generic that two headers reach through different backends, or under
+different macros, as `INT_MAX` that Clang and GCC spell otherwise or
+`__FILE__` through another include path, has two digests there, and a
+client that includes both headers is refused: the headers that one
+client includes are generated with one backend and one set of macros
+for the generics they share.
+
+The digest covers the generic's own tokens, not those of the generics
+that its definition applies, whose instances the two headers name
+alike. Where both headers declare such an inner instance, its own
+layout typedef tells the two apart; where a header only declares the
+outer instance, because something that its definition needs complete
+is incomplete there, it declares no inner one, and a difference in the
+inner generic alone passes with no message. That is a limitation
+(section 14), provisional until the digest takes in the generics that
+a definition applies. Two definitions that differ share a digest with a
+chance too small to matter. Releases of `typec` that lower one text
+otherwise write one digest for different definitions, which nothing
+tells apart, so a program writes its headers with one release.
 
 A Type-C unit reads the interface and a C unit the lowered text: the
 redirect of the skeleton. `typec` defines `__TYPEC__` while it
@@ -8626,8 +8656,8 @@ the others of its kind:
 - the layout typedef of an instance in an emitted header (9.3):
   `layout`, then the instance name, as in `__tc_layout__vector__i`;
 - the tag of the structure that a layout typedef points to (9.3):
-  `digest`, then the digest of the text of the instance's definition
-  as 32 hexadecimal digits in lower case, as in
+  `digest`, then the digest of the text of the definition of the
+  instance's generic as 32 hexadecimal digits in lower case, as in
   `__tc_digest__5d41402abc4b2a76b9719d911017c592` for a definition of
   that digest;
 - the two structures of the packing probe of an emitted header (10.3):
@@ -8802,7 +8832,7 @@ a crash.
 | The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure, the bits of each unnamed bit-field and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect and zeroes an unnamed bit-field, which C leaves indeterminate (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | The C text that `typec` writes for a unit is at most its output limit, and what the front end reads for its instances at most the instance budget | Every unit and every byte of its C text but the fixed static assertions that end it, instances, copies, temporaries and line markers alike: emission charges each piece and edit as it makes it, with no list of constructs, and the front end counts the copies of deferred statements against the output limit as it finds their exits (3.5 rule 7) | Nothing; a unit past either bound is refused and nothing is written. The work of the parser and of the front end outside its readings for instances and its count of copies is not counted |
-| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for and none that the driver refuses, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. A client that GCC preprocesses apart under `-fdirectives-only` and compiles from that output cannot keep its macros that a run names, since the output keeps the `#undef` lines of the macro bracket and drops its pragmas; the macro probe fails its compile, and `typec` cannot cure it (9.3). The headers that the header includes declare for the client what they declared for the Type-C units, without the macros that the `.tci` defines before them and without `__TYPEC__`; a macro that changes what they declare is given on the command line of every compile (9.3). `typec` does not see a client's compile: the header's macro probe, enumeration assertion and packing probe (9.3) fail a client whose compiler, or whose build's split into preprocessing and compiling, does not restore a macro by `#pragma push_macro` and `#pragma pop_macro`, or whose enumeration representation or reading of `#pragma pack()` differs from that of the step that generated the header, and nothing else of this is checked. By construction, each run of lowered text holds no trigraph sequence, by the escape of its literals and the refusal of one in its include and pragma lines, and no name with a character outside the basic character set but `$`, which `--emit-c-header` refuses, and stands in a macro bracket that puts aside every macro of a name in it, so no macro of the header's includes, of the client's own headers or of its command line reaches that text, and two headers that write different definitions of one instance fail the client's compile, whether each defines it or only declares it, where each header's step reads the instance's generic defined (9.3). An instance whose generic a header's step reads declared alone has no layout typedef in that header, and nothing tells two of its definitions apart (9.3). Headers that one client includes were written by releases of `typec` that write each instance they share with the same tokens; headers of releases that write one otherwise refuse each other in that client |
+| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for and none that the driver refuses, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. A client that GCC preprocesses apart under `-fdirectives-only` and compiles from that output cannot keep its macros that a run names, since the output keeps the `#undef` lines of the macro bracket and drops its pragmas; the macro probe fails its compile, and `typec` cannot cure it (9.3). The headers that the header includes declare for the client what they declared for the Type-C units, without the macros that the `.tci` defines before them and without `__TYPEC__`; a macro that changes what they declare is given on the command line of every compile (9.3). `typec` does not see a client's compile: the header's macro probe, enumeration assertion and packing probe (9.3) fail a client whose compiler, or whose build's split into preprocessing and compiling, does not restore a macro by `#pragma push_macro` and `#pragma pop_macro`, or whose enumeration representation or reading of `#pragma pack()` differs from that of the step that generated the header, and nothing else of this is checked. By construction, each run of lowered text holds no trigraph sequence, by the escape of its literals and the refusal of one in its include and pragma lines, and no name with a character outside the basic character set but `$`, which `--emit-c-header` refuses, and stands in a macro bracket that puts aside every macro of a name in it, so no macro of the header's includes, of the client's own headers or of its command line reaches that text, and two headers that write different definitions of one instance fail the client's compile, whether each defines it or only declares it, where each header's step reads the instance's generic defined and the two differ in that generic's own text (9.3); a difference only in a generic that the definition applies passes where a header declares the instance alone (9.3). An instance whose generic a header's step reads declared alone has no layout typedef in that header, and nothing tells two of its definitions apart (9.3). Headers that one client includes were written by one release of `typec`, or by releases that lower each instance they share alike, and with one backend and one set of macros for the generics they share; nothing checks the first, and a difference in the second refuses the client (9.3) |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
 | A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length. No full expression that holds an index, a `slice_sub` or a conversion of a slice is resumed, by a call that returns a second time (`setjmp`, `sigsetjmp`, `getcontext`, `vfork`, `__builtin_setjmp`, a function declared with the GNU attribute `returns_twice`), after the same call of its function has begun to evaluate it again: the values that it held are then indeterminate, as C11 7.13.2.1p3 has the objects of a function after a `longjmp`, and the test does not protect the access (section 8 rule 10). Measured: under GCC 16 at `-O2` such an index passes its test and points beyond the end of a slice whose array is live, and under both backends a call stores through the address of an element that it held across such a call in another argument, into an array that is freed, as C does with `&a[i]` there. `typec` does not refuse such an expression (13.5) |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |

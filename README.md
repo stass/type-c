@@ -1349,9 +1349,7 @@ $ ./admin
 interface, so that C code gets its variants without a structure written
 by hand ([design 9.3](type-c-language-design.md#93-c-clients)). A Type-C
 unit that includes `M.h` reads `M.tci` itself. Not built yet (plan
-package 4.1): the definitions of the instances that an interface names,
-their layout typedefs, the dependency options and the enumeration
-assertion.
+package 4.1): the dependency options and the enumeration assertion.
 
 ## Measured on a real library
 

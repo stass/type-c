@@ -177,6 +177,12 @@ val entity : t -> Tree.reference -> entity option
 val tag : t -> Tree.tag_id -> tag option
 (** The tag that a tag declaration declares, [None] as for {!entity}. *)
 
+val latest_generic : t -> Tree.type_declaration -> Tree.type_declaration
+(** [latest_generic result generic] is the latest declaration of the
+    generic type that [generic] declares: the variant that completes it
+    where one does (design 3.1 rule 4), which is its definition. The
+    declaration of every application is a generic's. *)
+
 val type_declarations : t -> Tree.type_declaration list
 (** The type declarations that the reader has read, in source order:
     those that lowering replaces (design 13.5). *)

@@ -257,9 +257,11 @@ let header_guards () =
   compares "the guarded definition of an instance in a header"
     (words (header_text source))
     "#pragma pack(push) #pragma pack() typedef int __tc_arg__i; struct \
-     box__i; typedef struct box__i box__i; #ifndef __tc_instance__box__i \
-     struct box__i { __tc_arg__i value ; } ; #endif #pragma pack(pop) struct \
-     s { box__i b; }; #pragma pack(push) #pragma pack(1) #pragma pack(push) \
+     box__i; typedef struct box__i box__i; typedef struct \
+     __tc_digest__284ac50ed3e82ce972e3f57298c9c75f *__tc_layout__box__i; \
+     #ifndef __tc_instance__box__i struct box__i { __tc_arg__i value ; } ; \
+     #endif #pragma pack(pop) struct s { box__i b; }; #pragma pack(push) \
+     #pragma pack(1) #pragma pack(push) \
      #pragma pack() struct __tc_pack_probe_1__m { char c; int i; }; \
      #pragma pack(pop) #pragma pack(2) #pragma pack(push) #pragma pack() \
      struct __tc_pack_probe_2__m { char c; int i; }; #pragma pack(pop) \
@@ -272,6 +274,72 @@ let header_guards () =
        (List.exists
           (String.starts_with ~prefix:"#ifndef")
           (String.split_on_char (Char.chr 10) (emitted source))))
+    "false"
+
+(* The layout typedefs (design 9.3) that the header text of [source]
+   declares, each with its semicolon. *)
+let layout_lines source =
+  String.split_on_char ';' (words (header_text source))
+  |> List.map String.trim
+  |> List.filter (String.starts_with ~prefix:"typedef struct __tc_digest__")
+  |> List.map (fun typedef -> typedef ^ ";")
+  |> String.concat " "
+
+(* Design 9.3, 13.5: the layout typedef of an instance digests the
+   tokens of its generic's definition, each followed by one space, with
+   BLAKE2b-128, whose digests of "" and "abc" b2sum -l 128 gives. *)
+let layout_typedefs () =
+  let of_int generic =
+    match Spelling.type_name ~at_file_scope:true generic with
+    | Ok name -> Spelling.instance name [ "i" ]
+    | Error _ -> failwith (generic ^ " is no name of a generic")
+  in
+  let name = of_int "box" in
+  compares "the digest of no text" (Layout.typedef name ~definition:"")
+    "typedef struct __tc_digest__cae66941d9efbd404e4d88758ea67670 \
+     *__tc_layout__box__i;";
+  compares "the digest of abc" (Layout.typedef name ~definition:"abc")
+    "typedef struct __tc_digest__cf4ab791c62b8d2b2109c90275287816 \
+     *__tc_layout__box__i;";
+  let box = "type box(T) = struct { T value; };\n" in
+  let use = "struct s { box(int) b; };\n" in
+  compares "the text that a layout typedef digests"
+    (layout_lines (box ^ use))
+    (Layout.typedef name
+       ~definition:"type box ( T ) = struct { T value ; } ; ");
+  compares "a definition spelt with other white space"
+    (layout_lines ("type box(T)=struct{T\tvalue;\n\n};\n" ^ use))
+    (layout_lines (box ^ use));
+  compares "a definition spelt with a universal character name"
+    (layout_lines ("type box(T) = struct { T \\u00e9; };\n" ^ use))
+    (layout_lines ("type box(T) = struct { T \xc3\xa9; };\n" ^ use));
+  compares "another definition is another digest"
+    (string_of_bool
+       (layout_lines ("type box(T) = struct { T value; int n; };\n" ^ use)
+       = layout_lines (box ^ use)))
+    "false";
+  compares "an instance declared and not defined has one"
+    (layout_lines (box ^ "struct s { box(int) *b; };\n"))
+    (layout_lines (box ^ use));
+  compares "a generic declared alone has none"
+    (layout_lines "type lst(T);\nstruct s { lst(int) *p; };\n") "";
+  compares "a variant that completes a declaration is the definition"
+    (layout_lines
+       "type lst(T);\nstruct s { lst(int) *p; };\n\
+        type lst(T) = | No | Cons(T h, lst(T) *t);\n")
+    (Layout.typedef (of_int "lst")
+       ~definition:"type lst ( T ) = | No | Cons ( T h , lst ( T ) * t ) ; ");
+  compares "a function instance has one"
+    (layout_lines
+       "generic(T) T twice(T v) { return v; }\n\
+        static inline int four(void) { return twice(2); }\n")
+    (Layout.typedef (of_int "twice")
+       ~definition:"generic ( T ) T twice ( T v ) { return v ; } ");
+  compares "no layout typedef in a unit"
+    (string_of_bool
+       (List.exists
+          (String.starts_with ~prefix:"typedef struct __tc_digest__")
+          (String.split_on_char '\n' (emitted (box ^ use)))))
     "false"
 
 (* The words of [text] from the first [first] to the [last] after it,
@@ -867,6 +935,7 @@ let () =
   linearity_check_tells_quadratic_work ();
   many_applications ();
   header_guards ();
+  layout_typedefs ();
   many_void_fields ();
   void_fields ();
   many_tries ();
