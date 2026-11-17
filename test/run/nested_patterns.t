@@ -6,9 +6,10 @@ twins, a switch on each tag nested in a switch on the tag around it,
 give the same output on each backend at -O0 and -O2 under
 -pedantic-errors, AddressSanitizer and UndefinedBehaviorSanitizer. The
 programs cover the examples of 4.7, overlapping labels that select the
-first in source order, a default written first, and a scrutinee with a
-side effect, which selection evaluates once. Each program flushes its
-output before the case that stops it.
+first in source order, a default written first, a scrutinee with a
+side effect, which selection evaluates once, and a generic function's
+binding below `Some` in an instance whose argument is a variant. Each
+program flushes its output before the case that stops it.
 
   $ . ./backends.sh
   $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Werror -g"
@@ -36,6 +37,8 @@ output before the case that stops it.
   > static int defaulted(res r);
   > static res counted(res r) { calls++; return r; }
   > static int once(res r);
+  > /* which: 0 for None, 1 for Some(DivByZero), 2 for Some(Overflow). */
+  > static int unwrapped(int which);
   > EOF
   $ cat > main.h <<'EOF'
   > int main(int argc, char **argv) {
@@ -71,6 +74,7 @@ output before the case that stops it.
   >          defaulted(over));
   >   printf("once %d %d %d\n", once(ok), once(zero), once(over));
   >   printf("calls %d\n", calls);
+  >   printf("unwrapped %d %d %d\n", unwrapped(0), unwrapped(1), unwrapped(2));
   >   return 0;
   > }
   > EOF
@@ -78,7 +82,9 @@ output before the case that stops it.
 The Type-C program. `swapped` is `ordered` with its two overlapping
 labels in the other order, which selects another arm for a value that
 both match, and follows the pointer of a value that `ordered` selects
-by its side alone.
+by its side alone. `unwrap` names its binding `Overflow`, which its
+instance for `eval_error` still reads as a binding (rule 2), so
+`Some(DivByZero)` selects the arm and binds `DivByZero`.
 
   $ cat > nested.tc <<'EOF'
   > #include <stdio.h>
@@ -179,10 +185,32 @@ by its side alone.
   >     return v;
   >   }
   > }
+  > generic(T) int unwrap(option(T) o, T *out) {
+  >   match (o) {
+  >   case Some(Overflow):
+  >     *out = Overflow;
+  >     return 1;
+  >   case None:
+  >     return 0;
+  >   }
+  > }
+  > static int unwrapped(int which) {
+  >   option(eval_error) o = None;
+  >   eval_error e = DivByZero;
+  >   if (which == 1)
+  >     o = Some(DivByZero);
+  >   if (which == 2)
+  >     o = Some(Overflow);
+  >   if (!unwrap(o, &e))
+  >     return 0;
+  >   return report(Err(e));
+  > }
   > #include "main.h"
   > EOF
 
-The twin, a tagged structure read by nested switches.
+The twin, a tagged structure read by nested switches. Built with
+`EXCHANGED`, its `ordered` tests the two overlapping labels in the
+other order, as `swapped` does: the partner, which must differ.
 
   $ cat > nested.c <<'EOF'
   > #include <stdio.h>
@@ -209,6 +237,7 @@ The twin, a tagged structure read by nested switches.
   > };
   > enum side { Left, Right };
   > typedef struct { enum side s; const tree *t; } pair;
+  > typedef struct { enum { None, Some } tag; eval_error value; } option_error;
   > #include "corrupt.h"
   > #include "common.h"
   > static res make_ok(int v) { return (res){ Ok, { .Ok = { v } } }; }
@@ -261,6 +290,7 @@ The twin, a tagged structure read by nested switches.
   >     return l->cons.head;
   >   return last(l->cons.tail);
   > }
+  > #ifndef EXCHANGED
   > static int ordered(pair p) {
   >   if (p.s == Left)
   >     return 1;
@@ -268,6 +298,9 @@ The twin, a tagged structure read by nested switches.
   >     return 10 + p.t->u.value;
   >   return 0;
   > }
+  > #else
+  > static int ordered(pair p) { return swapped(p); }
+  > #endif
   > static int swapped(pair p) {
   >   if (p.t->tag == Leaf)
   >     return 10 + p.t->u.value;
@@ -288,21 +321,49 @@ The twin, a tagged structure read by nested switches.
   >     return 1;
   >   return 2;
   > }
+  > static int unwrap(option_error o, eval_error *out) {
+  >   if (o.tag == None)
+  >     return 0;
+  >   *out = o.value;
+  >   return 1;
+  > }
+  > static int unwrapped(int which) {
+  >   option_error o = { None, { DivByZero } };
+  >   eval_error e = { DivByZero };
+  >   if (which == 1)
+  >     o = (option_error){ Some, { DivByZero } };
+  >   if (which == 2)
+  >     o = (option_error){ Some, { Overflow } };
+  >   if (!unwrap(o, &e))
+  >     return 0;
+  >   return report(make_err(e.tag == Overflow));
+  > }
   > #include "main.h"
   > EOF
 
 Each program prints the same lines; `swapped` follows the null pointer
 that `ordered` does not, where UndefinedBehaviorSanitizer stops the
-program; a
-tag that is no constructor of its variant, below a label that reads
-it, traps (4.5), where a label that binds the field whole reads no tag
-below it.
+program; a tag that is no constructor of its variant, below a label
+that reads it, traps (4.5), where a label that binds the field whole
+reads no tag below it. The twin with its labels' tests exchanged
+differs from them by these lines alone: another line for `ordered`,
+and the null pointer followed there.
 
+  $ cat > exchanged.diff <<'EOF'
+  > 4c4
+  > < ordered 1 17 0
+  > ---
+  > > ordered 17 17 0
+  > 10d9
+  > < ordered 1
+  > EOF
   $ for cc in "$clang" "$gcc"; do
   >   for opt in -O0 -O2; do
   >     typec --cc="$cc" $opt $flags $sanitize -o nested-tc nested.tc &&
-  >     "$cc" $opt $flags $sanitize -o nested-c nested.c || exit 1
-  >     for program in nested-tc nested-c; do
+  >     "$cc" $opt $flags $sanitize -o nested-c nested.c &&
+  >     "$cc" $opt $flags $sanitize -DEXCHANGED -o nested-x nested.c ||
+  >       exit 1
+  >     for program in nested-tc nested-c nested-x; do
   >       ./$program > $program.out
   >       sh -c "./$program null; exit \$?" >> $program.out 2> $program.null
   >       grep -q 'runtime error: member access within null pointer' \
@@ -312,6 +373,8 @@ below it.
   >       test $? -gt 128 && echo trapped >> $program.out
   >     done
   >     cmp nested-tc.out nested-c.out || echo "$cc $opt differs"
+  >     diff nested-tc.out nested-x.out | cmp -s - exchanged.diff ||
+  >       echo "$cc $opt exchanged twin differs otherwise"
   >   done
   > done
   $ cat nested-tc.out
@@ -323,6 +386,7 @@ below it.
   defaulted 0 0 2
   once 4 1 2
   calls 3
+  unwrapped 0 -1 -2
   ordered 1
   stopped
   whole -3

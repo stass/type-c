@@ -715,8 +715,17 @@ let rec value_matches shape (pattern : Selection.value) value =
       && List.map fst read = List.sort_uniq compare (List.map fst read)
       && List.for_all field_matches read
 
+let generate_labels shape =
+  List.init (below 6) (fun _ -> generate_pattern shape 0)
+
+(* Whether [tree] selects for [root] what the in-order matcher selects
+   from [labels], a label of the tree named by [label_of] in [labels]. *)
+let selects_as_reference shape labels ~default ~label_of tree root =
+  fst (reference shape labels ~default root)
+  = label_of (fst (evaluate shape tree root))
+
 let one_trial shape =
-  let labels = List.init (below 6) (fun _ -> generate_pattern shape 0) in
+  let labels = generate_labels shape in
   let default = below 2 = 0 in
   let tree = select (variant shape 0) labels ~default in
   let all = values shape 0 in
@@ -726,7 +735,8 @@ let one_trial shape =
         let expected = reference shape labels ~default root in
         let got = evaluate shape tree root in
         check "the tree selects what the in-order matcher does"
-          (fst expected = fst got);
+          (selects_as_reference shape labels ~default ~label_of:Fun.id tree
+             root);
         check "the tree reads the tags that the in-order matcher does"
           (snd expected = snd got);
         fst got)
@@ -755,15 +765,47 @@ let one_trial shape =
            matched))
     missing
 
-let property () =
-  let trial = ref 0 in
-  while !trial < trials do
+(* Runs [trial] on [trials] generated shapes of at most [most_values]
+   values each. *)
+let each_shape trial =
+  let count = ref 0 in
+  while !count < trials do
     let shape = generate_shape () in
     if count_values shape 0 <= most_values then begin
-      incr trial;
-      one_trial shape
+      incr count;
+      trial shape
     end
   done
+
+let property () = each_shape one_trial
+
+(* A label of a tree built from [count] labels in reverse order, named
+   by its position in source order. *)
+let in_source_order count = function
+  | Selection.Label index -> Selection.Label (count - 1 - index)
+  | other -> other
+
+(* Whether the property's check of selection fails for some value over
+   a tree built from the labels in reverse order. *)
+let reversed_disagrees shape =
+  let labels = generate_labels shape in
+  let default = below 2 = 0 in
+  let label_of = in_source_order (List.length labels) in
+  let tree = select (variant shape 0) (List.rev labels) ~default in
+  List.exists
+    (fun root ->
+      not (selects_as_reference shape labels ~default ~label_of tree root))
+    (values shape 0)
+
+(* The partner of the property: over a tree built from the labels in
+   reverse order, its check of selection fails, so the property tells
+   source order from its reverse. *)
+let reversed_partner () =
+  let disagreeing = ref 0 in
+  each_shape (fun shape ->
+      if reversed_disagrees shape then incr disagreeing);
+  check "a tree built from the labels in reverse order fails the property"
+    (!disagreeing > 0)
 
 let () =
   nested_results ();
@@ -781,4 +823,5 @@ let () =
   wording ();
   flat_in_linear_time ();
   property ();
+  reversed_partner ();
   if !failures > 0 then exit 1

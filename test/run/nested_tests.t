@@ -223,14 +223,21 @@ Each program prints the same lines.
 
 The partner of the count: the lowered text with the operand written
 again where the tree of `divides` reads its second tag evaluates it
-twice for an `Err`, and counts five calls where the test counts three.
+twice for an `Err`, and counts five calls where the test counts three,
+on each backend at -O0 and -O2.
 
-  $ typec --cc="$clang" --emit-c tests.tc > tests-lowered.c
-  $ sed 's/__tc_match0->u\.Err\.error\.tag/(counted(r)).u.Err.error.tag/' \
-  >   tests-lowered.c > twice.c
-  $ cmp -s tests-lowered.c twice.c || echo rewritten
-  rewritten
-  $ "$clang" -std=c11 -w -o twice twice.c && ./twice | sed -n 2p
+  $ for cc in "$clang" "$gcc"; do
+  >   typec --cc="$cc" --emit-c tests.tc > tests-lowered.c || exit 1
+  >   sed 's/__tc_match0->u\.Err\.error\.tag/(counted(r)).u.Err.error.tag/' \
+  >     tests-lowered.c > twice.c
+  >   cmp -s tests-lowered.c twice.c && echo "$cc: not rewritten"
+  >   for opt in -O0 -O2; do
+  >     "$cc" -std=c11 -w $opt -o twice twice.c && ./twice | sed -n 2p
+  >   done
+  > done
+  calls 5
+  calls 5
+  calls 5
   calls 5
 
 A test traps where a match would (4.6 rule 3, 4.5): a tag below the
