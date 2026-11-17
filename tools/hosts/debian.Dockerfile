@@ -5,7 +5,8 @@
 # a Clang from apt.llvm.org, the oldest that typec supports
 # (Target.minimum_major_version), as Debian 13's own is older, and OCaml
 # and dune from opam, since Debian 13's OCaml 5.3 lacks the Char.Ascii of
-# 5.4 that tools/fuzz uses. The base image is pinned by the digest of its
+# 5.4 that tools/fuzz uses. The Clang comes with its sanitizer runtimes,
+# as the tests of test/run link with -fsanitize. The base image is pinned by the digest of its
 # multi-platform index; the compilers, the C library's and the kernel's
 # headers, and file, which the own suite of the corpus's chibicc runs, by
 # package version, the same on both platforms; the key of
@@ -29,6 +30,7 @@ RUN apt-get update \
 # apt checks the repository against the key, and the key is the one
 # whose fingerprint apt.llvm.org publishes, the only one in the file.
 RUN fingerprint=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 \
+ && llvm_version=1:21.1.8~++20251221033036+2078da43e25a-1~exp1~20251221153213.50 \
  && keyring=/usr/share/keyrings/apt.llvm.org.asc \
  && curl --fail --silent --show-error --location --proto '=https' \
       --output "$keyring" https://apt.llvm.org/llvm-snapshot.gpg.key \
@@ -41,7 +43,7 @@ RUN fingerprint=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421 \
       > /etc/apt/sources.list.d/apt.llvm.org.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
-      clang-21=1:21.1.8~++20251221033036+2078da43e25a-1~exp1~20251221153213.50 \
+      clang-21="$llvm_version" libclang-rt-21-dev="$llvm_version" \
  && rm -rf /var/lib/apt/lists/* \
  && ln -s clang-21 /usr/bin/clang
 
