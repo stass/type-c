@@ -60,3 +60,75 @@ which is why typec refuses that option (13.2).
   $ $gcc -fpack-struct -fsyntax-only -x cpp-output probe.i 2>&1 |
   >   grep -c "'#pragma pack' has no effect with '-fpack-struct'"
   3
+
+A header that packs a structure gives it one layout in a `.tc` unit,
+which typec compiles through -E, and in a `.c` unit that the backend
+compiles itself (design 2.2).
+
+  $ flags="-std=c11 -Wall -Wextra -pedantic-errors -Werror"
+  $ cat > hand.c <<'EOF'
+  > #include "wire.h"
+  > unsigned long size_by_hand(void) { return sizeof(struct wire); }
+  > EOF
+  $ cat > program.tc <<'EOF'
+  > #include <stdio.h>
+  > #include "wire.h"
+  > unsigned long size_by_hand(void);
+  > int main(void) {
+  >   printf("%lu %lu\n", (unsigned long)sizeof(struct wire),
+  >          size_by_hand());
+  >   return 0;
+  > }
+  > EOF
+  $ cat > wire.h <<'EOF'
+  > #pragma pack(push, 1)
+  > struct wire { char a; int b; };
+  > #pragma pack(pop)
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -c -o program.o program.tc &&
+  >     $cc $flags -c -o hand.o hand.c &&
+  >     $cc -o program program.o hand.o && ./program
+  > done
+  5 5
+  5 5
+
+Clang replaces a macro in the arguments of the pragma when it compiles C
+itself, and keeps it as written in -E output, where it reads as a label
+of `push`: the `.tc` unit would lay the structure out unpacked. typec
+refuses the line.
+
+  $ cat > wire.h <<'EOF'
+  > #define M_PACK 1
+  > #pragma pack(push, M_PACK)
+  > struct wire { char a; int b; };
+  > #pragma pack(pop)
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -c -o program.o program.tc &&
+  >     $cc $flags -c -o hand.o hand.c &&
+  >     $cc -o program program.o hand.o && ./program
+  > done
+  ./wire.h:2: error: `M_PACK` in a `#pragma pack` line, which is none of the pragma's words (push, pop, show): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
+  wire.h:2: error: `M_PACK` in a `#pragma pack` line, which is none of the pragma's words (push, pop, show): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
+  [80]
+
+The refusal rests on what the backends do with that header: Clang packs
+the structure when it compiles C and not through -E and -x cpp-output,
+and GCC packs it in neither mode, where `M_PACK` is a label to it.
+
+  $ cat > size.c <<'EOF'
+  > #include <stdio.h>
+  > #include "wire.h"
+  > int main(void) {
+  >   printf("%lu\n", (unsigned long)sizeof(struct wire));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   $cc -o direct size.c && $cc -E -o size.i size.c &&
+  >     $cc -x cpp-output -o through size.i &&
+  >     echo "$(./direct) $(./through)"
+  > done
+  5 8
+  8 8

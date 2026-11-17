@@ -6672,8 +6672,8 @@ with the reader of the unit's text and under that reader's rules, and
 the identifiers of the line are the identifiers among them. A line
 that is no sequence of preprocessing tokens, as one with a `'` or a `"`
 that begins no literal ending on the line (C11 6.4p3), is an error
-wherever a rule below looks at the identifiers of a pragma: in moved
-text and in Type-C text. Nothing says which names a backend takes from
+in moved text and in Type-C text, where the rules below look at the
+identifiers of every pragma. Nothing says which names a backend takes from
 such a line (for `#pragma weak f '`, GCC 16 reports an error and Apple
 Clang 21 warns and ignores the pragma), so no reading of it would keep
 the property. The cost is the refusal of a line that both backends
@@ -6681,10 +6681,52 @@ accept: `#pragma mark - Don't edit` in Type-C text is an error under
 GCC 16, whose `-E` keeps the line and warns of the `'`, and the mark
 has to be reworded. Apple Clang 21's `-E` drops a `#pragma mark` line,
 so `typec` does not read it there. In C text that does not move `typec`
-looks at the
-identifiers of no pragma and passes every line on whole: GCC keeps some
-pragmas verbatim in its `-E` output, the free text of a `#pragma mark`
-line among them.
+looks at the identifiers of no pragma but the layout pragmas below, and
+passes every line on whole: GCC keeps some pragmas verbatim in its `-E`
+output, the free text of a `#pragma mark` line among them.
+
+A *layout pragma* sets the layout of a structure, takes its own words
+and numbers as arguments, and has them read by Clang after macro
+replacement when it compiles C and as written in its `-E` output, which
+`typec` compiles. An identifier among the arguments of a layout pragma
+that is none of its words is an error, in every text. The layout pragmas and their words are
+`pack` with `push`, `pop` and `show`; `options` with `align` and the
+alignment rules `native`, `natural`, `packed`, `power`, `mac68k` and
+`reset`; `align` with the alignment rules; and `ms_struct` with `on`,
+`off` and `reset`: the words that Clang or GCC defines, one table,
+`Pragma_words` in the parser. Clang 21 to 23 and Apple Clang 21 read
+them so. A header that holds `#define M_PACK 1` and `#pragma
+pack(push, M_PACK)` before `struct wire { char a; int b; };` gives the
+structure size 5 in a `.c` unit and size 8 in a `.tc` unit, where Clang
+reads `M_PACK` as a label of `push`, with no diagnostic: two units of
+one program would disagree on its layout. For `#pragma pack(M_PACK)`
+and the other three pragmas Clang warns of the `-E` reading, outside a
+system header, and ignores the line, with the same disagreement. GCC
+14 and 16 replace no macro there in either mode, and GCC's
+`scalar_storage_order`, which sets layout too, is read as written in
+both. `typec` sees no macros, so it cannot tell a macro from a label,
+and the cost is the refusal of the labels of `push` and `pop`:
+`#pragma pack(push, saved, 1)` is an error. The headers of the macOS
+26.5 SDK, Debian 13 and FreeBSD 16 write no layout pragma that the rule
+refuses outside a branch for Windows. A layout pragma line of C text
+that is no sequence of tokens is not read: Clang drops `#pragma
+pack(push, M_PACK) @` for its extra tokens when it compiles C, so both
+modes leave it unapplied.
+
+The rule does not close the difference. A macro named as one of the
+words passes it: under `#define natural packed`, `#pragma options
+align=natural` packs a structure in a `.c` unit and not in a `.tc` unit,
+with no diagnostic from Clang in either. The pragmas whose arguments
+are names, as `weak` and `redefine_extname` are, differ under Clang in
+the same way, and so may others that Clang reads after macro
+replacement, as `float_control` and `clang fp`; their names and values
+cannot be told from macros without knowing the macros. *Provisional:*
+knowing them would close the class: preprocessing with `-dD` keeps
+each definition in the `-E` output, and a rule could then refuse a
+macro name in any pragma line, admitting labels again. Whether a pilot
+meets a macro in a pragma line settles whether that is worth the reader
+of definitions it needs; without one, the table stays. `GCC visibility`
+and `STDC` lines are read as written in both modes by both backends.
 
 Of the kinds of moved text, only a deferred statement can hold a
 `#pragma` line. The definition of a generic holds none, since a generic

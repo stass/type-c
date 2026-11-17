@@ -243,6 +243,14 @@ let rows =
         "A [#pragma] line whose text after [pragma] is no sequence of \
          preprocessing tokens, in Type-C text or in a deferred statement \
          (design 6), which is moved text." };
+    Live { constructor = "Pragma_word"; name = "pragma-word";
+      clause = "design 13.5";
+      meaning =
+        "An identifier among the arguments of a [#pragma] line of a \
+         pragma whose arguments are its own words and numbers alone, as \
+         [pack] is, that is none of those words, in any text: a macro \
+         there, which Clang replaces when it compiles C, stays as \
+         written in the preprocessed text that typec compiles." };
     Live { constructor = "Type_argument"; name = "type-argument";
       clause = "design 3.5 rule 2";
       meaning =

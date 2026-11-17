@@ -382,6 +382,17 @@ is [type-c-language-design.md](type-c-language-design.md).
   backends pick a pragma by its first tokens, which makes that line an
   unknown pragma; have the reader keep the leading run of identifiers
   and match the list against it, so that such a line is refused.
+- [Medium] Clang replaces a macro in a pragma line when it compiles C
+  and not in its `-E` output (Clang 21 to 23, Apple Clang 21), and
+  `Pragma_words` (design 13.5) closes only part of that: a macro named
+  as a word of a layout pragma passes it (`#define natural packed`
+  before `#pragma options align=natural` packs in a `.c` unit alone,
+  silently), and the arguments of `weak`, `redefine_extname`,
+  `float_control` and `clang fp` are not looked at. Preprocessing with
+  `-dD` would let the reader know which identifiers of a pragma line
+  are macros and refuse those alone, closing the class, deleting the
+  table and admitting `pack` labels again; it needs the reader to take
+  `#define` and `#undef` lines. Measure the other pragmas first.
 - [Low] `Scope_pragma.placement_refusals` tests every place of a site
   against every annotated statement, quadratic in one scope with many
   of each. If it is reported slow, sort the places' tokens once and

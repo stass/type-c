@@ -742,6 +742,34 @@ let refuse_pragmas_without_tokens state =
   Array.iteri (refuse_pragma_without_tokens state ~moved:false)
     state.reader.tokens
 
+(* Clang replaces a macro among the arguments of a layout pragma when it
+   compiles C and not in the preprocessed text that typec compiles, so a
+   header would lay a structure out one way in a C unit and another in a
+   Type-C unit (design 2.2, 13.5). In every text the arguments of such a
+   pragma are its own words alone. *)
+let refuse_stray_pragma_word state index (token : Token.t) =
+  match token.kind with
+  | Token.Pragma (Identifiers names) -> (
+      match Pragma_words.stray_word names with
+      | Some { pragma; word; words } ->
+          fail_at_token state index
+            (Rule.message Pragma_word
+               (Printf.sprintf
+                  "%s in a `#pragma %s` line, which is none of the \
+                   pragma's words (%s): Clang replaces a macro there when \
+                   it compiles C and keeps it as written in the \
+                   preprocessed text that typec compiles; write the value \
+                   the macro stands for"
+                  (quoted word) pragma
+                  (String.concat ", " words)))
+      | None -> ())
+  | Token.Pragma (Not_tokens _) | Typec_pragma | Identifier _ | Number
+  | Character _ | String _ | Punctuator _ ->
+      ()
+
+let refuse_stray_pragma_words state =
+  Array.iteri (refuse_stray_pragma_word state) state.reader.tokens
+
 (* Lowering copies a deferred statement to each exit of its scope, so it
    may hold only the pragmas that apply to the statement after them
    (design 6 rule 9, 13.5). *)
@@ -5460,6 +5488,7 @@ let parse_with_scopes ~keywords reader =
   match
     refuse_generated_names state;
     refuse_pragmas_without_tokens state;
+    refuse_stray_pragma_words state;
     translation_unit state ~keywords
   with
   | universe, declarations ->

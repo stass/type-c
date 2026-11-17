@@ -4,7 +4,7 @@
 (library
  (name typec_syntax)
  (libraries typec_cpp)
- (private_modules anchor keyword scope spanned statement_pragma))
+ (private_modules anchor keyword pragma_words scope spanned statement_pragma))
 
 ; Rule is a build output of the one table of rules.
 
