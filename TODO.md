@@ -682,10 +682,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   = try f();`) takes the check and the object goes unchecked. Key the
   check to the holder's own initialiser, and keep the holder's state
   per holder rather than in mutable fields of the view.
-- [High] `if (c) if (case Ok(w) = try f(c)) n = w;` emits invalid C:
-  the holder's closing `}` and the pattern test's tail are insertions
-  after one token, and `with_tries` puts the holders' closings first.
-  Let `Emitter.in_order` nest closings at one token by their extents.
 - [Medium] `c ? try f() : 0, g();` draws `-Wunused-value` on the read
   in the branch: the void cast covers a conditional only as a
   statement's value. Have typing record every discarded conditional

@@ -974,3 +974,57 @@ Each is hoisted with the views that the parser took at it.
   > done
   extension: 1 extension: 0 extension: error 3 included: 1 included: 0 included: error 5
   extension: 1 extension: 0 extension: error 3 included: 1 included: 0 included: error 5
+
+Constructs that begin or end at one token with a holder nest by their
+extents: the braces and prelude of a holder stand around every other
+lowering of the holder, such as the test of a single pattern, and
+inside the substatement that holds it.
+
+  $ cat > nested.tc <<'EOF'
+  > #include <stdio.h>
+  > typedef result(int, int) result_int;
+  > typedef result(result_int, int) result_ri;
+  > static result_ri f(int c) {
+  >   if (c > 2)
+  >     return Err(c);
+  >   if (c > 1)
+  >     return Ok(Err(c));
+  >   return Ok(Ok(c * 10));
+  > }
+  > static result_int tested(int c) {
+  >   int n = 5;
+  >   if (c) if (case Ok(w) = try f(c)) n = w;
+  >   return Ok(n);
+  > }
+  > static result_int labelled(int c) {
+  >   int n = 5;
+  >   if (c)
+  >   L: if (case Ok(w) = try f(c)) n = w;
+  >   if (n == 4)
+  >     goto L;
+  >   return Ok(n);
+  > }
+  > static void show(const char *name, result_int r) {
+  >   match (r) {
+  >   case Ok(v):
+  >     printf("%s: %d\n", name, v);
+  >     break;
+  >   case Err(e):
+  >     printf("%s: error %d\n", name, e);
+  >     break;
+  >   }
+  > }
+  > int main(void) {
+  >   for (int c = 0; c < 4; c++) {
+  >     show("tested", tested(c));
+  >     show("labelled", labelled(c));
+  >   }
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o nested nested.tc && ./nested |
+  >     paste -s -d ' ' -
+  > done
+  tested: 5 labelled: 5 tested: 10 labelled: 10 tested: 5 labelled: 5 tested: error 3 labelled: error 3
+  tested: 5 labelled: 5 tested: 10 labelled: 10 tested: 5 labelled: 5 tested: error 3 labelled: error 3

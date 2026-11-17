@@ -1283,11 +1283,6 @@ let prelude output (holder : Typec_sema.Expressions.try_holder) ~text_of
 
 (* The edits of a holder: its prelude, after the null statement of its
    labels, in front of it, and around it the braces of a substatement. *)
-type try_lowering = {
-  opening : Emitter.edit list;
-  closing : Emitter.edit list;
-}
-
 let lower_holder output held ~cleanups_of
     ((holder : Typec_sema.Expressions.try_holder), moves) =
   let moves = hold_moves moves in
@@ -1310,44 +1305,38 @@ let lower_holder output held ~cleanups_of
   in
   let first = (Option.value labels ~default:statement).first in
   let extent = { statement with first } in
+  (* The prelude and the braces stand around the holder as lowered. *)
+  let around edit = Emitter.enclosing edit ~extent in
   let in_front =
-    insert_moved output ~before:statement.first ~extent
-      (null_statement @ prelude output holder ~text_of ~cleanups_of)
+    around
+      (insert_moved output ~before:statement.first ~extent
+         (null_statement @ prelude output holder ~text_of ~cleanups_of))
   in
   (* A discarded value is cast to void, as a read in place of a try
      would draw -Wunused-value where nothing else reads it. *)
-  let opening_void, closing_void =
+  let void_cast =
     match discarded with
     | Some (value : Tree.span) ->
-        ( [ insert output ~before:value.first ~extent "(void)(" ],
-          [ close output ~after:value.last ~extent ")" ] )
-    | None -> ([], [])
+        [ insert output ~before:value.first ~extent:value "(void)(";
+          close output ~after:value.last ~extent:value ")" ]
+    | None -> []
   in
   match standing with
-  | Block_item ->
-      { opening = in_front :: opening_void; closing = closing_void }
+  | Block_item -> in_front :: void_cast
   | Substatement ->
-      { opening =
-          [ insert output ~before:first ~extent "{"; in_front ] @ opening_void;
-        closing =
-          closing_void @ [ close output ~after:statement.last ~extent "}" ] }
+      [ around (insert output ~before:first ~extent "{");
+        in_front;
+        around (close output ~after:statement.last ~extent "}") ]
+      @ void_cast
 
 (* The edits of a text with its holders of try lowered. The edits inside
    the tokens that a hoisted operand replaces go with the operand, which
-   moves, and its replacement takes their place. Where another construct
-   inserts at the token where a holder begins or ends, the two nest: one
-   that ends where the holder begins closes before the prelude, and one
-   around the holder closes after the holder's block. So the closings of
-   the holders go first and their openings last. [cleanups_of] gives the
+   moves, and its replacement takes their place. [cleanups_of] gives the
    cleanups of the error path of a try. *)
 let with_tries output edits moved_holders ~cleanups_of =
   let held = hold edits in
-  let lowered =
-    List.map (lower_holder output held ~cleanups_of) moved_holders
-  in
-  List.concat_map (fun lowered -> lowered.closing) lowered
-  @ with_moves edits (List.concat_map snd moved_holders)
-  @ List.concat_map (fun lowered -> lowered.opening) lowered
+  with_moves edits (List.concat_map snd moved_holders)
+  @ List.concat_map (lower_holder output held ~cleanups_of) moved_holders
 
 (* Design 6 and 13.5: a defer statement is removed, and a copy of its
    statement [S], as a block, runs at each exit of its scope. An exit

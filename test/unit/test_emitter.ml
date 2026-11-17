@@ -66,6 +66,37 @@ let () =
        # 2 \"a.c\"\n\
        int z;\n")
 
+(* Insertions at one place nest by their extents, an outer construct
+   opening first and closing last, and an edit that encloses an extent
+   stands around every other edit of an equal one, whatever the order
+   of the list. Tokens 0 to 4 are int x = 1 ;. *)
+let () =
+  let text (edit : Emitter.edit) =
+    match edit.text with
+    | Code { code; _ } -> code
+    | Bracketed _ | Moved _ -> "?"
+  in
+  let statement : Tree.span = { first = 0; last = 4 } in
+  let made_edits =
+    made unit (fun output ->
+        let before code =
+          Emitter.code output (Reader.range unit.tokens ~first:0 ~count:0)
+            ~location:(at 1) code
+        in
+        let after code =
+          Emitter.closing output ~after:4 ~location:(at 1) code
+        in
+        [ before "own";
+          Emitter.extended (before "statement") ~extent:statement;
+          Emitter.enclosing (before "enclosing") ~extent:statement;
+          Emitter.enclosing (after "enclosing") ~extent:statement;
+          Emitter.extended (after "statement") ~extent:statement;
+          after "own" ])
+  in
+  check "insertions at one place nest by their extents"
+    (List.map text (Emitter.in_order made_edits)
+    = [ "enclosing"; "statement"; "own"; "own"; "statement"; "enclosing" ])
+
 (* An edit between identifiers that universal character names spell
    leaves their bytes as written, though their names are in UTF-8. *)
 let () =

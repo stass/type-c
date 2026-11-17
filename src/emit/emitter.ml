@@ -175,6 +175,7 @@ type edit = {
   text : text;
   owner : int;
   extent : Tree.span;
+  encloses : bool;
 }
 
 let own_extent owner (range : Reader.range) : Tree.span =
@@ -317,7 +318,8 @@ let code output (range : Reader.range) ~location code =
     { range;
       text = Code { location; code };
       owner = range.first;
-      extent = own_extent range.first range }
+      extent = own_extent range.first range;
+      encloses = false }
 
 let closing output ~after ~location code =
   check_own_text ~caller:"Emitter.closing" code;
@@ -325,26 +327,31 @@ let closing output ~after ~location code =
     { range = Reader.range output.unit.tokens ~first:(after + 1) ~count:0;
       text = Code { location; code };
       owner = after;
-      extent = { first = after; last = after } }
+      extent = { first = after; last = after };
+      encloses = false }
 
 let bracketed output ~(at : Tree.anchor) ~location pieces =
   made_edit output
     { range = Reader.range output.unit.tokens ~first:at.before ~count:0;
       text = Bracketed { location; pieces };
       owner = at.before;
-      extent = { first = at.before; last = at.before } }
+      extent = { first = at.before; last = at.before };
+      encloses = false }
 
 let moved output (range : Reader.range) pieces =
   made_edit output
     { range;
       text = Moved pieces;
       owner = range.first;
-      extent = own_extent range.first range }
+      extent = own_extent range.first range;
+      encloses = false }
 
 let extended edit ~(extent : Tree.span) =
   if extent.first > edit.extent.first || edit.extent.last > extent.last then
     invalid_arg "Emitter.extended: an extent that does not hold the edit's";
   { edit with extent }
+
+let enclosing edit ~extent = { (extended edit ~extent) with encloses = true }
 
 type lowered = { edits : edit list; assertions : string list }
 
@@ -393,11 +400,17 @@ let is_bracketed edit =
 let probes edits =
   if List.exists is_bracketed edits then [ packing_probe ] else []
 
+(* How far the construct of [edit] reaches around its place: one that
+   holds another reaches at least as far on each side, and one that
+   encloses its extent reaches past every other edit of that extent. *)
+let reach edit = (-edit.extent.first, edit.extent.last, edit.encloses)
+
 (* Of two insertions at one place, the one whose construct holds the
    other's opens first and closes last. *)
 let nesting a b =
-  if a.owner < a.range.first then compare b.extent.first a.extent.first
-  else compare b.extent.last a.extent.last
+  let is_closing = a.owner < a.range.first in
+  if is_closing then compare (reach a) (reach b)
+  else compare (reach b) (reach a)
 
 let in_order edits =
   let order a b =

@@ -146,18 +146,27 @@ type text =
     holds its extent: the tokens it replaces, or, for an insertion, the
     construct that {!extended} names. A place between two tokens can
     begin one construct and end another, so only the construct says
-    which; an insertion that names none belongs to its owner alone. *)
+    which; an insertion that names none belongs to its owner alone. An
+    edit that [encloses] its extent stands around every other edit of
+    that construct ({!enclosing}). *)
 type edit = private {
   range : Typec_cpp.Reader.range;
   text : text;
   owner : int;
   extent : Typec_syntax.Tree.span;
+  encloses : bool;
 }
 
 val extended : edit -> extent:Typec_syntax.Tree.span -> edit
 (** [extended edit ~extent] is [edit] belonging to [extent], the
     construct that it lowers. [Invalid_argument] unless [extent] holds
     the edit's own extent. *)
+
+val enclosing : edit -> extent:Typec_syntax.Tree.span -> edit
+(** [enclosing edit ~extent] is [edit] belonging to [extent] and standing
+    around the construct there, outside every other edit of it, as the
+    block and prelude of a holder of [try] stand around the lowered
+    holder (design 13.5). [Invalid_argument] as for {!extended}. *)
 
 val code : output -> Typec_cpp.Reader.range ->
   location:Typec_cpp.Location.t -> string -> edit
@@ -193,10 +202,11 @@ val in_order : edit list -> edit list
     their ranges, an insertion before a token ahead of an edit that
     replaces it, a closing insertion after a token ahead of an insertion
     before the next; of two insertions at one place, the one whose
-    extent holds the other's ahead of it before a token and behind it
-    after one, as the construct around the other opens first and closes
-    last; and other edits of one range and owner in the order of the
-    list. Their owners follow the same order. *)
+    extent holds the other's, or that encloses an extent equal to the
+    other's, ahead of it before a token and behind it after one, as the
+    construct around the other opens first and closes last; and other
+    edits of one range and owner in the order of the list. Their owners
+    follow the same order. *)
 
 (** What lowering makes of a unit: its edits, and the declarations that
     follow its text, the static assertions of {!Assumptions}. *)
