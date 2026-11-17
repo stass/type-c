@@ -664,7 +664,14 @@ let output_limit () =
     (Budget_probes.edits_in_long_file ~length:80000 100);
   over_limit "a long variant" (Budget_probes.long_variant ~length:50000 1250);
   under_limit "a shorter long variant"
-    (Budget_probes.long_variant ~length:50000 100)
+    (Budget_probes.long_variant ~length:50000 100);
+  over_limit "a str in a defer by exits"
+    (Budget_probes.string_defer_by_exits ~length:40000 1000);
+  under_limit "a str in a defer by fewer exits"
+    (Budget_probes.string_defer_by_exits ~length:40000 100);
+  over_limit "nested array operands" (Budget_probes.nested_array_operands 18);
+  under_limit "fewer nested array operands"
+    (Budget_probes.nested_array_operands 4)
 
 let () =
   lowers "a variant without fields" "type e = | A | B;"

@@ -2055,10 +2055,10 @@ let try_cases =
 let try_span_cases =
   [
     case "spans of try" "void g(int a) { a = try a + 1; a = -try a; }"
-      "(define@36-56 (void@36-36) (function@37-41 g@37-37 (@39-40 int@39-39 \
-       a@40-40)) (block@42-56 (expr@43-49 (=@43-48 a@43-43 (try:2@45-48 \
-       (+@46-48 a@46-46 1@48-48)))) (expr@50-55 (=@50-54 a@50-50 (-@52-54 \
-       (try:2@53-54 a@54-54))))))";
+      "(define@66-86 (void@66-66) (function@67-71 g@67-67 (@69-70 int@69-69 \
+       a@70-70)) (block@72-86 (expr@73-79 (=@73-78 a@73-73 (try:2@75-78 \
+       (+@76-78 a@76-76 1@78-78)))) (expr@80-85 (=@80-84 a@80-80 (-@82-84 \
+       (try:2@83-84 a@84-84))))))";
   ]
 
 let type_c_error_cases =
@@ -2169,16 +2169,14 @@ let type_c_error_cases =
       "int x __attribute__((cleanup(__tc_f)));"
       "in.tc:1: error: `__tc_f` begins with `__tc_`, which is reserved for \
        the names that typec generates [generated-name]";
-    case "a universe name in an expression"
-      "int f(void) { return slice; }"
-      "in.tc:1: error: `slice` is a universe name that typec does not \
-       implement yet (work package 3.4) [not-implemented]";
-    case "a universe name where a declaration begins" "str s;"
-      "in.tc:1: error: `str` is a universe name that typec does not implement \
-       yet (work package 3.4) [not-implemented]";
-    case "a universe name in a block" "void f(void) { slice_sub(0); }"
-      "in.tc:1: error: `slice_sub` is a universe name that typec does not \
-       implement yet (work package 3.4) [not-implemented]";
+    case "an operator of section 8 not applied"
+      "int f(void) { return slice_sub; }"
+      "in.tc:1: error: expected `(` after `slice_sub`, found `;`";
+    case "an operator of section 8 where a declaration begins" "slice_sub s;"
+      "in.tc:1: error: expected a declaration, found `slice_sub`";
+    case "an operator of section 8 short of an operand"
+      "void f(void) { slice_sub(0); }"
+      "in.tc:1: error: expected `,` after an operand of `slice_sub`, found `)`";
     case "a type declaration repeated" "type t = int;\ntype t = int;"
       "in.tc:2: error: `t` is declared twice in one scope, and one of them is \
        a type declaration [type-redeclaration]";
@@ -2503,9 +2501,22 @@ let universe_cases =
       "int f(result) int result; { return result; }"
       "in.tc:1: error: the generic type `result` names a type only in a type \
        application, `result(...)` [generic-type-use]";
-    case "a universe name that typec does not implement yet" "str s;"
-      "in.tc:1: error: `str` is a universe name that typec does not implement \
-       yet (work package 3.4) [not-implemented]";
+    case "str is a typedef name of the universe" "str s; slice(int) t;"
+      "(declaration (str) s) | (declaration ((slice (type int))) t)";
+    case "str in parentheses is the parameter it declares"
+      "int f(int (str));"
+      "(declaration (int) (function f (int (paren str))))";
+    case "a parameter of type str with no name" "long len(str);"
+      "(declaration (long) (function len (str)))";
+    case "str as an old-style parameter in Type-C text"
+      "int f(str) int str; { return str; }"
+      "in.tc:1: error: expected `;` after a declaration, found `int`";
+    case "str as an old-style parameter in C text"
+      "# 1 \"in.tc\"\n\
+       # 1 \"old.h\" 1\n\
+       int f(str) int str; { return str; }\n"
+      "(define (int) (function f (identifiers str)) (declaration (int) str) \
+       (block (return str)))";
   ]
 
 (* A generic claims the names of its instances by one lookup in the
@@ -2550,8 +2561,8 @@ let failed_universe_scope () =
             [
               ( "the tree holds the unit's own text",
                 List.length unit = 1 );
-              ( "the scopes hold the two generics",
-                List.length scopes.universe = 2 );
+              ( "the scopes hold the four types",
+                List.length scopes.universe = 4 );
               ( "file scope declares no universe name",
                 not declares_universe_name );
               ( "a view finds the universe generics",

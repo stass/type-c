@@ -244,6 +244,7 @@ let as_variant t =
 (* No generic of a unit has a universe name (design 3.6), so an instance
    of a generic of this name is one of the universe's result. *)
 let universe_result = "result"
+let universe_slice = "slice"
 let result_ok = "Ok"
 let result_err = "Err"
 

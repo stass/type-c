@@ -270,6 +270,14 @@ let rec expression reader (e : expression) =
   | Qualified_constructor { variant; constructor } ->
       here "constructor" [ type_name reader variant; leaf constructor.node ]
   | Subscript { operand; index } -> here "index" [ sub operand; sub index ]
+  | Slice_operation operation ->
+      let label =
+        match operation with
+        | Slice_from_array _ -> "slice_from_array"
+        | Slice_sub _ -> "slice_sub"
+        | Slice_unchecked _ -> "slice_unchecked"
+      in
+      here label (List.map sub (Tree.slice_operands operation))
   | Call { callee; arguments } ->
       here "call" (sub callee :: List.map sub arguments)
   | Instance { generic; type_arguments } ->

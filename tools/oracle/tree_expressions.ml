@@ -30,6 +30,8 @@ let rec expression visit (e : Tree.expression) =
   | Subscript { operand; index } ->
       expression visit operand;
       expression visit index
+  | Slice_operation operation ->
+      list expression visit (Tree.slice_operands operation)
   | Call { callee; arguments } ->
       expression visit callee;
       list expression visit arguments

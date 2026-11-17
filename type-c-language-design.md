@@ -2739,7 +2739,9 @@ str greeting = "hello";                             /* len 5    */
    (P14):* no option turns the check off. `s.data[i]` is the unchecked
    spelling and is visible in the source.
 2. `slice_from_array(a)` takes an lvalue of array type `T[N]` and yields a
-   `slice(T)` of length `N`. A pointer is not accepted. The length is
+   `slice(T)` of length `N`. A pointer is not accepted, and neither is
+   an array of arrays, as `int rows[3][4]`: its `T` is an array type,
+   which no type argument is (3.5 rule 2). The length is
    the backend's: lowering writes the operand a second time, as the
    operand of a `sizeof` (13.5), and `a` is still evaluated once. Four
    limits follow:
@@ -2778,7 +2780,9 @@ str greeting = "hello";                             /* len 5    */
    `hi <= s.len`. Each operand is evaluated once. Where C does not
    evaluate it there is nothing to test, as for an index (rule 9).
 4. `slice_unchecked(p, n)` makes a slice from a pointer and a count that the
-   compiler cannot verify.
+   compiler cannot verify. The count has an integer type no wider than
+   `size_t`, as an index does (rule 1), so that no conversion drops the
+   bits of a count the program holds.
 5. `slice(T)` converts implicitly to `slice(const T)`, as `T *` converts to
    `const T *`, and in the places where C converts the pointer:
    * in a position that has a target type (3.3), where the expression
@@ -2787,8 +2791,12 @@ str greeting = "hello";                             /* len 5    */
      assignment (C11 6.5.16.1), which are an initialiser, the right
      operand of `=`, an argument of a prototyped function and the
      operand of a `return`, and the argument of a constructor, which
-     initialises its field. The whole expression of the position
-     converts;
+     initialises its field. The expression of the position converts;
+     where that expression is a parenthesised expression, a
+     conditional or a comma expression, the operands that have its
+     target type (3.3) convert instead, at any depth, each branch of a
+     conditional on its own, and where it is a `try`, the value that
+     the `try` yields converts (5.1);
    * in a conditional operator whose second and third operands are a
      `slice(T)` and a `slice(const T)`, in either order. The result
      is a `slice(const T)` and the other operand converts, as
@@ -2805,23 +2813,15 @@ str greeting = "hello";                             /* len 5    */
    `str name = (slice_from_array(letters));` and
    `option(str) o = Some(slice_from_array(letters));` stand at file
    scope.
-
-   Where `T` is an array type the conversion is an error, of a
-   `slice_from_array` and a `slice_unchecked` as of any other operand.
-   `const T` is then an array of constant elements (C11 6.7.3p9), and
-   C before C23 does not convert a pointer to an array into a pointer
-   to an array of constant elements: `int (*)[4]` to
-   `const int (*)[4]` violates the constraint of assignment (C11
-   6.5.16.1p1). Every dialect that `typec` accepts is before C23
-   (2.4). GCC 16 refuses that conversion of the pointer under
-   `-pedantic-errors`, and lowered code compiles under that option
-   (2.4), so `typec` refuses the conversion of the slice, with a
-   message of its own. A `slice(const int[4])` comes from an array
-   that is declared so, as `slice_from_array` of
-   `const int rows[3][4]` is.
 6. *Provisional (P13).* A string literal whose target type is `str` denotes
    a `str` over the characters of the literal. Its length excludes the
-   terminating NUL, which is still present in storage.
+   terminating NUL, which is still present in storage. The literal is
+   one of plain or UTF-8 characters, whose elements C11 writes as
+   `char`; one of wide characters denotes no `str`. It stands in the
+   places of rule 5: in a position whose target type is `str`, and as
+   an operand of a conditional operator whose other operand is a `str`.
+   Like a `slice_from_array`, it is under no rule for the conversion
+   and stands at file scope (13.5).
 7. A slice does not own its storage and says nothing about how long it
    lives. A slice of length 0 may have a null `data`. A `str` promises
    neither NUL termination nor an encoding.
@@ -4479,8 +4479,8 @@ Two properties follow by construction:
 | `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. A statement `try e;` reads no field: nothing is written after its test, as said below the table. It is the one position of a `try` whose `T` is `void` (5.1 rule 2), where `Ok` has no field (3.5 rule 6). Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
 | `defer` | The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
 | Slice index, `slice_sub` | An expression at the use, and no call: a comma expression of ISO C that assigns the value of each operand to a temporary of the function, tests, traps (10.5) and then indexes, as said below the table ("The check of a slice"). An index is `(*(assignments, test, &element))`, an lvalue. Where C does not evaluate one, it has no test and no temporary: it is the trap and then its operands, each written once, `(*((void)__builtin_trap(), &(s).data[+(i)]))` for an index, so that it traps where C evaluates it after all. |
-| Conversion to `slice(const T)` (section 8 rule 5) | The form of a `slice_sub` with no bounds and no test: `((void)(__tc_s0 = (e)), (struct C){ __tc_s0.data, __tc_s0.len })`, where `struct C` is the instance converted to and `e` the expression that converts: the whole expression of a position that has a target type, or one operand of a conditional operator. Where C does not evaluate it, the form of a `slice_sub` there. A `slice_from_array` and a `slice_unchecked` hold no temporary and are converted by being written for `struct C`. No form is written for elements of array type, whose conversion is an error. |
-| `slice_from_array`, `slice_unchecked` | A compound literal, at the use, of the instance that the use takes: its own, or the one that it is converted to (the row above). As the initialiser of an object, member or element that is declared with the type of that instance, the field of a constructor among them, the braced list alone, in place of the whole initialiser with its parentheses, as for a constructor and under the same condition. Neither holds a test. The length of a `slice_from_array` is a `sizeof` of its operand over the size of an element, plus a term of the value 0 that names an array type of negative size where that size is 0. |
+| Conversion to `slice(const T)` (section 8 rule 5) | The form of a `slice_sub` with no bounds and no test: `((void)(__tc_s0 = (e)), (struct C){ __tc_s0.data, __tc_s0.len })`, where `struct C` is the instance converted to and `e` the expression that converts: the expression of a position that has a target type, or an operand that has the target type of the expression around it, or one operand of a conditional operator. Where C does not evaluate it, the form of a `slice_sub` there. A `slice_from_array`, a `slice_unchecked` and a string literal that denotes a `str` hold no temporary and are converted by being written for `struct C`, and so is the value of a `try`, the read of the `Ok` field of its temporary (5.1), which has no side effect: `(struct C){ v.data, v.len }`. |
+| `slice_from_array`, `slice_unchecked`, `str` literal | A compound literal, at the use, of the instance that the use takes: its own, or the one that it is converted to (the row above). As the initialiser of an object, member or element that is declared with the type of that instance, the field of a constructor among them, the braced list alone, in place of the whole initialiser with its parentheses, as for a constructor and under the same condition. Neither holds a test. The length of a `slice_from_array` is a `sizeof` of its operand over the size of an element, plus a term of the value 0 that names an array type of negative size where that size is 0. A string literal that denotes a `str` is `(struct C){ "lit", sizeof("lit") - 1 }`, or the braced list `{ "lit", sizeof("lit") - 1 }`. |
 | Checked-mode checks | Inline tests that trap. |
 
 A constructor passed by value to a function that the backend inlines,
@@ -5503,9 +5503,12 @@ converted without a temporary (below).
 
 `e` is the expression that rule 5 of section 8 converts, and the form
 is the same in each place. In a position that has a target type it is
-the whole expression of the position, so an initialiser, the right
-operand of `=`, an argument, the operand of a `return` and the
-argument of a constructor are one case to lowering. In a conditional
+the expression of the position, or the operand that has its target
+type (3.3) where that expression is in parentheses, a conditional or a
+comma expression, so an initialiser, the right operand of `=`, an
+argument, the operand of a `return` and the argument of a constructor
+are one case to lowering, and in `str s = k ? m : n;` each branch
+converts on its own. In a conditional
 operator it is the one operand of type `slice(T)`, and the other
 stands as written:
 
@@ -5515,17 +5518,6 @@ c ? ((void)(__tc_s0 = (s)), (struct C){ __tc_s0.data, __tc_s0.len }) : k
 
 Both backends refuse the conditional whose operands are the two
 structures, as the source has them.
-
-No form converts a slice whose elements are of array type, and rule 5
-makes that conversion an error. The form above would assign a pointer
-to `int[4]` to a pointer to `const int[4]`, which C before C23 does
-not take. GCC 16 refuses it under `-pedantic-errors` in C11 and in
-C17, in ISO and in GNU form ("invalid use of pointers to arrays with
-different qualifiers in ISO C before C23"), in the form above and in
-the braced list of a `slice_from_array`; it takes both without that
-option, and Apple Clang 21 takes both with it. Lowered code compiles
-under `-pedantic-errors` (2.4), so the refusal is the front end's, by
-the type of the element, and the backend is given nothing to refuse.
 
 The operands are written inside the expression, where the source has
 them, and only their values go into the temporaries. What section 8
@@ -6041,6 +6033,17 @@ backends refuse there, and its initialiser is the compound literal.
 Where such an object has static storage, GCC 16 under
 `-pedantic-errors` refuses it, as it does in C.
 
+A string literal that denotes a `str` (section 8 rule 6) is made the
+same way, with no test and no temporary: the compound literal
+`(struct C){ "lit", sizeof("lit") - 1 }`, where `struct C` is the
+instance of `str`, or, under the condition above, the braced list
+`{ "lit", sizeof("lit") - 1 }`, in place of the parentheses around
+the literal too. The count is the size that the backend computes,
+less its terminating NUL. It writes the literal a second time, as the
+operand of a `sizeof`, where a literal declares nothing and is not
+evaluated; the pragma lines between its pieces are left out of that
+writing, which would repeat them.
+
 The length is the quotient that the backend computes, and no number
 that `typec` writes. `typec` holds the size of an array as an opaque
 constant (13.3, P16), and the length of an array may rest on one, as in
@@ -6381,6 +6384,7 @@ generic-head:          declaration-specifiers declarator
 
 primary-expression:    ... | variant-type "." identifier
                            | generic-function-name type-arguments
+                           | slice-operation
 variant-type:          typedef-name | generic-type-name type-arguments
 assignment-expression: ... | "try" assignment-expression
 
@@ -6396,6 +6400,11 @@ arm-label:             "case" pattern ":" | "default" ":"
 pattern:               identifier ("(" sub-pattern ("," sub-pattern)* ")")?
 sub-pattern:           identifier | "_"
 defer-statement:       ("defer" | "_Defer") statement
+slice-operation:       "slice_from_array" "(" assignment-expression ")"
+                     | "slice_sub" "(" assignment-expression
+                       "," assignment-expression "," assignment-expression ")"
+                     | "slice_unchecked" "(" assignment-expression
+                       "," assignment-expression ")"
 unsafe-block:          "unsafe" compound-statement
 ```
 
@@ -6411,4 +6420,5 @@ only in the positions of 5.1, which gives a `try` in any other place one
 error, whether this grammar derives it there or not.
 An unqualified constructor is an ordinary identifier or call in the
 grammar; 3.3 decides its meaning. Slice indexing uses C's subscript
-syntax.
+syntax. The words of a slice operation are universe names, which a
+declaration may hide (2.3); a hidden one is an ordinary identifier.

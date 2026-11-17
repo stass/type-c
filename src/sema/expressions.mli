@@ -149,16 +149,17 @@ val create : unit -> t
 (** A constructor expression (design 3.3) that lowering replaces (13.5):
     its span; the name of its variant and of the constructor; the span
     of the name where the constructor is called with arguments, [None]
-    for one without fields; its arguments; and whether it initialises a
-    whole object of its variant with no brace elided before it, where it
-    lowers to the braced list alone. *)
+    for one without fields; its arguments; and, where it initialises a
+    whole object of its variant with no brace elided before it, the span
+    of that initialiser, which its braced list alone replaces with the
+    parentheses around the constructor. *)
 type construction = {
   span : Tree.span;
   variant : Ctype.variant_name;
   constructor : Spelling.constructor;
   callee : Tree.span option;
   arguments : Tree.expression list;
-  braced : bool;
+  braced : Tree.span option;
 }
 
 val constructions : t -> construction list
@@ -255,7 +256,8 @@ type try_form = Whole_statement | Assigned | Initialiser
     instance of [result] that the operand is, and that the function
     returns; and the names of the fields of the [Ok] and the [Err] of
     the operand's type, [None] where the argument is void (design 3.5
-    rule 6). *)
+    rule 6); and the claimed tag of the slice instance that its value
+    converts to (section 8 rule 5), if it converts. *)
 type try_site = {
   try_span : Tree.span;
   operand : Tree.span;
@@ -267,10 +269,55 @@ type try_site = {
   return_instance : Ctype.instance;
   ok_field : string option;
   err_field : string option;
+  converted_to : string option;
 }
 
 val tries : t -> try_site list
 (** The tries typed, in source order. *)
+
+(** A slice index [s[i]] (design section 8 rule 1), a [slice_sub]
+    (rule 3) or a conversion to a slice of const elements (rule 5): its
+    whole, the claimed tag of the instance that it reads, the
+    [struct R] of design 13.5, and its operands, or for a conversion
+    the claimed tag of the instance that it makes, the [struct C]. *)
+type slice_check = { whole : Tree.span; instance : string; check : check }
+
+and check =
+  | Index of { slice : Tree.span; index : Tree.span }
+  | Sub of { slice : Tree.span; low : Tree.span; high : Tree.span }
+  | Conversion of { converted_to : string }
+
+(** How lowering writes a slice index (design 13.5, "The check of a
+    slice"): with its test, over temporaries that the function whose
+    [body] holds it declares, or, where C does not evaluate it, as the
+    trap and its operands. *)
+type slice_form = Tested of { body : Tree.span } | Untested
+
+val slice_checks : t -> (slice_check * slice_form) list
+(** The slice indexes, [slice_sub]s and conversions typed, each with its
+    form. *)
+
+(** A [slice_from_array] or a [slice_unchecked] at [span] (design
+    section 8 rules 2 and 4), or a string literal that denotes a [str]
+    (rule 6), a slice of [instance], its own or the one that it converts
+    to (rule 5). Lowering writes it
+    as a compound literal of the instance, or, where [braced] holds the
+    span of the initialiser around it with its parentheses, as the
+    braced list alone in place of that initialiser (13.5). *)
+type slice_making = {
+  span : Tree.span;
+  instance : Ctype.instance;
+  making : making;
+  braced : Tree.span option;
+}
+
+and making =
+  | From_array of { operand : Tree.span }
+  | Unchecked of { pointer : Tree.span; count : Tree.span }
+  | From_string of { literal : Tree.span }
+
+val slice_makings : t -> slice_making list
+(** The slices made from arrays, pointers and string literals. *)
 
 (** Whether a function returns void, which decides the form of a
     [return e;] in the scope of a defer statement (design 13.5). *)
@@ -373,7 +420,10 @@ type type_argument =
     [read_moved span read] runs [read], which types the statement of a
     defer or the operand of a [return] at [span], text that lowering
     writes at each exit of a scope or in a block of its own (section 6
-    rules 8 and 12), and records the names that it finds there. *)
+    rules 8 and 12), and records the names that it finds there.
+    [array_operand ~whole operand read] types with [read] the operand at
+    [operand] of the [slice_from_array] at [whole], which lowering
+    writes a second time (section 8 rule 2). *)
 type context = {
   typed : t;
   target : Target.t;
@@ -393,6 +443,9 @@ type context = {
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
   needs_complete : Ctype.t -> unit;
+  slice_instance : Tree.span -> Ctype.t -> Ctype.t;
+      (** the instance of the universe [slice] over an element type that
+          an expression at the span yields (design section 8) *)
   block_literal : unit -> unit;
   subjectless : Tree.attribute list -> unit;
       (** notes attributes of a label or a null statement, whose subject
@@ -402,6 +455,7 @@ type context = {
     Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
     (unit -> typed) -> typed;
   read_moved : Tree.span -> (unit -> unit) -> unit;
+  array_operand : whole:Tree.span -> Tree.span -> (unit -> typed) -> typed;
   label_address : Tree.label_name -> unit;
       (** notes the label that [&&] takes the address of, a use of its
           name (design 13.5) *)
@@ -412,6 +466,15 @@ val whole_value : context -> Tree.expression -> typed
     takes its value whole, as GNU [typeof] does: a value of a distinct
     type is not refused (design 3.4). An expression typed before raises
     [Invalid_argument]: it is typed once. *)
+
+val typeof_value : context -> Tree.expression -> typed
+(** {!whole_value} for the operand of GNU [__typeof__], which C does not
+    evaluate unless its type is variably modified (design 13.5). *)
+
+val refuse_untested_outside : context -> unit
+(** Refuses the first slice index typed outside a function body that C
+    evaluates (design section 8 rule 9); called after each external
+    declaration, when every operand around an index has been judged. *)
 
 val integer_constant :
   context ->

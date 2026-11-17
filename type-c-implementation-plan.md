@@ -343,13 +343,10 @@ record of what it found.
      text with the compound literal of `slice(int)` in that
      initialiser and with the operands of the conditional operator as
      the source has them, are refused by both backends;
-   - a `slice(const int[4])` that `slice_from_array` makes of an array
-     declared `const` compiles under `-pedantic-errors` on both
-     backends and indexes its rows; the partner, the conversion of a
-     `slice(int[4])` to it, of an operand and of a `slice_from_array`,
-     is refused by `typec` with its own message, and the lowered text
-     of that conversion, written by hand, is refused by GCC under
-     `-pedantic-errors`;
+   - a string literal initialises a `str` of file scope under
+     `-pedantic-errors` and holds its length without the NUL; the
+     partner, `slice_from_array` of an array of arrays, is refused by
+     `typec` (design section 8 rule 2, 3.5 rule 2);
    - `slice_from_array` of an array of `int` compiles without a
      diagnostic under `-pedantic-errors -Wall -Wextra` in a block, at
      file scope, in a return type, in the size of a member and in a

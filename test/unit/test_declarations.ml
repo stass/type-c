@@ -2881,6 +2881,11 @@ let generic_resolution () =
   accepts ~file
     "type slot(T) = struct { void (*call)(int (foo), T value); }; \
      slot(int) s; typedef char foo; slot(int) t;";
+  (* A universe name that file scope hides after the definition keeps
+     its universe meaning in the instance (design 3.5). *)
+  accepts ~file
+    "type named(T) = struct { str name; T value; }; int str; \
+     named(int) n;";
   (* What the text uses: an array type completed, a function type
      changed, and a type that depends on an unknown one, are refused;
      a structure completed and a declaration with the same type are

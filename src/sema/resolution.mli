@@ -47,14 +47,17 @@ type own = {
     (design 3.5 rule 8), the operand of a [try] (5.1 rule 3), the
     statement of a defer (6 rule 8) and the operand of a [return] in the
     scope of a defer, which lowering writes in a block of its own (6
-    rule 12). A failure carries the name of its kind, whichever clause
-    fails, but one that rests on a type that typec does not compute
-    carries the one name of those, across the kinds (P21). *)
+    rule 12), and the operand of a [slice_from_array], which it writes a
+    second time as the operand of [sizeof] (section 8 rule 2). A failure
+    carries the name of its kind, whichever clause fails, but one that
+    rests on a type that typec does not compute carries the one name of
+    those, across the kinds (P21). *)
 type kind =
   | Generic_definition
   | Try_operand
   | Deferred_statement
   | Return_operand
+  | Array_operand
 
 (** The moved text: its kind, its tokens, the scope that holds it, the
     view around it at its own place, which is that in front of the

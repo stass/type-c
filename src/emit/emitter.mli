@@ -25,9 +25,10 @@ type piece
     that {!emit} writes for the unit but the static assertions that end
     it, a fixed text of typec's. Only {!limited} makes an output.
 
-    The charge holds only if lowering puts each piece into one edit: it
-    makes a copy of moved text afresh, and the text of an edit that it
-    moves into other moved text is charged again there. *)
+    The charge holds only if lowering puts each piece it makes into one
+    edit. A copy of moved text is made afresh: the pieces of a moved
+    edit are read only through {!copied}, which charges them again, and
+    the text of a code edit is made into a piece again. *)
 type output
 
 val limited :
@@ -63,9 +64,11 @@ val generated : output -> Typec_cpp.Location.t -> string -> piece
     a name is written for, or of the construct that puts the text there.
     [Invalid_argument] unless every byte of [text] is one of an
     identifier, UTF-8 included, the blank, or a punctuator of C other
-    than [#], [%], [?], [/] and [\\]: then it spells no directive, line
-    splice, comment, line break or string literal, and so no pragma line,
-    as [_Pragma] takes a string literal (C11 6.10.9). *)
+    than [#], [%] and [\\], and each [?] and [/] stands between two other
+    bytes, no [?] beside a [?] and no [/] beside a [/] or [*]: then it
+    spells no directive, trigraph, line splice, comment, line break or
+    string literal, and so no pragma line, as [_Pragma] takes a string
+    literal (C11 6.10.9). *)
 
 val joined : output -> Typec_cpp.Location.t -> separator:string ->
   ('a -> string) -> 'a list -> string
@@ -96,6 +99,15 @@ val moved_token : output -> int -> moved_piece option
     line that is no such sequence, which can splice the line after it;
     moved text that holds one is an error (design 11.1, 13.5). *)
 
+(** The pieces of a {!Moved} edit, which lowering reads only through
+    {!copied}. *)
+type moved_pieces
+
+val copied : output -> moved_pieces -> moved_piece list
+(** [copied output pieces] is [pieces] for a copy of the moved text that
+    holds them, each charged again as a piece, as {!emit} writes it once
+    more wherever the copy goes. *)
+
 (** The text of an edit: C code as it is, at [location]; moved text in
     the packing bracket of design 10.3, at [location], which lays it out
     with the packing of the command line whatever packing a pragma has
@@ -106,7 +118,7 @@ val moved_token : output -> int -> moved_piece option
 type text =
   | Code of { location : Typec_cpp.Location.t; code : string }
   | Bracketed of { location : Typec_cpp.Location.t; pieces : piece list }
-  | Moved of moved_piece list
+  | Moved of moved_pieces
 
 (** Replace the tokens of [range] by [text]. The backend places code and
     the pragmas of a bracket at the location of the text, the line of

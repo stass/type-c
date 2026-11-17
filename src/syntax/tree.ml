@@ -242,6 +242,9 @@ and expression_node =
           of it. The type name denotes a variant where the expression is
           typed. *)
   | Subscript of { operand : expression; index : expression }
+  | Slice_operation of slice_operation
+      (** An operator of section 8 applied to its operands, where its
+          universe name is not hidden (design 2.3). *)
   | Call of { callee : expression; arguments : expression list }
   | Instance of { generic : expression; type_arguments : type_name list }
       (** [f(T1, ..., Tn)], the instance of the generic function that
@@ -304,6 +307,15 @@ and expression_node =
 (** Adjacent string literal tokens, which translation phase 6 joins
     (C11 5.1.1.2): at least one, each with its encoding prefix. *)
 and string_literal = Token.encoding spanned list
+
+(** The operands of an operator of section 8, each as its rule names
+    it. *)
+and slice_operation =
+  | Slice_from_array of expression  (** rule 2 *)
+  | Slice_sub of { slice : expression; low : expression; high : expression }
+      (** rule 3 *)
+  | Slice_unchecked of { pointer : expression; count : expression }
+      (** rule 4 *)
 
 and generic_association = generic_association_node spanned
 
@@ -816,6 +828,12 @@ let deferred_text ~(keyword : span) ~(statement : span) =
 (** The identity that a break or continue leaving the loop, switch or
     match [statement] names. *)
 let jump_target_of statement = Statement_at statement.span.first
+
+(* The operands of a slice operation in the order of the source. *)
+let slice_operands = function
+  | Slice_from_array operand -> [ operand ]
+  | Slice_sub { slice; low; high } -> [ slice; low; high ]
+  | Slice_unchecked { pointer; count } -> [ pointer; count ]
 
 (** The expression that a condition evaluates: the controlling
     expression, or the operand of a test. *)

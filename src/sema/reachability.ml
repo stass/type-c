@@ -697,6 +697,7 @@ and expression walk (value : Tree.expression) =
   | Alignof_expression operand ->
       operands [ operand ]
   | Subscript { operand; index } -> operands [ operand; index ]
+  | Slice_operation operation -> operands (Tree.slice_operands operation)
   | Binary (_, left, right)
   | Assignment (_, left, right)
   | Comma (left, right) ->

@@ -78,6 +78,37 @@ type try_site = {
   return_instance : Ctype.instance;
   ok_field : string option;
   err_field : string option;
+  converted_to : string option;
+}
+
+type slice_check = { whole : Tree.span; instance : string; check : check }
+
+and check =
+  | Index of { slice : Tree.span; index : Tree.span }
+  | Sub of { slice : Tree.span; low : Tree.span; high : Tree.span }
+  | Conversion of { converted_to : string }
+
+type slice_form = Tested of { body : Tree.span } | Untested
+
+type slice_making = {
+  span : Tree.span;
+  instance : Ctype.instance;
+  making : making;
+  braced : Tree.span option;
+}
+
+and making =
+  | From_array of { operand : Tree.span }
+  | Unchecked of { pointer : Tree.span; count : Tree.span }
+  | From_string of { literal : Tree.span }
+
+(* A slice index as typing meets it: [body] is that of the function
+   being typed, and [evaluated] is cleared where the index turns out to
+   stand in an operand that C does not evaluate (design 13.5). *)
+type slice_site = {
+  checked : slice_check;
+  body : Tree.span option;
+  mutable evaluated : bool;
 }
 
 (* Whether a function returns void, which decides the form of a return
@@ -111,10 +142,12 @@ type try_positions = No_positions | Positions of try_place
 
 (* What encloses the statement being typed: the function, for __func__,
    return and try, the switch or match that case labels need, and the
-   positions of try. [return_type] is [None] outside functions.
-   [in_generic]: the function is the definition of a generic function. *)
+   positions of try. [return_type] and [body] are [None] outside
+   functions. [in_generic]: the function is the definition of a generic
+   function. *)
 type enclosing = {
   function_name : string option;
+  body : Tree.span option;
   in_generic : bool;
   return_type : Ctype.t Unknown.answer option;
   case_labels : label_owner;
@@ -127,7 +160,7 @@ type construction = {
   constructor : Spelling.constructor;
   callee : Tree.span option;
   arguments : Tree.expression list;
-  braced : bool;
+  braced : Tree.span option;
 }
 
 type access = Through_pointer | Through_copy
@@ -211,8 +244,9 @@ module Sites : sig
       where the site lies outside the scope of its declaration. *)
 
   val construction : t -> Tree.span -> construction option
-  val brace : t -> construction -> unit
-  (** Lowers a recorded construction to its braced list alone (design
+  val brace : t -> construction -> replacing:Tree.span -> unit
+  (** Lowers a recorded construction to its braced list alone, in place
+      of [replacing], the initialiser with its parentheses (design
       13.5). *)
 
   val constructions : t -> construction list
@@ -273,9 +307,9 @@ end = struct
 
   let construction sites span = Hashtbl.find_opt sites.constructions span
 
-  let brace sites construction =
+  let brace sites construction ~replacing =
     Hashtbl.replace sites.constructions construction.span
-      { construction with braced = true }
+      { construction with braced = Some replacing }
 
   let constructions sites =
     Hashtbl.to_seq_values sites.constructions
@@ -339,10 +373,12 @@ type t = {
   mutable tries : try_site list;
   mutable function_tries : try_site list;
   mutable defers : function_defers list;
+  mutable slice_sites : slice_site list;
+  slice_makings : (Tree.span, slice_making) Hashtbl.t;
 }
 
 let outside_functions =
-  { function_name = None; in_generic = false; return_type = None;
+  { function_name = None; body = None; in_generic = false; return_type = None;
     case_labels = No_switch; try_positions = No_positions }
 
 let create () =
@@ -357,7 +393,9 @@ let create () =
     enclosing = outside_functions;
     tries = [];
     function_tries = [];
-    defers = [] }
+    defers = [];
+    slice_sites = [];
+    slice_makings = Hashtbl.create 8 }
 
 let find_at view span = Hashtbl.find_opt view.types span
 let find view (expression : Tree.expression) = find_at view expression.span
@@ -372,6 +410,21 @@ let constructions view = Sites.constructions view.sites
 let matchings view = Sites.matchings view.sites
 let tries view = List.rev view.tries
 let defers view = List.rev view.defers
+
+(* A site outside a function that C evaluates is refused (design section
+   8 rule 9), so every [Tested] form has a body. *)
+let slice_checks view =
+  let form (site : slice_site) =
+    match site.body with
+    | Some body when site.evaluated -> Tested { body }
+    | Some _ | None -> Untested
+  in
+  List.rev_map (fun site -> (site.checked, form site)) view.slice_sites
+
+let slice_makings view =
+  Hashtbl.to_seq_values view.slice_makings
+  |> List.of_seq
+  |> List.sort (fun (a : slice_making) b -> compare a.span b.span)
 
 let answered view =
   Hashtbl.to_seq_values view.answered
@@ -403,6 +456,7 @@ type context = {
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
   needs_complete : Ctype.t -> unit;
+  slice_instance : Tree.span -> Ctype.t -> Ctype.t;
   block_literal : unit -> unit;
   subjectless : Tree.attribute list -> unit;
       (** notes attributes of a label or a null statement, whose subject
@@ -412,6 +466,7 @@ type context = {
     Parser.try_views -> scope:Tree.scope_depth -> Tree.span ->
     (unit -> typed) -> typed;
   read_moved : Tree.span -> (unit -> unit) -> unit;
+  array_operand : whole:Tree.span -> Tree.span -> (unit -> typed) -> typed;
   label_address : Tree.label_name -> unit;
 }
 
@@ -1338,6 +1393,205 @@ let pointer_member context span (pointer : typed) name =
            "the operand of '->' is not a pointer to a structure or union (C11 \
             6.5.2.3p2)")
 
+(* Slices (design section 8) *)
+
+let is_pragma (token : Token.t) =
+  match token.kind with
+  | Pragma _ | Typec_pragma -> true
+  | Identifier _ | Number | Character _ | String _ | Punctuator _ -> false
+
+(* The claimed tag of a slice instance and the type of its elements:
+   the universe generic of section 8, as no other generic has its name
+   (design 3.6). *)
+let slice_of context (t : Ctype.t) =
+  match t.shape with
+  | Record ({ record_name = Instance_name instance; _ } as tag)
+    when (instance.generic :> string) = Ctype.universe_slice -> (
+      context.needs_complete (Ctype.record tag);
+      match Ctype.find_member context.tags tag "data" with
+      | Some { member = { member_type = { shape = Pointer element; _ }; _ }; _ }
+        ->
+          Some (Encoding.instance_name instance, element)
+      | _ -> None)
+  | _ -> None
+
+(* Design section 8 rule 1: an index has an integer type that converts
+   to [size_t] without dropping a bit that tells it from one in range. *)
+let refuse_slice_index context span ~what (index : typed) =
+  let width = Target.integer_width context.target in
+  match operand context index with
+  | Arithmetic_operand { arithmetic = Integer integer; _ } ->
+      if width integer > width context.target.size_type then
+        context.fail span
+          (Rule.message Slice_index
+             (Printf.sprintf
+                "%s has the type %s, wider than `size_t`: the conversion \
+                 would drop the bits that tell it from one in range; a cast \
+                 to `size_t` writes the narrowing"
+                what
+                (quote (Type_name.of_ctype index.expression_type))))
+  | Unknown_operand unknown ->
+      context.fail span (needing ("the type of " ^ what) unknown)
+  | Arithmetic_operand _ | Pointer_operand _ | Distinct_operand _
+  | Other_operand _ ->
+      context.fail span
+        (Rule.message Slice_index
+           (what ^ " has no integer type (C11 6.5.2.1p1)"))
+
+(* A check that lowering writes as a test where C evaluates it (13.5). *)
+let record_check context checked =
+  let view = context.typed in
+  view.slice_sites <-
+    { checked; body = view.enclosing.body; evaluated = true }
+    :: view.slice_sites
+
+(* Design section 8 rule 1: [s[i]] is an lvalue of the element type. *)
+let slice_index context span ~instance ~slice ~index element
+    (index_typed : typed) =
+  refuse_slice_index context index ~what:"the index of a slice" index_typed;
+  context.needs_complete element;
+  record_check context
+    { whole = span; instance; check = Index { slice; index } };
+  lvalue element
+
+(* Design section 8 rule 3: [slice_sub(s, lo, hi)] is a slice of the
+   type of [s], unqualified, as the value of [s] is. *)
+let slice_sub context span ~(slice : Tree.expression) (sliced : typed)
+    ((low : Tree.expression), low_typed) ((high : Tree.expression), high_typed)
+    =
+  let what = "a bound of `slice_sub`" in
+  refuse_slice_index context low.span ~what low_typed;
+  refuse_slice_index context high.span ~what high_typed;
+  match slice_of context sliced.expression_type with
+  | Some (instance, _) ->
+      let check =
+        Sub { slice = slice.span; low = low.span; high = high.span }
+      in
+      record_check context { whole = span; instance; check };
+      value (Ctype.unqualified sliced.expression_type)
+  | None ->
+      context.fail slice.span
+        (Rule.message Slice_operand
+           (Printf.sprintf "the first operand of `slice_sub` has the type %s, \
+                            which is no slice"
+              (quote (Type_name.of_ctype sliced.expression_type))))
+
+(* The instance of a slice type that [context.slice_instance] made. *)
+let made_instance (t : Ctype.t) =
+  match t.shape with
+  | Record { record_name = Instance_name instance; _ } -> instance
+  | _ -> invalid_arg "Expressions.made_instance: no instance"
+
+(* A [slice_from_array] or a [slice_unchecked] over [element], which
+   lowering writes as a compound literal until an initialiser braces it
+   ([initialises_whole]). *)
+let made_slice context span element making =
+  let slice_type = context.slice_instance span element in
+  let instance = made_instance slice_type in
+  Hashtbl.replace context.typed.slice_makings span
+    { span; instance; making; braced = None };
+  value slice_type
+
+let refuse_slice_operand context (operand : Tree.expression) reason =
+  context.fail operand.span (Rule.message Slice_operand reason)
+
+(* Design section 8 rule 2: [slice_from_array(a)] takes an lvalue of a
+   complete array type that is not variably modified, which lowering
+   writes again as the operand of a [sizeof] that C does not evaluate
+   (13.5). An element type that mentions a type parameter is no
+   variable length array (10.3). *)
+let slice_from_array context span (operand : Tree.expression) (array : typed) =
+  let refuse = refuse_slice_operand context operand in
+  let tokens = context.text.tokens in
+  let rec pragma_from index =
+    index <= operand.span.last
+    && (is_pragma tokens.(index) || pragma_from (index + 1))
+  in
+  if pragma_from operand.span.first then
+    refuse
+      "the operand of `slice_from_array` holds a pragma line, which its \
+       second writing, as the operand of `sizeof`, would repeat";
+  match array.expression_type.shape with
+  | Array { element; length = Constant _ | Opaque } -> (
+      if array.category <> Lvalue then
+        refuse "the operand of `slice_from_array` is no lvalue";
+      match Ctype.is_variably_modified array.expression_type with
+      | Answer false | Depends_on _ ->
+          made_slice context span element
+            (From_array { operand = operand.span })
+      | Answer true ->
+          refuse
+            "the operand of `slice_from_array` is variably modified, and \
+             C would evaluate it again as the operand of `sizeof`; \
+             `slice_unchecked` takes the count that the program holds")
+  | Array { length = Unknown | Variable; _ } ->
+      refuse
+        "the operand of `slice_from_array` is an array of unknown or \
+         variable length; `slice_unchecked` takes the count that the \
+         program holds"
+  | Unknown_type unknown ->
+      context.fail operand.span
+        (needing "the type of the operand of `slice_from_array`" unknown)
+  | _ ->
+      refuse
+        (Printf.sprintf
+           "the operand of `slice_from_array` has the type %s, which is no \
+            array"
+           (quote (Type_name.of_ctype array.expression_type)))
+
+(* Design section 8 rule 4: [slice_unchecked(p, n)] is a slice of what
+   [p] points to; the count converts to [size_t] as an initialiser of
+   the member [len] does (13.5). *)
+let slice_unchecked context span (pointer : Tree.expression)
+    (pointer_typed : typed) (count : Tree.expression) =
+  match operand context pointer_typed with
+  | Pointer_operand { referenced; _ } ->
+      made_slice context span referenced
+        (Unchecked { pointer = pointer.span; count = count.span })
+  | Unknown_operand unknown ->
+      context.fail pointer.span
+        (needing "the type of the first operand of `slice_unchecked`" unknown)
+  | Arithmetic_operand _ | Distinct_operand _ | Other_operand _ ->
+      refuse_slice_operand context pointer
+        (Printf.sprintf
+           "the first operand of `slice_unchecked` has the type %s, which \
+            is no pointer"
+           (quote (Type_name.of_ctype pointer_typed.expression_type)))
+
+(* Design 13.5: an index inside [operand], an operand that C does not
+   evaluate, has no test. *)
+let leave_untested view (operand : Tree.span) =
+  let inside (span : Tree.span) =
+    operand.first <= span.first && span.last <= operand.last
+  in
+  List.iter
+    (fun site -> if inside site.checked.whole then site.evaluated <- false)
+    view.slice_sites
+
+(* The judgement of design 13.5 for the operand of [sizeof] and of
+   [__typeof__], which errs to the side of the test: C leaves the
+   operand alone where typing knows its type and that type is not
+   variably modified. *)
+let judge_by_type view (operand : Tree.span) (t : Ctype.t) =
+  match Ctype.is_variably_modified t with
+  | Answer false -> leave_untested view operand
+  | Answer true | Depends_on _ -> ()
+
+(* Design section 8 rule 9: an index that C evaluates outside a function
+   body has no function to declare the temporaries of its test. *)
+let refuse_untested_outside context =
+  let refused (site : slice_site) =
+    site.evaluated && Option.is_none site.body
+  in
+  match List.rev (List.filter refused context.typed.slice_sites) with
+  | [] -> ()
+  | site :: _ ->
+      context.fail site.checked.whole
+        (Rule.message Slice_test_place
+           "an index of a slice or a `slice_sub` that C evaluates stands \
+            in a function body, where the function declares the \
+            temporaries of its test")
+
 (* Postfix and unary operators (6.5.2, 6.5.3) *)
 
 (* 6.5.2.1: [a[i]] is [*(a + i)], an lvalue. *)
@@ -1973,6 +2227,7 @@ let value_operands (whole : Tree.expression) =
       [ left; right ]
   | Call { callee; arguments } -> callee :: arguments
   | Instance _ -> []
+  | Slice_operation operation -> Tree.slice_operands operation
   | Conditional { condition; if_true; if_false } ->
       (condition :: Option.to_list if_true) @ [ if_false ]
   | Generic { controlling; associations } ->
@@ -2491,6 +2746,13 @@ let classify_node context (whole : Tree.expression) typed =
       invalid_arg "Expressions: a constructor that is no constructor expression"
   | Subscript { operand; index } ->
       itself (subscript_kind context operand index)
+  (* A slice is a structure, made by a compound literal at the use or
+     over the temporaries of a function (design 13.5). *)
+  | Slice_operation (Slice_sub _) -> itself Not_constant
+  | Slice_operation ((Slice_from_array _ | Slice_unchecked _) as operation) ->
+      itself
+        (combined
+           (List.map (operand_kind context) (Tree.slice_operands operation)))
   | Member { operand; _ } -> itself (member_kind context operand)
   | Pointer_member { operand; _ } | Unary (Indirection, operand) ->
       itself (through_pointer context operand)
@@ -2888,11 +3150,6 @@ let place_declared_try context ~constant t (initialiser : Tree.initialiser) =
       (Expression_initialiser _ | Braced _) ) ->
       ()
 
-let is_pragma (token : Token.t) =
-  match token.kind with
-  | Pragma _ | Typec_pragma -> true
-  | Identifier _ | Number | Character _ | String _ | Punctuator _ -> false
-
 (* Rule 3: no pragma line stands from directly before the statement or
    declaration that holds a try, its C labels included, to its final
    [;]; the token before the first is a pragma exactly where one stands
@@ -3058,13 +3315,18 @@ and positioned context position (expression : Tree.expression) =
   note_typed context expression typed;
   (* The conversion reads the dependence of the value. *)
   record_dependence context expression;
-  (match position with
-  | Targeted target ->
-      (* 6.5.16.1p2, 6.5.2.2p7: converted as if by assignment. *)
-      context.needs_complete typed.expression_type;
-      refuse_conversion context expression.span target typed
-  | Untargeted | Discarded -> ());
-  typed
+  match position with
+  | Targeted target -> assigned context expression ~target typed
+  | Untargeted | Discarded -> typed
+
+(* 6.5.16.1p2, 6.5.2.2p7: [typed], the value of [expression], converted
+   to [target] as if by assignment. Apart from [positioned], which
+   recurses through deep trees, so that its frame stays small. *)
+and assigned context expression ~target typed =
+  context.needs_complete typed.expression_type;
+  let converted = convert_slice context expression ~target typed in
+  refuse_conversion context expression.span target converted;
+  converted
 
 and expression_node context position (whole : Tree.expression) =
   let span = whole.span in
@@ -3094,9 +3356,29 @@ and expression_node context position (whole : Tree.expression) =
         (List.map association_result associations)
   | Compound_literal { type_name; values } ->
       compound_literal context type_name values
-  | Subscript { operand; index } ->
+  | Subscript { operand; index } -> (
       let array = typed operand in
-      subscript context span array (typed index)
+      let index_typed = typed index in
+      match slice_of context array.expression_type with
+      | Some (instance, element) ->
+          slice_index context span ~instance ~slice:operand.span
+            ~index:index.span element index_typed
+      | None -> subscript context span array index_typed)
+  | Slice_operation (Slice_sub { slice; low; high }) ->
+      let sliced = typed slice in
+      let low_typed = typed low in
+      let high_typed = typed high in
+      slice_sub context span ~slice sliced (low, low_typed) (high, high_typed)
+  | Slice_operation (Slice_from_array operand) ->
+      let array =
+        context.array_operand ~whole:span operand.span (fun () -> typed operand)
+      in
+      slice_from_array context span operand array
+  | Slice_operation (Slice_unchecked { pointer; count }) ->
+      let pointer_typed = typed pointer in
+      refuse_slice_index context count.span
+        ~what:"the count of `slice_unchecked`" (typed count);
+      slice_unchecked context span pointer pointer_typed count
   | Qualified_constructor _ ->
       invalid_arg "Expressions: a constructor that is no constructor expression"
   | Call { callee; arguments } when generic_callee context callee <> None ->
@@ -3127,12 +3409,18 @@ and expression_node context position (whole : Tree.expression) =
       if designates_bit_field whole then
         context.fail span (Rule.c_text "sizeof of a bit-field (C11 6.5.3.4p1)");
       context.needs_complete whole.expression_type;
+      judge_by_type context.typed operand.span whole.expression_type;
       value (size_type context span)
-  | Sizeof_type type_name | Alignof type_name ->
+  | Sizeof_type type_name ->
       context.needs_complete (context.type_name type_name);
+      value (size_type context span)
+  | Alignof type_name ->
+      context.needs_complete (context.type_name type_name);
+      leave_untested context.typed type_name.span;
       value (size_type context span)
   | Alignof_expression operand ->
       context.needs_complete (as_whole operand).expression_type;
+      leave_untested context.typed operand.span;
       refuse_instance_name context operand;
       value (size_type context span)
   | Cast { type_name; operand } ->
@@ -3248,7 +3536,8 @@ and try_expression context (whole : Tree.expression) operand scope =
       ok_field = Option.map field_name ok_field;
       err_field =
         Option.map field_name
-          (result_field context operand_type Ctype.result_err) }
+          (result_field context operand_type Ctype.result_err);
+      converted_to = None }
   in
   view.function_tries <- site :: view.function_tries;
   value value_type
@@ -3264,7 +3553,7 @@ and construct context (whole : Tree.expression) named arguments =
          constructor = named.chosen.constructor_name;
          callee = called_name whole;
          arguments = Option.value arguments ~default:[];
-         braced = false });
+         braced = None });
   let described = "the variant " ^ quoted_variant named.variant_name in
   refuse_private_creation context whole.span named.variant_type ~described;
   let name = quote (named.chosen.constructor_name :> string) in
@@ -3658,6 +3947,7 @@ and selection_of context (selecting : Tree.expression) =
    GCC and Clang do in every mode. *)
 and generic context span controlling associations =
   let controlling_typed = whole_value context controlling in
+  leave_untested context.typed controlling.span;
   let associations_typed =
     List.map (generic_association context span) associations
   in
@@ -3715,6 +4005,7 @@ and conditional context span position condition if_true if_false =
     | None -> { branch = condition; branch_typed = condition_typed }
   in
   let third = { branch = if_false; branch_typed = branch_typed if_false } in
+  let second, third = meet_slices context second third in
   operands_meet context
     (second.branch, value_type second.branch_typed)
     (third.branch, value_type third.branch_typed);
@@ -3724,6 +4015,19 @@ and conditional context span position condition if_true if_false =
       "the type of a discarded conditional with a branch of a result type"
     (Ctype.is_void result) [ second; third ];
   result
+
+(* Design section 8 rule 5: of a slice of non-const elements and the
+   slice of those elements made const, the first converts to the second;
+   any other pair of branches stays as it is. *)
+and meet_slices context second third =
+  let towards branch other =
+    let target = value_type other.branch_typed in
+    let converted =
+      convert_slice context branch.branch ~target branch.branch_typed
+    in
+    { branch with branch_typed = converted }
+  in
+  (towards second third, towards third second)
 
 (* 6.5.15p3 to p6: the type of a conditional of these branches. *)
 and conditional_type context span second third =
@@ -3949,20 +4253,117 @@ and constant_value context candidate =
       context.fail span diagnostic
   | Not_integer { first; _ } -> Error first
 
-(* Design 13.5: a constructor that initialises a whole object of its
-   variant, with no brace elided before it, lowers to its braced list
-   alone, which keeps a static initialiser constant. An atomic object
-   takes no braced list in Clang, so it keeps the compound literal. *)
+(* Design 13.5: a constructor, or a slice made from an array, a pointer
+   or a string literal, that initialises a whole object of its type,
+   with no brace elided before it, lowers to its braced list alone,
+   which keeps a static initialiser constant. The list replaces the
+   parentheses around it too: in them it would be a statement expression
+   of GNU C. An atomic object takes no braced list in Clang, so it keeps
+   the compound literal. *)
 and initialises_whole context t (initialising : Tree.expression) =
-  let span = initialising.span in
-  match Sites.construction context.typed.sites span with
-  | Some construction ->
-      let variant_type = (operand_typed context initialising).expression_type in
-      if
-        compatible context span (Ctype.without_top_qualifiers t) variant_type
-        = Answer true
-      then Sites.brace context.typed.sites construction
-  | None -> ()
+  let rec made (expression : Tree.expression) =
+    match expression.node with
+    | Parenthesized inner -> made inner
+    | _ -> expression
+  in
+  let inner = made initialising in
+  let replacing = initialising.span in
+  let object_type = Ctype.without_top_qualifiers t in
+  let sites = context.typed.sites and makings = context.typed.slice_makings in
+  match
+    (Sites.construction sites inner.span, Hashtbl.find_opt makings inner.span)
+  with
+  | Some construction, _ ->
+      let made_type = (operand_typed context inner).expression_type in
+      if compatible context replacing object_type made_type = Answer true then
+        Sites.brace sites construction ~replacing
+  | None, Some making ->
+      if is_instance_type object_type making.instance then
+        Hashtbl.replace makings inner.span
+          { making with braced = Some replacing }
+  | None, None -> ()
+
+(* Whether [t] is the type of the slice instance [instance], which a
+   slice that converts takes in place of its own (section 8 rule 5). *)
+and is_instance_type (t : Ctype.t) instance =
+  match t.shape with
+  | Record { record_name = Instance_name own; _ } ->
+      Encoding.instance_name own = Encoding.instance_name instance
+  | _ -> false
+
+(* Design section 8 rules 5 and 6: whether [target] is the slice of
+   [element] made const, which a slice of [element] or a string literal
+   of such elements converts to. *)
+and is_const_slice_of context span ~target (element : Ctype.t) =
+  let const = { Qualifiers.none with const = true } in
+  match slice_of context (Ctype.without_top_qualifiers target) with
+  | Some (_, target_element) when not element.qualifiers.const -> (
+      match Ctype.qualify const element with
+      | Ok const_element ->
+          compatible context span target_element const_element = Answer true
+      | Error _ -> false)
+  | Some _ | None -> false
+
+(* Design section 8 rules 5 and 6: [typed], the value of [expression],
+   converted to [target] where it converts. A string literal of plain or
+   UTF-8 characters, a [slice_from_array] and a [slice_unchecked] are
+   made as slices of [target]; any other slice converts through a
+   temporary, as a test does (13.5). *)
+and convert_slice context (expression : Tree.expression) ~target typed =
+  let span = expression.span in
+  let converted = value (Ctype.unqualified target) in
+  (* The instance converted to, once [target] is known to be a slice. *)
+  let target_instance () =
+    made_instance (Ctype.without_top_qualifiers target)
+  in
+  let makings = context.typed.slice_makings in
+  let source = typed.expression_type in
+  let source_slice = slice_of context (value_type typed) in
+  match (expression.node, source.shape, source_slice) with
+  | String literal, Array { element; _ }, _
+    when is_char_literal context literal
+         && is_const_slice_of context span ~target element ->
+      Hashtbl.replace makings span
+        { span; instance = target_instance ();
+          making = From_string { literal = span }; braced = None };
+      converted
+  | _, _, Some (instance, element)
+    when is_const_slice_of context span ~target element ->
+      (match Hashtbl.find_opt makings span with
+      | Some making ->
+          Hashtbl.replace makings span
+            { making with instance = target_instance () }
+      | None ->
+          let converted_to = Encoding.instance_name (target_instance ()) in
+          convert_value context expression ~instance ~converted_to);
+      converted
+  | _ -> typed
+
+(* The conversion of a slice that no making holds. Lowering moves the
+   operand of a try in front of its statement, so a try's site converts
+   the read of its value, where lowering writes it; any other value
+   converts through a temporary (13.5). *)
+and convert_value context (expression : Tree.expression) ~instance
+    ~converted_to =
+  let view = context.typed in
+  let converting (site : try_site) =
+    if site.try_span = expression.span then
+      { site with converted_to = Some converted_to }
+    else site
+  in
+  match expression.node with
+  | Try _ -> view.function_tries <- List.map converting view.function_tries
+  | _ ->
+      record_check context
+        { whole = expression.span; instance;
+          check = Conversion { converted_to } }
+
+(* A string literal that rule 6 of section 8 lets denote a [str]: plain
+   or UTF-8 characters, whose elements C writes as [char]. *)
+and is_char_literal context literal =
+  match joined_encoding context literal with
+  | Plain | Utf8 -> true
+  | Char16 | Char32 | Wide -> false
 
 and initialiser context ~constant t initialiser =
   (* [value] types an expression, which classes it too; the other
@@ -4642,10 +5043,12 @@ let record_defers context ~name ~declarator ~enclosing (block : Tree.block) =
       context.typed.defers <- recorded :: context.typed.defers;
       Some recorded
 
-let function_body context ~name ~in_generic ~declarator ~return_type block =
+let function_body context ~name ~in_generic ~declarator ~return_type
+    (block : Tree.block) =
   let view = context.typed in
   let enclosing =
-    { function_name = Some name; in_generic; return_type = Some return_type;
+    { function_name = Some name; body = Some block.span; in_generic;
+      return_type = Some return_type;
       case_labels = No_switch; try_positions = Positions No_place }
   in
   view.function_tries <- [];
@@ -4655,3 +5058,10 @@ let function_body context ~name ~in_generic ~declarator ~return_type block =
   within context enclosing (fun () -> block_items context block);
   view.tries <- view.function_tries @ view.tries;
   record_defers context ~name ~declarator ~enclosing block
+
+(* GNU [__typeof__] of an expression, whose indexes the judgement of
+   design 13.5 leaves untested where C does not evaluate it. *)
+let typeof_value context (expression : Tree.expression) =
+  let typed = whole_value context expression in
+  judge_by_type context.typed expression.span typed.expression_type;
+  typed

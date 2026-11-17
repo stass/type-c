@@ -438,12 +438,12 @@ scope (design 13.5), here the end of the body.
   # 1 "defer.tc"
   }
 
-The constructs of later work packages are refused with the package that
-implements them.
+An operator of design section 8 is a universe name that names no type,
+so no declaration begins with one.
 
-  $ printf 'str s;\n' > universe.tc
+  $ printf 'slice_sub s;\n' > universe.tc
   $ ./golden.exe universe.tc
-  universe.tc:1: error: `str` is a universe name that typec does not implement yet (work package 3.4) [not-implemented]
+  universe.tc:1: error: expected a declaration, found `slice_sub`
   [1]
 
 A distinct type lowers to the typedef of its representation (design

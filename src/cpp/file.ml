@@ -28,15 +28,17 @@ type origin =
 
 type t = { name : string; system_header : bool; origin : origin }
 
-(** The Type-C text of the generic types of the universe scope, the two
-    lines of design 3.6, which the reader puts in front of the own text
+(** The Type-C text of the types of the universe scope, those of design
+    3.6 and section 8, which the reader puts in front of the own text
     of a Type-C unit ({!Reader.read}). It ends with a newline, so the
-    unit's text starts a line. It declares one generic a line, as
-    [type name(...)], which is how [Typec_syntax.Universe] reads the
+    unit's text starts a line. It declares one type a line, as
+    [type name ...], which is how [Typec_syntax.Universe] reads the
     names. *)
 let universe_text =
   "type option(T)    = | None | Some(T value);\n\
-   type result(T, E) = | Err(E error) | Ok(T value);\n"
+   type result(T, E) = | Err(E error) | Ok(T value);\n\
+   type slice(T)     = struct { T *data; __typeof__(sizeof 0) len; };\n\
+   type str          = slice(const char);\n"
 
 (** The one owner of {!universe_text}. A line marker that names
     [<universe>] opens a file of another origin, so source text cannot

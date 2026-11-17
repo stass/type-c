@@ -161,6 +161,11 @@ type body_labels = {
   mutable gotos : (int * label_entry) list;
 }
 
+(* The operand of a [slice_from_array] being read, which lowering writes
+   a second time (design section 8 rule 2): the labels of the body that
+   holds it and the index of its first token. *)
+type array_operand = { around : body_labels; first : int }
+
 (* A constructor's name that the lookahead read and checked, at the token
    [at]. *)
 type constructor_ahead = { at : int; checked : Spelling.constructor }
@@ -187,6 +192,8 @@ type state = {
   mutable jumps : jump_scope;
   mutable arm : arm_breaks option;
   mutable labels : body_labels option;  (** [None] outside every body *)
+  mutable array_operand : array_operand option;
+      (** the innermost operand of a [slice_from_array] being read *)
   mutable generic : generic_place option;
       (** [None] outside the definition of a generic type *)
   mutable parameter_depth : int option;
@@ -398,10 +405,37 @@ let address_label state start name : label_name =
            "the address of a label outside a function body (GCC manual, \
             \"Labels as Values\")")
 
+let quoted spelling =
+  if String.length spelling <= max_quoted_spelling then "`" ^ spelling ^ "`"
+  else "`" ^ String.sub spelling 0 max_quoted_spelling ^ "...`"
+
+(* Design section 8 rule 2: the second writing of the operand of a
+   [slice_from_array] would define again a label whose scope reaches
+   beyond it, the function's or a local label declared outside it. *)
+let refuse_label_in_array_operand state labels (name : identifier) entry =
+  let outlives { around; first } =
+    let (Label_at declared) = entry.identity in
+    around == labels
+    && ((not (Names.mem name.node labels.local_labels)) || declared < first)
+  in
+  match state.array_operand with
+  | Some operand when outlives operand ->
+      fail_at_token state name.span.first
+        (Rule.message Array_operand_moved
+           (Printf.sprintf
+              "the label %s is defined in the operand of `slice_from_array`, \
+               which lowering writes again as the operand of `sizeof`, and \
+               its scope reaches beyond the operand; declare it with \
+               `__label__` in a statement expression of the operand"
+              (quoted name.node)))
+  | Some _ | None -> ()
+
 (* The label that a labelled statement defines, once in its scope
    (6.8.1p3). *)
 let define_label state name =
-  let entry = label_named (body_labels state name) name in
+  let labels = body_labels state name in
+  let entry = label_named labels name in
+  refuse_label_in_array_operand state labels name entry;
   if entry.defined then
     fail_at_token state name.span.first
       (Rule.c_text "a second definition of a label in its scope (C11 6.8.1p3)");
@@ -463,10 +497,6 @@ let as_function state parse =
   refuse_undefined_jump state labels;
   state.labels <- saved;
   result
-
-let quoted spelling =
-  if String.length spelling <= max_quoted_spelling then "`" ^ spelling ^ "`"
-  else "`" ^ String.sub spelling 0 max_quoted_spelling ^ "...`"
 
 (* Whether the token [index] of [Reader.t.tokens] is Type-C text. *)
 let is_type_c_text_at state index =
@@ -701,12 +731,6 @@ let refuse_pragma_before_defer state ~keyword =
               lowering removes, so the pragma would apply to the \
               statement after it; put a `;` between them")
     | Identifier _ | Number | Character _ | String _ | Punctuator _ -> ()
-
-(* A construct that a later work package implements, at the cursor. *)
-let fail_not_implemented state ~package text =
-  fail state
-    (Rule.message Not_implemented
-       (Printf.sprintf "%s (work package %s)" text package))
 
 let found state =
   match peek state with
@@ -995,15 +1019,6 @@ let end_definition state (name : identifier) (declared : declared)
         declaration = In_tree declared.id;
         kind = declared_type ~parameters Defined;
       }
-
-(* A name that no scope declares may be one of the universe scope that
-   typec does not implement yet. *)
-let refuse_universe_name state name =
-  match Universe.find name with
-  | Some { meaning = Not_implemented { package }; _ } ->
-      fail_not_implemented state ~package
-        (quoted name ^ " is a universe name that typec does not implement yet")
-  | Some { meaning = Generic; _ } | None -> ()
 
 (* At a defer statement that stands in [where], which is no block item of
    a compound statement or a match arm in a function body. *)
@@ -1311,6 +1326,8 @@ module Deferred = struct
     | Try { operand; scope = _ } ->
         expression operand
     | Sizeof_type name | Alignof name -> type_name name
+    | Slice_operation operation ->
+        List.iter expression (Tree.slice_operands operation)
     | Generic { controlling; associations } ->
         expression controlling;
         List.iter generic_association associations
@@ -1455,7 +1472,6 @@ let resolve state name =
       if begins_try state then invalid_arg "Parser: a try read as a name";
       (* A defer statement begins a block item, never an operand. *)
       if begins_defer state then fail_expected state "an expression";
-      refuse_universe_name state name;
       Undeclared
 
 (* Whether the innermost scope is file scope in the C that the text
@@ -2523,6 +2539,7 @@ let is_unary_expression expression =
       false
   | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
   | Generic _ | Compound_literal _ | Qualified_constructor _ | Subscript _
+  | Slice_operation _
   | Call _ | Instance _ | Member _ | Pointer_member _ | Post_increment _
   | Post_decrement _ | Unary _
   | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Alignof_expression _
@@ -3084,16 +3101,8 @@ and type_arguments state name ~at ~parameters =
             count));
   arguments
 
-(* Where a declaration must begin and does not. A universe name there may
-   be a type that typec does not implement yet, which the error says. *)
-and refuse_declaration state =
-  (match peek state with
-  | Identifier_token name when visible state name = None ->
-      refuse_universe_name state name
-  | Identifier_token _ | Keyword_token _ | Punctuator_token _ | Number_token
-  | Character_token _ | String_token _ | End_of_input ->
-      ());
-  fail_expected state "a declaration"
+(* Where a declaration must begin and does not. *)
+and refuse_declaration state = fail_expected state "a declaration"
 
 (* After the [typeof]. *)
 and typeof_specifier state =
@@ -3826,12 +3835,52 @@ and arguments state =
     in
     loop []
 
-(* At an identifier where an expression begins. *)
+(* At an identifier where an expression begins: an operator of section
+   8 where its universe name is not hidden, and otherwise a name. *)
 and name_operand state name =
   let start = state.position in
-  let resolution = resolve state name in
-  advance state;
-  finish state start (Identifier { name; resolution })
+  match (visible state name, Universe.find name) with
+  | None, Some { meaning = Slice_operator operator; _ } ->
+      take_statement_view state;
+      advance state;
+      let operation = slice_operation state name operator in
+      finish state start (Slice_operation operation)
+  | _ ->
+      let resolution = resolve state name in
+      advance state;
+      finish state start (Identifier { name; resolution })
+
+(* After the name of an operator of section 8, its parenthesized
+   operands, as many as the operator takes. *)
+and slice_operation state name (operator : Universe.slice_operator) =
+  let after = "after an operand of " ^ quoted name in
+  expect state P.Left_paren ("`(` after " ^ quoted name);
+  let operand ~last =
+    let value = assignment_expression state in
+    if last then expect state P.Right_paren ("`)` " ^ after)
+    else expect state P.Comma ("`,` " ^ after);
+    value
+  in
+  match operator with
+  | From_array -> Slice_from_array
+        (array_operand state (fun () -> operand ~last:true))
+  | Sub ->
+      let slice = operand ~last:false in
+      let low = operand ~last:false in
+      Slice_sub { slice; low; high = operand ~last:true }
+  | Unchecked ->
+      let pointer = operand ~last:false in
+      Slice_unchecked { pointer; count = operand ~last:true }
+
+(* [read] of the operand of a [slice_from_array], with the labels it
+   may define (refuse_label_in_array_operand). *)
+and array_operand state read =
+  let saved = state.array_operand in
+  state.array_operand <-
+    Option.map
+      (fun around -> { around; first = first_token state state.position })
+      state.labels;
+  Fun.protect ~finally:(fun () -> state.array_operand <- saved) read
 
 (* At a typedef name where an expression begins, which C's grammar has
    not taken as beginning a type name. In Type-C text it is the variant
@@ -5201,6 +5250,7 @@ let parse_with_scopes ~keywords reader =
       jumps = Function_body;
       arm = None;
       labels = None;
+      array_operand = None;
       generic = None;
       parameter_depth = None;
       names_generic_function = false;

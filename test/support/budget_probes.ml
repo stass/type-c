@@ -95,3 +95,28 @@ let long_variant ~length count =
   lines
     [ Printf.sprintf "type %s = %s;" ("v" ^ String.make (length - 1) 'x')
         constructors ]
+
+(* A defer of a call with a string literal of [length] bytes, which
+   makes a [str], and [count] returns, each of which runs a copy of
+   it. *)
+let string_defer_by_exits ~length count =
+  let step n = Printf.sprintf "  if (c == %d) return;" n in
+  lines
+    ([ "void use(str s);"; "void f(int c) {";
+       Printf.sprintf "  defer use(\"%s\");" (String.make length 'a') ]
+    @ List.init count step
+    @ [ "}" ])
+
+(* [depth] operands of [slice_from_array] nested in one another, each
+   of which lowering writes twice, the second time under [sizeof]. *)
+let nested_array_operands depth =
+  let rec operand depth =
+    if depth = 0 then "a"
+    else
+      Printf.sprintf "*({ (void)slice_from_array(%s); &a; })"
+        (operand (depth - 1))
+  in
+  lines
+    [ "int a[3];";
+      Printf.sprintf "long f(void) { return (long)slice_from_array(%s).len; }"
+        (operand depth) ]

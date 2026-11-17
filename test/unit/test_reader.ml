@@ -613,6 +613,10 @@ let universe_places =
   universe_line 1 "type option ( T ) = | None | Some ( T value ) ;"
   @ universe_line 2
       "type result ( T , E ) = | Err ( E error ) | Ok ( T value ) ;"
+  @ universe_line 3
+      "type slice ( T ) = struct { T * data ; __typeof__ ( sizeof 0 ) len ; } \
+       ;"
+  @ universe_line 4 "type str = slice ( const char ) ;"
 
 let universe_token_count = List.length universe_places
 

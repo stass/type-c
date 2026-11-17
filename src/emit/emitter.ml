@@ -75,21 +75,53 @@ let token output index =
   else None
 
 (* The bytes of typec's own text: those of identifiers, UTF-8 included,
-   the blank, and the punctuators of C but for '#', '%', '?', '/' and
-   '\\'. They spell no directive ('#', '%:', '??='), line splice,
-   comment, line break or string literal, so no pragma line either, as
-   the _Pragma operator takes a string literal (C11 6.10.9). *)
+   the blank, and the punctuators of C but for '#', '%' and '\\', with
+   a '?' or a '/' only between two other bytes ({!check_own_text}). They
+   spell no directive ('#', '%:', '??='), line splice, comment, line
+   break or string literal, so no pragma line either, as the _Pragma
+   operator takes a string literal (C11 6.10.9). *)
 let is_plain_byte = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '$' | ' ' -> true
   | '(' | ')' | '[' | ']' | '{' | '}' | ';' | ',' | '.' | ':' -> true
   | '=' | '*' | '&' | '!' | '<' | '>' | '-' | '+' | '|' | '~' | '^' -> true
+  | '?' | '/' -> true
   | byte -> Char.code byte >= 0x80
+
+(* A '?' that no other '?' can follow or precede, in this text or
+   next to it, starts no trigraph. *)
+let is_trigraph_free text =
+  let last = String.length text - 1 in
+  let lone index =
+    text.[index] <> '?'
+    || (index > 0 && index < last && text.[index - 1] <> '?'
+       && text.[index + 1] <> '?')
+  in
+  List.for_all lone (List.init (last + 1) Fun.id)
+
+(* A '/' inside the text with neither '/' nor '*' beside it, as the
+   division of the length of a slice (design 13.5) has, starts and ends
+   no comment, in this text or next to it. *)
+let is_comment_free text =
+  let last = String.length text - 1 in
+  let beside_slash index =
+    match text.[index] with '/' | '*' -> false | _ -> true
+  in
+  let lone index =
+    text.[index] <> '/'
+    || (index > 0 && index < last
+       && beside_slash (index - 1) && beside_slash (index + 1))
+  in
+  List.for_all lone (List.init (last + 1) Fun.id)
 
 (* typec's own text stands on the line of its location and holds no
    pragma line, so a '#pragma pack' never escapes the probe that a
    bracket brings (design 10.3), inside a bracket or out of one. *)
 let check_own_text ~caller text =
-  if not (String.for_all is_plain_byte text) then
+  let trigraph_free = is_trigraph_free text in
+  let comment_free = is_comment_free text in
+  if
+    not (String.for_all is_plain_byte text && trigraph_free && comment_free)
+  then
     invalid_arg
       (Printf.sprintf "%s: %S holds a byte that typec's text never does"
          caller text)
@@ -129,10 +161,19 @@ let moved_token output index =
   | kind when Token.is_movable kind -> Some (Piece (own_piece output index))
   | _ -> None
 
+type moved_pieces = moved_piece list
+
+let copied output pieces =
+  let copy = function
+    | Piece piece -> Piece (made_piece output piece)
+    | Pragma_line { line } -> Pragma_line { line = made_piece output line }
+  in
+  List.map copy pieces
+
 type text =
   | Code of { location : Location.t; code : string }
   | Bracketed of { location : Location.t; pieces : piece list }
-  | Moved of moved_piece list
+  | Moved of moved_pieces
 
 type edit = { range : Reader.range; text : text; owner : int }
 

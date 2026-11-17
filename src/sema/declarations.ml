@@ -216,7 +216,12 @@ type state = {
   incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
       (* the structure of each [type N;], which its variant completes *)
   generics : (string, generic) Hashtbl.t;
+  universe_aliases : (Tree.reference, Tree.type_name) Hashtbl.t;
+      (* the type that each non-generic type declaration of the universe
+         text names, as [str] names [slice(const char)] *)
   mutable applied_at : Tree.span Ctype.Instances.t;
+  mutable slice_generic : Tree.type_declaration option;
+      (** the universe generic [slice] (design section 8), once read *)
   mutable nesting : nesting option;
   mutable instance_bytes : int;
   mutable external_facts : external_facts;
@@ -1599,16 +1604,37 @@ and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
   | Application { name; generic = _; arguments } ->
       applied_type state own name arguments
   | Typedef_name { name; declaration } -> (
-      match entity_used state span name declaration with
-      | Some { declared = Typedef { typedef_type; _ }; _ } ->
-          note_parameter_use state own declaration;
-          typedef_type
-      | Some _ | None ->
-          fail state span (Rule.c_text (quote name ^ " is not a typedef name")))
+      match Hashtbl.find_opt state.universe_aliases declaration with
+      | Some alias -> universe_alias state own alias
+      | None -> typedef_type state span ~own name declaration)
+
+(* A universe alias, [str], read at its use as the application that it
+   names: the universe text is not emitted (design 3.6), so lowering
+   writes the name of the instance for the typedef name. *)
+and universe_alias state span (alias : Tree.type_name) =
+  match alias.node with
+  | {
+   specifier_qualifiers =
+     [
+       { node = Type_specifier (Application { name; generic = _; arguments });
+         _ };
+     ];
+   abstract = None;
+  } ->
+      applied_type state span name arguments
+  | _ -> invalid_arg "Declarations.universe_alias"
+
+and typedef_type state span ~own name declaration =
+  match entity_used state span name declaration with
+  | Some { declared = Typedef { typedef_type; _ }; _ } ->
+      note_parameter_use state own declaration;
+      typedef_type
+  | Some _ | None ->
+      fail state span (Rule.c_text (quote name ^ " is not a typedef name"))
 
 (* GNU [typeof] of an expression is its type, unconverted. *)
 and typeof_expression state expression =
-  let typed = Expressions.whole_value (typing state) expression in
+  let typed = Expressions.typeof_value (typing state) expression in
   Expressions.refuse_instance_name (typing state) expression;
   typed.expression_type
 
@@ -2991,6 +3017,17 @@ and applied_again state span (generic : Spelling.type_name) types =
   let instance = instance_of state declaration arguments in
   application state span declaration instance arguments
 
+(* The instance of the universe [slice] of section 8 over [element],
+   which a [slice_from_array] or a [slice_unchecked] at [span] yields:
+   an application that no name writes. *)
+and slice_instance state span element =
+  match state.slice_generic with
+  | Some declaration ->
+      let arguments = [ (span, element) ] in
+      let instance = instance_of state declaration arguments in
+      application state span declaration instance arguments
+  | None -> invalid_arg "Declarations.slice_instance: no universe slice"
+
 (* Design 3.5 rule 2: an inexact argument, refused from its text, as
    its type, which encodes it, holds no attribute, while the backend's
    type of the same text may hold one. *)
@@ -3648,6 +3685,7 @@ and typing state : Expressions.context =
       (fun declaration -> ignore (read_type_declaration state declaration));
     binding = bind_binding state;
     needs_complete = needs_complete state;
+    slice_instance = slice_instance state;
     block_literal = (fun () -> note_block_literal state);
     subjectless =
       (fun attributes ->
@@ -3658,6 +3696,7 @@ and typing state : Expressions.context =
       (fun span read ->
         let (), found = finding state span read in
         Hashtbl.replace state.read_moved span found);
+    array_operand = type_array_operand state;
     label_address =
       (fun { name; label } ->
         note_use state name.span name.node (Resolution.Label label));
@@ -3685,6 +3724,24 @@ and type_moved_operand state (views : Parser.try_views) ~scope operand
       typedef_names = []; tags = [] }
   in
   check_moved state text ~at:(Some place);
+  typed
+
+(* The operand at [operand] of the [slice_from_array] at [whole], typed
+   with [read], and then the third clause of the resolution property
+   (design 13.5) on it: lowering writes it again, at its own place, as
+   the operand of a [sizeof] (section 8 rule 2). *)
+and type_array_operand state ~whole operand read =
+  let typed, found = finding state operand read in
+  let own : Parser.statement_view = statement_view state whole.Tree.first in
+  let text =
+    { Resolution.kind = Array_operand;
+      span = operand;
+      scope = own.depth;
+      own_place = own.view;
+      uses = List.rev found.uses;
+      declares = List.rev found.declares }
+  in
+  check_moved state text ~at:None;
   typed
 
 (* Design 6 rules 8 and 12, once the body is read: the statement of
@@ -4090,10 +4147,8 @@ let read_generic_function state (generic : Tree.generic_function) =
   refuse_variable_parameters state span reference;
   Generic_function_declaration
 
-let read_external state ((item : Tree.external_declaration Tree.item), view) =
-  state.external_facts <-
-    declaration_state state.tags (Some (texts_anchor item)) view;
-  match item.declaration with
+let read_external_declaration state (declaration : Tree.external_declaration) =
+  match declaration with
   | External_declaration declaration -> read_declaration state declaration
   | Function_definition definition -> read_function_definition state definition
   | Type_declaration declaration -> (
@@ -4104,15 +4159,28 @@ let read_external state ((item : Tree.external_declaration Tree.item), view) =
   | Generic_function generic -> read_generic_function state generic
   | Top_level_asm _ | Empty_declaration _ -> Declaration []
 
+let read_external state ((item : Tree.external_declaration Tree.item), view) =
+  state.external_facts <-
+    declaration_state state.tags (Some (texts_anchor item)) view;
+  let read = read_external_declaration state item.declaration in
+  Expressions.refuse_untested_outside (typing state);
+  read
+
 (* A generic of the universe text (design 3.6), which the emitted C does
    not hold: it is no type declaration that lowering replaces. Only its
    definition check, a trial that discards its texts, places a text at
    its anchor, so every text of an instance stands in the unit's own. *)
 let read_universe_generic state
     ((item : Tree.scoped_type_declaration Tree.item), view) =
-  let anchor = Some (Tree.universe_anchor item) in
-  state.external_facts <- declaration_state state.tags anchor view;
-  read_generic state item.declaration
+  match item.declaration.declaration.node with
+  | { type_parameters = []; definition = Alias alias; declared; _ } ->
+      Hashtbl.replace state.universe_aliases (Tree.In_tree declared.id) alias
+  | { name; _ } ->
+      let anchor = Some (Tree.universe_anchor item) in
+      state.external_facts <- declaration_state state.tags anchor view;
+      read_generic state item.declaration;
+      if (name.node :> string) = Ctype.universe_slice then
+        state.slice_generic <- Some item.declaration.declaration
 
 (* The location that GCC gives a name declared before the first token,
    which a diagnostic that depends on a builtin type cites. *)
@@ -4187,7 +4255,9 @@ let read target text (scopes : Parser.scopes) =
       type_declarations = Hashtbl.create 16;
       incomplete_variants = Hashtbl.create 16;
       generics = Hashtbl.create 16;
+      universe_aliases = Hashtbl.create 1;
       applied_at = Ctype.Instances.empty;
+      slice_generic = None;
       instance_bytes = 0;
       nesting = None;
       external_facts = declaration_state tags None Parser.View.empty;

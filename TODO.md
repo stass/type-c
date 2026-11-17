@@ -954,11 +954,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   the reader, with the variant's scope, and `Tree_dump` repeats the
   rule. Record each constructor's declaration in the tree where the
   parser claims it, and read it in both.
-- [Low] Design 3.5's example `type named(T) = struct { str name; T
-  value; }; int str; named(int) n;` is valid, but the parser reads
-  `str` as an ordinary identifier until package 3.4 gives it its
-  meaning. Add it to `generic_resolution` in `test_declarations.ml`
-  then.
 
 - [Medium] The needs of a type complete (design 10.3) are calls of
   `Declarations.needs_complete` at each construct of the list, so a
@@ -1344,13 +1339,15 @@ types (design 13.3).
   section. Make design 2.2 the one list of the exceptions to the
   superset property, each pointing at the section that states it, and
   have the README link to it instead of keeping its own list.
-- [Medium] C text keeps C's meaning for a universe generic at three
+- [Medium] C text keeps C's meaning for a universe name at three
   grammar sites (`opens_nested_declarator`, `parameters`,
-  `identifier_list` in the parser), and package 3.4 would repeat them for
-  the slice names. As a bare generic is always an error (design 3.5
-  rule 1), a universe generic in C text could begin a type only before
-  `(`, decided in the one predicate behind `starts_declaration` and
-  `is_typedef_name`, which would cover every C position at once. Owner
+  `identifier_list` in the parser), which serve `slice` and `str` as
+  well, since the universe text declares them. As a bare generic is
+  always an error (design 3.5 rule 1), a universe generic in C text
+  could begin a type only before `(`, decided in the one predicate
+  behind `starts_declaration` and `is_typedef_name`, which would cover
+  every C position at once; `str`, the one universe type that is no
+  generic, would keep the three sites or need a rule of its own. Owner
   decision: it changes the wording of design 2.2 and 2.3.
 - [Medium] The tests rebuild where the universe tokens end, which the
   reader alone knows: `Spans.read_bytes` puts `File.universe_text` in
@@ -1359,14 +1356,6 @@ types (design 13.3).
   own token, the bytes the tokens index) would make them read the one
   fact instead.
 
-- [Medium] When package 3.4 makes its universe names typedef names to
-  the parser, each gets design 2.3's exception to C11 6.7.6.3p11 (a
-  universe name in a parenthesised parameter declarator is the
-  parameter) and 2.2's old-style case (an error in Type-C text, the
-  parameter in C text's identifier list) with a test, as the universe
-  generics have them where the parser declares them from the universe
-  text; until then `Universe` leaves those names ordinary identifiers to
-  the grammar.
 - [Medium] Distinct types, owner decision taken by default (design
   3.4): Type-C or C text is decided by the first token of the
   operation, for an implicit conversion by that of the converted
@@ -1535,14 +1524,13 @@ types (design 13.3).
   place leaves as the chain of its scopes, linear in the source, and
   make each copy as the place is lowered, so that the limit bounds the
   pairs by construction.
-- [Medium] The output limit charges each piece where it is made, so a
+- [Low] The output limit charges each piece where it is made, so a
   piece that lowering puts into two edits is written twice and
-  charged once; no current path does (`moved_text` reuses the pieces
-  of a `Moved` edit only where that edit goes, and `base` holds only
-  `Code` edits), but nothing enforces it. Hide the payloads of
-  `Emitter.text` behind a function that charges the pieces again where
-  they move, or charge the edits that `limited` returns once more,
-  exactly.
+  charged once. A `Moved` edit's pieces are read only through
+  `Emitter.copied`, which charges them again, but a piece list that
+  lowering holds itself could still be passed to two edits; no path
+  does. Charging the edits that `limited` returns once more, exactly,
+  would close it.
 - [Medium] `Emitter.joined` holds a text built from a list to the
   limit only where lowering calls it (the enumerators, the case labels
   and the bindings); a text built per item by hand escapes it until
@@ -1761,6 +1749,51 @@ types (design 13.3).
   the lowered forms for such values and state one rule of that shape
   for all of them in section 14, with rule 10 of section 8 as its case
   for slices.
+- [High] Package 3.3: the body of a generic function is typed in the
+  unit's own typed view (`Declarations.read_generic_function`), so the
+  slice checks and makings that it records (`Expressions.slice_checks`,
+  `slice_makings`) would be lowered into the unit's text once generic
+  functions stop being refused (`not-implemented`). When 3.3 writes
+  instances, type each body in views of its own, as `in_own_views`
+  does for a generic type, and drop the definition's records.
+- [Medium] Typing takes a compound literal that a constructor or a
+  slice making writes for a constant wherever its operands are, but C
+  takes it for one only as the braced initialiser of a whole object
+  (design 13.5). At file scope `int *p = slice_from_array(a).data;`,
+  `slice(int) g = 1 ? slice_from_array(a) : slice_from_array(b);`,
+  `str s = 1 ? "a" : "bc";` and `e x = 1 ? A(1) : B(2);` pass `typec`
+  and GCC 16 refuses each under `-pedantic-errors` ("initializer
+  element is not constant"). Make such a value constant in one place,
+  only where it initialises a whole object, and make the sentences of
+  section 8 rules 5 and 6 that say these makings "stand at file scope"
+  say so.
+- [Medium] Constructions (`Sites.construction`, `Sites.brace`) and
+  slice makings (`Expressions.slice_makings`) are two models of one
+  concept, a value lowered to its braced list where it initialises a
+  whole object: each has its own `braced` span, table and brace step,
+  `initialises_whole` matches a pair of lookups, and a making's record
+  has three writers (`made_slice`, `convert_slice`, `initialises_whole`)
+  whose result rests on the conversion running before the brace step.
+  Give both one record, with the instance decided once, when it is
+  typed.
+- [Low] Slice lowering, loose ends: `slice-check-place` names "an index
+  of a slice or a `slice_sub`" for a conversion outside a function body
+  (`void g(int a[take(m)]);`), and section 8 rule 9 does not name
+  conversions; `slice_check` and `check` name conversions, which test
+  nothing; `Lowering.by_body` groups consecutive runs only, which is
+  right only while bodies never interleave (`unsupported`);
+  `Expressions.slice_checks` maps an evaluated check outside a body to
+  `Untested` instead of failing; the untested trap is spelled three
+  times in `untested` and the temporary names `__tc_s%d`, `__tc_i%d` in
+  four functions; `convert_slice` decides, re-targets a making and
+  records a check in one match; `slice_of` hides a `needs_complete`;
+  `read_universe_generic` also reads `str`; `state.slice_generic`
+  repeats the `generics` entry of `slice`.
+- [Low] `slice_sub` of an empty slice whose `data` is null, which
+  section 8 rule 7 allows, lowers to `NULL + 0`, undefined in C11
+  (6.5.6p8); neither backend's UBSan reports it. Decide whether the
+  lowering avoids the addition at `lo == 0` or the design forbids a
+  null `data`.
 - [Low] `slice_from_array(a).len` is a member of a compound literal
   and no constant expression (design section 8 rule 2, 13.5). An
   array of that size, `char b[slice_from_array(a).len];`, is a

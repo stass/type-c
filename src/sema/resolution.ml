@@ -21,6 +21,7 @@ type kind =
   | Try_operand
   | Deferred_statement
   | Return_operand
+  | Array_operand
 
 type text = {
   kind : kind;
@@ -99,6 +100,7 @@ let kind_rule : kind -> Rule.t = function
   | Try_operand -> Try_moved_operand
   | Deferred_statement -> Deferred_moved
   | Return_operand -> Return_operand_moved
+  | Array_operand -> Array_operand_moved
 
 (* The one failure path: [run] of the clauses, with the failure made a
    diagnostic under the name of [kind], or under the one name of a
@@ -218,12 +220,21 @@ let check_scope text (own : own) =
       | Label _ -> "the label " ^ quote own.declared.name
       | Ordinary _ -> quote own.declared.name
     in
+    let written =
+      match text.kind with
+      | Array_operand ->
+          "which lowering writes again as the operand of `sizeof`, where \
+           it would declare it a second time"
+      | Generic_definition | Try_operand | Deferred_statement
+      | Return_operand ->
+          "which lowering writes elsewhere or in a block of its own, so \
+           the text after it would lose the declaration"
+    in
     refuse own.declared.span
       (Printf.sprintf
-         "%s is declared in the scope around the text, which lowering \
-          writes elsewhere or in a block of its own, so the text after \
-          it would lose the declaration; declare it before the text"
-         named)
+         "%s is declared in the scope around the text, %s; declare it \
+          before the text"
+         named written)
 
 (* The third clause on a declaration with linkage, in any scope of the
    text: it declares an entity that the text around it sees, so what it
@@ -610,11 +621,12 @@ let check_reading context text place =
       (check_completion context text place)
       (within window context.completed)
 
-(* Lowering writes the operand of a return at its own place, so what it
+(* Lowering writes the operand of a return, and the second writing of
+   the operand of a [slice_from_array], at its own place, so what it
    declares with linkage reaches no other text (design 13.5). *)
 let moves = function
   | Generic_definition | Try_operand | Deferred_statement -> true
-  | Return_operand -> false
+  | Return_operand | Array_operand -> false
 
 let check context text ~at =
   checking text.kind (fun () ->

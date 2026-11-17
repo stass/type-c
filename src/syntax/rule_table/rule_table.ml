@@ -582,6 +582,35 @@ let rows =
       meaning =
         "An explicit instance of a generic function with a number of \
          type arguments other than the number of its type parameters." };
+    Live { constructor = "Slice_index"; name = "slice-index";
+      clause = "design 8 rules 1, 3 and 4";
+      meaning =
+        "An index of a slice, a bound of a [slice_sub] or the count of a \
+         [slice_unchecked], whose type is no integer type, or an integer \
+         type wider than [size_t]." };
+    Live { constructor = "Slice_test_place"; name = "slice-check-place";
+      clause = "design 8 rule 9";
+      meaning =
+        "An index of a slice, a [slice_sub] or a conversion of a slice \
+         that C evaluates outside a function body, where no function \
+         declares the temporaries of its test." };
+    Live { constructor = "Slice_operand"; name = "slice-operand";
+      clause = "design 8 rules 2 to 4";
+      meaning =
+        "An operand of [slice_from_array], [slice_sub] or \
+         [slice_unchecked] that the operator does not take: a first \
+         operand of [slice_sub] of no slice type, an operand of \
+         [slice_from_array] that is no lvalue of a complete array type \
+         that is not variably modified or that holds a pragma line, or \
+         a pointer operand of [slice_unchecked] of no pointer type." };
+    Live { constructor = "Array_operand_moved";
+      name = "array-operand-name-capture";
+      clause = "design 8 rule 2, 13.5";
+      meaning =
+        "The operand of a [slice_from_array], which lowering writes a \
+         second time as the operand of [sizeof], where it declares a tag \
+         or an enumeration constant in the scope around it, or defines a \
+         label whose scope reaches beyond it." };
   ]
 
 let () =
