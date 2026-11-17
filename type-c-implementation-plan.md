@@ -285,10 +285,10 @@ record of what it found.
 | --- | --- |
 | 3.1 | Generic function declarations: opaque type parameters and body checking. |
 | 3.2 | Calls: deduction and explicit instances. |
-| 3.3 | Instantiation and emission: per-unit instances, typedef substitution, recursion limit, and rule 8 of design 3.5 for function definitions (P23). |
+| 3.3 | Instantiation and emission: per-unit instances, typedef substitution, the nesting limit and the instance budget of design 3.5 rule 7, and rule 8 of design 3.5 for function definitions (P23). |
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
-| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches when its evaluation is resumed after its function has evaluated it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
+| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The tokens that each unit of the library and of the pilot counts for its instances, against the instance budget of design 3.5 rule 7 (P30). The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches when its evaluation is resumed after its function has evaluated it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
 
 **Exit gate**
 
@@ -349,7 +349,7 @@ record of what it found.
      with an index out of range at the second return, traps.
 4. The measurements of 3.6 are written up.
 
-**Decided at the gate:** P11 to P14, P23, P27, P28, and whether the
+**Decided at the gate:** P11 to P14, P23, P27, P28, P30, and whether the
 measured cost of function-pointer operations is evidence for constraints
 (design section 12). **Release 0.3.**
 

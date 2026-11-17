@@ -1490,7 +1490,53 @@ types (design 13.3).
     `_Static_assert(__builtin_strlen(__func__) == 1, "length");` and
     `static const char *name = __func__;` are refused as constants
     that depend; the same body without `generic` stands.
+  - The place before an ellipsis (rule 6). Where the parameter list
+    of a generic function ends in an ellipsis, the head is refused if
+    its last named parameter has the type of a type parameter, read
+    from the type and not from its spelling. This is a security item:
+    `va_start` on that parameter is undefined in the instance for
+    `char`, which a call deduces. Pairs: `generic(T) int f(T last,
+    ...);` is refused, as it is with `const T last`, `_Atomic(T)
+    last`, `__typeof__(T) last` and, with `type same(T) = T;`,
+    `same(T) last`; `T *last`, `T last[4]`, `vector(T) last`,
+    `T first, int count, ...` and `void (*log)(T last, ...), ...`
+    stand, as does `int f(char last, ...)` without `generic`. The
+    reason is tested on the backend: C text of the instance for
+    `char` of the refused head, with `va_start(ap, last)` in its
+    body, draws `-Wvarargs` from Apple Clang, and the same text with
+    `int count` before the ellipsis draws nothing.
   - Attributes: the item on the rule of 13.3 under "Declarations".
+- [High] The instance budget (design 3.5 rule 7), a security item: a
+  source of a few lines must not make `typec` read without bound.
+  - `Declarations.max_instance_tokens` is 524288, a value taken for
+    type instances alone. The design gives 4194304 for types and
+    functions together (P30); change the value and the comment that
+    argues for it.
+  - `fail_instances` names the instance and not the application or
+    call that began the chain, as `fail_nesting` does and the design
+    asks: `type g0(T) = struct { T v; };`, then `type gN(T) = struct
+    { gM(T *) a; gM(const T *) b; };` for 24 more, is reported at
+    the application in the definition of `g1` alone.
+  - Package 3.3: reading the definition of a generic function for an
+    instance counts on the same count, through the one function that
+    counts a type's (`in_instance`), so that no reading goes
+    uncounted.
+  - Regression for package 3.3, the shallow branching chain: the
+    generic functions `g0` to `g24`, each `generic(T) void gN(T *p)
+    { const T *q = p; gM(&p); gM(&q); }` and the last with an empty
+    body, and one use `g0(&x)`. No chain holds more than 25
+    instances, so the nesting limit does not refuse it. It is
+    refused with the message of the budget, which names an instance
+    and cites the use, within a time bound, and no lowered text is
+    written. Partner: the chain of 10 functions compiles and runs,
+    and the lowered text holds its 1023 instances. With the count
+    of function instances left out, the chain of 25 does not end
+    within the bound, which is what shows that the test meets the
+    count. `doubling_instances` in `test_declarations.ml` is the
+    same chain over generic types; it runs to the budget, so see
+    what the larger value costs it.
+  - Package 3.6 measures the tokens that each unit of the container
+    library and of the pilot counts (P30).
 - [Medium] Generic functions, from the review of package 3.1:
   attributes inside the declarator of a generic prototype
   (`void (__attribute__((cold)) f)(T);`) pass rule 6, which wants one
