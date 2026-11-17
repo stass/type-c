@@ -9,4 +9,4 @@
    compile. *)
 
 let edit range ~location : Emitter.edit =
-  { range; text = Bracketed { location; pieces = [] } }
+  { range; text = Bracketed { location; texts = [] } }

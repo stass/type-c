@@ -233,3 +233,81 @@ declarations reach the header alike.
   int a ;
   #include <stddef.h>
   size_t b ;
+
+Two headers that name one instance each write its declaration and its
+definition, the definition under the instance's guard and the probe of
+the packing brackets under names of the header, so a client includes
+them together, in either order and twice. A client's macros of the
+names of the instances and of the typedef of their argument do not reach
+the text, and the client finds the layout that a Type-C unit finds.
+
+  $ cat > vec.tci <<'EOF'
+  > #ifndef VEC_TCI
+  > #define VEC_TCI
+  > type vec(T) = struct { T *data; int len; int cap; };
+  > type link(T) = struct { link(T) *next; T v; };
+  > #endif
+  > EOF
+  $ cat > left.tci <<'EOF'
+  > #ifndef LEFT_TCI
+  > #define LEFT_TCI
+  > #include "vec.tci"
+  > struct left { vec(int) v; char tag; };
+  > void left_take(link(int) *l);
+  > #endif
+  > EOF
+  $ cat > right.tci <<'EOF'
+  > #ifndef RIGHT_TCI
+  > #define RIGHT_TCI
+  > #include "vec.tci"
+  > struct right { char tag; vec(int) v; };
+  > void right_take(link(int) *l);
+  > #endif
+  > EOF
+  $ for name in vec left right; do typec --emit-c-header $name.tci; done
+  $ grep '__tc_instance__\|__tc_pack_probe_.*{' left.h
+  #ifndef __tc_instance__vec__i
+  #define __tc_instance__vec__i
+  struct __tc_pack_probe_1__left { char c ; int i ; } ;
+  struct __tc_pack_probe_2__left { char c ; int i ; } ;
+  $ cat > layout.tc <<'EOF'
+  > #include <stddef.h>
+  > #include "left.h"
+  > #include "right.h"
+  > const size_t layout[] = {
+  >   sizeof(vec(int)), offsetof(vec(int), cap),
+  >   sizeof(struct left), offsetof(struct right, v),
+  > };
+  > EOF
+  $ cat > pair.c <<'EOF'
+  > #include <stddef.h>
+  > #include <stdio.h>
+  > #include FIRST
+  > #include SECOND
+  > #include FIRST
+  > #include SECOND
+  > extern const size_t layout[4];
+  > int main(void) {
+  >   const size_t mine[] = {
+  >     sizeof(((struct left *)0)->v),
+  >     offsetof(struct left, v.cap) - offsetof(struct left, v),
+  >     sizeof(struct left), offsetof(struct right, v),
+  >   };
+  >   int i;
+  >   for (i = 0; i < 4; i++)
+  >     if (mine[i] != layout[i])
+  >       printf("layout %d: %zu, not %zu\n", i, mine[i], layout[i]);
+  >   return 0;
+  > }
+  > EOF
+  $ hostile="-Dvec__i=int -D__tc_arg__i=char -Dlink__i=int"
+  $ typec -c layout.tc
+  $ for cc in "$clang" "$gcc"; do
+  >   for std in c11 gnu17; do
+  >     for order in '"left.h" "right.h"' '"right.h" "left.h"'; do
+  >       set -- $order
+  >       "$cc" -std=$std $strict $hostile -DFIRST="$1" -DSECOND="$2" \
+  >         pair.c layout.o -o pair && ./pair || echo "failed: $cc $std"
+  >     done
+  >   done
+  > done

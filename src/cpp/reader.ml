@@ -22,7 +22,14 @@ type include_line = {
   location : Location.t;
 }
 
-type own_part = Include_line of include_line | Own_token of Token.t
+type guard_line =
+  | If_not_defined of { name : string; location : Location.t }
+  | End_if of Location.t
+
+type own_part =
+  | Include_line of include_line
+  | Guard_line of guard_line
+  | Own_token of Token.t
 
 type interface = {
   unit : t;
@@ -698,10 +705,36 @@ let read_include_line state ~hash directive =
   in
   state.own_text <- Include_line line :: state.own_text
 
+(* The lines of the guard of an instance's definition in the lowered
+   text of an interface are read exactly, as lowering writes them: the
+   directive right after the '#' of the first column, then one space and
+   a name for [#ifndef], then the end of the line. *)
+let read_guard_line state ~hash directive read_rest =
+  let malformed () =
+    fail state (Printf.sprintf "malformed #%s line" directive)
+  in
+  if state.pos <> hash + 1 + String.length directive then malformed ();
+  let line = read_rest ~malformed state.presumed in
+  if state.pos <> line_end state then malformed ();
+  state.own_text <- Guard_line line :: state.own_text
+
+let read_if_not_defined_line state ~hash =
+  read_guard_line state ~hash "ifndef" (fun ~malformed location ->
+      if peek state 0 <> Some ' ' then malformed ();
+      advance state 1;
+      if not (starts_identifier state) then malformed ();
+      If_not_defined { name = scan_name state; location })
+
+let read_end_if_line state ~hash =
+  read_guard_line state ~hash "endif" (fun ~malformed:_ location ->
+      End_if location)
+
 (* In the text of an interface whose header is written, an include line
    is read and every other directive that no unit reads is refused,
    since the header carries none; deeper text reaches no header, and its
-   lines are passed over (design 9.3). *)
+   lines are passed over (design 9.3). An [#ifndef] or [#endif] line is
+   read as a line of the guard of an instance, which the lowered text
+   holds and the header refuses in the step's output. *)
 let read_other_directive state ~hash name =
   if not state.interface then
     fail state (Printf.sprintf "unsupported directive #%s" name)
@@ -710,6 +743,8 @@ let read_other_directive state ~hash name =
     match name with
     | "include" | "include_next" | "import" ->
         read_include_line state ~hash name
+    | "ifndef" -> read_if_not_defined_line state ~hash
+    | "endif" -> read_end_if_line state ~hash
     | _ ->
         fail state
           (Printf.sprintf

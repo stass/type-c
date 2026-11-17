@@ -69,6 +69,9 @@ val argument_name : string -> string
 (** The typedef that an instance names the argument of this encoding
     through (design 10.3), as in [__tc_arg__Pi] for [int *]. *)
 
+val instance_c_name : Ctype.instance -> Typec_syntax.Spelling.c_name
+(** {!instance_name}, as the checked name that a guard is made from. *)
+
 val local_name : string -> string
 (** The name that an instance of a generic function declares a local of
     the definition under (design 7.3 rule 7), as in [__tc_local_n] for

@@ -13,6 +13,18 @@ let check name passed =
     incr failures
   end
 
+let contains text fragment =
+  let length = String.length fragment in
+  let rec from index =
+    index + length <= String.length text
+    && (String.sub text index length = fragment || from (index + 1))
+  in
+  from 0
+
+let c_name name =
+  Typec_syntax.Spelling.declared
+    (Result.get_ok (Typec_syntax.Spelling.type_name ~at_file_scope:true name))
+
 let read text =
   match Reader.read ~name:"input.i" text with
   | Ok unit -> unit
@@ -348,7 +360,8 @@ let () =
   let bracketed =
     made unit (fun output ->
         Emitter.bracketed output ~at:anchor ~location:(at 2)
-          [ Emitter.generated output (at 2) "struct s { int n; };" ])
+          [ Unguarded
+              [ Emitter.generated output (at 2) "struct s { int n; };" ] ])
   in
   let text =
     "# 1 \"a.c\"\n\
@@ -404,10 +417,11 @@ let moved =
       Emitter.bracketed output
         ~at:(Tree.anchor (List.nth (declarations moving) 2))
         ~location:(own 12)
-        (pieces output ~first:8 ~count:4
-        @ pieces output ~first:0 ~count:1
-        @ [ Emitter.generated output (own 1) "box__i" ]
-        @ pieces output ~first:2 ~count:6))
+        [ Unguarded
+            (pieces output ~first:8 ~count:4
+            @ pieces output ~first:0 ~count:1
+            @ [ Emitter.generated output (own 1) "box__i" ]
+            @ pieces output ~first:2 ~count:6) ])
 
 let moved_text =
   Emitter.emit moving
@@ -674,6 +688,28 @@ let () =
   check "read back, nothing follows the moved text"
     (Array.length read_back = 17)
 
+(* Design 9.3: a header's text guards the definition of an instance and
+   ends with the packing probe under names of the header. *)
+let () =
+  let anchor = Tree.anchor (List.nth (declarations unit) 2) in
+  let bracketed =
+    made unit (fun output ->
+        Emitter.bracketed output ~at:anchor ~location:(at 2)
+          [ Guarded
+              { instance = c_name "s";
+                pieces =
+                  [ Emitter.generated output (at 2) "struct s { int n; };" ] }
+          ])
+  in
+  let text = Emitter.header_text unit ~header_module:"m" [ bracketed ] in
+  check "a guarded definition in a header's text"
+    (contains text
+       "#pragma pack()\n#ifndef __tc_instance__s\n# 2 \"a.c\"\n\
+        struct s { int n; };\n#endif\n# 2 \"a.c\"\n#pragma pack(pop)\n");
+  check "the probe of a header's text is named for the header"
+    (contains text "struct __tc_pack_probe_1__m { char c; int i; };"
+    && contains text "_Alignof(struct __tc_pack_probe_2__m)")
+
 (* Design 3.5 rule 7: an output is charged what emission writes for the
    unit, its own text and each edit with its markers and pragmas, and
    at least 32 bytes for a piece. The pieces here are longer, so each is
@@ -698,7 +734,11 @@ let () =
       Emitter.bracketed output
         ~at:(Tree.anchor (List.nth (declarations unit) 2))
         ~location:(at 2)
-        [ long output (at 2); long output (at 3) ] ]
+        [ Unguarded [ long output (at 2); long output (at 3) ];
+          Guarded
+            { instance = c_name "g";
+              pieces = [ long output (at 3) ] }
+        ] ]
   in
   let closing_block = "\n# 1 \"<typec>\" 3\n" ^ probe in
   let written =

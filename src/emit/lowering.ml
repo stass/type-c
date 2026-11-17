@@ -2247,13 +2247,16 @@ let split_type_declarations declarations =
   List.partition_map split
     (Typec_sema.Declarations.type_declarations declarations)
 
+type product = Unit_text | Header_text
+
 (* What the texts of the placements are written from: the output of the
-   unit, what its reading found, and its type declarations with no type
-   parameters. *)
+   unit, what its reading found, its type declarations with no type
+   parameters, and what the lowered text becomes. *)
 type instance_context = {
   output : Emitter.output;
   declarations : Typec_sema.Declarations.t;
   named_types : (Spelling.c_name * Tree.type_declaration) list;
+  product : product;
 }
 
 (* Design 10.3: each typedef after the lines that declare its tags. *)
@@ -2366,21 +2369,42 @@ let application_location context
     (placement : Typec_sema.Declarations.placement) =
   (tokens_of context.output).(placement.application.first).location
 
-let placement_text context (placement : Typec_sema.Declarations.placement) =
+(* C lets a unit define an instance once, and a header guards each
+   definition so that two headers that define one can be included
+   together (design 9.3); the rest of the texts may be repeated. *)
+let definition_text context instance pieces : Emitter.bracketed_text =
+  match context.product with
+  | Unit_text -> Unguarded pieces
+  | Header_text ->
+      Guarded
+        { instance = Typec_sema.Encoding.instance_c_name instance; pieces }
+
+let placement_text context (placement : Typec_sema.Declarations.placement) :
+    Emitter.bracketed_text =
+  let location = application_location context placement in
   match placement.step with
   | Typedefs typedefs ->
-      argument_typedefs context (application_location context placement)
-        typedefs
+      Unguarded (argument_typedefs context location typedefs)
   | Declared { generic } ->
-      instance_declaration context
-        (application_location context placement)
-        placement.instance generic
+      Unguarded
+        (instance_declaration context location placement.instance generic)
   | Prototype ->
-      function_prototype context (application_location context placement)
-        placement.instance
+      Unguarded (function_prototype context location placement.instance)
   | Defined ->
-      instance_rest context (application_location context placement)
-        placement.instance
+      definition_text context placement.instance
+        (instance_rest context location placement.instance)
+
+(* The texts of the placements at one anchor, in order: those with no
+   guard between them are one, so that their pieces of one location share
+   a line, and a guard alone parts them. *)
+let anchor_texts context run =
+  let add earlier placement =
+    match (placement_text context placement, earlier) with
+    | Unguarded pieces, Emitter.Unguarded before :: rest ->
+        Emitter.Unguarded (before @ pieces) :: rest
+    | (Unguarded _ | Guarded _) as text, _ -> text :: earlier
+  in
+  List.rev (List.fold_left add [] run)
 
 (* The placements in runs that share an anchor, each run in order. *)
 let by_anchor placements =
@@ -2400,8 +2424,8 @@ let by_anchor placements =
 let instance_brackets context =
   let bracket (at, run) =
     let location = application_location context (List.hd run) in
-    let pieces = List.concat_map (placement_text context) run in
-    Emitter.bracketed context.output ~at ~location pieces
+    let texts = anchor_texts context run in
+    Emitter.bracketed context.output ~at ~location texts
   in
   List.map bracket
     (by_anchor (Typec_sema.Declarations.placements context.declarations))
@@ -2436,8 +2460,8 @@ let unit_edits context ~generic_types =
     ~zero_initialisers:[]
     (Typec_sema.Declarations.typed declarations)
 
-let edits (text : Reader.t) ~trap declarations =
+let edits (text : Reader.t) ~trap ~product declarations =
   Emitter.limited text ~trap (fun output ->
       let named_types, generic_types = split_type_declarations declarations in
-      let context = { output; declarations; named_types } in
+      let context = { output; declarations; named_types; product } in
       instance_brackets context @ unit_edits context ~generic_types)

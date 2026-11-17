@@ -91,9 +91,19 @@ type include_line = {
   location : Location.t;
 }
 
-(** A part of the text of an interface: an include line, or a token of
-    the unit. *)
-type own_part = Include_line of include_line | Own_token of Token.t
+(** A line of the guard of the definition of an instance (design 9.3),
+    which the lowered text of an interface holds: [#ifndef name] or
+    [#endif]. *)
+type guard_line =
+  | If_not_defined of { name : string; location : Location.t }
+  | End_if of Location.t
+
+(** A part of the text of an interface: an include line, a line of the
+    guard of an instance, or a token of the unit. *)
+type own_part =
+  | Include_line of include_line
+  | Guard_line of guard_line
+  | Own_token of Token.t
 
 (** The output of the [-E -dI] step of an interface whose header is
     written: the unit, the include lines and tokens of the text of the
@@ -114,9 +124,11 @@ val read_interface : name:string -> string -> (interface, error) result
 (** [read_interface ~name text] is {!read} of the output of the [-E -dI]
     step of an interface. In the text of the interface it reads each
     [#include], [#include_next] and [#import] line exactly, as [-dI]
-    writes it, and refuses every other directive that {!read} refuses; in
-    deeper text it passes over every line that {!read} would refuse as a
-    directive, since none reaches the header. The bytes of the lines it
+    writes it, and each [#ifndef name] and [#endif] line exactly, as
+    lowering writes the guard of an instance, and refuses every other
+    directive that {!read} refuses; in deeper text it passes over every
+    line that {!read} would refuse as a directive, since none reaches the
+    header. The bytes of the lines it
     reads or passes over stay in the text, so {!rewrite} copies them. *)
 
 val spelling : t -> Token.t -> string

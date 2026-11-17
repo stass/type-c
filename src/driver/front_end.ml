@@ -101,10 +101,11 @@ let parse dialect target text =
   let keywords = Typec_sema.Target.keywords target dialect in
   Typec_syntax.Parser.parse_with_scopes ~keywords text
 
-let lower_parsed target ~trap text (scopes : Typec_syntax.Parser.scopes) =
+let lower_parsed target ~trap ~product text
+    (scopes : Typec_syntax.Parser.scopes) =
   let* declarations = Declarations.read target text scopes in
   let* edits, output_bytes =
-    Typec_emit.Lowering.edits text ~trap declarations
+    Typec_emit.Lowering.edits text ~trap ~product declarations
   in
   let slices = count_slice_checks (Declarations.slice_checks declarations) in
   let counts =
@@ -129,7 +130,7 @@ let lower_parsed target ~trap text (scopes : Typec_syntax.Parser.scopes) =
 
 let lower dialect target ~trap text =
   let* _unit, scopes = parse dialect target text in
-  lower_parsed target ~trap text scopes
+  lower_parsed target ~trap ~product:Unit_text text scopes
 
 let counts_line counts =
   Printf.sprintf

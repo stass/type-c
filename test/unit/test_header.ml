@@ -100,7 +100,7 @@ let clang_text =
 let includes (read : Reader.interface) =
   let include_line : Reader.own_part -> _ = function
     | Include_line line -> Some line
-    | Own_token _ -> None
+    | Guard_line _ | Own_token _ -> None
   in
   List.filter_map include_line read.own_text
 
@@ -322,6 +322,44 @@ let test_runs () =
   check "an interface with no token has an empty body"
     (body (header "# 1 \"m.tci\"\n#define M_TCI\n") = [])
 
+(* The guard of an instance's definition, which lowering writes as its
+   #ifndef and #endif lines, is the one name of a run that the macro
+   bracket does not name, and the header writes its #define. *)
+let test_guards () =
+  let text =
+    "# 1 \"m.tci\"\n#ifndef __tc_instance__v\nstruct v;\n#endif\n"
+  in
+  check "a guarded definition, its guard outside the macro bracket"
+    (body (header text)
+    = [
+        "#pragma push_macro(\"struct\")";
+        "#undef struct";
+        "#pragma push_macro(\"v\")";
+        "#undef v";
+        "#ifndef __tc_instance__v";
+        "#define __tc_instance__v";
+        "struct v ;";
+        "#endif";
+        "#pragma pop_macro(\"struct\")";
+        "#pragma pop_macro(\"v\")";
+      ]);
+  check "two spaces after #ifndef"
+    (refused_with "# 1 \"m.tci\"\n#ifndef  g\n" "malformed #ifndef");
+  check "text after the name of #ifndef"
+    (refused_with "# 1 \"m.tci\"\n#ifndef g h\n" "malformed #ifndef");
+  check "#ifndef without a name"
+    (refused_with "# 1 \"m.tci\"\n#ifndef\n" "malformed #ifndef");
+  check "text after #endif"
+    (refused_with "# 1 \"m.tci\"\n#endif g\n" "malformed #endif");
+  check "a guard line in the step's output"
+    (match
+       Header.check_interface ~source:"m.tci"
+         (read_ok "# 1 \"m.tci\"\n#ifndef g\n#endif\n")
+         []
+     with
+    | Error error -> contains error.message "#ifndef or #endif line"
+    | Ok () -> false)
+
 let test_literals () =
   let text =
     "# 1 \"m.tci\"\nchar *s = \"???=\"; char c = '?'; int d = 1?2:3;\n"
@@ -369,6 +407,7 @@ let () =
   test_line_markers ();
   test_skeleton ();
   test_runs ();
+  test_guards ();
   test_literals ();
   test_refusals ();
   test_names ();

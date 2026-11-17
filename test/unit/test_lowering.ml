@@ -35,9 +35,9 @@ let read source =
   | Error error -> failwith (Reader.error_message error)
 
 (* The text that [source] is read to, its tree and its edits. *)
-let lowered source =
+let lowered ?(product = Lowering.Unit_text) source =
   let text, unit, declarations = read source in
-  match Lowering.edits text ~trap:Trap.builtin declarations with
+  match Lowering.edits text ~trap:Trap.builtin ~product declarations with
   | Ok (edits, _) -> (text, unit, edits)
   | Error error -> failwith (Reader.error_message error)
 
@@ -142,7 +142,8 @@ let bracketed_after_forward source =
   let location = text.tokens.(0).location in
   let bracket output =
     Emitter.bracketed output ~at ~location
-      [ Emitter.generated output location "struct s { int i; };" ]
+      [ Unguarded
+          [ Emitter.generated output location "struct s { int i; };" ] ]
   in
   let edits =
     fst (Result.get_ok (Emitter.limited text ~trap:Trap.builtin bracket))
@@ -232,6 +233,34 @@ let many_applications () =
     (string_of_int (small + 2));
   grows_linearly "the work to lower many applications" ~small
     (fun count -> ignore (lowered (source count)))
+
+(* Design 9.3: the text of a header guards the definition of each
+   instance, and nothing else that it writes for one; a unit's text
+   guards nothing. *)
+let header_guards () =
+  let source =
+    "type box(T) = struct { T value; };\nstruct s { box(int) b; };\n"
+  in
+  let text, _, edits = lowered ~product:Header_text source in
+  compares "the guarded definition of an instance in a header"
+    (words (Emitter.header_text text ~header_module:"m" edits))
+    "#pragma pack(push) #pragma pack() typedef int __tc_arg__i; struct \
+     box__i; typedef struct box__i box__i; #ifndef __tc_instance__box__i \
+     struct box__i { __tc_arg__i value ; } ; #endif #pragma pack(pop) struct \
+     s { box__i b; }; #pragma pack(push) #pragma pack(1) #pragma pack(push) \
+     #pragma pack() struct __tc_pack_probe_1__m { char c; int i; }; \
+     #pragma pack(pop) #pragma pack(2) #pragma pack(push) #pragma pack() \
+     struct __tc_pack_probe_2__m { char c; int i; }; #pragma pack(pop) \
+     #pragma pack(pop) _Static_assert(_Alignof(struct __tc_pack_probe_1__m) \
+     == _Alignof(struct __tc_pack_probe_2__m), \"typec assumes '#pragma \
+     pack()' restores the packing of the command line \
+     (-fapple-pragma-pack or -fxl-pragma-pack?)\");";
+  compares "no guard in a unit"
+    (string_of_bool
+       (List.exists
+          (String.starts_with ~prefix:"#ifndef")
+          (String.split_on_char (Char.chr 10) (emitted source))))
+    "false"
 
 (* The words of [text] from the first [first] to the [last] after it,
    inclusive; empty where either is missing. *)
@@ -683,7 +712,9 @@ let holds text part =
    count passes, where its C text would pass the output limit. *)
 let over_limit name source =
   let text, _, declarations = read source in
-  match Lowering.edits text ~trap:Trap.builtin declarations with
+  match
+    Lowering.edits text ~trap:Trap.builtin ~product:Unit_text declarations
+  with
   | Ok _ -> fails name "lowered"
   | Error { message; _ } ->
       if not (holds message "would pass the output limit of typec") then
@@ -692,7 +723,9 @@ let over_limit name source =
 (* The partner of a source that [over_limit] refuses lowers. *)
 let under_limit name source =
   let text, _, declarations = read source in
-  match Lowering.edits text ~trap:Trap.builtin declarations with
+  match
+    Lowering.edits text ~trap:Trap.builtin ~product:Unit_text declarations
+  with
   | Ok _ -> ()
   | Error error -> fails name (Reader.error_message error)
 
@@ -750,7 +783,8 @@ let deep_patterns () =
     read (Budget_probes.deep_pattern ~length:100_000 120)
   in
   let before = Gc.allocated_bytes () in
-  ignore (Lowering.edits text ~trap:Trap.builtin declarations);
+  ignore
+    (Lowering.edits text ~trap:Trap.builtin ~product:Unit_text declarations);
   let allocated = Gc.allocated_bytes () -. before in
   if allocated > deep_pattern_allocation then
     fails "the allocation of lowering a deep pattern over a long field"
@@ -812,6 +846,7 @@ let () =
   anchors ();
   linearity_check_tells_quadratic_work ();
   many_applications ();
+  header_guards ();
   many_void_fields ();
   void_fields ();
   many_tries ();

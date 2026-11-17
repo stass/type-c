@@ -10,4 +10,5 @@
 
 let text location =
   Emitter.Bracketed
-    { location; pieces = "#pragma pack(1)\nstruct s { int n; };" }
+    { location;
+      texts = [ Unguarded "#pragma pack(1)\nstruct s { int n; };" ] }

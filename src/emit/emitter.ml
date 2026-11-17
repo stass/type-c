@@ -198,9 +198,15 @@ let copied output pieces =
   in
   List.map copy (Lazy.force pieces)
 
+(* A text in a packing bracket: one with no guard, or the definition of
+   an instance under the guard that a header gives it. *)
+type bracketed_text =
+  | Unguarded of piece list
+  | Guarded of { instance : Spelling.c_name; pieces : piece list }
+
 type text =
   | Code of { location : Location.t; code : string }
-  | Bracketed of { location : Location.t; pieces : piece list }
+  | Bracketed of { location : Location.t; texts : bracketed_text list }
   | Moved of moved_pieces
 
 type edit = {
@@ -290,6 +296,24 @@ let moved_lines pieces =
 
 let as_moved piece = Piece piece
 
+let bracketed_pieces = function
+  | Unguarded pieces | Guarded { pieces; _ } -> pieces
+
+(* The include guard of the definition of an instance (design 13.5). *)
+let instance_guard (instance : Spelling.c_name) =
+  "__tc_instance__" ^ (instance :> string)
+
+(* The guard's lines stand on lines of their own (C11 6.10p2) around
+   the lines of the definition; the header writes its #define. *)
+let guard_opening instance = "#ifndef " ^ instance_guard instance
+let guard_closing = "#endif"
+
+let bracketed_text_lines = function
+  | Unguarded pieces -> moved_lines (List.map as_moved pieces)
+  | Guarded { instance; pieces } ->
+      (guard_opening instance :: moved_lines (List.map as_moved pieces))
+      @ [ guard_closing ]
+
 (* The lines of a bracket at [location] around the lines of its moved
    text: the pragmas stand at its location, whose marker precedes the
    first and the last, and the second is on the line after the first. *)
@@ -300,8 +324,8 @@ let bracketed_lines location lines =
    the edit stands in a line. *)
 let written = function
   | Code { location; code } -> marker location ^ code
-  | Bracketed { location; pieces } ->
-      let lines = moved_lines (List.map as_moved pieces) in
+  | Bracketed { location; texts } ->
+      let lines = List.concat_map bracketed_text_lines texts in
       "\n" ^ String.concat "\n" (bracketed_lines location lines)
   | Moved pieces -> "\n" ^ String.concat "\n" (moved_lines (Lazy.force pieces))
 
@@ -330,11 +354,24 @@ let moved_frame_bytes = function
 let code_frame_bytes location code =
   String.length (marker location) + String.length code
 
-(* The bytes that [written] gives a bracket beyond the lines of its
-   runs: its markers and pragmas, and the markers of the runs. *)
-let bracket_frame_bytes location pieces =
-  line_bytes (bracketed_lines location [])
-  + line_bytes (List.map run_marker (runs (List.map as_moved pieces)))
+let guard_bytes = function
+  | Unguarded _ -> 0
+  | Guarded { instance; _ } ->
+      line_bytes [ guard_opening instance; guard_closing ]
+
+(* The bytes that [written] gives a bracket beyond the pieces of its
+   texts, which were charged as they were made ([made_piece]): its
+   markers and pragmas, and the markers of the runs and the lines of the
+   guard of each text. *)
+let bracket_frame_bytes location texts =
+  let text_frame_bytes text =
+    let pieces = List.map as_moved (bracketed_pieces text) in
+    guard_bytes text + line_bytes (List.map run_marker (runs pieces))
+  in
+  List.fold_left
+    (fun bytes text -> bytes + text_frame_bytes text)
+    (line_bytes (bracketed_lines location []))
+    texts
 
 (* Each edit is charged at the location of the construct it writes, its
    frame and the marker after the tokens it replaces ([replacement]):
@@ -363,12 +400,12 @@ let closing output ~after ~location code =
     extent = { first = after; last = after };
     encloses = false }
 
-let bracketed output ~(at : Tree.anchor) ~location pieces =
+let bracketed output ~(at : Tree.anchor) ~location texts =
   let range = Reader.range output.unit.tokens ~first:at.before ~count:0 in
   charge_edit output location range
-    ~frame:(bracket_frame_bytes location pieces);
+    ~frame:(bracket_frame_bytes location texts);
   { range;
-    text = Bracketed { location; pieces };
+    text = Bracketed { location; texts };
     owner = at.before;
     extent = { first = at.before; last = at.before };
     encloses = false }
@@ -416,15 +453,16 @@ let assertion_block = function
    so the two are aligned alike only where '#pragma pack()' restores the
    packing of the command line in both, whatever it is. The outer push
    and pop keep the packing around the probe. *)
-let packing_probe =
+let packing_probe ~suffix =
+  let tag number = Printf.sprintf "__tc_pack_probe_%d%s" number suffix in
   let structure number =
-    Printf.sprintf "struct __tc_pack_probe_%d { char c; int i; };" number
+    Printf.sprintf "struct %s { char c; int i; };" (tag number)
   in
   let assertion =
     Assumptions.assertion
       ~holds:
-        "_Alignof(struct __tc_pack_probe_1) \
-         == _Alignof(struct __tc_pack_probe_2)"
+        (Printf.sprintf "_Alignof(struct %s) == _Alignof(struct %s)" (tag 1)
+           (tag 2))
       ~assumes:"'#pragma pack()' restores the packing of the command line"
       ~option:"-fapple-pragma-pack or -fxl-pragma-pack"
   in
@@ -439,9 +477,11 @@ let is_bracketed edit =
   match edit.text with Bracketed _ -> true | Code _ | Moved _ -> false
 
 (* The probe is a fact of the backend that every bracket rests on, so
-   emission, the one place that writes a bracket, adds it. *)
-let probes edits =
-  if List.exists is_bracketed edits then [ packing_probe ] else []
+   emission, the one place that writes a bracket, adds it. Its
+   structures are named for a header (design 13.5), as a client may
+   include several headers that hold one. *)
+let probes ~suffix edits =
+  if List.exists is_bracketed edits then [ packing_probe ~suffix ] else []
 
 (* How far the construct of [edit] reaches around its place: one that
    holds another reaches at least as far on each side, and one that
@@ -496,10 +536,11 @@ let trap_lines trap edits =
   | _ :: _ -> (Trap.prototype trap, Trap.definition trap)
 
 (* Reader.rewrite checks that the ranges do not overlap. *)
-let applied (unit : Reader.t) edits =
+let header_text (unit : Reader.t) ~header_module edits =
   let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;
   Reader.rewrite unit (List.map (replacement unit.tokens) edits)
+  ^ assertion_block (probes ~suffix:("__" ^ header_module) edits)
 
 let emit (unit : Reader.t) { trap; edits; assertions } =
   let edits = in_order edits in
@@ -508,4 +549,4 @@ let emit (unit : Reader.t) { trap; edits; assertions } =
   Reader.rewrite unit
     (prototype_replacement unit.tokens prototype
     @ List.map (replacement unit.tokens) edits)
-  ^ assertion_block (assertions @ definition @ probes edits)
+  ^ assertion_block (assertions @ definition @ probes ~suffix:"" edits)

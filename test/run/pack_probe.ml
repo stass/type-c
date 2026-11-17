@@ -26,8 +26,9 @@ let () =
   let location = unit.tokens.(0).location in
   let instance output =
     Emitter.bracketed output ~at ~location
-      [ Emitter.generated output location
-          "struct instance { char c; int i; };" ]
+      [ Unguarded
+          [ Emitter.generated output location
+              "struct instance { char c; int i; };" ] ]
   in
   let instance, _ =
     Result.get_ok (Emitter.limited unit ~trap:Trap.builtin instance)

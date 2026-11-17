@@ -93,11 +93,13 @@ val parse :
 val lower_parsed :
   Typec_sema.Target.t ->
   trap:Typec_emit.Trap.t ->
+  product:Typec_emit.Lowering.product ->
   Typec_cpp.Reader.t ->
   Typec_syntax.Parser.scopes ->
   (Typec_emit.Emitter.lowered * counts, Typec_cpp.Reader.error) result
-(** [lower_parsed target ~trap text scopes] is {!lower} of [text] after
-    {!parse} gave [scopes]: the stages after the parser. *)
+(** [lower_parsed target ~trap ~product text scopes] is {!lower} of
+    [text] after {!parse} gave [scopes], lowered for [product]: the stages
+    after the parser. *)
 
 val lower :
   Typec_syntax.Keyword_set.dialect ->

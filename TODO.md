@@ -135,22 +135,48 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 `typec --emit-c-header` writes the redirect, the guard, the macro probe
 and the runs of the interface's own lowered text in macro brackets
-between its include lines (design 9.3). The rest of the package, in
+between its include lines, the definition of each instance under its
+guard where a point needs it complete, and the packing probe named for
+the header (design 9.3). The rest of the package, in
 the order of its commits:
 
-- [High] Instances: define at the end of the header every instance that
-  an application in the declarations of the interface names and that
-  can be defined there, each under its `__tc_instance__` guard, and
-  declare the others; end a header that holds a packing bracket with the
-  packing probe of 10.3 named for the header (`__tc_pack_probe_1__M`).
-  A run now holds the instances that lowering writes in front of a
-  declaration, unguarded, and no probe, so two headers that name one
-  instance clash in a client. The lowered body of an inline function
-  that traps also needs the trap's declarations in the header.
+- [High] Instances at the end of the header: define there, each under
+  its `__tc_instance__` guard, every instance that an application in the
+  declarations of the interface names, that no point of the header
+  needed complete, and whose definition finds complete all that it
+  needs there; leave the others declared (design 9.3, second bullet).
+  The header now defines an instance only where a point needs it
+  complete, as a unit does, so a client that needs complete an instance
+  that the header passes by pointer finds it incomplete. It takes a
+  query of `Declarations` for the instances that the interface's own
+  applications name (not those that only generic declarations or
+  generated definitions name), read complete at an anchor after the
+  last declaration as a trial that leaves an instance declared where
+  its definition fails, and lowering's texts at that anchor
+  (`Reader.rewrite` has no insertion after the last token, so the text
+  goes after the rewritten text, as `Emitter.header_text` writes the
+  probe).
+- [High] The trap in a header: under `--trap-function`, a lowered
+  inline body of the interface calls `__tc_trap`, which the header
+  neither declares nor defines. A unit declares it in front of its text
+  and defines it after; a header that did so would clash with another
+  header's definition, so the definition needs a guard, which 13.5 does
+  not name. Proposed: the prototype in front of the header's text
+  (repeatable) and the definition at its end under a guard named for
+  the trap function (`__tc_trap__name`), so that two headers of one
+  trap function share one definition and two of different ones fail to
+  compile together rather than one calling the other's function.
+  Needs the owner's decision on the guard and its name.
 - [High] Layout typedefs: the `__tc_layout__` typedef of each declared
   instance, pointing to the `__tc_digest__` tag of the BLAKE2b-128
   digest of its definition's tokens (9.3, 13.5). Waits on the
-  short-enum design, which changes the text that is digested.
+  short-enum design, which changes the text that is digested. Until it
+  lands, the guard of an instance merges two different definitions of
+  one instance name in a C client with no message: two libraries whose
+  `vec.tci` and `vector.tci` each define a generic `vec` write two
+  `vec__i`, and the second header's guard skips its own, so its
+  functions see the first layout. Without the guards the client failed
+  with a redefinition.
 - [High] Dependency options: `-MQ` with the header's path by default,
   `M.h.d` for `-MD` and `-MMD` without `-MF`, `-M` and `-MM` printing
   the rule and writing no header, `-o` with them refused, and `-o -`
@@ -178,6 +204,13 @@ the order of its commits:
   `read_preprocessed`, `Pipeline.plan_header` fills a `shape` with
   values of a translation to reuse its helpers, and `Invocation` defines
   `given` twice: factor them.
+- [Medium] `Front_end.lower_parsed ~product:Header_text` must be paired
+  with `Emitter.header_text`, and `Unit_text` with `Emitter.emit`, and
+  nothing ties the two: a header lowered as a unit writes its
+  definitions unguarded. Lowering could mark every definition and let
+  the emission entry decide whether to guard it, if the output limit's
+  charge of the guard lines can follow (`Emitter.limited` knows no
+  product).
 - [Medium] The writer reads the lowered text of the interface again
   (`Reader.read_interface` of `Emitter.applied`) to meet each token
   that it writes as a token, since the text of an edit is a string.

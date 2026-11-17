@@ -16,6 +16,12 @@ val name_of_path : string -> name option
     where its last component does not end in [.tci] or holds another
     byte. *)
 
+val module_name : name -> string
+(** The module of the interface (design 13.5): the last component of its
+    path without [.tci], each ASCII letter or digit standing for itself
+    and every other byte written as [_] and two hexadecimal digits in
+    lower case. *)
+
 val first_line : string
 (** The comment that begins every header, by which [typec] knows a file
     that it may write over. *)

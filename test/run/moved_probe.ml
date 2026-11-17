@@ -44,8 +44,9 @@ let () =
     let token offset = Option.get (Emitter.token output (start + offset)) in
     let moved =
       Emitter.bracketed output ~at:(Tree.anchor last) ~location:application
-        (Emitter.generated output application "typedef int __tc_arg__i;"
-        :: List.map token (List.init count Fun.id))
+        [ Unguarded
+            (Emitter.generated output application "typedef int __tc_arg__i;"
+            :: List.map token (List.init count Fun.id)) ]
     in
     [ deleted; moved ]
   in

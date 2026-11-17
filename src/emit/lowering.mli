@@ -22,12 +22,18 @@
     definitions, as moved text in packing brackets, at the anchors that
     their placements name. *)
 
+(** What the lowered text becomes: a C unit, or the text of the header of
+    an interface (design 9.3), which writes each definition of an
+    instance under its guard ({!Emitter.Guarded}). *)
+type product = Unit_text | Header_text
+
 val edits :
   Typec_cpp.Reader.t ->
   trap:Trap.t ->
+  product:product ->
   Typec_sema.Declarations.t ->
   (Emitter.edit list * int, Typec_cpp.Reader.error) result
-(** [edits text ~trap declarations] lowers the unit [text] that
+(** [edits text ~trap ~product declarations] lowers the unit [text] that
     [declarations] read: its type declarations, constructor expressions,
     match statements, single-pattern tests and answered constructs, and
     the instances that it uses. Every trap is {!Trap.call} of [trap]. An

@@ -465,7 +465,9 @@ let with_bracket reader (lowered : Typec_emit.Emitter.lowered) =
   let location = reader.Reader.tokens.(0).location in
   let bracketed output =
     Typec_emit.Emitter.bracketed output ~at ~location
-      [ Typec_emit.Emitter.generated output location "struct s { int i; };" ]
+      [ Unguarded
+          [ Typec_emit.Emitter.generated output location
+              "struct s { int i; };" ] ]
   in
   let bracketed, _ =
     Result.get_ok

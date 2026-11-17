@@ -128,6 +128,20 @@ val copied : output -> moved_pieces -> moved_piece list
     again as a piece, as {!emit} writes it once more wherever the copy
     goes. *)
 
+(** A text of an instance in a packing bracket: one with no guard, or
+    the definition of an instance in a header of an interface, under the
+    [#ifndef] and [#endif] lines of the guard of [instance], its name
+    (design 9.3, 13.5: [__tc_instance__vec__i] for [vec__i]), between
+    which the header writes the guard's [#define]. Each piece is a token
+    or typec's text and the name is checked, so a bracket holds no line
+    that typec did not make. *)
+type bracketed_text =
+  | Unguarded of piece list
+  | Guarded of {
+      instance : Typec_syntax.Spelling.c_name;
+      pieces : piece list;
+    }
+
 (** The text of an edit: C code as it is, at [location]; moved text in
     the packing bracket of design 10.3, at [location], which lays it out
     with the packing of the command line whatever packing a pragma has
@@ -137,7 +151,10 @@ val copied : output -> moved_pieces -> moved_piece list
     (see {!emit}). *)
 type text =
   | Code of { location : Typec_cpp.Location.t; code : string }
-  | Bracketed of { location : Typec_cpp.Location.t; pieces : piece list }
+  | Bracketed of {
+      location : Typec_cpp.Location.t;
+      texts : bracketed_text list;
+    }
   | Moved of moved_pieces
 
 (** Replace the tokens of [range] by [text]. The backend places code and
@@ -193,8 +210,8 @@ val closing : output -> after:int -> location:Typec_cpp.Location.t ->
     construct that ends at token [after], which owns it. *)
 
 val bracketed : output -> at:Typec_syntax.Tree.anchor ->
-  location:Typec_cpp.Location.t -> piece list -> edit
-(** [bracketed output ~at ~location pieces] inserts [pieces] in a
+  location:Typec_cpp.Location.t -> bracketed_text list -> edit
+(** [bracketed output ~at ~location texts] inserts [texts] in a
     packing bracket at [location] at the anchor [at] of the unit, which
     only the parser names, so that the bracket, whose pragmas take lines
     of their own, stands where a declaration may and never inside an
@@ -266,9 +283,14 @@ val emit : Typec_cpp.Reader.t -> lowered -> string
     marker that enters or leaves a file without its partner; [emit]
     raises [Invalid_argument] otherwise. *)
 
-val applied : Typec_cpp.Reader.t -> edit list -> string
-(** [applied unit edits] is the text of [unit] with each edit applied, as
-    {!emit} writes it, without the declarations of the trap, the
-    assertions or the packing probe around it: the lowered text that a
-    header of an interface takes its runs from (design 9.3).
-    [Invalid_argument] as for {!emit}. *)
+val header_text :
+  Typec_cpp.Reader.t -> header_module:string -> edit list -> string
+(** [header_text unit ~header_module edits] is the text of [unit] with
+    each edit applied, as {!emit} writes it, without the declarations of
+    the trap or the assertions around it: the lowered text that the
+    header of an interface takes its runs from (design 9.3). Where an
+    edit is bracketed, it ends with the packing probe as {!emit} writes
+    it, its structures named for the header, whose module (design 13.5)
+    is [header_module]: [struct __tc_pack_probe_1__M] and
+    [struct __tc_pack_probe_2__M] for the module [M]. [Invalid_argument]
+    as for {!emit}. *)

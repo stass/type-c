@@ -26,7 +26,7 @@ let name_of_path path =
 (* The written form of a module (design 13.5): an ASCII letter or digit
    stands for itself, and every other byte is '_' and two hexadecimal
    digits, so every '_' begins an escape. *)
-let module_of { last_component } =
+let module_name { last_component } =
   let module_name =
     Filename.chop_suffix last_component File.interface_suffix
   in
@@ -76,6 +76,15 @@ let check_include_place declarations (line : Reader.include_line) =
   if List.exists holds declarations then
     refuse line.location (inside_declaration_message line)
 
+(* Lowering writes the guard of an instance, and -E writes no #ifndef or
+   #endif line, so a guard line in the step's output is no text that the
+   interface wrote. *)
+let refuse_guard_line : Reader.guard_line -> unit = function
+  | If_not_defined { location; _ } | End_if location ->
+      refuse location
+        "#ifndef or #endif line in the output of -E of an interface whose \
+         header is written"
+
 let check_interface ~source (read : Reader.interface) unit =
   catch_refusal (fun () ->
       if not read.holds_text then
@@ -87,6 +96,7 @@ let check_interface ~source (read : Reader.interface) unit =
       in
       let check_part : Reader.own_part -> unit = function
         | Include_line line -> check_include_place declarations line
+        | Guard_line line -> refuse_guard_line line
         | Own_token _ -> ()
       in
       List.iter check_part read.own_text)
@@ -204,9 +214,19 @@ let add_to_line run (location : Location.t) text =
   run.line_location <- Some location;
   run.line <- text :: run.line
 
-let add_pragma_line run text =
+let add_whole_line run text =
   close_line run;
   run.lines <- text :: run.lines
+
+(* The guard of an instance's definition is the one name of a run that
+   the macro bracket does not name, so that it stays defined after the
+   run (design 9.3); lowering writes no #define, which the reader would
+   take for a macro's definition. *)
+let add_guard_line run : Reader.guard_line -> unit = function
+  | If_not_defined { name; _ } ->
+      add_whole_line run ("#ifndef " ^ name);
+      add_whole_line run ("#define " ^ name)
+  | End_if _ -> add_whole_line run "#endif"
 
 (* Compilers disagree on the spelling of an extended character that a
    pragma restores, so no spelling keeps every client's macro. *)
@@ -235,7 +255,7 @@ let add_token (lowered : Reader.t) run (token : Token.t) =
       refuse_trigraph token.location bytes;
       List.iter (refuse_extended_identifier token) names;
       List.iter (collect run) names;
-      add_pragma_line run bytes
+      add_whole_line run bytes
   | Pragma (Not_tokens _) ->
       invalid_arg "Header.add_token: Type-C text holds no such pragma"
   | Typec_pragma -> ()
@@ -269,6 +289,7 @@ let body (lowered : Reader.interface) =
     | Include_line line ->
         end_run ();
         add [ include_line_text line ]
+    | Guard_line line -> add_guard_line !run line
     | Own_token token -> add_token lowered.unit !run token
   in
   List.iter write lowered.own_text;
@@ -298,7 +319,7 @@ let macro_probe module_name =
    outside the guard, so no lowered text reaches it. *)
 let write name lowered =
   catch_refusal (fun () ->
-      let module_name = module_of name in
+      let module_name = module_name name in
       let guard = "__tc_module__" ^ module_name in
       let skeleton_head =
         [
