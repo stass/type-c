@@ -129,11 +129,16 @@
  (applies_to readme)
  (deps readme.sh ../../README.md))
 
-; tutorial.t checks the examples of docs/tutorial.md the same way.
+; tutorial.t and reference.t check the examples of docs/tutorial.md and
+; docs/reference.md the same way.
 
 (cram
  (applies_to tutorial)
  (deps readme.sh ../../docs/tutorial.md))
+
+(cram
+ (applies_to reference)
+ (deps readme.sh ../../docs/reference.md))
 
 ; make_rule.t, ninja_rule.t and cmake_rule.t build with the rules that
 ; README.md shows, each where the host has its build tool.

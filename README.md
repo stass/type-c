@@ -136,7 +136,8 @@ What it shows:
 [What Type-C adds to C](#what-type-c-adds-to-c) explains each new piece,
 and shows the mistakes each one rules out. The
 [tutorial](docs/tutorial.md) grows a C program into Type-C one feature
-at a time.
+at a time, and the [language reference](docs/reference.md) states the
+rules of each construct.
 
 ## Why Type-C
 

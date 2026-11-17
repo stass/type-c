@@ -1622,6 +1622,32 @@ types (design 13.3).
   the backend's own macros (__CHAR_UNSIGNED__, __WCHAR_TYPE__,
   __SIZEOF_FLOAT128__) instead.
 
+## Language reference
+
+- [Medium] Write sections 9 (interfaces and privacy), 10 (C clients and
+  headers, once `--emit-c-header` is complete), 12 (checked mode) and 13
+  (the driver) of `docs/reference.md`, which point to the design and to
+  typec(1) instead.
+- [Medium] Nothing checks that a bracketed rule name in
+  `docs/reference.md`, `docs/tutorial.md` or `README.md` is a live rule
+  of `src/syntax/rule_table/rule_table.ml`. The catalogue generator
+  could fail on a name it does not hold, so that a typo or a retired
+  name fails the build; a name on the wrong rule still needs review.
+- [Low] `docs/reference.md` does not state some rules that a user can
+  meet: `[excess-initializer]` (design 5.2), the pragma rules
+  `[try-pragma]`, `[deferred-pragma]` and `[instance-pragma]`, the
+  `return` rules of design 6 rule 12 (`[defer-return-jump]` and the
+  `defer-return-*` names), `[function-instance-place]`, the rest of
+  `[generic-definition]` (`_Alignas`, `_Atomic ( )`, `typeof` and
+  attribute arguments over a parameter, an enumeration with a body, a
+  structure body under a declarator), provisional P26, and the
+  translation limits of design 3.5 rule 7 and 4.7 rule 10.
+- [Medium] Design 3.6 refuses a generic function with a universe name,
+  but `typec` accepts `generic(T) static T option(T *p)` and
+  `generic(T) static void slice_sub(T *p);`, and the rule
+  `[generic-universe-name]` covers only generic types. Refuse both
+  under that rule.
+
 ## Design questions with a gate
 
 - [Low] Design 3.5 rule 7 and P30 say that the encodings of the
