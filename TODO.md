@@ -955,17 +955,39 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] A generic name longer than `Encoding.max_length` refuses each
   application with a message that blames its first argument; refuse
   such a name at its declaration.
-- [Low] Typing refuses every type in an expression of a generic's
-  definition that mentions a type parameter (`sizeof(T *)` among them),
-  where design 3.5 rule 4 and 7.1 rule 4 refuse an expression whose
-  value depends on one. Say the simpler rule in the design, or relax
-  the check.
+- [Low] Typing refuses every type name in an expression of a generic
+  type's definition that mentions a type parameter
+  (`Declarations.expression_type_name`), where design 7.1 rule 4
+  refuses only a construct that needs the value of an expression that
+  depends on one: `type g(T) = struct { __typeof__((T *)0) p; };` is
+  refused (TC0038) and the design allows it. Give the definition check
+  the test of rule 4 when generic functions are typed, as their bodies
+  need it.
 - [Medium] The opaque value type of a definition check is a structure
   without members (`Ctype.declare_opaque`), which is exact for generic
-  types but not for the bodies of generic functions (design 7.1 rule
-  3): such a structure may be passed through `...` and is refused the
-  initialiser `{0}`. Give it a shape of its own when generic functions
+  types but not for the bodies of generic functions. Design 7.1 rules
+  2 and 3 type a type parameter as a complete structure whose members
+  cannot be named and list what a value of it may do: a structure
+  without members may be passed through `...`, which rule 3 refuses,
+  and is refused the initialiser `{0}`, which rule 3 allows as the
+  zero initialiser. Give it a shape of its own when generic functions
   are typed.
+- [Low] Design 7.1 rule 3 allows `{0}` for a type parameter, and Apple
+  Clang 21 refuses that list where the argument is a structure or
+  union whose first member is a structure without members, so such an
+  instance fails in the backend. The rule states the limit and names
+  `{}`. Decide whether a type that begins with a structure without
+  members stays a type argument of a generic function; design 3.2 rule
+  7 says of `{0}` that it zeroes any object, which the same case
+  contradicts for C text.
+- [Medium] An attribute on a member whose type mentions a type
+  parameter can make an application to a value type fail in the
+  backend, against design 3.5 rule 4: `type g(T) = struct { T v
+  __attribute__((vector_size(16))); };` is accepted and `g(struct s)`
+  is refused by Apple Clang 21 ("invalid vector element type"). Design
+  7.1 rule 3 refuses such an attribute in a generic function unless
+  the table of effects records that it asks nothing of the type; say
+  that rule in 3.5 rule 4 and check it in the definition check.
 - [Medium] `Ctype.instance` holds the encodings of its arguments as
   plain strings, so a caller can build one from a string that
   `Encoding.encode` did not make, which need not be self-delimiting.

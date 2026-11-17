@@ -647,10 +647,12 @@ id(stmt) s;                             /* e = s is an error */
    a type argument. It does not use one directly after `distinct`, in a
    bit-field, in `_Alignas` or in the arguments of an attribute, which
    lowering leaves as the source spells them (13.5), and no constant
-   expression in it depends on one. A struct or union specifier with a
-   body in it has no tag, and stands only where the definition of an instance holds it (10.3): as
-   the whole definition of an alias, in a field of a variant, where a
-   variant that is not generic may have one too, or inside either.
+   expression in it depends on one, by the test and the rule of 7.1
+   rule 4. A struct or union specifier with a body in it has no tag,
+   and stands only where the definition of an instance holds it
+   (10.3): as the whole definition of an alias, in a field of a
+   variant, where a variant that is not generic may have one too, or
+   inside either.
    Elsewhere no definition of an instance holds it: the instance of a
    distinct generic, or of an alias generic such as
    `type p(T) = struct { T x; } *;`, is a typedef that stands before its
@@ -1765,7 +1767,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    those of a generic type are (10.3). Rule 6 says what the declaration
    holds, and rule 7 when two declarations of one name agree.
 2. Inside, `Ti` is an opaque value type (3.2): the check types it as C
-   types a structure whose members are not known.
+   types a complete structure whose members cannot be named. An object
+   of the type can be declared and copied whole and its size taken, and
+   no part of it can be read or written.
 3. The body is checked once, against the opaque types, when the definition
    is read, and an instance is the same text with each `Ti` naming its
    argument (10.3). A use of a type parameter is therefore valid only
@@ -1774,15 +1778,19 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    place of `Ti`. Typing `Ti` as a structure allows a value of the type
    to be used in these ways:
 
-   - declare objects of the type, including with the initialiser `{0}` or
-     `{}`, the two initialiser lists that are valid for every value type:
-     `T u = { t };` is valid where `T` is `short` and an error where it
-     is a structure;
-   - initialise, assign, pass to a parameter of a prototype, and return;
+   - declare objects of the type, and initialise an object or a
+     subobject of the type with an expression of the type or with the
+     zero initialiser (below);
+   - assign, pass to a parameter of a prototype, and return;
    - discard it, as an expression statement, as the left operand of a
      comma or under a cast to `void`, and yield it as the right operand of
      a comma;
-   - apply unary `&`, `sizeof`, `_Alignof` and `__typeof__`;
+   - apply unary `&`, `sizeof`, `__alignof__` and `__typeof__`. C11
+     gives `_Alignof` a type name alone (6.5.3p1), so the alignment of a
+     value is `__alignof__(t)` or `_Alignof(__typeof__(t))`. Both
+     backends take these two under `-pedantic-errors` and refuse
+     `_Alignof(t)` there, of which Apple Clang 21 warns without the
+     option as well (Apple Clang 21, GCC 16);
    - do everything C allows with a `Ti *`: dereference, arithmetic,
      subscripting, comparison, casts to and from other object pointers;
    - use `Ti` as a type argument and in derived types.
@@ -1796,7 +1804,61 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    extension (Apple Clang 21 and GCC 16 refuse it under
    `-pedantic-errors`).
 
-   Three things that C allows of a structure are errors too, because
+   No initialiser enters a `Ti` but the zero initialiser of 3.2 rule 7,
+   `{0}` or `{}`. An initialiser list is read as C reads it, against
+   the types of the check. Where it reaches an object or subobject of
+   type `Ti`, an expression of the type `Ti` initialises it whole (C11
+   6.7.9p13). Any other initialiser there is for a member of `Ti`,
+   written in braces of `Ti`'s own or handed to its first member with
+   the braces left out (6.7.9p20), and it is an error, as `Ti` has no
+   member that can be named. The zero initialiser is the exception that
+   3.2 rule 7 makes for a variant too: as the whole list of an object
+   or of a subobject it zeroes that object whatever its members are,
+   and nothing in it is matched against them. So these are valid and
+   mean the same in every instance:
+
+   ```c
+   T u = {0};
+   T row[4] = {0};
+   T both[] = { t, t };
+   struct { T a; int b; } w = { t, 5 };
+   struct { T a; int b; } z = {0};
+   struct { T a; int b; } y = { .b = 5 };
+   ```
+
+   These are errors, because what each means is the argument's to say:
+
+   ```c
+   T u = { t };
+   T both[] = { 0, 0 };
+   struct { T a; int b; } w = { 0, 5 };
+   struct { T a; int b; } y = { .a = 0 };
+   T *q = (T[]){ 0, 0 };
+   ```
+
+   `T u = { t };` is valid where `T` is `short` and an error where it is
+   a structure. `both` and the array of the compound literal have two
+   elements where `T` is `short` and one where it is
+   `struct { short x, y; }`, and the 5 of `w` is stored in `b` in the
+   first instance and in `a.y` in the second (Apple Clang 21, GCC 16).
+   A zero for one subobject of a longer list is `(T){0}`: `{ {0}, 5 }`
+   is valid as well, and both backends warn of braces around a scalar
+   initialiser where `T` is a scalar.
+
+   `{0}` is the zero of every type that ISO C can declare, and `{}` of
+   every type. A structure without members is a GNU extension (13.3).
+   Where the argument is one, both backends take `{0}` with a warning
+   of excess elements, and where it is a structure or union whose first
+   member is one, Apple Clang 21 refuses `{0}` ("initializer for
+   aggregate with no elements requires explicit braces") and GCC 16
+   warns. `{}` belongs to the same dialects as that structure, GNU C
+   and C23, and is valid there for every argument: both backends take
+   it in C11 mode without a warning for a scalar, a pointer, an
+   enumeration, a complex type, a structure, a union and a structure
+   without members. A generic function that is to take such an argument
+   writes `{}`.
+
+   Other things that C allows of a structure are errors too, because
    another value type gives them another type or another meaning:
 
    - What applies the default argument promotions (C11 6.5.2.2p6), which
@@ -1808,18 +1870,19 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      type without a prototype (6.7.6.3p15): `void (*old)() = take;` with
      `void take(T t)` is an error in the instances for `short` and
      `float` and valid for a structure (Apple Clang 21, GCC 16).
-   - *Provisional.* The conditional operator with a `Ti` value as its
-     second or third operand. C gives it the type of the usual arithmetic
-     conversions (6.5.15p5), so `c ? a : b` has the type `int` where `Ti`
-     is `short`: `sizeof(c ? a : b)` is 4 in that instance and 2 for a
-     structure that holds one `short`, and
+   - *Provisional (P29).* The conditional operator with a `Ti` value as
+     its second or third operand. C gives it the type of the usual
+     arithmetic conversions (6.5.15p5), so `c ? a : b` has the type
+     `int` where `Ti` is `short`: `sizeof(c ? a : b)` is 4 in that
+     instance and 2 for a structure that holds one `short`, and
      `__typeof__(c ? a : b) *p = &a;` is an error in that instance alone
      (GCC 16; Apple Clang 21 warns). An `if` statement selects the value
-     instead. A count of the conditional operators that the generic
-     functions of Pilot B or the corpus apply to such values settles it:
-     if they are common, the operator is allowed where its value is
-     converted to `Ti` at once, by an initialisation, an assignment, an
-     argument or a `return`. The refusal stays if that cannot settle it.
+     instead. The container library of Stage 3 settles it, by how often
+     it wants the operator over such values, read from the code of this
+     refusal: if that is common, the operator is allowed where its value
+     is converted to `Ti` at once, by an initialisation, an assignment,
+     an argument or a `return`. The refusal stays if that cannot settle
+     it.
    - A construct that asks whether two types are compatible, `_Generic`
      and `__builtin_types_compatible_p` (13.5), where a type in it
      mentions a type parameter (rule 4): the type of the controlling
@@ -1831,6 +1894,39 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      compatible (Apple Clang 21, GCC 16). `__typeof__` asks nothing: it
      names the type that the check gave its operand, which is that type
      in every instance.
+   - A declaration in the body that gives its identifier linkage, where
+     its type mentions a type parameter: `extern T shared;`, or the
+     declaration of a function, `T helper(T);`. Every declaration of an
+     identifier with linkage denotes the same object or function (C11
+     6.2.2p2), which has one type, and each instance would declare it
+     with the type of its own argument. Both backends refuse two such
+     instances in one unit for conflicting types. With one instance in
+     each of two units the program links without a message, and one
+     unit reads the other's `short` as a structure (Apple Clang 21, GCC
+     16). An object without linkage is each instance's own, so
+     `static T cache;` is valid.
+   - An attribute on a declaration whose type mentions a type
+     parameter, be it the function's own (rule 6), a parameter's or one
+     in the body, unless the table of effects records that the
+     attribute asks nothing of the type that it applies to (13.3). The
+     backend judges an attribute against the types of the instance.
+     Over a parameter of type `T`, `alloc_size(1)` is an error of Apple
+     Clang 21 unless the argument is an integer type,
+     `format(printf, 1, 2)` an error of both backends unless it is a
+     string type, and `access(read_only, 1)` an error of GCC 16 unless
+     it is a pointer. `returns_nonnull`, which has no arguments, is an
+     error of GCC 16 on a function that returns `T` unless the argument
+     is a pointer; both backends ignore `malloc` on that function, and
+     `nonnull(1)` over that parameter, with a warning where it is not
+     one. The table decides by the attribute's name, as `typec`
+     reads no attribute arguments (13.3), so `nonnull(1)` is refused
+     also where parameter 1 is a `T *`. A rule that read the arguments
+     for the parameters they name would need the form of every
+     attribute's arguments, and would still pass `returns_nonnull`.
+     The table errs to the safe side: an attribute that it does not
+     hold, or does not record as asking nothing, is refused, so a gap
+     in the table costs a refusal and never an instance that the
+     backend rejects.
 4. A type *mentions* a type parameter where it is one, is derived from a
    type that mentions one, is a type application with an argument that
    mentions one, or is a structure or union with a member whose type
@@ -1839,22 +1935,71 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    P16): `T *` and `vector(T)` mention `T`. An expression *depends on a
    type parameter* where it holds, evaluated or not, the size or the
    alignment of a type that mentions one, or the offset of a member of
-   such a type: a `sizeof`, an `_Alignof` or an `offsetof` whose operand
-   is such a type or has one. So `sizeof(T)` and `sizeof(T *)` both
-   depend on `T`.
+   such a type: a `sizeof`, an `_Alignof`, an `__alignof__` or an
+   `offsetof` whose operand is such a type or has one. So `sizeof(T)`
+   and `sizeof(T *)` both depend on `T`: C does not promise one size
+   for all object pointers (6.2.5p28), and `sizeof(void *)` says what
+   is meant.
 
-   An expression that depends on a type parameter is not a constant
-   expression. It cannot be an array bound, where it is not read as the
-   bound of a variable length array either, a `case` value, a static
-   initialiser, the width of a bit-field, the value of an enumerator or
-   the operand of `_Static_assert`; and a type that mentions a type
-   parameter cannot be the operand of `_Alignas`, which stands for the
-   alignment of that type (C11 6.7.5p6). Each of them can be valid for
-   some arguments and not for others, as `char pad[sizeof(T) - 4]` is.
-   The test refuses `sizeof(T *)` there as well: C does not promise one
-   size for all object pointers (6.2.5p28), and `sizeof(void *)` says
-   what is meant. Storage for a `T` is declared as a `T` and not as
-   `char buf[sizeof(T)]`.
+   The value of such an expression belongs to the instance. It is a
+   constant there, a different one in each instance, and the check,
+   which runs once, has the expression's type and no value for it. The
+   definition therefore cannot use it as a constant: a construct to
+   which C gives a type, a meaning or its validity by the value of a
+   constant expression is an error where that expression depends on a
+   type parameter. Any other use computes with the value as with one
+   that is read at run time, so `malloc(n * sizeof(T))`,
+   `memcpy(to, from, sizeof(T))` and `if (sizeof(T) > 16)` are valid.
+
+   No list of constructs carries the rule. The front end has one
+   evaluation of constant expressions, which every construct that needs
+   such a value asks, and for an expression that depends on a type
+   parameter its one answer is this error. An opaque constant of 13.3
+   (P16) differs: it has one value, which the backend computes, so its
+   construct passes through. C has two kinds of construct that ask:
+
+   - One that requires a constant expression, whose value must lie in
+     the range of its type (C11 6.6p4) and meet the constraint of its
+     place: a `case` value, a static initialiser, the width of a
+     bit-field, the value of an enumerator, the index of a designator,
+     the operand of `_Static_assert`, the first operand of
+     `__builtin_choose_expr`, and the operand of `_Alignas`, where a
+     type name that mentions a type parameter stands for the alignment
+     of that type (6.7.5p5).
+   - One that asks whether an expression is a constant and takes a type
+     from the answer. An array bound declares an array of that length
+     where it is a constant and a variable length array where it is not
+     (6.7.6.2p4), so a bound that depends on a type parameter is an
+     error and is not read as the bound of a variable length array. A
+     null pointer constant is an integer constant expression of the
+     value 0, or one cast to `void *` (6.3.2.3p3), so an expression
+     that depends on a type parameter is an error wherever a rule of C
+     asks whether it is one.
+
+   Each can be valid, or have one type, for some arguments and not for
+   others. `char pad[sizeof(T) - 4]` is an error where `T` has two
+   bytes and an array where it has 2000, and
+   `static int k = 1 / (sizeof(T) - 2);` is an error where `T` has two
+   bytes and valid where it has 2000. With `T *p`,
+   `c ? p : (void *)(sizeof(T) > 1000)` has the type `T *` where `T` is
+   small, as its third operand is a null pointer constant there
+   (6.5.15p6), and `void *` where `T` has 2000 bytes: a `_Generic` over
+   it selects another association, and an object declared with its
+   `__typeof__` has another type. The size of
+   `__builtin_choose_expr(sizeof(T) > 1000, (char)0, 0L)` is that of a
+   `long` in the first instance and 1 in the second (Apple Clang 21 and
+   GCC 16 for all four). Storage for a `T` is declared as a `T` and not
+   as `char buf[sizeof(T)]`.
+
+   The rule ends where C stops reading the value. Arithmetic on it
+   that no constant expression holds is the instance's computation,
+   and what a backend says of it is that instance's too: for
+   `int a = 1 / (sizeof(T) - 2);` both backends warn of a division by
+   zero in the instance where `T` has two bytes and in no other, as
+   they warn of `1 / 0` in any function, and of a shift by
+   `sizeof(T) * 16` only where that reaches the width of the shifted
+   type (Apple Clang 21, GCC 16). The warning is true of that instance,
+   and the check cannot look for it without the value.
 5. Type parameters have no constraints. An operation that is not valid for
    every type, such as hashing, equality or ordering, is passed as an
    ordinary function pointer, as `qsort` takes its comparison:
@@ -1892,7 +2037,26 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    - An attribute means on an instance what the backend makes of it on a
      `static` function, and the backend refuses one that such a function
      cannot carry, as `weak` (Apple Clang 21, GCC 16). Its arguments
-     name no type parameter (3.5 rule 4, 13.5).
+     name no type parameter (3.5 rule 4, 13.5), and it asks nothing of
+     the function's type where that mentions a type parameter (rule 3),
+     which keeps `nonnull`, `format` and `alloc_size` off nearly every
+     generic function.
+   - No parameter has a variably modified type, once C has adjusted an
+     array parameter to a pointer (C11 6.7.6.3p7): `T a[n]` is `T *a`
+     and stands, and `T (*m)[n]` and `T m[n][k]` are errors. Whether
+     two such types are the same rests on the values of their bounds at
+     run time (6.7.6.2p6), so C lets no typedef name of one be defined
+     twice (6.7p3), and rule 7 compares two declarations as two such
+     definitions. The backends differ there: Apple Clang 21 refuses the
+     same text twice, `void (size_t n, int (*a)[n])`, and GCC 16 takes
+     it, and `[*]` beside `[n]` as well. Both take `int a[n]` beside
+     `int *a`, and `int a[static 4]` beside it, as one type. The
+     refusal is the smaller rule: comparing such types with their
+     bounds left out, as compatibility does, would add a case to rule 7
+     and one to the match of 7.2 rule 2, for a parameter that few
+     generic functions have. A function over a matrix takes a `T *` and
+     the two lengths. A type argument is not variably modified either
+     (3.5 rule 2), so no type in the head of an instance is.
    - No assembler label follows the declarator. `__asm__("name")` would
      give every instance the one name: with two instances so labelled,
      GCC 16 stops at the assembler, and Apple Clang 21 compiles the unit
@@ -1903,6 +2067,8 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    number of type parameters and, with each type parameter of one read
    as the type parameter at the same position of the other, declare the
    same type, as two definitions of one typedef name must (C11 6.7p3).
+   No parameter type is variably modified (rule 6), so the comparison
+   reads no bound that is not a constant and always has an answer.
    The names of the type parameters and of the parameters may differ.
    Types that are compatible and not the same do not agree, so the
    declarations of a generic function form no composite type, and a use
@@ -1927,10 +2093,22 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
 Because of rules 2 to 4, an instance of a checked generic function is
 valid C for every value type. Instantiation fails only where a chain of
 instances exceeds the nesting limit (3.5 rule 7), where a declaration
-changes what the definition names (3.5 rule 8), or where 10.3 or rule 2
-or 4 of 7.3 refuses the instance's placement. A declaration of a name that
-an instance would take is refused whether or not the instance is used
-(10.3).
+changes what the definition names (3.5 rule 8), where 10.3 or rule 2
+or 4 of 7.3 refuses the instance's placement, or where the body gives
+`{0}` to a `Ti` whose argument is or begins with a structure without
+members, which ISO C does not have (rule 3). A declaration of a name
+that an instance would take is refused whether or not the instance is
+used (10.3). What a backend warns of in one instance and not in another
+is no part of this (rule 4).
+
+Rationale for no constant that depends on a type parameter. A use of
+`sizeof(T)` as a constant can be valid for some arguments and not for
+others, so allowing it would move an error from the definition, where
+rule 3 reports it once, to each instance that fails, in a message about
+text that the caller did not write. That `sizeof(T)` is no constant in
+a definition is the owner's decision and is not provisional: it awaits
+no count, and what would reopen it is a generic function that cannot be
+written without such a constant.
 
 Rationale for no constraints. Resolving `hash(K)` statically for an
 arbitrary `K` needs overloading, or named instances that the compiler
@@ -3464,6 +3642,15 @@ for what reports an error by itself. An attribute that is found to
 break the form joins the table with a mark; 13.5 says what an attribute
 without one means there.
 
+The table holds a last fact of an attribute, which 7.1 rule 3 reads:
+whether it asks something of the type of the declaration that it
+stands on, as `nonnull` and `format` ask of a parameter of a function
+and `returns_nonnull` and `malloc` of its result. `always_inline`,
+`cold` and `unused` ask nothing. The fact is the attribute's alone, as
+a mark is, since `typec` reads no attribute arguments. An attribute is
+held to ask until a measurement with both backends shows that they
+take it alike on a declaration of every type.
+
 **Where GCC and Clang differ.** The front end types C as Clang does,
 whichever the backend is. GCC types a few constructs otherwise: the
 value of a bit-field narrower than its type, which it gives a type of
@@ -4867,6 +5054,7 @@ with the scripts that reproduce them (`make size-split`,
 | P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |
 | P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
 | P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its code; and how many of them stand where C does not evaluate them. A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays |
+| P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
 
 ## 16. Non-goals
 
@@ -4924,8 +5112,10 @@ field:                 specifier-qualifier-list declarator
 type-specifier:        ... | generic-type-name type-arguments
 type-arguments:        "(" type-name ("," type-name)* ")"
 
-generic-function:      "generic" type-parameters function-definition
-                     | "generic" type-parameters declaration
+generic-function:      "generic" type-parameters generic-head
+                       compound-statement
+                     | "generic" type-parameters generic-head ";"
+generic-head:          declaration-specifiers declarator
 
 primary-expression:    ... | variant-type "." identifier
                            | generic-function-name type-arguments
@@ -4948,6 +5138,11 @@ unsafe-block:          "unsafe" compound-statement
 ```
 
 A type declaration with type parameters is an external declaration only.
+A generic head declares one function with a prototype: its declarator
+is a function declarator with a parameter type list, `static` is the
+only storage-class specifier among its specifiers, and neither an
+initialiser, a second declarator nor a list of parameter declarations
+follows it (7.1 rule 6).
 A `defer` statement is a block item and not a statement, so it is not the
 substatement of another statement (section 6 rule 11). `try` is written
 only in the positions of 5.1, which gives a `try` in any other place one
