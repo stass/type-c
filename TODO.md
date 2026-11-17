@@ -21,6 +21,12 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Driver
 
+- [Low] `typec --cc=clang` fails with a backend error on the valid C
+  `#undef __APPLE__` followed by `int __APPLE__;`: Clang expands its
+  predefined macros in `-x cpp-output` input, so the backend reads
+  `int 1;` where the `-E` step left the identifier (design 13.2). A
+  backend error on lowered code is a `typec` bug; the backend's reading
+  of a unit should equal the step's for every name the unit undefines.
 - [Low] `--trap-function=` takes a C keyword (`int`, `_Bool`) or a name
   reserved to typec (`__tc_trap`), which then fails as a backend error at
   `<typec>` rather than as a refusal of the option. Refusing them needs
