@@ -672,6 +672,8 @@ literals became `str` by their target type and none needed a cast.
 | 4.5 | Packaging: opam, Homebrew, a FreeBSD port. |
 | 4.6 | Freestanding check: a `-nostdlib` link with `--trap-function` leaves no undefined symbol that the program did not introduce. |
 | 4.7 | Pilot C: the stream and message buffers of FreeRTOS, `stream_buffer.c`, rewritten in Type-C, in a FreeRTOS kernel build that boots in QEMU on a Cortex-M3. |
+| 4.8 | Short enumerations (design 13.3, 13.4, 13.2): the minimal enumeration size in the target model, read from `__ARM_SIZEOF_MINIMAL_ENUM` with the size of `int` where it is absent and an error of the model for any other value than 1 or that size, and printed by `--print-target`; the enumeration rule with that size, and with 1 for `packed` on an enumeration, which becomes an entry of the table of effects of attributes; the enumeration assertion of the rule's type for the value 0, with a message that names `-fshort-enums` or `-fno-short-enums` by the model's size; the refusal of `-fshort-enums` deleted, and the README's text on it rewritten. Lands before 4.7, whose GCC half builds with short enumerations. |
+| | Tests of 4.8. `test/unit/test_target.ml`: the size read as 1, as 4 and absent, and an error for 2 and a malformed value. `test/unit/test_types.ml`: the rule on the 19 enumerations and 5 packed ones of the measurements, for the sizes 1 and 4 and for ILP32 and LP64 models (`enum { A = -1, B = 0x80000000u }` is `long` on LP64 and `long long` on ILP32). A new `test/run/short_enums.t`, with `-S` for Clang's `thumbv7m-none-eabi`: under `-fshort-enums` a unit's static assertions hold a one-byte tag for a variant of two constructors and the promotion of an object of `enum { A }` to `int`, and `typec` refuses a 9-bit bit-field of that type; under `-fno-short-enums` and under neither the tag is 4 bytes, the promotion is to `unsigned int` and the bit-field is accepted; and, where the host backend is Clang, `-Xclang -fshort-enums` for x86-64 fails the enumeration assertion with its message, as `-fshort-enums` does with both compilers. `test/run/target.t` and `test/unit/test_pipeline.ml` drop the refusal and keep that of the long spelling `--short-enums`, which the table of long options does not name; the golden texts of the assertion follow. Where 4.1 has landed, a header generated under each representation fails a client compiled under the other. |
 
 Pilot C lives in a repository of its own,
 `/Volumes/Optaine/type-c-pilot-c`, as Pilots A and B do. It pins commit
@@ -690,11 +692,10 @@ LP64.
 Each compiler builds the kernel with its own default enumeration ABI.
 Clang's for `thumbv7m-none-eabi` gives an enumeration the size of
 `int`. arm-none-eabi-gcc's gives it the smallest integer type that
-holds its values (short enums), which the assertion of design 13.4
-refuses in a lowered unit. The owner has decided that `typec` supports
-the short-enum representation, through a change to design 13.4. The
-GCC half of criteria 1, 2, 3 and 6 depends on that change: without
-it, the pilot builds with Clang only.
+holds its values (short enums), which `typec` learns from the target
+model and types by the enumeration rule (design 13.3, 13.4). The GCC
+half of criteria 1, 2, 3 and 6 depends on package 4.8: without it,
+the pilot builds with Clang only.
 
 `stream_buffer.c` is the subsystem because:
 

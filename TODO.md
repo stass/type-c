@@ -27,6 +27,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   `int 1;` where the `-E` step left the identifier (design 13.2). A
   backend error on lowered code is a `typec` bug; the backend's reading
   of a unit should equal the step's for every name the unit undefines.
+- [Medium] The driver refuses `-specs`/`--specs` with a `.tc` input
+  (`src/driver/cc_option.ml:180-184`), and Arm GNU firmware builds
+  commonly link with `--specs=nano.specs` or `--specs=nosys.specs`.
+  Before Pilot C (plan 4.7) is built as its firmware is, decide whether
+  a spec file may reach the link step alone, or the pilot links in a
+  separate command.
 - [Low] `--trap-function=` takes a C keyword (`int`, `_Bool`) or a name
   reserved to typec (`__tc_trap`), which then fails as a backend error at
   `<typec>` rather than as a refusal of the option. Refusing them needs
