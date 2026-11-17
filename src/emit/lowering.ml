@@ -1079,17 +1079,23 @@ let function_edits (text : Reader.t) base ~dropped
 
 (* The cleanups of the error path of each try (13.5, the [try] row):
    the copies of the scopes of [functions] that it leaves, the latest
-   first, from the edits [base] of the text. *)
+   first, from the edits [base] of the text. The sites are indexed by
+   the span of the try once, so that each try finds its own in constant
+   time. *)
 let error_path_cleanups (text : Reader.t) base
     (functions : Typec_sema.Expressions.function_defers list) =
-  let leaving =
-    List.concat_map
-      (fun (defers : Typec_sema.Expressions.function_defers) ->
-        places defers.sites)
-      functions
+  let leaving = Hashtbl.create 16 in
+  let index (place, sites) =
+    match place with
+    | Left_by (Error_path try_span) -> Hashtbl.replace leaving try_span sites
+    | Block_end _ | Left_by (Jump _ | Value_return _) -> ()
   in
+  List.iter
+    (fun (defers : Typec_sema.Expressions.function_defers) ->
+      List.iter index (places defers.sites))
+    functions;
   fun (site : Typec_sema.Expressions.try_site) ->
-    match List.assoc_opt (Left_by (Error_path site.try_span)) leaving with
+    match Hashtbl.find_opt leaving site.try_span with
     | Some sites -> List.concat_map (copy text base) sites
     | None -> []
 

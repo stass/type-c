@@ -289,6 +289,35 @@ let many_tries () =
   grows_linearly "the time to lower many tries" ~small
     (fun count -> ignore (emitted (source count)))
 
+(* The cleanups of the error paths are indexed by try once, so the time
+   to lower many tries in the scope of a defer is linear in the tries,
+   not in their square. *)
+let many_tries_in_a_defer_scope () =
+  let source count =
+    "result(int, int) f(void) {\n  defer (void)0;\n"
+    ^ String.concat ""
+        (List.init count (fun _ -> "  try result(int, int).Ok(1);\n"))
+    ^ "  return Ok(0);\n}\n"
+  in
+  let small = 4000 in
+  (* The occurrences of the copy in [text]. *)
+  let copies text =
+    let copy = "{ ( void ) 0 ; }" in
+    let width = String.length copy in
+    let rec count from found =
+      if from + width > String.length text then found
+      else if String.sub text from width = copy then
+        count (from + width) (found + 1)
+      else count (from + 1) found
+    in
+    count 0 0
+  in
+  compares "each try and the return in the scope of a defer run its copy"
+    (string_of_int (copies (words (emitted (source small)))))
+    (string_of_int (small + 1));
+  grows_linearly "the time to lower many tries in the scope of a defer"
+    ~small (fun count -> ignore (emitted (source count)))
+
 (* Design 6 and 13.5: each exit of the scope of a defer runs a copy of
    its statement, as a block, innermost and latest first; a jump that
    runs copies becomes a block that holds them and then the jump. *)
@@ -585,6 +614,7 @@ let () =
   many_void_fields ();
   void_fields ();
   many_tries ();
+  many_tries_in_a_defer_scope ();
   many_defers ();
   defers ();
   goto_defers ();
