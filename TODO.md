@@ -1538,17 +1538,17 @@ types (design 13.3).
 - [Low] P10 was decided on instance names read in lldb (design 15).
   Read them under gdb on a GCC build as well: an instance, its tags by
   name, and a value of it.
-- [Low] The pragma clause of design 5.1 rule 3 was accepted unmeasured
-  (design 15, P8). Count in the corpus how often a pragma line stands
-  in, or directly before, a statement or declaration in one of the
-  three positions of a `try`, next to the refusals that package 3.6
-  counts in the library.
-- [Medium] Design 13.5 gives `slice_from_array(a)` as a compound
-  literal and does not say how its length is written. `sizeof (a) /
-  sizeof *(a)` writes the operand a second time: one that declares a
-  tag would declare it twice, and `sizeof` evaluates an operand of
-  variably modified type. State the form in package 3.4: a length that
-  the front end computes, a temporary, or a refusal.
+- [Low] `slice_from_array(a)` divides the size of `a` by the size of
+  an element (design 13.5). Where the element has size 0, a structure
+  without members in the GNU profile, both backends refuse the lowered
+  code for a division by zero, and `typec` computes no layout to see
+  it (design 13.3, P16). Give the refusal a message of `typec`'s own,
+  or state the limit in design section 8 rule 2.
+- [Low] Design 10.5 gives a backend without `__builtin_trap` an
+  endless loop after the trap function, which is a statement. The test
+  of a slice writes its trap as an expression (design 13.5), and both
+  supported backends have the builtin (design 2.4). Remove the clause
+  from 10.5, or say what the expression is on such a backend.
 - [Medium] Returning a `result` by value costs code. In Pilot B the
   text of `toml.tc` is 11.9% larger under GCC 16 (2192 bytes) and 2.8%
   larger under Apple Clang 21 (528 bytes) than the `goto cleanup`

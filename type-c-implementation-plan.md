@@ -288,7 +288,7 @@ record of what it found.
 | 3.3 | Instantiation and emission: per-unit instances, typedef substitution, recursion limit, and rule 8 of design 3.5 for function definitions (P23). |
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
-| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The refusals, by their codes, of the pragma clause of design 5.1 rule 3 (P8), of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), in the library and the pilot. |
+| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The refusals, by their codes, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. |
 
 **Exit gate**
 
@@ -298,6 +298,21 @@ record of what it found.
 2. Every operation that is invalid on a type parameter is rejected at the
    definition, not at a use.
 3. Out-of-range slice accesses trap; the negative tests for slices pass.
+   Each run test of the lowered form (design 13.5, "The check of a
+   slice") has a partner that fails where the test is missing, on both
+   backends at `-O0` and at `-O2`:
+   - an index and a `slice_sub` whose operand holds a compound literal
+     read its elements after the expression; the partner indexes one
+     past the literal and traps;
+   - `sizeof(s[0])` sizes an array of file scope and draws no
+     diagnostic; the partner, an index out of range in a `sizeof` whose
+     operand is a variable length array, traps;
+   - operands that count their evaluations are evaluated once in an
+     index, a `slice_sub` and a `slice_from_array`; the partner, a
+     `slice_from_array` of a variable length array, is refused;
+   - `slice_from_array` initialises an object of file scope under
+     `-pedantic-errors`; the partner, an index that C evaluates in the
+     head of a function, is refused.
 4. The measurements of 3.6 are written up.
 
 **Decided at the gate:** P11 to P14, P23, P27, P28, and whether the
