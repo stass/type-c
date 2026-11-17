@@ -1119,6 +1119,158 @@ nested, operand).
   moved: 2 moved: error 1 nested: 12 nested: error 2 operand: 602 operand: error 4 left: 11 left: error 3 initialised: 17 inner: 1 inner: 11 inner: error 5
   moved: 2 moved: error 1 nested: 12 nested: error 2 operand: 602 operand: error 4 left: 11 left: error 3 initialised: 17 inner: 1 inner: 11 inner: error 5
 
+A discarded value in which the holder reads a try is cast to void
+wherever a backend takes the source as used for the effect of the call
+that the prelude takes out of it: an operand of && or || (both,
+either), which Apple Clang takes so, and an operand of a cast, a member
+access or an indirection in a branch, or a cast alone (converted,
+member, pointed, cast), which GCC takes so; as a statement and on the
+left of a comma (lefts). An assignment or a call is not cast, and a try
+alone leaves ((void)0), the only void in partners.
+
+  $ cat > effects.tc <<'EOF'
+  > #include <stdio.h>
+  > typedef result(int, int) result_int;
+  > typedef result(int *, int) result_pointer;
+  > struct pair {
+  >   int x;
+  >   int y;
+  > };
+  > typedef result(struct pair, int) result_pair;
+  > static int calls;
+  > static int cell = 40;
+  > static result_int f(int n) {
+  >   calls++;
+  >   if (n >= 0)
+  >     return Ok(n);
+  >   return Err(-n);
+  > }
+  > static result_pair fs(int n) {
+  >   calls++;
+  >   if (n >= 0)
+  >     return Ok((struct pair){ n, n });
+  >   return Err(-n);
+  > }
+  > static result_pointer fp(int n) {
+  >   calls++;
+  >   if (n >= 0)
+  >     return Ok(&cell);
+  >   return Err(-n);
+  > }
+  > static int g(int n) {
+  >   calls += 10;
+  >   return n;
+  > }
+  > static result_int both(int c, int n) {
+  >   c && try f(n);
+  >   return Ok(calls);
+  > }
+  > static result_int either(int c, int d, int n) {
+  >   c ? 0 : d || try f(n);
+  >   return Ok(calls);
+  > }
+  > static result_int converted(int c, int n) {
+  >   c ? (long)try f(n) : 0;
+  >   return Ok(calls);
+  > }
+  > static result_int member(int c, int n) {
+  >   c ? (try fs(n)).x : 0;
+  >   return Ok(calls);
+  > }
+  > static result_int pointed(int c, int n) {
+  >   c ? *try fp(n) : 0;
+  >   return Ok(calls);
+  > }
+  > static result_int cast(int n) {
+  >   (long)try f(n);
+  >   return Ok(calls);
+  > }
+  > static result_int lefts(int c, int d, int n) {
+  >   c && try f(n), d && try f(n + 1);
+  >   return Ok(calls);
+  > }
+  > static result_int partners(int n) {
+  >   int x = 0;
+  >   try f(n);
+  >   g(try f(n));
+  >   x = try f(n);
+  >   x += try f(n);
+  >   return Ok(x + calls);
+  > }
+  > static void show(const char *name, result_int r) {
+  >   match (r) {
+  >   case Ok(v):
+  >     printf("%s: %d\n", name, v);
+  >     break;
+  >   case Err(e):
+  >     printf("%s: error %d\n", name, e);
+  >     break;
+  >   }
+  > }
+  > int main(void) {
+  >   calls = 0;
+  >   show("both", both(1, 2));
+  >   show("both", both(0, -2));
+  >   show("both", both(1, -3));
+  >   calls = 0;
+  >   show("either", either(0, 0, 2));
+  >   show("either", either(1, 0, -2));
+  >   show("either", either(0, 0, -4));
+  >   calls = 0;
+  >   show("converted", converted(1, 2));
+  >   show("converted", converted(1, -5));
+  >   calls = 0;
+  >   show("member", member(1, 2));
+  >   show("member", member(1, -6));
+  >   calls = 0;
+  >   show("pointed", pointed(1, 2));
+  >   show("pointed", pointed(1, -7));
+  >   calls = 0;
+  >   show("cast", cast(2));
+  >   show("cast", cast(-9));
+  >   calls = 0;
+  >   show("lefts", lefts(1, 1, 2));
+  >   show("lefts", lefts(1, 1, -1));
+  >   calls = 0;
+  >   show("partners", partners(3));
+  >   show("partners", partners(-8));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   for o in -O0 -O2; do
+  >     typec --cc=$cc $flags $o -o effects effects.tc && ./effects |
+  >       paste -s -d ' ' -
+  >   done
+  > done
+  both: 1 both: 1 both: error 3 either: 1 either: 1 either: error 4 converted: 1 converted: error 5 member: 1 member: error 6 pointed: 1 pointed: error 7 cast: 1 cast: error 9 lefts: 2 lefts: error 1 partners: 20 partners: error 8
+  both: 1 both: 1 both: error 3 either: 1 either: 1 either: error 4 converted: 1 converted: error 5 member: 1 member: error 6 pointed: 1 pointed: error 7 cast: 1 cast: error 9 lefts: 2 lefts: error 1 partners: 20 partners: error 8
+  both: 1 both: 1 both: error 3 either: 1 either: 1 either: error 4 converted: 1 converted: error 5 member: 1 member: error 6 pointed: 1 pointed: error 7 cast: 1 cast: error 9 lefts: 2 lefts: error 1 partners: 20 partners: error 8
+  both: 1 both: 1 both: error 3 either: 1 either: 1 either: error 4 converted: 1 converted: error 5 member: 1 member: error 6 pointed: 1 pointed: error 7 cast: 1 cast: error 9 lefts: 2 lefts: error 1 partners: 20 partners: error 8
+  $ typec --cc=$clang --emit-c -o effects.i effects.tc
+  $ sed -n '/^static result_int partners/,/^}/p' effects.i | grep void
+  ((void)0)
+
+Under any other operator both backends report the source with a call
+in place of the try as unused, and the value is not cast, so they
+report the try as well: an equality that should have been an
+assignment still fails -Werror.
+
+  $ cat > unused.tc <<'EOF'
+  > typedef result(int, int) result_int;
+  > result_int f(void);
+  > result_int compared(int x) {
+  >   x == try f();
+  >   return Ok(x);
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -c -o unused.o unused.tc 2>&1 |
+  >     grep -o 'unused-[a-z]*' | sort -u
+  > done
+  unused-comparison
+  unused-value
+
 A temporary that the holder reads and an if assigns is declared with
 the value 0, so the optimisers that cannot tell that the holder reads
 it only where the if assigned it warn of no uninitialised read: GCC 16
@@ -1142,7 +1294,8 @@ each level.
   > EOF
   $ for cc in $clang $gcc; do
   >   for o in -O1 -O2 -O3 -Os; do
-  >     for program in assigned holders partners beside voids nested; do
+  >     for program in assigned holders partners beside voids nested \
+  >       effects; do
   >       typec --cc=$cc $flags $o -c -o $program.o $program.tc ||
   >         echo "$cc $o $program"
   >     done

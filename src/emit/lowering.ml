@@ -1372,20 +1372,17 @@ let lower_holder output lowered ~cleanups_of
         in_front;
         around (close output ~after:statement.last ~extent "}") ]
 
-(* The casts to void of the discarded conditionals in whose branches
-   [holder] reads a try, where the read would draw -Wunused-value. They
-   lower the source in place, so one inside a hoisted operand moves with
-   it like the other edits inside the tokens that it replaces. *)
+(* The casts to void of the discarded values of [holder] whose tries
+   may leave them reading values with no effect, which would draw
+   -Wunused-value. They lower the source in place, so one inside a
+   hoisted operand moves with it like the other edits inside the tokens
+   that it replaces. *)
 let void_casts output (holder : Typec_sema.Expressions.try_holder) =
   let cast (value : Tree.span) =
     [ insert output ~before:value.first ~extent:value "(void)(";
       close output ~after:value.last ~extent:value ")" ]
   in
-  List.filter_map
-    (fun (site : Typec_sema.Expressions.try_site) -> site.void_cast)
-    holder.tries
-  |> List.sort_uniq compare
-  |> List.concat_map cast
+  List.concat_map cast holder.void_casts
 
 (* The edits of the holders of try of a text, each copy in them made
    from [lowered], the whole of the text, and the casts to void in

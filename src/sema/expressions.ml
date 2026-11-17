@@ -78,13 +78,13 @@ type try_site = {
   return_instance : Ctype.instance;
   err_field : string option;
   value : try_value;
-  void_cast : Tree.span option;
 }
 
 type try_holder = {
   holder : holder;
   hoisted : Try_plan.hoisted list;
   tries : try_site list;
+  void_casts : Tree.span list;
 }
 
 (* [late_call] is whether an operand after the first holds a call or a
@@ -409,16 +409,15 @@ end
    unqualified constructor (design 3.3), or none. A [Discarded] position
    has none and discards the value (6.3.2.2p1), which a conditional of a
    type that typec does not know needs to tell (design 5.2). A
-   [Discarded_branch] is a branch of the conditional at [cast], which
-   stands where its value is discarded: its value is discarded too, but
-   a try there reads its value, as C gives both branches of a
-   conditional one type (6.5.15p3), and lowering casts that conditional
-   to void so that the read draws no -Wunused-value (design 13.5). *)
+   [Discarded_branch] is a branch of a conditional that stands where its
+   value is discarded: its value is discarded too, but a try there reads
+   its value, as C gives both branches of a conditional one type
+   (6.5.15p3, design 13.5). *)
 type position =
   | Untargeted
   | Targeted of Ctype.t
   | Discarded
-  | Discarded_branch of { cast : Tree.span }
+  | Discarded_branch
 
 (* The position of an operand whose value is that of the expression
    around it, which stands in [position]: the association that a
@@ -427,15 +426,12 @@ type position =
    type, as design 3.3 gives neither one. *)
 let value_position = function
   | Discarded -> Discarded
-  | Discarded_branch _ as branch -> branch
+  | Discarded_branch -> Discarded_branch
   | Untargeted | Targeted _ -> Untargeted
 
-(* The position of a branch of the conditional at [conditional], which
-   stands in [position]; a conditional in a branch of a discarded one is
-   cast with it. *)
-let branch_position ~(conditional : Tree.span) = function
-  | Discarded -> Discarded_branch { cast = conditional }
-  | Discarded_branch _ as branch -> branch
+(* The position of a branch of a conditional that stands in [position]. *)
+let branch_position = function
+  | Discarded | Discarded_branch -> Discarded_branch
   | (Untargeted | Targeted _) as position -> position
 
 (* Where a pattern stands, which decides whether it may omit the field
@@ -600,6 +596,7 @@ type t = {
   mutable enclosing : enclosing;
   mutable holders : try_holder list;
   mutable holder_tries : try_site list;
+  mutable holder_void_casts : Tree.span list;
   mutable holder_short_lived : short_lived list;
   mutable next_try : int;
   mutable next_truth : int;
@@ -625,6 +622,7 @@ let create () =
     enclosing = outside_functions;
     holders = [];
     holder_tries = [];
+    holder_void_casts = [];
     holder_short_lived = [];
     next_try = 0;
     next_truth = 0;
@@ -939,6 +937,40 @@ let dropped_result =
 let refuse_dropped_result context (discarded : Tree.expression) typed =
   if drops_result context discarded typed then
     context.fail discarded.span dropped_result
+
+(* The expression whose value [discarded] has: itself, or the right
+   operand of a comma, without parentheses. *)
+let rec discarded_value (discarded : Tree.expression) =
+  let value = Try_plan.without_parentheses discarded in
+  match value.node with
+  | Comma (_, right) -> discarded_value right
+  | _ -> value
+
+(* Whether a backend takes the value of [value] as used when an operand
+   has an effect, which design 13.5 measures. Both report any other
+   operation that computes a value as unused whatever its operands, and
+   a cast to void would silence that report; an assignment, a call, an
+   increment and a decrement keep their effect in place. *)
+let used_by_effects (value : Tree.expression) =
+  match value.node with
+  | Binary ((Logical_and | Logical_or), _, _) | Conditional _ | Cast _ -> true
+  | _ -> false
+
+(* Design 13.5: whether lowering casts [discarded], an expression whose
+   value is discarded and typed [typed], to void, as a try of [view]'s
+   holder stands in its value, which the prelude may leave with no
+   effect where the source had one. A value of type void draws no
+   report, and the left operand of a comma is a discarded value of its
+   own. *)
+let needs_void_cast view (discarded : Tree.expression) typed =
+  let value = discarded_value discarded in
+  let within (site : try_site) =
+    site.try_span.first >= value.span.first
+    && site.try_span.last <= value.span.last
+  in
+  Ctype.is_void typed.expression_type <> Unknown.Answer true
+  && used_by_effects value
+  && List.exists within view.holder_tries
 
 (* Distinct types (design 3.4, 10.2) *)
 
@@ -2171,7 +2203,7 @@ let discard_branches context position ~need discards branches =
   let diagnostic =
     match (discards, position) with
     | Unknown.Answer true, _ -> Some dropped_result
-    | Depends_on unknown, (Discarded | Discarded_branch _) ->
+    | Depends_on unknown, (Discarded | Discarded_branch) ->
         Some (needing need unknown)
     | Answer false, _ | Depends_on _, (Untargeted | Targeted _) -> None
   in
@@ -3268,7 +3300,7 @@ let target_constructor context position (span : Tree.span) name =
       context.needs_complete t;
       Option.bind (Ctype.constructors context.tags t) (fun constructors ->
           named_in t constructors name)
-  | Targeted _ | Untargeted | Discarded | Discarded_branch _ -> None
+  | Targeted _ | Untargeted | Discarded | Discarded_branch -> None
 
 (* The constructor that the name at the start of [span] denotes, as the
    first reading of the name decided: an instance of a generic function
@@ -3451,6 +3483,7 @@ let holding context ?(declaration = false) (holder : holder) ~stretch_last
           unchecked_object = declaration }
       in
       view.holder_tries <- [];
+      view.holder_void_casts <- [];
       view.holder_short_lived <- [];
       let typed = ref None in
       context.hoisted_operands
@@ -3473,9 +3506,13 @@ let holding context ?(declaration = false) (holder : holder) ~stretch_last
       | [] -> ()
       | hoisted ->
           view.holders <-
-            { holder; hoisted; tries = List.rev view.holder_tries }
+            { holder;
+              hoisted;
+              tries = List.rev view.holder_tries;
+              void_casts = view.holder_void_casts }
             :: view.holders);
       view.holder_tries <- [];
+      view.holder_void_casts <- [];
       view.holder_short_lived <- [];
       typed
 
@@ -3632,10 +3669,10 @@ let try_value context span position ok_field =
   match (ok_field, position) with
   | Some (field : Ctype.member), Discarded ->
       (Ctype.unqualified field.member_type, No_value)
-  | Some field, (Untargeted | Targeted _ | Discarded_branch _) ->
+  | Some field, (Untargeted | Targeted _ | Discarded_branch) ->
       ( Ctype.unqualified field.member_type,
         Read { field = field_name field; conversion = Unconverted } )
-  | None, (Discarded | Discarded_branch _) -> (Ctype.void, No_value)
+  | None, (Discarded | Discarded_branch) -> (Ctype.void, No_value)
   | None, (Untargeted | Targeted _) ->
       context.fail span
         (Rule.message Try_void
@@ -3737,7 +3774,7 @@ and positioned context position (expression : Tree.expression) =
   record_dependence context expression;
   match position with
   | Targeted target -> assigned context expression ~target typed
-  | Untargeted | Discarded | Discarded_branch _ -> typed
+  | Untargeted | Discarded | Discarded_branch -> typed
 
 (* 6.5.16.1p2, 6.5.2.2p7: [typed], the value of [expression], converted
    to [target] as if by assignment. Apart from [positioned], which
@@ -3948,11 +3985,6 @@ and try_expression context position (whole : Tree.expression) operand =
   context.needs_complete operand_type;
   let ok_field = result_field context operand_type Ctype.result_ok in
   let value_type, read = try_value context span position ok_field in
-  let void_cast =
-    match (position, read) with
-    | Discarded_branch { cast }, Read _ -> Some cast
-    | (Untargeted | Targeted _ | Discarded | Discarded_branch _), _ -> None
-  in
   let temporary =
     match hoisted.form with
     | Tried { number } -> number
@@ -3968,8 +4000,7 @@ and try_expression context position (whole : Tree.expression) operand =
       err_field =
         Option.map field_name
           (result_field context operand_type Ctype.result_err);
-      value = read;
-      void_cast }
+      value = read }
   in
   view.holder_tries <- site :: view.holder_tries;
   value value_type
@@ -4298,7 +4329,7 @@ and prototype_positions context (callee : typed) arguments =
 and argument context position argument =
   match position with
   | Targeted _ -> positioned context position argument
-  | Untargeted | Discarded | Discarded_branch _ ->
+  | Untargeted | Discarded | Discarded_branch ->
       let typed = whole_value context argument in
       if Ctype.is_opaque typed.expression_type then
         refuse_type_parameter context argument.span
@@ -4435,9 +4466,7 @@ and compound_literal context (whole : Tree.expression) type_name values =
 and conditional context span position condition if_true if_false =
   let condition_typed = whole_value context condition in
   require_scalar context condition.span ~clause:"6.5.15p2" condition_typed;
-  let branch_typed =
-    positioned context (branch_position ~conditional:span position)
-  in
+  let branch_typed = positioned context (branch_position position) in
   let second =
     match if_true with
     | Some branch -> { branch; branch_typed = branch_typed branch }
@@ -4626,10 +4655,14 @@ and statement_operand context position value =
    effects alone, which discards its value (design 5.2). The statements
    and the comma type such an expression here; a cast to void, which
    discards on purpose, and a void conditional, which discards a branch
-   that it has typed, do otherwise. *)
+   that it has typed, do otherwise. The value is cast to void where its
+   tries may leave it with no effect (design 13.5). *)
 and discard context value =
-  refuse_dropped_result context value
-    (statement_operand context Discarded value)
+  let typed = statement_operand context Discarded value in
+  refuse_dropped_result context value typed;
+  if needs_void_cast context.typed value typed then
+    context.typed.holder_void_casts <-
+      value.span :: context.typed.holder_void_casts
 
 (* 7.19p3: each step of the member path of [offsetof] reaches into the
    type that the steps before it reach, which may not be a variant (design

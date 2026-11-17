@@ -336,10 +336,7 @@ type try_value =
     function in the order of 5.1; the instance of [result] that the
     operand is, and that the function returns; the name of the field of
     the [Err] of the operand's type, [None] where the argument is void
-    (design 3.5 rule 6); what the holder reads of it; and [void_cast], the
-    conditional whose value is discarded and in whose branch the holder
-    reads it, which lowering casts to void so that the read draws no
-    -Wunused-value (13.5). *)
+    (design 3.5 rule 6); and what the holder reads of it. *)
 type try_site = {
   try_span : Tree.span;
   operand : Tree.span;
@@ -348,16 +345,18 @@ type try_site = {
   return_instance : Ctype.instance;
   err_field : string option;
   value : try_value;
-  void_cast : Tree.span option;
 }
 
 (** A holder of [try] expressions (design 5.1 rule 3): the statement or
-    declaration, its hoisted operands in the order of 5.1, and its
-    tries in the order they were typed. *)
+    declaration, its hoisted operands in the order of 5.1, its tries in
+    the order they were typed, and the expressions whose values it
+    discards that lowering casts to void, as the tries they read may
+    leave a value with no effect (13.5). *)
 type try_holder = {
   holder : holder;
   hoisted : Try_plan.hoisted list;
   tries : try_site list;
+  void_casts : Tree.span list;
 }
 
 val try_holders : t -> try_holder list

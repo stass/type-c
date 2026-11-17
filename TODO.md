@@ -682,18 +682,13 @@ is [type-c-language-design.md](type-c-language-design.md).
   = try f();`) takes the check and the object goes unchecked. Key the
   check to the holder's own initialiser, and keep the holder's state
   per holder rather than in mutable fields of the view.
-- [Medium] A discarded expression whose effects all move to the prelude
-  lowers to reads with none: `c && try f();` becomes
-  `__tc_c0 && __tc_t0.u.Ok.value;`, which Clang reports under
-  `-Wunused-value` (`-Werror` fails). A try under an operator in the
-  branch of a discarded conditional is not cast either: GCC 16 reports
-  `c ? (long)try f() : 0;`, `c ? (try fs()).x : 0;` and
-  `c ? *try fp() : 0;` ("statement with no effect") where the plain C
-  draws nothing, and Clang `c ? 0 : d || try f();`. Only a try that is
-  itself a branch is cast. Decide the cast at each funnel of discarded
-  values (`Expressions.discard`: a statement's value, the left of a
-  comma) for any read of a try whose value flows into the discarded
-  value, which deletes `Discarded_branch.cast`.
+- [Low] The cast to void of a discarded value (design 13.5) covers the
+  whole value, so it silences a pure operation under `&&`, `||`, `?:` or
+  a cast that the source with a call in place of the try would draw a
+  report for: `c && (x == try f());` and `(long)(x == try f());` compile
+  under -Werror, as does `(long)try f();`, which Clang reports with a
+  call. Decide whether such a case is worth a rule that follows the
+  path to each try.
 - [Low] A chain of 3000 `a ? try f() :` exceeds Clang's bracket depth
   of 2048; refuse past a named bound or document it.
 - [Low] Per-holder quadratic costs: `Try_plan.expression` appends with
