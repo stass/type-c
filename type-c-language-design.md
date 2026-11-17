@@ -1764,7 +1764,7 @@ Because of rules 2 to 4, an instance of a checked generic function is
 valid C for every value type. Instantiation fails only where a chain of
 instances exceeds the nesting limit (3.5 rule 7), where a declaration
 changes what the definition names (3.5 rule 8), or where 10.3 or rule 2
-of 7.3 refuses the instance's placement. A declaration of a name that
+or 4 of 7.3 refuses the instance's placement. A declaration of a name that
 an instance would take is refused whether or not the instance is used
 (10.3).
 
@@ -1834,11 +1834,54 @@ convert, is weighed with P11.
    `extern int tbl[];`, a generic uses `tbl`, and the definition of `tbl`
    with its size stands before an instance. The measurement of P23
    counts these.
-4. Consequences: the code of an instance is duplicated across translation
+
+   The list of an enumeration that the source declares without one
+   before the definition is refused as well, whether or not the body
+   names the enumeration (13.5). In
+
+   ```c
+   enum E;
+   generic(T) int f(T *p)
+   {
+       return _Generic((enum E *)0, int *: 1, default: 0);
+   }
+   enum E { A = -1 };
+   int h(int *p) { return f(p); }
+   ```
+
+   the body reads 0 at the definition, where `enum E` is compatible
+   with no integer type, and would read 1 in the instance `f__i`, which
+   is defined after the list (Apple Clang 21, GCC 16). The call in `h`
+   is an error that cites the list.
+4. *Provisional (P27).* An instance is compiled under the pragmas in
+   force at the definition of its generic, as a `static inline`
+   function of a header is under those of the header. It is not
+   compiled under the pragmas in force at its first use, which it would
+   carry to every later use in the unit. Between the definition and the
+   place where an instance is written there stands therefore no
+   `#pragma` line that sets state for the text after it: the first use
+   of an instance after such a line is an error that cites the line.
+   13.5 says which lines set none: a packing line, since an instance
+   has the packing of the command line (10.3); a diagnostic line; and a
+   line inside a function body that reaches no further than a loop or
+   a block. In
+
+   ```c
+   generic(T) float damp(T *state, float x) { return x * 0.0f; }
+   #pragma GCC optimize("fast-math")
+   float first(int *s, float x) { return damp(s, x); }
+   ```
+
+   GCC 16 would give `damp__i` the options of the pragma, and the
+   instance would return 0 for a NaN to every caller in the unit, so
+   the call in `first` is an error. A unit therefore includes the
+   headers that define generic functions after the headers whose
+   pragmas set state; 13.5 gives the measured cost.
+5. Consequences: the code of an instance is duplicated across translation
    units, the address of an instance differs between them, and a static
    object in a generic function exists once per instance per translation
    unit.
-5. An ordinary function gives C code and other translation units a single
+6. An ordinary function gives C code and other translation units a single
    external entry point:
 
    ```c
@@ -2499,7 +2542,8 @@ struct or union in a generic that is to be packed says so in the
 definition, with `__attribute__((packed))`, which every instance then
 carries. Under `-fpack-struct=n` the packing of the command line is
 that option's, for an instance as for every other structure of the unit.
-Other pragmas that change a layout are not kept from an instance (13.5).
+Other pragmas that change a layout are not kept from a type instance;
+rule 4 of 7.3 keeps them from a function instance (13.5).
 
 The bracket assumes that `#pragma pack()` restores the packing of the
 command line and leaves the stack of `push` alone, as GCC and Clang
@@ -3750,7 +3794,34 @@ each. A third clause covers the text around it.
   type, and neither does declaring an entity again with the type it has:
   a member that names a structure of file scope reads alike where the
   structure is completed between the text and a place of writing after
-  it. The backend reads attributes that typec's types lack and cannot
+  it. A completion adds the content of the type, and the text reads
+  that content only at a point that needs the type complete (10.3),
+  which is an error at the text's own place, where the type is
+  incomplete. Every other reading takes the type for the one type that
+  it is before and after (C11 6.7.2.3p4). Apple Clang 21 and GCC 16
+  read alike, before and after a completion that packs the structure,
+  aligns it to 32 and marks it `may_alias`: a `_Generic` on a pointer
+  to it, the type of a conditional on that pointer and a `void *`,
+  `__builtin_types_compatible_p`, and the size and alignment of the
+  pointer. Only a message differs: `-Wcast-align`, which neither
+  `-Wall` nor `-Wextra` turns on, reports a cast to the pointer after
+  the completion and not before it.
+  Completing an enumeration does change its type. ISO C has no
+  incomplete enumeration (C11 6.7.2.3p3). The GNU profile takes
+  `enum E;` before the list of `E`, and until the list such an
+  enumeration is compatible with no integer type; the list makes it
+  compatible with one (C11 6.7.2.2p4). Text that needs nothing complete
+  reads the difference. On Apple Clang 21 and GCC 16,
+  `_Generic((enum E *)0, int *: 1, default: 0)` is 0 before
+  `enum E { A = -1 };` and 1 after it, also where the text reaches the
+  enumeration through a typedef name or through the type of an object
+  and does not name the tag. With an association for `enum E *` beside
+  the one for `int *`, both backends take the expression before the
+  list and refuse it after. An enumeration with a fixed type is
+  complete from its first declaration, and compatible with that type
+  before its list as after it (both backends), so its list completes
+  nothing.
+  The backend reads attributes that typec's types lack and cannot
   compare, so the declarations that may change what the text reads are
   found by where they stand rather than by what the text names. Between
   the text's own place and a place of writing, in either order and in
@@ -3760,9 +3831,23 @@ each. A third clause covers the text around it.
   inexactly, a typedef name declared before both places, whether or not
   the text uses it: GCC changes the name in place, and with it every
   declaration and member written through it. One completes a tag
-  declared before a place of writing that precedes the text, whether or
-  not the text names it; a completion changes nothing for text written
-  after it. A declaration is inexact if it or an earlier declaration of
+  declared before both places, whether or not the text names it: a tag
+  of any kind where the place of writing precedes the text, and an
+  enumeration where it follows the text as well. The completion of a
+  structure or union changes nothing for text written after it, as
+  said above. That of an enumeration is found by where it stands
+  because the text reads the enumeration's type through every typedef
+  name, object and function declared with it, and none of them names
+  the tag. The cost is the refusal of text that reads nothing of the
+  enumeration: after `enum E;` and the definition of a generic, the
+  list of `E` makes the first use of each instance that follows it an
+  error, whatever the definition names. The case is expected to be
+  rare: both backends report `enum E;` before the list under
+  `-pedantic`, and an enumeration that is declared with a fixed type
+  is not refused. Where the text is the definition of a generic, the
+  measurement of P23 counts the refusal with the others of rule 8 of
+  3.5. A declaration is inexact if it or an earlier
+  declaration of
   its entity that it sees holds an attribute, an alignment specifier or
   a `__typeof__` of an expression (3.5 rule 2), or is written through a
   typedef name so declared. Clang gives `__typeof__(obj)` the alignment
@@ -4013,22 +4098,141 @@ Three rules carry the property into unread text.
   error: no instance could be lowered from its body.
 
 The state that positional pragmas set is that of the place where the
-text is written, and it is outside the property. A deferred statement
-sets no such state and declares no type for it to lay out (section 6
-rule 9). The
-operand of a `try` is written under the state of its own place, since
-no pragma stands between the two (5.1 rule 3). An
-instance is kept from `#pragma pack` by the bracket of 10.3 and from no
-other pragma that changes a layout, among them `#pragma ms_struct on`,
-GCC's `#pragma scalar_storage_order` and a `#pragma clang attribute
-push` that applies `packed`. An instance that is first used inside the
-region of one of them in one translation unit, and outside it in
-another, has one name and two layouts. A function instance is likewise
-compiled under the pragmas in force where its first use puts its
-definition: `#pragma GCC target`, `#pragma GCC optimize`, `#pragma clang
-attribute push` and the pragmas that name a section apply to an instance
-first used in their region. Code under such a pragma keeps the first use
-of every instance outside its region.
+text is written, and it is outside the property, which speaks of names.
+A deferred statement sets no such state and declares no type for it to
+lay out (section 6 rule 9). The operand of a `try` is written under the
+state of its own place, since no pragma stands between the two (5.1
+rule 3). A type instance is kept from `#pragma pack` by the bracket of
+10.3 and from no other pragma that changes a layout, among them
+`#pragma ms_struct on`, GCC's `#pragma scalar_storage_order` and a
+`#pragma clang attribute push` that applies `packed`. A type instance
+that is first used inside the region of one of them in one translation
+unit, and outside it in another, has one name and two layouts. Code
+under such a pragma keeps the first use of every type instance outside
+its region.
+
+*Provisional (P27).* A function instance is compiled under the state of
+its generic's definition, by the construction that serves the operand
+of a `try`: no `#pragma` line that sets state stands between the two
+places (7.3 rule 4). The first use of an instance is an error where
+such a line stands, in any scope, between the definition of its generic
+and the place where 10.3 writes the instance, its prototype and its
+definition. The error cites the line. The state at a place is what the
+lines before it have set, so two places with no such line between them
+have one state, whatever the pragmas are and whatever a backend makes
+of them: `typec` does not read what a pragma does.
+
+Without the rule, the place of one use would decide the code of an
+instance for every use in the unit, and that place differs between
+units. GCC 16 gives a function the options of a `#pragma GCC optimize`
+region that holds its definition, or only its prototype. After
+`#pragma GCC optimize("fast-math")` a body `return x * 0.0f;` returns 0
+for a NaN, at `-O0` and at `-O2`, and it does so as well where the
+prototype alone stands in the region and the definition after its
+`#pragma GCC pop_options`. Apple Clang 21 with `-O2 -mfma` compiles
+`a * b + c` as one fused operation before a `#pragma STDC FP_CONTRACT
+OFF` line of file scope and as a multiplication and an addition in
+every function after it. It leaves a function defined after `#pragma
+clang optimize off` unoptimised, and puts one defined in a `#pragma
+clang attribute push` region that names a section, or after a `#pragma
+clang section` line, into that section.
+
+A `#pragma` line sets state unless it is of one of three kinds. Each
+has a reason that holds for every instance:
+
+- A `pack` line. Every text of an instance stands in the bracket of
+  10.3, so an instance has the packing of the command line whatever
+  line stands before it. This one part of the state is the command
+  line's and not the definition's (10.3).
+- A `GCC diagnostic` or `clang diagnostic` line. It changes the
+  messages of the backend and no code: Apple Clang 21 and GCC 16 write
+  the same assembly for a function inside a `diagnostic ignored` region
+  and outside it, at `-O0` and at `-O2`. Which warnings an instance
+  draws is thus decided where it is written, unlike its exemption as
+  the text of a system header, which follows the lines of the
+  definition (13.4). A `diagnostic ignored` bracket around the
+  definition of a generic silences nothing in its instances, and under
+  a `diagnostic error` line the backend refuses an instance whose body
+  draws that warning, as it does under `-Werror` on the command line.
+  Counting these lines would refuse nearly every unit: the twelve
+  headers measured below put a diagnostic bracket into a unit under
+  both backends.
+- A line of `Statement_pragma` (above) that stands inside a function
+  body. It reaches the loop that follows it or the end of its block,
+  and nothing after the body: with `#pragma STDC FP_CONTRACT OFF` in
+  the body of one function, Apple Clang 21 still fuses `a * b + c` in
+  the next. At file scope the three `STDC` lines of the list are in
+  force to the end of the unit (C11 7.12.2, 7.6.1, 7.3.4) and set
+  state.
+
+Every other line sets state for this rule: one that no backend knows,
+one that only prints, as `#pragma message`, and one that names what it
+acts on, as `#pragma weak f`. The three kinds are a list, and the list
+errs to one side only. A line that it lacks is refused with a message
+that cites it; a line that it held without cause would change the code
+of an instance with no message. So a kind enters the list with the
+reason that it reaches no instance, and with nothing less.
+
+Two other constructions were measured and set aside.
+
+- A bracket around each instance that restores the state of the
+  command line, as the bracket of 10.3 restores the packing. GCC 16 has
+  the lines for its options: an instance between `#pragma GCC
+  push_options`, `#pragma GCC reset_options` and `#pragma GCC
+  pop_options` inside a fast-math region returns a NaN for a NaN.
+  Apple Clang 21 ignores those lines as unknown pragmas, and its own
+  lines set a state of their choice and not the command line's: under
+  `-ffast-math`, a body between `#pragma float_control(push)` and
+  `#pragma float_control(pop)` is compiled strictly after `#pragma
+  float_control(precise, on)` and after `#pragma clang fp
+  reassociate(off)` alike, where the rest of the unit is not. The
+  bracket would be a list of the pragma families of each backend that
+  no measurement completes, and it would give the state of the command
+  line, which is not that of a definition inside a region.
+- Every function instance at the end of the unit. All instances would
+  share one state, the one that the unit leaves in force, which is not
+  the definition's after a region that the unit does not close. The
+  prototype of an instance would still stand before its first use, and
+  GCC 16 takes the options from the prototype. The text of the
+  definition would be written at the end of the unit, so each of the
+  three declarations that the resolution property refuses between the
+  two places (above) would be refused anywhere after the definition
+  of a generic function that the unit uses.
+
+The cost is the refusal of a use where the lines between change
+nothing for the instance: a region that is opened and closed again
+between the two places, and a line that sets no state at all. Measured
+on macOS with twelve headers of the C library and POSIX (`<stdio.h>`,
+`<stdlib.h>`, `<string.h>`, `<stdint.h>`, `<math.h>`, `<pthread.h>`,
+`<unistd.h>`, `<sys/stat.h>`, `<sys/socket.h>`, `<netinet/in.h>`,
+`<time.h>`, `<errno.h>`), the lines that reach `typec` are `pack` and
+diagnostic lines, which are not counted, and under Apple Clang 21 the
+`#pragma clang assume_nonnull begin` and `end` of `<pthread.h>` and two
+headers that it includes. GCC 16's `<immintrin.h>` holds 118 regions of
+`#pragma GCC push_options` and `#pragma GCC target`. A generic function
+that is defined before `#include <pthread.h>` under Apple Clang 21, or
+before `#include <immintrin.h>` under GCC 16, has no instance first
+used after it. The same holds for one that is defined before a
+`#pragma weak`, `#pragma GCC visibility` or `#pragma message` line,
+which the `-E` of both backends keeps, or before a `#pragma mark` line
+under GCC 16 (above). A unit therefore includes the headers that define generic
+functions after the headers that hold such lines, and writes such a
+line of its own after the first use of each instance or before the
+definitions.
+
+Stage 3 settles the rule. The container library and the measurements
+(packages 3.5 and 3.6) count its refusals from the code of rule 4 of
+7.3, by the leading identifiers of the cited line. If the refusals are
+common, the alternative reads the pairs of lines that open and close a
+region, as `#pragma GCC push_options` and `#pragma GCC pop_options`,
+and passes over a region that is closed before the place of writing.
+Each pair enters one list with the measurement, for each backend, that
+its closing line restores everything that a line of the region can
+set. Without such a finding the refusal stays.
+
+The internal functions of slices (below) are written from no
+definition in the source, and the rule does not reach them: each is
+compiled under the state of the place where lowering writes it.
 
 The identifiers that the compiler invents begin with `__tc_`, which
 keeps them from every name in the text (2.3). One that is declared at
@@ -4143,7 +4347,7 @@ a crash.
 | A `match` handles every constructor | Every `match` | Nothing; an invalid tag traps |
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
-| A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 refuses are compile errors | Nothing |
+| A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 or 4 refuses are compile errors | Nothing |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. An instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), an instance first used inside its region in one translation unit and outside it in another has one name and two layouts, and a function instance is compiled under the target, optimisation, attribute and section pragmas in force at its first use (13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
@@ -4183,6 +4387,7 @@ numbers refer to the implementation plan.
 | P24 | A block literal is C text only (13.3) | Stage 2, Pilot B: how often a block literal is refused. Type-C code on macOS: how often a block-taking API has no function-pointer form | C text only |
 | P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
 | P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |
+| P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
 
 ## 16. Non-goals
 
