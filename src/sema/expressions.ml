@@ -1086,23 +1086,47 @@ let reads_distinct : Tree.expression_node -> bool = function
       true
   | _ -> false
 
-let refuse_distinct context span (distinct : Ctype.distinct) =
-  context.fail span
-    (Rule.message Distinct_operation
-       (Printf.sprintf
-          "a value of the distinct type %s takes no such operation; a cast \
-           to its underlying type crosses to it"
-          (distinct_name distinct)))
+(* What reads a value of a distinct type where the table refuses it, as
+   its message names it. *)
+type distinct_reader =
+  | Operator of { spelling : string; casts_back : bool }
+      (** An operator as written, or a builtin by its name; [casts_back]
+          says whether its result is a value of the operand's type, which
+          the fix casts back to the distinct type. *)
+  | Operand of string  (** The operand's role, as "an index". *)
+  | Unnamed_operation
+
+let refuse_distinct context span reader (distinct : Ctype.distinct) =
+  let name = distinct_name distinct in
+  let underlying = quote (Type_name.of_ctype distinct.representation) in
+  let refusal =
+    match reader with
+    | Operator { spelling; casts_back = true } ->
+        Printf.sprintf
+          "%s is not defined on the distinct type %s; cast to %s and back"
+          (quote spelling) name underlying
+    | Operator { spelling; casts_back = false } ->
+        Printf.sprintf "%s is not defined on the distinct type %s; cast to %s"
+          (quote spelling) name underlying
+    | Operand role ->
+        Printf.sprintf "%s may not be of the distinct type %s; cast it to %s"
+          role name underlying
+    | Unnamed_operation ->
+        Printf.sprintf
+          "this operation is not defined on the distinct type %s; cast to %s"
+          name underlying
+  in
+  context.fail span (Rule.message Distinct_operation refusal)
 
 (* An operand of an operation at [span], as the operation sees it;
    [reads] says whether the table lets the operation read a value of a
-   distinct type. *)
-let read_operand context span ~reads (typed : typed) =
+   distinct type, and [reader] names the operation where it does not. *)
+let read_operand context span ~reads ~reader (typed : typed) =
   context.needs_complete typed.expression_type;
   let typed = as_seen context span typed in
   refuse_type_parameter_operand context span typed.expression_type;
   match Ctype.as_distinct typed.expression_type with
-  | Some distinct when not reads -> refuse_distinct context span distinct
+  | Some distinct when not reads -> refuse_distinct context span reader distinct
   | Some _ | None -> typed
 
 (* Design 3.4: [==], [!=] and [?:] take two values of one distinct type,
@@ -1456,7 +1480,7 @@ let refuse_mixed_pointers context span ~clause left right =
             (Rule.message Distinct_operation
                (Printf.sprintf
                   "the pointers %s and %s are not compatible; a cast \
-                   crosses between them"
+                   converts one to the other"
                   (quote (Type_name.of_ctype a.pointer))
                   (quote (Type_name.of_ctype b.pointer))))
       | Some Record_gap ->
@@ -1515,8 +1539,45 @@ let require_scalar context span ~clause typed =
 
 (* Constants (6.4.4, 6.4.5) *)
 
-let spelling context (span : Tree.span) =
-  Reader.spelling context.text context.text.tokens.(span.first)
+let token_spelling context index =
+  Reader.spelling context.text context.text.tokens.(index)
+
+let spelling context (span : Tree.span) = token_spelling context span.first
+
+(* Whether [op] makes a value of its operands' type, as the arithmetic
+   operators do and the comparisons do not. *)
+let binary_casts_back : Tree.binary_operator -> bool = function
+  | Multiply | Divide | Remainder | Add | Subtract | Shift_left | Shift_right
+  | Bitwise_and | Bitwise_xor | Bitwise_or ->
+      true
+  | Less_than | Greater_than | Less_or_equal | Greater_or_equal | Equal_to
+  | Not_equal_to | Logical_and | Logical_or ->
+      false
+
+let unary_casts_back : Tree.unary_operator -> bool = function
+  | Unary_plus | Unary_minus | Bitwise_not | Pre_increment | Pre_decrement ->
+      true
+  | Address | Indirection | Logical_not | Real_part | Imaginary_part -> false
+
+(* The operation of [whole], as a refusal of a distinct operand names it:
+   an operator by its token, which follows a left operand and begins a
+   prefix operation. *)
+let distinct_reader context (whole : Tree.expression) =
+  let operator ~casts_back token =
+    Operator { spelling = token_spelling context token; casts_back }
+  in
+  match whole.node with
+  | Binary (op, left, _) ->
+      operator ~casts_back:(binary_casts_back op) (left.span.last + 1)
+  | Assignment (_, left, _) -> operator ~casts_back:true (left.span.last + 1)
+  | Unary (op, _) -> operator ~casts_back:(unary_casts_back op) whole.span.first
+  | Post_increment _ | Post_decrement _ ->
+      operator ~casts_back:true whole.span.last
+  | Member { operand; _ } | Pointer_member { operand; _ } ->
+      operator ~casts_back:false (operand.span.last + 1)
+  | Subscript _ -> Operator { spelling = "[]"; casts_back = false }
+  | Call _ -> Operand "a called function"
+  | _ -> Unnamed_operation
 
 (* The tokens of [span] as a message quotes them. *)
 let excerpt context (span : Tree.span) =
@@ -3367,7 +3428,9 @@ let pointee_of_first context span name first =
   match operand context first with
   | Pointer_operand { referenced = { shape = Distinct distinct; _ }; _ }
     when is_type_c_text context span ->
-      refuse_distinct context span distinct
+      refuse_distinct context span
+        (Operator { spelling = name; casts_back = false })
+        distinct
   | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
   | Other_operand _ | Unknown_operand _ ->
       object_of_first context span name first
@@ -4029,7 +4092,8 @@ let note_typed context (expression : Tree.expression) typed =
    3.4 lets take such a value whole call [whole_value] instead. *)
 let rec expression context (expression : Tree.expression) =
   let typed = whole_value context expression in
-  read_operand context expression.span ~reads:false typed
+  read_operand context expression.span ~reads:false ~reader:Unnamed_operation
+    typed
 
 (* An expression without a target type, which its use takes whole: it
    discards, copies, sizes, addresses or tests it, or gives it to the
@@ -4169,10 +4233,12 @@ and expression_node context position (whole : Tree.expression) =
   (* Any other operand, which the operation reaches into, so it may not
      be a variant; it reads a distinct value only where the table of
      design 3.4 says so. *)
-  let typed ?remedy operand =
+  let operation = distinct_reader context whole in
+  let typed ?remedy ?(reader = operation) operand =
     let operand_typed = whole_value context operand in
     refuse_variant ?remedy context span operand_typed.expression_type;
-    read_operand context span ~reads:(reads_distinct whole.node) operand_typed
+    read_operand context span ~reads:(reads_distinct whole.node) ~reader
+      operand_typed
   in
   match whole.node with
   | Identifier { name; resolution } -> identifier context span name resolution
@@ -4187,7 +4253,7 @@ and expression_node context position (whole : Tree.expression) =
       compound_literal context whole type_name values
   | Subscript { operand; index } -> (
       let array = typed operand in
-      let index_typed = typed index in
+      let index_typed = typed ~reader:(Operand "an index") index in
       match slice_of context array.expression_type with
       | Some (instance, element) ->
           slice_index context span ~instance ~slice:operand.span ~index
@@ -4714,7 +4780,9 @@ and argument context position argument =
           "a value of a type parameter is an argument that no parameter \
            type receives, which the default argument promotions or a \
            builtin read by its type";
-      read_operand context argument.span ~reads:false typed
+      read_operand context argument.span ~reads:false
+        ~reader:(Operand "an argument without a parameter type")
+        typed
 
 (* GNU [__real__] and [__imag__] and the operators of 6.5.3. *)
 and unary context span (op : Tree.unary_operator) typed =

@@ -299,7 +299,7 @@ conversions (distinct-conversion) and the operator (distinct-operation).
   ids.tc:8: error: a value of type 'user_id' does not convert to 'unsigned int' without a cast [distinct-conversion]
   [80]
   $ typec --cc=$clang -DPRODUCT -c ids.tc -o tc.o
-  ids.tc:11: error: a value of the distinct type 'user_id' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
+  ids.tc:11: error: '*' is not defined on the distinct type 'user_id'; cast to 'unsigned int' and back [distinct-operation]
   [80]
 
 5. A private value made outside its owner (design 9.2). A C module that

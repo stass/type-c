@@ -468,7 +468,19 @@ implicit conversions that design 3.4 leaves out, each at its operation.
   d x = (d)0;
   $ printf 'type d = distinct int;\nint f(d a) { return a + 1; }\n' > add.tc
   $ ./golden.exe add.tc
-  add.tc:2: error: a value of the distinct type 'd' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
+  add.tc:2: error: '+' is not defined on the distinct type 'd'; cast to 'int' and back [distinct-operation]
+  [1]
+  $ printf 'type idx = distinct int;\nint f(idx i) { i++; return ((int)i); }\n' > increment.tc
+  $ ./golden.exe increment.tc
+  increment.tc:2: error: '++' is not defined on the distinct type 'idx'; cast to 'int' and back [distinct-operation]
+  [1]
+  $ printf 'type idx = distinct int;\nint f(int *a, idx i) { return (a[i]); }\n' > index.tc
+  $ ./golden.exe index.tc
+  index.tc:2: error: an index may not be of the distinct type 'idx'; cast it to 'int' [distinct-operation]
+  [1]
+  $ printf 'type idx = distinct int;\nint f(idx i, idx j) { return (i < j); }\n' > less.tc
+  $ ./golden.exe less.tc
+  less.tc:2: error: '<' is not defined on the distinct type 'idx'; cast to 'int' [distinct-operation]
   [1]
   $ printf 'type d = distinct int;\nd f(int a) { return a; }\n' > convert.tc
   $ ./golden.exe convert.tc
@@ -492,7 +504,7 @@ on the object refuses it (design 3.4).
   > void f(id *p) { (void)__atomic_fetch_add(p, 1, 5); }
   > EOF
   $ ./golden.exe atomic.tc
-  atomic.tc:2: error: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
+  atomic.tc:2: error: '__atomic_fetch_add' is not defined on the distinct type 'id'; cast to 'unsigned int' [distinct-operation]
   [1]
   $ cat > exchange.tc <<'EOF'
   > type id = distinct unsigned;
@@ -509,7 +521,7 @@ on the object refuses it (design 3.4).
   > unsigned f(volatile id *p) { return __atomic_load_n(p, 5) * 2u; }
   > EOF
   $ ./golden.exe qualified.tc
-  qualified.tc:2: error: a value of the distinct type 'id' takes no such operation; a cast to its underlying type crosses to it [distinct-operation]
+  qualified.tc:2: error: '*' is not defined on the distinct type 'id'; cast to 'unsigned int' and back [distinct-operation]
   [1]
   $ cat > load.tc <<'EOF'
   > type id = distinct unsigned;

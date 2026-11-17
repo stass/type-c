@@ -48,16 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] An operation on a distinct type does not name the
-  operation, and "crosses" is the design's word. `i++` and `a[i]` with
-  `type idx = distinct int` give "a value of the distinct type 'idx'
-  takes no such operation; a cast to its underlying type crosses to
-  it [distinct-operation]". Proposed: "'++' is not defined on the
-  distinct type 'idx'; cast to 'int' and back: 'i = (idx)((int)i +
-  1)'", and for an index "an index may not be of the distinct type
-  'idx'; cast it to 'int'". Source: Pilot A (15 increments, 7 index
-  casts, 17 casts to print, casts to compare against `int` limits);
-  probe.
 - [Medium] A C idiom on a variant gets no type or no fix. `if (v)`,
   `while (v)` and `if (f())` on a variant give C's "the operand is not
   of scalar type (C11 6.8.4.1p1)", naming no type. `f() < 0` on a

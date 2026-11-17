@@ -1978,15 +1978,19 @@ let distinct_types () =
     types ^ "id f(id a, id b, other o, ref r, unsigned u, int c) { " ^ body
     ^ " }"
   in
-  let refused body =
-    rejects ~file (in_function body)
-      "a value of the distinct type 'id' takes no such operation; a cast to \
-       its underlying type crosses to it [distinct-operation]"
+  let refused (body, refusal) =
+    rejects ~file (in_function body) (refusal ^ " [distinct-operation]")
   in
   let mixed body =
     rejects ~file (in_function body)
       "the operands are not both of the distinct type 'id' \
        [distinct-operation]"
+  in
+  let arithmetic operator =
+    Printf.sprintf
+      "'%s' is not defined on the distinct type 'id'; cast to 'unsigned \
+       int' and back"
+      operator
   in
   let converts body =
     rejects ~file (in_function body) "without a cast [distinct-conversion]"
@@ -2001,9 +2005,19 @@ let distinct_types () =
         return a == b ? (id)(a != b) : s.f;");
   accepts ~file (types ^ "static id k = (id)3; static id *q = &k;");
   List.iter refused
-    [ "return a + b;"; "return -a;"; "a++; return a;"; "a += 1; return a;";
-      "return (id)(a < b);"; "switch (a) { default: ; } return a;";
-      "int t[2]; return (id)t[a];"; "struct bits s = {0}; return s.f + 1;" ];
+    [ ("return a + b;", arithmetic "+"); ("return -a;", arithmetic "-");
+      ("a++; return a;", arithmetic "++");
+      ("a += 1; return a;", arithmetic "+=");
+      ( "return (id)(a < b);",
+        "'<' is not defined on the distinct type 'id'; cast to 'unsigned \
+         int'" );
+      ( "switch (a) { default: ; } return a;",
+        "this operation is not defined on the distinct type 'id'; cast to \
+         'unsigned int'" );
+      ( "int t[2]; return (id)t[a];",
+        "an index may not be of the distinct type 'id'; cast it to \
+         'unsigned int'" );
+      ("struct bits s = {0}; return s.f + 1;", arithmetic "+") ];
   mixed "return (id)(a == u);";
   mixed "return (id)(a == 0);";
   mixed "(void)(c ? a : u); return a;";
@@ -2014,8 +2028,10 @@ let distinct_types () =
       "_Bool t = a; return (id)t;" ];
   rejects ~file
     (in_function "return a; } int g(id a) { return __builtin_printf(\"\", a);")
-    "takes no such operation";
-  rejects ~file (in_function "return (id)*r;") "'ref' takes no such operation";
+    "an argument without a parameter type may not be of the distinct type \
+     'id'; cast it to 'unsigned int'";
+  rejects ~file (in_function "return (id)*r;")
+    "'*' is not defined on the distinct type 'ref'; cast to 'int *'";
   rejects ~file "type d = distinct struct s *[2];"
     "is not over an unqualified arithmetic or pointer type \
      [distinct-base]";
@@ -2050,8 +2066,7 @@ let distinct_operands () =
     types ^ "id f(id a, ref r, unsigned u, int c) { " ^ body ^ " }"
   in
   let refused body =
-    rejects ~file (in_function body)
-      "a value of the distinct type 'id' takes no such operation"
+    rejects ~file (in_function body) "the distinct type 'id'; cast"
   in
   let mixed body =
     rejects ~file (in_function body)
@@ -2065,8 +2080,9 @@ let distinct_operands () =
       "id x = a; return __sync_add_and_fetch(&x, a);";
       "id x = a; __atomic_store_n(&x, a, a); return a;" ];
   rejects ~file (types ^ "static int t[(id)2];")
-    "a value of the distinct type 'id' takes no such operation";
-  rejects ~file (in_function "goto *r;") "'ref' takes no such operation";
+    "this operation is not defined on the distinct type 'id'";
+  rejects ~file (in_function "goto *r;")
+    "this operation is not defined on the distinct type 'ref'";
   List.iter mixed
     [ "id x = a; unsigned *q = &u; return (id)(&x == q);";
       "id x = a; unsigned *q = &u; return (id)(&x < q);";
@@ -2080,7 +2096,7 @@ let distinct_operands () =
   (* GCC has no __c11 builtins, so these take a Clang target. *)
   rejects ~file ~target:lp64_clang
     (in_function "_Atomic id x; return __c11_atomic_fetch_add(&x, 1, 5);")
-    "a value of the distinct type 'id' takes no such operation";
+    "'__c11_atomic_fetch_add' is not defined on the distinct type 'id'";
   rejects ~file ~target:lp64_clang
     (in_function "_Atomic id x; __c11_atomic_store(&x, u, 5); return a;")
     "a value of type 'unsigned int' does not convert to 'id' without a cast";
@@ -2107,14 +2123,18 @@ let distinct_operands () =
   (* Clang's max, min and nand fetch operations compute on the value;
      the operand is an int, so that the object is what is refused. *)
   List.iter
-    (fun call ->
+    (fun (builtin, object_name) ->
       rejects ~file ~target:lp64_clang
-        (in_function ("_Atomic id x; id y = a; (void)" ^ call ^ "; return a;"))
-        "a value of the distinct type 'id' takes no such operation")
-    [ "__c11_atomic_fetch_max(&x, 1, 5)"; "__c11_atomic_fetch_min(&x, 1, 5)";
-      "__c11_atomic_fetch_nand(&x, 1, 5)"; "__atomic_fetch_max(&y, 1, 5)";
-      "__atomic_fetch_min(&y, 1, 5)"; "__atomic_max_fetch(&y, 1, 5)";
-      "__atomic_min_fetch(&y, 1, 5)" ];
+        (in_function
+           (Printf.sprintf "_Atomic id x; id y = a; (void)%s(&%s, 1, 5); \
+                            return a;"
+              builtin object_name))
+        (Printf.sprintf "'%s' is not defined on the distinct type 'id'"
+           builtin))
+    [ ("__c11_atomic_fetch_max", "x"); ("__c11_atomic_fetch_min", "x");
+      ("__c11_atomic_fetch_nand", "x"); ("__atomic_fetch_max", "y");
+      ("__atomic_fetch_min", "y"); ("__atomic_max_fetch", "y");
+      ("__atomic_min_fetch", "y") ];
   rejects ~file ~target:lp64_clang
     (in_function "id y = a; (void)__sync_fetch_and_umax(&y, 1u); return a;")
     "'id *' does not convert to 'volatile unsigned int *' without a cast";
