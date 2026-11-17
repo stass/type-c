@@ -1678,6 +1678,18 @@ types (design 13.3).
 
 ## Design questions without a gate yet
 
+- [Medium] A slice argument costs code under GCC on Arm. Pilot C's
+  port of `stream_buffer.c` is 5.9% larger than the original at -Os
+  and 3.9% at -O2 over arm-none-eabi-gcc 14, though smaller over
+  Clang: GCC builds every two-word structure argument on the stack
+  and loads it back into registers, as plain C passing such a
+  structure does, keeps one `slice_sub` check Clang folds, and does
+  not carry a length's value range through a structure member as it
+  does through a scalar (pilot repository
+  /Volumes/Optaine/type-c-pilot-c at 83abeea, README "Sizes"). Weigh
+  lowering a slice parameter of an internal-linkage function as two
+  scalars against the mechanism it adds; measure on GCC 15 and 16
+  first.
 - [Medium] A member access to an `_Atomic` structure or union, which
   C11 6.5.2.3p5 leaves undefined, is typed with the atomic qualifier
   dropped (`member_of` in `src/sema/expressions.ml`) and not refused.
