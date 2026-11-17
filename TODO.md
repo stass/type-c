@@ -65,7 +65,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   puts the instance name and the rest of the line on physical lines of
   their own, each after a line marker of the source line, and Clang
   quotes the physical line. GCC 16 quotes the source line, which it
-  reads from the `.tc` file.
+  reads from the `.tc` file. Clang also quotes text that lowering adds
+  and the source does not hold: under `-Wunreachable-code`, Pilot B's
+  `toml.tc:563:1` shows `__builtin_trap();`, where line 563 is the `}`
+  that ends a function. Design 15 (P15) decides who preprocesses, and
+  with it what a backend can quote.
 - [Low] With Clang the debug information names the compilation unit
   after the emitted file, an absolute path in the random temporary
   directory (GCC names it after the `.tc` input), so a Clang build with
@@ -82,6 +86,12 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] `Unix.execvp` hands an executable without a `#!` line to
   `/bin/sh` with glibc, macOS and FreeBSD libc but not with musl, so such
   a backend works on some hosts only. Document it or decide one behaviour.
+- [Low] `typec` refuses `-std=c99` for a `.tc` input (design 2.4), so a
+  build that sets `-std=c99` in one `CFLAGS` for every file cannot
+  switch one file to Type-C by `CC=typec` alone: Pilot B's Makefile
+  gives `toml.tc` flags of its own. Decide whether a `.tc` input takes
+  the option, and what the backend is then given, or the refusal stays
+  and the README says how such a build switches a file.
 
 ## Target model
 
@@ -1308,6 +1318,14 @@ types (design 13.3).
   __here: (unsigned long)&&__here; })`) in a match arm or in the scope
   of a `defer` statement. If they occur, change the reading as design
   4.4 says.
+- [Medium] A function that hands a deferred resource to its caller, or
+  links it into a structure, clears the variable first, since the
+  deferred statement reads the variable at the exit (`ret = x; x = 0;
+  return Ok(ret);`). 7 of the 9 `defer` statements of Pilot B need
+  that hand-over, nothing checks that it is written, and forgetting it
+  frees what the caller owns. Count the idiom again in the next pilot
+  before any change to the language, such as a `defer` that runs on
+  the error exit alone.
 
 ## Design questions without a gate yet
 
@@ -1506,6 +1524,28 @@ types (design 13.3).
   (`./type.tci`); and a binding of another arm used in an arm reads
   "'addr' is not declared (C11 6.5.1p2)" with no code, where a message
   naming the arm that binds it would point at the mistake.
+- [Low] TC0061 on `T *p = try f(sizeof(*p));` says that `p` is not
+  visible where lowering writes the text and names no remedy. Pilot B
+  met it 4 times and wrote `sizeof(T)` each time, which no longer
+  follows the type of `p`. Have the message suggest `T *p; p = try
+  f(sizeof(*p));`, which design 5.1 rule 3 accepts.
+- [Medium] Returning a `result` by value costs code. In Pilot B the
+  text of `toml.tc` is 11.9% larger under GCC 16 (2192 bytes) and 2.8%
+  larger under Apple Clang 21 (528 bytes) than the `goto cleanup`
+  version in C. The repeated cleanups are 368 and 208 bytes of that
+  (design 15, P9). The rest, 1824 and 320 bytes, is not split further:
+  the record puts it down to the return of a structure of a tag and a
+  union where the C returns an `int` or a pointer, and under GCC most
+  of the growth is in functions that hold no `defer` (`parse_array`
+  +432, `next_token` +208). Measure whether a `result` whose error
+  type has no fields could be returned as a bare pointer or `int`
+  (design 3.5, 13.4), which is one of the compact layouts of design 12.
+- [Medium] Pilot B's `RECORD.md` (branch `port`) argues function by
+  function that the repeated cleanups are not where the size goes, and
+  does not hold the measurement that design 15 (P9) rests on: the text
+  of `toml.tc` without its 9 `defer` statements and of `toml_goto.c`
+  without its 9 cleanups. Add the two builds and their table to the
+  record, then cite the record's commit in design 15.
 - [Medium] Alpine packages no csmith (3.24), so the csmith recipe
   fails to set up in the Alpine host images (`prepare.sh: csmith is not
   installed`). Build a pinned csmith from source in alpine.Dockerfile, or
