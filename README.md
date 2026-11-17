@@ -298,6 +298,87 @@ option(size_t) find(const int *items, size_t n, int wanted) {
 }
 ```
 
+**Errors as values, cleanups on every exit.** `result(T, E)` is another
+generic variant that every Type-C file has: `Ok` of a value, or `Err`
+of an error. C releases resources at one label that each error path must jump
+to; here an error path written later returns past it:
+
+<!-- file: copy.c -->
+```c
+#include <stdio.h>
+
+int copy_file(const char *from, const char *to) {
+  int status = -1;
+  FILE *out = NULL;
+  FILE *in = fopen(from, "rb");
+  if (!in)
+    goto done;
+  out = fopen(to, "wb");
+  if (!out)
+    goto done;
+  char buffer[4096];
+  size_t n;
+  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
+    if (fwrite(buffer, 1, n, out) != n)
+      return -1;  /* leaks in and out */
+  if (ferror(in) || fflush(out) != 0)
+    goto done;
+  status = 0;
+done:
+  if (out)
+    fclose(out);
+  if (in)
+    fclose(in);
+  return status;
+}
+```
+
+In Type-C, `try` gives the value of a `result` or returns its error. A
+`defer`, written on the line after an acquisition, releases the
+resource at every exit after it: each exit runs the deferred statements
+in force there, in reverse order, so the `return` in the loop closes
+both files. A deferred statement cannot report an error, so the
+function flushes `out` itself before its last exit:
+
+<!-- file: copy.tc -->
+```c
+#include <stdio.h>
+
+type copy_error = | CannotOpen | CannotRead | CannotWrite;
+
+static result(FILE *, copy_error) open_file(const char *path,
+                                            const char *mode) {
+  FILE *f = fopen(path, mode);
+  if (!f)
+    return Err(CannotOpen);
+  return Ok(f);
+}
+
+result(void, copy_error) copy_file(const char *from, const char *to) {
+  FILE *in = try open_file(from, "rb");
+  defer fclose(in);
+  FILE *out = try open_file(to, "wb");
+  defer fclose(out);
+  char buffer[4096];
+  size_t n;
+  while ((n = fread(buffer, 1, sizeof buffer, in)) > 0)
+    if (fwrite(buffer, 1, n, out) != n)
+      return Err(CannotWrite);
+  if (ferror(in))
+    return Err(CannotRead);
+  if (fflush(out) != 0)
+    return Err(CannotWrite);
+  return Ok;
+}
+```
+
+`typec` writes a copy of each deferred statement at each exit
+([What the C looks like](#what-the-c-looks-like)). And a `result` cannot
+be ignored by accident: a call that drops one, as the statement
+`copy_file(from, to);` does, is an error. C drops a return code without
+a word unless its function is declared `[[nodiscard]]` (C23) or
+`warn_unused_result`, and then it warns.
+
 **Types that only their owner can make.** A `private` type can be made
 only in its interface and in the source file of the same name, here
 `port.tc`; other files use ports and read their value. So, short of C
@@ -322,6 +403,55 @@ port port_from_argument(const char *argument) {
   return (port)atoi(argument);  /* skips the check */
 }
 ```
+
+## Measured on a real library
+
+Pilot B, the plan's test of Stage 2 on real code
+([plan, Stage 2](type-c-implementation-plan.md#stage-2-generic-types-result-try-and-defer)),
+rewrote the parser of tomlc99, a TOML library in C (`toml.c`, 2392
+lines), with `result`, `try` and `defer`. Its header `toml.h`, its C
+programs and its tests did not change and link against the Type-C
+object. The pilot's repository is not published; the numbers here are
+from its record.
+
+Fault injection fails each allocation of a parse in turn, one run for
+each. Over the library's 62 example files, 1416 runs, the original
+went wrong in 34: 25 leaks and 9 uses after free, from two defects in
+the code that grows an array or a table. The rewrite went wrong in
+none, built by Clang or GCC, and the address, undefined behavior and
+leak sanitizers reported nothing. Over the 146 files of
+toml-spec-tests, 18847 runs, the original leaked in 1022, 1000 of them
+in one deeply nested file, and crashed in 9; the rewrite did neither.
+
+`try` and `defer` did not remove the defects by themselves. A variant
+of the rewrite whose three faulty functions only put a `try` in place
+of each `if (!x) return` kept all 34 bad runs. Adding a `defer` that
+frees each new object until it is linked into the tree removed the 25
+leaks but not the 9 uses after free, which came from the order of the
+steps: the old buffer of an array was freed before its new element
+existed. Reordering the steps, so that each grown buffer is stored and
+counted before the next allocation, removed them. The language puts
+the question "who owns this object if this step fails?" at every
+`try`; the rewrite had to answer it.
+
+What it costs, at `-O2 -g`, against a hand-written C version of the
+same rewrite with a `goto cleanup` where Type-C has a `defer`:
+
+| | Apple Clang 21 | GCC 16 |
+| --- | --- | --- |
+| text of `toml.o`, over the `goto` version | +528 bytes, +2.8% | +2192 bytes, +11.9% |
+| of which cleanups repeated at each exit | 208 bytes, 1.1% of text | 368 bytes, 2.0% of text |
+| text of `toml.o`, over the original `toml.c` | +480 bytes, +2.6% | +656 bytes, +3.3% |
+| 20 parses of a 1.3 MB document, `goto` version | 0.868 s | 0.962 s |
+| the same, Type-C | 0.870 s | 0.960 s |
+
+The record does not split the rest of the growth further and puts most
+of it down to the representation of `result`, a structure of a tag and
+a union returned by value where the C returns an `int` or a pointer;
+returning a result whose error has no fields as the bare value is open
+in [TODO.md](TODO.md). Parse times are the best
+of five rounds, and repeated runs move each by 2 to 3 percent, more
+than any gap between the versions. Error paths were not timed.
 
 ## Try it
 
@@ -497,6 +627,31 @@ typec: server.tc:5: the distinct type 'port' is private to 'include/port.tci', s
 $ typec -std=c11 -Wall -Wextra -c find.tc
 ```
 
+So does `result`, with `try` and `defer`:
+
+```console
+$ typec -std=c11 -Wall -Wextra -c copy.tc
+```
+
+A dropped result:
+
+<!-- file: backup.tc -->
+```c
+type copy_error = | CannotOpen | CannotRead | CannotWrite;
+
+result(void, copy_error) copy_file(const char *from, const char *to);
+
+void backup(void) {
+  copy_file("notes.txt", "notes.bak");
+}
+```
+
+```console
+$ typec -c backup.tc
+typec: backup.tc:6: a value of a result type is discarded; handle it with try or match, store it, or cast it to void (design 5.2) [TC0048]
+[80]
+```
+
 Each instance of a generic type is a C structure of its own, so it is
 the C compiler that refuses `list(double)` where `list(int)` is wanted.
 Clang says (it quotes a fragment of the line, which
@@ -595,6 +750,7 @@ $ cc -std=c11 -Wall -Wextra -c token.c
 $ cc -std=c11 -Wall -Wextra -c ids.c
 $ cc -std=c11 -Wall -Wextra -c list.c
 $ cc -std=c11 -Wall -Wextra -c server.c
+$ cc -std=c11 -Wall -Wextra -c copy.c
 ```
 
 </details>
@@ -606,7 +762,15 @@ enumerator, unless it has a `default`; `-Wswitch-enum` warns with the
 `default` too; GCC's `-Wextra` warns of a missing `break`, and Clang
 does with `-Wimplicit-fallthrough`. No flag tried warns of a member
 read under the wrong tag, of swapped ids or of a value made outside its
-module.
+module. An analyzer finds some of them by following paths: GCC's
+`-fanalyzer` reports both leaks of `copy.c`.
+
+<!-- console: gcc -->
+```console
+$ cc -std=c11 -fanalyzer -c copy.c 2>&1 | grep -o "leak of FILE '[a-z]*'"
+leak of FILE 'in'
+leak of FILE 'out'
+```
 
 Type-C has limits here too. A `match` with a `default` covers a new
 case as C's `default` does; but a `default` that covers no case is
@@ -709,6 +873,108 @@ double area(shape s) {
 The unit ends with a few static assertions of what `typec` assumes of
 the target, which fail to compile where the C compiler's types differ
 from those `typec` read, as under `-Xclang -fshort-enums`.
+
+</details>
+
+A `result` is a variant like any other, an instance named after its
+arguments, as `result__i5error` is `result(int, error)`. A `try` tests
+the tag and returns the error at once, and a `defer` writes its
+statement at each exit of its scope, in reverse order, after the value
+of a `return` is computed: the C of early returns that each release
+what is held, with no table, unwinding or allocation.
+
+<details>
+<summary>The C of <code>try</code> and <code>defer</code></summary>
+
+<!-- file: pair.tc -->
+```c
+type error = | Busy;
+
+result(int, error) acquire(int id);
+void release(int handle);
+result(void, error) join(int a, int b);
+
+result(void, error) pair(void) {
+  int a = try acquire(1);
+  defer release(a);
+  int b = try acquire(2);
+  defer release(b);
+  return join(a, b);
+}
+```
+
+`typec --emit-c pair.tc` writes this, here without its line markers and
+laid out for reading:
+
+<!-- emit-c: pair.tc -->
+```c
+struct error; typedef struct error error;
+enum error_tag { error_Busy };
+struct error { enum error_tag tag; };
+
+typedef int __tc_arg__i;
+struct error; typedef struct error __tc_arg__5error;
+struct result__i5error; typedef struct result__i5error result__i5error;
+
+result__i5error acquire(int id);
+void release(int handle);
+
+typedef void __tc_arg__v;
+struct result__v5error; typedef struct result__v5error result__v5error;
+
+result__v5error join(int a, int b);
+
+enum result__v5error_tag { result__v5error_Err, result__v5error_Ok };
+struct result__v5error {
+  enum result__v5error_tag tag;
+  union {
+    struct { __tc_arg__5error error; } Err;
+  } u;
+};
+enum result__i5error_tag { result__i5error_Err, result__i5error_Ok };
+struct result__i5error {
+  enum result__i5error_tag tag;
+  union {
+    struct { __tc_arg__5error error; } Err;
+    struct { __tc_arg__i value; } Ok;
+  } u;
+};
+
+result__v5error pair(void) {
+  typedef __typeof__(((__typeof__(pair) *)0)()) __tc_ret;
+  {
+    const struct result__i5error __tc_t0 = acquire(1);
+    if (__tc_t0.tag != result__i5error_Ok) {
+      if (__tc_t0.tag != result__i5error_Err)
+        __builtin_trap();
+      return ((struct result__v5error){
+          .tag = result__v5error_Err, .u.Err = { __tc_t0.u.Err.error } });
+    }
+    int a = __tc_t0.u.Ok.value;
+
+    const struct result__i5error __tc_t1 = acquire(2);
+    if (__tc_t1.tag != result__i5error_Ok) {
+      if (__tc_t1.tag != result__i5error_Err)
+        __builtin_trap();
+      { release(a); }
+      return ((struct result__v5error){
+          .tag = result__v5error_Err, .u.Err = { __tc_t1.u.Err.error } });
+    }
+    int b = __tc_t1.u.Ok.value;
+
+    {
+      __tc_ret __tc_r = (join(a, b));
+      { release(b); }
+      { release(a); }
+      return __tc_r;
+    }
+    __builtin_trap();
+  }
+}
+```
+
+A tag that is neither `Ok` nor `Err` traps, as in every `match`, and so
+does the end of the function, which no path reaches.
 
 </details>
 
@@ -858,17 +1124,19 @@ macro cannot check a `switch` either.
 Type-C is in development: the [design](type-c-language-design.md)
 specifies the whole language, and the
 [plan](type-c-implementation-plan.md) builds it in stages, each ending
-in a measured gate. What is built is the language of Stage 1 of the
-plan and the first packages of Stage 2: variants, `match` and `if (case ...)`, distinct
-types, `private` and interface files (`.tci`), generic types,
-`option` and `result`, `try`, which returns the error of a `result` or
-gives its value (`uint32_t n = try read_u32(r);`), and `defer`, which
-runs a statement when its block is left (`defer fclose(f);`).
+in a measured gate. Stages 1 and 2 are built and have met their gates:
+variants, `match` and `if (case ...)`, distinct types, `private` and
+interface files (`.tci`), generic types, `option` and `result`, `try`,
+which returns the error of a `result` or gives its value
+(`uint32_t n = try read_u32(r);`), and `defer`, which runs a statement
+when its block is left (`defer fclose(f);`). Stage 2's gate rests
+on [Pilot B](#measured-on-a-real-library).
 
 Coming next, designed and **not yet implemented**:
 
-- generic functions: `generic(T) T *vector_last(vector(T) *v);`
-- slices with checked indexing:
+- Stage 3, generic functions:
+  `generic(T) T *vector_last(vector(T) *v);`
+- Stage 3, slices with checked indexing:
   `slice(uint8_t) bytes = slice_from_array(buffer);`
 - a checked mode, whose rules are provisional, that rules out specific
   classes of memory errors in the functions it covers.
