@@ -1,0 +1,62 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * A queue of values in storage that the caller supplies. It wraps around
+ * by comparison rather than by a modulo, which a small processor may
+ * lack, so its size need not be a power of two.
+ */
+
+#ifndef RING_TCI
+#define RING_TCI
+
+#include <stddef.h>
+
+type ring(T) = struct {
+	slice(T)	buf;		/* buf.len is the ring's size */
+	size_t		head;		/* the index of the oldest value */
+	size_t		count;		/* the values queued */
+};
+
+generic(T) static inline void
+ring_init(ring(T) *r, slice(T) buf)
+{
+	r->buf = buf;
+	r->head = 0;
+	r->count = 0;
+}
+
+/* Queues value; returns 0, and drops it, when the ring is full. */
+generic(T) static inline int
+ring_put(ring(T) *r, T value)
+{
+	size_t tail;
+
+	if (r->count == r->buf.len)
+		return (0);
+	tail = r->head + r->count;
+	if (tail >= r->buf.len)
+		tail -= r->buf.len;
+	r->buf[tail] = value;
+	r->count++;
+	return (1);
+}
+
+/* Takes the oldest value; returns None when the ring is empty. */
+generic(T) static inline option(T)
+ring_get(ring(T) *r)
+{
+	T value;
+
+	if (r->count == 0)
+		return (None);
+	value = r->buf[r->head];
+	if (++r->head == r->buf.len)
+		r->head = 0;
+	r->count--;
+	return (Some(value));
+}
+
+#endif /* !RING_TCI */

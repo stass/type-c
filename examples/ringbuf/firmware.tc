@@ -1,0 +1,286 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * The command interpreter of a small device, as firmware has one on
+ * its serial port. The UART interrupt queues each byte it receives in a
+ * ring; the main loop takes them out, assembles lines and answers each
+ * line with a reply, which it queues in a second ring for the UART to
+ * send. It needs no C library: it is built with -ffreestanding.
+ *
+ *	set led 0|1	turns the LED off or on; replies "ok"
+ *	get led		replies "led" and the LED's state
+ *	get temp	replies "temp" and the board's temperature
+ *	echo text	replies the text
+ *	stats		replies the bytes dropped by each ring when full
+ */
+
+#include <stddef.h>
+
+#include "firmware.h"
+#include "ring.tci"
+
+#define RX_SIZE		16	/* bytes received and not yet polled */
+#define TX_SIZE		32	/* bytes of replies not yet sent */
+#define LINE_SIZE	32	/* the longest command line */
+
+/* The digits of the largest unsigned long, of 64 bits. */
+#define DECIMAL_DIGITS	20
+
+type command =
+    | Empty				/* a blank line */
+    | SetLed(int on)
+    | GetLed
+    | GetTemp
+    | Echo(str text)
+    | Stats;
+
+type parse_error = | UnknownCommand | BadArgument;
+
+static unsigned char rx_buf[RX_SIZE];
+static unsigned char tx_buf[TX_SIZE];
+static ring(unsigned char) rx, tx;
+static char line[LINE_SIZE];
+static size_t line_len;
+static int line_too_long;		/* bytes of this line were lost */
+static int led;
+static unsigned long rx_dropped, tx_dropped;
+
+static void
+put_char(char c)
+{
+	if (!ring_put(&tx, (unsigned char)c))
+		tx_dropped++;
+}
+
+static void
+put_string(str s)
+{
+	for (size_t i = 0; i < s.len; i++)
+		put_char(s[i]);
+}
+
+static void
+put_decimal(unsigned long n)
+{
+	char digits[DECIMAL_DIGITS];
+	size_t len = 0;
+
+	do {
+		digits[len++] = (char)('0' + n % 10);
+		n /= 10;
+	} while (n != 0);
+	while (len > 0)
+		put_char(digits[--len]);
+}
+
+static void
+put_signed(long n)
+{
+	if (n < 0) {
+		put_char('-');
+		put_decimal(0UL - (unsigned long)n);
+		return;
+	}
+	put_decimal((unsigned long)n);
+}
+
+static int
+equal(str a, str b)
+{
+	if (a.len != b.len)
+		return (0);
+	for (size_t i = 0; i < a.len; i++)
+		if (a[i] != b[i])
+			return (0);
+	return (1);
+}
+
+/*
+ * Returns the word at *s, after any spaces, and moves *s past it and
+ * the one space that ends it.
+ */
+static str
+next_word(str *s)
+{
+	str p = *s, word;
+	size_t len = 0;
+
+	while (p.len > 0 && p[0] == ' ')
+		p = slice_sub(p, 1, p.len);
+	while (len < p.len && p[len] != ' ')
+		len++;
+	word = slice_sub(p, 0, len);
+	p = slice_sub(p, len, p.len);
+	if (p.len > 0)
+		p = slice_sub(p, 1, p.len);
+	*s = p;
+	return (word);
+}
+
+static result(command, parse_error)
+parse_get(str s)
+{
+	str object = next_word(&s);
+	command cmd;
+
+	if (equal(object, "led"))
+		cmd = GetLed;
+	else if (equal(object, "temp"))
+		cmd = GetTemp;
+	else
+		return (Err(BadArgument));
+	if (next_word(&s).len != 0)
+		return (Err(BadArgument));
+	return (Ok(cmd));
+}
+
+static result(command, parse_error)
+parse_set(str s)
+{
+	str object = next_word(&s);
+	str value = next_word(&s);
+	int on;
+
+	if (!equal(object, "led"))
+		return (Err(BadArgument));
+	if (equal(value, "0"))
+		on = 0;
+	else if (equal(value, "1"))
+		on = 1;
+	else
+		return (Err(BadArgument));
+	if (next_word(&s).len != 0)
+		return (Err(BadArgument));
+	return (Ok(SetLed(on)));
+}
+
+/* Reads the command of line s. */
+static result(command, parse_error)
+parse(str s)
+{
+	str verb = next_word(&s);
+
+	if (verb.len == 0)
+		return (Ok(Empty));
+	if (equal(verb, "echo"))
+		return (Ok(Echo(s)));
+	if (equal(verb, "stats")) {
+		if (next_word(&s).len != 0)
+			return (Err(BadArgument));
+		return (Ok(Stats));
+	}
+	if (equal(verb, "get"))
+		return (parse_get(s));
+	if (equal(verb, "set"))
+		return (parse_set(s));
+	return (Err(UnknownCommand));
+}
+
+static void
+execute(command cmd)
+{
+	match (cmd) {
+	case Empty:
+		break;
+	case SetLed(on):
+		led = on;
+		board_led(led);
+		put_string("ok\n");
+		break;
+	case GetLed:
+		put_string("led ");
+		put_decimal((unsigned long)led);
+		put_char('\n');
+		break;
+	case GetTemp:
+		put_string("temp ");
+		put_signed(board_temp());
+		put_char('\n');
+		break;
+	case Echo(text):
+		put_string(text);
+		put_char('\n');
+		break;
+	case Stats:
+		put_string("dropped rx ");
+		put_decimal(rx_dropped);
+		put_string(" tx ");
+		put_decimal(tx_dropped);
+		put_char('\n');
+		break;
+	}
+}
+
+/* Adds c to the line, or marks the line too long when it is full. */
+static void
+add_char(char c)
+{
+	if (line_len == LINE_SIZE) {
+		line_too_long = 1;
+		return;
+	}
+	slice_from_array(line)[line_len++] = c;
+}
+
+/* Answers the line just ended, and starts the next. */
+static void
+end_line(void)
+{
+	if (line_too_long) {
+		put_string("error: line too long\n");
+	} else {
+		str text = slice_sub(slice_from_array(line), 0, line_len);
+
+		match (parse(text)) {
+		case Ok(command cmd):
+			execute(cmd);
+			break;
+		case Err(UnknownCommand):
+			put_string("error: unknown command\n");
+			break;
+		case Err(BadArgument):
+			put_string("error: bad argument\n");
+			break;
+		}
+	}
+	line_len = 0;
+	line_too_long = 0;
+}
+
+void
+fw_init(void)
+{
+	ring_init(&rx, slice_from_array(rx_buf));
+	ring_init(&tx, slice_from_array(tx_buf));
+}
+
+/* Drops byte, and counts it, when the main loop has fallen behind. */
+void
+fw_rx(unsigned char byte)
+{
+	if (!ring_put(&rx, byte))
+		rx_dropped++;
+}
+
+/* Answers each line that the UART has received; a CR is ignored. */
+void
+fw_poll(void)
+{
+	while (case Some(c) = ring_get(&rx)) {
+		if (c == '\n')
+			end_line();
+		else if (c != '\r')
+			add_char((char)c);
+	}
+}
+
+int
+fw_tx(void)
+{
+	if (case Some(c) = ring_get(&tx))
+		return (c);
+	return (-1);
+}

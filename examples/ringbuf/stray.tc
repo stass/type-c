@@ -1,0 +1,39 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * What a stray write into a ring does: it moves the ring's head past
+ * its storage, as an overrun of a neighbouring buffer would, and takes
+ * a byte. The C ring reads past its storage; this one traps and calls
+ * panic, which --trap-function names.
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "ring.tci"
+
+_Noreturn void
+panic(void)
+{
+	fflush(stdout);
+	fputs("stray: panic\n", stderr);
+	exit(3);
+}
+
+int
+main(void)
+{
+	unsigned char storage[4];
+	ring(unsigned char) r;
+
+	ring_init(&r, slice_from_array(storage));
+	if (!ring_put(&r, 'a'))
+		return (1);
+	r.head = 9;
+	if (case Some(c) = ring_get(&r))
+		printf("read %d\n", c);
+	return (0);
+}
