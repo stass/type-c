@@ -1,0 +1,528 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * dns: prints a DNS response message read from a file: its header, its
+ * questions and its answers, with the data of A, AAAA, CNAME and MX
+ * records.  The message comes from the network, so every length and
+ * offset in it is checked before it is used.
+ *
+ * Usage: dns file
+ */
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#include <err.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define	MAX_MESSAGE	65535	/* the largest message, over TCP */
+#define	MAX_NAME	255	/* in wire form, RFC 1035, 2.3.4 */
+
+/*
+ * A name of MAX_NAME bytes has at most 128 labels, the root included,
+ * and needs at most one pointer before each.  A name that follows more
+ * pointers runs in a loop, or chains pointers to pointers, which is
+ * refused too.
+ */
+#define	MAX_POINTERS	(MAX_NAME / 2 + 1)
+
+/* A name as text: a byte of a label prints as at most 4 characters. */
+#define	NAME_TEXT_SIZE	(4 * MAX_NAME)
+
+#define	LABEL_KIND	0xc0	/* the top bits of a label's first byte */
+#define	LABEL_POINTER	0xc0	/* ... of a compression pointer */
+#define	LABEL_PLAIN	0x00	/* ... of a label of up to 63 bytes */
+
+#define	TYPE_A		1
+#define	TYPE_CNAME	5
+#define	TYPE_MX		15
+#define	TYPE_AAAA	28
+#define	CLASS_IN	1
+
+type bytes = slice(const uint8_t);
+
+/* Reads a message from its start to its end, one field at a time. */
+struct reader {
+	bytes	data;
+	size_t	off;		/* the next byte; never past data.len */
+};
+
+/* The first error in the message, which ends the reading. */
+type parse_error =
+    | Truncated(size_t off)
+    | CompressionLoop(size_t off)
+    | PointerPastEnd(size_t off)
+    | UnknownLabelType(size_t off)
+    | NameTooLong(size_t off)
+    | RecordPastEnd(size_t off)
+    | RecordTooLong(size_t off);
+
+/* A name as text: its labels, each followed by a dot. */
+struct name {
+	char	text[NAME_TEXT_SIZE];
+	size_t	len;
+};
+
+struct header {
+	uint16_t	id;
+	uint16_t	flags;
+	uint16_t	qdcount;
+	uint16_t	ancount;
+	uint16_t	nscount;
+	uint16_t	arcount;
+};
+
+struct question {
+	struct name	name;
+	uint16_t	type;
+	uint16_t	class;
+};
+
+/* The data of a record, by its type. */
+type rdata =
+    | A(bytes addr)				/* 4 bytes */
+    | AAAA(bytes addr)				/* 16 bytes */
+    | CNAME(struct name target)
+    | MX(uint16_t preference, struct name exchange)
+    | Other(uint16_t type, bytes data);
+
+struct answer {
+	struct name	owner;
+	uint16_t	class;
+	uint32_t	ttl;
+	rdata		data;
+};
+
+static result(uint8_t, parse_error)
+read_u8(struct reader *r)
+{
+	uint8_t v;
+
+	if (r->data.len - r->off < 1)
+		return (Err(Truncated(r->off)));
+	v = r->data[r->off];
+	r->off += 1;
+	return (Ok(v));
+}
+
+static result(uint16_t, parse_error)
+read_u16(struct reader *r)
+{
+	uint16_t v;
+
+	if (r->data.len - r->off < 2)
+		return (Err(Truncated(r->off)));
+	v = (uint16_t)(r->data[r->off] << 8 | r->data[r->off + 1]);
+	r->off += 2;
+	return (Ok(v));
+}
+
+static result(uint32_t, parse_error)
+read_u32(struct reader *r)
+{
+	uint16_t high, low;
+
+	high = try read_u16(r);
+	low = try read_u16(r);
+	return (Ok((uint32_t)high << 16 | low));
+}
+
+static result(bytes, parse_error)
+read_bytes(struct reader *r, size_t n)
+{
+	bytes p;
+
+	if (r->data.len - r->off < n)
+		return (Err(Truncated(r->off)));
+	p = slice_sub(r->data, r->off, r->off + n);
+	r->off += n;
+	return (Ok(p));
+}
+
+static void
+name_put(struct name *n, char c)
+{
+	slice(char) text = slice_from_array(n->text);
+
+	/* NAME_TEXT_SIZE holds the text of the longest name. */
+	text[n->len++] = c;
+}
+
+/*
+ * Appends a label and its dot.  A byte that a terminal could take for
+ * something else, and a dot or backslash inside a label, print as \DDD.
+ */
+static void
+name_append(struct name *n, bytes label)
+{
+	size_t i;
+
+	for (i = 0; i < label.len; i++) {
+		uint8_t c = label[i];
+
+		if (c > ' ' && c < 0x7f && c != '.' && c != '\\') {
+			name_put(n, (char)c);
+			continue;
+		}
+		name_put(n, '\\');
+		name_put(n, (char)('0' + c / 100));
+		name_put(n, (char)('0' + c / 10 % 10));
+		name_put(n, (char)('0' + c % 10));
+	}
+	name_put(n, '.');
+}
+
+/*
+ * Reads the name at r and moves r past it: past its first pointer, or
+ * past its last label.  The pointers lead anywhere before the end of
+ * r, and are counted so that a loop of them ends.
+ */
+static result(struct name, parse_error)
+read_name(struct reader *r)
+{
+	struct reader at = *r;		/* follows the pointers */
+	struct name n;
+	size_t wire = 0;		/* the length in wire form */
+	int pointers = 0;
+	bool jumped = false;
+
+	n.len = 0;
+	for (;;) {
+		size_t start = at.off;
+		bytes label;
+		uint8_t len, low;
+		size_t target;
+
+		len = try read_u8(&at);
+		if ((len & LABEL_KIND) == LABEL_POINTER) {
+			low = try read_u8(&at);
+			if (++pointers > MAX_POINTERS)
+				return (Err(CompressionLoop(start)));
+			target = (size_t)(len & ~LABEL_KIND) << 8 | low;
+			if (target >= at.data.len)
+				return (Err(PointerPastEnd(start)));
+			if (!jumped)
+				r->off = at.off;
+			jumped = true;
+			at.off = target;
+			continue;
+		}
+		if ((len & LABEL_KIND) != LABEL_PLAIN)
+			return (Err(UnknownLabelType(start)));
+		wire += 1 + len;
+		if (wire > MAX_NAME)
+			return (Err(NameTooLong(start)));
+		if (len == 0)
+			break;
+		label = try read_bytes(&at, len);
+		name_append(&n, label);
+	}
+	if (!jumped)
+		r->off = at.off;
+	if (n.len == 0)
+		name_put(&n, '.');
+	return (Ok(n));
+}
+
+static result(struct header, parse_error)
+read_header(struct reader *r)
+{
+	struct header h;
+
+	h.id = try read_u16(r);
+	h.flags = try read_u16(r);
+	h.qdcount = try read_u16(r);
+	h.ancount = try read_u16(r);
+	h.nscount = try read_u16(r);
+	h.arcount = try read_u16(r);
+	return (Ok(h));
+}
+
+static result(struct question, parse_error)
+read_question(struct reader *r)
+{
+	struct question q;
+
+	q.name = try read_name(r);
+	q.type = try read_u16(r);
+	q.class = try read_u16(r);
+	return (Ok(q));
+}
+
+/* Reads the data of a record of the given type, which ends where r does. */
+static result(rdata, parse_error)
+read_rdata(struct reader *r, uint16_t type)
+{
+	uint16_t preference;
+
+	switch (type) {
+	case TYPE_A:
+		return (Ok(A(try read_bytes(r, 4))));
+	case TYPE_AAAA:
+		return (Ok(AAAA(try read_bytes(r, 16))));
+	case TYPE_CNAME:
+		return (Ok(CNAME(try read_name(r))));
+	case TYPE_MX:
+		preference = try read_u16(r);
+		return (Ok(MX(preference, try read_name(r))));
+	default:
+		return (Ok(Other(type, try read_bytes(r,
+		    r->data.len - r->off))));
+	}
+}
+
+static result(struct answer, parse_error)
+read_answer(struct reader *r)
+{
+	struct answer a;
+	struct reader record;
+	uint16_t type, rdlength;
+	size_t start, end;
+
+	a.owner = try read_name(r);
+	type = try read_u16(r);
+	a.class = try read_u16(r);
+	a.ttl = try read_u32(r);
+	rdlength = try read_u16(r);
+	start = r->off;
+	if (rdlength > r->data.len - start)
+		return (Err(RecordPastEnd(start)));
+	end = start + rdlength;
+
+	/* The data, with the message before it that its names point to. */
+	record.data = slice_sub(r->data, 0, end);
+	record.off = start;
+	a.data = try read_rdata(&record, type);
+	if (record.off != end)
+		return (Err(RecordTooLong(record.off)));
+	r->off = end;
+	return (Ok(a));
+}
+
+static void
+print_type(uint16_t type)
+{
+	switch (type) {
+	case TYPE_A:
+		printf("A");
+		break;
+	case TYPE_CNAME:
+		printf("CNAME");
+		break;
+	case TYPE_MX:
+		printf("MX");
+		break;
+	case TYPE_AAAA:
+		printf("AAAA");
+		break;
+	default:
+		printf("TYPE%u", type);
+		break;
+	}
+}
+
+static void
+print_class(uint16_t class)
+{
+	if (class == CLASS_IN)
+		printf("IN");
+	else
+		printf("CLASS%u", class);
+}
+
+static void
+print_name(const struct name *n)
+{
+	printf("%.*s", (int)n->len, n->text);
+}
+
+/* addr holds the 4 or 16 bytes that read_rdata took for the family. */
+static void
+print_address(int family, bytes addr)
+{
+	char text[INET6_ADDRSTRLEN];
+
+	if (inet_ntop(family, addr.data, text, sizeof(text)) == NULL)
+		err(1, "inet_ntop");
+	printf("%s", text);
+}
+
+/* Prints the data of a record of a type it does not know, as RFC 3597. */
+static void
+print_unknown(bytes data)
+{
+	size_t i;
+
+	printf("\\# %zu", data.len);
+	if (data.len > 0)
+		printf(" ");
+	for (i = 0; i < data.len; i++)
+		printf("%02x", data[i]);
+}
+
+static void
+print_rdata(const rdata *rd)
+{
+	match (*rd) {
+	case A(addr):
+		printf("A ");
+		print_address(AF_INET, addr);
+		break;
+	case AAAA(addr):
+		printf("AAAA ");
+		print_address(AF_INET6, addr);
+		break;
+	case CNAME(target):
+		printf("CNAME ");
+		print_name(&target);
+		break;
+	case MX(preference, exchange):
+		printf("MX %u ", preference);
+		print_name(&exchange);
+		break;
+	case Other(type, data):
+		print_type(type);
+		printf(" ");
+		print_unknown(data);
+		break;
+	}
+}
+
+static void
+print_header(const struct header *h)
+{
+	printf("header id %u flags 0x%04x", h->id, h->flags);
+	printf(" questions %u answers %u", h->qdcount, h->ancount);
+	printf(" authority %u additional %u\n", h->nscount, h->arcount);
+}
+
+static void
+print_question(const struct question *q)
+{
+	printf("question ");
+	print_name(&q->name);
+	printf(" ");
+	print_class(q->class);
+	printf(" ");
+	print_type(q->type);
+	printf("\n");
+}
+
+static void
+print_answer(const struct answer *a)
+{
+	printf("answer ");
+	print_name(&a->owner);
+	printf(" %lu ", (unsigned long)a->ttl);
+	print_class(a->class);
+	printf(" ");
+	print_rdata(&a->data);
+	printf("\n");
+}
+
+/* Prints the header, questions and answers, up to the first error. */
+static result(void, parse_error)
+print_message(struct reader *r)
+{
+	struct header h;
+	struct question q;
+	struct answer a;
+	unsigned i;
+
+	h = try read_header(r);
+	print_header(&h);
+	for (i = 0; i < h.qdcount; i++) {
+		q = try read_question(r);
+		print_question(&q);
+	}
+	for (i = 0; i < h.ancount; i++) {
+		a = try read_answer(r);
+		print_answer(&a);
+	}
+	return (Ok);
+}
+
+/* Reads a file whole, into memory of exactly its size. */
+static uint8_t *
+read_file(const char *path, size_t *lenp)
+{
+	struct stat st;
+	uint8_t *data;
+	FILE *fp;
+	size_t len;
+
+	if ((fp = fopen(path, "rb")) == NULL)
+		err(1, "%s", path);
+	if (fstat(fileno(fp), &st) == -1)
+		err(1, "%s", path);
+	if (!S_ISREG(st.st_mode))
+		errx(1, "%s: not a regular file", path);
+	if (st.st_size > MAX_MESSAGE)
+		errx(1, "%s: larger than a DNS message", path);
+	len = (size_t)st.st_size;
+	/* malloc(0) may return NULL, which is not a failure. */
+	if ((data = malloc(len > 0 ? len : 1)) == NULL)
+		err(1, "malloc");
+	if (fread(data, 1, len, fp) != len)
+		errx(1, "%s: short read", path);
+	fclose(fp);
+	*lenp = len;
+	return (data);
+}
+
+/* Reports the error, which the original keeps in a global, and exits. */
+static _Noreturn void
+report(const char *path, parse_error e)
+{
+	match (e) {
+	case Truncated(off):
+		errx(1, "%s: truncated at offset %zu", path, off);
+	case CompressionLoop(off):
+		errx(1, "%s: compression loop at offset %zu", path, off);
+	case PointerPastEnd(off):
+		errx(1, "%s: pointer past the end at offset %zu", path, off);
+	case UnknownLabelType(off):
+		errx(1, "%s: unknown label type at offset %zu", path, off);
+	case NameTooLong(off):
+		errx(1, "%s: name too long at offset %zu", path, off);
+	case RecordPastEnd(off):
+		errx(1, "%s: record data past the end at offset %zu", path,
+		    off);
+	case RecordTooLong(off):
+		errx(1, "%s: record data longer than its type at offset %zu",
+		    path, off);
+	}
+}
+
+int
+main(int argc, char *argv[])
+{
+	struct reader r;
+	uint8_t *data;
+	size_t len;
+	result(void, parse_error) status;
+
+	if (argc != 2) {
+		fprintf(stderr, "usage: dns file\n");
+		return (2);
+	}
+	data = read_file(argv[1], &len);
+	r.data = slice_unchecked(data, len);
+	r.off = 0;
+	status = print_message(&r);
+	free(data);
+	if (case Err(parse_error e) = status) {
+		fflush(stdout);
+		report(argv[1], e);
+	}
+	return (0);
+}

@@ -28,9 +28,13 @@ gmake where make is another, as on FreeBSD.
 
   $ check "$clang" -O0
   cut: 102 cases agree with original/cut, 8 with cut(1)
+  dns: 27 cases agree with original/dns
   $ check "$clang" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
+  dns: 27 cases agree with original/dns
   $ check "$gcc" -O0
   cut: 102 cases agree with original/cut, 8 with cut(1)
+  dns: 27 cases agree with original/dns
   $ check "$gcc" -O2
   cut: 102 cases agree with original/cut, 8 with cut(1)
+  dns: 27 cases agree with original/dns
