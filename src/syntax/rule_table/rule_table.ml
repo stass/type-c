@@ -697,6 +697,12 @@ let rows =
       meaning =
         "A generic function whose body is C text of a system header, \
          which typec passes through unread." };
+    Live { constructor = "Generic_block_literal";
+      name = "generic-block-literal";
+      clause = "design 7.1 rule 9";
+      meaning =
+        "A block literal in a generic function, written by C text that an \
+         include puts there; its body is not read." };
     Live { constructor = "Function_instance_place";
       name = "function-instance-place";
       clause = "design 7.3 rule 2";

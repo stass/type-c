@@ -1892,6 +1892,11 @@ let zero_values () =
   rejects ~file (lost_walk 30 " e k;") "in an object that holds a variant";
   reads_in_time ~degree:1 ~file "lost_walk" ~small:7 (fun depth ->
       lost_walk depth " e k;");
+  (* In a generic function, whether the object of a braced list holds a
+     type that typec does not compute is found once per record too. *)
+  reads_in_time ~degree:1 ~file "generic_walk" ~small:7 (fun depth ->
+      doubling_structures depth ""
+      ^ " generic(T) void g(void) { struct top z = {0}; (void)z; }");
   (* A variant held through a member record, an array member or an
      anonymous member; a pointed-to variant is not held. The walk is lost
      where the complex value meets the first member, a structure. *)

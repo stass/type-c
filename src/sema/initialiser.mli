@@ -59,10 +59,15 @@ open Typec_syntax
     - [in_generic] says that the initialiser is in the definition of a
       generic function, head or body, which its check reads (design 7.1
       rule 3).
-    - [lowers_zero] is told of the span of the braced list of each zero
-      initialiser of design 7.1 rule 3, which zeroes an object or
-      subobject whose type mentions a type parameter, and which lowering
-      writes as [{}].
+    - [lowers_zero] and [keeps_list] classify each braced list that
+      the walk meets by its span, for lowering (design 7.1 rule 3).
+      [lowers_zero] is told of each zero initialiser that zeroes an
+      object or subobject whose type mentions a type parameter, which
+      lowering writes as [{}], and [keeps_list] of each other list,
+      which it keeps as written. Neither is told of a list where the
+      object may be one of a type that typec does not compute, or may
+      mention a type parameter at a subobject that the walk does not
+      know, where a refusal in a generic function goes first.
 
     In Type-C text an initialiser opens no variant's members but through
     the [{0}] that zeroes it (design 3.2 rules 6 and 7). *)
@@ -81,6 +86,7 @@ type typing = {
     Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
   in_generic : bool;
   lowers_zero : Tree.span -> unit;
+  keeps_list : Tree.span -> unit;
 }
 
 val max_levels : int

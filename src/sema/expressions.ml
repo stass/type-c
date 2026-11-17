@@ -479,6 +479,7 @@ type checked_pattern = {
 }
 
 type zero_initialiser = { list : Tree.span; holder : int }
+type classified_list = Zero_list of zero_initialiser | Kept_list
 
 (* Where a sub-pattern stands (4.7 rule 1): the field [member], of index
    [index], of the constructor [holder] at [position], which lowering
@@ -582,8 +583,8 @@ let named_locals reading =
    that depends on a type parameter, that of the first place in it where
    the dependence arises, and [dependent_objects] the same of the
    initialiser of each [const] object (design 7.1 rule 4).
-   [zero_initialisers] holds those of design 7.1 rule 3, latest
-   first. *)
+   [classified_lists] holds how lowering writes each braced list typed,
+   by its span (design 7.1 rule 3). *)
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
@@ -602,7 +603,7 @@ type t = {
   mutable next_truth : int;
   mutable defers : function_defers list;
   mutable slice_sites : slice_site list;
-  mutable zero_initialisers : zero_initialiser list;
+  classified_lists : (Tree.span, classified_list) Hashtbl.t;
   slice_makings : (Tree.span, slice_making) Hashtbl.t;
 }
 
@@ -628,7 +629,7 @@ let create () =
     next_truth = 0;
     defers = [];
     slice_sites = [];
-    zero_initialisers = [];
+    classified_lists = Hashtbl.create 16;
     slice_makings = Hashtbl.create 8 }
 
 let find_at view span = Hashtbl.find_opt view.types span
@@ -653,7 +654,8 @@ let selection_sizes view =
 
 let try_holders view = List.rev view.holders
 let defers view = List.rev view.defers
-let zero_initialisers view = List.rev view.zero_initialisers
+let classified_list view (list : Tree.span) =
+  Hashtbl.find_opt view.classified_lists list
 
 (* A site outside a function that C evaluates is refused (design section
    8 rule 9), so every [Tested] form has a body. *)
@@ -4914,7 +4916,8 @@ and initialiser context ~holder ~constant t initialiser =
       location = location_of context;
       index = integer_constant context;
       in_generic = context.generic_definition;
-      lowers_zero = record_zero_initialiser context holder;
+      lowers_zero = lowers_zero context holder;
+      keeps_list = keeps_list context;
     }
   in
   context.needs_complete t;
@@ -4934,17 +4937,21 @@ and initialiser context ~holder ~constant t initialiser =
 (* Design 7.1 rule 3: lowering writes the zero initialiser at [list] as
    [{}] under [__extension__] before its holder, which Apple Clang 21
    does not read before a declaration in the first clause of a [for]. *)
-and record_zero_initialiser context holder (list : Tree.span) =
+and lowers_zero context holder (list : Tree.span) =
   match holder with
   | Holder_at holder ->
-      context.typed.zero_initialisers <-
-        { list; holder } :: context.typed.zero_initialisers
+      Hashtbl.replace context.typed.classified_lists list
+        (Zero_list { list; holder })
   | For_clause ->
       context.fail list
         (Rule.message Zero_initialiser_in_for
            "the zero initialiser of an object whose type mentions a type \
             parameter, in a declaration in the first clause of a for \
             statement: declare the object before the loop")
+
+(* Design 7.1 rule 3: lowering keeps the list at [list] as written. *)
+and keeps_list context (list : Tree.span) =
+  Hashtbl.replace context.typed.classified_lists list Kept_list
 
 and block_items context (block : Tree.block) = items context block.node.items
 

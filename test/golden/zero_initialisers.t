@@ -185,12 +185,41 @@ it whole.
   __extension__ struct { __tc_arg__i * _Atomic a ; int b ; } w = { } ;
   __extension__ __tc_arg__i * _Atomic row [ 2 ] = { } ;
 
-The form is written where the check types the list. A list for an
-object whose type mentions a type parameter loses its place after an
+The check classifies every braced list that the parser reads in the
+definition, head and body, as one that lowering writes as {} or one
+that it keeps, wherever the list stands: behind nested designators, in
+an array of structures that hold a type parameter inside a structure,
+in a compound literal in a statement expression, and in the head.
+
+  $ cat > deep.tc <<'EOF'
+  > void use(const void *);
+  > struct cell { int k; };
+  > generic(T) void f(const void *head[sizeof((struct cell){0})])
+  > {
+  >     struct { struct { int k; T a[2]; } in[2]; int n; } d =
+  >         { .in[1].a[1] = {0}, .n = 1 };
+  >     struct { int n; struct { T a; int b; } row[2]; } r =
+  >         { 1, { {0}, {} } };
+  >     int s = ({ const T *p = &(T){0}; use(p); 1; });
+  >     use(&d); use(&r); use(&s); use(head);
+  > }
+  > void g(void) { f(short)(0); }
+  > EOF
+  $ ./golden.exe deep.tc | grep -o -e 'head [^]]*]' -e '{ [.1] .*} ;' \
+  >   -e 'p = [^;]*;'
+  head [ sizeof ( ( struct cell ) { 0 } ) ]
+  head [ sizeof ( ( struct cell ) { 0 } ) ]
+  { . in [ 1 ] . a [ 1 ] = { } , . n = 1 } ;
+  { 1 , { { } , { } } } ;
+  p = & __extension__ ( __tc_arg__s ) { } ;
+
+No initialiser enters a type parameter but the zero initialiser, and
+what typec cannot see enter one is an error. A list for an object
+whose type mentions a type parameter loses its place after an
 initialiser whose subobject typec does not know, here an element of an
 array whose length the backend computes, and what follows is an error
-unless a designator places it: its place, and so whether a zero
-initialiser of rule 3 stands there, is the argument's to decide.
+unless a designator places it: it may reach the `T`, and what it means
+there is the argument's to decide.
 
   $ cat > lost.tc <<'EOF'
   > void use(const void *);

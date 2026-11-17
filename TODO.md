@@ -1547,13 +1547,6 @@ types (design 13.3).
 - [Low] Design 7.1 rule 3: the refusal of the zero initialiser of a
   variable length array passes an array whose variability
   `Depends_on` an unknown type; refuse it unless it is `Answer false`.
-- [Medium] Design 7.1 rule 3: lowering writes `{}` only where the walk
-  of `Initialiser.braced` reaches a zero list, and the refusals of a lost
-  place and of an unknown type close the paths that do not reach it,
-  which is a list. Correct by construction instead: take from the parser
-  every braced list of a generic definition that reads as `{0}` or `{}`,
-  have the check classify each as lowered or kept, and refuse any left
-  unclassified.
 - [Medium] The type declarations that a text lowers come from one
   table of the unit, which `Lowering` filters for each text by span,
   while the other inputs of `text_edits` come from the reading of the

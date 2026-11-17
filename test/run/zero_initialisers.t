@@ -275,3 +275,64 @@ stays next to the literal.
   > done
   lowered
   lowered
+
+The lists of test/golden/zero_initialisers.t that stand behind nested
+designators, in an array of structures inside a structure and in a
+compound literal in a statement expression zero their objects too.
+
+  $ cat > deep.tc <<'EOF'
+  > #include <stdio.h>
+  > #include <string.h>
+  > 
+  > union wide { char c; long l[4]; };
+  > static const union wide zero;
+  > 
+  > __attribute__((noinline)) static void poison(void) {
+  >   volatile unsigned char stack[8192];
+  >   for (size_t i = 0; i < sizeof stack; i++)
+  >     stack[i] = 0xa5;
+  > }
+  > __attribute__((noinline)) static int zeroed(const void *object) {
+  >   return memcmp(object, &zero, sizeof zero) == 0;
+  > }
+  > 
+  > generic(T) int designated(void) {
+  >   struct { struct { int k; T a[2]; } in[2]; int n; } d =
+  >     { .in[1].a[1] = {0}, .n = 1 };
+  >   return zeroed(&d.in[1].a[1]);
+  > }
+  > generic(T) int rows(void) {
+  >   struct { int n; struct { T a; int b; } row[2]; } r =
+  >     { 1, { {0}, {} } };
+  >   return zeroed(&r.row[0].a) && zeroed(&r.row[1].a);
+  > }
+  > generic(T) int statement(void) {
+  >   return ({ const T *p = &(T){0}; zeroed(p); });
+  > }
+  > 
+  > typedef int place_function(void);
+  > static place_function *const places[] = {
+  >   designated(union wide), rows(union wide), statement(union wide)
+  > };
+  > 
+  > int main(void) {
+  >   for (size_t i = 0; i < sizeof places / sizeof places[0]; i++) {
+  >     place_function *volatile place = places[i];
+  >     poison();
+  >     printf("%d", place());
+  >   }
+  >   printf("\n");
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in "$clang" "$gcc"; do
+  >   for level in -O0 -O2; do
+  >     typec --cc="$cc" -std=c11 $level -o deep deep.tc \
+  >       2> log || cat log
+  >     ./deep
+  >   done
+  > done
+  111
+  111
+  111
+  111

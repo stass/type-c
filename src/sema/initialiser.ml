@@ -18,6 +18,7 @@ type typing = {
     Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
   in_generic : bool;
   lowers_zero : Tree.span -> unit;
+  keeps_list : Tree.span -> unit;
 }
 
 (* Clang's default limit on nested brackets, which the parser keeps. *)
@@ -110,10 +111,11 @@ let refuse_unlowered_zero typing (span : Tree.span) (t : Ctype.t) =
          "the zero initialiser of an atomic object whose type mentions a \
           type parameter, which Clang refuses in braces")
 
-(* Design 7.1 rule 3: lowering writes a zero initialiser as [{}] only
-   where the check types the list that holds it. A type that typec does
-   not compute may be an argument's, so in a generic function no braced
-   list initialises an object of one or one that holds one. *)
+(* Design 7.1 rule 3: no initialiser enters a type parameter but the
+   zero initialiser. A type that typec does not compute may be an
+   argument's or hold one, where the walk could not see a list enter it,
+   so in a generic function no braced list initialises an object of one
+   or one that holds one. *)
 let refuse_unknown_object typing (list : Tree.initialiser_list) t =
   if typing.in_generic && Ctype.holds_unknown typing.tags t then
     typing.fail list.span
@@ -123,10 +125,9 @@ let refuse_unknown_object typing (list : Tree.initialiser_list) t =
           type parameter")
 
 (* Design 7.1 rule 3: where a list for an object whose type mentions a
-   type parameter has lost its place, the subobject of the next
-   initialiser depends on the argument, and with it whether that is a
-   zero initialiser that lowering writes as [{}]; only a designator
-   places it. *)
+   type parameter has lost its place, the next initialiser may reach a
+   value of a type parameter, which only the zero initialiser may enter,
+   and typec cannot see whether it does; only a designator places it. *)
 let refuse_lost_place typing (span : Tree.span) (t : Ctype.t) =
   if Ctype.mentions_opaque typing.tags t then
     typing.fail span
@@ -134,6 +135,25 @@ let refuse_lost_place typing (span : Tree.span) (t : Ctype.t) =
          "the subobject that an initialiser reaches depends on what typec \
           does not know, in an object whose type mentions a type \
           parameter: place it with a designator")
+
+(* Design 7.1 rule 3: classifies the braced list at [span] for an object
+   of type [t], where [zeroes] says that the list is the zero initialiser
+   that zeroes it ({!zeroes_dependent}). A type that typec does not
+   compute may mention a type parameter, so a list for an object that
+   holds one is left unclassified. *)
+let classify typing (t : Ctype.t) ~zeroes span =
+  match (Ctype.holds_unknown typing.tags t, zeroes) with
+  | true, _ -> ()
+  | false, true -> typing.lowers_zero span
+  | false, false -> typing.keeps_list span
+
+(* Whether lowering keeps as written each braced list in an initialiser
+   that reaches a subobject, which the walk does not know, of an object
+   of type [t]: where [t] mentions no type parameter and holds no type
+   that typec does not compute, no subobject of it mentions one. *)
+let keeps_within typing (t : Ctype.t) =
+  not
+    (Ctype.mentions_opaque typing.tags t || Ctype.holds_unknown typing.tags t)
 
 (* Subobjects (6.7.9p17) *)
 
@@ -450,15 +470,20 @@ let designate typing t designators =
   enter t [] designators
 
 (* Initialisers without a subobject: excess ones, and those whose
-   subobject typec does not know. Their expressions are typed. *)
-let rec untargeted typing (initialiser : Tree.initialiser) =
+   subobject typec does not know. Their expressions are typed. [kept]
+   says that lowering keeps each braced list in them as written; where
+   it does not, the list is left unclassified, as a refusal in a generic
+   function goes first (design 7.1 rule 3). *)
+let rec untargeted typing ~kept (initialiser : Tree.initialiser) =
   match initialiser with
   | Expression_initialiser expression -> ignore (typing.value None expression)
-  | Braced list -> List.iter (untargeted_element typing) list.node
+  | Braced list ->
+      if kept then typing.keeps_list list.span;
+      List.iter (untargeted_element typing ~kept) list.node
 
-and untargeted_element typing (element : Tree.designated_initialiser) =
+and untargeted_element typing ~kept (element : Tree.designated_initialiser) =
   List.iter (designator_expressions typing) element.node.designators;
-  untargeted typing element.node.initialiser
+  untargeted typing ~kept element.node.initialiser
 
 (* An initialiser at [span] with no subobject left for it (6.7.9p2),
    which GCC drops with a warning. Type-C text holds none, as design 5.2
@@ -471,9 +496,11 @@ let refuse_excess typing ~zeroes (span : Tree.span) =
          "an initialiser has no element or member left to initialise, and \
           GCC drops it (C11 6.7.9p2)")
 
+(* An excess initialiser initialises nothing, so lowering keeps its
+   lists as written. *)
 let drop_excess typing ~zeroes (element : Tree.designated_initialiser) =
   refuse_excess typing ~zeroes element.span;
-  untargeted_element typing element
+  untargeted_element typing ~kept:true element
 
 (* Braced lists (6.7.9p17, p20) *)
 
@@ -596,11 +623,13 @@ and place_expression typing ~zeroes ~elided ~depth (level, outer) expression
 (* The braced list for an object of type [t], its current object; gives
    the type of the object, completed as for {!initialise}. *)
 and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
+  let zeroes = zeroes_dependent typing t list in
+  if zeroes then refuse_unlowered_zero typing list.span t;
+  classify typing t ~zeroes list.span;
   match (t.shape, list.node) with
-  | _ when zeroes_dependent typing t list ->
-      refuse_unlowered_zero typing list.span t;
-      List.iter (untargeted_element typing) list.node;
-      typing.lowers_zero list.span;
+  (* The list is [{}] or [{0}], which holds no list. *)
+  | _ when zeroes ->
+      List.iter (untargeted_element typing ~kept:false) list.node;
       t
   (* 6.7.9p14: a string literal in braces. *)
   | ( Array { element; _ },
@@ -622,7 +651,8 @@ and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
       scalar typing ~zeroes:(is_zero_initialiser typing list) t elements;
       t
   | (Va_list | Unknown_type _), elements ->
-      List.iter (untargeted_element typing) elements;
+      List.iter (untargeted_element typing ~kept:(keeps_within typing t))
+        elements;
       t
 
 and aggregate typing t (list : Tree.initialiser_list) =
@@ -685,7 +715,7 @@ and place_element typing ~zeroes t walk
       walk
   | Lost ->
       refuse_lost_place typing element.span t;
-      untargeted typing initialiser;
+      untargeted typing ~kept:(keeps_within typing t) initialiser;
       { cursor = Lost; extent = Opaque_extent }
 
 (* 6.7.9p11: one initialiser, which GCC and Clang take in more braces, and

@@ -109,6 +109,23 @@ typec passes its body through unread and an instance reads it again.
   sys.h:1: error: a system header defines the body of a generic function, which typec passes through unread, while each instance reads it again under its type arguments [generic-system-body]
   [1]
 
+Nor does a generic function hold a block literal, which C text that an
+include puts there may write: typing does not read its body.
+
+  $ cat > block.tc <<'EOF'
+  > void use(const void *);
+  > generic(T) void f(void)
+  > {
+  > # 1 "blk.h" 1
+  >     int (^b)(void) = ^{ int a[] = {1, 2}; return a[0]; };
+  > # 5 "block.tc" 2
+  >     use(&b);
+  > }
+  > EOF
+  $ ./golden.exe block.tc
+  blk.h:1: error: a block literal in a generic function, whose body typing does not read, while each instance reads the definition again under its type arguments [generic-block-literal]
+  [1]
+
 Rule 4: no `#pragma` line that sets state stands between the
 definition of the generic and the place where the instance is written.
 A `pack` or diagnostic line sets none, nor does a statement pragma in

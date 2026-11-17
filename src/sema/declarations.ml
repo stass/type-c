@@ -4558,17 +4558,37 @@ let refuse_variable_parameters state span reference =
   | Unknown_type _ -> ()
   | _ -> invalid_arg "Declarations: a generic function without a prototype"
 
+(* Design 7.1 rule 3: the zero initialisers among [lists], each braced
+   list that the parser read in a generic function, as the check of the
+   function classified them. The check types every initialiser of the
+   function, and so classifies each list, unless it first refuses one
+   whose object it cannot classify; a list left unclassified is a fault
+   of typec, which stops rather than let C's [{0}] reach an instance. *)
+let zero_lists state lists =
+  let zero_list (list : Tree.span) =
+    match Expressions.classified_list state.typed list with
+    | Some (Zero_list zero) -> Some zero
+    | Some Kept_list -> None
+    | None ->
+        invalid_arg
+          (Printf.sprintf
+             "Declarations: the braced list at token %d of a generic \
+              function left unclassified"
+             list.first)
+  in
+  List.filter_map zero_list lists
+
 (* Design 7.1 rule 3: the check of a generic function reads it against
    the opaque types of its type parameters and writes none of its text
    (3.5 rule 4). It reads the head where the definition stands, so that
    the instances that the head applies to concrete types are real first
    uses ({!gets_texts}) and its type outlives the check, and the body as
    a trial, which defines no instance (3.5 rule 7). It types the
-   definition in views of its own, which no lowering reads: each
-   instance is typed again, but the zero initialisers that the check
-   finds are kept, as no instance, whose types are its arguments, finds
-   them. *)
-let check_generic_function state (declared : Tree.declared) read =
+   definition in views of its own, which no lowering reads, as each
+   instance is typed again. It keeps one finding of them: the zero
+   initialisers among [lists], the braced lists of the function, which
+   no instance finds, since its types are its arguments. *)
+let check_generic_function state (declared : Tree.declared) ~lists read =
   let outer = state.moved in
   state.moved <- Some (fresh_moved ~written:false ~of_type:false []);
   state.generic_part <- Some Generic_head;
@@ -4582,7 +4602,7 @@ let check_generic_function state (declared : Tree.declared) read =
   in
   let read_and_find () =
     read ~body_reading;
-    Expressions.zero_initialisers state.typed
+    zero_lists state lists
   in
   let found =
     Fun.protect ~finally:restore (fun () ->
@@ -4608,7 +4628,9 @@ let refuse_system_body state (definition : Tree.function_definition) =
    that of the earlier declaration at the same position (rule 7). The
    function is read once, against those, where it stands (rule 3). *)
 let read_generic_function state (generic : Tree.generic_function) =
-  let { Tree.type_parameters; generic = form } = generic.node in
+  let { Tree.type_parameters; generic = form; initialiser_lists } =
+    generic.node
+  in
   let span, declarator, declared = generic_declared form in
   let name = Option.value ~default:"" (Tree.declared_name declarator) in
   let definition =
@@ -4660,7 +4682,7 @@ let read_generic_function state (generic : Tree.generic_function) =
              ~holder:(Expressions.Holder_at generic.span.first)
              specified declarator)
   in
-  check_generic_function state declared read;
+  check_generic_function state declared ~lists:initialiser_lists read;
   check_generic_attributes state generic.span;
   Option.iter
     (fun (earlier, _) ->

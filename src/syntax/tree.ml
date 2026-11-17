@@ -967,6 +967,10 @@ and generic_function_node = {
   type_parameters : parameter_name list;
       (** at least one, in order, with distinct names *)
   generic : generic_form;
+  initialiser_lists : span list;
+      (** the span of every braced initialiser list in the function, head
+          and body, in the order the parser read them, which the check
+          classifies for lowering (design 7.1 rule 3) *)
 }
 
 and generic_form =

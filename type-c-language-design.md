@@ -2828,25 +2828,42 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      atomic member and an array of atomic elements take the zero
      initialiser whole (both).
 
-   Lowering writes `{}` where the check finds a zero initialiser, so
-   the check types every list of a definition, and two errors keep it
-   so. A list it could not type would reach the backend as C's `{0}`,
-   with the bytes that the stack held in it:
+   Lowering takes the lists that it writes as `{}` from one
+   classification. The parser records every braced list of a generic
+   function, head and body, and the check classifies each as it types
+   the initialiser that holds it: a zero initialiser of an object or
+   subobject whose type mentions a type parameter is lowered, and every
+   other list is kept as written, as is each list inside an excess
+   initialiser or after a lost place in an object whose type mentions
+   no type parameter. Lowering reads the lowered lists of that
+   classification and no other record. A list that the check left
+   unclassified would reach the backend as C's `{0}`, with the bytes
+   that the stack held in it, so typec stops there as at any fault of
+   its own: the check types every initialiser of the definition, which
+   holds no text that typing does not read (rule 9 and 13.3), and the
+   two errors below refuse the lists that it could not classify.
+
+   No initialiser enters a `Ti` but the zero initialiser, and two
+   errors refuse an initialiser where typec cannot see whether it
+   enters one:
 
    - A braced initialiser of an object whose type typec does not
      compute (13.3), or holds a member or element of one, as
      `__typeof__` of a call of a Clang overloaded function, or of a
      conditional whose null pointer constant is a value that the
-     backend computes. The type may be the argument or hold it.
+     backend computes. The type may be the argument or hold it, and
+     the list may enter it.
    - In a list for an object whose type mentions a type parameter, an
      initialiser without a designator after the list has lost its
      place: after an element of an array whose length or designated
      index the backend computes, or after an initialiser whose reach
-     typec does not know. Where it goes, and so whether it is a zero
-     initialiser, is the argument's to say. A designator places it:
-     `{ x, .a = {0} }` is valid where `{ x, x, {0} }` is not, for
-     `struct { int k[sizeof(struct s)]; T a; }`. A list for an object
-     whose type mentions no type parameter loses its place as in C.
+     typec does not know. It may reach a `Ti`, and what it means
+     there, an initialiser that enters it, one that initialises it
+     whole or a zero initialiser, is the argument's to say. A
+     designator places it: `{ x, .a = {0} }` is valid where
+     `{ x, x, {0} }` is not, for `struct { int k[sizeof(struct s)]; T
+     a; }`. A list for an object whose type mentions no type parameter
+     loses its place as in C.
 
    Other things that C allows of a structure are errors too, because
    another value type gives them another type or another meaning:
@@ -3304,7 +3321,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
 9. A generic function is not defined in a system header. Its body there
    is C text that `typec` passes through unread (13.3), while each
    instance reads the definition again under its type arguments, so
-   such a definition is an error.
+   such a definition is an error. For the same reason a generic
+   function holds no block literal, whose body typing does not read
+   (13.3), as C text that an include puts in the function may write.
 
 Because of rules 2 to 4, an instance of a checked generic function is
 valid C for every value type. Instantiation fails only where a chain of

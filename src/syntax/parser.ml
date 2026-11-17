@@ -214,6 +214,10 @@ type state = {
   mutable in_generic_head : bool;
       (** whether the head of a generic function is being read, which
           every instance writes twice (design 7.1 rule 6) *)
+  mutable initialiser_lists : Tree.span list ref option;
+      (** the braced initialiser lists of the generic function being
+          read, latest first; [None] outside one, so it also says
+          whether one is being read *)
   mutable views : views;  (** taken so far *)
   mutable generics : Name_set.t;
       (** the names of the generic types declared so far, those of the
@@ -347,6 +351,11 @@ let spanned state (span : span) node =
   | None -> fail_at_token state span.first (Rule.c_text too_deep)
 
 let finish state start node = spanned state (span_from state start) node
+
+(* Notes the braced initialiser list at [span] for the generic function
+   being read, outside of which nothing reads it (design 7.1 rule 3). *)
+let note_initialiser_list state span =
+  Option.iter (fun lists -> lists := span :: !lists) state.initialiser_lists
 
 (* The refusal of the break or continue at [start]. *)
 let fail_jump state start diagnostic =
@@ -3579,7 +3588,9 @@ and initialiser_list state =
     end
   in
   let values = if accept state P.Right_brace then [] else loop [] in
-  finish state start values
+  let list = finish state start values in
+  note_initialiser_list state list.span;
+  list
 
 and designated_initialiser state =
   let start = state.position in
@@ -4070,7 +4081,20 @@ and block_literal state start =
      of its body. *)
   let literal = as_function state (fun () -> literal_after_caret state start) in
   scan_unread state Unread_block_literal (span_from state start);
+  refuse_generic_block_literal state start;
   literal
+
+(* Design 7.1 rule 9: typing does not read the body of a block literal,
+   while each instance of a generic function reads the definition again
+   under its type arguments, and the check classifies each braced list
+   of it for lowering (rule 3). *)
+and refuse_generic_block_literal state start =
+  if Option.is_some state.initialiser_lists then
+    fail_at_token state (first_token state start)
+      (Rule.message Generic_block_literal
+         "a block literal in a generic function, whose body typing does \
+          not read, while each instance reads the definition again under \
+          its type arguments")
 
 and literal_after_caret state start =
   match peek state with
@@ -5207,6 +5231,17 @@ let check_generic_name state declarator =
            ~what:"generic function");
       claim_instance_space state name
 
+(* [read ()], and the braced initialiser lists that it reads, in order. *)
+let with_initialiser_lists state read =
+  let outer = state.initialiser_lists and lists = ref [] in
+  state.initialiser_lists <- Some lists;
+  let result =
+    Fun.protect
+      ~finally:(fun () -> state.initialiser_lists <- outer)
+      read
+  in
+  (result, List.rev !lists)
+
 (* At the [generic] that [begins_generic_function] recognises. The type
    parameters are declared in a scope of their own, which stands for
    file scope while the function is read (design 3.5 rule 8), and the
@@ -5215,19 +5250,21 @@ let generic_function state =
   let start = state.position in
   advance state;
   advance state;
-  let (type_parameters, (generic, declarator)), left =
-    run_in_scope state (inner_scope state) (fun () ->
-        let type_parameters = type_parameter_list state in
-        let form =
-          with_parameter_scope state (fun () ->
-              state.names_generic_function <- true;
-              generic_form state)
-        in
-        (type_parameters, form))
+  let ((type_parameters, (generic, declarator)), left), initialiser_lists =
+    with_initialiser_lists state (fun () ->
+        run_in_scope state (inner_scope state) (fun () ->
+            let type_parameters = type_parameter_list state in
+            let form =
+              with_parameter_scope state (fun () ->
+                  state.names_generic_function <- true;
+                  generic_form state)
+            in
+            (type_parameters, form)))
   in
   state.scope <- Scope.outer left;
   check_generic_name state declarator;
-  finish state start ({ type_parameters; generic } : generic_function_node)
+  finish state start
+    ({ type_parameters; generic; initialiser_lists } : generic_function_node)
 
 (* Whether the cursor is at the universe text, which stands in front of
    the unit's own text where the reader holds it (design 13.3). *)
@@ -5371,6 +5408,7 @@ let parse_with_scopes ~keywords reader =
       names_generic_function = false;
       in_type_argument = false;
       in_generic_head = false;
+      initialiser_lists = None;
       views =
         {
           attributes = Places.empty;

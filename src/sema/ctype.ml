@@ -89,9 +89,11 @@ type held = Const_member | Flexible_array_member
    initialiser reaches; every member by name, those of anonymous members
    included; the first member, at any depth, of a kind that [held]
    names; whether it holds a variant at any depth; the first variant on
-   the chain of its first subobjects (see [first_variant]); and whether
-   the type of a member mentions a type parameter. The last four are
-   found from the answers stored for the records among the members, so
+   the chain of its first subobjects (see [first_variant]); whether the
+   type of a member mentions a type parameter; and whether a member
+   holds a type that typec does not compute (see [holds_unknown]). The
+   last five are found from the answers stored for the records among the
+   members, so
    that no question walks the members of a record again and a record
    held twice costs once. *)
 type record_definition = {
@@ -102,6 +104,7 @@ type record_definition = {
   holds_variant : bool;
   first_variant : t option;
   mentions_parameter : bool;
+  holds_unknown : bool;
 }
 
 type constructor = {
@@ -481,7 +484,7 @@ let declare_opaque tags name =
   add_record_definition tags record.record_id
     { members = []; positions = [||]; by_name = Names.empty;
       holds = Answer None; holds_variant = false; first_variant = None;
-      mentions_parameter = false };
+      mentions_parameter = false; holds_unknown = false };
   record
 
 let trial tags read =
@@ -810,16 +813,14 @@ let holds_variant tags t =
       | Array _ | Function _ | Unknown_type _ ) ) ->
       false
 
-(* A record cannot hold itself, so the walk ends. *)
+(* A definition is final, so its [holds_unknown] never goes stale. *)
 let rec holds_unknown tags t =
   let element = innermost_element t in
   match element.shape with
   | Unknown_type _ -> true
   | Record tag -> (
-      match record_members tags tag with
-      | Some members ->
-          List.exists (fun member -> holds_unknown tags member.member_type)
-            members
+      match record_definition tags tag with
+      | Some definition -> definition.holds_unknown
       | None -> false)
   | Distinct distinct -> holds_unknown tags distinct.representation
   (* [Array] is not an innermost element. *)
@@ -1098,7 +1099,10 @@ let definition_of target tags tag members =
     mentions_parameter =
       List.exists
         (fun member -> mentions_opaque tags member.member_type)
-        members }
+        members;
+    holds_unknown =
+      List.exists (fun member -> holds_unknown tags member.member_type) members
+  }
 
 let define_record target tags tag members =
   match definition_of target tags tag members with

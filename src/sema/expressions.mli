@@ -439,8 +439,13 @@ val defers : t -> function_defers list
     [__extension__] (13.5). *)
 type zero_initialiser = { list : Tree.span; holder : int }
 
-val zero_initialisers : t -> zero_initialiser list
-(** The zero initialisers typed, in the order of typing. *)
+(** How lowering writes a braced list (design 7.1 rule 3): as the zero
+    initialiser, or as written. *)
+type classified_list = Zero_list of zero_initialiser | Kept_list
+
+val classified_list : t -> Tree.span -> classified_list option
+(** How typing classified the braced list at a span, or [None] where it
+    classified none there ({!Initialiser.typing}). *)
 
 (** How lowering answers a construct that asks whether types are
     compatible where Type-C text compares a distinct type with them
