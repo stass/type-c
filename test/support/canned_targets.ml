@@ -95,9 +95,13 @@ let dump_of macros =
     (List.map (fun (name, value) -> "#define " ^ name ^ " " ^ value ^ "\n")
        macros)
 
-(* The model of a canned dump, which must be valid. *)
+(* The model of a canned dump, which must be valid, with the int-sized
+   enumerations of the default of every host. *)
 let target macros =
-  match Typec_sema.Target.of_predefined_macros (dump_of macros) with
+  match
+    Typec_sema.Target.of_predefined_macros ~enum_representation:Int_sized
+      (dump_of macros)
+  with
   | Ok target -> target
   | Error error -> failwith (Typec_sema.Target.error_message error)
 

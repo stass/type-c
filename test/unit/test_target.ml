@@ -3,6 +3,7 @@
 
 open Typec_sema
 open Typec_test_support
+module Target_query = Typec_driver.Target_query
 
 let lp64 : Target.t =
   {
@@ -33,6 +34,7 @@ let lp64 : Target.t =
     char32_type = Unsigned_int;
     byte_order = Little_endian;
     stdc_version = 201112;
+    enum_representation = Int_sized;
   }
 
 let ilp32 : Target.t =
@@ -64,6 +66,7 @@ let ilp32 : Target.t =
     char32_type = Unsigned_int;
     byte_order = Big_endian;
     stdc_version = 201710;
+    enum_representation = Int_sized;
   }
 
 let dump_of = Canned_targets.dump_of
@@ -413,7 +416,9 @@ let error_cases =
   ]
 
 let check_case case =
-  let outcome = Target.of_predefined_macros case.dump in
+  let outcome =
+    Target.of_predefined_macros ~enum_representation:Int_sized case.dump
+  in
   if outcome = case.expected then true
   else (
     Printf.eprintf "FAIL: %s\n" case.name;
@@ -458,11 +463,117 @@ let signedness =
     ("__int128", lp64, Integer.Int128, true);
   ]
 
+(* What a probe of the fake backend does: a shell command. *)
+let compiles = "exit 0"
+let fails = "exit 1"
+let killed = "kill -KILL $$"
+
+type query_case = {
+  query_name : string;
+  query_dump : string;
+  short_probe : string;
+  int_sized_probe : string;
+  options : string list;
+  answer : (Target.enum_representation, Target_query.error) result;
+}
+
+let write_file path text =
+  Out_channel.with_open_bin path (fun channel ->
+      Out_channel.output_string channel text)
+
+(* A backend that prints the case's dump for -dM and runs the command of
+   the probe whose text it reads on stdin, told apart by its size; the
+   paths of the dump and of the backend. *)
+let fake_backend case =
+  let dump = Filename.temp_file "dump" ".txt" in
+  write_file dump case.query_dump;
+  let backend = Filename.temp_file "backend" ".sh" in
+  write_file backend
+    (String.concat "\n"
+       [
+         "#!/bin/sh";
+         "for argument in \"$@\"; do";
+         "  if [ \"$argument\" = -dM ]; then exec cat " ^ Filename.quote dump
+         ^ "; fi";
+         "done";
+         "case \"$(cat)\" in";
+         "*'== 1 ?'*) " ^ case.short_probe ^ " ;;";
+         "*'== sizeof(int) ?'*) " ^ case.int_sized_probe ^ " ;;";
+         "esac";
+         "exit 2";
+         "";
+       ]);
+  Unix.chmod backend 0o755;
+  (dump, backend)
+
+let query_cases =
+  let int_sized_alone =
+    {
+      query_name = "the int-sized probe alone compiles";
+      query_dump = lp64_dump;
+      short_probe = fails;
+      int_sized_probe = compiles;
+      options = [];
+      answer = Ok Target.Int_sized;
+    }
+  in
+  [
+    int_sized_alone;
+    {
+      int_sized_alone with
+      query_name = "the short probe alone compiles";
+      short_probe = compiles;
+      int_sized_probe = fails;
+      answer = Ok Target.Short;
+    };
+    {
+      int_sized_alone with
+      query_name = "the model does not read __ARM_SIZEOF_MINIMAL_ENUM";
+      query_dump = lp64_dump_with "__ARM_SIZEOF_MINIMAL_ENUM" "1";
+    };
+    {
+      int_sized_alone with
+      query_name = "neither probe compiles";
+      short_probe = fails;
+      int_sized_probe = fails;
+      options = [ "-fshort-enums" ];
+      answer =
+        Error (Target_query.Neither_enumeration_probe [ "-fshort-enums" ]);
+    };
+    {
+      int_sized_alone with
+      query_name = "both probes compile";
+      short_probe = compiles;
+      int_sized_probe = compiles;
+      answer = Error (Target_query.Both_enumeration_probes []);
+    };
+    {
+      int_sized_alone with
+      query_name = "a signal ends a probe";
+      short_probe = killed;
+      answer = Error (Target_query.Probe_ended_by_signal []);
+    };
+  ]
+
+let check_query case =
+  let dump, backend = fake_backend case in
+  let outcome =
+    Fun.protect
+      ~finally:(fun () -> List.iter Sys.remove [ dump; backend ])
+      (fun () -> Target_query.query ~program:backend case.options)
+    |> Result.map (fun (target : Target.t) -> target.enum_representation)
+  in
+  if outcome = case.answer then true
+  else (
+    Printf.eprintf "FAIL: %s\n" case.query_name;
+    false)
+
 let () =
   let results =
     List.map check_case (model_cases @ optional_float_cases @ error_cases)
     @ List.map check_width widths
     @ List.map check_signed signedness
     @ [ without_int128 () ]
+    @ List.map check_query query_cases
   in
   if List.mem false results then exit 1

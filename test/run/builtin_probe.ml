@@ -107,7 +107,8 @@ let () =
       let target =
         or_exit
           (Result.map_error Target.error_message
-             (Target.of_predefined_macros (read_file dump)))
+             (Target.of_predefined_macros ~enum_representation:Int_sized
+                (read_file dump)))
       in
       match mode with
       | "calls" -> calls target

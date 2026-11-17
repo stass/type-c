@@ -39,6 +39,7 @@ __float128, which is x86-64 alone; they are checked on their own below.
   char32_type: unsigned int
   byte_order: little-endian
   stdc_version: 201710
+  enum_representation: int-sized
 
 Plain char is signed on x86-64 and unsigned on arm64 Linux, where wchar_t
 is unsigned int, not int. GCC spells the types in another order and reads
@@ -102,26 +103,49 @@ The options reach the backend, so they change the model.
   $ typec --cc=$gcc -fshort-wchar --print-target | grep '^wchar_type:'
   wchar_type: unsigned short
 
-Some options change a type of C but no macro that the model reads:
 -fshort-enums gives an enumeration the narrowest integer type that
-holds its values, and GCC's -funsigned-bitfields, also spelled
--fno-signed-bitfields, makes a bit-field declared without signed or
-unsigned unsigned, and its -fsingle-precision-constant makes an
-unsuffixed floating constant float. typec refuses them with a .tc
-input, even when a later option undoes them. Their negations, which
-keep the model's types, pass, and so do the refused options on a
-command line without a .tc input.
+holds its values, which no macro states on every target. The target
+query learns it by two probe compiles, each of which fails under the
+other representation; the backend's messages of the failing probe are
+not shown.
+
+  $ for cc in "$clang" "$gcc"; do
+  >   typec --cc="$cc" --print-target 2>&1 | grep -v '^[a-z0-9_]*: '
+  >   typec --cc="$cc" -fshort-enums --print-target 2>&1 |
+  >     grep -v '^[a-z0-9_]*: '
+  >   typec --cc="$cc" --print-target | grep '^enum_representation:'
+  >   typec --cc="$cc" -fshort-enums --print-target |
+  >     grep '^enum_representation:'
+  > done
+  enum_representation: int-sized
+  enum_representation: short
+  enum_representation: int-sized
+  enum_representation: short
+
+A backend that compiles neither probe gives no model.
+
+  $ cat > no-probe <<EOF
+  > #!/bin/sh
+  > case " \$* " in *" -dM "*) exec "$gcc" "\$@" ;; esac
+  > exit 1
+  > EOF
+  $ chmod +x no-probe
+  $ typec --cc=./no-probe -fshort-enums --print-target
+  typec: the C compiler "./no-probe" compiled neither probe of the enumeration representation, for short and for int-sized enumerations, with the options "-fshort-enums"
+  [81]
+
+Some options change a type of C but no macro that the model reads:
+GCC's -funsigned-bitfields, also spelled -fno-signed-bitfields, makes a
+bit-field declared without signed or unsigned unsigned, and its
+-fsingle-precision-constant makes an unsuffixed floating constant
+float. typec refuses them with a .tc input, even when a later option
+undoes them. Their negations, which keep the model's types, pass, and
+so do the refused options on a command line without a .tc input.
 
   $ cat > enum.tc <<'EOF'
   > enum colour { red, green };
   > struct flags { int field : 3; };
   > EOF
-  $ typec --cc=$clang -fshort-enums -c enum.tc
-  typec: -fshort-enums cannot be used with a .tc input: it gives an enumeration the narrowest integer type that holds its values, which typec's target model does not read
-  [81]
-  $ typec --cc=$gcc -fshort-enums -fno-short-enums -c enum.tc
-  typec: -fshort-enums cannot be used with a .tc input: it gives an enumeration the narrowest integer type that holds its values, which typec's target model does not read
-  [81]
   $ typec --cc=$gcc -funsigned-bitfields -c enum.tc
   typec: -funsigned-bitfields cannot be used with a .tc input: GCC makes every bit-field declared without signed or unsigned unsigned, which typec's target model does not read
   [81]
@@ -134,7 +158,7 @@ command line without a .tc input.
   $ typec --cc=$gcc -fno-short-enums -fsigned-bitfields \
   >   -fno-unsigned-bitfields -fno-single-precision-constant -c enum.tc
   $ typec --cc=$clang -fno-short-enums -fsigned-bitfields -c enum.tc
-  $ typec --cc=$gcc -fshort-enums --print-target > /dev/null
+  $ typec --cc=$gcc -funsigned-bitfields --print-target > /dev/null
 
 GCC's -fpack-struct without a value makes it ignore every '#pragma
 pack' that typec writes around an instance of a generic, with a warning

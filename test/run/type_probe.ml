@@ -216,7 +216,10 @@ let read_file path = In_channel.with_open_bin path In_channel.input_all
 let () =
   match Sys.argv with
   | [| _; dump |] -> (
-      match Target.of_predefined_macros (read_file dump) with
+      match
+        Target.of_predefined_macros ~enum_representation:Int_sized
+          (read_file dump)
+      with
       | Ok target ->
           let tags = Ctype.create_tags () in
           print_conversions target;

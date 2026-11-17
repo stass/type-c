@@ -72,7 +72,10 @@ let describe = function
   | Tree.Empty_declaration _ -> "empty declaration"
 
 let keywords_of_dump path =
-  match Target.of_predefined_macros (read_file path) with
+  (* The representation of enumerations changes no keyword. *)
+  match
+    Target.of_predefined_macros ~enum_representation:Int_sized (read_file path)
+  with
   | Ok target -> Target.keywords target Gnu
   | Error error -> fail (Target.error_message error)
 

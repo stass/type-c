@@ -29,6 +29,13 @@ type backend = {
           its Clang releases on its own. *)
 }
 
+(** The enumeration representation: under [Int_sized] an enumeration
+    without a fixed type is at least as wide as [int], under [Short] it
+    takes the smallest integer type that holds its values (design 13.3).
+    Two states and not a byte count, since where [int] has 16 bits the
+    two can give one size and differ in rank. *)
+type enum_representation = Int_sized | Short
+
 (** Sizes are in bytes, that is in units of [char]. The widths of the
     typedefs such as [size_t] follow from the integer type behind each;
     see {!integer_width}. *)
@@ -70,6 +77,9 @@ type t = {
   char32_type : Integer.t;  (** [char32_t] *)
   byte_order : byte_order;  (** [__BYTE_ORDER__] *)
   stdc_version : int;  (** [__STDC_VERSION__] without its suffix. *)
+  enum_representation : enum_representation;
+      (** No macro states it on every target, so the target query learns
+          it by probe compiles and passes it in. *)
 }
 
 (** Why a macro dump gives no target model. *)
@@ -94,9 +104,12 @@ val max_integer_width : int
 (** 128 bits: the widest integer type of a model, which bounds the work
     of constant evaluation. *)
 
-val of_predefined_macros : string -> (t, error) result
-(** [of_predefined_macros dump] reads the output of [cc -dM -E]: one
-    [#define NAME VALUE] per line, empty lines allowed. Macros the model
+val of_predefined_macros :
+  enum_representation:enum_representation -> string -> (t, error) result
+(** [of_predefined_macros ~enum_representation dump] is the model of the
+    backend with the enumeration representation [enum_representation]. [dump]
+    is the output of [cc -dM -E]: one [#define NAME VALUE] per line,
+    empty lines allowed. Macros the model
     does not use are ignored, but every line must have that form. The
     model must keep the guarantees of C that the front end relies on:
     [CHAR_BIT] of at least 8, the minimum widths of the standard integer
@@ -127,6 +140,9 @@ val is_signed : t -> Integer.t -> bool
 
 val compiler_name : compiler -> string
 (** The compiler's name in messages: [GCC] or [Clang]. *)
+
+val enum_representation_name : enum_representation -> string
+(** The representation's name in messages: [int-sized] or [short]. *)
 
 val architecture_name : architecture -> string
 (** The architecture's name in messages, such as [AArch64], or [other]. *)

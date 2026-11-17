@@ -26,18 +26,17 @@ let not_started_status = 127
 (* start holds the standard descriptors open, so each copy is a new
    descriptor above them and no dup2 overwrites a copy that a later one
    reads. *)
-let redirect ~stdin ~stdout =
-  let sources =
-    List.map (Unix.dup ~cloexec:true) [ stdin; stdout; Unix.stderr ]
+let redirect ~stdin ~stdout ~stderr =
+  let sources = List.map (Unix.dup ~cloexec:true) [ stdin; stdout; stderr ]
   in
   List.iter2
     (fun source standard -> Unix.dup2 ~cloexec:false source standard)
     sources
     [ Unix.stdin; Unix.stdout; Unix.stderr ]
 
-let attempt_exec ~stdin ~stdout program argv =
+let attempt_exec ~stdin ~stdout ~stderr program argv =
   try
-    redirect ~stdin ~stdout;
+    redirect ~stdin ~stdout ~stderr;
     Unix.execvp program argv
   with
   | Unix.Unix_error (error, call, _) -> System_call (error, call)
@@ -48,9 +47,9 @@ let attempt_exec ~stdin ~stdout program argv =
    output that typec buffered is written twice. A System_call message is
    far below PIPE_BUF, so its one write to the empty pipe is whole; a Bug
    message cut short fails to unmarshal, which is a bug report too. *)
-let run_child ~stdin ~stdout ~failure_output program argv =
+let run_child ~stdin ~stdout ~stderr ~failure_output program argv =
   (try
-     let failure = attempt_exec ~stdin ~stdout program argv in
+     let failure = attempt_exec ~stdin ~stdout ~stderr program argv in
      let message = Marshal.to_bytes failure [] in
      ignore (Unix.write failure_output message 0 (Bytes.length message))
    with _ -> ());
@@ -99,13 +98,13 @@ let wait_for_exec ~failure_input pid program =
       reap pid;
       raise_failure program (Marshal.from_string message 0 : failure)
 
-let start ~stdin ~stdout command =
+let start ~stdin ~stdout ~stderr command =
   hold_standard_descriptors ();
   let program = List.hd command in
   let argv = Array.of_list command in
   let failure_input, failure_output = Unix.pipe ~cloexec:true () in
   match Unix.fork () with
-  | 0 -> run_child ~stdin ~stdout ~failure_output program argv
+  | 0 -> run_child ~stdin ~stdout ~stderr ~failure_output program argv
   | pid ->
       Unix.close failure_output;
       wait_for_exec ~failure_input pid program
@@ -135,4 +134,5 @@ let wait pid =
   in
   wait_passing_on (pass_on pid)
 
-let run ~stdin ~stdout command = wait (start ~stdin ~stdout command)
+let run ~stdin ~stdout ~stderr command =
+  wait (start ~stdin ~stdout ~stderr command)

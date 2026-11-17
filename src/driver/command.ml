@@ -64,7 +64,7 @@ let stop_if_caught () =
    reports a stopped child only when asked to, which Process.run does not. *)
 let run_step ~stdin ~stdout command =
   stop_if_caught ();
-  (match Process.run ~stdin ~stdout command with
+  (match Process.run ~stdin ~stdout ~stderr:Unix.stderr command with
   | Unix.WEXITED 0 -> ()
   | Unix.WEXITED status -> raise (Stopped (Exit status))
   | Unix.WSIGNALED signal -> raise (Stopped (Signal signal))
@@ -112,7 +112,10 @@ let query_target ~program options =
   | Ok target -> target
   | Error (Exited status) -> raise (Stopped (Exit status))
   | Error (Ended_by_signal signal) -> raise (Stopped (Signal signal))
-  | Error ((Output_too_long | Invalid_macros _) as error) ->
+  | Error
+      (( Output_too_long | Invalid_macros _ | Neither_enumeration_probe _
+       | Both_enumeration_probes _ | Probe_ended_by_signal _
+       | No_temporary_directory _ ) as error) ->
       stop Exit_status.Environment (Target_query.error_message ~program error)
 
 let lower dialect target ~trap text =

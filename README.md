@@ -934,7 +934,7 @@ The fine print, for a `.tc` file:
   (design 2.1).
 - `__FILE__` names the `.tc` file, as it names any renamed file.
 - A few options are refused, among them `-E`, `-save-temps`,
-  `-fshort-enums` and more than one `-arch`
+  `-funsigned-bitfields` and more than one `-arch`
   ([Compiling a `.tc` input](#compiling-a-tc-input) lists them).
 - The C compiler reads preprocessed text, so its warnings that depend on
   where a macro came from or on comments can differ from a direct
@@ -1146,7 +1146,8 @@ area(shape s)
 
 The unit ends with a few static assertions of what `typec` assumes of
 the target, which fail to compile where the C compiler's types differ
-from those `typec` read, as under `-Xclang -fshort-enums`.
+from those `typec` read, as under a wrapper that adds
+`-funsigned-bitfields`.
 
 </details>
 
@@ -1503,8 +1504,8 @@ typec --emit-c token.tc  # print the C that typec hands to cc
 `.tc` file to the C compiler untouched, so an existing build runs with
 `CC=typec` and its C files compile as before. With a `.tc` input it
 refuses the few options that it cannot follow, such as `-E`, which
-stops before the C it writes, or `-fshort-enums`, which changes C's
-types, and the long options, spelled with `--`, that it does not
+stops before the C it writes, or `-funsigned-bitfields`, which changes
+C's types, and the long options, spelled with `--`, that it does not
 know. The C compiler is `cc` unless `--cc=PATH` or
 `TYPEC_CC` names another ([choosing it](#choosing-the-backend)).
 
@@ -1740,10 +1741,12 @@ backend unseen; an option that also has a form with one `-` passes
 in that form.
 It refuses the options known to change a type of C without changing a
 macro that the target model reads, which the model therefore cannot
-see: `-fshort-enums`, `-funsigned-bitfields` or `-fno-signed-bitfields`,
-and `-fsingle-precision-constant`, even when a later option undoes
-them. Other routes to these types, such as `-Xclang -fshort-enums`, a
-config file, a wrapper or a target whose default differs, fail in step
+see: `-funsigned-bitfields` or `-fno-signed-bitfields`, and
+`-fsingle-precision-constant`, even when a later option undoes them.
+`-fshort-enums` passes: the target query learns the enumeration
+representation by its probe compiles ([Printing the target
+model](#printing-the-target-model)). Other routes to these types, such
+as a config file, a wrapper or a target whose default differs, fail in step
 3: the C of a unit with a Type-C construct ends, after a line marker
 for `<typec>` with flag 3, with a static assertion of each such type
 that `typec` assumes, whose message names the option that would break
@@ -1786,13 +1789,18 @@ its predefined macros give: the backend and its major version, the
 sizes of the scalar types, the
 signedness of `char`, the types behind `size_t` and the other standard
 typedefs, the byte order and `__STDC_VERSION__`, one `field: value` per
-line. The other arguments are the backend options that select the
+line, and last the enumeration representation, `int-sized` or `short`
+(as under `-fshort-enums`), which no macro states: `typec` learns it by
+two compiles of a probe, `BACKEND OPTIONS -fsyntax-only -w -x c -`,
+each of which compiles under one representation alone. The other
+arguments are the backend options that select the
 target or the dialect, such as `-m32`, `-funsigned-char` or `-std=gnu17`;
 inputs, `-o` and dependency options do not belong there.
 
 Exit status: 0 with the model on stdout; 81 when the backend fails,
 cannot be started, is not supported or prints macros the model cannot
-be read from, or for a usage error; 82 for an internal error.
+be read from, when it compiles neither probe or both, or for a usage
+error; 82 for an internal error.
 
 ## Developing typec
 

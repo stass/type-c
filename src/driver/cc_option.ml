@@ -89,10 +89,6 @@ let names_options_to_add =
 let keeps_intermediate_files =
   "typec keeps no intermediate files; --emit-c writes the C"
 
-let short_enums =
-  "it gives an enumeration the narrowest integer type that holds its \
-   values, which typec's target model does not read"
-
 let unsigned_bit_fields =
   "GCC makes every bit-field declared without signed or unsigned \
    unsigned, which typec's target model does not read"
@@ -196,10 +192,10 @@ let table =
          make the backend ignore what typec writes. Each is refused
          wherever it stands, even before the option that undoes it.
          Options that change a macro the model reads, such as
-         -fshort-wchar, reach it through the target query, and the front
+         -fshort-wchar, reach it through the target query, as does
+         -fshort-enums through its probe compiles, and the front
          end computes no layout, so the other options of layout, such as
          -fpack-struct=n, pass. *)
-      entries (Refused short_enums) Flag [ "-fshort-enums" ];
       entries (Refused unsigned_bit_fields) Flag
         [ "-funsigned-bitfields"; "-fno-signed-bitfields" ];
       entries (Refused float_constants) Flag

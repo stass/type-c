@@ -111,7 +111,8 @@ let () =
   | [| _; dump; source |] ->
       let target =
         or_exit Target.error_message
-          (Target.of_predefined_macros (read_file dump))
+          (Target.of_predefined_macros ~enum_representation:Int_sized
+             (read_file dump))
       in
       let contents = read_file source in
       let text =

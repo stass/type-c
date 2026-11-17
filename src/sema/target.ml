@@ -5,6 +5,7 @@ type byte_order = Little_endian | Big_endian
 type architecture = X86 | Arm | Aarch64 | Powerpc | Systemz | Ve | Other
 type compiler = Gcc | Clang
 type backend = { compiler : compiler; major_version : int }
+type enum_representation = Int_sized | Short
 
 type t = {
   backend : backend;
@@ -34,6 +35,7 @@ type t = {
   char32_type : Integer.t;
   byte_order : byte_order;
   stdc_version : int;
+  enum_representation : enum_representation;
 }
 
 type error =
@@ -222,7 +224,7 @@ let check_backend backend =
   if backend.major_version < minimum_major_version backend.compiler then
     raise (Invalid (Unsupported_backend backend))
 
-let model_of_macros macros backend =
+let model_of_macros ~enum_representation macros backend =
   let count = read_count macros in
   let integer_type = read_integer_type macros in
   {
@@ -253,6 +255,7 @@ let model_of_macros macros backend =
     char32_type = integer_type "__CHAR32_TYPE__";
     byte_order = read_byte_order macros;
     stdc_version = read_stdc_version macros;
+    enum_representation;
   }
 
 
@@ -350,17 +353,17 @@ let check_typedefs model =
 
 (* The backend is checked first, so that an unsupported one is reported
    as such rather than by a macro of the model that it lacks. *)
-let checked_model dump =
+let checked_model ~enum_representation dump =
   let macros = macros_of_dump dump in
   let backend = read_backend macros in
   check_backend backend;
-  let model = model_of_macros macros backend in
+  let model = model_of_macros ~enum_representation macros backend in
   check_widths model;
   check_typedefs model;
   model
 
-let of_predefined_macros dump =
-  match checked_model dump with
+let of_predefined_macros ~enum_representation dump =
+  match checked_model ~enum_representation dump with
   | model -> Ok model
   | exception Invalid error -> Error error
 
@@ -373,6 +376,10 @@ let optional_floats_name = function
   | optional_floats ->
       String.concat " "
         (List.map Typec_syntax.Optional_float.spelling optional_floats)
+
+let enum_representation_name = function
+  | Int_sized -> "int-sized"
+  | Short -> "short"
 
 let byte_order_name = function
   | Little_endian -> "little-endian"
@@ -424,6 +431,8 @@ let to_string target =
       ("char32_type", Integer.name target.char32_type);
       ("byte_order", byte_order_name target.byte_order);
       ("stdc_version", string_of_int target.stdc_version);
+      ( "enum_representation",
+        enum_representation_name target.enum_representation );
     ]
   in
   String.concat ""

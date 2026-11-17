@@ -37,6 +37,7 @@ let () =
       ("-E", (Refused "", 0, ""));
       ("-fpack-struct", (Refused "", 0, ""));
       ("-fpack-struct=2", (Common, 0, ""));
+      ("-fshort-enums", (Common, 0, ""));
       ("-std=c11", (Dialect, 0, "c11"));
       ("-std=", (Dialect, 0, ""));
       ("--std", (Dialect, 1, ""));

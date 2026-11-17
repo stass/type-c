@@ -14,11 +14,15 @@ val hold_standard_descriptors : unit -> unit
     opened. *)
 
 val start :
-  stdin:Unix.file_descr -> stdout:Unix.file_descr -> string list -> int
-(** [start ~stdin ~stdout command] starts the program [List.hd command]
-    with the argument vector [command], never through a shell, with
-    [stdin] and [stdout] and the stderr, environment and working
-    directory of [typec], and returns its process id without waiting for
+  stdin:Unix.file_descr ->
+  stdout:Unix.file_descr ->
+  stderr:Unix.file_descr ->
+  string list ->
+  int
+(** [start ~stdin ~stdout ~stderr command] starts the program
+    [List.hd command] with the argument vector [command], never through a
+    shell, with [stdin], [stdout] and [stderr] and the environment and
+    working directory of [typec], and returns its process id without waiting for
     it. The program is found through [PATH] when its name has no slash.
     It raises [Unix.Unix_error] when the program cannot be started, after
     reaping the child that tried, so a program that starts and exits with
@@ -30,10 +34,11 @@ val start :
 val run :
   stdin:Unix.file_descr ->
   stdout:Unix.file_descr ->
+  stderr:Unix.file_descr ->
   string list ->
   Unix.process_status
-(** [run ~stdin ~stdout command] starts [command] as {!start} does and
-    waits for it to end. A signal that {!Signals} records while the
+(** [run ~stdin ~stdout ~stderr command] starts [command] as {!start}
+    does and waits for it to end. A signal that {!Signals} records while the
     program runs is passed on to it, so it ends as it would have without
     [typec]. It raises [Unix.Unix_error] when the program cannot be
     started. *)

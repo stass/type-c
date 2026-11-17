@@ -5937,9 +5937,14 @@ for GCC 16 and Apple Clang 21 for x86-64 without an option, and for
 Apple Clang 21 for `msp430-elf` without one and for
 `hexagon-unknown-elf` under `-fno-short-enums`. The cost is two more
 runs of the backend for each step that queries the target, which the
-design accepts (simplicity over speed in the compiler). An option that makes the backend write
-files of its own, as GCC 16's `-fdiagnostics-add-output=sarif`, writes
-them for the failing probe as well. The compatible type of an
+design accepts (simplicity over speed in the compiler). Each probe also gets `-dumpdir` naming a
+private temporary directory that `typec` removes after the probes,
+since GCC 16 writes the auxiliary files of an option such as
+`-fstack-usage` or `-fcallgraph-info` even under `-fsyntax-only`, named
+for the input `-`; without it they would land in the working directory,
+where a build without `typec` leaves none. An option that writes a
+file under a name of its own, as GCC 16's
+`-fdiagnostics-add-output=sarif`, may still write it for each probe. The compatible type of an
 enumeration follows from the representation by one rule (13.4), and
 every use of the enumeration's type reads it from there.
 
