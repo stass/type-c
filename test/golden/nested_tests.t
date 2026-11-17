@@ -87,7 +87,7 @@ The bounds on selection hold a test as they hold a match (rule 10).
   deeper.tc:3: error: the selection tree of the test is deeper than 127 nodes, the most that typec takes (a translation limit, C11 5.2.4.1)
   [1]
 
-The lowered form: the selection tree of the one pattern sets __tc_arm
+The lowered form: the selection tree of the one pattern sets __tc_arm0
 to 1 at its leaf and to 0 at every other, and the if of the test reads
 it; the false branch checks no tag, since the tree has (13.5). A pattern
 that reads no tag below its constructor keeps the form of a flat test.
@@ -118,9 +118,9 @@ that reads no tag below its constructor keeps the form of a flat test.
   $ ./golden.exe lower.tc | grep -v '^# ' | sed 's/ *$//' | grep . |
   >   sed -n '/^int f/,$p'
   int f(res r) {
-  { const struct res *const __tc_match = &(
+  { const struct res *const __tc_match0 = &(
    r
-  ); unsigned __tc_arm; switch (__tc_match->tag) { case res_Err: switch (__tc_match->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm = 1; break; case eval_error_Overflow: __tc_arm = 0; break; default: __builtin_trap(); } break; case res_Ok: __tc_arm = 0; break; default: __builtin_trap(); } if (__tc_arm == 1) {
+  ); unsigned __tc_arm0; switch (__tc_match0->tag) { case res_Err: switch (__tc_match0->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm0 = 1; break; case eval_error_Overflow: __tc_arm0 = 0; break; default: __builtin_trap(); } break; case res_Ok: __tc_arm0 = 0; break; default: __builtin_trap(); } if (__tc_arm0 == 1) {
       return -1;
    }
   else {
@@ -129,9 +129,9 @@ that reads no tag below its constructor keeps the form of a flat test.
   }
   int g(const list *l) {
     int sum = 0;
-  for (;;) { const struct list *const __tc_match = &(
+  for (;;) { const struct list *const __tc_match1 = &(
    *l
-  ); unsigned __tc_arm; const struct list *__tc_p1 = 0; switch (__tc_match->tag) { case list_Cons: __tc_p1 = __tc_match->u.Cons.tail; switch (__tc_p1->tag) { case list_Cons: __tc_arm = 1; break; case list_Nil: __tc_arm = 0; break; default: __builtin_trap(); } break; case list_Nil: __tc_arm = 0; break; default: __builtin_trap(); } if (__tc_arm == 1) { const __typeof__(__tc_match->u.Cons.head) h = __tc_match->u.Cons.head; const __typeof__(__tc_p1->u.Cons.tail) t = __tc_p1->u.Cons.tail;
+  ); unsigned __tc_arm1; const struct list *__tc_p1_1 = 0; switch (__tc_match1->tag) { case list_Cons: __tc_p1_1 = __tc_match1->u.Cons.tail; switch (__tc_p1_1->tag) { case list_Cons: __tc_arm1 = 1; break; case list_Nil: __tc_arm1 = 0; break; default: __builtin_trap(); } break; case list_Nil: __tc_arm1 = 0; break; default: __builtin_trap(); } if (__tc_arm1 == 1) { const __typeof__(__tc_match1->u.Cons.head) h = __tc_match1->u.Cons.head; const __typeof__(__tc_p1_1->u.Cons.tail) t = __tc_p1_1->u.Cons.tail;
    {
       sum += h;
       l = t;
@@ -140,15 +140,15 @@ that reads no tag below its constructor keeps the form of a flat test.
   return sum;
   }
   int k(const expr *e) {
-  { const struct expr *const __tc_match = &(
+  { const struct expr *const __tc_match2 = &(
    *e
-  ); unsigned __tc_arm; const struct expr *__tc_p1 = 0; switch (__tc_match->tag) { case expr_Add: __tc_p1 = __tc_match->u.Add.l; switch (__tc_p1->tag) { case expr_Num: __tc_arm = 1; break; case expr_Add: __tc_arm = 0; break; default: __builtin_trap(); } break; case expr_Num: __tc_arm = 0; break; default: __builtin_trap(); } if (__tc_arm == 1) { const __typeof__(__tc_match->u.Add.r) r = __tc_match->u.Add.r;
+  ); unsigned __tc_arm2; const struct expr *__tc_p2_1 = 0; switch (__tc_match2->tag) { case expr_Add: __tc_p2_1 = __tc_match2->u.Add.l; switch (__tc_p2_1->tag) { case expr_Num: __tc_arm2 = 1; break; case expr_Add: __tc_arm2 = 0; break; default: __builtin_trap(); } break; case expr_Num: __tc_arm2 = 0; break; default: __builtin_trap(); } if (__tc_arm2 == 1) { const __typeof__(__tc_match2->u.Add.r) r = __tc_match2->u.Add.r;
       return k(r);
    } else { } }
-  { const struct expr *const __tc_match = &(
+  { const struct expr *const __tc_match3 = &(
    *e
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == expr_Add) {
+  ); const __typeof__(__tc_match3->tag) __tc_tag3 = __tc_match3->tag; if (__tc_tag3 == expr_Add) {
       return 1;
-   } else { switch (__tc_tag) { case expr_Num: case expr_Add: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag3) { case expr_Num: case expr_Add: break; default: __builtin_trap(); } } }
   return 0;
   }

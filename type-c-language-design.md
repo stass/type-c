@@ -5389,13 +5389,13 @@ Two properties follow by construction:
 | `match` | A block: a pointer to the scrutinee where it is an lvalue whose address C aligns for its type, or else a copy. The address is aligned for a named object not declared `register`, a compound literal, the object of a pointer that is read as a stored value or returned by a call, and an element of an array whose address is aligned; it is not for a member of a structure or union, which a `#pragma pack` or an attribute may pack where typec does not see it and which the backend reads correctly through a member access only, nor for the object of a pointer that the scrutinee forms, as by converting a member array. A volatile or atomic scrutinee is copied too. Then: a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
-| Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm;`, then a pointer local for each position under a `*` where a constructor pattern stands, `const struct V *__tc_pK = 0;` for the `K`th such position, of the variant `V`, and for each node a `switch` on the tag of the node's position. The locals are numbered from 1 in the order in which the labels name their positions, so that each follows the one it is reached from, and the scrutinee's pointer is `__tc_match`. An object is reached from the nearest local above it, `__tc_match` or one of a position under a `*`, through the members of 10.1: a node under a `*` first points its local at the object that the pointer field points to, `__tc_p1 = __tc_match->u.Add.l;`, and switches on `__tc_p1->tag`; a node at a field in place switches on the field's tag, `__tc_match->u.Err.error.tag`, `__tc_p1->u.Wrapped.inner.tag`. A field in place has no local, since its address may be misaligned in a packed variant, where a member access is not. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_p1->u.Num.value`. The path from a local to an object never passes a `*`, so a variant is held in place at most once on it and its length is bounded by the variants of the unit and the depth of the tree, not by the depth of a pattern under `*`; spelling the whole path from `__tc_match` at each node would make a 100 KB pattern 120 deep over a long field name about 900 MB of text. Every path to a node or to an arm passes the nodes that point the locals that it reads, since a label is selected only after every tag that it names is read (4.7 rule 6); the null pointer that a local starts as spares a backend that cannot see this a warning of a value used uninitialized. |
+| Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm0;`, then a pointer local for each position under a `*` where a constructor pattern stands, `const struct V *__tc_p0_K = 0;` for the `K`th such position, of the variant `V`, and for each node a `switch` on the tag of the node's position. The locals are numbered from 1 in the order in which the labels name their positions, so that each follows the one it is reached from, and the scrutinee's pointer is `__tc_match0`. An object is reached from the nearest local above it, `__tc_match0` or one of a position under a `*`, through the members of 10.1: a node under a `*` first points its local at the object that the pointer field points to, `__tc_p0_1 = __tc_match0->u.Add.l;`, and switches on `__tc_p0_1->tag`; a node at a field in place switches on the field's tag, `__tc_match0->u.Err.error.tag`, `__tc_p0_1->u.Wrapped.inner.tag`. A field in place has no local, since its address may be misaligned in a packed variant, where a member access is not. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm0 = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm0)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm0`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_p0_1->u.Num.value`. The path from a local to an object never passes a `*`, so a variant is held in place at most once on it and its length is bounded by the variants of the unit and the depth of the tree, not by the depth of a pattern under `*`; spelling the whole path from `__tc_match0` at each node would make a 100 KB pattern 120 deep over a long field name about 900 MB of text. Every path to a node or to an arm passes the nodes that point the locals that it reads, since a label is selected only after every tag that it names is read (4.7 rule 6); the null pointer that a local starts as spares a backend that cannot see this a warning of a value used uninitialized. |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | Zero initialiser of an object whose type mentions a type parameter (7.1 rule 3) | The empty initialiser `{}`, whichever of `{0}` and `{}` the source writes, under `__extension__`: before the declaration whose initialiser holds it, `__extension__ T u = {};`, or, where the list of a compound literal holds it, before that literal, `__extension__ (T){}`. As said below the table ("The zero initialiser of a type parameter"). Every other initialiser stays as written. |
 | `try` | Before each holder (5.1 rule 3), its prelude: for each `try`, in the order of 5.1, a temporary of the result type that takes the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary. Then the holder, with the `Ok` field read where each `try` stood, or `((void)0)` where the value of the `try` is discarded or `T` is `void`, where `Ok` has no field (3.5 rule 6); a branch of a discarded conditional reads the field, and a discarded value in which the holder reads a `try` is cast to `void` where a backend would report it (below the table). A `try` that is an initialiser of a braced list and whose value the list converts from one arithmetic type to another takes a second temporary, of the type converted to, which holds the converted value and which the list reads. A first operand that 5.1 evaluates with the `try` expressions takes a temporary of type `int`, and what it conditions stands under an `if` on that temporary, as said below the table. Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
-| `defer` | The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
+| `defer` | The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r0 = (e); copies return __tc_r0; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
 | Slice index, `slice_sub` | An expression at the use, and no call: a comma expression of ISO C that assigns the value of each operand to a temporary of the function, tests, traps (10.5) and then indexes, as said below the table ("The check of a slice"). An index is `(*(assignments, test, &element))`, an lvalue. Where C does not evaluate one, it has no test and no temporary: it is the trap and then its operands, each written once, `(*((void)__builtin_trap(), &(s).data[+(i)]))` for an index, so that it traps where C evaluates it after all. |
 | Conversion to `slice(const T)` (section 8 rule 5) | The form of a `slice_sub` with no bounds and no test: `((void)(__tc_s0 = (e)), (struct C){ __tc_s0.data, __tc_s0.len })`, where `struct C` is the instance converted to and `e` the expression that converts: the expression of a position that has a target type, or an operand that has the target type of the expression around it, or one operand of a conditional operator. Where C does not evaluate it, the form of a `slice_sub` there. A `slice_from_array`, a `slice_unchecked` and a string literal that denotes a `str` hold no temporary and are converted by being written for `struct C`, and so is the value of a `try`, the read of the `Ok` field of its temporary (5.1), which has no side effect: `(struct C){ v.data, v.len }`. |
 | `slice_from_array`, `slice_unchecked`, `str` literal | A compound literal, at the use, of the instance that the use takes: its own, or the one that it is converted to (the row above). As the initialiser of an object, member or element that is declared with the type of that instance, the field of a constructor among them, the braced list alone, in place of the whole initialiser with its parentheses, as for a constructor and under the same condition. Neither holds a test. The length of a `slice_from_array` is a `sizeof` of its operand over the size of an element, plus a term of the value 0 that names an array type of negative size where that size is 0. A string literal that denotes a `str` is `(struct C){ "lit", sizeof("lit") - 1 }`, or the braced list `{ "lit", sizeof("lit") - 1 }`. |
@@ -5428,22 +5428,22 @@ C, where `struct R` is the instance `result(int, eval_error)` under its
 claimed tag and `TRAP` the trap of 10.5:
 
 ```c
-{ const struct R __tc_copy = (eval(e)), *const __tc_match = &__tc_copy;
-  unsigned __tc_arm;
-  switch (__tc_match->tag) {
-  case R_Ok: __tc_arm = 0; break;
+{ const struct R __tc_copy0 = (eval(e)), *const __tc_match0 = &__tc_copy0;
+  unsigned __tc_arm0;
+  switch (__tc_match0->tag) {
+  case R_Ok: __tc_arm0 = 0; break;
   case R_Err:
-    switch (__tc_match->u.Err.error.tag) {
-    case eval_error_DivByZero: __tc_arm = 1; break;
-    case eval_error_Overflow: __tc_arm = 2; break;
+    switch (__tc_match0->u.Err.error.tag) {
+    case eval_error_DivByZero: __tc_arm0 = 1; break;
+    case eval_error_Overflow: __tc_arm0 = 2; break;
     default: TRAP
     }
     break;
   default: TRAP
   }
-  switch (__tc_arm) {
-  case 0: { const __typeof__(__tc_match->u.Ok.value) value =
-                __tc_match->u.Ok.value;
+  switch (__tc_arm0) {
+  case 0: { const __typeof__(__tc_match0->u.Ok.value) value =
+                __tc_match0->u.Ok.value;
             { printf("%d\n", value); break; } TRAP }
   case 1: { printf("division by zero\n"); break; TRAP }
   case 2: { printf("overflow\n"); break; TRAP }
@@ -5456,15 +5456,16 @@ branches leave possible is a leaf in each of them, and the items of its
 arm are written once, as the source writes them, so a leaf cannot hold
 them. They also stay outside every `switch` of the tree, where a
 `break` of the arm would leave that `switch` and not the match: in the
-`switch` on `__tc_arm` a `break`, a `continue` and a `return` mean what
+`switch` on `__tc_arm0` a `break`, a `continue` and a `return` mean what
 they mean in the `switch` of a match without nested patterns. The
 `default:` of that `switch` is reached by no run, since every path
 through the tree sets the local to the number of an arm or traps. It
 is written because a backend that does not follow the values of the
 local would see a path past the `switch`, and would report a function
-whose arms all return as one that can end without a value. `__tc_arm`
-is declared in the block of its match or test, as `__tc_match` is, and
-needs no more than the prefix.
+whose arms all return as one that can end without a value. `__tc_arm0`
+is declared in the block of its match or test, as `__tc_match0` is,
+and carries the number of its match or test, as every local of one
+does (the invented names below).
 
 A tree of one node has one branch for each arm, so the `switch` on the
 tag holds the arms and there is no local: that is the `match` row and
@@ -6014,7 +6015,7 @@ long f(int a, char *b)
 and each such `return e;` in its body becomes
 
 ```c
-{ __tc_ret __tc_r = (e); /* cleanups */ return __tc_r; }
+{ __tc_ret __tc_r0 = (e); /* cleanups */ return __tc_r0; }
 ```
 
 A function with no such `return` declares no `__tc_ret`. One that also
@@ -6040,9 +6041,12 @@ The initialisation converts the value of `e` to the return type as the
 cleanups (section 6 rule 3); the `return` of the temporary converts
 nothing. A constructor expression or a `str` literal that takes its type
 from the return type (3.3) is written in the initialiser as the compound
-literal it lowers to, which carries that type. `__tc_ret` and `__tc_r`
-are reserved (2.3), so neither the body, `e` nor a cleanup names one,
-and each such block declares its own `__tc_r`.
+literal it lowers to, which carries that type. `__tc_ret` and the
+temporaries are reserved (2.3), so neither the body, `e` nor a cleanup
+names one. Each such block declares a temporary of its own, `__tc_r0`
+for the first such `return` of the function in source order, `__tc_r1`
+for the next and so on, so that one in a statement expression of `e`
+hides none (below).
 
 The typedef is the first block item of the function's body, and the
 body as written is a block after it. At the typedef the names in scope
@@ -6196,7 +6200,6 @@ at `-O0` and `-O2`, and with Clang's `-Weverything`:
 | `-Wmisleading-indentation` (in `-Wall`), both backends, `if (c) return x;` followed by a statement indented as if the `if` guarded it; the same for every other jump that runs copies, as `if (c) break;`, which stands in a block too (the `defer` row) | Reported | Lost: the jump stands in a block |
 | `-Wunused-parameter`, `-Wunused-but-set-parameter`, both backends | Reported | Lost for every parameter of the function |
 | Clang `-Wunused-function`, an unused `static` function | Reported | Replaced by `-Wunneeded-internal-declaration`; GCC reports `-Wunused-function` for both |
-| `-Wshadow`, both backends, where `e` holds a statement expression with such a `return` of its own | None | Added: the inner `__tc_r` hides the outer one |
 | Clang `-Wunreachable-code`, where `e` is a call of a `noreturn` function | None | Added: what follows the initialiser is never reached |
 | Clang `-Wused-but-marked-unused` (in `-Weverything`), a parameter marked `unused` | None | Added, once for the function |
 | Clang `-Wdeprecated-non-prototype`, an old-style definition with no prototype in scope | Once, for the definition | Once more, for the call in the typedef |
@@ -6414,7 +6417,7 @@ copies of deferred statements stand at one place for each exit (section
   writes the copies after the initialiser, or the expression statement,
   that holds `e` (above). The names in scope there are those in scope
   before the `return` of the source, since `e` declares none that is in
-  scope after it (section 6 rule 12), and `__tc_r` where the block
+  scope after it (section 6 rule 12), and `__tc_r0` where the block
   declares it, which is reserved (2.3), so that no copy names it;
 - for the error path of a `try`, with its test: before the statement or
   declaration that holds the `try` and after the labels of that
@@ -7457,10 +7460,19 @@ and one instance. A generic of the universe shares its guards with no
 other: no generic of a file has a universe name (3.6), so none has its
 instance names.
 
-No other invented name holds a `__` after the prefix. `__tc_ret`, the
-return type of a function, is declared once in the outermost block of
-its function, and `__tc_r`, the temporary of a `return`, in a block of
-its own; neither needs more than the prefix. `__tc_t0`, `__tc_t1` and
+No other invented name holds a `__` after the prefix, and no two
+invented locals that one block can see share a name, so none hides
+another and a backend's `-Wshadow` finds no invented name to report
+when the constructs of Type-C nest. A local takes a number wherever two
+of its kind could
+be in scope at once, and the number is the only thing that tells them
+apart; a name without one is declared once in its function.
+`__tc_ret`, the return type of a function, is declared once in the
+outermost block of its function and needs no more than the prefix.
+`__tc_r0`, `__tc_r1` and so on are the temporaries of the `return e;`
+statements that run copies, numbered in source order in their function
+(above): each stands in a block of its own, but a statement expression
+of `e` can hold another such `return`. `__tc_t0`, `__tc_t1` and
 so on are the temporaries of the `try` expressions of a function,
 `__tc_v0` and so on those of the values that a prelude converts for a
 braced list, each with the number of its `try`, and
@@ -7471,7 +7483,22 @@ under `--trap-function` (10.5), declared once in front of a unit's own
 text and defined once after it. `__tc_s0`,
 `__tc_i0`, `__tc_lo0` and `__tc_hi0` and so on are the temporaries of
 the test and of the conversion of a slice (above), declared where
-`__tc_ret` is, with the number of their test or conversion. `__tc_bits`
+`__tc_ret` is, with the number of their test or conversion.
+`__tc_match0`, `__tc_copy0`, `__tc_tag0` and `__tc_arm0` are the
+pointer to the scrutinee or operand of a match or a single-pattern
+test, its copy, its tag and its arm (above), and `__tc_p0_1`,
+`__tc_p0_2` and so on its pointer locals. The first number is that of
+the match or test, which counts those of its text, the unit's or an
+instance's, from 0 in source order, and the second that of the pointer
+local within it; an instance stands at file scope, outside every
+function of the unit (10.3). A match or test in an arm of another, in
+the statement or the `else` of a test, in the scrutinee of another, or
+in a copy of a deferred statement that an exit there runs, stands in
+the scope of the outer one's locals. A copy keeps the numbers of its
+original, and lowering writes every copy outside the tokens that it
+copies: a deferred statement holds no exit (6 rule 4), the operand of
+a `try` is copied into the prelude before its holder, and the operand
+of a slice's length beside that operand. `__tc_bits`
 and `__tc_enum_probe` are the probes of the assertions that end a unit
 (13.4), and `__tc_pack_probe_1` and `__tc_pack_probe_2` the two
 structures of the packing probe that ends one (10.3), one of each.

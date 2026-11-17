@@ -420,21 +420,21 @@ let defers () =
     "void a(void); long f(int x, char *s) { defer a(); return x; }"
     ("void a(void); long f(int x, char *s) { typedef \
       __typeof__(((__typeof__(f) *)0)(*(__typeof__(x) *)0, *(__typeof__(s) \
-      *)0)) __tc_ret; { { __tc_ret __tc_r = ( x ); { a ( ) ; } return \
-      __tc_r; } " ^ trap ^ " } }");
+      *)0)) __tc_ret; { { __tc_ret __tc_r0 = ( x ); { a ( ) ; } return \
+      __tc_r0; } " ^ trap ^ " } }");
   lowers "a return of a value from a function without parameters"
     "void a(void); int f(void) { defer a(); if (1) return 1; return 2; }"
     ("void a(void); int f(void) { typedef \
       __typeof__(((__typeof__(f) *)0)()) __tc_ret; { if (1) { __tc_ret \
-      __tc_r = ( 1 ); { a ( ) ; } return __tc_r; } { __tc_ret __tc_r = ( 2 \
-      ); { a ( ) ; } return __tc_r; } " ^ trap ^ " } }");
+      __tc_r0 = ( 1 ); { a ( ) ; } return __tc_r0; } { __tc_ret __tc_r1 = \
+      ( 2 ); { a ( ) ; } return __tc_r1; } " ^ trap ^ " } }");
   lowers "a return in the operand of a return"
     "void a(void); int f(int c) { defer a(); return ({ if (c) return 1; 2; \
      }); }"
     ("void a(void); int f(int c) { typedef \
       __typeof__(((__typeof__(f) *)0)(*(__typeof__(c) *)0)) __tc_ret; { { \
-      __tc_ret __tc_r = ( ({ if (c) { __tc_ret __tc_r = ( 1 ); { a ( ) ; } \
-      return __tc_r; } 2; }) ); { a ( ) ; } return __tc_r; } " ^ trap
+      __tc_ret __tc_r0 = ( ({ if (c) { __tc_ret __tc_r1 = ( 1 ); { a ( ) ; \
+      } return __tc_r1; } 2; }) ); { a ( ) ; } return __tc_r0; } " ^ trap
    ^ " } }");
   compares "a return in the operand of a try runs the copies"
     (between
@@ -444,7 +444,7 @@ let defers () =
               { defer a(); int x = try ({ if (c) return Ok(0); g(c); }); \
               return Ok(x); }"))
        ~first:"if ( c )" ~last:"{ a ( ) ; }")
-    "if ( c ) { __tc_ret __tc_r = ( ((struct result__ii){ .tag = \
+    "if ( c ) { __tc_ret __tc_r0 = ( ((struct result__ii){ .tag = \
      result__ii_Ok, .u.Ok = { 0 } }) ); { a ( ) ; }";
   (* The text of [f] alone, after the definition of [o]. *)
   let tested_defer form =
@@ -459,25 +459,25 @@ let defers () =
   in
   compares "a single-pattern if that ends a deferred statement"
     (tested_defer "if (case A(v) = p) a(v);")
-    " { b(); { { const struct o *const __tc_match = &( p ); const \
-     __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == \
-     o_A) { const __typeof__(__tc_match->u.A.x) v = __tc_match->u.A.x; a ( v \
-     ) ; } else { switch (__tc_tag) { case o_A: case o_B: break; default: \
-     __builtin_trap(); } } } } }";
+    " { b(); { { const struct o *const __tc_match0 = &( p ); const \
+     __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 \
+     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; \
+     a ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; \
+     default: __builtin_trap(); } } } } }";
   compares "a single-pattern if with else that ends a deferred statement"
     (tested_defer "if (case A(v) = p) a(v); else b();")
-    " { b(); { { const struct o *const __tc_match = &( p ); const \
-     __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == \
-     o_A) { const __typeof__(__tc_match->u.A.x) v = __tc_match->u.A.x; a ( v \
-     ) ; } else { switch (__tc_tag) { case o_A: case o_B: break; default: \
-     __builtin_trap(); } b ( ) ; } } } }";
+    " { b(); { { const struct o *const __tc_match0 = &( p ); const \
+     __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 \
+     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; \
+     a ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; \
+     default: __builtin_trap(); } b ( ) ; } } } }";
   compares "a single-pattern while that ends a deferred statement"
     (tested_defer "while (case A(v) = p) a(v);")
-    " { b(); { for (;;) { const struct o *const __tc_match = &( p ); const \
-     __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == \
-     o_A) { const __typeof__(__tc_match->u.A.x) v = __tc_match->u.A.x; a ( v \
-     ) ; } else { switch (__tc_tag) { case o_A: case o_B: break; default: \
-     __builtin_trap(); } break; } } } }";
+    " { b(); { for (;;) { const struct o *const __tc_match0 = &( p ); const \
+     __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 \
+     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; \
+     a ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; \
+     default: __builtin_trap(); } break; } } } }";
   lowers "a defer in a statement expression of a kept type name"
     "void g(void); int f(int x) { return _Generic(x, __typeof__(({ int y = \
      0; { defer g(); } y; })): 1, default: 0); }"
@@ -488,7 +488,7 @@ let defers () =
      defer a(); return; case B: return; } }"
     ("struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
       e_tag tag; }; void a(void); void f(e v) { { const struct e *const \
-      __tc_match = &( v ); switch (__tc_match->tag) { case e_A: { { { a ( ) \
+      __tc_match0 = &( v ); switch (__tc_match0->tag) { case e_A: { { { a ( ) \
       ; } return ; } " ^ trap ^ " } case e_B: { return; " ^ trap
    ^ " } default: " ^ trap ^ " } } }")
 
@@ -537,7 +537,7 @@ let goto_defers () =
      A: defer a(); if (c) goto L; return; case B: return; } L: ; }"
     ("struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
       e_tag tag; }; void a(void); void f(e v, int c) { { const struct e \
-      *const __tc_match = &( v ); switch (__tc_match->tag) { case e_A: { if \
+      *const __tc_match0 = &( v ); switch (__tc_match0->tag) { case e_A: { if \
       (c) { { a ( ) ; } goto L ; } { { a ( ) ; } return ; } " ^ trap
    ^ " } case e_B: { return; " ^ trap ^ " } default: " ^ trap
    ^ " } } L: ; }")
@@ -630,10 +630,10 @@ let try_defers () =
   compares "a try in the scope of a defer whose statement is lowered"
     (error_path "defer if (case A(v) = p) k(v); try g(c); return Ok(0);")
     (runs
-       " { { const struct o *const __tc_match = &( p ); const \
-        __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag \
-        == o_A) { const __typeof__(__tc_match->u.A.x) v = \
-        __tc_match->u.A.x; k ( v ) ; } else { switch (__tc_tag) { case o_A: \
+       " { { const struct o *const __tc_match0 = &( p ); const \
+        __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if \
+        (__tc_tag0 == o_A) { const __typeof__(__tc_match0->u.A.x) v = \
+        __tc_match0->u.A.x; k ( v ) ; } else { switch (__tc_tag0) { case o_A: \
         case o_B: break; default: __builtin_trap(); } } } }")
 
 let fails name message =

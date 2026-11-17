@@ -4305,7 +4305,8 @@ and exit_places state (site : Reachability.defer_site) =
   List.filter_map place site.places
 
 (* Lowering declares nothing at a place of writing that the source
-   does not: [__tc_r] is reserved (design 2.3). *)
+   does not: every name that begins with [__tc_] is reserved (design
+   2.3). *)
 and place_before state index : Resolution.place =
   let { Parser.view; depth = _ } = statement_view state index in
   { view; before = index; typedef_names = []; tags = [] }

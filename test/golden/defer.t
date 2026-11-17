@@ -825,7 +825,7 @@ statements of the scopes around it run as usual.
     if (c)
       
   # 6 "jump_before.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 6 "jump_before.tc"
    1
   # 6 "jump_before.tc"
@@ -833,7 +833,7 @@ statements of the scopes around it run as usual.
   # 4 "jump_before.tc"
   { h ( ) ; }
   # 6 "jump_before.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 6 "jump_before.tc"
   
     
@@ -843,7 +843,7 @@ statements of the scopes around it run as usual.
   
     
   # 8 "jump_before.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r1 = (
   # 8 "jump_before.tc"
    2
   # 8 "jump_before.tc"
@@ -853,7 +853,7 @@ statements of the scopes around it run as usual.
   # 4 "jump_before.tc"
   { h ( ) ; }
   # 8 "jump_before.tc"
-  return __tc_r; }
+  return __tc_r1; }
   # 8 "jump_before.tc"
   
   
@@ -1140,7 +1140,7 @@ The operand of a return, written at its own place, may.
   
     
   # 4 "return_linked.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 4 "return_linked.tc"
    ({ extern int o; o; })
   # 4 "return_linked.tc"
@@ -1148,7 +1148,7 @@ The operand of a return, written at its own place, may.
   # 3 "return_linked.tc"
   { g ( ) ; }
   # 4 "return_linked.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 4 "return_linked.tc"
   
   
@@ -1459,7 +1459,7 @@ end of that block, and each copy writes S in a block of its own.
     double r = 0;
     
     
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
    a * b + c
   );
   { {
@@ -1467,7 +1467,7 @@ end of that block, and each copy writes S in a block of its own.
   r = a * b + c ;
   }
   }
-  return __tc_r; }
+  return __tc_r0; }
   __builtin_trap();
   } }
 
@@ -1843,7 +1843,7 @@ in front of the statement or declaration that holds the try.
     }
     
   # 10 "declared_by_try.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 10 "declared_by_try.tc"
    
   # 10 "declared_by_try.tc"
@@ -1859,7 +1859,7 @@ in front of the statement or declaration that holds the try.
   # 5 "declared_by_try.tc"
   { use ( x ) ; }
   # 10 "declared_by_try.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 10 "declared_by_try.tc"
   
   
@@ -2121,7 +2121,7 @@ operand, and a return in it, which leaves the function, are allowed.
   
     
   # 4 "operand_inner_jumps.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 4 "operand_inner_jumps.tc"
    ({
       for (;;) { if (c) break; continue; }
@@ -2129,7 +2129,7 @@ operand, and a return in it, which leaves the function, are allowed.
     in:
       if (c > 1) 
   # 8 "operand_inner_jumps.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r1 = (
   # 8 "operand_inner_jumps.tc"
    2
   # 8 "operand_inner_jumps.tc"
@@ -2137,7 +2137,7 @@ operand, and a return in it, which leaves the function, are allowed.
   # 3 "operand_inner_jumps.tc"
   { g ( ) ; }
   # 8 "operand_inner_jumps.tc"
-  return __tc_r; }
+  return __tc_r1; }
   # 8 "operand_inner_jumps.tc"
   
       1;
@@ -2147,7 +2147,7 @@ operand, and a return in it, which leaves the function, are allowed.
   # 3 "operand_inner_jumps.tc"
   { g ( ) ; }
   # 10 "operand_inner_jumps.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 10 "operand_inner_jumps.tc"
   
   
@@ -2210,7 +2210,7 @@ operand that only uses a tag declares nothing.
   
     
   # 5 "return_uses.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 5 "return_uses.tc"
    (struct p){1}.a
   # 5 "return_uses.tc"
@@ -2218,7 +2218,7 @@ operand that only uses a tag declares nothing.
   # 4 "return_uses.tc"
   { g ( ) ; }
   # 5 "return_uses.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 5 "return_uses.tc"
   
   
@@ -2258,11 +2258,11 @@ refused, each case with a name of its own; a function without such a
   # 2 "form_allowed.tc"
    
   # 2 "form_allowed.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 2 "form_allowed.tc"
    a + *b
   # 2 "form_allowed.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 2 "form_allowed.tc"
    
   # 2 "form_allowed.tc"
@@ -2283,11 +2283,11 @@ refused, each case with a name of its own; a function without such a
   # 3 "form_allowed.tc"
    
   # 3 "form_allowed.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 3 "form_allowed.tc"
    1
   # 3 "form_allowed.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 3 "form_allowed.tc"
    
   # 3 "form_allowed.tc"
@@ -2399,11 +2399,11 @@ A name that a nested parameter list declares hides nothing at the call.
   # 2 "own_name_nested.tc"
    
   # 2 "own_name_nested.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 2 "own_name_nested.tc"
    p(0)
   # 2 "own_name_nested.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 2 "own_name_nested.tc"
    
   # 2 "own_name_nested.tc"
@@ -2442,11 +2442,11 @@ a returned function pointer or of a member, is another scope.
   # 2 "head_prototypes.tc"
    
   # 2 "head_prototypes.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 2 "head_prototypes.tc"
    0
   # 2 "head_prototypes.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 2 "head_prototypes.tc"
    
   # 2 "head_prototypes.tc"
@@ -2467,11 +2467,11 @@ a returned function pointer or of a member, is another scope.
   # 3 "head_prototypes.tc"
    
   # 3 "head_prototypes.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 3 "head_prototypes.tc"
    0
   # 3 "head_prototypes.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 3 "head_prototypes.tc"
    
   # 3 "head_prototypes.tc"
@@ -2492,11 +2492,11 @@ a returned function pointer or of a member, is another scope.
   # 4 "head_prototypes.tc"
    
   # 4 "head_prototypes.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 4 "head_prototypes.tc"
    0
   # 4 "head_prototypes.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 4 "head_prototypes.tc"
    
   # 4 "head_prototypes.tc"
@@ -2520,7 +2520,7 @@ a returned function pointer or of a member, is another scope.
   
     
   # 8 "head_prototypes.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 8 "head_prototypes.tc"
    (struct r){0}
   # 8 "head_prototypes.tc"
@@ -2528,7 +2528,7 @@ a returned function pointer or of a member, is another scope.
   # 7 "head_prototypes.tc"
   { g ( ) ; }
   # 8 "head_prototypes.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 8 "head_prototypes.tc"
   
   
@@ -2591,7 +2591,7 @@ A tag that an inner block declares is another tag in C as well.
   
     
   # 5 "inner_tag.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 5 "inner_tag.tc"
    p != 0
   # 5 "inner_tag.tc"
@@ -2599,7 +2599,7 @@ A tag that an inner block declares is another tag in C as well.
   # 4 "inner_tag.tc"
   { g ( ) ; }
   # 5 "inner_tag.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 5 "inner_tag.tc"
   
   
@@ -2643,11 +2643,11 @@ arguments differ, token for token: they declare two versions.
   # 3 "target_same.tc"
    
   # 3 "target_same.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 3 "target_same.tc"
    1
   # 3 "target_same.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 3 "target_same.tc"
    
   # 3 "target_same.tc"
@@ -2685,7 +2685,7 @@ The `target` attributes of one declaration are one fact of it.
   
     
   # 5 "target_pair.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 5 "target_pair.tc"
    a
   # 5 "target_pair.tc"
@@ -2693,7 +2693,7 @@ The `target` attributes of one declaration are one fact of it.
   # 4 "target_pair.tc"
   { g ( ) ; }
   # 5 "target_pair.tc"
-  return __tc_r; }
+  return __tc_r0; }
   # 5 "target_pair.tc"
   
   
@@ -2780,11 +2780,11 @@ A parameter has no name; `(void)` has none to give.
   # 3 "void_typedef.tc"
    
   # 3 "void_typedef.tc"
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
   # 3 "void_typedef.tc"
    1
   # 3 "void_typedef.tc"
-  ); { g ( ) ; } return __tc_r; }
+  ); { g ( ) ; } return __tc_r0; }
   # 3 "void_typedef.tc"
    
   # 3 "void_typedef.tc"
@@ -2896,10 +2896,10 @@ The defer around it is written as anywhere else.
   0
   ;
     
-  { __tc_ret __tc_r = (
+  { __tc_ret __tc_r0 = (
    c
   );
   { g ( 0 ) ; }
-  return __tc_r; }
+  return __tc_r0; }
   __builtin_trap();
   } }

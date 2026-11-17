@@ -199,11 +199,11 @@ opens it (design 3.3, 4).
     (void)first;
     
   # 5 "construct.tc"
-  { const struct list__i *const __tc_match = &(
+  { const struct list__i *const __tc_match0 = &(
   # 5 "construct.tc"
   l
   # 5 "construct.tc"
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match0->tag) {
   # 5 "construct.tc"
   
     
@@ -217,7 +217,7 @@ opens it (design 3.3, 4).
   # 7 "construct.tc"
   
   # 7 "construct.tc"
-  case list__i_Cons: { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail; {
+  case list__i_Cons: { const __typeof__(__tc_match0->u.Cons.head) head = __tc_match0->u.Cons.head; const __typeof__(__tc_match0->u.Cons.tail) tail = __tc_match0->u.Cons.tail; {
   # 7 "construct.tc"
    return head + (tail ? sum(*tail) : 0);
     

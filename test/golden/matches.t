@@ -31,23 +31,23 @@ the block items keep their tokens and lines.
   > EOF
   $ ./golden.exe lower.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^long f/,$p'
   long f(const e *p, e v) {
-  { const struct e *const __tc_match = &(
+  { const struct e *const __tc_match0 = &(
   *p
-  ); switch (__tc_match->tag) {
-  case e_B: { const __typeof__(__tc_match->u.B.i) i = __tc_match->u.B.i; {
+  ); switch (__tc_match0->tag) {
+  case e_B: { const __typeof__(__tc_match0->u.B.i) i = __tc_match0->u.B.i; {
       return i;
    } __builtin_trap(); }
   case e_A: case e_C: {
       break;
    __builtin_trap(); }
   default: __builtin_trap(); } }
-  { const struct e *const __tc_match = &(
+  { const struct e *const __tc_match1 = &(
   v
-  ); switch (__tc_match->tag) {
-  case e_C: { const __typeof__(__tc_match->u.C.l) l = __tc_match->u.C.l; {
-  { const struct e *const __tc_match = &(
+  ); switch (__tc_match1->tag) {
+  case e_C: { const __typeof__(__tc_match1->u.C.l) l = __tc_match1->u.C.l; {
+  { const struct e *const __tc_match2 = &(
   *p
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match2->tag) {
   case e_A: case e_B: case e_C: {
    return l;
    __builtin_trap(); }
@@ -86,10 +86,10 @@ another array is reached through a pointer.
   > EOF
   $ ./golden.exe register.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^int f/,$p'
   int f(register e r) {
-  { const struct e __tc_copy = (
+  { const struct e __tc_copy0 = (
   r
-  ), *const __tc_match = &__tc_copy; switch (__tc_match->tag) {
-  case e_B: { const __typeof__(__tc_match->u.B.i) i = __tc_match->u.B.i; {
+  ), *const __tc_match0 = &__tc_copy0; switch (__tc_match0->tag) {
+  case e_B: { const __typeof__(__tc_match0->u.B.i) i = __tc_match0->u.B.i; {
    {
       int i = 2;
       return i;
@@ -101,9 +101,9 @@ another array is reached through a pointer.
   default: __builtin_trap(); } }
   }
   int g(e a[2]) {
-  { const struct e *const __tc_match = &(
+  { const struct e *const __tc_match1 = &(
   a[1]
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match1->tag) {
   case e_A: case e_B: {
    return 1;
    __builtin_trap(); }
@@ -115,9 +115,9 @@ another array is reached through a pointer.
   ,
   { .tag = e_A }
    };
-  { const struct e __tc_copy = (
+  { const struct e __tc_copy2 = (
   a[1]
-  ), *const __tc_match = &__tc_copy; switch (__tc_match->tag) {
+  ), *const __tc_match2 = &__tc_copy2; switch (__tc_match2->tag) {
   case e_A: case e_B: {
    return 1;
    __builtin_trap(); }

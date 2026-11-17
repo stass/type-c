@@ -142,7 +142,7 @@ is opaque.
   >   return present(o);
   > }
   > EOF
-  $ ./golden.exe generic.tc > generic.c && grep -c '__tc_match->tag' generic.c
+  $ ./golden.exe generic.tc > generic.c && grep -c '__tc_match0->tag' generic.c
   1
   $ grep -c __tc_arm generic.c
   0
@@ -347,7 +347,7 @@ the work grows.
   [1]
 
 The lowered form: nested switch statements on the tags that set
-__tc_arm, then one switch on it over the arms (13.5).
+__tc_arm0, then one switch on it over the arms (13.5).
 
   $ cat types.h - > lower.tc <<'EOF'
   > int f(res r) {
@@ -373,10 +373,10 @@ __tc_arm, then one switch on it over the arms (13.5).
   > EOF
   $ ./golden.exe lower.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^int f/,$p'
   int f(res r) {
-  { const struct res *const __tc_match = &(
+  { const struct res *const __tc_match0 = &(
   r
-  ); unsigned __tc_arm; switch (__tc_match->tag) { case res_Ok: __tc_arm = 0; break; case res_Err: switch (__tc_match->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm = 1; break; case eval_error_Overflow: __tc_arm = 2; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm) {
-  case 0: { const __typeof__(__tc_match->u.Ok.value) value = __tc_match->u.Ok.value; {
+  ); unsigned __tc_arm0; switch (__tc_match0->tag) { case res_Ok: __tc_arm0 = 0; break; case res_Err: switch (__tc_match0->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm0 = 1; break; case eval_error_Overflow: __tc_arm0 = 2; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm0) {
+  case 0: { const __typeof__(__tc_match0->u.Ok.value) value = __tc_match0->u.Ok.value; {
       return value;
    } __builtin_trap(); }
   case 1: {
@@ -388,16 +388,16 @@ __tc_arm, then one switch on it over the arms (13.5).
   default: __builtin_trap(); } }
   }
   int g(const expr *e) {
-  { const struct expr *const __tc_match = &(
+  { const struct expr *const __tc_match1 = &(
   *e
-  ); unsigned __tc_arm; const struct expr *__tc_p1 = 0; const struct expr *__tc_p2 = 0; switch (__tc_match->tag) { case expr_Num: __tc_arm = 2; break; case expr_Add: __tc_p1 = __tc_match->u.Add.l; switch (__tc_p1->tag) { case expr_Num: __tc_p2 = __tc_match->u.Add.r; switch (__tc_p2->tag) { case expr_Num: __tc_arm = 0; break; case expr_Add: __tc_arm = 1; break; default: __builtin_trap(); } break; case expr_Add: __tc_arm = 1; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm) {
-  case 0: { const __typeof__(__tc_p1->u.Num.value) a = __tc_p1->u.Num.value; const __typeof__(__tc_p2->u.Num.value) b = __tc_p2->u.Num.value; {
+  ); unsigned __tc_arm1; const struct expr *__tc_p1_1 = 0; const struct expr *__tc_p1_2 = 0; switch (__tc_match1->tag) { case expr_Num: __tc_arm1 = 2; break; case expr_Add: __tc_p1_1 = __tc_match1->u.Add.l; switch (__tc_p1_1->tag) { case expr_Num: __tc_p1_2 = __tc_match1->u.Add.r; switch (__tc_p1_2->tag) { case expr_Num: __tc_arm1 = 0; break; case expr_Add: __tc_arm1 = 1; break; default: __builtin_trap(); } break; case expr_Add: __tc_arm1 = 1; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm1) {
+  case 0: { const __typeof__(__tc_p1_1->u.Num.value) a = __tc_p1_1->u.Num.value; const __typeof__(__tc_p1_2->u.Num.value) b = __tc_p1_2->u.Num.value; {
       return a + b;
    } __builtin_trap(); }
-  case 1: { const __typeof__(__tc_match->u.Add.l) l = __tc_match->u.Add.l; const __typeof__(__tc_match->u.Add.r) r = __tc_match->u.Add.r; {
+  case 1: { const __typeof__(__tc_match1->u.Add.l) l = __tc_match1->u.Add.l; const __typeof__(__tc_match1->u.Add.r) r = __tc_match1->u.Add.r; {
       return g(l) + g(r);
    } __builtin_trap(); }
-  case 2: { const __typeof__(__tc_match->u.Num.value) value = __tc_match->u.Num.value; {
+  case 2: { const __typeof__(__tc_match1->u.Num.value) value = __tc_match1->u.Num.value; {
       return value;
    } __builtin_trap(); }
   default: __builtin_trap(); } }

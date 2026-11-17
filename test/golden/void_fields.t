@@ -28,17 +28,17 @@ parentheses, and its patterns have no sub-pattern for it.
   opt__v
    check(int ok) {
     
-  { const struct opt__v *const __tc_match = &(
+  { const struct opt__v *const __tc_match0 = &(
    o
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == opt__v_Yes) {
+  ); const __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 == opt__v_Yes) {
       return 
   ((struct opt__v){ .tag = opt__v_No })
   ;
     
-   } else { switch (__tc_tag) { case opt__v_No: case opt__v_Yes: break; default: __builtin_trap(); } } }
-  { const struct opt__v *const __tc_match = &(
+   } else { switch (__tc_tag0) { case opt__v_No: case opt__v_Yes: break; default: __builtin_trap(); } } }
+  { const struct opt__v *const __tc_match1 = &(
   o
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match1->tag) {
     
   case opt__v_No: {
    return ok ? 

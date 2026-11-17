@@ -1116,28 +1116,28 @@ double
 area(shape s)
 {
   {
-    const struct shape *const __tc_match = &(s);
-    switch (__tc_match->tag) {
+    const struct shape *const __tc_match0 = &(s);
+    switch (__tc_match0->tag) {
     case shape_Circle: {
-      const __typeof__(__tc_match->u.Circle.r) r = __tc_match->u.Circle.r;
+      const __typeof__(__tc_match0->u.Circle.r) r = __tc_match0->u.Circle.r;
       {
         return (3.14159 * r * r);
       }
       __builtin_trap();
     }
     case shape_Rect: {
-      const __typeof__(__tc_match->u.Rect.w) w = __tc_match->u.Rect.w;
-      const __typeof__(__tc_match->u.Rect.h) h = __tc_match->u.Rect.h;
+      const __typeof__(__tc_match0->u.Rect.w) w = __tc_match0->u.Rect.w;
+      const __typeof__(__tc_match0->u.Rect.h) h = __tc_match0->u.Rect.h;
       {
         return (w * h);
       }
       __builtin_trap();
     }
     case shape_Triangle: {
-      const __typeof__(__tc_match->u.Triangle.b) b =
-          __tc_match->u.Triangle.b;
-      const __typeof__(__tc_match->u.Triangle.h) h =
-          __tc_match->u.Triangle.h;
+      const __typeof__(__tc_match0->u.Triangle.b) b =
+          __tc_match0->u.Triangle.b;
+      const __typeof__(__tc_match0->u.Triangle.h) h =
+          __tc_match0->u.Triangle.h;
       {
         return (b * h / 2);
       }
@@ -1251,10 +1251,10 @@ pair(void)
     b = __tc_t1.u.Ok.value;
 
     {
-      __tc_ret __tc_r = ((join(a, b)));
+      __tc_ret __tc_r0 = ((join(a, b)));
       { release(b); }
       { release(a); }
-      return __tc_r;
+      return __tc_r0;
     }
     __builtin_trap();
   }

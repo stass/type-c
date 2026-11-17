@@ -49,16 +49,16 @@ from their tokens under markers for the lines of <universe>, with flag
   ;
     
   # 3 "some.tc"
-  { const struct option__i *const __tc_match = &(
+  { const struct option__i *const __tc_match0 = &(
   # 3 "some.tc"
   o
   # 3 "some.tc"
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match0->tag) {
   # 3 "some.tc"
   
       
   # 4 "some.tc"
-  case option__i_Some: { const __typeof__(__tc_match->u.Some.value) v = __tc_match->u.Some.value; {
+  case option__i_Some: { const __typeof__(__tc_match0->u.Some.value) v = __tc_match0->u.Some.value; {
   # 4 "some.tc"
    return v;
       

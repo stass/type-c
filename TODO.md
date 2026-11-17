@@ -1136,16 +1136,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   rule 3; the rule it breaks is 4.1 rule 2 (a label of the match stands
   directly in its body). Give the label under a named label its own
   message.
-- [Low] Every match names its pointer `__tc_match`, which is safe only
-  because each reference sits inside the block that declares it. A name
-  unique per match (by the token index of `match`) would make that hold
-  by construction.
-- [Low] Design 13.5 names the invented names that are one of a kind
-  (`__tc_ret`, `__tc_r`, `__tc_t0`, the probes) but not `__tc_match`,
-  `__tc_copy` and `__tc_tag`, which lowering writes. Its rule (no `__`
-  after the prefix) holds for them, as `test/unit/test_naming.ml`
-  checks on the emitted C; add them to that paragraph, or state the
-  rule alone without the list.
+- [Medium] A copy of a deferred statement brings the declarations and
+  bindings of `S` to each exit, where a later declaration of the same
+  name is in scope, so `-Wshadow -Werror` fails on code that hides
+  nothing as written: `defer { int y = 1; note(y); } int y = 2;
+  return y;`, and a binding `x` of a deferred match before `int x`.
+  Design 6 rule 8 covers only what `S` reads. Either refuse a
+  declaration in the scope of a defer whose `S` declares the same name
+  (an extension of rule 8), or state the limit in design 6.
 - [Low] Invented names are string literals in lowering, the emitter
   and the assertions, and `test/unit/test_naming.ml` finds them by
   scanning the C of one sample unit, with a count of the names it
@@ -1805,7 +1803,7 @@ types (design 13.3).
   call does to the values that a slice test holds. Every value that
   lowering holds across text of the program is in the same position,
   and no rule says so. A `return` in the scope of a `defer` holds its
-  value in `__tc_r` across the cleanups (design 13.5), and needs no
+  value in `__tc_r0` across the cleanups (design 13.5), and needs no
   GNU form and no `getcontext` to meet the case: a deferred statement
   marks a place with `setjmp` where C allows it, a `longjmp` to the
   body abandons the `return`, the `return` is evaluated again, and its
@@ -1817,7 +1815,7 @@ types (design 13.3).
   (design 13.5), which is unmeasured. A value of two parts can come
   apart there: under GCC 16 at `-O2` a resumed slice test had the
   pointer of one evaluation and the length of another (design 13.5),
-  and a `result` in `__tc_r` is a tag and a payload. Rule 10 states
+  and a `result` in `__tc_r0` is a tag and a payload. Rule 10 states
   its limit over the full expression that holds the index. Go through
   the lowered forms for such values and state one rule of that shape
   for all of them in section 14, with rule 10 of section 8 as its case

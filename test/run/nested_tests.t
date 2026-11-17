@@ -226,7 +226,7 @@ again where the tree of `divides` reads its second tag evaluates it
 twice for an `Err`, and counts five calls where the test counts three.
 
   $ typec --cc="$clang" --emit-c tests.tc > tests-lowered.c
-  $ sed 's/__tc_match->u\.Err\.error\.tag/(counted(r)).u.Err.error.tag/' \
+  $ sed 's/__tc_match0->u\.Err\.error\.tag/(counted(r)).u.Err.error.tag/' \
   >   tests-lowered.c > twice.c
   $ cmp -s tests-lowered.c twice.c || echo rewritten
   rewritten

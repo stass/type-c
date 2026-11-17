@@ -439,16 +439,16 @@ holds one as any block does.
    r) {
     
   # 3 "arm.tc"
-  { const struct result__ii *const __tc_match = &(
+  { const struct result__ii *const __tc_match0 = &(
   # 3 "arm.tc"
   r
   # 3 "arm.tc"
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match0->tag) {
   # 3 "arm.tc"
   
     
   # 4 "arm.tc"
-  case result__ii_Ok: { const __typeof__(__tc_match->u.Ok.value) v = __tc_match->u.Ok.value; {
+  case result__ii_Ok: { const __typeof__(__tc_match0->u.Ok.value) v = __tc_match0->u.Ok.value; {
   # 4 "arm.tc"
   
       
@@ -782,16 +782,16 @@ without one. The Ok of the operand's type may be a result of its own.
   ;
     
   # 4 "nested.tc"
-  { const struct result__ic *const __tc_match = &(
+  { const struct result__ic *const __tc_match0 = &(
   # 4 "nested.tc"
   inner
   # 4 "nested.tc"
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match0->tag) {
   # 4 "nested.tc"
   
     
   # 5 "nested.tc"
-  case result__ic_Ok: { const __typeof__(__tc_match->u.Ok.value) v = __tc_match->u.Ok.value; {
+  case result__ic_Ok: { const __typeof__(__tc_match0->u.Ok.value) v = __tc_match0->u.Ok.value; {
   # 5 "nested.tc"
   
       return 
@@ -809,7 +809,7 @@ without one. The Ok of the operand's type may be a result of its own.
   # 7 "nested.tc"
   
   # 7 "nested.tc"
-  case result__ic_Err: { const __typeof__(__tc_match->u.Err.error) e = __tc_match->u.Err.error; {
+  case result__ic_Err: { const __typeof__(__tc_match0->u.Err.error) e = __tc_match0->u.Err.error; {
   # 7 "nested.tc"
   
       return 

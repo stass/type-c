@@ -22,7 +22,7 @@ other Type-C text: the match of an inline function there is lowered.
   $ ./golden.exe interface.tc | grep -c 'match (v)'
   0
   [1]
-  $ ./golden.exe interface.tc | grep -c 'switch (__tc_match->tag)'
+  $ ./golden.exe interface.tc | grep -c 'switch (__tc_match0->tag)'
   1
 
 A Type-C interface that a system header includes inside a body is

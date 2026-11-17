@@ -443,8 +443,17 @@ let invented_source =
   \  case Nil: break;\n\
   \  case Cons(head, _): total += head; break;\n\
   \  }\n\
+  \  match (*l) {\n\
+  \  case Cons(_, *Cons(next, _)): total += next; break;\n\
+  \  default: break;\n\
+  \  }\n\
   \  if (case Cons(head, _) = *l) total += head;\n\
   \  return total;\n\
+   }\n\
+   void done(void);\n\
+   long g(const list *l) {\n\
+  \  defer done();\n\
+  \  return f(l);\n\
    }\n"
 
 let with_bracket reader (lowered : Typec_emit.Emitter.lowered) =
@@ -502,10 +511,11 @@ let identifiers text =
 
 let prefix = "__tc_"
 
-(* The names that the sample invents: those of the match and the test,
-   of the assertions and of the probe. Fewer means that the sample no
-   longer reaches a construct, and the check would pass unread. *)
-let invented_in_sample = 7
+(* The names that the sample invents: those of the matches and the test,
+   flat and nested, of the return that runs a deferred statement, of the
+   assertions and of the probe. Fewer means that the sample no longer
+   reaches a construct, and the check would pass unread. *)
+let invented_in_sample = 14
 
 let check_invented_names () =
   let invented =

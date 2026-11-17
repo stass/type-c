@@ -34,40 +34,40 @@ loop, whose false branch ends in break (design 13.5, 4.5, 10.5).
   $ ./golden.exe lower.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^long f/,$p'
   long f(const list *l, list v) {
     long total = 0;
-  { const struct list *const __tc_match = &(
+  { const struct list *const __tc_match0 = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
+  ); const __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 == list_Cons) { const __typeof__(__tc_match0->u.Cons.head) head = __tc_match0->u.Cons.head;
       total = head;
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
-  { const struct list *const __tc_match = &(
+   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+  { const struct list *const __tc_match1 = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+  ); const __typeof__(__tc_match1->tag) __tc_tag1 = __tc_match1->tag; if (__tc_tag1 == list_Nil) {
    {
       __label__ again;
     again:
       total++;
     }
    }
-  else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
       total--;
    } }
-  for (;;) { const struct list *const __tc_match = &(
+  for (;;) { const struct list *const __tc_match2 = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
+  ); const __typeof__(__tc_match2->tag) __tc_tag2 = __tc_match2->tag; if (__tc_tag2 == list_Cons) { const __typeof__(__tc_match2->u.Cons.head) head = __tc_match2->u.Cons.head; const __typeof__(__tc_match2->u.Cons.tail) tail = __tc_match2->u.Cons.tail;
    {
       total += head;
       l = tail;
     }
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
-  { const struct list *const __tc_match = &(
+   } else { switch (__tc_tag2) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+  { const struct list *const __tc_match3 = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
-  { const struct list *const __tc_match = &(
+  ); const __typeof__(__tc_match3->tag) __tc_tag3 = __tc_match3->tag; if (__tc_tag3 == list_Cons) { const __typeof__(__tc_match3->u.Cons.head) head = __tc_match3->u.Cons.head;
+  { const struct list *const __tc_match4 = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+  ); const __typeof__(__tc_match4->tag) __tc_tag4 = __tc_match4->tag; if (__tc_tag4 == list_Nil) {
    return head;
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag4) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag3) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
   return total;
   }
 
@@ -97,21 +97,21 @@ before the if, or in the body of that loop (design 4.4).
   long f(const list *l, int n) {
     long total = 0;
     for (; n; n--)
-  { const struct list __tc_copy = (
+  { const struct list __tc_copy0 = (
    ({ if (n == 2) continue; *l; })
-  ), *const __tc_match = &__tc_copy; const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head;
+  ), *const __tc_match0 = &__tc_copy0; const __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 == list_Cons) { const __typeof__(__tc_match0->u.Cons.head) head = __tc_match0->u.Cons.head;
         total += head;
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
-  for (;;) { const struct list __tc_copy = (
+   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+  for (;;) { const struct list __tc_copy1 = (
    ({ if (total > 9) break; *l; })
-  ), *const __tc_match = &__tc_copy; const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.head) head = __tc_match->u.Cons.head; const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
+  ), *const __tc_match1 = &__tc_copy1; const __typeof__(__tc_match1->tag) __tc_tag1 = __tc_match1->tag; if (__tc_tag1 == list_Cons) { const __typeof__(__tc_match1->u.Cons.head) head = __tc_match1->u.Cons.head; const __typeof__(__tc_match1->u.Cons.tail) tail = __tc_match1->u.Cons.tail;
    {
       l = tail;
       if (head < 0)
         break;
       total += head;
     }
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+   } else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
   return total;
   }
 
@@ -140,55 +140,55 @@ test whose body is an if test with an else.
   > EOF
   $ ./golden.exe nested.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^long f/,$p'
   long f(const list *l, list v) {
-  { const struct list *const __tc_match = &(
+  { const struct list *const __tc_match0 = &(
   v
-  ); switch (__tc_match->tag) {
+  ); switch (__tc_match0->tag) {
   case list_Nil: {
       return 0;
    __builtin_trap(); }
   case list_Cons: {
-  { const struct list *const __tc_match = &(
+  { const struct list *const __tc_match1 = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+  ); const __typeof__(__tc_match1->tag) __tc_tag1 = __tc_match1->tag; if (__tc_tag1 == list_Nil) {
    return 1;
    }
-  else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
    return 2;
    } }
    __builtin_trap(); }
   default: __builtin_trap(); } }
   }
   long g(const list *l, list v) {
-  { const struct list *const __tc_match = &(
+  { const struct list *const __tc_match2 = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+  ); const __typeof__(__tc_match2->tag) __tc_tag2 = __tc_match2->tag; if (__tc_tag2 == list_Nil) {
    return 0;
    }
-  else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
-  { const struct list *const __tc_match = &(
+  else { switch (__tc_tag2) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  { const struct list *const __tc_match3 = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+  ); const __typeof__(__tc_match3->tag) __tc_tag3 = __tc_match3->tag; if (__tc_tag3 == list_Nil) {
    return 1;
    }
-  else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag3) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
    return 2;
    } }
    } }
   }
   long h(const list *l) {
     long n = 0;
-  for (;;) { const struct list *const __tc_match = &(
+  for (;;) { const struct list *const __tc_match4 = &(
    *l
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) { const __typeof__(__tc_match->u.Cons.tail) tail = __tc_match->u.Cons.tail;
-  { const struct list *const __tc_match = &(
+  ); const __typeof__(__tc_match4->tag) __tc_tag4 = __tc_match4->tag; if (__tc_tag4 == list_Cons) { const __typeof__(__tc_match4->u.Cons.tail) tail = __tc_match4->u.Cons.tail;
+  { const struct list *const __tc_match5 = &(
    *tail
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Nil) {
+  ); const __typeof__(__tc_match5->tag) __tc_tag5 = __tc_match5->tag; if (__tc_tag5 == list_Nil) {
    break;
    }
-  else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag5) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
    l = tail, n++;
    } }
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+   } else { switch (__tc_tag4) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
   return n;
   }
 
@@ -262,11 +262,11 @@ and lowers as a test of a constructor without fields does.
   > EOF
   $ ./golden.exe fieldless.tc | grep -v '^# ' | sed 's/ *$//' | grep . | sed -n '/^long f/,$p'
   long f(list v) {
-  { const struct list *const __tc_match = &(
+  { const struct list *const __tc_match0 = &(
    v
-  ); const __typeof__(__tc_match->tag) __tc_tag = __tc_match->tag; if (__tc_tag == list_Cons) {
+  ); const __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 == list_Cons) {
       return 1;
-   } else { switch (__tc_tag) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
   return 0;
   }
 
