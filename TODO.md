@@ -19,15 +19,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   hosts in containers, the arm64 ones under emulation, and the FreeBSD
   one over ssh, on a machine of the owner's.)
 
-## Documents
-
-- [Medium] `docs/tutorial.md`, section 6, gives
-  `printf("%.*s", (int)s.len, s.data)` as the spelling that prints a
-  `str`. The cast wraps for a `str` of 2 GiB or more, and a negative
-  precision means none, so `printf` reads past the end looking for a
-  NUL. Teach `fwrite(s.data, 1, s.len, stdout)` instead, as
-  `examples/wordfreq` prints its words, or a checked helper.
-
 ## Driver
 
 - [Low] `typec --cc=clang` fails with a backend error on the valid C

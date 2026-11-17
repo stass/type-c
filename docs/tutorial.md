@@ -928,7 +928,10 @@ The pitfalls follow from what a slice is: a pointer and a count, and
 no more. It owns nothing and keeps nothing alive, so the slice of a local
 array that a function returns dangles as the pointer would. A `str` is
 not a C string: it promises no NUL, so `printf("%s", s.data)` can read
-past the end, and the spelling is `printf("%.*s", (int)s.len, s.data)`.
+past the end. `printf("%.*s", (int)s.len, s.data)` is no better for a `str`
+of 2 GiB or more: the `int` cast wraps negative, and a negative precision
+means none. The spelling is `fwrite(s.data, 1, s.len, stdout)`, which takes
+a `size_t` length and needs no NUL.
 And `s.data[i]` is the unchecked index, visible where it is written.
 
 ## 7. Reading the errors and the C
