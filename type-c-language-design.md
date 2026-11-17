@@ -2007,8 +2007,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    - An `__asm__` operand whose type mentions a type parameter, a `T *`
      too: its constraint asks of the operand a size and a kind, which
      differ between instances.
-   - The predefined names of the function, `__func__`, `__FUNCTION__`
-     and `__PRETTY_FUNCTION__`. Each is an array of `char` that holds
+   - A use of a predefined name of the function, `__func__`,
+     `__FUNCTION__` or `__PRETTY_FUNCTION__`, that reads the type of
+     its array. Each is a static `const` array of `char` that holds
      the name of the function it stands in (C11 6.4.2.2p1), and an
      instance has a name of its own (10.3), which the definition does
      not know. The array therefore has another length in each
@@ -2016,13 +2017,22 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      `generic(T) void f(T *p)`, `sizeof __func__` is 2 by the name of
      the definition and 5 in the instance `f__i`:
      `_Static_assert(sizeof __func__ == 2, "name length");` fails
-     there with both backends (Apple Clang 21, GCC 16). The refusal
-     reaches every macro that names one of the three. The `assert` of
-     `<assert.h>` is such a macro where the library's reports the
-     function, as Apple's does through `__func__`, unless `NDEBUG` is
-     defined. A definition tests without the name, by
-     `if (!ok) abort();` or by a macro of its own over `__FILE__` and
-     `__LINE__`.
+     there with both backends, as `const char (*q)[2] = &__func__;`
+     and `__typeof__(__func__) *q = (const char (*)[2])0;` do (Apple
+     Clang 21, GCC 16). The pointer to its first element is a
+     `const char *` in every instance. So the name is valid where C
+     converts the array to that pointer (6.3.2.1p3), and every other
+     use of it is an error: as the operand of `sizeof`, of
+     `__alignof__`, of unary `&` and of `__typeof__`. As the
+     initialiser of an array of `char` C refuses it in every
+     function, since it is no string literal (6.7.9p14 and p16; both
+     backends). The pointer serves what the name is written for. It
+     is an argument, as in `printf("%s\n", __func__)`, and the
+     `assert` of `<assert.h>` is valid in a generic function, as its
+     macro hands the name to a function of the library: Apple's
+     expands to `__assert_rtn(__func__, ...)`. The contents of the
+     array are the instance's too, and rule 4 says what follows from
+     that.
 4. A type *mentions* a type parameter where it is one, is derived from a
    type that mentions one, is a type application with an argument that
    mentions one, or is a structure or union with a member whose type
@@ -2071,7 +2081,7 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    The layout of a type is handed to the program as a value, and there
    the fact is one of the value. An expression *depends on a type
    parameter* where its value is an answer that the argument gives, or
-   is computed from one. The fact arises in two places. The first is
+   is computed from one. The fact arises in three places. The first is
    the one function of the front end that gives the layout of a type:
    for a type that mentions a type parameter it answers that the value
    depends, where for another structure it answers with an opaque
@@ -2094,7 +2104,24 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    table costs a refusal and never an instance that the backend
    judges by itself.
 
-   From both places the fact flows as a value does. An operation
+   The third place is a predefined name of the function (rule 3). It
+   designates a `const` array whose contents are the name of the
+   instance, which the argument gives. The name therefore depends,
+   and with it the pointer that C converts it to and what is read
+   through that pointer. Apple Clang 21 reads those contents as a
+   constant. In `generic(T) void f(T *p)`,
+   `_Static_assert(__builtin_strlen(__func__) == 1, "length");` holds
+   by the name of the definition and fails in the instance `f__i`,
+   and the bound `__builtin_strlen(__func__) == 1 ? 1 : -1` declares
+   an array by the one name and is an error by the other. GCC 16
+   takes neither for a constant, and declares a variable length array
+   with that bound. Read at run time the name is valid, as in
+   `assert(p)` and in `report(__func__, code)`. A static initialiser
+   requires a constant, so `static const char *name = __func__;` is
+   an error, valid though it is in every instance, like the address
+   of `pool[3]` below.
+
+   From each place the fact flows as a value does. An operation
    depends where an operand does, evaluated or not, and a call where
    an argument does. An expression that designates a `const` object,
    or a part of one, depends where the initialiser of that object
