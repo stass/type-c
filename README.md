@@ -1305,10 +1305,12 @@ checked indexing are built,
 functions are not yet:
 `generic(T) T *vector_last(vector(T) *v);`.
 
-Planned, and previewed by [A first look](#a-first-look): `try` inside
-any expression, and nested patterns such as `case Err(DivByZero):`.
-The [design](type-c-language-design.md#12-outside-the-core) lists both
-outside the core until it adopts them.
+Planned, and previewed by [A first look](#a-first-look): nested
+patterns such as `case Err(DivByZero):`, which
+[design 4.7](type-c-language-design.md#47-nested-patterns) specifies,
+and `try` inside any expression, which the
+[design](type-c-language-design.md#12-outside-the-core) lists outside
+the core until it adopts it.
 
 Designed and **not yet implemented**: a checked mode, whose rules are
 provisional, that rules out specific classes of memory errors in the

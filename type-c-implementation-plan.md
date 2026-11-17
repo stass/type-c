@@ -277,7 +277,10 @@ record of what it found.
 
 ## Stage 3: generic functions and slices
 
-**Purpose.** Design sections 7 and 8.
+**Purpose.** Design sections 7 and 8, and the nested patterns of
+design 4.7. Nested patterns stand here because their rules read
+the generic types of Stage 2, `option` and `result` among them,
+and the opaque type parameters of package 3.1.
 
 **Work packages**
 
@@ -289,6 +292,10 @@ record of what it found.
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
 | 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The bytes of text that each unit of the library and of the pilot counts for its instances in the front end, the bytes that lowering charges for it and their ratio to its source, and its longest encodings of one instance, against the instance budget, the output limit and the bound on encodings of design 3.5 rule 7 (P30). The bytes of a `long double` that the zero initialiser leaves, counted by the functions of its test on both backends at `-O0`, `-O2` and `-O3` (design 13.5): a record, and no test. The refusals, by their names, of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), and the slice indexes and `slice_sub` expressions that stand where C does not evaluate them (P28), in the library and the pilot. The slice tests that hold a call or a statement expression in an operand after the first, and the cost of volatile temporaries for those alone (P28). What a slice index reaches, and where a call stores through the address of an element that it holds across another argument, when the full expression that holds the index is resumed after its function has begun to evaluate it again, the limit of design section 8 rule 10, on both backends at `-O0` and at `-O2`: a record, and no test. |
+| 3.7 | The selection tree of design 4.7 rule 6: a function from the typed labels of a match to its tree, with the checks of design 4.2 and the bound of design 4.7 rule 10 read from the tree and from nowhere else. Matches without nested patterns keep their diagnostics. Unit tests on label sets written as data, nested ones included, and a property test: for generated label sets and every value up to a depth, the tree selects the label that a matcher which tries the labels in order selects and reads no tag that the matcher does not, and it reports as missing or never selected exactly what the values show. |
+| 3.8 | Nested patterns in `match` (design 4.7): the grammar, sub-patterns typed by their position, typed bindings, `*`, bindings at any depth, and the lowering of selection (design 13.5). A negative golden test for each rule. A bare identifier that binds a field of variant type is refused from this package on (design 4.7 rule 3), so the tests that hold one take the typed form. In the README, the `case Err(error):` of the `result` section and the second `match` in its arm become the nested labels `case Err(Missing(name)):` and `case Err(NotANumber(name)):`; the first example, whose `show` writes `case Err(DivByZero):`, and Status say that nested patterns are built. |
+| 3.9 | Nested patterns in the single-pattern test (design 4.6, 4.7 rule 9), in `if` and in `while`: typing, the field list left out at any depth, lowering. |
+| 3.10 | Measurements of nested patterns: selection against hand-written nested `switch` statements, size and speed, on both backends at `-O0` and at `-O2` (P31); the largest selection tree in the container library, the pilot and the tests (P32). |
 
 **Exit gate**
 
@@ -361,8 +368,62 @@ record of what it found.
      call of `getcontext` as the operand; the partner, the same run
      with an index out of range at the second return, traps.
 4. The measurements of 3.6 are written up.
+5. Nested patterns behave as design 4.7 says. Each test has a partner
+   that fails where the rule or the lowered form is missing, and the
+   run tests run on both backends at `-O0` and at `-O2`:
+   - `case Err(DivByZer):` is refused with a message that names
+     `DivByZer` and `eval_error`, also in the scope of an object and
+     of an enumeration constant named `DivByZer`; the partner,
+     `case Err(eval_error DivByZer):`, compiles and is selected for
+     every `Err`;
+   - `case Cons(head, Nil):` at a field that points to a variant with
+     the constructor `Nil` is refused; the partner,
+     `case Cons(head, *Nil):`, compiles and is selected for a tail
+     that holds `Nil` and for no other;
+   - a match with the labels `Ok(value)`, `Err(DivByZero)` and
+     `Err(Overflow)` compiles; without its last arm it is refused with
+     a message that names `Err(Overflow)`, and a constructor added to
+     `eval_error` makes it fail with a message that names `Err` of
+     that constructor; the partner, the match with a `default`,
+     compiles, and its `default` takes the new constructor;
+   - `case Add(l, r):` before `case Add(*Num(a), *Num(b)):` is refused
+     at the second label; the partner, the two in the other order,
+     compiles and selects the first for two numbers and the second
+     for every other `Add`;
+   - a `default` written before the `case` labels takes only what no
+     label matches; the partner, a `default` after labels that match
+     every value, is refused;
+   - with `case Pair(Left, _):` before `case Pair(_, *Leaf(n)):`, a
+     value that holds `Left` and a null pointer selects the first arm;
+     the partner, a value that holds another constructor and a null
+     pointer, is stopped by the address sanitizer at the match;
+   - a field of variant type whose tag is overwritten with no
+     constructor's value traps in a match that names a constructor at
+     the field; the partner, the same value in a match that binds the
+     field or writes `_` for it, runs its arm;
+   - a scrutinee and an operand that count their evaluations are
+     evaluated once in a `match`, once in an `if` test and once for
+     each iteration of a `while` test; the partner, the lowered text
+     with the operand written again where the tree reads its second
+     tag, counts two;
+   - in a generic function, `case Some(x):` on an `option(T)` binds the
+     field in an instance whose argument is a variant; the partner,
+     `case Some(Some(y)):` there, is refused at the definition;
+   - each run test has a twin in C with nested `switch` statements
+     written by hand, which gives the same output, and its lowered
+     text compiles under `-pedantic-errors` with the options that the
+     tests of `match` use; the partner, the twin of the test of two
+     overlapping labels with its labels' tests exchanged, differs;
+   - a match whose tree passes the bound of design 4.7 rule 10 is
+     refused as a limit of `typec`, within the time of the unit
+     tests; the partner, a match of the same shape whose tree stays
+     under the bound, compiles;
+   - the property test of 3.7 passes; the partner, the same test over
+     a tree that is built from the labels in reverse order, fails;
+   - the fuzzing of the parser and the checker (Tests) starts from a
+     corpus that holds nested patterns.
 
-**Decided at the gate:** P11 to P14, P23, P27, P28, P30, and whether the
+**Decided at the gate:** P11 to P14, P23, P27, P28, P30 to P32, and whether the
 measured cost of function-pointer operations is evidence for constraints
 (design section 12). **Release 0.3.**
 

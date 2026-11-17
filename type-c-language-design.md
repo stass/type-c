@@ -1062,8 +1062,11 @@ expression form; a C local assigned in each arm does that job.
 3. A pattern names a constructor of the scrutinee's type, unqualified, with
    one sub-pattern per field; a `case` label that omits the field list of
    a constructor with fields is refused (only a single-pattern test may,
-   4.6(2)). A sub-pattern is an identifier, which is a *binding*, or `_`,
-   which matches without binding.
+   4.6(2)). A sub-pattern is `_`, which matches without binding; a
+   *binding*, which is an identifier where the field's type is no
+   variant; or, where the field is a variant or points to one, a pattern
+   for the constructor that the field holds (4.7). The type of the field
+   decides which of these an identifier alone is (4.7 rules 2 and 3).
 4. A binding declares a non-modifiable object of the
    field's type in the scope of its arm, initialised with a copy of the
    field.
@@ -1078,9 +1081,10 @@ expression form; a C local assigned in each arm does that job.
 6. An arm may carry several labels only if none of them binds:
    `case None: case Empty:` share a body. This is one arm reached two ways,
    not fallthrough.
-7. The scrutinee is evaluated once. Its tag is read once, the bound fields
-   of the selected constructor are copied, and then the arm runs. Assigning
-   to the scrutinee inside the arm does not change the bindings.
+7. The scrutinee is evaluated once. Its tag is read once, and so is each
+   tag that a nested pattern asks for (4.7 rule 6); the bound fields of
+   the selected label are copied, and then the arm runs. Assigning to
+   the scrutinee inside the arm does not change the bindings.
 
 Rationale for copied, non-modifiable bindings. A copy cannot dangle or
 change when the scrutinee is overwritten, and it is an ordinary C local that
@@ -1106,14 +1110,24 @@ and wrote 57 arms that repeat the body of another for it.
 
 1. Every constructor is covered exactly once: by one `case` label, or by
    `default`. A missing constructor is an error that names it; so is a
-   constructor named twice.
+   constructor named twice. With nested patterns (4.7) this is the same
+   rule over values: every value of the scrutinee's type is matched by
+   a `case` label or taken by `default`, and every `case` label is
+   selected for some value. A value that nothing takes is an error that
+   names it as a pattern, `Err(Overflow)`; so is a label that is never
+   selected, because the labels before it match all that it matches
+   (4.7 rule 6).
 2. There is at most one `default`, and it must cover at least one
-   constructor.
+   constructor: with nested patterns, take at least one value that no
+   `case` label matches. It takes those values wherever it stands among
+   the arms.
 3. A `default` hides constructors added later, and nothing warns about
    it. In Pilot A written with the single-pattern test (4.6), 49 of 60
    matches keep a `default`, most of them matches of several cases whose
    `default` means "every other constructor"; a warning would flag that
-   correct code far more often than a forgotten constructor.
+   correct code far more often than a forgotten constructor. A `_` or a
+   typed binding at a position of variant type (4.7) hides the
+   constructors added to that position's variant in the same way.
 4. `match` accepts variants only. A C `enum` is not closed: its objects can
    hold values that are not enumerators.
 
@@ -1284,6 +1298,13 @@ stands where a `default` arm does, so it too receives real constructors
 only, and a match of one `case` and a `default` keeps its check when it
 is written as a test.
 
+With nested patterns (4.7) the check is made at every tag that
+selection reads: that of the scrutinee, and that of each position below
+it where a label names a constructor and selection reaches that label.
+A field that a label binds or matches with `_` is not read, so an
+invalid tag inside it does not trap in this match. It traps in the
+match that opens the bound value.
+
 `try` abbreviates a match and makes the check as well; rule 2 of 5.1
 says what it traps on.
 
@@ -1304,7 +1325,7 @@ A single-pattern test asks whether a variant value holds one constructor
 and binds that constructor's fields if it does. It is the selection step
 of a `match`, written as the condition of an `if` or a `while`: the test
 *succeeds* where a match on the operand would select `case` *pattern*,
-*fails* where it would select another constructor, and traps where the
+*fails* where it would select another arm, and traps where the
 match would trap (4.5). The statement it controls is C's `if` or `while`
 and not an arm.
 
@@ -1322,10 +1343,13 @@ and not an arm.
    constructor of the operand's type, unqualified, with one sub-pattern
    per field. In a test, and only there, a constructor with fields may
    also be written without its field list, `case Str = tok->kind`: the
-   test then binds nothing, as if each field were `_`.
+   test then binds nothing of that constructor, as if each of its
+   fields were `_`. The pattern nests as that of a label does, and a
+   field list may be left out at any depth of it (4.7 rule 9).
 3. Each time the condition is evaluated, once for an `if` and before
    every iteration of a `while`, the operand is evaluated once and its
-   tag is read once. On success the bound fields are copied and then `S`
+   tag is read once, as is each tag that a nested pattern asks for
+   (4.7 rule 9). On success the bound fields are copied and then `S`
    runs, as an arm does (4.1(7)); on failure nothing is bound, and `S2`
    runs or the loop ends.
 4. A binding is the object of 4.1(4): non-modifiable, initialised with a
@@ -1380,6 +1404,262 @@ binding scopes across `&&`, `||` and `!`. Without a field list a test
 that binds nothing does not repeat its constructor's arity at every
 site; in a `case` label the full pattern stays, so that a label always
 shows what an arm binds.
+
+### 4.7 Nested patterns
+
+```c
+/* type eval_error = | DivByZero | Overflow; */
+match (eval(e)) {
+case Ok(value):
+    printf("%d\n", value);
+    break;
+case Err(DivByZero):
+    printf("division by zero\n");
+    break;
+case Err(Overflow):
+    printf("overflow\n");
+    break;
+}
+
+/* type expr = | Num(int value) | Add(const expr *l, const expr *r); */
+match (*e) {
+case Add(*Num(a), *Num(b)):
+    return a + b;
+case Add(l, r):
+    return evaluate(l) + evaluate(r);
+case Num(value):
+    return value;
+}
+
+/* option(result(int, eval_error)) next(void); */
+while (case Some(Ok(v)) = next())
+    sum += v;
+```
+
+A sub-pattern may be a pattern of its own. It asks which constructor a
+field holds, as a label asks of the scrutinee, and its sub-patterns ask
+the same of that constructor's fields. Labels with nested patterns can
+overlap, so this section says which label a match selects. It does so
+with one construction, the selection tree of rule 6, and exhaustiveness
+(4.2), the tags that are checked (4.5) and the lowered form (13.5) are
+all read from that tree. A match without a nested pattern has a tree of
+one node, for which 4.1 to 4.6 say everything.
+
+1. **Positions.** A *position* is the scrutinee, a field of a constructor
+   at a position, or the object that a pointer field points to. A
+   sub-pattern stands at the position of the field it is written for,
+   and the type of the field is the type of the position.
+2. **The type of a position decides what stands there.**
+
+   | Type of the position | Sub-patterns |
+   | --- | --- |
+   | A variant | `_`; a *constructor pattern*, `C` or `C(...)`; a *typed binding*, `T x` |
+   | A pointer to a variant | `_`; a binding, `x`; `*P`, where `P` is a constructor pattern |
+   | Any other type | `_`; a binding, `x` |
+
+   A variant is a type that 4.1(1) accepts for a scrutinee. A type
+   parameter of a generic function is an opaque type and no variant
+   (7.1 rule 2): a field of that type takes a binding, in the definition
+   and so in every instance. A sub-pattern that its position does not
+   list is an error, which names the type of the position. A constructor
+   pattern is written as the pattern of a label is and obeys 4.1(3) at
+   its own position: it names a constructor of that position's variant,
+   unqualified, with one sub-pattern for each field.
+3. **An identifier alone at a position of variant type is a constructor
+   pattern** and never a binding. It names a constructor of the
+   position's variant whatever identifiers are visible, as the
+   identifier of a label does and as an unqualified constructor does in
+   an expression (3.3). One that names no constructor of that variant is
+   an error, which names the identifier and the variant and says how a
+   field is bound (rule 4). A misspelled constructor is therefore
+   refused: it cannot become a binding that matches every value.
+4. **A typed binding binds a field of variant type whole.** `T x` is the
+   binding of 4.1(4): an object `x` of the field's type, initialised
+   with a copy of the field. `T` is a typedef name or a type application
+   that denotes the type of the position, as the `T` of a qualified
+   constructor is (3.3); a `T` that denotes another type is an error,
+   since the binding converts nothing. It is written at a position of
+   variant type and nowhere else: at every other position the
+   identifier alone is the binding, and each position has one way to
+   bind. What follows the type tells a typed binding from a constructor
+   pattern: an identifier follows `T`, and `,` or `)` follows a
+   pattern. No visible name changes that reading, so a constructor
+   that has the name of a type is still written `C(...)`.
+5. **`*P` follows a pointer.** At a position whose type is a pointer to
+   a variant, `*P` matches where the object pointed to matches the
+   constructor pattern `P`. Selection reads the tag of that object as a
+   `match (*f)` in the arm would, where `f` is the field: the variant is
+   complete there, and the pointer points to an object of it. It reads
+   the tag only where rule 6 reaches the sub-pattern; a null or invalid
+   pointer that selection follows is undefined behaviour, as it is in
+   that match, and checked text traps on a null one (11.2 rule 1). The
+   pointed-to type is not volatile-qualified or atomic: selection and
+   the bindings read the object in place at separate moments, and a
+   `match (*f)` in the arm, which copies such an object (13.5), serves
+   it. A pointer is never followed without the `*`, as a scrutinee is
+   not (4.1(1)). A binding at this position, which names the pointer,
+   does not have the name of a constructor of the pointed-to variant:
+   `case Cons(head, Nil):` is an error, and is written `*Nil` or with
+   another name.
+6. **Selection.** A sub-pattern *matches* a value as follows: `_`, a
+   binding and a typed binding match every value; `C(p1, ..., pn)`
+   matches a value that holds `C` with fields that `p1` to `pn` match;
+   `*P` matches a pointer to an object that `P` matches. A match
+   selects **the first label in source order whose pattern matches the
+   scrutinee**, and its `default`, wherever that stands among the arms,
+   where no label does.
+
+   Selection finds that label by reading tags. It takes the labels in
+   source order. For a label it reads the tags that the label's
+   constructor patterns ask for, in the order in which the label
+   writes them, and gives the label up at the first tag that holds
+   another constructor. It reads the tag of a position at most once: a
+   later label that names a constructor at a position already read is
+   judged by the tag that was read. The first label that is not given
+   up is selected.
+
+   Laid out by what each tag can hold, these steps are the *selection
+   tree* of the match. A node reads the tag of one position and has a
+   branch for each constructor of that position's variant; a leaf is a
+   label, the `default`, or, where the labels have run out and there
+   is no `default`, nothing. Every branch can be taken, since every
+   constructor has values, so a leaf stands for at least one value of
+   the scrutinee. The tree is the one statement of what a match does,
+   and four things are read from it and decided nowhere else:
+
+   - **What is missing (4.2 rule 1).** A leaf that is nothing is a
+     value that no label matches. The error names the constructors on
+     the way to the first such leaf as a pattern that a label could
+     hold, with `_` at each position that selection did not read:
+     `Err(Overflow)`, `Add(*Num(_), _)`. Constructors that no label
+     names at a position share a leaf, and the error names each. A
+     constructor of the scrutinee itself is named as a constructor of
+     its variant, so a match without nested patterns reports what 4.2
+     says.
+   - **What is never selected (4.2 rules 1 and 2).** A label that is no
+     leaf matches no value that the labels before it leave, and is an
+     error at that label; so is a `default` that is no leaf. This is
+     the useless clause of Maranget (section 17, reference 9), found
+     exactly, because every branch of the tree can be taken.
+   - **What is checked (4.5).** A tag traps where a node reads it and it
+     is no constructor's. Selection reads no other tag.
+   - **What runs (13.5).** The lowered form is the tree, written as
+     `switch` statements.
+
+   Selection runs no code of the program: a pattern holds no
+   expression. So the order of the reads shows in two ways only, an
+   invalid tag that traps and a pointer that `*` follows. In
+   `case Pair(Left, _):` before `case Pair(_, *Leaf(n)):`, the second
+   field of a value whose first field holds `Left` is never followed.
+7. **Bindings.** 4.1(4) to 4.1(7) hold at every depth. A binding is an
+   object in the scope of its arm, whatever the depth of its field. The
+   bindings of the selected label are copied after selection and
+   before the arm runs, and nothing is copied for a label that was
+   given up. A label that binds at any depth shares its arm with no
+   other label (4.1(6)), and two bindings of one label have different
+   names, since they are declared in one scope (4.1(5)).
+8. **Scope.** Each constructor pattern stands within the scope of the
+   declaration of its position's variant, as the match does within
+   that of the scrutinee's (4.1(1)): it lowers to the names that the
+   declaration claims.
+9. **In a single-pattern test.** The pattern of a test (4.6) nests as
+   that of a label does. The test succeeds where its pattern matches
+   the operand and fails elsewhere; selection reads the tags that the
+   pattern asks for, in the order of rule 6, and stops at the first
+   that holds another constructor. A constructor with fields may be
+   written without its field list at any depth of a test's pattern
+   (4.6(2)), and at no depth of a label's.
+10. **The bound on a tree.** *Provisional (P32).* The selection tree of
+    one match holds at most 65536 nodes and leaves. A match that needs
+    more is refused where the count is passed. This is a translation
+    limit of `typec` (C11 5.2.4.1) and no rule of the language, so the
+    refusal carries no name (13.6). Without it a few lines can ask for
+    a tree that doubles with each field: a label that several branches
+    leave possible is a leaf in each. The checks build the tree before
+    any text is made, so the output limit does not hold that work
+    (3.5 rule 7); the count bounds it, and the depth of the tree with
+    it.
+
+Rationale for deciding by the type of the position. An identifier in a
+sub-pattern could be a binding or a constructor without fields. A rule
+that looks the name up, a constructor if the variant has one and a
+binding if not, turns every misspelled constructor into a binding that
+matches all values, and turns a correct label into one when the
+constructor is renamed in its type: `case Err(DivByZero): return
+Err(DivByZero);` followed by a `default` still compiles after the
+rename and then returns every error. Checks on top of the lookup, that
+a later label is never selected or that a binding goes unused, catch
+some of these and not that one. Here no lookup decides. At a position
+of variant type an identifier is a constructor, and at any other type
+it is a binding, so the one thing that settles the reading is the type
+of the field, which is also what gives an unqualified constructor its
+meaning in an expression (3.3). The pattern `Err(DivByZero)` then
+matches exactly the value that the expression `Err(DivByZero)` makes.
+The cost falls on binding a field of variant type whole, which names
+the type, as C# and Java write a binding in a pattern. The field most
+often bound so is the error of a `result`, where the error is a
+variant and an arm hands it on (5.3). The rule holds for every
+sub-pattern, also in a match that nests nothing. That an identifier
+alone at a position of variant type is always a constructor, and that
+a binding there writes its type, is the owner's decision and is not
+provisional: it awaits no count. The pilots show what it asks of
+written code. In Pilot A, at commit 323777e, none of the 400 bindings
+in its 332 labels binds a field of variant type, since none of the 131
+fields of its eight variants has one. In Pilot B, at commit 06d4eb8,
+the eight labels with a field list are four `Ok(x)` and four `Err(_)`.
+The counts are of the type declarations and `case` labels in the `.tc`
+and `.tci` files of the two repositories.
+
+Rationale for `*`. A variant holds itself only through a pointer (3.2
+rule 5), so without a way through a pointer no nested pattern would
+reach the second level of a tree. The `*` is required for the reason
+of rule 3: at a pointer position an identifier alone is a binding of
+the pointer, and a pattern that followed pointers unasked would make
+`Nil` in `case Cons(head, Nil):` a binding that matches every tail.
+With the `*` written, what follows it is a constructor and a wrong
+name is refused. That a pointer is followed only where the `*` is
+written is the owner's decision and is not provisional. The patterns
+it serves are those over a variant that holds itself, the `expr` at
+the head of this section and a list. Pilot A's tree does not gain from
+`*`: its nodes are structures that hold a variant, and the fields of
+that variant point to the structures. Two of its 131 fields point to a
+variant, the links of a chain of designators.
+
+Rationale for the name of a pointer binding. A label that leaves out
+the `*`, `case Cons(head, Nil):`, would bind the tail under the name
+`Nil` and match every list, which is the error that rule 3 keeps out
+of a position of variant type. The last sentence of rule 5 refuses
+it: a binding of a pointer does not have the name of a constructor of
+the variant it points to. The refusal reads the constructors of that
+one variant and costs a program a name for a binding. It decides no
+reading, since an identifier alone at a pointer position is a binding
+whatever its name, so a label that leaves out the `*` and also
+misspells the constructor still binds.
+
+Rationale for selecting the first label. Labels that overlap need an
+order, and source order is the one a reader has. A `default` keeps the
+meaning it has in a `switch` and in a match without nested patterns:
+it takes what no `case` takes, wherever it is written, so moving it
+among the arms changes no selection. A label that is never selected
+is an error and no warning, as a constructor named twice is in a
+match without nested patterns (4.2 rule 1): its arm is code that no
+value reaches, and the label is most often one written after a wider
+one that was meant to follow it. Reading a tag only when the first
+label that is still possible asks for it makes the order of reads the
+order a reader would follow, which matters where a read can trap or
+follow a pointer, and it never reads a tag twice.
+
+What a sub-pattern is not. An integer, character or enumeration
+constant is no sub-pattern (section 12): an arm binds the field and
+compares it. A constant position has no closed set of values, so every
+match over one would need a `default`, and a C enumeration constant
+fits any integer position, so the type of the position could not tell
+a misspelled constant from a binding as rule 3 tells a constructor.
+The three patterns at the head of this section need no constant.
+There is no pattern that both binds a field of variant type and opens
+it, no alternative inside a pattern, and no condition on a label:
+labels that share an arm (4.1(6)) and an `if` in the arm do those
+jobs.
 
 ## 5. Errors: `option`, `result`, `try`
 
@@ -1626,14 +1906,19 @@ An error of one type becomes an error of another through an ordinary
 function and a `match`:
 
 ```c
+/* type io_error = | NotFound | Denied | Failed(int code); */
 match (open_file(path)) {
 case Ok(opened):
     f = opened;
     break;
-case Err(e):
+case Err(io_error e):
     return Err(io_to_app_error(e));
 }
 ```
+
+The error here is a variant, so the binding names its type (4.7 rule
+4); an error of a C type, such as an `int` or an enumeration, is bound
+by an identifier alone.
 
 C functions that report failure through return codes, `errno` or null are
 wrapped by ordinary Type-C functions that return a `result`. Errors are
@@ -3694,7 +3979,8 @@ checked wrapper functions around the rest.
 
 *Provisional (P17).* In the body of a checked function:
 
-1. A dereference, `*p` or `p->m`, traps if the pointer is null. The check
+1. A dereference, `*p`, `p->m` or a `*` sub-pattern that selection
+   follows (4.7 rule 5), traps if the pointer is null. The check
    is omitted where flow analysis shows the pointer is not null.
 2. Pointer arithmetic is rejected: `p + n`, `p - q`, `p[i]`, `++p`, and
    relational comparison of pointers. Indexed access goes through slices
@@ -3774,7 +4060,7 @@ a design change to this document, not an implementation detail.
 | Feature | Sketch | Evidence that would bring it in |
 | --- | --- | --- |
 | Binding by reference | `case Block(&stmts):` binds a pointer to the field, for in-place update of a payload. | A lifetime tier in checked mode (11.3) that keeps a pointer into a payload from outliving an assignment that changes the object's tag. Pilot A shows the need (4.1): 24 payload updates, and payloads moved behind pointers to allow them. |
-| Nested and constant patterns | `case Add(Number(0), r):`. Needs matrix-based exhaustiveness and a rule that tells a binding from a constructor without fields. | Pilot code that routinely nests matches two deep. |
+| Constant patterns | `case Add(*Number(0), r):`, with an integer, character or enumeration constant as a sub-pattern (4.7). Needs a test of equality beside the tests of tags, a `default` wherever a constant stands, and a rule that tells a misspelled enumeration constant from a binding, which the type of the position cannot do: such a constant fits any integer position. | Arms in pilot code that bind a field only to compare it with a constant. |
 | `try` inside expressions | `f(try g(), h())`, with a defined order for the hoisted operands. | Many rewrites forced by the three positions of 5.1 rule 3 in pilot code. Pilot B wanted no `try` inside an expression: its 4 rewrites came from what the operand may name, not from the positions (section 15, P8). |
 | `try` on `option` | Returns `None` from a function that returns an `option`. | Repeated hand-written propagation of `None`. |
 | Expression `match` | A match that yields a value. | Real code where a local assigned in each arm reads materially worse. |
@@ -4472,6 +4758,7 @@ Two properties follow by construction:
 | `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
+| Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm;`, and for each node a `switch` on the tag of the node's position. The tag is reached from `__tc_match` through the members of 10.1 and, under a `*`, through the pointer field: `__tc_match->u.Err.error.tag`, `__tc_match->u.Add.l->tag`. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_match->u.Add.l->u.Num.value`. |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
@@ -4504,6 +4791,77 @@ union of every arm's bindings, would rename each use of a binding, and
 typec does not read attribute arguments or `#pragma` lines, where a
 binding can be named; it would also hide the bindings from a debugger
 under their own names (4.1).
+
+**Selection of a nested pattern.** The first match of 4.7 becomes this
+C, where `struct R` is the instance `result(int, eval_error)` under its
+claimed tag and `TRAP` the trap of 10.5:
+
+```c
+{ const struct R __tc_copy = (eval(e)), *const __tc_match = &__tc_copy;
+  unsigned __tc_arm;
+  switch (__tc_match->tag) {
+  case R_Ok: __tc_arm = 0; break;
+  case R_Err:
+    switch (__tc_match->u.Err.error.tag) {
+    case eval_error_DivByZero: __tc_arm = 1; break;
+    case eval_error_Overflow: __tc_arm = 2; break;
+    default: TRAP
+    }
+    break;
+  default: TRAP
+  }
+  switch (__tc_arm) {
+  case 0: { const __typeof__(__tc_match->u.Ok.value) value =
+                __tc_match->u.Ok.value;
+            { printf("%d\n", value); break; } TRAP }
+  case 1: { printf("division by zero\n"); break; TRAP }
+  case 2: { printf("overflow\n"); break; TRAP }
+  default: TRAP
+  } }
+```
+
+The tree and the arms are two statements. A label that several
+branches leave possible is a leaf in each of them, and the items of its
+arm are written once, as the source writes them, so a leaf cannot hold
+them. They also stay outside every `switch` of the tree, where a
+`break` of the arm would leave that `switch` and not the match: in the
+`switch` on `__tc_arm` a `break`, a `continue` and a `return` mean what
+they mean in the `switch` of a match without nested patterns. The
+`default:` of that `switch` is reached by no run, since every path
+through the tree sets the local to the number of an arm or traps. It
+is written because a backend that does not follow the values of the
+local would see a path past the `switch`, and would report a function
+whose arms all return as one that can end without a value. `__tc_arm`
+is declared in the block of its match or test, as `__tc_match` is, and
+needs no more than the prefix.
+
+A tree of one node has one branch for each arm, so the `switch` on the
+tag holds the arms and there is no local: that is the `match` row and
+the rows of the test, which a match or a test without a nested pattern
+always gets.
+
+The tree holds no token of the source. A pattern has no expression,
+its constructors are written as the enumerators that their variants
+claim (10.1 rule 6), and the type of a typed binding is read by typing
+and not written, since a binding takes its type from its field. So
+nested patterns add no moved text (below), and the scrutinee and the
+items of the arms stay where the source has them. The form uses what a
+match without nested patterns uses, `switch`, member access,
+`__typeof__` for a binding (2.4) and the trap, and nothing else of the
+dialect.
+
+Selection reads each tag at most once on a path and reads a tag only
+for the first label that is still possible (4.7 rule 6), so no path
+makes more tests than the labels would in order. *Provisional (P31).*
+Against nested `switch` statements written by hand, whose branches
+hold the bodies, the form costs one store to the local and one
+`switch` on it; in a test, the store and the `if`. A backend that
+threads jumps can remove both where it optimises, and they remain at
+`-O0`. The text of the tree can be longer than the labels, because a
+label is a leaf in each branch that leaves it possible; a leaf is one
+assignment, 4.7 rule 10 bounds the tree, and the text is charged to
+the output limit as it is made, as all that lowering writes is (3.5
+rule 7).
 
 **The zero initialiser of a type parameter.** The zero initialiser of
 an object or subobject whose type mentions a type parameter gives
@@ -6220,7 +6578,8 @@ structures of the packing probe that ends one (10.3), one of each.
   output limit, in bytes of all the C text that `typec` writes for a
   unit but the fixed static assertions that end it, charged where each piece and edit of it is made, so that no
   construct's text escapes it; and the bound of 4096 bytes on the
-  encodings of the arguments of one instance. The limit
+  encodings of the arguments of one instance. 4.7 rule 10 states one
+  more, the bound on the selection tree of a match. The limit
   on nested instantiation is none: 3.5 rule 7 states it as a rule of
   Type-C, so it carries a name. A limit of the GNU profile, a
   construct
@@ -6261,7 +6620,7 @@ a crash.
 | --- | --- | --- |
 | Plain C keeps its meaning and ABI | Every translation unit in the supported dialect, but for the one exception of 2.2 | Emission by token span (13.4) |
 | A variant value has a valid tag and the payload of that tag | Values made by constructors, the zero value, and copies of either | No code writing the bytes of the object behind its type (C code, casts, unions, `memcpy`); no read of an uninitialised automatic object |
-| A `match` handles every constructor | Every `match` | Nothing; an invalid tag traps |
+| A `match` selects an arm for every value of its scrutinee's type | Every `match` | An invalid tag traps where selection reads it (4.5); a pointer that a `*` sub-pattern follows points to an object of its type (4.7 rule 5) |
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3), a placement that 10.3 or 7.3 rule 2 or 4 refuses and a translation limit of `typec` (13.6) are compile errors | Nothing |
@@ -6320,6 +6679,8 @@ with the scripts that reproduce them (`make size-split`,
 | P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its name; how many of them stand where C does not evaluate them; and how many tests hold a call or a statement expression in an operand after the first, with what volatile temporaries for those tests alone cost there, the form that the owner decided against (section 8 rule 10). A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays, and its temporaries are not volatile |
 | P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
 | P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32; and the encodings of the arguments of one instance hold at most 4096 bytes (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances in the front end, the bytes that lowering charges for each of them and their ratio to the source, and the longest encodings of one instance in them. The budget and the base of the limit are at least four times the largest count and charge, the factor at least four times the largest ratio and the bound at least four times the longest; a larger budget or limit costs in proportion (3.5 rule 7) | 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes |
+| P31 | Selection sets a local that a second `switch` reads (13.5) | Stage 3, package 3.10: size and speed against hand-written nested `switch` statements, on both backends at `-O0` and at `-O2`. If the local costs at `-O2`: the leaves reach the arms by `goto` | The local stays |
+| P32 | The selection tree of a match holds at most 65536 nodes and leaves (4.7 rule 10) | Stage 3, package 3.10: the largest tree in the container library, the pilot and the tests. The bound is at least sixteen times the largest | 65536 |
 
 ## 16. Non-goals
 
@@ -6398,7 +6759,8 @@ match-statement:       "match" "(" expression ")" "{" arm+ "}"
 arm:                   arm-label+ block-item+
 arm-label:             "case" pattern ":" | "default" ":"
 pattern:               identifier ("(" sub-pattern ("," sub-pattern)* ")")?
-sub-pattern:           identifier | "_"
+sub-pattern:           "_" | pattern | "*" pattern
+                     | variant-type identifier
 defer-statement:       ("defer" | "_Defer") statement
 slice-operation:       "slice_from_array" "(" assignment-expression ")"
                      | "slice_sub" "(" assignment-expression
@@ -6418,6 +6780,9 @@ A `defer` statement is a block item and not a statement, so it is not the
 substatement of another statement (section 6 rule 11). `try` is written
 only in the positions of 5.1, which gives a `try` in any other place one
 error, whether this grammar derives it there or not.
+A sub-pattern that is an identifier alone is a constructor pattern or
+a binding by the type of its position, and the identifier that ends a
+typed binding tells it from a pattern (4.7 rules 2 to 4).
 An unqualified constructor is an ordinary identifier or call in the
 grammar; 3.3 decides its meaning. Slice indexing uses C's subscript
 syntax. The words of a slice operation are universe names, which a

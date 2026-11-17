@@ -1852,11 +1852,12 @@ types (design 13.3).
   `try` "of the positions of rule 3"), all of rule 3 and its rationale
   ("Rationale for the positions"), the `try` rows of 13.5 and section
   15, P8.
-- [High] Nested patterns, as in `case Err(DivByZero):` (owner: the
-  README's first example uses them). Design 12 lists them outside the
-  core: move them into section 4, with matrix-based exhaustiveness and
-  a rule that tells a binding from a constructor without fields; a
-  misspelled constructor must not become a catch-all binding.
+- [High] Build nested patterns, as in `case Err(DivByZero):` (owner: the
+  README's first example uses them): design 4.7, plan packages 3.7 to
+  3.10.
+- [Medium] Design 4.7 cites counts of the bindings and fields of Pilots
+  A and B that no script in either pilot's repository reproduces: add
+  the script there and cite the commit that holds it.
 - [Medium] Define which GNU attributes the front end must understand
   rather than merely carry (the tree holds each one's name and its
   argument tokens unread). The macOS headers use four that typing needs:
