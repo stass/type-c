@@ -98,8 +98,9 @@ is [type-c-language-design.md](type-c-language-design.md).
   `resume.sh` each repeat the check that OUT lies outside the
   repository, the revision lookup, the build of typec, the CSV `row`
   function and (the first two) the parser of the `--stats` line, and
-  the checks have drifted apart. Move them into one sourced
-  `tools/measure/common.sh`.
+  the checks have drifted apart; only `zero_record.sh` writes its CSV
+  to a scratch file and moves it over OUT when every run has passed.
+  Move the shared set-up into one sourced `tools/measure/common.sh`.
 - [Low] `slice_late_calls` of `--stats` reads the operands as written
   (`Tree.holds_call`): it counts a call in an operand that C does not
   evaluate (`sizeof`, the unselected arm of `_Generic`) and misses one

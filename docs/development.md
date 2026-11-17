@@ -626,3 +626,15 @@ not a test.
 ```sh
 tools/measure/resume.sh /Volumes/Optaine/measure-3.6/run/resume.csv
 ```
+
+`tools/measure/zero_record.sh OUT [CC...]` builds the program of
+`test/run/zero_initialisers.t` with `typec` on each backend at `-O0`,
+`-O2` and `-O3`, runs it as `zeroes record`, and writes one row to `OUT`
+for each place and type of the test: how many of the bytes of a
+`long double` that hold none of its value the zero initialiser left
+non-zero (design 13.5). It fails where a promised byte is not zero. It
+is a record, not a test.
+
+```sh
+tools/measure/zero_record.sh /Volumes/Optaine/measure-3.6/run/zero.csv
+```
