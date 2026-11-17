@@ -3910,6 +3910,8 @@ The header's skeleton, in order:
 /* the instances that it defines at its end, each under its own guard */
 /* the enumeration assertion, where it defines the tags of a variant */
 /* the probe of 10.3, where it holds a packing bracket */
+/* (all of the above but the include lines: in runs, each in a macro
+   bracket) */
 #endif
 #endif
 ```
@@ -3970,7 +3972,9 @@ differ as well, and the paragraphs after them state how.
   whether the header defines it or not. It is a typedef named
   for the instance of a pointer to a structure that no text defines,
   whose tag holds a digest of the text of the instance's definition
-  (13.5).
+  (13.5). An instance of a generic that the step reads declared and
+  not defined, as `type list(T);` (3.1 rule 4), has no text of a
+  definition: the header declares it and writes no layout typedef.
 
 Two headers that name one instance, as each does with `vector(int)` in a
 prototype, can then be included together in either order. Each writes
@@ -3998,22 +4002,31 @@ declared again with another type, whichever header defines the
 instance. GCC 16 and Apple Clang 21 refuse it under `-std=c11` and
 `-std=c23` alike, for `{ data, len, cap }` in one header and
 `{ len, data }` in the other, and take two headers whose definitions
-are one text. Equal text is one layout within a client that defines no
-macro of a name in it: every name in the definition, a tag, a typedef
-or the typedef of an argument (10.3), has one meaning in one
-translation unit, no macro of the header's includes rewrites it
-(below), and the client includes every header outside the region of
-each pragma that changes a layout (13.5).
+are one text. Equal text is one layout within one client: every name
+in the definition, a tag, a typedef or the typedef of an argument
+(10.3), has one meaning in one translation unit, the macro bracket
+keeps every macro of the client from it (below), and the client
+includes every header outside the region of each pragma that changes a
+layout (13.5).
+
+A header whose step reads the generic declared and not defined (3.1
+rule 4) has no text to digest, so it writes no layout typedef, and
+nothing tells its instance from one that another header defines by
+another generic of the same name. A client that includes both then
+passes values of the second layout to functions compiled with the
+first, with no message. That is a limitation (section 14): the refusal
+holds for an instance whose generic each header's step reads defined.
 
 The digest is BLAKE2b with a 128-bit result, which the OCaml library
 provides as `Digest.BLAKE128`, of the tokens of the definition as
 lowering writes them, each followed by one space. The text is a
-function of the generic and the arguments alone, so a header that
-cannot write the definition still computes its digest. Two definitions
-that differ share a digest with a chance too small to matter. A
-release of `typec` that writes one definition with other tokens makes
-headers that the headers of another release refuse in one client, so a
-program writes its headers with one release.
+function of the definition of the generic and the arguments alone, so
+a header that cannot write the definition, because something that it
+needs complete is incomplete there, still computes its digest. Two
+definitions that differ share a digest with a chance too small to
+matter. A release of `typec` that writes one definition with other
+tokens makes headers that the headers of another release refuse in one
+client, so a program writes its headers with one release.
 
 A Type-C unit reads the interface and a C unit the lowered text: the
 redirect of the skeleton. `typec` defines `__TYPEC__` while it
@@ -4071,10 +4084,8 @@ twice, once as a plain C structure.
 The header is written from one `-E` step whose main file is `M.tci`,
 run as that of a `.tc` input (13.2): `M.tci` is Type-C text (2.1), so
 the unit is a Type-C unit, with the universe text and `__TYPEC__`. The
-reader of that step, as of every unit, knows at each point of the
-output which identifiers name macros and where each was defined and
-undefined (13.3). The step also gets `-dI`, which the user cannot give
-(13.2). Under it GCC and Clang write each `#include` that they process
+step also gets `-dI`, which the user cannot give (13.2). Under it GCC
+and Clang write each `#include` that they process
 as a line of the output, in the text of the file that holds it, and
 still expand it. The output differs from that of `-E` alone in those
 lines and in line markers, and in no token. The step gets
@@ -4086,16 +4097,16 @@ includes `M.tci` draws.
 The *text of `M.tci`* is what the output holds while the main file is
 the current file at the bottom of the include stack. The reader passes
 over deeper text, and the lines of `-dI` in it, since a client reaches
-that text through the includes of the header; the macros that deeper
-text defines are the macros of the header's includes (below). A text
-of `M.tci` that holds nothing, no declaration, include line, `#define`
-or `#undef`, is an error of `M.tci`: a file that the user's `-include`
-names makes it so when it includes `M.tci` and sets its guard first,
-and the header would be empty with no message. An `#if` within the
-guard that skips the rest of the interface leaves the guard's
-`#define`, and gives a header with no declaration, as it gives the
-Type-C units none; so does an interface of macros alone, whose header
-the header of an interface that includes it can then include.
+that text through the includes of the header. A text of `M.tci` that
+holds no declaration gives a header with none. An `#if` within the
+guard that skips the rest of the interface gives one, as it gives the
+Type-C units no declaration; so does an interface of macros alone,
+whose header the header of an interface that includes it can then
+include. So does a file that the user's `-include` names when it
+includes `M.tci` and sets its guard first. Telling that case from an
+interface of macros alone would take the macros of the step, which
+`typec` does not read for the header; a client of that header meets
+each name of the interface that it uses as undeclared.
 
 As a main file, `M.tci` draws from GCC and Clang the warning "#pragma
 once in main file" for a `#pragma once`, an error under `-Werror`,
@@ -4112,15 +4123,16 @@ directive `include`, `include_next` or `import`, one space, a header
 name between `"` and `"` or `<` and `>`, ended as C11 6.4.7 ends one,
 then the end of the line, or ` /* clang -E -dI */` and the end of the
 line. In the text of `M.tci`, any other line that has `#` in its first
-column and is neither a line marker, a pragma nor a `#define` or
-`#undef` that the reader reads as in every unit (13.3) is an error of
-`M.tci` that names the directive, as `#ident`, which GCC 16 and Apple
-Clang 21 both pass through `-E`: the header carries no directive of
-`M.tci` but its include lines and pragmas. In deeper text the reader
-passes over every line that it does not read in every unit, since no
-text of it reaches the header. A directive that a macro of `M.tci`
-builds starts with a space in the output of both families, and is read
-as tokens, as in a unit. The reader lexes the whole output, deeper text
+column and that the reader does not read in every unit (13.3), as it
+reads a line marker and a pragma, is an error of `M.tci` that names
+the directive, as `#ident`, which GCC 16 and Apple Clang 21 both pass
+through `-E`: the header carries no directive of `M.tci` but its
+include lines and pragmas. In deeper text the reader passes over every
+line that it does not read in every unit, since no text of it reaches
+the header. A directive that a macro of `M.tci` builds starts with a
+space in the output of both families, and the reader refuses its `#`
+as it does in every unit: preprocessed C holds no `#` outside a
+directive. The reader lexes the whole output, deeper text
 with it, and a raw string literal with its lines, so no line inside one
 is read as a directive or as a line marker.
 
@@ -4196,8 +4208,8 @@ fails to find `M.h` unless a stale one stands on the include path, and
 make reports the circular dependency. `typec` does not check for it.
 
 The header carries the declarations of `M.tci` and not its macros.
-`-E` drops the definition of each macro and expands it where `M.tci`
-uses it, and the lowered text holds the expansion. A macro of a `.tci`
+`-E` expands each macro where `M.tci` uses it, and the lowered text
+holds the expansion and no definition. A macro of a `.tci`
 may hold Type-C, such as a `match` in its body, and lowering never
 reads a definition, only what an expansion gives; carrying the
 definitions would hand that text to C compilers. A macro that a C
@@ -4207,51 +4219,154 @@ in a plain `.h` that `M.tci` includes, and the header includes that
 decided when the header is written, with `__TYPEC__` defined as for
 every Type-C unit and under the options of that command line.
 
-A client preprocesses the lowered text a second time, after the
-includes of the header, and so expands again each name in it that a
-macro of those includes has. The client then reads other declarations
-than the Type-C units do. With `enum { CAPACITY = 8 };` and
+A client preprocesses the lowered text a second time, and would expand
+again each name in it that a macro of the client has: a macro of the
+header's includes, of a header that the client includes first, or of
+its command line. With `enum { CAPACITY = 8 };` and
 `#define CAPACITY (CAPACITY + 1)` in a plain `.h`, a field
 `char bytes[CAPACITY]` of `M.tci` has 9 bytes in a Type-C unit, and
-its lowered text `char bytes[(CAPACITY + 1)]` has 10 in a client (GCC
-16 and Apple Clang 21). An `#undef` in `M.tci` of a macro of its
-includes is lost, since the header carries no directive of `M.tci`;
-and a function-like macro that the step does not invoke, as `f` in
-`f LP 1)` where `LP` gives `(`, is invoked in the client, which reads
-`f ( 1)`.
+its lowered text `char bytes[(CAPACITY + 1)]` would have 10 in a
+client; under the client's `-Downed=owned[16]`, an instance with a
+field `owned` would have 24 bytes in the unit and 32 in the client
+(GCC 16 and Apple Clang 21).
 
-`typec` therefore refuses each identifier of the lowered text, whether
-`M.tci` writes it or lowering makes it, that names a macro which the
-reader knows (13.3) to be defined before that point of the header
-outside the text of `M.tci`, with a message that names the macro and
-the line of `M.tci`. Such a macro is predefined, given on the command
-line, or defined in deeper text, which holds the files that the user's
-`-include` names as well; these are what the header's includes, the
-compiler and the command line define for a client of the configuration
-(13.2). The set leaves out `__TYPEC__`, which no C unit has, and the
-`#define` and `#undef` of the text of `M.tci`, which the header does
-not carry. An `#undef` in deeper text does not take its name out of
-the set: `#pragma pop_macro` restores a macro, and neither GCC 16 nor
-Apple Clang 21 shows that in its output, so no line proves that a
-client lacks the name. A name whose every definition there is its own
-name alone, as glibc's `<stdio.h>` defines `stdin`,
-is no reason to refuse: its expansion is the identifier itself (C11
-6.10.3.4p2). A main file that includes `<stdint.h>`, `<stddef.h>`,
-`<stdbool.h>`, `<errno.h>`, `<assert.h>`, `<stdio.h>`, `<limits.h>`,
-`<string.h>` and `<stdlib.h>` and uses `bool`, `true`, `NULL`,
-`errno`, `assert`, `offsetof`, `stdin`, `EOF` and the limits of
-`<stdint.h>` and `<limits.h>` in a structure and in an inline function
-draws no refusal from GCC 16 and Apple Clang 21 on macOS, with or
-without the names that an `#undef` removes, since their expansions end
-in names that no macro has; the `CAPACITY` above is refused. glibc is
-unmeasured. A macro meant for clients belongs in a plain `.h`, and one
-that the declarations of `M.tci` use must expand to text that names no
-macro of the set.
+The header therefore writes its lowered text in *runs*, each in a
+*macro bracket*. The lowered text is all that stands between the
+`#define` of the header's guard and its `#endif`: the declarations of
+`M.tci` with their pragma lines, the instances with their packing
+brackets, the enumeration assertion and the probe. Its include lines
+divide it into runs, and a header with no include line has one run.
+The writer builds a run whole, collecting the identifiers of the
+tokens that it writes, and then writes the run in its macro bracket:
+before the run `#pragma push_macro("x")` and `#undef x` for each
+identifier `x` of the run, and after it `#pragma pop_macro("x")`:
 
-The refusal sees the step and not the client: a macro that the client
-defines before it includes the header, by its own `-D` or in a header
-that it includes first, can still expand a name of the lowered text,
-as it can in any C header. That is a limitation (section 14).
+```c
+#pragma push_macro("CAPACITY")      /* once for each identifier */
+#undef CAPACITY                     /* of the run               */
+struct room { char bytes[(CAPACITY + 1)]; };
+#pragma pop_macro("CAPACITY")
+```
+
+While the client reads a run, no identifier in it names a macro, so
+its preprocessor passes each token on as it stands. That is how the
+backend reads the emitted C of a unit, which it compiles as
+`-x cpp-output` with no macro in force (13.2): a client reads the
+lowered text as the units' backend reads it. After the run the client
+has every macro that it had, a name that it had not defined is
+undefined again, and a guard that the run defines stays defined. The
+field above has 9 bytes in the client and the instance 24. A name that
+a plain `.h` defines one way under `__TYPEC__` and another for C reads
+in the run as the step left it, and the client's own uses of the name
+keep its macro. So it is for every macro that the client has at the
+run, whatever its definition: a macro whose expansion is its own name,
+a function-like macro named without `(` and a macro that `M.tci`
+undefines before a declaration all leave the client an identifier
+where the units' backend reads one. The macro bracket uses no list of
+names and no knowledge of the macros of the step or of the client.
+
+- The macro bracket names every identifier of the run, of `M.tci` or
+  invented by lowering, keywords included, and every identifier of its
+  pragma lines, those of its packing brackets among them: Clang
+  replaces macros in the arguments of `#pragma pack`, and a client's
+  `#define pop 2` would turn `pack(pop)` into a packing of 2 for the
+  rest of the client. Leaving the keywords out would take a list of the
+  keywords of every dialect, and a client's `#define inline` would
+  reach the run. The cost is length: three lines for each identifier
+  made a header of 47 lines one of 236.
+- `defined` is left out. No directive may define or undefine it (C11
+  6.10.8p2), GCC and Clang refuse `#undef defined`, and so it never
+  names a macro.
+- The guard of an instance is the one name of a run that the macro
+  bracket does not name. Its `#ifndef`, `#define` and `#endif` lines
+  have a writer of their own, which collects no name, and no
+  identifier of a run is a guard (13.5), so the guard that a run
+  defines stays defined after the run's `pop_macro`.
+- The macro bracket closes before an include line and opens again
+  after it, so each header that the header includes reads the client's
+  macros, as it read the step's.
+- A pragma line of a run that is no sequence of tokens (13.5) is an
+  error of the text that holds it. The macro bracket cannot name its
+  identifiers, and a line that ends in `\`, as GCC 16 writes the line of
+  `_Pragma("x \\")`, would join the next line of the header in the
+  client, a `pop_macro` or the `#endif` of a guard among them.
+- A trigraph sequence (C11 5.2.1.1) in a run, within a token or where
+  two tokens meet, or in an include line, is an error that names the
+  line of the source that holds it. Under `-std=c11`, `-std=c17` or
+  `-trigraphs` the step replaces the trigraphs of the source, but a
+  macro can build one that it does not replace: with `#define Q ?` and
+  `#define STR(x) #x`, `sizeof STR(Q?=)` is `sizeof "??="`, 4 in the
+  unit, and a client compiled with `-std=c11` reads `"#"`, 2. Under
+  `gnu17`, the default (2.4), the step replaces none, so every literal
+  of the declarations or inline functions of `M.tci` that holds one, as
+  `"(??)"`, reaches the header and is refused as well. The emitted C of
+  a unit escapes this through `-fno-trigraphs` (13.2), which `typec`
+  gives no client. An interface writes such a literal with an escape,
+  as `"(?\?)"`, which every dialect reads alike (GCC 16 and Apple Clang
+  21). `typec` refuses rather than write that escape itself: a raw
+  string literal has no escape to write, and the refusal needs no
+  writer of literals.
+
+A client applies to a run three phases of translation (C11 5.1.1.2)
+that the units' backend does not, and none of them changes it: no
+identifier of the run names a macro, by the macro bracket; no trigraph
+sequence stands in it, by the refusal above; and no directive stands in
+it but those that `typec` writes, since the reader refuses a `#`
+outside a directive.
+
+The macro bracket needs a client compiler that implements
+`push_macro` and `pop_macro` as GCC and Clang do, and a backend whose
+`-E` output holds no `push_macro` or `pop_macro` of `M.tci`, which a
+run would carry and which would bring a macro of the client back into
+it. GCC 14.2 on FreeBSD 16 and on Debian 13 (glibc 2.41), GCC 16.2 on
+macOS, Clang 21.1 on FreeBSD 16 and on Debian 13, Clang 23.1 on
+FreeBSD 16 and Apple Clang 21 meet both: each restores a macro that a
+macro bracket puts aside, leaves undefined a name that was undefined,
+keeps a guard defined within it, and takes a macro bracket of
+keywords and of names of `<stdio.h>` and `<stdbool.h>`, as `int`,
+`sizeof`, `bool` and `stdin`, under `-pedantic-errors` in C11, `gnu17`
+and C23; and none writes either pragma to the output of `-E`. A
+compiler that ignores the two pragmas would undefine the names and
+restore none. The header is for clients of the supported backends
+(13.2), so it holds no probe for that. *Provisional:* GCC 15 and Clang
+22, between the releases measured, are unmeasured, and GCC 14 and 16
+differ on extended names (below); the same check on each settles it,
+and until then the macro bracket stands on the releases on either side.
+
+A name that holds a character outside the basic character set is the
+one exception. Clang 21.1, 23.1 and Apple Clang 21 restore a macro of
+such a name only where the pragma spells the name in UTF-8, however
+the client's definition spells it; GCC 16.2 restores it in either
+spelling; GCC 14.2 in neither. The macro bracket therefore spells such
+a name in UTF-8 in its pragmas, whichever spelling `-E` wrote. A
+client compiled with GCC 14 that defines a macro of such a name before
+the header, where a run names it, loses the macro after the run, and
+its later uses read the name as an identifier. That is a limitation:
+the run itself is unaffected, since every release measured takes the
+`#undef` in either spelling, and no spelling of the pragma restores the
+macro on GCC 14.
+
+Some clients' compilers report an `#undef` that the macro bracket
+writes: of a reserved name, of a macro that the client marks final, of
+one that its main file uses only after the header, and of a macro that
+the compiler defines itself, as `__FILE__` or Clang's
+`__has_attribute`, which `-E` leaves unreplaced in a pragma line. The
+last is an error under Clang's `-pedantic-errors`; the paragraph on
+reserved names below gives the others.
+
+Rationale. Three other answers were weighed. Refusing each identifier
+of the lowered text that names a macro of the step needs the macros of
+the step, rests on a set of names with exemptions, a list that no
+review completes, and sees no macro of the client's own. Checking the
+written header by a second `-E` run, whose tokens must equal the
+lowered text, sees the step's command line and not the client's.
+Writing the header from the bytes of `M.tci`, with each Type-C
+construct rewritten in place and its macros kept, needs the origin of
+each token in the source, which no output of `-E` gives, and leaves the
+client to expand a name that a plain `.h` defines one way for Type-C
+and another for C.
+The macro bracket makes the client's reading equal the backend's by
+construction, at the cost of length.
 
 A C client also reads each include of the header without the macros
 that `M.tci` defines before it and without `__TYPEC__`, and the header
@@ -4270,9 +4385,7 @@ neither (section 14).
 A macro whose value the compiler computes where it is expanded, such
 as `__FILE__`, `__LINE__`, `__COUNTER__` or `__DATE__`, written in
 `M.tci` or in a macro that it expands, such as `assert`, stands in the
-header as the step expanded it, as every macro does. No `#define`
-in the output defines it, and its expansion leaves no name to refuse.
-Its value is
+header as the step expanded it, as every macro does. Its value is
 then the step's and not that of a unit or a client: `__FILE__` is the
 path by which the command line named `M.tci`, an absolute one where the
 build writes one, while a Type-C unit sees the path by which it found
@@ -4287,7 +4400,16 @@ that begin with `__tc_` are reserved identifiers to C (C11 7.1.3), which
 is what keeps a client's names from them (2.3). Clang reports them under
 `-Wreserved-identifier` and `-Wreserved-macro-identifier`, which
 `-Weverything` turns on and `-Wall`, `-Wextra` and `-pedantic` do not
-(Apple Clang 21). In a header that ends with the probe of 10.3,
+(Apple Clang 21); the second reports as well each `#undef` of a
+reserved name in a macro bracket, as of `_Bool`. Under
+`-Wunused-macros`, which neither `-Wall` nor `-Wextra` turns on, GCC 16
+and Apple Clang 21 report a macro that the client's main file defines
+before the header and uses only after it, where its name stands in a
+run: the macro bracket's `#undef` ends the definition that the warning
+follows. Apple Clang 21 warns by default, under `-Wfinal-macro`, of
+each `#undef` of a macro that the client marks with
+`#pragma clang final` and a run names, an error under `-Werror`. In a
+header that ends with the probe of 10.3,
 `-Weverything` also reports the padding of the probe's two structures
 under `-Wpadded`, which GCC 16 has as well, outside `-Wall` and
 `-Wextra`, and the `_Static_assert` and `_Alignof` of the probe under
@@ -4300,12 +4422,12 @@ The header is specific to the target and configuration it was generated
 for, and assumes that a client includes it as the command line of that
 configuration leaves the compiler: with the same options that change a
 layout, and outside the region of every `#pragma pack` and of every
-other pragma that changes one (13.5). The bracket keeps a client's
-`#pragma pack` from an instance and from nothing else in the header,
-and it assumes the reading of `#pragma pack()` that 10.3 states; the
-lowered text of a header that holds a bracket ends with the probe of
-that reading (10.3), so a client whose compiler reads the line
-otherwise fails to compile.
+other pragma that changes one (13.5). The packing bracket keeps a
+client's `#pragma pack` from an instance and from nothing else in the
+header, and it assumes the reading of `#pragma pack()` that 10.3
+states; the lowered text of a header that holds a packing bracket ends
+with the probe of that reading (10.3), so a client whose compiler
+reads the line otherwise fails to compile.
 
 The layout of a variant rests as well on the size of its tag, whose
 type is the enumeration that `typec` generates (10.1 rule 2), not text
@@ -7969,7 +8091,12 @@ written form of a module that last component alone, since every `_` in
 it begins an escape. A digest is one text of a definition, so two
 headers that write one definition of an instance write one layout
 typedef, and two that write different ones write two that C refuses
-together.
+together; a header whose step reads the generic of an instance
+declared alone has no definition to digest and writes no layout
+typedef for it (9.3). The two kinds of guard are the only macros that
+a header defines. Each stands only in the directives that `typec`
+writes, never among the tokens of a run, so no macro bracket of 9.3
+names it, and a guard that a run defines stays defined after it.
 
 No other invented name holds a `__` after the prefix, and no two
 invented locals that one block can see share a name, so none hides
@@ -8098,7 +8225,7 @@ a crash.
 | The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure, the bits of each unnamed bit-field and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect and zeroes an unnamed bit-field, which C leaves indeterminate (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | The C text that `typec` writes for a unit is at most its output limit, and what the front end reads for its instances at most the instance budget | Every unit and every byte of its C text but the fixed static assertions that end it, instances, copies, temporaries and line markers alike: emission charges each piece and edit as it makes it, with no list of constructs, and the front end counts the copies of deferred statements against the output limit as it finds their exits (3.5 rule 7) | Nothing; a unit past either bound is refused and nothing is written. The work of the parser and of the front end outside its readings for instances and its count of copies is not counted |
-| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for and none that the driver refuses, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. The headers that the header includes declare for the client what they declared for the Type-C units, without the macros that the `.tci` defines before them and without `__TYPEC__`; a macro that changes what they declare is given on the command line of every compile (9.3). `typec` does not see a client's compile: the header's enumeration assertion and probe (9.3) fail a client whose rule for enumerations or reading of `#pragma pack()` differs from the assumed one, and nothing else of this is checked. The client defines no macro of a name in the lowered text before it includes the header, by `-D` or in a header that it includes first. By construction, no name in the lowered text is a macro that the step's includes, compiler or command line define, other than one that expands to itself, so the header's includes do not make a client expand that text again, and two headers that write different definitions of one instance fail the client's compile, whether each defines it or only declares it (9.3). Headers that one client includes were written by releases of `typec` that write each instance they share with the same tokens; headers of releases that write one otherwise refuse each other in that client |
+| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, with a compiler that implements `#pragma push_macro` and `#pragma pop_macro` as GCC and Clang do, for the target and with the layout options it was generated for and none that the driver refuses, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. The headers that the header includes declare for the client what they declared for the Type-C units, without the macros that the `.tci` defines before them and without `__TYPEC__`; a macro that changes what they declare is given on the command line of every compile (9.3). `typec` does not see a client's compile: the header's enumeration assertion and probe (9.3) fail a client whose rule for enumerations or reading of `#pragma pack()` differs from the assumed one, and nothing else of this is checked. By construction, each run of lowered text stands in a macro bracket that puts aside every macro of a name in it, so no macro of the header's includes, of the client's own headers or of its command line reaches that text, and two headers that write different definitions of one instance fail the client's compile, whether each defines it or only declares it, where each header's step reads the instance's generic defined (9.3). An instance whose generic a header's step reads declared alone has no layout typedef in that header, and nothing tells two of its definitions apart (9.3). Headers that one client includes were written by releases of `typec` that write each instance they share with the same tokens; headers of releases that write one otherwise refuse each other in that client |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
 | A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length. No full expression that holds an index, a `slice_sub` or a conversion of a slice is resumed, by a call that returns a second time (`setjmp`, `sigsetjmp`, `getcontext`, `vfork`, `__builtin_setjmp`, a function declared with the GNU attribute `returns_twice`), after the same call of its function has begun to evaluate it again: the values that it held are then indeterminate, as C11 7.13.2.1p3 has the objects of a function after a `longjmp`, and the test does not protect the access (section 8 rule 10). Measured: under GCC 16 at `-O2` such an index passes its test and points beyond the end of a slice whose array is live, and under both backends a call stores through the address of an element that it held across such a call in another argument, into an array that is freed, as C does with `&a[i]` there. `typec` does not refuse such an expression (13.5) |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |
