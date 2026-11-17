@@ -8,6 +8,7 @@ type typing = {
   tags : Ctype.tags;
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   value : Ctype.t option -> Tree.expression -> Ctype.t;
+  whole : Ctype.t -> Tree.expression -> Ctype.t;
   converts : Ctype.t -> Tree.expression -> unit;
   initialises : Tree.expression -> unit;
   source : Tree.expression -> Tree.expression Unknown.answer;
@@ -801,7 +802,7 @@ let initialise typing (t : Ctype.t) (initialiser : Tree.initialiser) =
       ( Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Record _
       | Va_list
       | Function _ | Unknown_type _ ) ) ->
-      ignore (typing.value (Some t) expression);
+      ignore (typing.whole t expression);
       typing.initialises expression;
       typing.initialises_whole t expression;
       t

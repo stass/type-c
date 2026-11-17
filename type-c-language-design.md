@@ -1773,6 +1773,18 @@ result(uint32_t, parse_error) read_number(reader *r)
 }
 ```
 
+`option` and `result` are variants (3.6), and a value of a variant or
+of an instance of a generic converts to no other type, as a structure
+does not in C (C11 6.5.16.1p1): `int n = read_u32(r);` and `return 0;`
+in a function that returns `result(int, E)` are errors. A result's `T`
+is reached by `try` (5.1) or by matching (section 4), and a value
+becomes an option or a result through a constructor (3.3), as in
+`return Ok(0);`. `typec` refuses such a conversion itself, naming the
+types as Type-C writes them; it is a refusal of C, so it carries no
+name (13.6), except in the definition of a generic function where a
+type argument decides whether the types are compatible, which 7.1
+refuses.
+
 ### 5.1 `try`
 
 1. The operand of `try` has type `result(T, E)`, and the enclosing function

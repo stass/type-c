@@ -2141,3 +2141,68 @@ ends inside the operand.
   #pragma pack(pop)
   #pragma pack(pop)
   _Static_assert(_Alignof(struct __tc_pack_probe_1) == _Alignof(struct __tc_pack_probe_2), "typec assumes '#pragma pack()' restores the packing of the command line (-fapple-pragma-pack or -fxl-pragma-pack?)");
+
+A value of a result or an option converts to no other type, as a
+structure does not, nor does another value convert to one (design 5):
+typec refuses the conversion in Type-C's names of the types, with the
+likely step, before the backend would name their C encodings.
+
+  $ cat > conversions.h <<'EOF'
+  > type error = | Bad | Worse;
+  > type holder(T) = struct { T value; int n; };
+  > result(int, error) f(void);
+  > option(int) g(void);
+  > void take(int x);
+  > void take_option(option(int) o);
+  > EOF
+  $ { cat conversions.h; printf 'int a(void) { int r = f(); return r; }\n'; } > initialised.tc
+  $ ./golden.exe initialised.tc
+  initialised.tc:7: error: a value of type 'result(int, error)' does not convert to 'int'; take its value with try, or match it (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'result(int, error) b(void) { return 0; }\n'; } > returned.tc
+  $ ./golden.exe returned.tc
+  returned.tc:7: error: a value of type 'int' does not convert to 'result(int, error)'; make one with a constructor of 'result(int, error)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void c(void) { take(f()); }\n'; } > passed.tc
+  $ ./golden.exe passed.tc
+  passed.tc:7: error: a value of type 'result(int, error)' does not convert to 'int'; take its value with try, or match it (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'int d(void) { int x; x = g(); return x; }\n'; } > assigned.tc
+  $ ./golden.exe assigned.tc
+  assigned.tc:7: error: a value of type 'option(int)' does not convert to 'int'; match it to reach what it holds (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void e(void) { take_option(3); }\n'; } > argument.tc
+  $ ./golden.exe argument.tc
+  argument.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with a constructor of 'option(int)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void h(void) { int a[2] = { g(), 1 }; (void)a; }\n'; } > listed.tc
+  $ ./golden.exe listed.tc
+  listed.tc:7: error: a value of type 'option(int)' does not convert to 'int'; match it to reach what it holds (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void i(holder(int) h) { holder(long) l = h; (void)l; }\n'; } > instances.tc
+  $ ./golden.exe instances.tc
+  instances.tc:7: error: a value of type 'holder(int)' does not convert to 'holder(long)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'option(int) j(void) { return Some(f()); }\n'; } > constructed.tc
+  $ ./golden.exe constructed.tc
+  constructed.tc:7: error: a value of type 'result(int, error)' does not convert to 'int'; take its value with try, or match it (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'option(int) k(int c) { return c ? Some(1) : 0; }\n'; } > branch.tc
+  $ ./golden.exe branch.tc
+  branch.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with a constructor of 'option(int)' (C11 6.5.16.1p1)
+  [1]
+
+The partners convert nothing: try and constructors take the steps, a
+zero initialiser zeroes the option, and a braced list reaches a
+member of an instance through elided braces.
+
+  $ cp conversions.h valid.tc
+  $ cat >> valid.tc <<'EOF'
+  > result(int, error) v(void) { int r = try f(); take(r); return Ok(0); }
+  > void w(void) { take_option(Some(3)); option(int) o = None; (void)o; }
+  > void x(void) { struct { option(int) o; int k; } s = {0}; (void)s; }
+  > void y(void) { struct { holder(int) h; int n; } s = { 0, 1, 2 }; (void)s; }
+  > void z(void) { option(int) a[2] = { Some(1), None }; (void)a; }
+  > result(int, error) u(void) { option(int) o = Some(try f()); (void)o; return Ok(0); }
+  > EOF
+  $ ./golden.exe valid.tc > /dev/null

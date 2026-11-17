@@ -69,12 +69,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   `tools/corpus/corpus.ml` does, at the cost of one more backend run;
   then `Pipeline.t.target_options` becomes a `Pipeline.command`.
 - [Low] A backend's diagnostic on a line that holds a lowered construct
-  quotes a fragment of the emitted text, not the source line: for a
-  call that passes a `list(double)` where a `list(int)` is wanted,
-  Clang 21 quotes ` l) {` for `int sum(list(int) l) {`: the emitted C
-  puts the instance name and the rest of the line on physical lines of
-  their own, each after a line marker of the source line, and Clang
-  quotes the physical line. GCC 16 quotes the source line, which it
+  quotes a fragment of the emitted text, not the source line: for
+  `return (Some(d));` with a `double d` where an `option(int *)` is
+  returned, Clang quotes `d` alone: the emitted C puts the constructor's
+  argument and the text around it on physical lines of their own, each
+  after a line marker of the source line, and Clang quotes the physical
+  line. GCC 16 quotes the source line, which it
   reads from the `.tc` file. Clang also quotes text that lowering adds
   and the source does not hold: under `-Wunreachable-code`, Pilot B's
   `toml.tc:563:1` shows `__builtin_trap();`, where line 563 is the `}`
@@ -418,17 +418,26 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
+- [High] A pointer to one instance converts to a pointer to another:
+  `list(int) *p = &d;` with `d` a `list(double)` is accepted, and
+  Clang only warns (`-Wincompatible-pointer-types`), naming the C
+  encodings. `pointers_differ` knows distinct types and type
+  parameters alone; refuse pointers to incompatible instances and
+  variants in Type-C text, as their values are refused (design 5).
+- [Low] `str s = { "abc" };` elides the braces of the slice and gives
+  `len` 0, which C accepts. Decide whether a braced list may initialise
+  a slice member by member (design section 8), or refuse it as a
+  variant's is refused.
 - [Medium] Diagnostics that need more than wording to read well
   (cases in `/Volumes/Optaine/diag-review/review.md`):
-  - A result, option or other instance that converts to a C type
-    (`int r = f();`, `return 0;` in a function returning a result, a
-    call result assigned to `char *` without `try`), and a mismatched
-    argument of a generic call, reach the backend, whose message
-    spells C encodings (`result__v15container_error`, `__tc_arg__...`)
-    and quotes lowered C. typec knows both types: refuse the conversion
-    in the user's names, with "use try" where the source is a result.
-  - An assignment between slices of different element types is not
-    refused at the assignment; the first wrong use fails, lines later.
+  - The hint of a refused conversion of a variant
+    (`Expressions.record_conversion_hint`) looks only at which side is
+    a structure: `option(point) o = p;` gets no "make one with a
+    constructor", a `result(void, E)` towards `int` is told to use
+    `try`, which has no value there, and a pointer to an option is told
+    to make one where `*p` was meant. Decide by what the variant holds:
+    a constructor whose field the source converts to, an Ok whose type
+    converts to the target.
   - A constructor of `result` or `option` where no such type is
     expected reads "'Err' is not declared": name the constructor and
     the type that the place expects.
@@ -486,13 +495,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   string literals (section 8, P13) and generic deduction (7.2) also take
   meaning from the target: before they land, state the rule as the first
   subobject on the elision chain whose type gives the target a meaning.
-- [Medium] Three `str` and slice conversions are refused by the backend in
-  lowered names instead of by `typec`: a `const char *`, a char array or
-  a wide literal passed to a `str` parameter (Clang names `slice__Kc`,
-  GCC says only "incompatible"); a `(str)"x"` cast; a literal for
-  `slice(char)` (Clang names `slice__c`, GCC says "invalid
-  initializer"). Refuse each in `typec` with a diagnostic in the user's
-  terms. Repros are in the data repository at
+- [Medium] A cast to a slice, as `(str)"x"`, is refused by the backend
+  in lowered names instead of by `typec` (Clang: "used type
+  'slice__Kc' where arithmetic or pointer type is required"); refuse a
+  cast to any instance or variant in `typec` in the user's terms, as
+  C11 6.5.4p2 does. Repro in the data repository at
   `measure/p13/2026-11-17-darwin-x86_64/bugs/`.
 - [Low] `Ctype.first_variant` follows the elision chain that
   `Initialiser.first_level` encodes too. Split a pure first-subobject

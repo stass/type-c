@@ -33,6 +33,10 @@ open Typec_syntax
       of the subobject where the walk meets it or, where that
       subobject's braces may be elided, of the first variant inside it;
       [None] for an excess one.
+    - [whole] types, as [value] does, the one expression that initialises
+      a whole object of a type that is not an array, which converts to
+      that type as if by assignment (C11 6.7.9p11, p13): no braces are
+      elided there.
     - [converts] takes an expression of a braced list that [value] has
       typed and the scalar type that it initialises, which is not its
       target type where the walk has elided braces around the scalar:
@@ -76,6 +80,7 @@ type typing = {
   tags : Ctype.tags;
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   value : Ctype.t option -> Tree.expression -> Ctype.t;
+  whole : Ctype.t -> Tree.expression -> Ctype.t;
   converts : Ctype.t -> Tree.expression -> unit;
   initialises : Tree.expression -> unit;
   source : Tree.expression -> Tree.expression Unknown.answer;

@@ -408,10 +408,15 @@ end
    [Discarded_branch] is a branch of a conditional that stands where its
    value is discarded: its value is discarded too, but a try there reads
    its value, as C gives both branches of a conditional one type
-   (6.5.15p3, design 13.5). *)
+   (6.5.15p3, design 13.5). A [Listed] position is that of a value in
+   a braced initialiser; its target type is the subobject at its place.
+   The value may instead initialise a member of that subobject through
+   elided braces (6.7.9p20), so the initialiser checks its conversion
+   where it places it. *)
 type position =
   | Untargeted
   | Targeted of Ctype.t
+  | Listed of Ctype.t
   | Discarded
   | Discarded_branch
 
@@ -423,12 +428,12 @@ type position =
 let value_position = function
   | Discarded -> Discarded
   | Discarded_branch -> Discarded_branch
-  | Untargeted | Targeted _ -> Untargeted
+  | Untargeted | Targeted _ | Listed _ -> Untargeted
 
 (* The position of a branch of a conditional that stands in [position]. *)
 let branch_position = function
   | Discarded | Discarded_branch -> Discarded_branch
-  | (Untargeted | Targeted _) as position -> position
+  | (Untargeted | Targeted _ | Listed _) as position -> position
 
 (* Where a pattern stands, which decides whether it may omit the field
    list of a constructor with fields: only a test may (design 4.1 rule 3,
@@ -1166,16 +1171,83 @@ let refuse_type_parameter_conversion context span target (typed : typed) =
     refuse_type_parameter context span
       "a value converts to or from a type parameter of another type"
 
+(* A variant or an instance of a generic: a structure or union whose C
+   name only lowering makes, so that the backend's message about it would
+   spell the encoding of its name. *)
+let is_type_c_record (t : Ctype.t) =
+  match t.shape with
+  | Record { record_name = Variant_name _ | Instance_name _; _ } -> true
+  | Record _ | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+  | Array _ | Function _ | Unknown_type _ ->
+      false
+
+(* The step that likely reaches the value that a [source] variant holds:
+   a result is opened by try, any variant by matching (design 5). *)
+let opening_hint source =
+  match (Ctype.as_result source, Ctype.as_variant source) with
+  | Some _, _ -> "; take its value with try, or match it"
+  | None, Some _ -> "; match it to reach what it holds"
+  | None, None -> ""
+
+(* The step that likely makes a [target] variant: a constructor. *)
+let making_hint target =
+  match Ctype.as_variant target with
+  | Some _ ->
+      "; make one with a constructor of " ^ quote (Type_name.of_ctype target)
+  | None -> ""
+
+(* What the user likely meant by converting [source] to [target] where
+   only one of them is a structure or union. Between two of them no step
+   is likely enough to suggest. *)
+let record_conversion_hint ~source ~target =
+  let is_record t = Ctype.is_record t = Answer true in
+  match (is_record source, is_record target) with
+  | true, true | false, false -> ""
+  | true, false -> opening_hint source
+  | false, true -> making_hint target
+
+(* Design 5, C11 6.5.16.1p1: a value of a variant or an instance converts
+   to no other type, as a structure does not. The backend would refuse it
+   too, naming both types by their C encodings; typec names them as
+   Type-C writes them. A refusal of C, so it carries no rule's name,
+   unless a type argument decides it (design 7.1 rule 4). *)
+let refuse_record_conversion context span ~target ~source =
+  let refuse () =
+    context.fail span
+      (Rule.c_text
+         (Printf.sprintf "a value of type %s does not convert to %s%s \
+                          (C11 6.5.16.1p1)"
+            (quote (Type_name.of_ctype source))
+            (quote (Type_name.of_ctype target))
+            (record_conversion_hint ~source ~target)))
+  in
+  if is_type_c_record source || is_type_c_record target then
+    match
+      Ctype.compatible_by_argument context.target context.tags
+        (location_of context span) target source
+    with
+    | Every_argument (Answer false) -> refuse ()
+    | Argument_decides when Ctype.is_opaque target || Ctype.is_opaque source
+      ->
+        (* [refuse_type_parameter_conversion] refuses it, as it does a
+           value of a type parameter towards any other type. *)
+        ()
+    | Argument_decides ->
+        refuse_type_parameter context span
+          "a value converts between types that a type argument decides \
+           are compatible or not"
+    | Every_argument (Answer true | Depends_on _) -> ()
+
 (* Design 3.4: Type-C text converts no value implicitly to or from a
    distinct type, nor a pointer but as [pointers_differ] allows. The
    backend sees a distinct type as its representation (design 10.2), so
-   it cannot refuse these conversions; the others are its own. A value
-   converts only to a scalar: towards a structure or an array it
-   initialises a member through elided braces, which the initialiser
-   checks where it places the value, or the backend refuses it. *)
+   it cannot refuse these conversions; the others are its own, which
+   typec refuses where a variant or an instance would make the backend
+   name a C encoding. *)
 let refuse_conversion context span target (typed : typed) =
   let target = Ctype.unqualified target in
   let source = value_type typed in
+  refuse_record_conversion context span ~target ~source;
   let crosses =
     match (target.shape, source.shape) with
     | Pointer t, Pointer s -> (
@@ -2203,7 +2275,8 @@ let discard_branches context position ~need discards branches =
     | Unknown.Answer true, _ -> Some dropped_result
     | Depends_on unknown, (Discarded | Discarded_branch) ->
         Some (needing need unknown)
-    | Answer false, _ | Depends_on _, (Untargeted | Targeted _) -> None
+    | Answer false, _ | Depends_on _, (Untargeted | Targeted _ | Listed _) ->
+        None
   in
   let refuse diagnostic { branch; branch_typed } =
     if drops_result context branch branch_typed then
@@ -3311,11 +3384,11 @@ let named_in t constructors name =
    C's meaning of every name. *)
 let target_constructor context position (span : Tree.span) name =
   match position with
-  | Targeted t when is_type_c_text context span ->
+  | (Targeted t | Listed t) when is_type_c_text context span ->
       context.needs_complete t;
       Option.bind (Ctype.constructors context.tags t) (fun constructors ->
           named_in t constructors name)
-  | Targeted _ | Untargeted | Discarded | Discarded_branch -> None
+  | Targeted _ | Listed _ | Untargeted | Discarded | Discarded_branch -> None
 
 (* The constructor that the name at the start of [span] denotes, as the
    first reading of the name decided: an instance of a generic function
@@ -3688,11 +3761,11 @@ let try_value context span position ok_field =
   match (ok_field, position) with
   | Some (field : Ctype.member), Discarded ->
       (Ctype.unqualified field.member_type, No_value)
-  | Some field, (Untargeted | Targeted _ | Discarded_branch) ->
+  | Some field, (Untargeted | Targeted _ | Listed _ | Discarded_branch) ->
       ( Ctype.unqualified field.member_type,
         Read { field = field_name field; conversion = Unconverted } )
   | None, (Discarded | Discarded_branch) -> (Ctype.void, No_value)
-  | None, (Untargeted | Targeted _) ->
+  | None, (Untargeted | Targeted _ | Listed _) ->
       context.fail span
         (Rule.message Try_void
            "this try has no value, as the Ok of its result holds void; use \
@@ -3793,16 +3866,23 @@ and positioned context position (expression : Tree.expression) =
   record_dependence context expression;
   match position with
   | Targeted target -> assigned context expression ~target typed
+  | Listed target -> listed_value context expression ~target typed
   | Untargeted | Discarded | Discarded_branch -> typed
 
 (* 6.5.16.1p2, 6.5.2.2p7: [typed], the value of [expression], converted
    to [target] as if by assignment. Apart from [positioned], which
    recurses through deep trees, so that its frame stays small. *)
 and assigned context expression ~target typed =
-  context.needs_complete typed.expression_type;
-  let converted = convert_slice context expression ~target typed in
+  let converted = listed_value context expression ~target typed in
   refuse_conversion context expression.span target converted;
   converted
+
+(* [typed], the value of [expression] in a braced initialiser, made a
+   slice where [target] is one (design section 8 rule 5); the
+   initialiser checks the conversion where it places the value. *)
+and listed_value context expression ~target typed =
+  context.needs_complete typed.expression_type;
+  convert_slice context expression ~target typed
 
 and expression_node context position (whole : Tree.expression) =
   let span = whole.span in
@@ -4350,7 +4430,7 @@ and prototype_positions context (callee : typed) arguments =
    (design 7.1 rule 3). *)
 and argument context position argument =
   match position with
-  | Targeted _ -> positioned context position argument
+  | Targeted _ | Listed _ -> positioned context position argument
   | Untargeted | Discarded | Discarded_branch ->
       let typed = whole_value context argument in
       if Ctype.is_opaque typed.expression_type then
@@ -4904,10 +4984,13 @@ and initialiser context ~holder ~constant t initialiser =
   let value subobject initialising =
     let position =
       match subobject with
-      | Some subobject_type -> Targeted subobject_type
+      | Some subobject_type -> Listed subobject_type
       | None -> Untargeted
     in
     (positioned context position initialising).expression_type
+  in
+  let whole t initialising =
+    (positioned context (Targeted t) initialising).expression_type
   in
   (* The tries of the list that [converts] gave an object, by span. *)
   let placed_tries = Hashtbl.create 4 in
@@ -4928,6 +5011,7 @@ and initialiser context ~holder ~constant t initialiser =
       tags = context.tags;
       fail = context.fail;
       value;
+      whole;
       converts;
       initialises;
       source = source_through (selection_of context);

@@ -433,17 +433,46 @@ temporary, so they stand at file scope (13.5).
    int i
    }
 
+No other conversion between slices exists: a slice of other elements,
+or one that drops const, is refused where it is assigned.
+
+  $ printf 'void f(slice(int) a, slice(long) b) { a = b; (void)a; }\n' > conversion_elements.tc
+  $ ./golden.exe conversion_elements.tc
+  conversion_elements.tc:1: error: a value of type 'slice(long)' does not convert to 'slice(int)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'void f(slice(char) m, str c) { m = c; (void)m; }\n' > conversion_const.tc
+  $ ./golden.exe conversion_const.tc
+  conversion_const.tc:1: error: a value of type 'slice(const char)' does not convert to 'slice(char)' (C11 6.5.16.1p1)
+  [1]
+
 A slice that converts through a temporary is no constant, and a wide
-string literal denotes no `str`: it stays as written, for the backend
-to refuse.
+string literal denotes no `str`: its value, a pointer, does not convert
+to a slice.
 
   $ printf 'slice(char) m;\nstr c = m;\n' > conversion_outside.tc
   $ ./golden.exe conversion_outside.tc
   conversion_outside.tc:2: error: an initialiser of an object with static or thread storage duration is not a constant expression (C11 6.7.9p4)
   [1]
   $ printf 'str w = L"w";\n' > conversion_wide.tc
-  $ ./golden.exe conversion_wide.tc | grep -o '= L"w"'
-  = L"w"
+  $ ./golden.exe conversion_wide.tc
+  conversion_wide.tc:1: error: a value of type 'int *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
+  [1]
+
+Only a string literal becomes a slice: a pointer or an array of
+characters does not, and a literal is no slice of modifiable elements.
+
+  $ printf 'void take(str s);\nvoid f(const char *p) { take(p); }\n' > conversion_pointer.tc
+  $ ./golden.exe conversion_pointer.tc
+  conversion_pointer.tc:2: error: a value of type 'const char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'void take(str s);\nchar a[4];\nvoid f(void) { take(a); }\n' > conversion_array.tc
+  $ ./golden.exe conversion_array.tc
+  conversion_array.tc:3: error: a value of type 'char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'slice(char) m = "x";\n' > conversion_modifiable.tc
+  $ ./golden.exe conversion_modifiable.tc
+  conversion_modifiable.tc:1: error: a value of type 'char *' does not convert to 'slice(char)' (C11 6.5.16.1p1)
+  [1]
 
 An index in a range that lowering drops, as the operands of a
 `__builtin_types_compatible_p` that typec answers, declares no

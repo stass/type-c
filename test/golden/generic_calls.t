@@ -18,6 +18,28 @@ call of `int max(int, int)` converts `n`.
   > EOF
   $ ./golden.exe first.tc > /dev/null
 
+A later argument that does not convert is refused as in any call, in
+the types that the unit writes: an instance converts to no other type
+(design 5).
+
+  $ cat > later_refused.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void put(T *at, box(T) b) { *at = b.v; }
+  > box(long) b;
+  > void f(int *p) { put(p, b); }
+  > EOF
+  $ ./golden.exe later_refused.tc
+  later_refused.tc:4: error: a value of type 'box(long)' does not convert to 'box(int)' (C11 6.5.16.1p1)
+  [1]
+
+  $ cat > later.tc <<'EOF'
+  > type box(T) = struct { T v; };
+  > generic(T) void put(T *at, box(T) b) { *at = b.v; }
+  > box(int) b;
+  > void f(int *p) { put(p, b); }
+  > EOF
+  $ ./golden.exe later.tc > /dev/null
+
 The call has the instance's return type: `max(0, n)` is an `int`.
 
   $ cat > return_type.tc <<'EOF'

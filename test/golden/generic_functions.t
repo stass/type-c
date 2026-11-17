@@ -517,6 +517,30 @@ type convert to it.
   two_parameters.tc:1: error: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type [type-parameter-operation]
   [1]
 
+  $ cat > to_option.tc <<'EOF'
+  > generic(T) void f(T t) { option(int) o = t; (void)o; }
+  > EOF
+  $ ./golden.exe to_option.tc
+  to_option.tc:1: error: a value converts to or from a type parameter of another type, which is not valid C of one meaning for every value type [type-parameter-operation]
+  [1]
+
+Nor does an instance that mentions a type parameter convert to one
+that it matches only for some arguments; an instance of the same
+arguments converts.
+
+  $ cat > instances.tc <<'EOF'
+  > type list(T) = struct { T *head; };
+  > generic(T) void f(list(T) a, list(int) b) { a = b; (void)a; }
+  > EOF
+  $ ./golden.exe instances.tc
+  instances.tc:2: error: a value converts between types that a type argument decides are compatible or not, which is not valid C of one meaning for every value type [type-parameter-operation]
+  [1]
+  $ cat > same_instances.tc <<'EOF'
+  > type list(T) = struct { T *head; };
+  > generic(T) void f(list(T) a, list(T) b) { a = b; (void)a; }
+  > EOF
+  $ ./golden.exe same_instances.tc > /dev/null
+
   $ cat > classify.tc <<'EOF'
   > generic(T) int f(T *p) { return __builtin_classify_type(*p); }
   > EOF

@@ -488,22 +488,14 @@ sum_prices(list(double) prices)
 }
 ```
 
-Each instance of a generic type is a C structure of its own, so it is
-the C compiler that refuses `list(double)` where `list(int)` is wanted.
-Clang says (it quotes a fragment of the line, which
-[TODO.md](TODO.md) tracks):
+Each instance of a generic type is a C structure of its own, and a
+structure converts to no other type, so `typec` refuses `list(double)`
+where `list(int)` is wanted:
 
-<!-- console: clang -->
 ```console
 $ typec -c list.tc
-list.tc:18:14: error: passing 'list__d' (aka 'struct list__d') to parameter of incompatible type 'list__i' (aka 'struct list__i')
-   18 |  return (sum(prices));
-      |              ^~~~~~
-list.tc:4:2: note: passing argument to parameter 'l' here
-    4 |  l)
-      |  ^
-1 error generated.
-[1]
+list.tc:18: error: a value of type 'list(double)' does not convert to 'list(int)' (C11 6.5.16.1p1)
+[80]
 ```
 
 The C list of `void *` takes any element:
