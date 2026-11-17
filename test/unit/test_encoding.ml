@@ -80,7 +80,7 @@ let int_type = get (Ctype.integer lp64 Int)
 let generic name =
   match Spelling.type_name ~at_file_scope:true name with
   | Ok name -> name
-  | Error message -> failwith message
+  | Error _ -> failwith ("generic: " ^ name)
 
 let instance name arguments : Ctype.instance =
   { generic = generic name; arguments; argument_types = [];

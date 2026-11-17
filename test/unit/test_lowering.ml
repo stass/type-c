@@ -643,8 +643,9 @@ let under_limit name source =
 (* Where the front end's count stays under its budget for long names
    and file names, the texts that lowering writes from them are charged
    where they are made; so is the unit's own text, which grows faster
-   than its source in copies of defers, line markers that hold a long
-   file name and the names of a variant's constructors. *)
+   than its source in copies of defers and line markers that hold a long
+   file name. The names of a variant's constructors grow only with the
+   bound on the variant's name. *)
 let output_limit () =
   over_limit "a variant under a tree"
     (Budget_probes.variant_tree ~tag_length:3900 7);
@@ -662,9 +663,8 @@ let output_limit () =
     (Budget_probes.edits_in_long_file ~length:80000 4000);
   under_limit "fewer edits in a long file"
     (Budget_probes.edits_in_long_file ~length:80000 100);
-  over_limit "a long variant" (Budget_probes.long_variant ~length:50000 1250);
-  under_limit "a shorter long variant"
-    (Budget_probes.long_variant ~length:50000 100);
+  under_limit "a variant with the longest name"
+    (Budget_probes.long_variant ~length:Spelling.max_type_name_length 2000);
   over_limit "a str in a defer by exits"
     (Budget_probes.string_defer_by_exits ~length:40000 1000);
   under_limit "a str in a defer by fewer exits"

@@ -2535,6 +2535,39 @@ let failed_instance_claims () =
     (Option.map (fun message -> ("many generics", message)))
     [ failed_parse; too_slow ]
 
+(* A name that derives others is bounded (design 3.5 rule 7), so the
+   names of a variant's enumerators, each of which holds it, grow with
+   the constructors alone: a name of 50 KB is refused at its token,
+   before the parser claims any enumerator. *)
+let failed_name_bound () =
+  let name length = "t" ^ String.make (length - 1) 'x' in
+  let refused text =
+    match parse_failure type_c_file text with
+    | Some message
+      when String.starts_with ~prefix:"the name of a " message ->
+        None
+    | Some message -> Some ("refused otherwise: " ^ message)
+    | None -> Some "parsed"
+  in
+  let parses text =
+    Option.map (( ^ ) "refused: ") (parse_failure type_c_file text)
+  in
+  let longest = Spelling.max_type_name_length in
+  List.filter_map
+    (fun (case, failure) -> Option.map (fun message -> (case, message)) failure)
+    [ ("a type name at the bound",
+       parses (Printf.sprintf "type %s = int;" (name longest)));
+      ("a type name past the bound",
+       refused (Printf.sprintf "type %s = int;" (name (longest + 1))));
+      ("a generic function name past the bound",
+       refused
+         (Printf.sprintf "generic(T) T %s(T x) { return x; }"
+            (name (longest + 1))));
+      ("a long variant",
+       refused (Budget_probes.long_variant ~length:50000 5000));
+      ("a variant at the bound",
+       parses (Budget_probes.long_variant ~length:longest 2000)) ]
+
 (* File scope opens inside the universe scope: the tree and what file
    scope declares hold no universe generic, the scopes hold the two
    generics apart, and the view in front of a declaration finds them. *)
@@ -2706,7 +2739,7 @@ let failures () =
   in
   ( failed,
     failed_nesting_cases () @ failed_chain_cases () @ failed_universe_scope ()
-    @ failed_instance_claims ()
+    @ failed_instance_claims () @ failed_name_bound ()
   )
 
 let () =

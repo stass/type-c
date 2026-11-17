@@ -68,7 +68,7 @@ let aliases_in_long_file ~length depth =
   Printf.sprintf "#line 1 \"%s\"\n" (String.make length 'n') ^ aliases depth
 
 (* The output limit of design 3.5 rule 7 bounds the unit's own text as
-   well, which grows faster than the source in the three sources below
+   well, which grows faster than the source in the two sources below
    and the smaller partners of each. *)
 
 (* A function of [count] defers, each followed by a return that runs
@@ -87,7 +87,8 @@ let edits_in_long_file ~length count =
   ^ lines (List.init count (Printf.sprintf "type t%d = int;"))
 
 (* A variant whose name has [length] bytes, with [count] constructors,
-   the name of each of which holds the variant's. *)
+   the name of each of which holds the variant's: the parser's bound on
+   the name keeps their text linear in the source. *)
 let long_variant ~length count =
   let constructors =
     String.concat " " (List.init count (Printf.sprintf "| C%d"))

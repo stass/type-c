@@ -1509,18 +1509,32 @@ let declare_tag state (name : identifier) ~implicit =
       implicit;
     }
 
-(* The name of a type declaration, which its spelling lets derive names
-   for C (design 3.1 rules 6 and 7). [name] is the node made last, which
+(* The spelling of [name] as that of a [what], from which typec derives
+   names for C (design 3.1 rules 6 and 7). Its length is a translation
+   limit, whose refusal carries no code (3.5 rule 7). *)
+let checked_spelling state ~at_file_scope (name : identifier) ~what =
+  let refuse diagnostic = fail_at_token state (token_of name) diagnostic in
+  match Spelling.type_name ~at_file_scope name.node with
+  | Ok checked -> checked
+  | Error (Too_long length) ->
+      refuse
+        (Rule.c_text
+           (Printf.sprintf
+              "the name of a %s holds %d bytes, over the %d that typec \
+               takes (a translation limit, C11 5.2.4.1)"
+              what length Spelling.max_type_name_length))
+  | Error (Misspelt reason) ->
+      refuse
+        (Rule.message Type_name_spelling
+           (Printf.sprintf "%s cannot name a %s%s" (quoted name.node) what
+              reason))
+
+(* The name of a type declaration. [name] is the node made last, which
    the checked name replaces: it counts as a part, a level too many. *)
 let checked_type_name state (name : identifier) =
   let at_file_scope = Scope.is_file state.scope in
-  match Spelling.type_name ~at_file_scope name.node with
-  | Ok checked -> spanned state name.span checked
-  | Error reason ->
-      fail_at_token state (token_of name)
-        (Rule.message Type_name_spelling
-           (Printf.sprintf "%s cannot name a type declaration%s"
-              (quoted name.node) reason))
+  spanned state name.span
+    (checked_spelling state ~at_file_scope name ~what:"type declaration")
 
 (* The end of a refused claim's message: what holds the name already. *)
 let already_taken_by ~declared_here =
@@ -5084,14 +5098,11 @@ let generic_form state =
 let check_generic_name state declarator =
   match Tree.declared_identifier declarator with
   | None -> fail_one_function state (first_token state state.position)
-  | Some name -> (
-      match Spelling.type_name ~at_file_scope:true name.node with
-      | Ok _ -> claim_instance_space state name
-      | Error reason ->
-          fail_at_token state (token_of name)
-            (Rule.message Type_name_spelling
-               (Printf.sprintf "%s cannot name a generic function%s"
-                  (quoted name.node) reason)))
+  | Some name ->
+      ignore
+        (checked_spelling state ~at_file_scope:true name
+           ~what:"generic function");
+      claim_instance_space state name
 
 (* At the [generic] that [begins_generic_function] recognises. The type
    parameters are declared in a scope of their own, which stands for

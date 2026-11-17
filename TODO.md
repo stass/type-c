@@ -1499,15 +1499,6 @@ types (design 13.3).
   prefix), so a file name of 100 KB is printed whole;
   `Resolution.check_reading` walks every inexact typedef redeclaration
   for each reading (a tree 14 deep with 4000 pairs: 10 s).
-- [High] Security: the parser builds and claims the name of every
-  enumerator that a variant derives (`claim_enumerator`), each holding
-  the variant's name, which no bound limits, so its cost is the length
-  of the name times the constructors, about the square of the source:
-  a variant whose name has 50 KB with 5000 constructors (89 KB of
-  source) costs the parser 4.9 s and holds 250 MB of names before
-  lowering's output limit refuses it (one x86-64 host). Claim the
-  constructor's name under the variant instead of the joined string,
-  or bound the length of a name.
 - [High] Security: the pairs of a defer and an exit grow with the
   square of the source before lowering makes any text, so the output
   limit does not bound them. `Reachability` gives each defer site

@@ -19,11 +19,20 @@ type c_name = private string
     declaration, or the name of an instance of a generic (10.3). Only
     {!declared} and {!instance} make one. *)
 
-val type_name : at_file_scope:bool -> string -> (type_name, string) result
+val max_type_name_length : int
+(** The most bytes in a type name, which every name derived from it
+    holds; one more is a translation limit of typec (design 3.5 rule 7). *)
+
+(** Why a spelling names no type declaration: [Misspelt reason], where
+    [reason] completes the sentence that begins with the name and
+    "cannot name a type declaration", or [Too_long length], a name of
+    [length] bytes, over {!max_type_name_length}. *)
+type refusal = Misspelt of string | Too_long of int
+
+val type_name : at_file_scope:bool -> string -> (type_name, refusal) result
 (** The name of a type declaration (design 3.1 rules 6 and 7), declared
     at file scope or not; a name checked for a block scope is valid only
-    there. [Error reason] completes the sentence that
-    begins with the name and "cannot name a type declaration". *)
+    there. *)
 
 val constructor : string -> (constructor, string) result
 (** The name of a constructor, as far as the names it derives need

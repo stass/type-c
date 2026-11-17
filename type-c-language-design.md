@@ -843,10 +843,24 @@ id(stmt) s;                             /* e = s is an error */
    reported there, and the message names the argument and the bound.
    Without the bound a name doubles with each line of
    `typedef pair(p0, p0) p1; typedef pair(p1, p1) p2;`, and the
-   identifiers that `typec` hands the backend grow with it.
+   identifiers that `typec` hands the backend grow with it. The name of
+   a type declaration or a generic function holds at most 255 bytes,
+   and a longer one is an error, reported at the name. Every name that
+   `typec` derives holds such a name: an enumerator of a variant holds
+   the variant's, and an instance the generic's. Without the bound the
+   parser, which claims each enumerator by its name (10.1), spends the
+   length of the name times the constructors, the square of the source:
+   89 KB of source that are a name of 50 KB with 5000 constructors took
+   `typec` 4.9 s and 450 MB at its peak, nearly all of it the parser's.
+   With it, an enumerator of a variant that is no instance is at most
+   some 65 times the four bytes of source of its constructor (one of an
+   instance holds the encodings as well, which their own bound and the
+   instance budget limit), and 133 KB of source that are a variant of
+   the longest name and 16000 constructors cost `typec` 0.5 s and 69 MB
+   (one x86-64 host).
 
-   The budget, the output limit and the bound on encodings are
-   translation limits of `typec` (C11 5.2.4.1) and no rules of the
+   The budget, the output limit and the bounds on encodings and names
+   are translation limits of `typec` (C11 5.2.4.1) and no rules of the
    language, unlike the nesting limit: what they bound is the reading
    and the text of this compiler, the reading of its checks included,
    and a source is valid Type-C whatever they count. Their refusals
@@ -863,7 +877,10 @@ id(stmt) s;                             /* e = s is an error */
    line markers, and that of a function of 152 tokens, the mean of
    the 82 functions of tomlc99 (their median is 72), about 900.
    Both sizes are estimates, and they make that unit 3.6 MB. The
-   bound on encodings rests on no measurement of a Type-C program.
+   bound on encodings rests on no measurement of a Type-C program, and
+   that on names, 2^8 - 1, above four times the 63 significant initial
+   characters that C11 5.2.4.1 asks of an internal identifier, on none
+   either.
    The output limit rests on the inputs of the test suite: of the 560
    units that it lowers, every one is charged less than the base, the
    most 32086171 bytes for 82 KB of source whose file name of 80 KB
@@ -897,11 +914,8 @@ id(stmt) s;                             /* e = s is an error */
    281 MB, most of the time the front end's reading of their 1.4
    million pairs of a defer and an exit and lowering's sorting of them
    before any text is made; that work grows with the square of the
-   source, and 3400 defers take 14 s and 1.1 GB. The long variant takes
-   5.1 s and 383 MB, of which 4.9 s and most of the memory are the
-   parser's, which builds the name of each enumerator, the variant's
-   name with it. Neither cost is a translation limit of `typec`; each
-   is a fault of the stage that has it.
+   source, and 3400 defers take 14 s and 1.1 GB. That cost is no
+   translation limit of `typec`, but a fault of the stages that have it.
 8. *Provisional (P23).* The definition of a generic, type or function
    (section 7), is moved text: lowering writes it in each instance,
    where 10.3 places it, and the resolution property of 13.5 holds for
@@ -6821,14 +6835,16 @@ structures of the packing probe that ends one (10.3), one of each.
   refusal: it bounds what this compiler reads or writes and says
   nothing of whether the source is valid, and its message names it
   as a limit of `typec`. The parser's bound on the nesting of
-  brackets is one, and 3.5 rule 7 states three: the instance budget,
+  brackets is one, and 3.5 rule 7 states four: the instance budget,
   in bytes of what the front end reads for a unit's instances; the
   output limit, in bytes of all the C text that `typec` writes for a
-  unit but the fixed static assertions that end it, charged where each piece and edit of it is made, so that no
-  construct's text escapes it; and the bound of 4096 bytes on the
-  encodings of the arguments of one instance. 4.7 rule 10 states one
-  more, the bound on the selection tree of a match. The limit
-  on nested instantiation is none: 3.5 rule 7 states it as a rule of
+  unit but the fixed static assertions that end it, charged where each
+  piece and edit of it is made, so that no construct's text escapes
+  it; the bound of 4096 bytes on the encodings of the arguments of one
+  instance; and the bound of 255 bytes on the name of a type
+  declaration or a generic function. 4.7 rule 10 states one more,
+  the bound on the selection tree of a match. The limit on nested
+  instantiation is none: 3.5 rule 7 states it as a rule of
   Type-C, so it carries a name. A limit of the GNU profile, a
   construct
   outside the profile or one that needs what `typec` does not compute,
@@ -6926,7 +6942,7 @@ with the scripts that reproduce them (`make size-split`,
 | P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
 | P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its name; how many of them stand where C does not evaluate them; and how many tests hold a call or a statement expression in an operand after the first, with what volatile temporaries for those tests alone cost there, the form that the owner decided against (section 8 rule 10). A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays, and its temporaries are not volatile |
 | P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
-| P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32; and the encodings of the arguments of one instance hold at most 4096 bytes (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances in the front end, the bytes that lowering charges for each of them and their ratio to the source, and the longest encodings of one instance in them. The budget and the base of the limit are at least four times the largest count and charge, the factor at least four times the largest ratio and the bound at least four times the longest; a larger budget or limit costs in proportion (3.5 rule 7) | 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes |
+| P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32; the encodings of the arguments of one instance hold at most 4096 bytes; and the name of a type declaration or a generic function at most 255 (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances in the front end, the bytes that lowering charges for each of them and their ratio to the source, the longest encodings of one instance in them, and their longest name of a type declaration or generic function. The budget and the base of the limit are at least four times the largest count and charge, the factor at least four times the largest ratio and each bound at least four times the longest; a larger budget or limit costs in proportion, and a longer name in proportion to the constructors and uses that hold it (3.5 rule 7) | 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes; 255 bytes |
 | P31 | Selection sets a local that a second `switch` reads (13.5) | Stage 3, package 3.10: size and speed against hand-written nested `switch` statements, on both backends at `-O0` and at `-O2`. If the local costs at `-O2`: the leaves reach the arms by `goto` | The local stays |
 | P32 | The selection tree of a match holds at most 65536 nodes and leaves (4.7 rule 10) | Stage 3, package 3.10: the largest tree in the container library, the pilot and the tests. The bound is at least sixteen times the largest | 65536 |
 | P33 | The `try` expressions of a holder are evaluated before the rest of it, in the order of the source, and not in the order of reading; the prelude that does so is ISO C and costs what the same code written by hand costs (5.1 rule 3, 13.5) | Stage 3, package 3.12: each holder in the container library, the pilot and the README that holds, before a `try`, an operand with a side effect that C leaves unsequenced with it, found by reading the holders, and whether the order of reading was meant there; size and speed of the preludes against the same code with each `try` in a declaration of its own, on both backends at `-O0` and at `-O2`. If such holders are common and mean the order of reading: the operands before a `try` are hoisted with it, with the forms and refusals that the rationale of 5.1 lists | The order stays |

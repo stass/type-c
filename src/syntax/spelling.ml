@@ -38,15 +38,33 @@ let has_double_underscore spelling = Option.is_some (first_separator spelling)
    no [__] and does not begin with [_], as [constructor] checks of a
    constructor, so this spelling keeps every derived name from being
    reserved or holding [__], whatever the form of the declaration. *)
-let type_name ~at_file_scope spelling =
-  if has_double_underscore spelling then Error ", as it contains `__`"
+let misspelling ~at_file_scope spelling =
+  if has_double_underscore spelling then Some ", as it contains `__`"
   else if String.ends_with ~suffix:"_" spelling then
-    Error ", as it ends with `_`"
+    Some ", as it ends with `_`"
   else if begins_with_underscore_and_uppercase spelling then
-    Error ", as it begins with `_` and an uppercase letter"
+    Some ", as it begins with `_` and an uppercase letter"
   else if at_file_scope && String.starts_with ~prefix:"_" spelling then
-    Error " at file scope, as it begins with `_`"
-  else Ok spelling
+    Some " at file scope, as it begins with `_`"
+  else None
+
+(* A translation limit (design 3.5 rule 7): every name that typec
+   derives holds a type name, an enumerator of a variant the variant's
+   and an instance the generic's, so without the bound a long name
+   times many constructors or instances costs the square of the source.
+   2^8 - 1, above four times the 63 significant initial characters that
+   C11 5.2.4.1 asks of an internal identifier (provisional, P30). *)
+let max_type_name_length = 255
+
+type refusal = Misspelt of string | Too_long of int
+
+let type_name ~at_file_scope spelling =
+  let length = String.length spelling in
+  if length > max_type_name_length then Error (Too_long length)
+  else
+    match misspelling ~at_file_scope spelling with
+    | Some reason -> Error (Misspelt reason)
+    | None -> Ok spelling
 
 let constructor spelling =
   if String.starts_with ~prefix:"_" spelling then Error "it begins with `_`"

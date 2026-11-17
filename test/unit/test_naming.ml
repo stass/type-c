@@ -99,7 +99,7 @@ let tag_name () =
 let checked_name namespace check =
   match check (fresh namespace (fun name -> Result.is_ok (check name))) with
   | Ok name -> name
-  | Error message -> failwith message
+  | Error _ -> failwith "checked_name: a fresh name refused"
 
 let type_name () =
   checked_name ordinary (Spelling.type_name ~at_file_scope:true)
