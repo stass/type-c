@@ -37,7 +37,9 @@ let read source =
 (* The text that [source] is read to, its tree and its edits. *)
 let lowered source =
   let text, unit, declarations = read source in
-  (text, unit, Lowering.edits text declarations)
+  match Lowering.edits text declarations with
+  | Ok edits -> (text, unit, edits)
+  | Error error -> failwith (Reader.error_message error)
 
 let emitted source =
   let text, _, edits = lowered source in
@@ -138,11 +140,11 @@ let bracketed_after_forward source =
     | [] -> failwith "bracketed_after_forward: no anchor"
   in
   let location = text.tokens.(0).location in
-  let bracket =
-    Emitter.bracketed text ~at ~location
-      [ Emitter.generated location "struct s { int i; };" ]
+  let bracket output =
+    Emitter.bracketed output ~at ~location
+      [ Emitter.generated output location "struct s { int i; };" ]
   in
-  let edits = bracket :: edits in
+  let edits = Result.get_ok (Emitter.limited text bracket) :: edits in
   words (before_typec_text (Emitter.emit text { edits; assertions = [] }))
 
 let bracket =
@@ -609,6 +611,61 @@ let try_defers () =
         __tc_match->u.A.x; k ( v ) ; } else { switch (__tc_tag) { case o_A: \
         case o_B: break; default: __builtin_trap(); } } } }")
 
+let fails name message =
+  incr failures;
+  Printf.eprintf "FAIL: %s\n  %s\n" name message
+
+let holds text part =
+  let length = String.length part in
+  let rec at index =
+    index + length <= String.length text
+    && (String.sub text index length = part || at (index + 1))
+  in
+  at 0
+
+(* Design 3.5 rule 7: lowering refuses [source], which the front end's
+   count passes, where its C text would pass the output limit. *)
+let over_limit name source =
+  let text, _, declarations = read source in
+  match Lowering.edits text declarations with
+  | Ok _ -> fails name "lowered"
+  | Error { message; _ } ->
+      if not (holds message "would pass the output limit of typec") then
+        fails name message
+
+(* The partner of a source that [over_limit] refuses lowers. *)
+let under_limit name source =
+  let text, _, declarations = read source in
+  match Lowering.edits text declarations with
+  | Ok _ -> ()
+  | Error error -> fails name (Reader.error_message error)
+
+(* Where the front end's count stays under its budget for long names
+   and file names, the texts that lowering writes from them are charged
+   where they are made; so is the unit's own text, which grows faster
+   than its source in copies of defers, line markers that hold a long
+   file name and the names of a variant's constructors. *)
+let output_limit () =
+  over_limit "a variant under a tree"
+    (Budget_probes.variant_tree ~tag_length:3900 7);
+  under_limit "a variant under a smaller tree"
+    (Budget_probes.variant_tree ~tag_length:3900 4);
+  over_limit "a long file name"
+    (Budget_probes.aliases_in_long_file ~length:100000 9);
+  under_limit "a shorter file name"
+    (Budget_probes.aliases_in_long_file ~length:1000 9);
+  under_limit "a tree over a long tag" (Budget_probes.tree ~tag_length:4000 6);
+  under_limit "aliases" (Budget_probes.aliases 9);
+  over_limit "defers by exits" (Budget_probes.defers_by_exits 1000);
+  under_limit "fewer defers by exits" (Budget_probes.defers_by_exits 300);
+  over_limit "edits in a long file"
+    (Budget_probes.edits_in_long_file ~length:80000 4000);
+  under_limit "fewer edits in a long file"
+    (Budget_probes.edits_in_long_file ~length:80000 100);
+  over_limit "a long variant" (Budget_probes.long_variant ~length:50000 1250);
+  under_limit "a shorter long variant"
+    (Budget_probes.long_variant ~length:50000 100)
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -673,4 +730,5 @@ let () =
   goto_defers ();
   places ();
   try_defers ();
+  output_limit ();
   if !failures > 0 then exit 1

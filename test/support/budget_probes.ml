@@ -1,0 +1,97 @@
+(* SPDX-License-Identifier: BSD-2-Clause
+   Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
+
+(* Sources of a few lines whose instances grow exponentially with them,
+   which the instance budget of design 3.5 rule 7 must refuse, and their
+   smaller partners, which compile. The tests of the front end and of
+   lowering share them: each count refuses some of them. *)
+
+let lines texts = String.concat "\n" texts ^ "\n"
+
+(* [depth] aliases, each of which applies the one before it twice and so
+   doubles the depth of a pointer. *)
+let alias_lines depth =
+  "type a0(T) = T *;"
+  :: List.init depth (fun n ->
+         Printf.sprintf "type a%d(T) = a%d(a%d(T));" (n + 1) n n)
+
+let aliases depth =
+  lines (alias_lines depth @ [ Printf.sprintf "a%d(int) x;" depth ])
+
+(* The aliases up to [depth], applied to each of [count] structures. *)
+let aliases_over_structures depth count =
+  let use k =
+    Printf.sprintf "struct s%d { int i; }; a%d(struct s%d) x%d;" k depth k k
+  in
+  lines (alias_lines depth @ List.init count use)
+
+(* A structure whose tag has [length] bytes. *)
+let long_tag length = "s" ^ String.make (length - 1) 'x'
+
+(* A tree of structures [depth] deep over the leaf [g0], each of which
+   holds two instances of the one below it. *)
+let tree_lines depth leaf =
+  leaf
+  :: List.init depth (fun n ->
+         Printf.sprintf
+           "type g%d(T) = struct { g%d(T *) a; g%d(const T *) b; };" (n + 1)
+           n n)
+
+(* The tree over a leaf of 20 members, applied to a structure whose tag
+   has [tag_length] bytes. *)
+let tree ~tag_length depth =
+  let tag = long_tag tag_length in
+  let members = String.concat " " (List.init 20 (Printf.sprintf "T f%d;")) in
+  lines
+    ((Printf.sprintf "struct %s { int i; };" tag
+     :: tree_lines depth (Printf.sprintf "type g0(T) = struct { %s };" members))
+    @ [ Printf.sprintf "g%d(struct %s) x;" depth tag ])
+
+(* The tree over a variant of 200 constructors, which uses its type
+   parameter once: the names of its constructors carry the tag of
+   [tag_length] bytes. *)
+let variant_tree ~tag_length depth =
+  let tag = long_tag tag_length in
+  let constructors =
+    String.concat " " (List.init 200 (Printf.sprintf "| C%d"))
+  in
+  lines
+    ([ Printf.sprintf "struct %s { int i; };" tag;
+       Printf.sprintf "type v(T) = %s | D(T *p);" constructors ]
+    @ tree_lines depth "type g0(T) = struct { v(T) a; };"
+    @ [ Printf.sprintf "g%d(struct %s) x;" depth tag ])
+
+(* The aliases up to [depth] after a presumed file name of [length]
+   bytes, which the line marker in front of each text of an instance
+   holds. *)
+let aliases_in_long_file ~length depth =
+  Printf.sprintf "#line 1 \"%s\"\n" (String.make length 'n') ^ aliases depth
+
+(* The output limit of design 3.5 rule 7 bounds the unit's own text as
+   well, which grows faster than the source in the three sources below
+   and the smaller partners of each. *)
+
+(* A function of [count] defers, each followed by a return that runs
+   the copies of all the defers before it. *)
+let defers_by_exits count =
+  let step n = Printf.sprintf "  defer g(%d); if (c == %d) return;" n n in
+  lines
+    ([ "void g(int);"; "void f(int c) {" ]
+    @ List.init count step
+    @ [ "}" ])
+
+(* [count] type declarations, each of them edits with two line markers,
+   after a presumed file name of [length] bytes. *)
+let edits_in_long_file ~length count =
+  Printf.sprintf "#line 1 \"%s\"\n" (String.make length 'n')
+  ^ lines (List.init count (Printf.sprintf "type t%d = int;"))
+
+(* A variant whose name has [length] bytes, with [count] constructors,
+   the name of each of which holds the variant's. *)
+let long_variant ~length count =
+  let constructors =
+    String.concat " " (List.init count (Printf.sprintf "| C%d"))
+  in
+  lines
+    [ Printf.sprintf "type %s = %s;" ("v" ^ String.make (length - 1) 'x')
+        constructors ]

@@ -6,14 +6,72 @@ open Typec_syntax
 
 type piece = { text : string; location : Location.t }
 
-(* The token [index] of [unit] at its own location. *)
-let own_piece (unit : Reader.t) index =
-  let token = unit.tokens.(index) in
-  { text = Reader.spelling unit token; location = token.location }
+(* The output limit of design 3.5 rule 7, on the bytes that emission
+   writes for a unit: [limit_base] and [limit_per_byte] for each byte of
+   the preprocessed unit. The base lets a short unit hold the instances
+   that the front end's count lets through, and the factor lets the text
+   of a long unit grow far past what the inputs of the tests ask; design
+   P30 gives the measures. *)
+let limit_base = 33554432
+let limit_per_byte = 256
 
-let token (unit : Reader.t) index =
-  if Token.is_movable unit.tokens.(index).kind then
-    Some (own_piece unit index)
+let limit unit = limit_base + (limit_per_byte * Reader.length unit)
+
+(* The output of a unit as lowering makes it: the bytes charged so far,
+   which only [charge] raises, and the limit they are held to. *)
+type output = { unit : Reader.t; limit : int; mutable charged : int }
+
+(* The first charge that would pass the limit, at the location of what
+   it charges; [limited] catches it, so nothing more is made. *)
+exception Over_limit of Location.t
+
+let charge output location bytes =
+  output.charged <- output.charged + bytes;
+  if output.charged > output.limit then raise (Over_limit location)
+
+let over_limit output location : Reader.error =
+  let message =
+    Printf.sprintf
+      "the C text of the unit would pass the output limit of typec, %d \
+       bytes for this unit: %d and %d for each byte of its preprocessed \
+       text"
+      output.limit limit_base limit_per_byte
+  in
+  { location; message = Rule.text (Rule.c_text message) }
+
+(* The text of the unit outside its edits is at most the unit's own, so
+   that is charged before anything is made. *)
+let limited unit make =
+  let size = Reader.length unit in
+  let output = { unit; limit = limit unit; charged = size } in
+  match make output with
+  | made -> Ok made
+  | exception Over_limit location -> Error (over_limit output location)
+
+let unit output = output.unit
+
+(* The least that a piece is charged. A piece costs typec some hundred
+   bytes of memory whatever its text, so where a piece of one token was
+   charged only its bytes, a unit of copied tokens would take 35 times
+   its limit in memory. *)
+let least_piece_charge = 32
+
+(* A piece takes its text and the blank or the line break after it on
+   the line of its run (see [moved_lines]). *)
+let made_piece output piece =
+  let bytes = String.length piece.text + 1 in
+  charge output piece.location (max bytes least_piece_charge);
+  piece
+
+(* The token [index] of the unit at its own location. *)
+let own_piece output index =
+  let token = output.unit.tokens.(index) in
+  made_piece output
+    { text = Reader.spelling output.unit token; location = token.location }
+
+let token output index =
+  if Token.is_movable output.unit.tokens.(index).kind then
+    Some (own_piece output index)
   else None
 
 (* The bytes of typec's own text: those of identifiers, UTF-8 included,
@@ -36,9 +94,24 @@ let check_own_text ~caller text =
       (Printf.sprintf "%s: %S holds a byte that typec's text never does"
          caller text)
 
-let generated location text =
+let generated output location text =
   check_own_text ~caller:"Emitter.generated" text;
-  { text; location }
+  made_piece output { text; location }
+
+(* Each part is held to the limit as it is spelt, before the next is,
+   so a text that repeats a long name for each of many items is refused
+   before it is built; a separator is counted for each part, one more
+   than it holds. The text is charged once, where it is written. *)
+let joined output location ~separator spell items =
+  let add (length, parts) item =
+    let text = spell item in
+    let length = length + String.length text + String.length separator in
+    if output.charged + length > output.limit then
+      raise (Over_limit location);
+    (length, text :: parts)
+  in
+  let _, parts = List.fold_left add (0, []) items in
+  String.concat separator (List.rev parts)
 
 (* A pragma line is a whole line of the source, of a type of its own so
    that no bracket holds one, inside this module as outside it. *)
@@ -49,10 +122,11 @@ type moved_piece = Piece of piece | Pragma_line of pragma_line
 (* Only a pragma line whose identifiers the rules of design 13.5 can
    read may move; the other lines are errors there, whose checks
    lowering makes. *)
-let moved_token (unit : Reader.t) index =
-  match unit.tokens.(index).kind with
-  | Pragma (Identifiers _) -> Some (Pragma_line { line = own_piece unit index })
-  | kind when Token.is_movable kind -> Some (Piece (own_piece unit index))
+let moved_token output index =
+  match output.unit.tokens.(index).kind with
+  | Pragma (Identifiers _) ->
+      Some (Pragma_line { line = own_piece output index })
+  | kind when Token.is_movable kind -> Some (Piece (own_piece output index))
   | _ -> None
 
 type text =
@@ -61,24 +135,6 @@ type text =
   | Moved of moved_piece list
 
 type edit = { range : Reader.range; text : text; owner : int }
-
-let code (range : Reader.range) ~location code =
-  check_own_text ~caller:"Emitter.code" code;
-  { range; text = Code { location; code }; owner = range.first }
-
-let closing tokens ~after ~location code =
-  check_own_text ~caller:"Emitter.closing" code;
-  { range = Reader.range tokens ~first:(after + 1) ~count:0;
-    text = Code { location; code };
-    owner = after }
-
-let bracketed (unit : Reader.t) ~(at : Tree.anchor) ~location pieces =
-  { range = Reader.range unit.tokens ~first:at.before ~count:0;
-    text = Bracketed { location; pieces };
-    owner = at.before }
-
-let moved (range : Reader.range) pieces =
-  { range; text = Moved pieces; owner = range.first }
 
 (* A line marker for [location], on a line of its own. It repeats the
    flags in effect at [location] and no enter or return flag, so the
@@ -124,10 +180,8 @@ let bracket lines =
    line, which no piece may join (C11 6.10p2). *)
 type run = Pieces of Location.t * string list | Line of pragma_line
 
-(* The lines of moved text: a marker for the location of each run, then
-   the run on one line, so that every piece keeps its own file and line
-   (design 13.4). *)
-let moved_lines pieces =
+(* The runs of moved text in order, the texts of each run reversed. *)
+let runs pieces =
   let add runs = function
     | Pragma_line line -> Line line :: runs
     | Piece piece -> (
@@ -137,26 +191,39 @@ let moved_lines pieces =
             Pieces (location, piece.text :: texts) :: earlier
         | _ -> Pieces (piece.location, [ piece.text ]) :: runs)
   in
-  let lines = function
-    | Pieces (location, texts) ->
-        [ marker_line location; String.concat " " (List.rev texts) ]
-    | Line { line } -> [ marker_line line.location; line.text ]
+  List.rev (List.fold_left add [] pieces)
+
+let run_marker = function
+  | Pieces (location, _) -> marker_line location
+  | Line { line } -> marker_line line.location
+
+(* The lines of moved text: a marker for the location of each run, then
+   the run on one line, so that every piece keeps its own file and line
+   (design 13.4). *)
+let moved_lines pieces =
+  let lines run =
+    match run with
+    | Pieces (_, texts) ->
+        [ run_marker run; String.concat " " (List.rev texts) ]
+    | Line { line } -> [ run_marker run; line.text ]
   in
-  List.concat_map lines (List.rev (List.fold_left add [] pieces))
+  List.concat_map lines (runs pieces)
 
 let as_moved piece = Piece piece
 
-(* The pragmas of a bracket stand at its location: the marker of the
-   location precedes the first and the last, and the second is on the
-   line after the first. The newline in front starts moved text on a
-   line of its own wherever the edit stands in a line. *)
+(* The lines of a bracket at [location] around the lines of its moved
+   text: the pragmas stand at its location, whose marker precedes the
+   first and the last, and the second is on the line after the first. *)
+let bracketed_lines location lines =
+  marker_line location :: bracket (lines @ [ marker_line location ])
+
+(* The newline in front starts moved text on a line of its own wherever
+   the edit stands in a line. *)
 let written = function
   | Code { location; code } -> marker location ^ code
   | Bracketed { location; pieces } ->
-      let opening = marker_line location in
-      let pieces = List.map as_moved pieces in
-      let lines = bracket (moved_lines pieces @ [ marker_line location ]) in
-      "\n" ^ String.concat "\n" (opening :: lines)
+      let lines = moved_lines (List.map as_moved pieces) in
+      "\n" ^ String.concat "\n" (bracketed_lines location lines)
   | Moved pieces -> "\n" ^ String.concat "\n" (moved_lines pieces)
 
 (* The edit as the backend reads it: its text, which begins with a
@@ -167,6 +234,58 @@ let replacement (tokens : Token.t array) edit : Reader.replacement =
     written edit.text ^ marker (end_location tokens edit.range)
   in
   { range = edit.range; text }
+
+(* The bytes of [lines] with a line break in front of each, as [written]
+   writes moved text. *)
+let line_bytes lines =
+  List.fold_left (fun bytes line -> bytes + String.length line + 1) 0 lines
+
+(* The bytes that [written] gives [text] beyond the lines of its runs,
+   whose pieces were charged as they were made ([made_piece]): the
+   markers of the runs, and the markers and code of a code edit or the
+   markers and pragmas of a bracket. Empty moved text is the line break
+   alone. *)
+let frame_bytes = function
+  | Code { location; code } ->
+      String.length (marker location) + String.length code
+  | Bracketed { location; pieces } ->
+      line_bytes (bracketed_lines location [])
+      + line_bytes (List.map run_marker (runs (List.map as_moved pieces)))
+  | Moved [] -> 1
+  | Moved pieces -> line_bytes (List.map run_marker (runs pieces))
+
+(* Each edit is charged as it is made, at the location of the construct
+   it writes, its frame and the marker after it ([replacement]). *)
+let made_edit output edit =
+  let location =
+    match edit.text with
+    | Code { location; _ } | Bracketed { location; _ } -> location
+    | Moved _ -> output.unit.tokens.(edit.owner).location
+  in
+  let after = marker (end_location output.unit.tokens edit.range) in
+  charge output location (frame_bytes edit.text + String.length after);
+  edit
+
+let code output (range : Reader.range) ~location code =
+  check_own_text ~caller:"Emitter.code" code;
+  made_edit output
+    { range; text = Code { location; code }; owner = range.first }
+
+let closing output ~after ~location code =
+  check_own_text ~caller:"Emitter.closing" code;
+  made_edit output
+    { range = Reader.range output.unit.tokens ~first:(after + 1) ~count:0;
+      text = Code { location; code };
+      owner = after }
+
+let bracketed output ~(at : Tree.anchor) ~location pieces =
+  made_edit output
+    { range = Reader.range output.unit.tokens ~first:at.before ~count:0;
+      text = Bracketed { location; pieces };
+      owner = at.before }
+
+let moved output (range : Reader.range) pieces =
+  made_edit output { range; text = Moved pieces; owner = range.first }
 
 type lowered = { edits : edit list; assertions : string list }
 

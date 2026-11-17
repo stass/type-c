@@ -105,6 +105,11 @@ val rewrite : t -> replacement list -> string
     before it, [first + count], so they do not overlap and insertions in
     front of one token keep their order; [Invalid_argument] otherwise. *)
 
+val length : t -> int
+(** [length result] is the bytes of the text as [cc -E] wrote it, which
+    {!rewrite} copies when it replaces nothing; the universe text is not
+    among them. *)
+
 val error_message : error -> string
 (** ["file:line: message"], the form of a C compiler's diagnostics, with
     every character that is not printable ASCII escaped as C writes it:

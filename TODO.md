@@ -1505,110 +1505,78 @@ types (design 13.3).
   `char` of the refused head, with `va_start(ap, last)` in its
   body, draws `-Wvarargs` from Apple Clang, and the same text with
   `int count` before the ellipsis draws nothing.
-- [High] The instance budget (design 3.5 rule 7), a security item: a
-  source of a few lines must not make `typec` read or write without
-  bound. `Declarations.max_instance_tokens` counts 524288 tokens of
-  the definitions read, and the cost of a reading grows with its
-  arguments as well: each name in an instance holds their encodings,
-  up to `Encoding.max_length` bytes, and each line marker the name
-  of the file. Today's `typec` on one x86-64 host, each source
-  under the count of tokens:
-  - `type a0(T) = T *;`, `type aN(T) = aM(aM(T));` up to `a12` and
-    `a12(int) x;`, 14 lines: 11.8 s and 146 MB, then refused by the
-    bound on encodings and not by the budget.
-  - `a0` to `a11` so and `struct sK { int i; }; a11(struct sK) xK;`
-    for 48 structures: 19 s and 708 MB before the budget refuses.
-  - A structure with a tag of 4000 bytes, `type g0(T) = struct
-    { T f0; ... T f19; };`, `type gN(T) = struct { gM(T *) a;
-    gM(const T *) b; };` up to `g10` and one `g10` of the
-    structure, 13 lines: accepted, 145 MB of C in 2.1 s and 1 GB.
-  - The tree up to `g8` over `type g0(T) = struct { v(T) a; };`
-    with `type v(T) = | C0 | ... | C199 | D(T *p);` and a tag of
-    3900 bytes, 12 lines: accepted, 226 MB in 5.5 s and 1.9 GB. `v`
-    uses `T` once: the names of its constructors carry the tag.
-  - `#line 1 "n...n"` with a name of 100000 bytes before the
-    aliases up to `a9` and `a9(int) x;`: accepted, 157 MB and
-    1.2 GB, in the line markers of 1023 instances.
-
-  The design counts bytes of text in two places and holds each to
-  16777216:
-  - The front end. `in_instance` counts the bytes of the tokens of
-    the definition, in place of their number, before the reading,
-    and `note_name` the bytes of each name, also where
-    `moved.written` is false, so that the chain of a definition
-    check counts as a definition does. The constant and the comment
-    that argues for it become the design's.
-  - Lowering. The texts that design 10.3 places (`Lowering`,
-    "Instances") pass through one function that counts their bytes,
-    line markers included, and refuses past the budget.
-    `Lowering.edits` returns the refusal, and `Front_end` reports
-    it as it reports one of `Declarations`. The count stands where
-    the text is made and asks nothing of what kind of text it is,
-    so that no construct is listed.
-  - `fail_instances` names the instance and not the application or
-    call that began the chain, as `fail_nesting` does and the design
-    asks: `type g0(T) = struct { T v; };`, then `type gN(T) = struct
-    { gM(T *) a; gM(const T *) b; };` for 24 more, is reported at
-    the application in the definition of `g1` alone.
-  - Package 3.3: reading the definition of a generic function for an
-    instance counts on the same count, through the one function that
-    counts a type's (`in_instance`), so that no reading goes
-    uncounted.
-  - Tests, each refusal with a partner that compiles. A source that
-    must be refused is read under a time bound (`Timing`), since
-    without its count it does not end in the time a test waits:
-    - The aliases up to `a12`, and the 48 structures over `a11`, are
-      refused with the message of the budget; the aliases up to
-      `a9` compile. With the names left out of the front end's
-      count, the first is refused by the bound on encodings
-      instead, which shows that the test meets the count of names.
-    - The tree up to `g10` over the tag of 4000 bytes is refused;
-      the tree up to `g6` compiles (9.3 MB).
-    - The variant of 200 constructors under the tree up to `g8`,
-      and the file name of 100000 bytes, are refused by lowering:
-      the front end's count passes both (by estimate, 7 MB and
-      3 MB; confirm it). Partners: the variant under the tree up to
-      `g4` (14 MB) and a file name of 1000 bytes compile. With
-      lowering's count left out, both refusals are missing.
-    - A byte bound on what is accepted: for each partner, the
-      output less the unit's own text is at most the budget.
-    - `doubling_instances` in `test_declarations.ml` runs to the
-      budget; see what the count in bytes costs it.
-  - Regression for package 3.3, the shallow branching chain: the
-    generic functions `g0` to `g24`, each `generic(T) void gN(T *p)
-    { const T *q = p; gM(&p); gM(&q); }` and the last with an empty
-    body, and one use `g0(&x)`. No chain holds more than 25
-    instances, so the nesting limit does not refuse it. It is
-    refused with the message of the budget, within a time bound,
-    and no lowered text is written. The place is not the use. A
-    definition check follows its chain and counts (design 3.5 rule
-    7), the checks run in the order of the definitions, and one of
-    them passes the budget before the use is read: the checks of
-    such a chain read about twice what its one use does. So the
-    error stands at a call in the definition of some `gM`, the call
-    that needs the reading which would pass the budget, and cites
-    the call that began the chain, in the definition under check.
-    The test asserts that both stand in definitions and not which
-    `gM`, which the sizes of the texts decide. Partner: the chain
-    of 10 functions compiles and runs, and the lowered text holds
-    its 1023 instances. A second refusal has its place at a use:
-    the chain of 10, used with as many argument types as pass the
-    budget, is refused at a call in an instance, and the message
-    cites the use that began the chain. With the count of function
-    instances left out, the chain of 25 does not end within the
-    bound, which is what shows that the test meets the count.
-  - Package 3.6 measures the bytes that each unit of the container
-    library and of the pilot counts, in the front end and in
-    lowering, and its longest encodings (P30).
-- [Medium] The unit's own text grows with its names, which the
-  instance budget does not count (design 3.5 rule 7): 5000 lines of
-  `g(b) *pN;`, with `b` a typedef of a structure whose tag has 4000
-  bytes, are 72 KB of source and 20 MB of lowered C, a name of 4000
-  bytes for each application. The growth is linear in the source,
-  by at most `Encoding.max_length` bytes for an application. Decide
-  whether that factor stands or the bound on encodings should be
-  lower; package 3.6 measures the longest encodings of the library
-  and the pilot (P30).
+- [Medium] Follow-ups of the review of the instance budget: the
+  messages echo the presumed file name unbounded (`fail_instances`,
+  `fail_nesting`, the output limit's refusal and every location
+  prefix), so a file name of 100 KB is printed whole;
+  `Resolution.check_reading` walks every inexact typedef redeclaration
+  for each reading (a tree 14 deep with 4000 pairs: 10 s).
+- [High] Security: the parser builds and claims the name of every
+  enumerator that a variant derives (`claim_enumerator`), each holding
+  the variant's name, which no bound limits, so its cost is the length
+  of the name times the constructors, about the square of the source:
+  a variant whose name has 50 KB with 5000 constructors (89 KB of
+  source) costs the parser 4.9 s and holds 250 MB of names before
+  lowering's output limit refuses it (one x86-64 host). Claim the
+  constructor's name under the variant instead of the joined string,
+  or bound the length of a name.
+- [High] Security: the pairs of a defer and an exit grow with the
+  square of the source before lowering makes any text, so the output
+  limit does not bound them. `Reachability` gives each defer site
+  every exit that leaves its scope, and `Lowering.places` makes all
+  the (place, site) pairs and sorts them with polymorphic compare,
+  once in `function_edits` and again in `error_path_cleanups`. 1700
+  defers each followed by a return (66 KB) take 3.7 s and 281 MB to
+  refuse, 3400 (133 KB) 14 s and 1.1 GB. Represent the sites that a
+  place leaves as the chain of its scopes, linear in the source, and
+  make each copy as the place is lowered, so that the limit bounds the
+  pairs by construction.
+- [Medium] The output limit charges each piece where it is made, so a
+  piece that lowering puts into two edits is written twice and
+  charged once; no current path does (`moved_text` reuses the pieces
+  of a `Moved` edit only where that edit goes, and `base` holds only
+  `Code` edits), but nothing enforces it. Hide the payloads of
+  `Emitter.text` behind a function that charges the pieces again where
+  they move, or charge the edits that `limited` returns once more,
+  exactly.
+- [Medium] `Emitter.joined` holds a text built from a list to the
+  limit only where lowering calls it (the enumerators, the case labels
+  and the bindings); a text built per item by hand escapes it until
+  its edit is made. Let `Emitter.code` and `closing` take the parts of
+  their text and charge them part by part, so that `joined` goes.
+- [Medium] The factor of the output limit counts every byte of the
+  preprocessed unit, its headers included, so a short unit that
+  includes 10 MB of headers may write 2.6 GB; and emission holds the
+  text several times at its peak (each edit's string, the buffer that
+  grows by doubling, its contents and the assertions appended). Weigh
+  counting the unit's own bytes only, and write the replacements and
+  the assertions into one buffer sized from the charge.
+- [Low] Four copies of the substring helper in test/unit, five with
+  `holds` in test_lowering.ml, should move to test/support.
+- [Medium] Package 3.3: the instance budget (design 3.5 rule 7) for
+  function instances. Reading the definition of a generic function for
+  an instance counts on the one count, through
+  `Declarations.charge_reading` with the link of the instance, as
+  `in_instance` does for a type's, so that no reading goes uncounted;
+  the output limit charges the texts of function instances as it does
+  every text lowering makes. Regression, the shallow
+  branching chain: the generic functions `g0` to `g24`, each
+  `generic(T) void gN(T *p) { const T *q = p; gM(&p); gM(&q); }` and
+  the last with an empty body, and one use `g0(&x)`. No chain holds
+  more than 25 instances, so the nesting limit does not refuse it. It
+  is refused with the message of the budget, within a time bound, and
+  no lowered text is written. A definition check follows its chain and
+  counts, the checks run in the order of the definitions, and one of
+  them passes the budget before the use is read, so the error stands
+  at a call in the definition of some `gM` and cites the call that
+  began the chain, in the definition under check. The test asserts
+  that both stand in definitions and not which `gM`. Partner: the
+  chain of 10 functions compiles and runs, and the lowered text holds
+  its 1023 instances. A second refusal has its place at a use: the
+  chain of 10, used with as many argument types as pass the budget, is
+  refused at a call in an instance, and the message cites the use that
+  began the chain. With the count of function instances left out, the
+  chain of 25 does not end within the bound.
 - [Medium] Function names in a generic function (design 7.1 rule
   3): the refusal follows the array through the forms that hand it
   on as it is. Pairs for `test/golden/generic_functions.t`, each

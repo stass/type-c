@@ -7,7 +7,7 @@
    '#pragma pack' that the probe of design 10.3 does not see: only moved
    text holds a pragma line, so this must not compile. *)
 
-let bracketed unit ~at ~location index =
-  match Emitter.moved_token unit index with
-  | Some (Pragma_line line) -> Emitter.bracketed unit ~at ~location [ line ]
+let bracketed output ~at ~location index =
+  match Emitter.moved_token output index with
+  | Some (Pragma_line line) -> Emitter.bracketed output ~at ~location [ line ]
   | Some (Piece _) | None -> failwith "no pragma line"

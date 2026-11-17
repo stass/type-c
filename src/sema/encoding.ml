@@ -21,11 +21,12 @@ exception No_row of no_row
 
 let refuse part reason = raise (No_row { part; reason })
 
-(* Design 10.3 bounds no name, but an instance is one node of a type, so
-   [Ctype.max_size] does not bound the encodings that it holds: a
-   typedef of [pair(p, p)] for each [p] doubles the name. The limit keeps
+(* The bound on encodings of design 3.5 rule 7 and 10.3, a translation
+   limit of typec: an instance is one node of a type, so
+   [Ctype.max_size] does not bound the encodings that it holds, and a
+   typedef of [pair(p, p)] for each [p] doubles the name. The bound keeps
    both the memory of typec and the identifiers that it hands the
-   backend small; it is far above the names of real programs. *)
+   backend small (provisional, P30). *)
 let max_length = 4096
 
 (* An encoding is written into a buffer that refuses to grow past

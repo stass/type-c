@@ -4,6 +4,9 @@
 open Typec_cpp
 open Typec_syntax
 
+(* The tokens of the unit that [output] is made from. *)
+let tokens_of output = (Emitter.unit output).tokens
+
 (* Whether [indexes] are a run of adjacent tokens of one file, which an
    edit may replace whole without dropping a pragma or a line marker
    that enters or leaves a file between them. *)
@@ -24,29 +27,30 @@ let is_run (tokens : Token.t array) = function
    [text]. Where the tokens are a run, one edit replaces them all. Where a
    pragma or a file boundary stands between them, [text] replaces the
    first and the others are deleted, so what stands between them stays. *)
-let replace (tokens : Token.t array) ~location text indexes :
-    Emitter.edit list =
+let replace output ~location text indexes : Emitter.edit list =
+  let tokens = tokens_of output in
+  let code ~first ~count text =
+    Emitter.code output (Reader.range tokens ~first ~count) ~location text
+  in
   match indexes with
   | [] -> []
   | first :: _ when is_run tokens indexes ->
-      let count = List.length indexes in
-      [ Emitter.code (Reader.range tokens ~first ~count) ~location text ]
+      [ code ~first ~count:(List.length indexes) text ]
   | first :: rest ->
-      let delete index =
-        Emitter.code (Reader.range tokens ~first:index ~count:1) ~location ""
-      in
-      Emitter.code (Reader.range tokens ~first ~count:1) ~location text
-      :: List.map delete rest
+      code ~first ~count:1 text
+      :: List.map (fun index -> code ~first:index ~count:1 "") rest
 
-let insert (tokens : Token.t array) ~before text =
-  Emitter.code
+let insert output ~before text =
+  let tokens = tokens_of output in
+  Emitter.code output
     (Reader.range tokens ~first:before ~count:0)
     ~location:tokens.(before).location text
 
 (* [text] after token [after], as the end of the construct that ends
    there, so that it moves with that construct's tokens. *)
-let close (tokens : Token.t array) ~after text =
-  Emitter.closing tokens ~after ~location:tokens.(after).location text
+let close output ~after text =
+  let location = (tokens_of output).(after).location in
+  Emitter.closing output ~after ~location text
 
 (* The grammar tokens from [first] to [last], without the pragmas
    between them, which stay. *)
@@ -110,17 +114,18 @@ let record_declarations kind ~tag name =
    would name it. [typedef] replaces the tokens before [T]: [type N =],
    with the type parameters of a generic and the words of a distinct
    type. *)
-let alias tokens ~location (declaration : Tree.type_declaration) name
+let alias output ~location (declaration : Tree.type_declaration) name
     (type_name : Tree.type_name) =
+  let tokens = tokens_of output in
   let before_type = grammar_token_before tokens type_name.span.first in
   let name_before =
     match type_name.node.abstract with
     | Some abstract -> name_position abstract
     | None -> type_name.span.last + 1
   in
-  replace tokens ~location "typedef"
+  replace output ~location "typedef"
     (grammar_tokens tokens declaration.span.first before_type)
-  @ [ insert tokens ~before:name_before name ]
+  @ [ insert output ~before:name_before name ]
 
 (* For a variant or a record alias [declaration]: the grammar tokens
    that its forward declaration replaces, and the first token after
@@ -130,16 +135,17 @@ let forward_declaration tokens (declaration : Tree.type_declaration) =
   (grammar_tokens tokens declaration.span.first (forward_end - 1), forward_end)
 
 (* A specifier without a tag of its own takes [name], before its body. *)
-let record_alias tokens ~location ~name (declaration : Tree.type_declaration)
+let record_alias output ~location ~name (declaration : Tree.type_declaration)
     (specifier : Tree.record_specifier Tree.spanned) =
+  let tokens = tokens_of output in
   let { Tree.kind; tag; members; _ } = specifier.node in
   let replace_head ~tag =
-    replace tokens ~location
+    replace output ~location
       (record_declarations kind ~tag name)
       (fst (forward_declaration tokens declaration))
   in
   let insert_tag (body : _ Tree.spanned) =
-    insert tokens ~before:body.span.first name
+    insert output ~before:body.span.first name
   in
   match tag with
   | Some own -> replace_head ~tag:own.name.node
@@ -179,7 +185,8 @@ let variant_forward ~completes (variant : Spelling.c_name) =
 (* What comes between the forward declaration and the constructors: the
    enumeration of the tags, numbered from 0 in order (rule 1), and the
    structure up to its union where it has one (rule 3). *)
-let variant_head (variant : Spelling.c_name) ~has_union constructors =
+let variant_head output ~location (variant : Spelling.c_name) ~has_union
+    constructors =
   let name = (variant :> string) in
   let enumerator (constructor : Tree.constructor) =
     Tree.enumerator_name ~variant constructor.node.name.node
@@ -187,7 +194,7 @@ let variant_head (variant : Spelling.c_name) ~has_union constructors =
   let tag_enum = "enum " ^ Tree.enum_tag_name variant in
   let union = if has_union then " union {" else "" in
   Printf.sprintf "%s { %s }; struct %s { %s %s;%s" tag_enum
-    (String.concat ", " (List.map enumerator constructors))
+    (Emitter.joined output location ~separator:", " enumerator constructors)
     name tag_enum Tree.tag_member union
 
 let variant_tail ~has_union =
@@ -195,8 +202,9 @@ let variant_tail ~has_union =
 
 (* The tokens at [indexes], the first of which is [first], replaced by
    [text] at the location of [first]. *)
-let replace_at (tokens : Token.t array) ~first text indexes =
-  replace tokens ~location:tokens.(first).location text (first :: indexes)
+let replace_at output ~first text indexes =
+  let tokens = tokens_of output in
+  replace output ~location:tokens.(first).location text (first :: indexes)
 
 (* A constructor with fields becomes the struct of them that the union
    holds, named after it; [| C (] opens it, the [,] after each field
@@ -204,7 +212,8 @@ let replace_at (tokens : Token.t array) ~first text indexes =
    a void field ends no field, so it becomes nothing or only the close.
    A constructor without fields becomes nothing (rule 3), and so do its
    parentheses and commas where every field is void. *)
-let constructor_edits tokens ~void_fields (constructor : Tree.constructor) =
+let constructor_edits output ~void_fields (constructor : Tree.constructor) =
+  let tokens = tokens_of output in
   let { Tree.name; fields } = constructor.node in
   let bar = constructor.span.first and close = constructor.span.last in
   let has_fields = has_fields void_fields constructor in
@@ -216,51 +225,53 @@ let constructor_edits tokens ~void_fields (constructor : Tree.constructor) =
         Printf.sprintf " } %s;" (name.node :> string)
       else ""
     in
-    replace_at tokens ~first:after (ends ^ closes) []
+    replace_at output ~first:after (ends ^ closes) []
   in
   match fields with
-  | [] -> replace_at tokens ~first:bar "" [ name.span.first ]
+  | [] -> replace_at output ~first:bar "" [ name.span.first ]
   | _ :: _ ->
       let open_paren = grammar_token_after tokens name.span.first in
       let opens = if has_fields then "struct {" else "" in
-      replace_at tokens ~first:bar opens [ name.span.first; open_paren ]
+      replace_at output ~first:bar opens [ name.span.first; open_paren ]
       @ List.concat_map field_end fields
 
 (* [type N = ... ;]: the forward declaration replaces [type], the head
    [N =] and [private] where it follows, and the tail the [;]. *)
-let variant tokens ~location ~lowered ~void_fields
+let variant output ~location ~lowered ~void_fields
     (declaration : Tree.type_declaration) constructors =
+  let tokens = tokens_of output in
   let completes = declaration.node.declared.earlier <> None in
   let has_union = List.exists (has_fields void_fields) constructors in
   let first_bar = (List.hd constructors : Tree.constructor).span.first in
   let forward_tokens, forward_end = forward_declaration tokens declaration in
-  replace tokens ~location (variant_forward ~completes lowered) forward_tokens
-  @ replace tokens ~location
-      (variant_head lowered ~has_union constructors)
+  replace output ~location (variant_forward ~completes lowered) forward_tokens
+  @ replace output ~location
+      (variant_head output ~location lowered ~has_union constructors)
       (grammar_tokens tokens forward_end (first_bar - 1))
-  @ List.concat_map (constructor_edits tokens ~void_fields) constructors
-  @ replace_at tokens ~first:declaration.span.last (variant_tail ~has_union)
+  @ List.concat_map (constructor_edits output ~void_fields) constructors
+  @ replace_at output ~first:declaration.span.last (variant_tail ~has_union)
       []
 
 (* The type declaration under the name [lowered], which is its own or,
    for the definition of a generic, that of an instance (design 10.3). *)
-let type_declaration (tokens : Token.t array) ~(lowered : Spelling.c_name)
+let type_declaration output ~(lowered : Spelling.c_name)
     ~void_fields (declaration : Tree.type_declaration) =
+  let tokens = tokens_of output in
   let name = (lowered :> string) in
   let location = tokens.(declaration.span.first).location in
   match declaration.node.definition with
   | Incomplete_variant ->
-      replace tokens ~location
+      replace output ~location
         (record_declarations Struct ~tag:name name)
         (grammar_tokens tokens declaration.span.first declaration.span.last)
-  | Alias type_name -> alias tokens ~location declaration name type_name
+  | Alias type_name -> alias output ~location declaration name type_name
   (* Design 10.2: the typedef of its representation. *)
   | Distinct { representation; _ } ->
-      alias tokens ~location declaration name representation
+      alias output ~location declaration name representation
   | Record_alias record ->
-      record_alias tokens ~location ~name declaration record
+      record_alias output ~location ~name declaration record
   | Variant { constructors; _ } ->
-      variant tokens ~location ~lowered ~void_fields declaration
+      variant output ~location ~lowered ~void_fields declaration
         constructors
 
 (* Design 13.5: a constructor expression becomes the compound literal
@@ -293,8 +304,9 @@ let fields_opening constructor =
 
 let fields_closing = " } "
 
-let construction (tokens : Token.t array)
+let construction output
     (construction : Typec_sema.Expressions.construction) =
+  let tokens = tokens_of output in
   let { Typec_sema.Expressions.span; variant; constructor; callee; braced; _ } =
     construction
   in
@@ -305,15 +317,15 @@ let construction (tokens : Token.t array)
   let tag = tag_designation ~variant constructor in
   match callee with
   | None ->
-      replace tokens ~location
+      replace output ~location
         (opening ^ tag ^ " " ^ closing)
         (grammar_tokens tokens span.first span.last)
   | Some callee ->
       let left_paren = grammar_token_after tokens callee.last in
-      replace tokens ~location
+      replace output ~location
         (opening ^ tag ^ fields_opening constructor)
         (grammar_tokens tokens span.first left_paren)
-      @ replace tokens
+      @ replace output
           ~location:tokens.(span.last).location
           (fields_closing ^ closing) [ span.last ]
 
@@ -369,8 +381,8 @@ let binding_declaration (binding : Typec_sema.Expressions.binding) =
   in
   Printf.sprintf " const __typeof__(%s) %s = %s;" field binding.name field
 
-let binding_declarations bindings =
-  String.concat "" (List.map binding_declaration bindings)
+let binding_declarations output location bindings =
+  Emitter.joined output location ~separator:"" binding_declaration bindings
 
 let case_label ~variant constructor =
   Printf.sprintf "case %s:" (Tree.enumerator_name ~variant constructor)
@@ -385,22 +397,31 @@ let invalid_tag = Printf.sprintf "default: %s" trap
    nothing begins its block with them already. A declaration in that
    inner block could hide a binding in C, but none redeclares one,
    since typec refuses it in the one scope of an arm (4.1 rule 5). *)
-let arm_block (bindings : Typec_sema.Expressions.binding list) =
+let arm_block output location
+    (bindings : Typec_sema.Expressions.binding list) =
   match bindings with
   | [] -> ("{", " " ^ trap ^ " }")
-  | _ -> ("{" ^ binding_declarations bindings ^ " {", " } " ^ trap ^ " }")
+  | _ ->
+      ( "{" ^ binding_declarations output location bindings ^ " {",
+        " } " ^ trap ^ " }" )
 
 (* The labels of an arm become the [case] of each constructor it takes
    and open its block; a trap closes the block after its last item. *)
-let matched_arm tokens ~variant (arm : Typec_sema.Expressions.matched_arm) =
-  let opening, closing = arm_block arm.bindings in
-  let cases = String.concat " " (List.map (case_label ~variant) arm.cases) in
-  replace tokens ~location:tokens.(arm.labels.first).location
+let matched_arm output ~variant (arm : Typec_sema.Expressions.matched_arm) =
+  let tokens = tokens_of output in
+  let location = tokens.(arm.labels.first).location in
+  let opening, closing = arm_block output location arm.bindings in
+  let cases =
+    Emitter.joined output location ~separator:" " (case_label ~variant)
+      arm.cases
+  in
+  replace output ~location
     (cases ^ " " ^ opening)
     (grammar_tokens tokens arm.labels.first arm.labels.last)
-  @ [ close tokens ~after:arm.arm.last closing ]
+  @ [ close output ~after:arm.arm.last closing ]
 
-let match_statement (tokens : Token.t array) matching arms =
+let match_statement output matching arms =
+  let tokens = tokens_of output in
   let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
     matching
   in
@@ -413,12 +434,12 @@ let match_statement (tokens : Token.t array) matching arms =
   let switch =
     Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member
   in
-  replace tokens ~location:tokens.(match_token).location opening
+  replace output ~location:tokens.(match_token).location opening
     [ match_token; open_paren ]
-  @ replace tokens ~location:tokens.(close_paren).location (held ^ switch)
+  @ replace output ~location:tokens.(close_paren).location (held ^ switch)
       [ close_paren; open_brace ]
-  @ List.concat_map (matched_arm tokens ~variant) arms
-  @ replace tokens
+  @ List.concat_map (matched_arm output ~variant) arms
+  @ replace output
       ~location:tokens.(statement.last).location
       (Printf.sprintf "%s } }" invalid_tag)
       [ statement.last ]
@@ -445,18 +466,20 @@ let tag_declaration =
   Printf.sprintf "const __typeof__(%s->%s) %s = %s->%s; " scrutinee_pointer
     Tree.tag_member tag_local scrutinee_pointer Tree.tag_member
 
-let tag_check ~variant constructors =
+let tag_check output location ~variant constructors =
   Printf.sprintf "switch (%s) { %s break; %s } " tag_local
-    (String.concat " " (List.map (case_label ~variant) constructors))
+    (Emitter.joined output location ~separator:" " (case_label ~variant)
+       constructors)
     invalid_tag
 
 (* The false branch of a test of [form] after the statement that ends at
    [controlled_last]: the end of the block around that statement, the
    [check] of the tag, then the [else] statement of an [if], or the end
    of the loop of a [while]. *)
-let false_branch tokens form ~controlled_last ~check =
+let false_branch output form ~controlled_last ~check =
+  let tokens = tokens_of output in
   let after_controlled text =
-    close tokens ~after:controlled_last (" }" ^ text)
+    close output ~after:controlled_last (" }" ^ text)
   in
   match (form : Typec_sema.Expressions.test_form) with
   | If_test { otherwise = None } ->
@@ -464,14 +487,15 @@ let false_branch tokens form ~controlled_last ~check =
   | If_test { otherwise = Some otherwise } ->
       let else_token = grammar_token_before tokens otherwise.first in
       after_controlled ""
-      :: replace tokens ~location:tokens.(else_token).location
+      :: replace output ~location:tokens.(else_token).location
           ("else { " ^ check)
           [ else_token ]
-      @ [ close tokens ~after:otherwise.last " } }" ]
+      @ [ close output ~after:otherwise.last " } }" ]
   | While_test -> [ after_controlled (" else { " ^ check ^ "break; } }") ]
 
-let single_pattern_test (tokens : Token.t array) matching
+let single_pattern_test output matching
     (test : Typec_sema.Expressions.test) =
+  let tokens = tokens_of output in
   let { Typec_sema.Expressions.statement; scrutinee; variant; _ } =
     matching
   in
@@ -484,22 +508,23 @@ let single_pattern_test (tokens : Token.t array) matching
     Printf.sprintf "if (%s == %s) " tag_local
       (Tree.enumerator_name ~variant test.constructor)
   in
-  let check = tag_check ~variant test.constructors in
-  replace tokens ~location:tokens.(statement.first).location
-    (loop ^ opening)
+  let location = tokens.(statement.first).location in
+  let check = tag_check output location ~variant test.constructors in
+  let held_location = tokens.(close_paren).location in
+  replace output ~location (loop ^ opening)
     (grammar_tokens tokens statement.first equals)
-  @ replace tokens ~location:tokens.(close_paren).location
+  @ replace output ~location:held_location
       (held ^ tag_declaration ^ selected ^ "{"
-      ^ binding_declarations test.bindings)
+      ^ binding_declarations output held_location test.bindings)
       [ close_paren ]
-  @ false_branch tokens test.form ~controlled_last:test.controlled.last
+  @ false_branch output test.form ~controlled_last:test.controlled.last
       ~check
 
-let matching (tokens : Token.t array)
+let matching output
     (matching : Typec_sema.Expressions.matching) =
   match matching.selects with
-  | Arms arms -> match_statement tokens matching arms
-  | Test test -> single_pattern_test tokens matching test
+  | Arms arms -> match_statement output matching arms
+  | Test test -> single_pattern_test output matching test
 
 (* Edits in {!Emitter.in_order}, so that those that a stretch of tokens
    owns are found by a search, not a scan of all of them. *)
@@ -532,17 +557,18 @@ let edits_within (ordered : ordered_edits) ~first ~last =
    return in the operand of a try runs, moves with it. No [#pragma
    typec] line moves: one of C text is ignored, and Type-C text holds
    one only outside every function (design 13.5). *)
-let moved_text (text : Reader.t) ordered ~first ~last =
+let moved_text output ordered ~first ~last =
+  let tokens = tokens_of output in
   let written (edit : Emitter.edit) =
     match edit.text with
     | Emitter.Code { code = ""; _ } -> []
     | Emitter.Code { location; code } ->
-        [ Emitter.Piece (Emitter.generated location code) ]
+        [ Emitter.Piece (Emitter.generated output location code) ]
     | Emitter.Bracketed _ -> invalid_arg "Lowering.moved_text: a bracket"
     | Emitter.Moved pieces -> pieces
   in
   let token index =
-    match (text.tokens.(index).kind, Emitter.moved_token text index) with
+    match (tokens.(index).kind, Emitter.moved_token output index) with
     | Token.Typec_pragma, _ -> []
     | _, Some piece -> [ piece ]
     | _, None -> invalid_arg "Lowering.moved_text: an unmovable token"
@@ -611,13 +637,14 @@ let dropped_ranges (answered : Typec_sema.Expressions.answered) =
       [ { span = construct; text = integer_constant compatible } ]
   | Selected { associations; _ } -> steered_type_names associations
 
-let steered_controlling tokens (answered : Typec_sema.Expressions.answered) =
+let steered_controlling output (answered : Typec_sema.Expressions.answered) =
+  let tokens = tokens_of output in
   match answered.answer with
   | Compatible _ -> []
   | Selected { controlling; associations; result } ->
       let selected = steering_type (selected_number associations result) in
-      [ insert tokens ~before:controlling.span.first "((void)(";
-        insert tokens
+      [ insert output ~before:controlling.span.first "((void)(";
+        insert output
           ~before:(grammar_token_after tokens controlling.span.last)
           (Printf.sprintf "), (%s)0)" selected) ]
 
@@ -686,8 +713,9 @@ let goes_with dropped (edit : Emitter.edit) =
     covers dropped ~first:edit.owner ~last:edit.owner
   else covers dropped ~first:(first - 1) ~last:first
 
-let dropped_edits tokens { span; text } =
-  replace tokens ~location:tokens.(span.first).location text
+let dropped_edits output { span; text } =
+  let tokens = tokens_of output in
+  replace output ~location:tokens.(span.first).location text
     (grammar_tokens tokens span.first span.last)
 
 (* Design 5.1, 13.5: a try becomes a temporary of the operand's result
@@ -713,7 +741,8 @@ let ok_constructor = result_constructor Typec_sema.Ctype.result_ok
 let err_constructor = result_constructor Typec_sema.Ctype.result_err
 
 (* typec's own text of a try, at the location of its [try]. *)
-let try_piece location text = Emitter.Piece (Emitter.generated location text)
+let try_piece output location text =
+  Emitter.Piece (Emitter.generated output location text)
 
 (* Whether the tag of [temporary], an object of [variant], is not that
    of [constructor]. *)
@@ -743,7 +772,8 @@ let returned_err ~returned ~temporary (err_field : string option) =
    rule 2); the cleanups, the copies of the deferred statements that are
    active at the try (section 6); and the return of the Err, built from
    the temporary after them. *)
-let error_path ~location ~variant (site : Typec_sema.Expressions.try_site)
+let error_path output ~location ~variant
+    (site : Typec_sema.Expressions.try_site)
     ~cleanups =
   let temporary = temporary_name site.temporary in
   let returned =
@@ -761,21 +791,21 @@ let error_path ~location ~variant (site : Typec_sema.Expressions.try_site)
     Printf.sprintf "return %s; }"
       (returned_err ~returned ~temporary site.err_field)
   in
-  [ try_piece location test; try_piece location trap_unless_err ]
+  [ try_piece output location test; try_piece output location trap_unless_err ]
   @ cleanups
-  @ [ try_piece location return ]
+  @ [ try_piece output location return ]
 
 (* The text in front of the holder: the null statement of its labels,
    the temporary initialised with the operand, which moves with the
    edits inside it, and the error path, which runs [cleanups]. *)
-let front (text : Reader.t) ordered ~location ~cleanups
+let front output ordered ~location ~cleanups
     (site : Typec_sema.Expressions.try_site) =
   let variant =
     Typec_sema.Encoding.variant_name (Applied site.operand_instance)
   in
   let null_statement =
     match site.holder.labels with
-    | Some _ -> [ try_piece location ";" ]
+    | Some _ -> [ try_piece output location ";" ]
     | None -> []
   in
   let declaration =
@@ -783,14 +813,14 @@ let front (text : Reader.t) ordered ~location ~cleanups
       (temporary_name site.temporary)
   in
   let operand =
-    moved_text text ordered ~first:site.operand.first
+    moved_text output ordered ~first:site.operand.first
       ~last:site.operand.last
   in
   null_statement
-  @ [ try_piece location declaration ]
+  @ [ try_piece output location declaration ]
   @ operand
-  @ [ try_piece location ";" ]
-  @ error_path ~location ~variant site ~cleanups
+  @ [ try_piece output location ";" ]
+  @ error_path output ~location ~variant site ~cleanups
 
 (* The tokens that the try's value replaces: the try, or for [try e;]
    the whole statement, so that no read of the Ok field is left as a
@@ -819,19 +849,19 @@ type try_lowering = {
   closing : Emitter.edit list;
 }
 
-let lower_try (text : Reader.t) ordered ~cleanups_of
+let lower_try output ordered ~cleanups_of
     (site : Typec_sema.Expressions.try_site) =
-  let tokens = text.tokens in
+  let tokens = tokens_of output in
   let { Typec_sema.Expressions.statement; labels; standing } = site.holder in
   let location = tokens.(site.try_span.first).location in
   let in_front =
-    Emitter.moved
+    Emitter.moved output
       (Reader.range tokens ~first:statement.first ~count:0)
-      (front text ordered ~location ~cleanups:(cleanups_of site) site)
+      (front output ordered ~location ~cleanups:(cleanups_of site) site)
   in
   let replaced = replaced_span site in
   let value =
-    replace tokens ~location:tokens.(replaced.first).location
+    replace output ~location:tokens.(replaced.first).location
       (try_value site)
       (grammar_tokens tokens replaced.first replaced.last)
   in
@@ -839,8 +869,8 @@ let lower_try (text : Reader.t) ordered ~cleanups_of
   | Block_item -> { opening = in_front :: value; closing = [] }
   | Substatement ->
       let first = (Option.value labels ~default:statement).first in
-      { opening = insert tokens ~before:first "{" :: in_front :: value;
-        closing = [ close tokens ~after:statement.last "}" ] }
+      { opening = insert output ~before:first "{" :: in_front :: value;
+        closing = [ close output ~after:statement.last "}" ] }
 
 (* The edits of a text with its tries lowered. The edits inside the
    tokens that a try replaces go with its operand, which moves, and the
@@ -850,10 +880,10 @@ let lower_try (text : Reader.t) ordered ~cleanups_of
    around the holder closes after the try's block. So the closings of
    the tries go first and their openings last. [cleanups_of] gives the
    cleanups of the error path of a try. *)
-let with_tries text edits tries ~cleanups_of =
+let with_tries output edits tries ~cleanups_of =
   let replaced = cover (List.map replaced_span tries) in
   let ordered = order_edits edits in
-  let lowered = List.map (lower_try text ordered ~cleanups_of) tries in
+  let lowered = List.map (lower_try output ordered ~cleanups_of) tries in
   List.concat_map (fun lowered -> lowered.closing) lowered
   @ List.filter (fun edit -> not (goes_with replaced edit)) edits
   @ List.concat_map (fun lowered -> lowered.opening) lowered
@@ -899,19 +929,22 @@ let places (sites : Reachability.defer_site list) =
   in
   List.rev (List.fold_left group [] sorted)
 
-let defer_piece location text = Emitter.Piece (Emitter.generated location text)
+let defer_piece output location text =
+  Emitter.Piece (Emitter.generated output location text)
 
 (* The copy of the statement of [site], [{ S }], from the edits [base]
    of the text. *)
-let copy (text : Reader.t) base (site : Reachability.defer_site) =
+let copy output base (site : Reachability.defer_site) =
+  let tokens = tokens_of output in
   let deferred =
     Tree.deferred_text ~keyword:site.keyword ~statement:site.deferred
   in
-  let location = text.tokens.(site.deferred.first).location in
+  let location = tokens.(site.deferred.first).location in
   let moved =
-    moved_text text base ~first:deferred.first ~last:deferred.last
+    moved_text output base ~first:deferred.first ~last:deferred.last
   in
-  (defer_piece location "{" :: moved) @ [ defer_piece location "}" ]
+  (defer_piece output location "{" :: moved)
+  @ [ defer_piece output location "}" ]
 
 (* The text of a [return e;] that runs copies: [value_opening] replaces
    its [return], [value_closing] its [;], before the copies, and
@@ -934,27 +967,29 @@ let return_form : Typec_sema.Expressions.returns -> return_form = function
 (* The edits of one place of a function that [returns], which runs the
    copies of [leaving]; a trap stands once at the end of a block however
    many defers it holds. *)
-let place_edits (text : Reader.t) base returns (place, leaving) =
-  let tokens = text.tokens in
+let place_edits output base returns (place, leaving) =
+  let tokens = tokens_of output in
   (* A trap and the error path of a try write no copies here. *)
-  let copies () = List.concat_map (copy text base) leaving in
+  let copies () = List.concat_map (copy output base) leaving in
   let at index = tokens.(index).location in
   let insertion index = Reader.range tokens ~first:index ~count:0 in
   let token index = Reader.range tokens ~first:index ~count:1 in
+  let piece index text = defer_piece output (at index) text in
   match (place : Reachability.place) with
-  | Block_end closing -> [ Emitter.moved (insertion closing) (copies ()) ]
-  | Trap closing -> [ insert tokens ~before:closing trap ]
+  | Block_end closing ->
+      [ Emitter.moved output (insertion closing) (copies ()) ]
+  | Trap closing -> [ insert output ~before:closing trap ]
   | Left_by (Jump jump) ->
-      [ Emitter.moved (insertion jump.first)
-          (defer_piece (at jump.first) "{" :: copies ());
-        Emitter.code (token jump.last) ~location:(at jump.last) "; }" ]
+      [ Emitter.moved output (insertion jump.first)
+          (piece jump.first "{" :: copies ());
+        Emitter.code output (token jump.last) ~location:(at jump.last) "; }" ]
   | Left_by (Value_return { statement; operand = _ }) ->
       let form = return_form returns in
-      [ Emitter.code (token statement.first) ~location:(at statement.first)
-          form.value_opening;
-        Emitter.moved (token statement.last)
-          ((defer_piece (at statement.last) form.value_closing :: copies ())
-          @ [ defer_piece (at statement.last) form.returned ]) ]
+      [ Emitter.code output (token statement.first)
+          ~location:(at statement.first) form.value_opening;
+        Emitter.moved output (token statement.last)
+          ((piece statement.last form.value_closing :: copies ())
+          @ [ piece statement.last form.returned ]) ]
   | Left_by (Error_path _) -> []
 
 (* The name of a parameter that the call of [__tc_ret] passes an lvalue
@@ -987,9 +1022,9 @@ let parameter_names : Tree.parameters -> string list = function
 
 (* Design 13.5: [typedef __typeof__(call of f) __tc_ret;] in a block
    around the body, which stays a block of its own. *)
-let return_type_edits (text : Reader.t)
+let return_type_edits output
     (defers : Typec_sema.Expressions.function_defers) =
-  let tokens = text.tokens in
+  let tokens = tokens_of output in
   let lvalue name = Printf.sprintf "*(__typeof__(%s) *)0" name in
   let arguments =
     parameter_names (Tree.defined_function defers.declarator).parameters
@@ -1000,8 +1035,8 @@ let return_type_edits (text : Reader.t)
       defers.function_name arguments return_type_name
   in
   let body = defers.body in
-  [ insert tokens ~before:body.first typedef;
-    Emitter.code
+  [ insert output ~before:body.first typedef;
+    Emitter.code output
       (Reader.range tokens ~first:body.last ~count:1)
       ~location:tokens.(body.last).location "} }" ]
 
@@ -1022,8 +1057,9 @@ let kept_sites dropped (sites : Reachability.defer_site list) =
       kept_token dropped site.keyword.first)
     sites
 
-let function_edits (text : Reader.t) base ~dropped
+let function_edits output base ~dropped
     (defers : Typec_sema.Expressions.function_defers) =
+  let tokens = tokens_of output in
   let kept_places =
     List.filter
       (fun (place, _) ->
@@ -1035,7 +1071,7 @@ let function_edits (text : Reader.t) base ~dropped
     if
       defers.returns = Returns_value
       && List.exists (fun (place, _) -> is_value_return place) kept_places
-    then return_type_edits text defers
+    then return_type_edits output defers
     else []
   in
   (* Every token of [defer S] goes, its pragma lines too, which move to
@@ -1044,9 +1080,9 @@ let function_edits (text : Reader.t) base ~dropped
   let removal site =
     let span = defer_span site in
     List.init (span.last - span.first + 1) (fun offset -> span.first + offset)
-    |> replace text.tokens ~location:text.tokens.(span.first).location ""
+    |> replace output ~location:tokens.(span.first).location ""
   in
-  List.concat_map (place_edits text base defers.returns) kept_places
+  List.concat_map (place_edits output base defers.returns) kept_places
   @ List.concat_map removal kept_sites
   @ return_type
 
@@ -1055,7 +1091,7 @@ let function_edits (text : Reader.t) base ~dropped
    first, from the edits [base] of the text. The sites are indexed by
    the span of the try once, so that each try finds its own in constant
    time. *)
-let error_path_cleanups (text : Reader.t) base
+let error_path_cleanups output base
     (functions : Typec_sema.Expressions.function_defers list) =
   let leaving = Hashtbl.create 16 in
   let index ((place : Reachability.place), sites) =
@@ -1069,14 +1105,14 @@ let error_path_cleanups (text : Reader.t) base
     functions;
   fun (site : Typec_sema.Expressions.try_site) ->
     match Hashtbl.find_opt leaving site.try_span with
-    | Some sites -> List.concat_map (copy text base) sites
+    | Some sites -> List.concat_map (copy output base) sites
     | None -> []
 
 (* The edits of a text with the defers of its functions lowered. The
    statements go, and the edits that their tokens own go with them, to
    their copies, which [base], the ordered [edits], gives. [dropped] is
    the text that lowering drops, whose own edits delete a defer in it. *)
-let with_defers (text : Reader.t) edits ~base ~dropped
+let with_defers output edits ~base ~dropped
     (functions : Typec_sema.Expressions.function_defers list) =
   let sites =
     List.concat_map
@@ -1086,7 +1122,7 @@ let with_defers (text : Reader.t) edits ~base ~dropped
   in
   let removed = cover (List.map defer_span sites) in
   List.filter (fun edit -> not (goes_with removed edit)) edits
-  @ List.concat_map (function_edits text base ~dropped) functions
+  @ List.concat_map (function_edits output base ~dropped) functions
 
 (* The edits of one text: the unit's own, or the definition of an
    instance. A type declaration may hold another, in a statement
@@ -1104,9 +1140,9 @@ let with_defers (text : Reader.t) edits ~base ~dropped
    inside one go, and the range's own edits replace them. Last, the
    tries are lowered ({!with_tries}), and the edits inside the operand
    of one move with it. *)
-let text_edits (text : Reader.t) ~declarations ~void_field_spans ~replaced
+let text_edits output ~declarations ~void_field_spans ~replaced
     typed =
-  let tokens = text.tokens in
+  let tokens = tokens_of output in
   let answered = Typec_sema.Expressions.answered typed in
   let constructions = Typec_sema.Expressions.constructions typed in
   let heads = cover (List.map (construction_head tokens) constructions) in
@@ -1125,17 +1161,17 @@ let text_edits (text : Reader.t) ~declarations ~void_field_spans ~replaced
   let kept edit = not (goes_with dropped_spans edit) in
   let void_fields = Spans.of_list void_field_spans in
   let declaration (lowered, declaration) =
-    type_declaration tokens ~lowered ~void_fields declaration
+    type_declaration output ~lowered ~void_fields declaration
   in
   let lowered =
     List.concat_map declaration declarations
-    @ List.concat_map (construction tokens) constructions
-    @ List.concat_map (matching tokens)
+    @ List.concat_map (construction output) constructions
+    @ List.concat_map (matching output)
         (List.rev (Typec_sema.Expressions.matchings typed))
-    @ List.concat_map (steered_controlling tokens) answered
+    @ List.concat_map (steered_controlling output) answered
   in
   let undeferred =
-    List.concat_map (dropped_edits tokens) dropped @ List.filter kept lowered
+    List.concat_map (dropped_edits output) dropped @ List.filter kept lowered
   in
   let functions = Typec_sema.Expressions.defers typed in
   (* The copies of a deferred statement, at its exits and on the error
@@ -1145,11 +1181,11 @@ let text_edits (text : Reader.t) ~declarations ~void_field_spans ~replaced
   (* The defers go before the tries, so that a jump in the operand of a
      try runs its copies wherever the operand moves. *)
   let deferred =
-    with_defers text undeferred ~base ~dropped:dropped_spans functions
+    with_defers output undeferred ~base ~dropped:dropped_spans functions
   in
-  with_tries text deferred
+  with_tries output deferred
     (Typec_sema.Expressions.tries typed)
-    ~cleanups_of:(error_path_cleanups text base functions)
+    ~cleanups_of:(error_path_cleanups output base functions)
 
 let named (span, name) = { span; text = name }
 
@@ -1162,11 +1198,11 @@ let named (span, name) = { span; text = name }
    found for it, from token [first] to its end. It stands in a bracket,
    which holds no pragma line: the front end refuses a generic whose
    definition holds one (design 10.3). *)
-let instance_definition (text : Reader.t) instance ~first
+let instance_definition output instance ~first
     (reading : Typec_sema.Declarations.instance_text) =
   let lowered = Typec_sema.Encoding.variant_name (Applied instance) in
   let edits =
-    text_edits text
+    text_edits output
       ~declarations:[ (lowered, reading.generic) ]
       ~void_field_spans:reading.void_field_spans
       ~replaced:(List.map named reading.names)
@@ -1176,25 +1212,26 @@ let instance_definition (text : Reader.t) instance ~first
     | Piece piece -> piece
     | Pragma_line _ -> invalid_arg "Lowering: a pragma line in a generic"
   in
-  moved_text text (order_edits edits) ~first
+  moved_text output (order_edits edits) ~first
     ~last:reading.generic.span.last
   |> List.map bracketed
 
-(* What the texts of the placements are written from: the unit and what
-   its reading found. *)
+(* What the texts of the placements are written from: the output of the
+   unit and what its reading found. *)
 type instance_context = {
-  unit : Reader.t;
+  output : Emitter.output;
   declarations : Typec_sema.Declarations.t;
 }
 
 (* Design 10.3: each typedef after the lines that declare its tags. *)
-let argument_typedefs location typedefs =
+let argument_typedefs context location typedefs =
   let lines (typedef : Typec_sema.Declarations.argument_typedef) =
     List.map (fun (tag_line : Typec_sema.Type_name.tag_line) -> tag_line.line)
       typedef.tag_lines
     @ [ typedef.line ]
   in
-  List.concat_map lines typedefs |> List.map (Emitter.generated location)
+  List.concat_map lines typedefs
+  |> List.map (Emitter.generated context.output location)
 
 let reading context instance =
   match Typec_sema.Declarations.instance_text context.declarations instance with
@@ -1208,29 +1245,37 @@ let instance_declaration context location instance
     (generic : Tree.type_declaration) =
   let name = Typec_sema.Encoding.instance_name instance in
   let forward kind =
-    [ Emitter.generated location (record_declarations kind ~tag:name name) ]
+    [ Emitter.generated context.output location
+        (record_declarations kind ~tag:name name) ]
   in
   match generic.node.definition with
   | Variant _ | Incomplete_variant -> forward Struct
   | Record_alias specifier -> forward specifier.node.kind
   | Alias _ | Distinct _ ->
       let reading = reading context instance in
-      instance_definition context.unit instance
+      instance_definition context.output instance
         ~first:reading.generic.span.first reading
 
 (* Step 2: the rest of 10.1 or 10.2, after the forward declaration. *)
 let instance_rest context instance =
   let reading = reading context instance in
   match Tree.forward_declaration_end reading.generic with
-  | Some first -> instance_definition context.unit instance ~first reading
+  | Some first -> instance_definition context.output instance ~first reading
   | None -> invalid_arg "Lowering.instance_rest: a typedef instance"
 
+let application_location context
+    (placement : Typec_sema.Declarations.placement) =
+  (tokens_of context.output).(placement.application.first).location
+
 let placement_text context (placement : Typec_sema.Declarations.placement) =
-  let location = context.unit.tokens.(placement.application.first).location in
   match placement.step with
-  | Typedefs typedefs -> argument_typedefs location typedefs
+  | Typedefs typedefs ->
+      argument_typedefs context (application_location context placement)
+        typedefs
   | Declared { generic } ->
-      instance_declaration context location placement.instance generic
+      instance_declaration context
+        (application_location context placement)
+        placement.instance generic
   | Defined -> instance_rest context placement.instance
 
 (* The placements in runs that share an anchor, each run in order. *)
@@ -1245,12 +1290,14 @@ let by_anchor placements =
     (fun (at, run) -> (at, List.rev run))
     (List.fold_left add [] placements)
 
+(* The texts are made in the order of the placements, so the first that
+   passes the output limit is the one that the earliest application
+   needs. *)
 let instance_brackets context =
-  let bracket (at, (run : Typec_sema.Declarations.placement list)) =
-    let first = List.hd run in
-    let location = context.unit.tokens.(first.application.first).location in
-    Emitter.bracketed context.unit ~at ~location
-      (List.concat_map (placement_text context) run)
+  let bracket (at, run) =
+    let location = application_location context (List.hd run) in
+    let pieces = List.concat_map (placement_text context) run in
+    Emitter.bracketed context.output ~at ~location pieces
   in
   List.map bracket
     (by_anchor (Typec_sema.Declarations.placements context.declarations))
@@ -1259,7 +1306,7 @@ let instance_brackets context =
    its own name, each generic's definition removed, as only its
    instances write it, and each application replaced by the name of its
    instance. *)
-let unit_edits (text : Reader.t) declarations =
+let unit_edits output declarations =
   let split (declaration : Tree.type_declaration) =
     match declaration.node.type_parameters with
     | [] ->
@@ -1271,12 +1318,13 @@ let unit_edits (text : Reader.t) declarations =
     List.partition_map split
       (Typec_sema.Declarations.type_declarations declarations)
   in
-  text_edits text ~declarations:own ~void_field_spans:[]
+  text_edits output ~declarations:own ~void_field_spans:[]
     ~replaced:
       (generics
       @ List.map named (Typec_sema.Declarations.instance_names declarations))
     (Typec_sema.Declarations.typed declarations)
 
 let edits (text : Reader.t) declarations =
-  let context = { unit = text; declarations } in
-  instance_brackets context @ unit_edits text declarations
+  Emitter.limited text (fun output ->
+      let brackets = instance_brackets { output; declarations } in
+      brackets @ unit_edits output declarations)

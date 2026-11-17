@@ -38,5 +38,5 @@ let lower dialect target text =
   let* unit, scopes = Typec_syntax.Parser.parse_with_scopes ~keywords text in
   let* declarations = Typec_sema.Declarations.read target text scopes in
   let* () = refuse_generic_functions text unit in
-  let edits = Typec_emit.Lowering.edits text declarations in
+  let* edits = Typec_emit.Lowering.edits text declarations in
   Ok { Typec_emit.Emitter.edits; assertions = assertions target edits }

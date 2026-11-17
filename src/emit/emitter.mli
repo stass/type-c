@@ -17,8 +17,37 @@
     own. *)
 type piece
 
-val token : Typec_cpp.Reader.t -> int -> piece option
-(** [token unit index] is the token [index] of [unit] at its own
+(** The C text of one unit while lowering makes it, held to the output
+    limit of design 3.5 rule 7. Every piece and every edit is made for
+    an output and charged, as it is made, the bytes that {!emit} writes
+    for it, markers and pragmas included, and a piece at least 32; the
+    unit's own text is charged in full first. So the charge covers all
+    that {!emit} writes for the unit but the static assertions that end
+    it, a fixed text of typec's. Only {!limited} makes an output.
+
+    The charge holds only if lowering puts each piece into one edit: it
+    makes a copy of moved text afresh, and the text of an edit that it
+    moves into other moved text is charged again there. *)
+type output
+
+val limited :
+  Typec_cpp.Reader.t -> (output -> 'a) -> ('a, Typec_cpp.Reader.error) result
+(** [limited unit make] is [make output] for an output of [unit], or the
+    error at the location of the first piece, edit or {!joined} text
+    whose charge would pass {!limit}, after which nothing more is made.
+    [output] belongs to [make] alone: one that escapes it would raise
+    past this function, and edits of two outputs are each held to a
+    limit of their own. *)
+
+val limit : Typec_cpp.Reader.t -> int
+(** [limit unit] is the output limit of [unit] in bytes: a base and a
+    factor for each byte of the unit ({!Typec_cpp.Reader.length}). *)
+
+val unit : output -> Typec_cpp.Reader.t
+(** [unit output] is the unit that [output] is made from. *)
+
+val token : output -> int -> piece option
+(** [token output index] is the token [index] of the unit at its own
     location, wherever lowering writes it, or None where it is no
     {!Typec_cpp.Token.is_movable} token, a pragma line or a [#]; such a
     token cannot be moved as a piece, and a definition that holds one is
@@ -28,15 +57,25 @@ val token : Typec_cpp.Reader.t -> int -> piece option
     in UTF-8 where universal character names spell it, which names the
     same identifier. *)
 
-val generated : Typec_cpp.Location.t -> string -> piece
-(** [generated location text] is [text], which typec writes from no token
-    of the moved text, at [location]: the line of the token that a name
-    is written for, or of the construct that puts the text there.
+val generated : output -> Typec_cpp.Location.t -> string -> piece
+(** [generated output location text] is [text], which typec writes from
+    no token of the moved text, at [location]: the line of the token that
+    a name is written for, or of the construct that puts the text there.
     [Invalid_argument] unless every byte of [text] is one of an
     identifier, UTF-8 included, the blank, or a punctuator of C other
     than [#], [%], [?], [/] and [\\]: then it spells no directive, line
     splice, comment, line break or string literal, and so no pragma line,
     as [_Pragma] takes a string literal (C11 6.10.9). *)
+
+val joined : output -> Typec_cpp.Location.t -> separator:string ->
+  ('a -> string) -> 'a list -> string
+(** [joined output location ~separator spell items] is the texts that
+    [spell] gives [items], with [separator] between them, for typec's own
+    text at [location]. Each is held to the limit as it is made, before
+    the next is, so that a text that holds a name for each of many
+    items, such as the enumerators of a variant, is refused before it is
+    built. The text is charged when the edit or piece that holds it is
+    made. *)
 
 (** A [#pragma] line of moved text (design 13.5), at the location of
     its own line. Only the text of {!moved} holds one, so a packing
@@ -47,8 +86,8 @@ type pragma_line
     stands on a line of its own. *)
 type moved_piece = Piece of piece | Pragma_line of pragma_line
 
-val moved_token : Typec_cpp.Reader.t -> int -> moved_piece option
-(** [moved_token unit index] is the token [index] of [unit] at its own
+val moved_token : output -> int -> moved_piece option
+(** [moved_token output index] is the token [index] of the unit at its own
     location, wherever lowering writes it: a pragma line where it is a
     [#pragma] line that is a sequence of preprocessing tokens
     ({!Typec_cpp.Token.Identifiers}), the piece of {!token} where there
@@ -89,30 +128,30 @@ type edit = private {
   owner : int;
 }
 
-val code : Typec_cpp.Reader.range -> location:Typec_cpp.Location.t ->
-  string -> edit
-(** [code range ~location text] replaces [range] by [text] at [location].
-    [Invalid_argument] unless [text] holds only the bytes that
-    {!generated} takes, so code never writes the pragmas of a bracket
-    past the probe. *)
-
-val closing : Typec_cpp.Token.t array -> after:int ->
+val code : output -> Typec_cpp.Reader.range ->
   location:Typec_cpp.Location.t -> string -> edit
-(** [closing tokens ~after ~location text] inserts [text], as {!code}
+(** [code output range ~location text] replaces [range] by [text] at
+    [location]. [Invalid_argument] unless [text] holds only the bytes
+    that {!generated} takes, so code never writes the pragmas of a
+    bracket past the probe. *)
+
+val closing : output -> after:int -> location:Typec_cpp.Location.t ->
+  string -> edit
+(** [closing output ~after ~location text] inserts [text], as {!code}
     does, between token [after] and the next, as the end of the
     construct that ends at token [after], which owns it. *)
 
-val bracketed : Typec_cpp.Reader.t -> at:Typec_syntax.Tree.anchor ->
+val bracketed : output -> at:Typec_syntax.Tree.anchor ->
   location:Typec_cpp.Location.t -> piece list -> edit
-(** [bracketed unit ~at ~location pieces] inserts [pieces] in a packing
-    bracket at [location] at the anchor [at] of [unit], which only the
-    parser names, so that the bracket, whose pragmas take lines of their
-    own, stands where a declaration may and never inside an
+(** [bracketed output ~at ~location pieces] inserts [pieces] in a
+    packing bracket at [location] at the anchor [at] of the unit, which
+    only the parser names, so that the bracket, whose pragmas take lines
+    of their own, stands where a declaration may and never inside an
     expression. *)
 
-val moved : Typec_cpp.Reader.range -> moved_piece list -> edit
-(** [moved range pieces] replaces [range] by [pieces], each at its own
-    location, without a bracket: the operand of a [try] and a copy of a
+val moved : output -> Typec_cpp.Reader.range -> moved_piece list -> edit
+(** [moved output range pieces] replaces [range] by [pieces], each at its
+    own location, without a bracket: the operand of a [try] and a copy of a
     deferred statement (design 13.5), whose pragma lines are the
     source's own. It takes any range, so the text of an instance, which
     needs the bracket, is kept from it only by the lowering that calls

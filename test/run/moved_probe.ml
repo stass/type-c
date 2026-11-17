@@ -34,18 +34,20 @@ let () =
   and last = List.nth declarations (List.length declarations - 1) in
   let { Tree.first = start; last = finish } = span_of first in
   let count = finish - start + 1 in
-  let deleted =
-    Emitter.code
-      (Reader.range unit.tokens ~first:start ~count)
-      ~location:unit.tokens.(start).location ""
-  in
   let application = unit.tokens.((span_of last).first).location in
-  let moved =
-    Emitter.bracketed unit ~at:(Tree.anchor last) ~location:application
-      (Emitter.generated application "typedef int __tc_arg__i;"
-      :: List.map
-           (fun offset -> Option.get (Emitter.token unit (start + offset)))
-           (List.init count Fun.id))
+  let edits output =
+    let deleted =
+      Emitter.code output
+        (Reader.range unit.tokens ~first:start ~count)
+        ~location:unit.tokens.(start).location ""
+    in
+    let token offset = Option.get (Emitter.token output (start + offset)) in
+    let moved =
+      Emitter.bracketed output ~at:(Tree.anchor last) ~location:application
+        (Emitter.generated output application "typedef int __tc_arg__i;"
+        :: List.map token (List.init count Fun.id))
+    in
+    [ deleted; moved ]
   in
-  print_string
-    (Emitter.emit unit { edits = [ deleted; moved ]; assertions = [] })
+  let edits = Result.get_ok (Emitter.limited unit edits) in
+  print_string (Emitter.emit unit { edits; assertions = [] })

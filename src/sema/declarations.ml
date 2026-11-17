@@ -165,11 +165,11 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    each instance, where an error of its definition is reported (design
    3.5 rule 5), and [nesting] the chain of instances whose definitions
    are being read (rule 7), none outside one.
-   [instance_tokens] counts the tokens of the definitions read for
-   instances so far, those of definition checks included, which a trial
-   does not undo. [external_facts] are those of the external declaration
-   being read, and [placements] where the texts of the instances stand
-   (design 10.3).
+   [instance_bytes] counts the bytes of the text that the readings for
+   instances so far give their instances, those of definition checks
+   included, which a trial does not undo. [external_facts] are those of
+   the external declaration being read, and [placements] where the texts
+   of the instances stand (design 10.3).
    [views] are the parser's views of the unit's unread text, and
    [definition_views] holds the view in front of each declaration of a
    generic, by its id, which is the own place of its definition (design
@@ -218,7 +218,7 @@ type state = {
   generics : (string, generic) Hashtbl.t;
   mutable applied_at : Tree.span Ctype.Instances.t;
   mutable nesting : nesting option;
-  mutable instance_tokens : int;
+  mutable instance_bytes : int;
   mutable external_facts : external_facts;
   mutable placements : placements;
   mutable place : place;
@@ -230,13 +230,21 @@ type state = {
    whose definition is being read, the last. *)
 and nesting = { depth : int; began : Tree.span; defining : Ctype.instance }
 
+(* What a reading of a generic's definition is for: the generic's own
+   definition check, or an instance, whose text lowering writes unless
+   the reading is within a check. *)
+and purpose =
+  | Definition_check
+  | For_instance of { instance : Ctype.instance; written : bool }
+
 (* What the reading of a generic's definition finds in its text besides
    its names: whether lowering writes the text, as it does for an
    instance but not for a definition check or an instance read within
-   one. Where it does, [parameters] holds
-   the name of the typedef of each type parameter's argument, by the
-   parameter's reference, and [names] collects the name that lowering
-   writes for each use of a type parameter and each application.
+   one. [parameters] holds the name of the typedef of each type
+   parameter's argument, by the parameter's reference, for the reading
+   of an instance, and where lowering writes the text [names] collects
+   the name that it writes for each use of a type parameter and each
+   application.
    [void_field_spans] are the fields that a void argument removes (design
    3.5 rule 6). *)
 and moved = {
@@ -295,14 +303,22 @@ exception Instance_failed of error
    at most this many. It is a rule of the language, so it is exact. *)
 let max_nesting = 64
 
-(* A translation limit of typec on the tokens of the definitions that a
-   unit reads for its instances, each time it reads one: instances can
-   grow exponentially with the text, as where each generic needs two
-   instances of the one before it, and the work and memory of a reading
-   grow with its definition. Counting tokens bounds both; about 5300
-   instances of 30 tokens each, which a heavy C++ unit has, read a
-   third of it. *)
-let max_instance_tokens = 524288
+(* The instance budget of design 3.5 rule 7, a translation limit of
+   typec on the bytes that the readings for a unit's instances count;
+   lowering's output limit bounds the text it writes from them. The
+   instances can grow exponentially with the source, as where each
+   generic needs two instances of the one before it, and an instance
+   grows with the encodings of its arguments as well as with its
+   definition. Between
+   four and five times the estimated text of a heavy C++ unit
+   (provisional, P30). *)
+let instance_budget = 16777216
+
+(* The least that the front end charges the budget for a token of a
+   definition it reads: 524288 tokens of one byte pass it, where without
+   this charge 16 million would, and a reading of such tokens costs far
+   more per byte than one of names. *)
+let least_token_charge = 32
 
 let next_link nesting application defining =
   match nesting with
@@ -2903,7 +2919,7 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
     { read =
         (fun declaration read ->
           read_definition state declaration (List.map snd parameters)
-            ~lowered:None read) }
+            Definition_check read) }
   in
   (* The check applies the generic at its own definition, which a
      placement of the trial names as its application. *)
@@ -3026,8 +3042,13 @@ and note_application state instance arguments span =
 
 (* The name that lowering writes for the text at [span] (design 10.3):
    in the unit's own text, or in the definition of the instance being
-   read where lowering writes it. *)
+   read where lowering writes it. The reading of an instance counts it
+   whether lowering writes it or not, so that the chain of a definition
+   check counts as a definition does (3.5 rule 7). *)
 and note_name state span name =
+  Option.iter
+    (fun link -> charge_reading state link (String.length name))
+    state.nesting;
   match state.moved with
   | Some moved ->
       if moved.written then moved.names <- (span, name) :: moved.names
@@ -3282,42 +3303,61 @@ and in_instance :
   let link = next_link outer application instance in
   if link.depth > max_nesting then
     fail_nesting state application instance link.began;
-  let span = declaration.span in
-  let tokens = state.instance_tokens + (span.last - span.first + 1) in
-  if tokens > max_instance_tokens then
-    fail_instances state application instance;
-  state.instance_tokens <- tokens;
+  charge_reading state link (token_charge state declaration.span);
+  let purpose = For_instance { instance; written = writes_text state } in
   state.nesting <- Some link;
   let restore () = state.nesting <- outer in
-  let lowered = if writes_text state then Some instance else None in
   let read_instance () =
-    read_definition state declaration arguments ~lowered read
+    read_definition state declaration arguments purpose read
   in
   match Fun.protect ~finally:restore read_instance with
   | result -> result
   | exception Failed error when Option.is_none outer ->
       raise (Instance_failed (instance_error state application instance error))
 
+(* Design 3.5 rule 7: [bytes] more of the text that the reading of the
+   instance [link.defining] gives the instances of the unit, refused
+   where they would pass the instance budget. *)
+and charge_reading state link bytes =
+  let counted = state.instance_bytes + bytes in
+  if counted > instance_budget then fail_instances state link;
+  state.instance_bytes <- counted
+
+(* What the reading of the tokens at [span] charges (rule 7): the bytes
+   of each token, which lowering copies, and at least
+   [least_token_charge] for each, as the work of reading a token does not
+   shrink with its length. *)
+and token_charge state (span : Tree.span) =
+  let charge = ref 0 in
+  for index = span.first to span.last do
+    let length = state.text.tokens.(index).length in
+    charge := !charge + max length least_token_charge
+  done;
+  !charge
+
 (* [read] of the definition of a generic with its type parameters bound
    to [arguments], in views of its own, followed by the one check of the
-   resolution property (design 13.5) on what the reading found: at the
+   resolution property (design 13.5) on what the reading found, at the
    place in front of the external declaration being read, where the
-   instance's text stands, if lowering writes the text: the text of the
-   [lowered] instance, whose reading it records. *)
+   instance's text stands. A reading whose text lowering writes is
+   recorded for it. *)
 and read_definition :
       'a.
       state ->
       Tree.type_declaration ->
       Ctype.t list ->
-      lowered:Ctype.instance option ->
+      purpose ->
       (unit -> 'a) ->
       'a =
- fun state declaration arguments ~lowered read ->
+ fun state declaration arguments purpose read ->
   let outer = state.moved in
   let moved =
-    { written = Option.is_some lowered;
-      parameters = argument_names declaration lowered; names = [];
-      void_field_spans = [] }
+    match purpose with
+    | Definition_check ->
+        { written = false; parameters = []; names = []; void_field_spans = [] }
+    | For_instance { instance; written } ->
+        { written; parameters = argument_names declaration instance;
+          names = []; void_field_spans = [] }
   in
   state.moved <- Some moved;
   let read_and_check () =
@@ -3328,21 +3368,22 @@ and read_definition :
               (result, state.typed)))
     in
     check_resolution state moved found declaration;
-    Option.iter (note_instance_text state declaration moved typed) lowered;
+    (match purpose with
+    | For_instance { instance; written = true } ->
+        note_instance_text state declaration moved typed instance
+    | For_instance { written = false; _ } | Definition_check -> ());
     result
   in
   Fun.protect ~finally:(fun () -> state.moved <- outer) read_and_check
 
-(* The name of the typedef of each argument of [lowered], by the
+(* The name of the typedef of each argument of [instance], by the
    reference of its type parameter (design 10.3). *)
-and argument_names (declaration : Tree.type_declaration) lowered =
+and argument_names (declaration : Tree.type_declaration)
+    (instance : Ctype.instance) =
   let named (parameter : Tree.parameter_name) encoding =
     (Tree.In_tree parameter.declared.id, Encoding.argument_name encoding)
   in
-  match lowered with
-  | Some (instance : Ctype.instance) ->
-      List.map2 named declaration.node.type_parameters instance.arguments
-  | None -> []
+  List.map2 named declaration.node.type_parameters instance.arguments
 
 and note_instance_text state generic moved typed instance =
   let text =
@@ -3434,14 +3475,20 @@ and fail_nesting state application instance began =
        { location = location_of state application;
          message = Rule.text diagnostic })
 
-and fail_instances state application instance =
+(* The application of the instance whose reading passes the budget is
+   the error, as where it would pass the nesting limit. *)
+and fail_instances state { depth = _; began; defining } =
+  let application = Ctype.Instances.find defining state.applied_at in
+  let began = location_of state began in
   let message =
     Printf.sprintf
-      "the application would define the instance %s, which would read \
-       more than %d tokens of definitions for the instances of the unit, \
-       those that definition checks need included, the limit of typec"
-      (quote (shown_instance instance))
-      max_instance_tokens
+      "the application would define the instance %s, whose reading would \
+       pass the instance budget of typec, %d bytes of text for the \
+       instances of the unit, those that definition checks read \
+       included, in a chain of instances that the application at %s:%d \
+       began"
+      (quote (shown_instance defining))
+      instance_budget began.file began.line
   in
   raise
     (Instance_failed
@@ -4144,7 +4191,7 @@ let read target text (scopes : Parser.scopes) =
       incomplete_variants = Hashtbl.create 16;
       generics = Hashtbl.create 16;
       applied_at = Ctype.Instances.empty;
-      instance_tokens = 0;
+      instance_bytes = 0;
       nesting = None;
       external_facts = declaration_state tags None Parser.View.empty;
       placements = no_placements;

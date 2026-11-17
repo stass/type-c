@@ -628,6 +628,9 @@ let replaced_bytes (tokens : Token.t array) range =
     let last = tokens.(end_token range) in
     (start, last.start + last.length)
 
+let length (result : t) =
+  String.length result.text.bytes - result.text.own_start
+
 let rewrite (result : t) replacements =
   let { bytes; own_start } = result.text in
   let buffer = Buffer.create (String.length bytes - own_start) in

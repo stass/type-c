@@ -38,8 +38,8 @@ type no_row = { part : Ctype.t; reason : reason }
 
 val max_length : int
 (** The limit on the bytes of an encoding and of the code of an instance,
-    which bounds every instance name (design 10.3 sets none; a chain of
-    typedefs of [pair(p, p)] doubles a name at each step). *)
+    which bounds every instance name: the bound on encodings of design
+    3.5 rule 7 and 10.3, 4096 bytes. *)
 
 val encode : Ctype.tags -> Ctype.t -> (string, no_row) result
 (** The encoding of a type argument by the table of design 10.3. An

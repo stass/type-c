@@ -2480,6 +2480,23 @@ let doubling_instances ?(members = 1) count =
              (n + 1) n n))
   ^ Printf.sprintf " g%d(int) x;" count
 
+(* Design 3.5 rule 7: the front end counts the bytes of the definitions
+   that it reads for instances and of the names it puts among them. *)
+let instance_budget () =
+  let file = "in.tc" in
+  (* The names count: without them the aliases are refused by the bound
+     on encodings instead, after a reading of many seconds. The
+     refusal stands in a definition check, which counts as a definition
+     does, and cites the application that began its chain. *)
+  rejects_at ~line:3 (Budget_probes.aliases 12)
+    "instances that the application at in.tc:13 began";
+  rejects ~file (Budget_probes.aliases_over_structures 11 48)
+    "instance budget of typec, 16777216 bytes of text";
+  accepts ~file (Budget_probes.aliases 9);
+  (* The tokens of a definition count by their bytes. *)
+  rejects ~file (Budget_probes.tree ~tag_length:4000 10) "instance budget";
+  accepts ~file (Budget_probes.tree ~tag_length:4000 6)
+
 let generic_checks () =
   let file = "in.tc" in
   (* Rule 4: an application over a type parameter is an instance, so the
@@ -2517,14 +2534,15 @@ let generic_checks () =
     "type d(T) = distinct int; int n;\
     \ int f(void) { return _Generic(__builtin_choose_expr(\
     __builtin_constant_p(n), n, n), int: 1, default: 2); }";
-  (* A translation limit bounds the tokens that a unit reads for its
-     instances, which can grow exponentially with the text, and so the
-     time of the refusal: without it, this text would not be read in
-     any time a test waits for. *)
-  rejects ~file (doubling_instances 30) "tokens of definitions";
-  (* A definition of many members reaches the limit after fewer
+  (* The instance budget bounds the text that the readings for a unit's
+     instances give them, which can grow exponentially with the source,
+     and so the time of the refusal: without it, these sources would not
+     be read in any time a test waits for. *)
+  rejects ~file (doubling_instances 30) "instance budget";
+  (* A definition of many members reaches the budget after fewer
      readings. *)
-  rejects ~file (doubling_instances ~members:1000 30) "tokens of definitions";
+  rejects ~file (doubling_instances ~members:1000 30) "instance budget";
+  instance_budget ();
   (* A transparent alias instance is a link of its chain, which causes
      the instance that it needs complete. *)
   let aliased depth =

@@ -762,78 +762,95 @@ id(stmt) s;                             /* e = s is an error */
    calls `g1`, for `T *` and for `const T *`, no chain holds more
    than 25 instances, and one use of `g0` causes 2^25 - 1 of them, no
    two of one type. Generic types that each hold two applications of
-   the next do the same. So `typec` also bounds the text of the
-   instances of a translation unit, by the *instance budget* of
-   16777216 bytes.
+   the next do the same. So `typec` also bounds what a translation unit
+   costs it, by two counts: the *instance budget* of 16777216 bytes on
+   what the front end reads for instances, and the *output limit* on
+   all the C text that it writes for the unit.
 
-   The budget counts bytes of text, because an instance is text that
-   grows with its arguments as well as with its definition. Where an
-   instance differs from the definition, lowering writes a name
-   (10.3): the typedef of an argument for a use of a type parameter,
-   the name of an instance for an application or a call, and the
-   names that a variant instance derives for its tag and for each of
-   its constructors (10.1). A name holds the encodings of the
-   arguments, and the line marker before a text holds the name of
-   its file. A count of definitions or of their tokens bounds none
-   of this. Three sources that read fewer than 524288 tokens of
-   definitions for their instances show it (one x86-64 host).
-   Thirteen lines,
-   a tree of structures of 20 members over a tag of 4000 bytes, are
-   145 MB of text, which costs `typec` 2 s and 1 GB. Twelve lines
+   Both count bytes of text, because an instance is text that grows
+   with its arguments as well as with its definition, and so is the
+   unit's own lowered text. Where an instance differs from the
+   definition, lowering writes a name (10.3): the typedef of an argument
+   for a use of a type parameter, the name of an instance for an
+   application or a call, and the names that a variant instance derives
+   for its tag and for each of its constructors (10.1). A name holds the
+   encodings of the arguments, and the line marker before a text holds
+   the name of its file. The unit's own text grows in the same ways and
+   in others: a copy of a deferred statement stands at each exit that
+   runs it (section 6), each edit carries line markers that hold the
+   presumed file name, and each enumerator of a variant holds the name
+   of the variant. A count of definitions, of tokens or of constructs
+   bounds none of this. Sources that read fewer than 524288 tokens of
+   definitions for their instances show it (one x86-64 host). Thirteen
+   lines, a tree of structures of 20 members over a tag of 4000 bytes,
+   are 145 MB of text, which costs `typec` 2 s and 1 GB. Twelve lines
    with a variant of 200 constructors, each of them a name in every
-   instance, are 226 MB, 5.5 s and 1.9 GB. Fourteen lines of
-   aliases, each of which applies the one before it twice and so
-   doubles the depth of a pointer, keep the front end reading for
-   12 s and write nothing.
+   instance, are 226 MB, 5.5 s and 1.9 GB. Fourteen lines of aliases,
+   each of which applies the one before it twice and so doubles the
+   depth of a pointer, keep the front end reading for 12 s and write
+   nothing. Without generics, 1700 defers in one function, each
+   followed by a return that runs the copies of those before it, are
+   66 KB of source and 205 MB of text, 14 s and 2.6 GB; 4000 type
+   declarations after a presumed file name of 80 KB are 1.3 GB of text,
+   13 s and 6.5 GB; and a variant whose name has 50 KB, with 5000
+   constructors, is 252 MB, 9 s and 2.3 GB.
 
-   `typec` counts the text where it makes it, which is in two
-   places, and holds each count to the budget:
+   `typec` counts the text where it makes it and holds each count to
+   its bound:
 
-   - Lowering counts every byte of the texts that 10.3 places for
-     instances: the typedefs of their arguments, their declarations
-     and their definitions, with the line markers that it writes
-     with them. The count is of the text itself, taken where the
-     text is written, so it covers whatever lowering writes for an
-     instance, and no list of constructs decides what is counted.
-   - The front end counts what its reading gives that text, so that
-     a source is refused before `typec` has read what lowering
-     would refuse. Each time it reads the definition of a generic
-     for an instance, to define the instance or to follow the chain
-     of a definition check, it counts the bytes of the tokens of
-     that definition, and then the bytes of each name that the
-     reading puts among them. The chain of a definition check is
-     counted as a definition is, though lowering never writes its
-     text.
+   - Lowering charges the C text of the unit to the output limit as it
+     makes it: each piece of moved text (13.4) when the piece is made,
+     a token of the source or text of `typec`'s own, at least 32 bytes
+     for a piece, which costs `typec` about a hundred bytes of memory
+     whatever its text; the line marker of each run of pieces; the
+     text, line markers and pragmas of each edit; and the unit's own
+     text in full, first. Emission makes every piece and every edit,
+     and charges it as it makes it, so the charge covers whatever
+     lowering writes, the texts of instances, the copies of defers,
+     the temporaries of tries and slices and the headers of
+     `--emit-c-header` alike, and no list of constructs decides what
+     is counted. The charge is at least what is written: the text of an
+     edit that lowering moves into an instance is charged with the edit
+     and again where it moves. A text that lowering builds from a list,
+     such as the enumerators of a variant, is held to the limit item by
+     item before it is built. The limit is 33554432 bytes and 256 for
+     each byte of the preprocessed unit.
+   - The front end counts what its reading gives the texts of
+     instances, so that a source is refused before `typec` has read
+     what lowering would refuse. Each time it reads the definition of a
+     generic for an instance, to define the instance or to follow the
+     chain of a definition check, it counts the bytes of the tokens of
+     that definition, at least 32 for each, as reading a token costs
+     as much whatever its length, and then the bytes of each name that
+     the reading puts among them. The chain of a definition check is
+     counted as a definition is, though lowering never writes its text.
+     This count is held to the instance budget.
 
    Type instances and function instances share each count. A count
-   that would pass the budget ends the translation: the front end
-   makes no further reading, lowering writes no further text, and
-   `typec` writes no output. The application or call that needs the
-   instance is an error, reported at that application or call; in
-   lowering it is the one that first needs the instance whose text
-   would pass the budget. The message names the instance and the
-   budget, and that of the front end cites the application or call
-   that began the chain, as that of the nesting limit does.
+   that would pass its bound ends the translation: the front end makes
+   no further reading, lowering makes no further text, and `typec`
+   writes no output. The error of the front end is reported at the
+   application or call that needs the instance; its message names the
+   instance and the budget and cites the application or call that
+   began the chain, as that of the nesting limit does. The error of
+   lowering is reported at the construct whose text would pass the
+   limit, and its message gives the limit.
 
-   The budget bounds what instances add to a unit. The unit's own
-   text is lowered where it stands, with a name for each application
-   or call in it, so it grows with the source and by no more than
-   its names hold. A name is bounded in turn: the encodings of the
-   arguments of one instance hold at most 4096 bytes together, so
-   the name of an instance is at most that and the name of its
-   generic. An application or call whose instance would have a
-   longer name is an error, reported there, and the message names
-   the argument and the bound. Without the bound a name doubles
-   with each line of
+   A name is bounded as well: the encodings of the arguments of one
+   instance hold at most 4096 bytes together, so the name of an
+   instance is at most that and the name of its generic. An application
+   or call whose instance would have a longer name is an error,
+   reported there, and the message names the argument and the bound.
+   Without the bound a name doubles with each line of
    `typedef pair(p0, p0) p1; typedef pair(p1, p1) p2;`, and the
    identifiers that `typec` hands the backend grow with it.
 
-   The budget and the bound on encodings are translation limits of
-   `typec` (C11 5.2.4.1) and no rules of the language, unlike the
-   nesting limit: what they bound is the reading and the text of
-   this compiler, the reading of its checks included, and a source
-   is valid Type-C whatever they count. Their refusals therefore
-   carry no code (13.6).
+   The budget, the output limit and the bound on encodings are
+   translation limits of `typec` (C11 5.2.4.1) and no rules of the
+   language, unlike the nesting limit: what they bound is the reading
+   and the text of this compiler, the reading of its checks included,
+   and a source is valid Type-C whatever they count. Their refusals
+   therefore carry no code (13.6).
 
    *Provisional (P30).* The budget is between four and five times
    the text of a heavy unit of C++, which is the measure taken
@@ -847,6 +864,16 @@ id(stmt) s;                             /* e = s is an error */
    the 82 functions of tomlc99 (their median is 72), about 900.
    Both sizes are estimates, and they make that unit 3.6 MB. The
    bound on encodings rests on no measurement of a Type-C program.
+   The output limit rests on the inputs of the test suite: of the 560
+   units that it lowers, every one is charged less than the base, the
+   most 32086171 bytes for 82 KB of source whose file name of 80 KB
+   stands in
+   400 line markers, and the instance texts that the front end lets
+   through 27.9 MB at most; of those of over 100 KB, the most is 28
+   times the source, for 20000 applications of a generic. A C unit,
+   which lowering does not edit, is charged its own size. So the base
+   is above every instance text that the tests let through and the
+   factor nine times the largest ratio.
 
    A source that is written to reach the budget costs what the
    budget lets through, and the cost grows with the budget in
@@ -856,11 +883,25 @@ id(stmt) s;                             /* e = s is an error */
    structures over a pointer 3900 levels deep. Text of that size
    which is long tags, the names of a variant's constructors or
    line markers takes under 0.5 s and 150 MB (one x86-64 host). A
-   unit that stays under the budget gives the backend at most the
-   budget of text for its instances. Half the budget of such text,
+   unit that stays under the limit gives the backend at most the
+   limit of text and the fixed static assertions that end it. Half the
+   budget of instance text,
    8.5 MB that are 65536 instances of a chain of functions in the
    form that 10.3 gives them, takes Apple Clang 21 5 s at `-O0` and
    33 s at `-O2` and GCC 16 23 s and 8 s, in 1.2 GB at most.
+
+   The output limit bounds the text and the pieces that lowering makes,
+   not the work that comes before them. Of the sources above that it
+   refuses, the declarations in the long file take 0.4 s and 26 MB and
+   the tree of variants 0.7 s and 58 MB. The defers take 3.7 s and
+   281 MB, most of the time the front end's reading of their 1.4
+   million pairs of a defer and an exit and lowering's sorting of them
+   before any text is made; that work grows with the square of the
+   source, and 3400 defers take 14 s and 1.1 GB. The long variant takes
+   5.1 s and 383 MB, of which 4.9 s and most of the memory are the
+   parser's, which builds the name of each enumerator, the variant's
+   name with it. Neither cost is a translation limit of `typec`; each
+   is a fault of the stage that has it.
 8. *Provisional (P23).* The definition of a generic, type or function
    (section 7), is moved text: lowering writes it in each instance,
    where 10.3 places it, and the resolution property of 13.5 holds for
@@ -2581,8 +2622,8 @@ convert, is weighed with P11.
    in that translation unit as a function with internal linkage, named
    and placed as 10.3 says. A generic function that is not used produces
    no code. Rule 7 of 3.5 bounds what a use causes: a chain of
-   instances by the nesting limit, and the text of the instances of
-   the unit by its instance budget.
+   instances by the nesting limit, and what the instances of the unit
+   cost by the instance budget and the output limit.
 2. The definition of a generic function precedes the first use of each
    of its instances, since the instance is defined there (10.3): generic
    functions are defined in headers. A declaration that is not a
@@ -6164,9 +6205,12 @@ structures of the packing probe that ends one (10.3), one of each.
   refusal: it bounds what this compiler reads or writes and says
   nothing of whether the source is valid, and its message names it
   as a limit of `typec`. The parser's bound on the nesting of
-  brackets is one, and 3.5 rule 7 states two: the instance budget,
-  in bytes of the text of a unit's instances, and the bound of 4096
-  bytes on the encodings of the arguments of one instance. The limit
+  brackets is one, and 3.5 rule 7 states three: the instance budget,
+  in bytes of what the front end reads for a unit's instances; the
+  output limit, in bytes of all the C text that `typec` writes for a
+  unit but the fixed static assertions that end it, charged where each piece and edit of it is made, so that no
+  construct's text escapes it; and the bound of 4096 bytes on the
+  encodings of the arguments of one instance. The limit
   on nested instantiation is none: 3.5 rule 7 states it as a rule of
   Type-C, so it carries a code. A limit of the GNU profile, a
   construct
@@ -6213,6 +6257,7 @@ a crash.
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3), a placement that 10.3 or 7.3 rule 2 or 4 refuses and a translation limit of `typec` (13.6) are compile errors | Nothing |
 | The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure, the bits of each unnamed bit-field and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect and zeroes an unnamed bit-field, which C leaves indeterminate (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
+| The C text that `typec` writes for a unit is at most its output limit, and what the front end reads for its instances at most the instance budget | Every unit and every byte of its C text but the fixed static assertions that end it, instances, copies, temporaries and line markers alike: emission charges each piece and edit as it makes it, with no list of constructs (3.5 rule 7) | Nothing; a unit past either bound is refused and nothing is written. The work of the parser and of the front end outside its readings for instances is not counted |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
 | A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length. No full expression that holds an index, a `slice_sub` or a conversion of a slice is resumed, by a call that returns a second time (`setjmp`, `sigsetjmp`, `getcontext`, `vfork`, `__builtin_setjmp`, a function declared with the GNU attribute `returns_twice`), after the same call of its function has begun to evaluate it again: the values that it held are then indeterminate, as C11 7.13.2.1p3 has the objects of a function after a `longjmp`, and the test does not protect the access (section 8 rule 10). Measured: under GCC 16 at `-O2` such an index passes its test and points beyond the end of a slice whose array is live, and under both backends a call stores through the address of an element that it held across such a call in another argument, into an array that is freed, as C does with `&a[i]` there. `typec` does not refuse such an expression (13.5) |
@@ -6264,7 +6309,7 @@ with the scripts that reproduce them (`make size-split`,
 | P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
 | P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its code; how many of them stand where C does not evaluate them; and how many tests hold a call or a statement expression in an operand after the first, with what volatile temporaries for those tests alone cost there, the form that the owner decided against (section 8 rule 10). A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays, and its temporaries are not volatile |
 | P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
-| P30 | The instance budget of a translation unit is 16777216 bytes of text, and the encodings of the arguments of one instance hold at most 4096 bytes (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances, in the front end and in lowering, and the longest encodings of one instance in them. The budget is at least four times the largest count and the bound at least four times the longest; a larger budget costs in proportion (3.5 rule 7) | 16777216 bytes and 4096 bytes |
+| P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32; and the encodings of the arguments of one instance hold at most 4096 bytes (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances in the front end, the bytes that lowering charges for each of them and their ratio to the source, and the longest encodings of one instance in them. The budget and the base of the limit are at least four times the largest count and charge, the factor at least four times the largest ratio and the bound at least four times the longest; a larger budget or limit costs in proportion (3.5 rule 7) | 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes |
 
 ## 16. Non-goals
 

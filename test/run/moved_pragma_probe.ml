@@ -25,23 +25,26 @@ let last_start unit =
   | External_declaration { span; _ } -> span.first
   | _ -> failwith "moved_pragma_probe: a last declaration that is no C one"
 
-let moved_piece unit index =
-  match Emitter.moved_token unit index with
+let moved_piece output index =
+  match Emitter.moved_token output index with
   | Some piece -> piece
   | None -> failwith "moved_pragma_probe: an unmovable token"
 
 let () =
   let unit = read Sys.argv.(1) in
   let start = last_start unit in
-  let deleted =
-    Emitter.code
-      (Reader.range unit.tokens ~first:0 ~count:start)
-      ~location:unit.tokens.(0).location ""
+  let edits output =
+    let deleted =
+      Emitter.code output
+        (Reader.range unit.tokens ~first:0 ~count:start)
+        ~location:unit.tokens.(0).location ""
+    in
+    let moved =
+      Emitter.moved output
+        (Reader.range unit.tokens ~first:start ~count:0)
+        (List.init start (moved_piece output))
+    in
+    [ deleted; moved ]
   in
-  let moved =
-    Emitter.moved
-      (Reader.range unit.tokens ~first:start ~count:0)
-      (List.init start (moved_piece unit))
-  in
-  print_string
-    (Emitter.emit unit { edits = [ deleted; moved ]; assertions = [] })
+  let edits = Result.get_ok (Emitter.limited unit edits) in
+  print_string (Emitter.emit unit { edits; assertions = [] })

@@ -7,5 +7,5 @@
    without the probe of design 10.3: only emission of an Emitter.Bracketed
    text writes a bracket, so this must not compile. *)
 
-let code range ~location =
-  Emitter.code range ~location (Emitter.bracket "struct s { int n; };")
+let code output range ~location =
+  Emitter.code output range ~location (Emitter.bracket "struct s { int n; };")

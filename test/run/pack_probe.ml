@@ -24,8 +24,10 @@ let () =
     | [] -> failwith "pack_probe: no external declaration"
   in
   let location = unit.tokens.(0).location in
-  let instance =
-    Emitter.bracketed unit ~at ~location
-      [ Emitter.generated location "struct instance { char c; int i; };" ]
+  let instance output =
+    Emitter.bracketed output ~at ~location
+      [ Emitter.generated output location
+          "struct instance { char c; int i; };" ]
   in
+  let instance = Result.get_ok (Emitter.limited unit instance) in
   print_string (Emitter.emit unit { edits = [ instance ]; assertions = [] })

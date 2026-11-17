@@ -33,8 +33,13 @@ let at line : Location.t = { file = "a.c"; line; flags = No_flags }
 (* The text with [edits] and no assertions. *)
 let emit unit edits = Emitter.emit unit { edits; assertions = [] }
 
+(* What [make] makes for an output of [unit], under the output limit. *)
+let made unit make = Result.get_ok (Emitter.limited unit make)
+
 let edit (unit : Reader.t) ~first ~count location text =
-  Emitter.code (Reader.range unit.tokens ~first ~count) ~location text
+  made unit (fun output ->
+      Emitter.code output (Reader.range unit.tokens ~first ~count) ~location
+        text)
 
 (* x = 1 becomes x = 2 at line 1. *)
 let replacement = edit unit ~first:1 ~count:3 (at 1) "x = 2"
@@ -277,9 +282,9 @@ let declarations = Typec_test_support.External_declarations.of_unit
 
 (* The pieces of the [count] tokens of [unit] from [first], none of them
    a pragma line. *)
-let pieces unit ~first ~count =
+let pieces output ~first ~count =
   List.init count (fun offset ->
-      Option.get (Emitter.token unit (first + offset)))
+      Option.get (Emitter.token output (first + offset)))
 
 (* A bracketed text stands in the packing bracket of design 10.3, whose
    pragmas take the line of the edit, and the unit ends with the packing
@@ -306,8 +311,9 @@ let probe =
 let () =
   let anchor = Tree.anchor (List.nth (declarations unit) 2) in
   let bracketed =
-    Emitter.bracketed unit ~at:anchor ~location:(at 2)
-      [ Emitter.generated (at 2) "struct s { int n; };" ]
+    made unit (fun output ->
+        Emitter.bracketed output ~at:anchor ~location:(at 2)
+          [ Emitter.generated output (at 2) "struct s { int n; };" ])
   in
   let text =
     "# 1 \"a.c\"\n\
@@ -357,13 +363,14 @@ let own index = moving.tokens.(index).location
    and flags, the name written for box takes the line of box, and the
    bracket takes the line of the edit. *)
 let moved =
-  Emitter.bracketed moving
-    ~at:(Tree.anchor (List.nth (declarations moving) 2))
-    ~location:(own 12)
-    (pieces moving ~first:8 ~count:4
-    @ pieces moving ~first:0 ~count:1
-    @ [ Emitter.generated (own 1) "box__i" ]
-    @ pieces moving ~first:2 ~count:6)
+  made moving (fun output ->
+      Emitter.bracketed output
+        ~at:(Tree.anchor (List.nth (declarations moving) 2))
+        ~location:(own 12)
+        (pieces output ~first:8 ~count:4
+        @ pieces output ~first:0 ~count:1
+        @ [ Emitter.generated output (own 1) "box__i" ]
+        @ pieces output ~first:2 ~count:6))
 
 let moved_text = Emitter.emit moving { edits = [ moved ]; assertions = [] }
 
@@ -427,13 +434,15 @@ let () =
        #pragma typec checked\n\
        int a;\n"
   in
-  let piece index = Option.is_some (Emitter.token unit index) in
+  let piece index =
+    made unit (fun output -> Option.is_some (Emitter.token output index))
+  in
   check "no piece of a pragma line" (not (piece 0));
   check "no piece of a pragma typec line" (not (piece 1));
   check "a piece of any other token" (piece 2 && piece 3 && piece 4);
   let refused text =
     raises
-      (fun () -> Emitter.generated (at 1) text)
+      (fun () -> made unit (fun output -> Emitter.generated output (at 1) text))
       (Printf.sprintf
          "Emitter.generated: %S holds a byte that typec's text never does"
          text)
@@ -469,7 +478,9 @@ let () =
   in
   (* A piece is the text and its location, as typec's own text is. *)
   let is_piece index location text =
-    Emitter.token unit index = Some (Emitter.generated location text)
+    made unit (fun output ->
+        Emitter.token output index
+        = Some (Emitter.generated output location text))
   in
   check "a universe token is at its line"
     (is_piece 1 (universe_at 1) "option"
@@ -494,7 +505,7 @@ let () =
        int a;\n"
   in
   let moved index =
-    match Emitter.moved_token unit index with
+    match made unit (fun output -> Emitter.moved_token output index) with
     | Some (Pragma_line _) -> `Line
     | Some (Piece _) -> `Piece
     | None -> `None
@@ -517,16 +528,16 @@ let pragmatic =
      int b;\n\
      int z;\n"
 
-let moved index = Option.get (Emitter.moved_token pragmatic index)
-
 (* The tokens of int a ; #pragma int b ; and a name of typec's at the
    pragma's line, moved in place of int z ;. *)
 let moved_with_pragma =
-  Emitter.moved
-    (Reader.range pragmatic.tokens ~first:7 ~count:3)
-    [ moved 0; moved 1; moved 2; moved 3;
-      Emitter.Piece (Emitter.generated (at 2) "int c;");
-      moved 4; moved 5; moved 6 ]
+  made pragmatic (fun output ->
+      let moved index = Option.get (Emitter.moved_token output index) in
+      Emitter.moved output
+        (Reader.range pragmatic.tokens ~first:7 ~count:3)
+        [ moved 0; moved 1; moved 2; moved 3;
+          Emitter.Piece (Emitter.generated output (at 2) "int c;");
+          moved 4; moved 5; moved 6 ])
 
 let moved_pragma_text = emit pragmatic [ moved_with_pragma ]
 
@@ -567,5 +578,74 @@ let () =
     = List.map at [ 1; 1; 1; 2; 2; 2; 2; 3; 3; 3 ]);
   check "read back, nothing follows the moved text"
     (Array.length read_back = 17)
+
+(* Design 3.5 rule 7: an output is charged what emission writes for the
+   unit, its own text and each edit with its markers and pragmas, and
+   at least 32 bytes for a piece. The pieces here are longer, so each is
+   charged its bytes and the blank or line break after it, and the edits,
+   all insertions, are charged exactly what they add: with a filler
+   piece that takes the rest of the limit the unit passes, and with one
+   a byte longer it does not. *)
+let () =
+  let long output location =
+    Emitter.generated output location (String.make 40 'a')
+  in
+  let edits output =
+    let insertion first = Reader.range unit.tokens ~first ~count:0 in
+    [ Emitter.code output (insertion 1) ~location:(at 1) "int w;";
+      Emitter.closing output ~after:3 ~location:(at 1) "int v;";
+      Emitter.moved output (insertion 8)
+        [ Piece (long output (at 2)); Piece (long output (at 2));
+          Piece (long output (at 1)) ];
+      Emitter.bracketed output
+        ~at:(Tree.anchor (List.nth (declarations unit) 2))
+        ~location:(at 2)
+        [ long output (at 2); long output (at 3) ] ]
+  in
+  let closing_block = "\n# 1 \"<typec>\" 3\n" ^ probe in
+  let written =
+    String.length (emit unit (made unit edits)) - String.length closing_block
+  in
+  let limit = Emitter.limit unit in
+  let filled extra output =
+    ignore (edits output);
+    String.make (limit - written - 1 + extra) 'a'
+    |> Emitter.generated output (at 3)
+  in
+  check "edits are charged the bytes they write"
+    (Result.is_ok (Emitter.limited unit (filled 0)));
+  check "a byte past the limit is refused at the piece that passes it"
+    (match Emitter.limited unit (filled 1) with
+     | Error { location; message } ->
+         location = at 3
+         && String.starts_with
+              ~prefix:"the C text of the unit would pass the output limit"
+              message
+     | Ok _ -> false);
+  (* A piece of one byte is charged 32. *)
+  let with_short extra output =
+    let size = String.length source in
+    ignore (Emitter.generated output (at 1)
+              (String.make (limit - size - 33 + extra) 'a'));
+    Emitter.generated output (at 2) "a"
+  in
+  check "a short piece is charged the least charge"
+    (Result.is_ok (Emitter.limited unit (with_short 0))
+    && Result.is_error (Emitter.limited unit (with_short 1)));
+  (* A joined text is refused as soon as its parts would pass the limit,
+     before it is built, and charged nowhere else. *)
+  let megabyte _ = String.make 1048576 'a' in
+  let joined count output =
+    Emitter.joined output (at 1) ~separator:", " megabyte
+      (List.init count Fun.id)
+  in
+  check "a joined text"
+    (made unit (fun output ->
+         Emitter.joined output (at 1) ~separator:", " string_of_int [ 1; 2 ])
+    = "1, 2");
+  check "a joined text within the limit"
+    (Result.is_ok (Emitter.limited unit (joined 31)));
+  check "a joined text past the limit"
+    (Result.is_error (Emitter.limited unit (joined 40)))
 
 let () = if !failures > 0 then exit 1

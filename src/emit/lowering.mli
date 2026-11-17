@@ -22,7 +22,10 @@
     definitions, as moved text in packing brackets, at the anchors that
     their placements name. *)
 
-val edits : Typec_cpp.Reader.t -> Typec_sema.Declarations.t -> Emitter.edit list
+val edits :
+  Typec_cpp.Reader.t ->
+  Typec_sema.Declarations.t ->
+  (Emitter.edit list, Typec_cpp.Reader.error) result
 (** [edits text declarations] lowers the unit [text] that [declarations]
     read: its type declarations, constructor expressions, match
     statements, single-pattern tests and answered constructs, and the
@@ -31,4 +34,9 @@ val edits : Typec_cpp.Reader.t -> Typec_sema.Declarations.t -> Emitter.edit list
     but the type names of its associations become types that steer the
     backend to typec's answer, and its controlling expression is wrapped
     to have the selected one; the edits of the tokens dropped are
-    discarded. *)
+    discarded.
+
+    Every piece and edit is made for one {!Emitter.output}, so the
+    lowered text is held to the output limit of design 3.5 rule 7 as it
+    is made; the error is at the first that would pass it. The texts of
+    the instances are made first, in the order of their placements. *)

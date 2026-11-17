@@ -454,10 +454,11 @@ let with_bracket reader (lowered : Typec_emit.Emitter.lowered) =
     | [] -> failwith "with_bracket: no external declaration"
   in
   let location = reader.Reader.tokens.(0).location in
-  let bracketed =
-    Typec_emit.Emitter.bracketed reader ~at ~location
-      [ Typec_emit.Emitter.generated location "struct s { int i; };" ]
+  let bracketed output =
+    Typec_emit.Emitter.bracketed output ~at ~location
+      [ Typec_emit.Emitter.generated output location "struct s { int i; };" ]
   in
+  let bracketed = Result.get_ok (Typec_emit.Emitter.limited reader bracketed) in
   { lowered with edits = bracketed :: lowered.edits }
 
 let emitted source =
