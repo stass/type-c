@@ -232,7 +232,24 @@ Each refusal is located at the construct it concerns.
   > }
   > EOF
   $ ./golden.exe shared.tc
-  shared.tc:5: error: the binding 'i' is in an arm of several labels, which none of them may bind [shared-arm-binding]
+  shared.tc:5: error: the labels 'A' and 'B(i)' share an arm, so 'i' may not be bound in it; give each label its own arm [shared-arm-binding]
+  [1]
+
+A C programmer's shared case, with each label binding the same name:
+
+  $ cat > shared_both.tc <<'EOF'
+  > type shape = | Circle(double r) | Square(double s) | Dot;
+  > double f(shape s) {
+  >   match (s) {
+  >   case Circle(x): case Square(x):
+  >     return x;
+  >   case Dot:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe shared_both.tc
+  shared_both.tc:4: error: the labels 'Circle(x)' and 'Square(x)' share an arm, so 'x' may not be bound in it; give each label its own arm [shared-arm-binding]
   [1]
 
   $ cat > scrutinee.tc <<'EOF'

@@ -299,7 +299,7 @@ A label that binds at any depth shares its arm with no other (4.7 rule
   > }
   > EOF
   $ ./golden.exe shared.tc
-  shared.tc:7: error: the binding 'a' is in an arm of several labels, which none of them may bind [shared-arm-binding]
+  shared.tc:7: error: the labels 'Add(*Num(a), _)' and 'Add(_, *Num(b))' share an arm, so 'a' may not be bound in it; give each label its own arm [shared-arm-binding]
   [1]
 
 The bounds on selection (rule 10) are translation limits, so their

@@ -1607,10 +1607,10 @@ let matching () =
      return KA;"
     "'KA' is not declared";
   match_error "match (v) { case A: break; case C(x): case B(_, _): break; }"
-    "the binding 'x' is in an arm of several labels, which none of them may \
-     bind [shared-arm-binding]";
+    "the labels 'C(x)' and 'B(_, _)' share an arm, so 'x' may not be bound \
+     in it; give each label its own arm [shared-arm-binding]";
   match_error "match (v) { case A: break; default: case C(x): break; }"
-    "[shared-arm-binding]";
+    "the labels 'default' and 'C(x)' share an arm, so 'x' may not";
   match_error "match (v) { case A: break; case B(_, _): break; }"
     "the match does not cover the constructor 'C' of the variant 'e' \
      [match-coverage]";

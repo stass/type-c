@@ -65,13 +65,6 @@ The items are ordered by how often real code meets them.
   of 'Circle'; bind it with 'if (case Circle(r) = s)'". Source: Pilot A
   (49 accessor calls and 92 predicate calls stand where C read the
   field or the tag); review cases 19 and 35; probe.
-- [Medium] A binding in an arm of several labels: `case Circle(x): case
-  Square(x):` gives "the binding 'x' is in an arm of several labels,
-  which none of them may bind [shared-arm-binding]", which reads as a
-  contradiction. Proposed: "the labels 'Circle(x)' and 'Square(x)'
-  share an arm, so neither may bind a field; give each label its own
-  arm". Source: Pilot A (39 shared arms at Step 6, 18 at Step 7);
-  probe.
 - [Medium] An array or a pointer passed where a slice is expected:
   `g(c)` with `char c[4]` and `size_t g(str s)` gives "a value of type
   'char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)",

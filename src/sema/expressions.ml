@@ -6335,7 +6335,7 @@ and matched_arm context (arm : Tree.arm) labelled defaulted ~number =
     | [ (_, Some (checked : checked_pattern)) ] ->
         List.map (declare_binding context) checked.bindings
     | _ ->
-        List.iter (refuse_shared_binding context) labelled;
+        List.iter (refuse_shared_binding context arm) labelled;
         []
   in
   let cases =
@@ -6350,15 +6350,29 @@ and matched_arm context (arm : Tree.arm) labelled defaulted ~number =
     cases = List.map constructor_name cases;
     bindings }
 
-and refuse_shared_binding context = function
+and refuse_shared_binding context arm = function
   | _, Some { bindings = { identifier; _ } :: _; _ } ->
       context.fail identifier.span
         (Rule.message Shared_arm
            (Printf.sprintf
-              "the binding %s is in an arm of several labels, which none of \
-               them may bind"
+              "%s share an arm, so %s may not be bound in it; give each label \
+               its own arm"
+              (listed ~one:"the label" ~several:"the labels" ~more:0
+                 (quoted_labels context arm))
               (quote identifier.node)))
   | _, Some { bindings = []; _ } | _, None -> ()
+
+(* The labels of [arm] as written, each without its [case] and colon. *)
+and quoted_labels context (arm : Tree.arm) =
+  List.map
+    (fun (label : Tree.arm_label) ->
+      match label.node with
+      | Pattern_label _ ->
+          quote
+            (excerpt context
+               { first = label.span.first + 1; last = label.span.last - 1 })
+      | Default_arm_label -> quote "default")
+    arm.node.labels
 
 and declare_binding context (found : found_binding) =
   context.binding found.identifier found.declared found.object_type;
