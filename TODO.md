@@ -209,14 +209,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Parser
 
-- [High] The parser raises `Invalid_argument("index out of bounds")`
-  where a `slice_from_array(` in a function body ends the text:
-  `array_operand` (`src/syntax/parser.ml`) reads `first_token` at the
-  position after the parenthesis, past the last grammar token. The
-  `lowering` and `parser` fuzz targets both crash on the two lines
-  `# 1 "a.c"` and `void f(void) { slice_from_array(`. Refuse the end of
-  the text there like any other missing operand, with a regression test
-  in `test/unit/test_parser.ml`.
 - [Low] Design 2.3 refuses an identifier that begins with `__tc_`
   anywhere in the text, C text included; the parser checks the grammar
   tokens only, not the identifiers of a `#pragma` line

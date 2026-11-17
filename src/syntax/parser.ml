@@ -54,6 +54,68 @@ type lexeme =
 (* A token the grammar reads and its index in [Reader.t.tokens]. *)
 type grammar_token = { lexeme : lexeme; index : int }
 
+(* The lexeme of a token, or None for a pragma: C gives a pragma no place
+   in the grammar and one may stand between any two tokens, so the
+   grammar passes over it. A [#pragma typec] line is passed over the same
+   way until Stage 5 gives it a meaning. *)
+let lexeme_of keywords (token : Token.t) =
+  match token.kind with
+  | Token.Identifier name -> (
+      match Keyword.of_spelling keywords name with
+      | Some keyword -> Some (Keyword_token keyword)
+      | None -> Some (Identifier_token name))
+  | Token.Number -> Some Number_token
+  | Token.Character encoding -> Some (Character_token encoding)
+  | Token.String encoding -> Some (String_token encoding)
+  | Token.Punctuator punctuator -> Some (Punctuator_token punctuator)
+  | Token.Pragma _ | Token.Typec_pragma -> None
+
+(* The grammar tokens of a text, read only through [at], which gives the
+   end of input at every position past the last token. So a construct
+   cut short by the end of the text reads the end of input where its
+   next token would be, and is refused as a syntax error there rather
+   than by a read outside the tokens. *)
+module Grammar : sig
+  type t
+
+  val of_reader : Keyword_set.t -> Reader.t -> t
+
+  (* The grammar token at [position], which is at least 0, or the end of
+     input where the tokens end before it. *)
+  val at : t -> int -> grammar_token
+
+  (* Every grammar token, the end of input excluded. *)
+  val iter : (grammar_token -> unit) -> t -> unit
+end = struct
+  type t = { tokens : grammar_token array; end_of_input : grammar_token }
+
+  (* The end of input has the index of the last grammar token, where an
+     error at the end is reported. A text of no grammar tokens gives the
+     parser nothing to read or refuse, so nothing reads the index of its
+     end, and 0 stands in for one. *)
+  let end_of_input tokens =
+    let count = Array.length tokens in
+    if count = 0 then { lexeme = End_of_input; index = 0 }
+    else { lexeme = End_of_input; index = tokens.(count - 1).index }
+
+  let of_reader keywords (reader : Reader.t) =
+    let tokens =
+      Array.to_seqi reader.tokens
+      |> Seq.filter_map (fun (index, token) ->
+             Option.map
+               (fun lexeme -> { lexeme; index })
+               (lexeme_of keywords token))
+      |> Array.of_seq
+    in
+    { tokens; end_of_input = end_of_input tokens }
+
+  let at grammar position =
+    if position < Array.length grammar.tokens then grammar.tokens.(position)
+    else grammar.end_of_input
+
+  let iter visit grammar = Array.iter visit grammar.tokens
+end
+
 (* What the cursor holds open: a bracket and the bracket that closes it,
    or the [?] of a conditional, which its [:] closes. *)
 type opening = Open_bracket of P.t | Open_conditional
@@ -183,7 +245,7 @@ type constructor_ahead = { at : int; checked : Spelling.constructor }
 type state = {
   reader : Reader.t;
   keywords : Keyword_set.t;  (** which the grammar tokens are read with *)
-  grammar : grammar_token array;
+  grammar : Grammar.t;
   mutable position : int;  (** in [grammar] *)
   mutable open_brackets : opening list;
       (** read and not yet closed, innermost first *)
@@ -239,35 +301,8 @@ exception Failed of error
 
 (* Reading the grammar tokens. *)
 
-(* The lexeme of a token, or None for a pragma: C gives a pragma no place
-   in the grammar and one may stand between any two tokens, so the
-   grammar passes over it. A [#pragma typec] line is passed over the same
-   way until Stage 5 gives it a meaning. *)
-let lexeme_of keywords (token : Token.t) =
-  match token.kind with
-  | Token.Identifier name -> (
-      match Keyword.of_spelling keywords name with
-      | Some keyword -> Some (Keyword_token keyword)
-      | None -> Some (Identifier_token name))
-  | Token.Number -> Some Number_token
-  | Token.Character encoding -> Some (Character_token encoding)
-  | Token.String encoding -> Some (String_token encoding)
-  | Token.Punctuator punctuator -> Some (Punctuator_token punctuator)
-  | Token.Pragma _ | Token.Typec_pragma -> None
-
-let grammar_tokens keywords (reader : Reader.t) =
-  Array.to_seqi reader.tokens
-  |> Seq.filter_map (fun (index, token) ->
-         Option.map
-           (fun lexeme -> { lexeme; index })
-           (lexeme_of keywords token))
-  |> Array.of_seq
-
 let peek_at state offset =
-  let position = state.position + offset in
-  if position < Array.length state.grammar then
-    state.grammar.(position).lexeme
-  else End_of_input
+  (Grammar.at state.grammar (state.position + offset)).lexeme
 
 let peek state = peek_at state 0
 
@@ -279,10 +314,11 @@ let peek state = peek_at state 0
    span. *)
 
 (* The index in [Reader.t.tokens] of the last grammar token read. *)
-let last_read state = state.grammar.(state.position - 1).index
+let last_read state = (Grammar.at state.grammar (state.position - 1)).index
 
-(* The index in [Reader.t.tokens] of the grammar token at [start]. *)
-let first_token state start = state.grammar.(start).index
+(* The index in [Reader.t.tokens] of the grammar token at [start], or of
+   the last one where [start] is the end of input ({!Grammar}). *)
+let first_token state start = (Grammar.at state.grammar start).index
 
 let span_from state start =
   { first = first_token state start; last = last_read state }
@@ -310,18 +346,15 @@ let with_jumps state jumps parse =
 (* Errors. *)
 
 let token_at state position =
-  state.reader.tokens.(state.grammar.(position).index)
+  state.reader.tokens.(first_token state position)
 
 (* The spelling of the next token, which is not the end of input. *)
 let next_spelling state =
   Reader.spelling state.reader (token_at state state.position)
 
 (* Where an error is reported: at the next token, or at the last one at
-   the end of the input. A parse of no grammar tokens never fails, so
-   there is a last one. *)
-let error_location state =
-  let last = Array.length state.grammar - 1 in
-  (token_at state (min state.position last)).location
+   the end of the input ({!Grammar}). *)
+let error_location state = (token_at state state.position).location
 
 let fail state diagnostic =
   raise
@@ -680,7 +713,7 @@ let refuse_generated_name state ~at spelling =
             (quoted spelling) generated_prefix))
 
 let refuse_generated_names state =
-  Array.iter
+  Grammar.iter
     (fun { lexeme; index } ->
       match lexeme with
       | Identifier_token spelling ->
@@ -1419,7 +1452,7 @@ let type_c_word = function
 let begins_word state word =
   match peek state with
   | Identifier_token name when type_c_word name = Some word ->
-      is_type_c_text_at state state.grammar.(state.position).index
+      is_type_c_text_at state (first_token state state.position)
       && Option.is_none (visible state name)
   | _ -> false
 
@@ -1441,14 +1474,14 @@ let in_place state read =
   result
 
 (* The views of an operand that begins at the cursor, in
-   [state.place], made when they are recorded: the place may begin at
-   the end of a text that ends early, where no token is and nothing is
-   recorded. *)
+   [state.place]. *)
 let try_views_here state =
-  let place = state.place and place_start = state.place_start in
-  let own = view_here state and depth = scope_depth state in
-  fun () ->
-    { place; place_before = first_token state place_start; own; depth }
+  {
+    place = state.place;
+    place_before = first_token state state.place_start;
+    own = view_here state;
+    depth = scope_depth state;
+  }
 
 (* Records [views] at [token], the first token of the span of a [try] or
    of an operand that a holder may hoist, which typing reads them by. *)
@@ -1464,7 +1497,7 @@ let record_try_views state token views =
 let hoistable state =
   let views = try_views_here state in
   fun (operand : expression) ->
-    record_try_views state operand.span.first (views ())
+    record_try_views state operand.span.first views
 
 (* At an [if] or a [switch], which holds a [try] in its controlling
    expression with its prelude in front of it, after its labels (design
@@ -1477,7 +1510,7 @@ let holds_place state =
    returns the node it makes of its operand. *)
 let try_prefix state =
   record_try_views state (first_token state state.position)
-    (try_views_here state ());
+    (try_views_here state);
   advance state;
   fun operand -> Tree.Try { operand }
 
@@ -1494,7 +1527,7 @@ and take_statement_view state =
 (* A variant declares its enumerators for C clients (design 10.1 rule
    6), so Type-C text cannot name them. *)
 let refuse_derived_enumerator state name =
-  let token = state.grammar.(state.position).index in
+  let token = first_token state state.position in
   if is_type_c_text_at state token then
     fail_at_token state token
       (Rule.message Claimed_name
@@ -1879,7 +1912,7 @@ let begins_qualified_constructor state offset (ordinary : ordinary) =
     else after_name
   in
   peek_at state after_type_name = Punctuator_token P.Dot
-  && is_type_c_text_at state state.grammar.(state.position + offset).index
+  && is_type_c_text_at state (first_token state (state.position + offset))
 
 (* The specifier that the token [offset] places ahead begins. A typedef
    name is one only where no other type specifier precedes it, which the
@@ -2628,7 +2661,8 @@ let names_universe_declaration state offset =
    parameter of an old-style definition (design 2.3). *)
 let is_c_text_universe_parameter state offset =
   let in_c_text () =
-    not (is_type_c_text_at state state.grammar.(state.position + offset).index)
+    let token = first_token state (state.position + offset) in
+    not (is_type_c_text_at state token)
   in
   let ends_name () =
     match peek_at state (offset + 1) with
@@ -2795,7 +2829,7 @@ let constructor_names state =
   let rec loop offset names =
     match (peek_at state offset, peek_at state (offset + 1)) with
     | Punctuator_token P.Pipe, Identifier_token name ->
-        let token = state.grammar.(state.position + offset + 1).index in
+        let token = first_token state (state.position + offset + 1) in
         let next = past_group state P.Left_paren (offset + 2) in
         let name = Spanned.identifier { first = token; last = token } name in
         loop next (name :: names)
@@ -3966,7 +4000,7 @@ and array_operand state read =
    A generic type has constructors only in an application, which
    begins a type name. *)
 and typedef_name_operand state name (ordinary : ordinary) =
-  let at = state.grammar.(state.position).index in
+  let at = first_token state state.position in
   match ordinary.kind with
   | Declared_type { stage = Defining; _ } -> fail_own_name state ~at name
   | _ when begins_qualified_constructor state 0 ordinary ->
@@ -4223,7 +4257,7 @@ and declaration_of_start state = function
 (* At the [type] that [begins_type_declaration] recognises. *)
 and type_declaration state : type_declaration =
   let start = state.position in
-  let type_keyword = state.grammar.(start).index in
+  let type_keyword = first_token state start in
   advance state;
   let name =
     checked_type_name state (identifier state "the name of a type declaration")
@@ -5393,7 +5427,7 @@ let parse_with_scopes ~keywords reader =
     {
       reader;
       keywords;
-      grammar = grammar_tokens keywords reader;
+      grammar = Grammar.of_reader keywords reader;
       position = 0;
       open_brackets = [];
       scope = Scope.file;

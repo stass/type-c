@@ -1587,6 +1587,18 @@ let error_cases =
       "in.i:1: error: expected an expression, found end of input";
     case "the end of input after else" "void f(void) { if (1) ; else"
       "in.i:1: error: expected an expression, found end of input";
+    case "the end of input after slice_from_array("
+      "void f(void) { slice_from_array("
+      "in.i:1: error: expected an expression, found end of input";
+    case "the end of input after slice_sub(" "void f(void) { slice_sub("
+      "in.i:1: error: expected an expression, found end of input";
+    case "the end of input after slice_unchecked("
+      "void f(void) { slice_unchecked("
+      "in.i:1: error: expected an expression, found end of input";
+    case "the end of input in a declarator" "int (*"
+      "in.i:1: error: expected a declarator, found end of input";
+    case "the end of input after a parameter list" "int f(int)"
+      "in.i:1: error: expected `;` after a declaration, found end of input";
     case "a body after a non-function" "int x { }"
       "in.i:1: error: expected `;` after a declaration, found `{`";
     case "a body after a pointer to a function" "int (*f)(void) { }"
@@ -2069,6 +2081,22 @@ let type_c_error_cases =
        preprocessing tokens: unterminated literal [pragma-tokens]";
     case "a try without an operand" "void f(void) { try; }"
       "in.tc:1: error: expected an expression, found `;`";
+    case "the end of input after try" "void f(void) { try"
+      "in.tc:1: error: expected an expression, found end of input";
+    case "the end of input after match (" "void f(void) { match ("
+      "in.tc:1: error: expected an expression, found end of input";
+    case "the end of input after the head of a match"
+      "void f(int x) { match (x)"
+      "in.tc:1: error: expected `;` after an expression, found end of input";
+    case "the end of input after generic(" "generic("
+      "in.tc:1: error: expected the name of a type parameter, found end of \
+       input";
+    case "the end of input after the head of a generic function"
+      "generic(T)"
+      "in.tc:1: error: expected a declaration, found end of input";
+    case "the end of input in the variants of a type" "type t = |"
+      "in.tc:1: error: expected the name of a constructor, found end of \
+       input";
     case "a block literal in Type-C text"
       "void f(void) {\n(void)\n^{ };\n}"
       "in.tc:3: error: a block literal is C text only, so Type-C text cannot \
