@@ -12,6 +12,10 @@ val piece_charge : int -> int
     is charged: its bytes and the blank after it, and at least 32
     whatever its length. *)
 
+val of_length : int -> int
+(** [of_length length] is the output limit in bytes of a unit whose
+    preprocessed text has [length] bytes. *)
+
 val of_unit : Typec_cpp.Reader.t -> int
 (** [of_unit unit] is the output limit of [unit] in bytes, from its
     length ({!Typec_cpp.Reader.length}). *)

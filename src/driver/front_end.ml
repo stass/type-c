@@ -97,9 +97,11 @@ let assertions target = function
   | [] -> []
   | _ :: _ -> Typec_emit.Assumptions.assertions target
 
-let lower dialect target ~trap text =
+let parse dialect target text =
   let keywords = Typec_sema.Target.keywords target dialect in
-  let* _unit, scopes = Typec_syntax.Parser.parse_with_scopes ~keywords text in
+  Typec_syntax.Parser.parse_with_scopes ~keywords text
+
+let lower_parsed target ~trap text (scopes : Typec_syntax.Parser.scopes) =
   let* declarations = Declarations.read target text scopes in
   let* edits, output_bytes =
     Typec_emit.Lowering.edits text ~trap declarations
@@ -124,6 +126,10 @@ let lower dialect target ~trap text =
     { trap; edits; assertions = assertions target edits }
   in
   Ok (lowered, counts)
+
+let lower dialect target ~trap text =
+  let* _unit, scopes = parse dialect target text in
+  lower_parsed target ~trap text scopes
 
 let counts_line counts =
   Printf.sprintf

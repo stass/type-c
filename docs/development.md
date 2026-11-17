@@ -145,10 +145,14 @@ and gaps, has only layout in the gaps and is emitted unchanged. The
 file-scope declarations of every unit that parses, for an LP64 target;
 each stage must accept or refuse with a printable message, every node's
 span must hold its parts in token order, and parsing again must give
-the same tree. The parser runs on a fiber whose stack is limited to 32K
-words (`test/support/small_stack.ml`), which holds its deepest nesting
-(`Parser.max_nesting`), so that recursion growing with the input
-overflows it and is reported. The normal build compiles
+the same tree. The `lowering` target lowers every unit whose
+declarations are read, with the builtin trap, and emits it as `typec`
+does; lowering must refuse with a printable message or make edits
+charged at most the output limit (design 3.5 rule 7), which emission
+applies without raising. The parser runs on a fiber whose stack is
+limited to 32K words (`test/support/small_stack.ml`), which holds its
+deepest nesting (`Parser.max_nesting`), so that recursion growing with
+the input overflows it and is reported. The normal build compiles
 the harness, and `dune test` runs it on the seeds in
 `tools/fuzz/seeds/`.
 
@@ -222,19 +226,32 @@ The limits of one execution, whose values are in `fuzz.ml` and
   The slowest input of that size measured, an array size of 8K
   additions in the `parser` target, takes about 65 ms in the
   instrumented harness; all `;` takes about 20 ms in the `reader`.
-* Time: `timeout_ms`, 300 ms (`-t`). AFL++ runs an input that exceeds
-  it again with twice that (`AFL_HANG_TMOUT`) and saves it as a hang
-  only if it exceeds that too, so that a busy host does not make one.
-  The limit is about five times the worst linear run, while a step
-  quadratic in the 16K bytes or tokens of that input would cost
-  thousands of times more. A step quadratic in something sparser, such
-  as line markers, can stay inside it.
+* Time: the target's `time_limit_ms` (`-t`), which `fuzz.sh` reads
+  from `fuzz.exe -t TARGET`. AFL++ runs an input that exceeds it again
+  with twice that (`AFL_HANG_TMOUT`) and saves it as a hang only if it
+  exceeds that too, so that a busy host does not make one. The reader
+  and the parser have 300 ms, about five times the worst linear run,
+  while a step quadratic in the 16K bytes or tokens of that input would
+  cost thousands of times more. A step quadratic in something sparser,
+  such as line markers, can stay inside it. The `lowering` target has
+  5 s: its stages write instances and copies of deferred statements
+  until the instance budget or the output limit stops them, which a
+  source of a few hundred bytes can reach. The slowest input measured,
+  49 aliases 8 deep over structures
+  (`Budget_probes.aliases_over_structures`), which nearly fills the
+  instance budget and writes 11 MB of C, takes 1.7 s in the
+  instrumented harness.
 * Memory: the harness fails when the major heap peaks above
   `heap_words_fixed` plus `heap_words_per_input_byte` per input byte,
-  about twice what the densest input needs. AFL++'s own limit (`-m`) is
-  off: it sets `RLIMIT_AS`, which macOS refuses to set, and on Linux
-  that limit counts the address space OCaml 5 reserves, not what a
-  stage uses.
+  about twice what the densest input needs. The `lowering` target may
+  add `heap_words_per_budget_byte` for each byte of the instance budget
+  and of the output limit, about twice the densest rate measured: some
+  51 million words, 400 MB, which each instance of a campaign may reach
+  at once. The harness checks the bound at the end of every major GC
+  cycle, so a runaway stops near it. AFL++'s own limit (`-m`) is off:
+  it sets `RLIMIT_AS`, which macOS refuses to set, and on Linux that
+  limit counts the address space OCaml 5 reserves, not what a stage
+  uses.
 
 The harness reports a crash with the exit code in `AFL_CRASH_EXITCODE`,
 which `fuzz.sh` sets, because the crash reporter of macOS can hold a
@@ -243,8 +260,8 @@ signalled process for seconds and AFL++ would record a hang.
 A target is a module with `check : string -> unit` that returns for
 every input its stage accepts or refuses and raises otherwise. Adding
 one is that module, its libraries in `tools/fuzz/dune`, an entry in the
-`targets` table of `fuzz.ml` and seeds in `tools/fuzz/seeds/TARGET/`,
-which `dune test` runs through it.
+`targets` table of `fuzz.ml`, linear or budgeted, and seeds in
+`tools/fuzz/seeds/TARGET/`, which `dune test` runs through it.
 
 ## Running the corpus
 

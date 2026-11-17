@@ -36,14 +36,18 @@ built=$work/_build/default/tools/fuzz
 harness=$built/fuzz.exe
 dictionary=$built/fuzz.dict
 
-# The limits of one execution; docs/development.md says why these values. AFL++
-# runs an input that times out again with AFL_HANG_TMOUT and saves it as a hang
-# only if that run times out too. Twice the limit spares a run that a busy host
-# made late, where AFL++'s default second would drop a step ten times too slow.
-timeout_ms=300
+# The limits of one execution; docs/development.md says why these values.
 # No AFL++ memory limit, spelled none because afl-tmin 5.03c refuses -m 0.
 memory_limit=none
-export AFL_HANG_TMOUT=$((timeout_ms * 2))
+
+# time_limit TARGET: the time limit of one execution of TARGET, which the
+# harness states (fuzz.ml says why). AFL++ runs an input that times out again
+# with AFL_HANG_TMOUT and saves it as a hang only if that run times out too.
+# Twice the limit spares a run that a busy host made late.
+time_limit() {
+    timeout_ms=$("$harness" -t "$1")
+    export AFL_HANG_TMOUT=$((timeout_ms * 2))
+}
 
 # The heap bound of fuzz.ml holds for the default GC settings.
 unset OCAMLRUNPARAM
@@ -227,10 +231,12 @@ run:2 | run:3)
     check_target "$1"
     check_minutes "$2"
     check_secondaries "${3:-0}"
+    time_limit "$1"
     run "$1" "$2" "${3:-0}"
     ;;
 triage:1)
     check_target "$1"
+    time_limit "$1"
     triage "$1"
     ;;
 *) usage ;;

@@ -1,3 +1,4 @@
+# 1 "declarations.c"
 typedef unsigned long size_t;
 typedef struct node { struct node *next; int value : 4; unsigned : 0; } node;
 enum colour { red, green = 4, blue = green * 2 + 1 };

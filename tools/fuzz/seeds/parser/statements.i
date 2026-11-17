@@ -1,3 +1,4 @@
+# 1 "statements.c"
 int printf(const char *, ...);
 int sum(int *a, int n)
 {

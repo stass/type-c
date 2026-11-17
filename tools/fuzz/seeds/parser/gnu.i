@@ -1,3 +1,4 @@
+# 1 "gnu.c"
 __extension__ typedef long long i64;
 typedef char *va_list;
 extern int printf(const char *, ...) __attribute__((format(printf, 1, 2)));

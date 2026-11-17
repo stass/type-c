@@ -209,6 +209,14 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Parser
 
+- [High] The parser raises `Invalid_argument("index out of bounds")`
+  where a `slice_from_array(` in a function body ends the text:
+  `array_operand` (`src/syntax/parser.ml`) reads `first_token` at the
+  position after the parenthesis, past the last grammar token. The
+  `lowering` and `parser` fuzz targets both crash on the two lines
+  `# 1 "a.c"` and `void f(void) { slice_from_array(`. Refuse the end of
+  the text there like any other missing operand, with a regression test
+  in `test/unit/test_parser.ml`.
 - [Low] Design 2.3 refuses an identifier that begins with `__tc_`
   anywhere in the text, C text included; the parser checks the grammar
   tokens only, not the identifiers of a `#pragma` line
@@ -1204,6 +1212,31 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Fuzzing
 
+- [High] The `parser` fuzz target reads declarations
+  (`Declarations.read`), whose work the instance budget of design 3.5
+  rule 7 bounds rather than the input, under the linear heap bound and
+  the 300 ms limit of the reader and the parser, so a budgeted input is
+  reported as a crash and a hang. `Budget_probes.aliases_over_structures
+  8 50` (2.3 KB) peaks at 15 million words against a bound of 330 000
+  and runs 0.8 s. Either move the declaration reader into the `lowering`
+  target, whose bounds are those of the budgets, and give it the parser
+  seeds that drive the checker; or give the `parser` target the
+  budgeted bounds, which blunts its checks of the parser's linearity.
+  The first is simpler and keeps both targets sharp.
+- [Medium] `tools/fuzz/seeds.t` passes a seed that its target refuses,
+  as the harness exits 0 for a refusal too, so a seed that never reaches
+  the stage it is for goes unnoticed (four parser seeds lacked the line
+  marker the reader needs). Have the test say how far each seed got, for
+  instance a harness mode that fails unless the target's last stage
+  accepted the input.
+- [Medium] The AFL++ dictionary (`tools/fuzz/dictionary.ml`) lacks the
+  words that reach lowering: the contextual keywords of Type-C (`match`,
+  `generic`, `type`, `try`, `defer`), the names of the universe text
+  (`slice_from_array`, `slice_sub`, `result`, `Ok`) and the `.tc"` of a
+  line marker that makes a unit Type-C. The contextual words are
+  constants and a `match` on strings spread over `src/syntax/parser.ml`,
+  not one table; make them one, then generate the dictionary entries
+  from it.
 - [Medium] Offer the OCaml AFL patch upstream
   (`tools/fuzz/patches/ocaml-5.5.2-afl.patch`). AFL++ on macOS hands the
   coverage map over only as a POSIX shared memory descriptor

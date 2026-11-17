@@ -15,11 +15,22 @@ The input can also come from standard input.
 A target is chosen by name.
 
   $ ./fuzz.exe lexer seeds/reader/markers.i
-  usage: fuzz TARGET [FILE]; targets: reader, parser
+  usage: fuzz [-t] TARGET [FILE]; targets: reader, parser, lowering
   [2]
 
-Only the parser runs on the small stack: the checks after it walk a tree
-as deep as the input, which overflows it.
+Only the parser runs on the small stack: the checks and the stages after
+it walk a tree as deep as the input, which overflows it. The input is
+just under Parser.max_depth deep, so the parser accepts it.
 
-  $ { printf 'int a['; head -c 16000 /dev/zero | tr '\0' '!'; echo '1];'; } |
-  >   ./fuzz.exe parser
+  $ for target in parser lowering; do
+  >   { echo '# 1 "deep.c"'; printf 'int a[';
+  >     head -c 9000 /dev/zero | tr '\0' '!'; echo '1];'; } |
+  >     ./fuzz.exe "$target"
+  > done
+
+A target states its time limit in milliseconds.
+
+  $ ./fuzz.exe -t parser
+  300
+  $ ./fuzz.exe -t lowering
+  5000

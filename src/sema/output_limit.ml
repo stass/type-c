@@ -19,7 +19,8 @@ let least_piece_charge = 32
    the line of its run. *)
 let piece_charge length = max (length + 1) least_piece_charge
 
-let of_unit unit = base + (per_byte * Reader.length unit)
+let of_length length = base + (per_byte * length)
+let of_unit unit = of_length (Reader.length unit)
 
 let described unit =
   Printf.sprintf

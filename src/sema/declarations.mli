@@ -193,6 +193,10 @@ val try_holders : t -> Expressions.try_holder list
     definition of each instance that it uses
     ({!Expressions.try_holders}). *)
 
+val instance_budget : int
+(** The instance budget of design 3.5 rule 7 in bytes: the most that
+    {!instance_bytes} may reach before {!read} refuses the unit. *)
+
 val instance_bytes : t -> int
 (** The bytes that the readings for the unit's instances charged the
     instance budget (design 3.5 rule 7). *)

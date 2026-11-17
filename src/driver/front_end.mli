@@ -79,6 +79,26 @@ type counts = {
           uses, which the measurements of P33 to P35 read *)
 }
 
+val parse :
+  Typec_syntax.Keyword_set.dialect ->
+  Typec_sema.Target.t ->
+  Typec_cpp.Reader.t ->
+  ( Typec_syntax.Tree.translation_unit * Typec_syntax.Parser.scopes,
+    Typec_cpp.Reader.error )
+  result
+(** [parse dialect target text] parses [text] with the keywords that the
+    backend of [target] reads in [dialect]: the first stage of
+    {!lower}. *)
+
+val lower_parsed :
+  Typec_sema.Target.t ->
+  trap:Typec_emit.Trap.t ->
+  Typec_cpp.Reader.t ->
+  Typec_syntax.Parser.scopes ->
+  (Typec_emit.Emitter.lowered * counts, Typec_cpp.Reader.error) result
+(** [lower_parsed target ~trap text scopes] is {!lower} of [text] after
+    {!parse} gave [scopes]: the stages after the parser. *)
+
 val lower :
   Typec_syntax.Keyword_set.dialect ->
   Typec_sema.Target.t ->
