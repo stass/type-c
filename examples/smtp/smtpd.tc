@@ -1,0 +1,491 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * smtpd: the server side of a small subset of SMTP, RFC 5321.  Reads
+ * what a client sends from standard input, a command or a line of
+ * message text per line, writes the replies to standard output, and
+ * appends each message it accepts to a mailbox file.  It knows HELO,
+ * EHLO, MAIL, RCPT, DATA, RSET, NOOP and QUIT, and no extension.
+ *
+ * Usage: smtpd mailbox
+ */
+
+#include <err.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
+#define	HOSTNAME	"smtpd.example"	/* the name the server gives */
+#define	MAX_LINE	1000	/* a line, CRLF included, RFC 5321 4.5.3.1.6 */
+#define	MAX_DOMAIN	255	/* RFC 5321 4.5.3.1.2 */
+#define	MAX_ADDRESS	254	/* a path less its brackets, 4.5.3.1.3 */
+#define	MAX_RCPT	100	/* the least a server must take, 4.5.3.1.8 */
+#define	MAX_SPOOL	(1024 * 1024)	/* a message, envelope included */
+
+/*
+ * The field of a variant is no array (design 3.2 rule 4), so each array
+ * that a state holds is wrapped in a structure.
+ */
+struct domain {
+	char	name[MAX_DOMAIN + 1];
+};
+
+struct address {
+	char	text[MAX_ADDRESS + 1];	/* "" for <> */
+};
+
+struct recipients {
+	struct address	rcpt[MAX_RCPT];
+	size_t		nrcpt;
+};
+
+/* Where the session is, with the data that is valid there. */
+type state =
+    | Init				/* before HELO or EHLO */
+    | Greeted(struct domain client)	/* after HELO, between messages */
+    | Mail(struct domain client, struct address from, struct recipients to)
+    | Data(struct domain client, FILE *spool);	/* reading the text */
+
+struct session {
+	state		state;
+	FILE		*mailbox;
+	unsigned	queued;			/* messages accepted */
+};
+
+enum verb {
+	VERB_HELO,
+	VERB_EHLO,
+	VERB_MAIL,
+	VERB_RCPT,
+	VERB_DATA,
+	VERB_RSET,
+	VERB_NOOP,
+	VERB_QUIT
+};
+
+/* The commands, by the four letters that name them, in any case. */
+static const struct {
+	const char	*name;
+	enum verb	verb;
+} verbs[] = {
+	{ "HELO", VERB_HELO },
+	{ "EHLO", VERB_EHLO },
+	{ "MAIL", VERB_MAIL },
+	{ "RCPT", VERB_RCPT },
+	{ "DATA", VERB_DATA },
+	{ "RSET", VERB_RSET },
+	{ "NOOP", VERB_NOOP },
+	{ "QUIT", VERB_QUIT },
+};
+
+#define	NVERBS	(sizeof(verbs) / sizeof(verbs[0]))
+
+struct command {
+	enum verb	verb;
+	struct domain	domain;		/* HELO, EHLO */
+	struct address	address;	/* MAIL, RCPT */
+};
+
+/* Why read_line read no line. */
+type line_error =
+    | EndOfInput
+    | TooLong				/* MAX_LINE bytes without CRLF */
+    | BareLf;				/* a LF without a CR before it */
+
+/* Writes a reply and sends it before the next line is read. */
+static void
+reply(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	printf("\r\n");
+	if (fflush(stdout) == EOF)
+		err(1, "stdout");
+}
+
+/*
+ * Reads a line that ends in CRLF from standard input into buf, without
+ * the CRLF and with a NUL after it, and returns its length.  A last
+ * line without its LF is dropped, as a client that went away left it.
+ */
+static result(size_t, line_error)
+read_line(char *buf, size_t size)
+{
+	size_t len;
+	int c;
+
+	len = 0;
+	while ((c = getchar()) != EOF) {
+		if (c == '\n') {
+			/* SMTP smuggling needs a bare LF to end a line. */
+			if (len == 0 || buf[len - 1] != '\r')
+				return (Err(BareLf));
+			buf[--len] = '\0';
+			return (Ok(len));
+		}
+		/* The last byte of buf is kept for the NUL. */
+		if (len == size - 1)
+			return (Err(TooLong));
+		buf[len++] = (char)c;
+	}
+	return (Err(EndOfInput));
+}
+
+/* Whether each byte is printable ASCII but space, '<' and '>'. */
+static bool
+printable(const char *s, size_t len)
+{
+	size_t i;
+
+	for (i = 0; i < len; i++)
+		if (s[i] < '!' || s[i] > '~' || s[i] == '<' || s[i] == '>')
+			return (false);
+	return (true);
+}
+
+/* Reads " domain", the argument of HELO and EHLO. */
+static result(struct domain, const char *)
+parse_domain(const char *arg)
+{
+	struct domain domain;
+	size_t len;
+
+	if (arg[0] != ' ')
+		return (Err("501 Syntax: HELO domain"));
+	arg++;
+	len = strlen(arg);
+	if (len == 0 || len > MAX_DOMAIN || !printable(arg, len))
+		return (Err("501 Syntax: HELO domain"));
+	memcpy(domain.name, arg, len + 1);
+	return (Ok(domain));
+}
+
+/*
+ * Reads keyword, " FROM:" or " TO:" in any case, then a path, <address>,
+ * and returns the address without the brackets.  Only MAIL takes the
+ * null path, <>.
+ */
+static result(struct address, const char *)
+parse_path(const char *arg, const char *keyword, bool null_ok)
+{
+	struct address address;
+	size_t len;
+
+	len = strlen(keyword);
+	if (strncasecmp(arg, keyword, len) != 0)
+		return (Err("501 Syntax error in parameters"));
+	arg += len;
+	len = strlen(arg);
+	if (len < 2 || arg[0] != '<' || arg[len - 1] != '>')
+		return (Err("501 Syntax error in parameters"));
+	arg++;
+	len -= 2;
+	if (len == 0 && !null_ok)
+		return (Err("501 Syntax error in parameters"));
+	if (len > MAX_ADDRESS || !printable(arg, len))
+		return (Err("501 Syntax error in parameters"));
+	memcpy(address.text, arg, len);
+	address.text[len] = '\0';
+	return (Ok(address));
+}
+
+/*
+ * Parses a command line.  The error is the reply to a line that does not
+ * parse.
+ */
+static result(struct command, const char *)
+parse_command(const char *line, size_t len)
+{
+	struct command cmd;
+	const char *arg;
+	size_t i;
+
+	/* A NUL would end the line early for the string functions. */
+	if (memchr(line, '\0', len) != NULL)
+		return (Err("500 Syntax error"));
+	for (i = 0; i < NVERBS; i++)
+		if (strncasecmp(line, verbs[i].name, 4) == 0)
+			break;
+	if (i == NVERBS || (line[4] != '\0' && line[4] != ' '))
+		return (Err("500 Command unrecognized"));
+	/* The fields that the verb does not take are returned too. */
+	memset(&cmd, 0, sizeof(cmd));
+	cmd.verb = verbs[i].verb;
+	arg = line + 4;
+	switch (cmd.verb) {
+	case VERB_HELO:
+	case VERB_EHLO:
+		cmd.domain = try parse_domain(arg);
+		break;
+	case VERB_MAIL:
+		cmd.address = try parse_path(arg, " FROM:", true);
+		break;
+	case VERB_RCPT:
+		cmd.address = try parse_path(arg, " TO:", false);
+		break;
+	case VERB_NOOP:
+		/* NOOP takes any argument, RFC 5321 4.1.1.9. */
+		break;
+	case VERB_DATA:
+	case VERB_RSET:
+	case VERB_QUIT:
+		if (arg[0] != '\0')
+			return (Err("501 Syntax error in parameters"));
+		break;
+	}
+	return (Ok(cmd));
+}
+
+/* HELO and EHLO start the session again, RFC 5321 4.1.4. */
+static void
+helo(struct session *s, const struct command *cmd)
+{
+	s->state = Greeted(cmd->domain);
+	reply("250 %s", HOSTNAME);
+}
+
+static void
+mail(struct session *s, const struct command *cmd)
+{
+	struct recipients none;
+
+	match (s->state) {
+	case Init:
+		reply("503 Send HELO first");
+		break;
+	case Greeted(client):
+		memset(&none, 0, sizeof(none));
+		s->state = Mail(client, cmd->address, none);
+		reply("250 Ok");
+		break;
+	case Mail(_, _, _):
+	case Data(_, _):
+		reply("503 Nested MAIL command");
+		break;
+	}
+}
+
+static void
+rcpt(struct session *s, const struct command *cmd)
+{
+	struct recipients more;
+
+	if (case Mail(client, from, to) = s->state) {
+		if (to.nrcpt == MAX_RCPT) {
+			reply("452 Too many recipients");
+			return;
+		}
+		/* A binding is a copy that cannot change (design 4.1). */
+		more = to;
+		more.rcpt[more.nrcpt++] = cmd->address;
+		s->state = Mail(client, from, more);
+		reply("250 Ok");
+	} else
+		reply("503 Need MAIL first");
+}
+
+/*
+ * Starts the message: the envelope goes to a spool file, which the text
+ * follows.
+ */
+static void
+data(struct session *s)
+{
+	FILE *spool;
+	size_t i;
+
+	if (case Mail(client, from, to) = s->state) {
+		if (to.nrcpt == 0) {
+			reply("554 No valid recipients");
+			return;
+		}
+		if ((spool = tmpfile()) == NULL)
+			err(1, "tmpfile");
+		fprintf(spool, "From <%s> via %s\n", from.text, client.name);
+		for (i = 0; i < to.nrcpt; i++)
+			fprintf(spool, "To <%s>\n", to.rcpt[i].text);
+		putc('\n', spool);
+		s->state = Data(client, spool);
+		reply("354 End data with <CR><LF>.<CR><LF>");
+	} else
+		reply("503 Need MAIL first");
+}
+
+/* RSET ends the transaction; the HELO stays. */
+static void
+rset(struct session *s)
+{
+	if (case Mail(client, _, _) = s->state)
+		s->state = Greeted(client);
+	reply("250 Ok");
+}
+
+/* Runs a command line.  Returns false after QUIT. */
+static bool
+command(struct session *s, const char *line, size_t len)
+{
+	struct command cmd;
+
+	match (parse_command(line, len)) {
+	case Ok(parsed):
+		cmd = parsed;
+		break;
+	case Err(error):
+		reply("%s", error);
+		return (true);
+	}
+	switch (cmd.verb) {
+	case VERB_HELO:
+	case VERB_EHLO:
+		helo(s, &cmd);
+		break;
+	case VERB_MAIL:
+		mail(s, &cmd);
+		break;
+	case VERB_RCPT:
+		rcpt(s, &cmd);
+		break;
+	case VERB_DATA:
+		data(s);
+		break;
+	case VERB_RSET:
+		rset(s);
+		break;
+	case VERB_NOOP:
+		reply("250 Ok");
+		break;
+	case VERB_QUIT:
+		reply("221 Bye");
+		return (false);
+	}
+	return (true);
+}
+
+/*
+ * Appends the spool to the mailbox after a line that numbers the message
+ * and gives the spool's size, which says where the next message starts.
+ */
+static void
+deliver(struct session *s, FILE *spool)
+{
+	char buf[BUFSIZ];
+	long size, copied;
+	size_t n;
+
+	/* rewind would clear the error of a write to the spool. */
+	if (fflush(spool) == EOF || ferror(spool))
+		errx(1, "spool: write error");
+	if ((size = ftell(spool)) == -1)
+		err(1, "spool");
+	rewind(spool);
+	s->queued++;
+	fprintf(s->mailbox, "Message %u, %ld bytes\n", s->queued, size);
+	copied = 0;
+	while ((n = fread(buf, 1, sizeof(buf), spool)) > 0) {
+		fwrite(buf, 1, n, s->mailbox);
+		copied += (long)n;
+	}
+	/* A record shorter than its size would frame the next one wrong. */
+	if (copied != size)
+		errx(1, "spool: short read");
+	if (fflush(s->mailbox) == EOF || ferror(s->mailbox))
+		errx(1, "mailbox: write error");
+	reply("250 Ok: queued as %u", s->queued);
+}
+
+/*
+ * Takes a line of the message text, or the "." that ends it, in the
+ * state Data(*client, spool).
+ */
+static void
+text(struct session *s, const struct domain *client, FILE *spool,
+    const char *line, size_t len)
+{
+	if (len == 1 && line[0] == '.') {
+		if (ftell(spool) > MAX_SPOOL)
+			reply("552 Message too big");
+		else
+			deliver(s, spool);
+		fclose(spool);
+		s->state = Greeted(*client);
+		return;
+	}
+	/* The client doubled a dot that starts a line, RFC 5321 4.5.2. */
+	if (line[0] == '.') {
+		line++;
+		len--;
+	}
+	/* Past MAX_SPOOL the text is read on to its end and dropped. */
+	if (ftell(spool) <= MAX_SPOOL) {
+		fwrite(line, 1, len, spool);
+		putc('\n', spool);
+	}
+}
+
+/* Runs the session to QUIT, the end of input or a line it cannot read. */
+static void
+serve(struct session *s)
+{
+	char line[MAX_LINE];
+	size_t len;
+
+	reply("220 %s ESMTP", HOSTNAME);
+	for (;;) {
+		match (read_line(line, sizeof(line))) {
+		case Ok(n):
+			len = n;
+			break;
+		case Err(EndOfInput):
+			return;
+		case Err(TooLong):
+			reply("421 Line too long");
+			return;
+		case Err(BareLf):
+			reply("421 Bare LF received");
+			return;
+		}
+		/* A match, not a test: each state says what its lines are. */
+		match (s->state) {
+		case Init:
+		case Greeted(_):
+		case Mail(_, _, _):
+			if (!command(s, line, len))
+				return;
+			break;
+		case Data(client, spool):
+			text(s, &client, spool, line, len);
+			break;
+		}
+	}
+}
+
+int
+main(int argc, char *argv[])
+{
+	struct session s;
+
+	if (argc != 2) {
+		fprintf(stderr, "usage: smtpd mailbox\n");
+		return (2);
+	}
+	s.state = Init;
+	s.queued = 0;
+	if ((s.mailbox = fopen(argv[1], "a")) == NULL)
+		err(1, "%s", argv[1]);
+	serve(&s);
+	/* A session cut off in DATA leaves its spool open. */
+	if (case Data(_, spool) = s.state)
+		fclose(spool);
+	if (fclose(s.mailbox) == EOF)
+		err(1, "%s", argv[1]);
+	return (0);
+}

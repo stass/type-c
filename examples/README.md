@@ -16,6 +16,7 @@ differently, and each runs a check that compares the two.
 | [`dns`](dns/) | A parser of DNS responses, beside the careful C it ports function for function: every error a `result` that `try` hands up in place of 24 tests for `-1`, the record data a variant in place of a tagged union, and the message a slice, so that a length check left out traps instead of leaking the heap. Its check runs both programs over real and malformed messages. |
 | [`queue`](queue/) | A round-robin job scheduler on BSD `sys/queue.h` tail queues, beside the same program on `list(T)`, a typed list written once as generic functions: what the types catch of the classic `TAILQ` mistakes, what they do not, and what a list that owns its nodes costs against an intrusive one. Its check runs both over the same inputs. |
 | [`ringbuf`](ringbuf/) | Firmware with no C library: a UART's byte rings and a line-command parser, built with `-ffreestanding` and `--trap-function=panic`. The ring is generic over a slice, a command is a variant parsed into a `result`, and words are `str`. Its check proves with `nm` that each object needs only its board, and runs both over the same bytes. |
+| [`smtp`](smtp/) | The server side of a small SMTP subset, beside the C state machine it ports function for function: the state a variant whose constructors carry only the data valid in that state, in place of an `enum` and a structure of fields each valid in some states, and a line that does not parse a `result` that `try` hands up. Adding a state makes `typec` name each `match` that must handle it, where the C compilers miss the `if` that routes its lines; a field read in the wrong state cannot be written. Its check runs both programs over 41 sessions. |
 | [`wordfreq`](wordfreq/) | A word counter on klib's `khash.h`, beside the same program on a generic `map(K, V)` written in the example: what the generic code costs in size and time on Clang and GCC, and the key type mixup that `khash`'s macros let through and the type checker stops. Its check runs both programs over the same texts. |
 
 ## Building one
@@ -44,8 +45,9 @@ example with Clang and with GCC, at `-O0` and at `-O2`, with
 ## Adding one
 
 An example is a directory here with a `README.md`, its Type-C source,
-the C that it compares with, and a Makefile with the targets `all`,
-`check` and `clean`, where `check` builds what it needs and exits 0 when
+the C that it compares with, a `.gitignore` of what its Makefile
+builds, and a Makefile with the targets `all`, `check` and `clean`,
+where `check` builds what it needs and exits 0 when
 the two programs agree. `examples.t` finds every directory and prints
 what each `check` prints, so a new example shows up there as a new line
 of expected output. C code taken from elsewhere keeps its license and
