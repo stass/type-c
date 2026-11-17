@@ -2185,33 +2185,29 @@ let added_static output (definition : Tree.function_definition) =
     [ insert output ~before ~extent:{ first = before; last = before }
         "static" ]
 
-(* A function instance (design 7.3, 10.3): the generic function's
-   definition, without [generic(T)], as a [static] function under the
-   instance's name, from its first token to [last], after which [ending]
-   follows: the prototype ends before the body. *)
-let function_instance output location instance ~last ~ending
-    ~zero_initialisers (reading : Typec_sema.Declarations.instance_text)
-    (definition : Tree.function_definition) =
-  let (Ordinary_at name_token) = definition.node.declared.id in
-  let name =
-    { span = { first = name_token; last = name_token };
-      text = Typec_sema.Encoding.instance_name instance }
+(* The type declarations of the unit: those with no type parameters,
+   under their own names, which each text lowers where it holds them,
+   and the generic ones, which only their instances write. Those in
+   function bodies are among the first, as design 3.1 puts a generic
+   one at file scope only. *)
+let split_type_declarations declarations =
+  let split (declaration : Tree.type_declaration) =
+    match declaration.node.type_parameters with
+    | [] ->
+        Either.Left
+          (Spelling.declared declaration.node.name.node, declaration)
+    | _ :: _ -> Either.Right declaration
   in
-  let edits =
-    added_static output definition
-    @ text_edits output ~declarations:[] ~void_field_spans:[]
-        ~replaced:(name :: List.map named reading.names)
-        ~zero_initialisers
-        reading.typed
-  in
-  generic_text output edits ~first:definition.span.first ~last
-  @ List.map (Emitter.generated output location) ending
+  List.partition_map split
+    (Typec_sema.Declarations.type_declarations declarations)
 
 (* What the texts of the placements are written from: the output of the
-   unit and what its reading found. *)
+   unit, what its reading found, and its type declarations with no type
+   parameters. *)
 type instance_context = {
   output : Emitter.output;
   declarations : Typec_sema.Declarations.t;
+  named_types : (Spelling.c_name * Tree.type_declaration) list;
 }
 
 (* Design 10.3: each typedef after the lines that declare its tags. *)
@@ -2224,10 +2220,46 @@ let argument_typedefs context location typedefs =
   List.concat_map lines typedefs
   |> List.map (Emitter.generated context.output location)
 
+(* The type declarations that the definition of a generic function
+   holds, which each of its instances declares as the definition does
+   (design 3.5 rule 8). *)
+let definition_type_declarations context
+    (definition : Tree.function_definition) =
+  let { first; last } : Tree.span = definition.span in
+  let in_definition (_, (declaration : Tree.type_declaration)) =
+    first <= declaration.span.first && declaration.span.last <= last
+  in
+  List.filter in_definition context.named_types
+
 (* Those that the check of the generic function found (design 7.1 rule
    3). *)
 let zero_initialisers context definition =
   Typec_sema.Declarations.zero_initialisers context.declarations definition
+
+(* A function instance (design 7.3, 10.3): the generic function's
+   definition, without [generic(T)], as a [static] function under the
+   instance's name, from its first token to [last], after which [ending]
+   follows: the prototype ends before the body. *)
+let function_instance context location instance ~last ~ending
+    (reading : Typec_sema.Declarations.instance_text)
+    (definition : Tree.function_definition) =
+  let output = context.output in
+  let (Ordinary_at name_token) = definition.node.declared.id in
+  let name =
+    { span = { first = name_token; last = name_token };
+      text = Typec_sema.Encoding.instance_name instance }
+  in
+  let edits =
+    added_static output definition
+    @ text_edits output
+        ~declarations:(definition_type_declarations context definition)
+        ~void_field_spans:[]
+        ~replaced:(name :: List.map named reading.names)
+        ~zero_initialisers:(zero_initialisers context definition)
+        reading.typed
+  in
+  generic_text output edits ~first:definition.span.first ~last
+  @ List.map (Emitter.generated output location) ending
 
 let reading context instance =
   match Typec_sema.Declarations.instance_text context.declarations instance with
@@ -2268,10 +2300,8 @@ let function_prototype context location instance =
     | Parsed block -> block.span.first
     | Skipped span -> span.first
   in
-  function_instance context.output location instance ~last:(body_first - 1)
-    ~ending:[ ";" ]
-    ~zero_initialisers:(zero_initialisers context definition)
-    reading definition
+  function_instance context location instance ~last:(body_first - 1)
+    ~ending:[ ";" ] reading definition
 
 (* Step 2: the rest of 10.1 or 10.2, after the forward declaration, or
    the whole definition of a function instance. *)
@@ -2283,10 +2313,8 @@ let instance_rest context location instance =
       | Some first -> instance_definition context.output instance ~first reading
       | None -> invalid_arg "Lowering.instance_rest: a typedef instance")
   | Function_generic { definition; _ } ->
-      function_instance context.output location instance
-        ~last:definition.span.last ~ending:[]
-        ~zero_initialisers:(zero_initialisers context definition)
-        reading definition
+      function_instance context location instance
+        ~last:definition.span.last ~ending:[] reading definition
 
 let application_location context
     (placement : Typec_sema.Declarations.placement) =
@@ -2348,21 +2376,15 @@ let generic_functions declarations =
    its own name, each generic's definition removed, as only its
    instances write it, and each application and use of a function
    instance replaced by the name of its instance. *)
-let unit_edits output declarations =
-  let split (declaration : Tree.type_declaration) =
-    match declaration.node.type_parameters with
-    | [] ->
-        Either.Left
-          (Spelling.declared declaration.node.name.node, declaration)
-    | _ :: _ -> Either.Right { span = declaration.span; text = "" }
+let unit_edits context ~generic_types =
+  let declarations = context.declarations in
+  let removed (declaration : Tree.type_declaration) =
+    { span = declaration.span; text = "" }
   in
-  let own, generics =
-    List.partition_map split
-      (Typec_sema.Declarations.type_declarations declarations)
-  in
-  text_edits output ~declarations:own ~void_field_spans:[]
+  text_edits context.output ~declarations:context.named_types
+    ~void_field_spans:[]
     ~replaced:
-      (generics
+      (List.map removed generic_types
       @ generic_functions declarations
       @ List.map named (Typec_sema.Declarations.instance_names declarations))
     ~zero_initialisers:[]
@@ -2370,5 +2392,6 @@ let unit_edits output declarations =
 
 let edits (text : Reader.t) ~trap declarations =
   Emitter.limited text ~trap (fun output ->
-      let brackets = instance_brackets { output; declarations } in
-      brackets @ unit_edits output declarations)
+      let named_types, generic_types = split_type_declarations declarations in
+      let context = { output; declarations; named_types } in
+      instance_brackets context @ unit_edits context ~generic_types)

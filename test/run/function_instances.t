@@ -132,3 +132,49 @@ reading of another instance.
   > done
   ok
   ok
+
+Design 3.5 rule 8: the type declarations of a generic function's body,
+each form, are declared in each instance as at the definition, and an
+instance runs as the plain function with the same body does.
+
+  $ cat > body_types.tc <<'EOF'
+  > #include <stdio.h>
+  > #define BODY(T)                                                  \
+  >   type count = distinct int;                                     \
+  >   type ref = T *;                                                \
+  >   type cell = struct { T value; };                               \
+  >   type list;                                                     \
+  >   type list = | Cons(T head, list *tail) | Nil;                  \
+  >   type wrap = | Wrapped(list inner) | Empty;                     \
+  >   list nil = Nil;                                                \
+  >   wrap w = Wrapped(Cons(*p, &nil));                              \
+  >   ref r = p;                                                     \
+  >   cell c = { *r };                                               \
+  >   count n = (count)0;                                            \
+  >   match (w) {                                                    \
+  >   case Wrapped(Cons(head, tail)):                                \
+  >     c.value = head;                                              \
+  >     *p = c.value;                                                \
+  >     n = (count)((tail != 0) + (r == p) + 1);                     \
+  >     break;                                                       \
+  >   case Wrapped(Nil):                                             \
+  >   case Empty:                                                    \
+  >     break;                                                       \
+  >   }                                                              \
+  >   return (int)n;
+  > generic(T) int generic_body(T *p) { BODY(T) }
+  > int plain_body(long *p) { BODY(long) }
+  > int main(void) {
+  >   int i = 4;
+  >   long l = 5;
+  >   double d = 6;
+  >   printf("%d %d %d %d\n", generic_body(&i), generic_body(&l),
+  >          generic_body(&d), plain_body(&l));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o body_types body_types.tc && ./body_types
+  > done
+  3 3 3 3
+  3 3 3 3

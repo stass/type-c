@@ -477,3 +477,34 @@ variant, the name is the constructor in the check and in each instance.
   $ ./golden.exe readings.tc | grep '{ \* out ='
   static void put__10eval_error ( __tc_arg__10eval_error * out , __tc_arg__10eval_error Overflow ) { * out = Overflow ; }
   static void fail__i ( eval_error * out , __tc_arg__i Overflow ) { * out = ((struct eval_error){ .tag = eval_error_Overflow }) ; }
+
+Design 3.5 rule 8: a type declaration in the body of a generic
+function is declared in each instance as it is at the definition,
+lowered as in the body of any function: the distinct type to its
+typedef, the variant to its structure.
+
+  $ cat > body_types.tc <<'EOF'
+  > generic(T) void put(T *out, T value) {
+  >   type d = distinct int;
+  >   type o = | Some(T x) | None;
+  >   d n = (d)0;
+  >   o w = Some(value);
+  >   *out = value; (void)n; (void)w;
+  > }
+  > void f(int *out) { put(out, 1); }
+  > EOF
+  $ ./golden.exe body_types.tc | grep -v '^#' | grep -v '^ *$' |
+  >   grep -v pack_probe
+  typedef int __tc_arg__i;
+  static void put__i ( __tc_arg__i * out , __tc_arg__i value )
+  ;
+  static void put__i ( __tc_arg__i * out , __tc_arg__i value ) {
+  typedef int d ;
+  struct o; typedef struct o o; enum o_tag { o_Some, o_None }; struct o { enum o_tag tag; union { struct { __tc_arg__i x ; } Some; } u; };
+  d n = ( d ) 0 ;
+  o w = { .tag = o_Some, .u.Some = {  value  } } ;
+  * out = value ; ( void ) n ; ( void ) w ;
+  }
+  void f(int *out) { 
+  put__i
+  (out, 1); }

@@ -1554,10 +1554,12 @@ types (design 13.3).
   every braced list of a generic definition that reads as `{0}` or `{}`,
   have the check classify each as lowered or kept, and refuse any left
   unclassified.
-- [Medium] A type declaration in the body of a generic function, as
-  `type d = distinct int;`, reaches its instances unlowered, since
-  `Lowering.function_instance` passes no declarations, and the backend
-  refuses it. Lower it there or refuse it in the check.
+- [Medium] The type declarations that a text lowers come from one
+  table of the unit, which `Lowering` filters for each text by span,
+  while the other inputs of `text_edits` come from the reading of the
+  text (`typed`, `names`). Have the reading of each text carry the
+  type declarations it read, so that no kind of text can lower its
+  constructs and miss its declarations.
 - [Medium] `Expressions.gives_dependence` lists the constructs that
   give dependence on a type parameter, where design 7.1 rule 4 wants it
   from the one place that gives a layout; the list refuses valid
