@@ -170,26 +170,53 @@ val constructions : t -> construction list
     atomic or is no lvalue that typec knows [&] may take. *)
 type access = Through_pointer | Through_copy
 
-(** One step from a position of a pattern down to a field (design 4.7
-    rule 1): the member [field] of the constructor [constructor] that the
-    position holds, where [through_pointer] says that the position the
-    step reaches is the object that the field points to (rule 5). *)
-type field_step = {
-  constructor : Spelling.constructor;
-  field : string;
-  through_pointer : bool;
+(** The member [field] of the constructor [constructor] that a position
+    of a pattern holds (design 4.7 rule 1). *)
+type pattern_field = { constructor : Spelling.constructor; field : string }
+
+(** A field below the scrutinee as lowering reaches it (design 13.5):
+    [field] of the object that the pointer local numbered [base] points
+    to, where 0 is the scrutinee's, after the fields in place [path],
+    outermost first, each of the constructor that the object before it
+    holds. *)
+type reach = {
+  base : int;
+  path : pattern_field list;
+  field : pattern_field;
 }
 
-(** A binding of a match: its name and the field that it copies, from
-    the scrutinee down, outermost step first (design 4.1 rule 4, 4.7
-    rule 7). *)
-type binding = { name : string; field : field_step list }
+(** Where the object at a position of a pattern stands: in place, as
+    the field at the reach, or as the object that the pointer field at
+    [pointer] points to (4.7 rule 5), which has the pointer local
+    numbered [local]. A position in place has no local, since the
+    address of a field in place may be misaligned in a packed variant. *)
+type position_object =
+  | In_place of reach
+  | Pointed_by of { local : int; pointer : reach }
 
-(** An arm of a match: its span; the span from its first label to its
-    last; the constructors it takes, in the order of its labels, where a
-    [default] stands for those no label names (design 4.2); and its
-    bindings in order. *)
+(** A position below the scrutinee where a constructor pattern of the
+    variant [variant] stands, and its object. *)
+type pattern_position = {
+  variant : Ctype.variant_name;
+  position_object : position_object;
+}
+
+(** A pointer local of a nested match: its number, from 1 in the order
+    in which the patterns name the positions under a [*], and the
+    variant of the object that it points to. *)
+type pointer_local = { local : int; local_variant : Ctype.variant_name }
+
+(** A binding of a match: its name and the field that it copies (design
+    4.1 rule 4, 4.7 rule 7). *)
+type binding = { name : string; field : reach }
+
+(** An arm of a match: its number from 0 in source order, which a leaf
+    of the selection tree selects (design 13.5); its span; the span from
+    its first label to its last; the constructors it takes, in the order
+    of its labels, where a [default] stands for those no label names
+    (design 4.2); and its bindings in order. *)
 type matched_arm = {
+  number : int;
   arm : Tree.span;
   labels : Tree.span;
   cases : Spelling.constructor list;
@@ -212,23 +239,29 @@ type test = {
   controlled : Tree.span;
 }
 
+(** Where a node of a selection tree reads a tag: at the scrutinee, of
+    its variant, or at a position below it. *)
+type read_at = Scrutinee of Ctype.variant_name | Position of pattern_position
+
 (** The selection tree of a match as lowering writes it (design 13.5):
     a leaf is the number of an arm from 0 in source order; a node reads
-    the tag of the field [tag], from the scrutinee down, which is the
-    scrutinee where it is empty, of the variant [variant], with a branch
-    for one or more of its constructors. *)
+    the tag [at], with a branch for one or more of the constructors of
+    its variant. *)
 type selection_tree =
   | Arm of int
   | Read of {
-      tag : field_step list;
-      variant : Ctype.variant_name;
+      at : read_at;
       branches : (Spelling.constructor list * selection_tree) list;
     }
+
+(** A selection tree of more than one node, and the pointer locals that
+    its nodes point, in the order of their numbers. *)
+type nested = { locals : pointer_local list; tree : selection_tree }
 
 (** The arms of a match, and its selection tree where the tree has more
     than one node (design 4.7 rule 6); a tree of one node is the [switch]
     on the scrutinee's tag that [matched] gives. *)
-type arms = { matched : matched_arm list; nested : selection_tree option }
+type arms = { matched : matched_arm list; nested : nested option }
 
 (** What a matching selects with the tag of its scrutinee: the arms of a
     match statement, or the one constructor of a single-pattern test. *)
@@ -447,13 +480,16 @@ type type_argument =
     [__extension__] there. *)
 type initialiser_holder = Holder_at of int | For_clause
 
-(** How typing first read an identifier alone in a pattern, which the
-    parser declared (design 4.7 rule 3): a constructor of the named
-    variant, or a binding. Each later reading of the same identifier,
-    in an instance of the generic function that holds it, takes the
-    first, so that an instance reads it as its definition did (7.1 rule
-    2). *)
-type alone_reading = Constructor_word of string | Binding_word
+(** How typing first read a name whose meaning a type decides: an
+    identifier alone in a pattern, which the parser declared (design 4.7
+    rule 3), or an unqualified name in Type-C text, which the target
+    type of its position may make a constructor (3.3). It is a
+    constructor of the named variant, or an ordinary identifier, which
+    in a pattern is a binding. Each later reading of the name, in an
+    instance of the generic function that holds it, takes the first, so
+    that an instance reads every name as its definition check did (7.3
+    rule 3). *)
+type name_reading = Constructor_word of string | Ordinary_word
 
 (** What the declaration reader gives typing. [fail] reports the first
     error at the start of a span and does not return; [entity] gives what
@@ -508,9 +544,10 @@ type context = {
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
-  alone_reading : Tree.declared -> (unit -> alone_reading) -> alone_reading;
-      (** the reading of an identifier alone that typing recorded first,
-          else the one that the function gives, which it records *)
+  name_reading : int -> (unit -> name_reading) -> name_reading;
+      (** the reading of the name at the token that typing recorded
+          first, else the one that the function gives, which it
+          records *)
   needs_complete : Ctype.t -> unit;
   slice_instance : Tree.span -> Ctype.t -> Ctype.t;
       (** the instance of the universe [slice] over an element type that

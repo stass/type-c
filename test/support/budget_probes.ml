@@ -158,3 +158,19 @@ let nested_array_operands depth =
     [ "int a[3];";
       Printf.sprintf "long f(void) { return (long)slice_from_array(%s).len; }"
         (operand depth) ]
+
+(* A match whose label is a chain of [depth] patterns of [C], each of
+   which follows its pointer field to the next and binds its other
+   field, over a variant whose pointer field has a name of [length]
+   bytes. *)
+let deep_pattern ~length depth =
+  let field = "f" ^ String.make (length - 1) 'x' in
+  let rec label depth =
+    if depth = 0 then "N"
+    else Printf.sprintf "C(*%s, n%d)" (label (depth - 1)) depth
+  in
+  lines
+    [ Printf.sprintf "type e = | N | C(const e *%s, int n);" field;
+      Printf.sprintf
+        "int g(e v) { match (v) { case %s: return 1; default: return 0; } }"
+        (label depth) ]

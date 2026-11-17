@@ -460,6 +460,13 @@ reads it. The cost is that unread text names no constructor, since
 the qualified form is not C either (13.5). String literals use the
 same mechanism to become `str` (section 8).
 
+In a generic function the check of the definition decides whether a
+name is a constructor or what C declares, against the opaque type
+parameters, and every instance takes that decision (7.3 rule 3): a
+type parameter is no variant, so a name whose target type is a type
+parameter is what C declares there in every instance, even one whose
+argument is a variant with a constructor of that name.
+
 A constructor expression, qualified or not, stands within the scope of its
 variant's declaration: from the type declaration to the end of the block,
 match arm or translation unit that holds it. Outside that scope it is an
@@ -3433,6 +3440,24 @@ convert, is weighed with P11.
    with no integer type, and would read 1 in the instance `f__i`, which
    is defined after the list (Apple Clang 21, GCC 16). The call in `h`
    is an error that cites the list.
+
+   An instance also reads each name whose meaning a type decides as the
+   check read it: an unqualified name is a constructor (3.3), and an
+   identifier alone in a pattern a constructor pattern (4.7 rule 3),
+   exactly where the check read one, whatever the arguments make of the
+   target type or the type of the position. In
+
+   ```c
+   generic(T) void put(T *out, T Overflow) { *out = Overflow; }
+   ```
+
+   the target type of `*out` is the opaque `T`, so the check reads the
+   parameter `Overflow`, and so does the instance over `eval_error`,
+   whose target type has a constructor `Overflow`. typec records the
+   check's reading of each such name and every instance takes it, so
+   that the check and an instance cannot read one name two ways; an
+   instance that read its own would compile code that no check
+   typed.
 4. *Provisional (P27).* An instance is compiled under the pragmas in
    force at the definition of its generic, as a `static inline`
    function of a header is under those of the header. It is not
@@ -5258,7 +5283,7 @@ Two properties follow by construction:
 | `match` | A block: a pointer to the scrutinee, or a copy when it is not an lvalue or is volatile, atomic or declared `register`; a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
-| Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm;`, and for each node a `switch` on the tag of the node's position. The tag is reached from `__tc_match` through the members of 10.1 and, under a `*`, through the pointer field: `__tc_match->u.Err.error.tag`, `__tc_match->u.Add.l->tag`. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_match->u.Add.l->u.Num.value`. |
+| Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm;`, then a pointer local for each position under a `*` where a constructor pattern stands, `const struct V *__tc_pK = 0;` for the `K`th such position, of the variant `V`, and for each node a `switch` on the tag of the node's position. The locals are numbered from 1 in the order in which the labels name their positions, so that each follows the one it is reached from, and the scrutinee's pointer is `__tc_match`. An object is reached from the nearest local above it, `__tc_match` or one of a position under a `*`, through the members of 10.1: a node under a `*` first points its local at the object that the pointer field points to, `__tc_p1 = __tc_match->u.Add.l;`, and switches on `__tc_p1->tag`; a node at a field in place switches on the field's tag, `__tc_match->u.Err.error.tag`, `__tc_p1->u.Wrapped.inner.tag`. A field in place has no local, since its address may be misaligned in a packed variant, where a member access is not. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_p1->u.Num.value`. The path from a local to an object never passes a `*`, so a variant is held in place at most once on it and its length is bounded by the variants of the unit and the depth of the tree, not by the depth of a pattern under `*`; spelling the whole path from `__tc_match` at each node would make a 100 KB pattern 120 deep over a long field name about 900 MB of text. Every path to a node or to an arm passes the nodes that point the locals that it reads, since a label is selected only after every tag that it names is read (4.7 rule 6); the null pointer that a local starts as spares a backend that cannot see this a warning of a value used uninitialized. |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |

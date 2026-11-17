@@ -166,6 +166,11 @@ and application_text (instance : Ctype.instance) =
   ^ String.concat ", " (List.map argument instance.argument_types)
   ^ ")"
 
+let of_variant (name : Ctype.variant_name) =
+  match name with
+  | Declared declared -> (declared :> string)
+  | Applied instance -> application_text instance
+
 let declaration t name = declared ~named:shown_name t name
 let of_ctype t = declaration t ""
 

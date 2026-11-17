@@ -1881,25 +1881,14 @@ types (design 13.3).
   initialised through a temporary of its declaring type.
   Package 3.12 adds the script under `tools/measure`; have the design
   cite it.
-- [High] An instance of a generic function re-resolves an unqualified
-  constructor by its target type (design 3.3) against the instance's
-  types, so it can read a name differently from the definition check:
-  in `generic(T) void f(T *out, T Overflow) { *out = Overflow; }` the
-  definition reads the parameter and the instance over `eval_error`
-  the constructor, which compiles to other code. Record the
-  definition's resolution of each use, as `Declarations.alone_readings`
-  records the reading of an identifier alone, or refuse a target-type
-  resolution whose target type holds a type parameter while an
-  ordinary identifier of that name is visible.
-- [High] Lowering spells the full path from `__tc_match` at every node
-  of a selection tree and in every binding (`Lowering.field_access`), so
-  the text of a match grows with depth times path length: a 100 KB
-  input, a chain of 120 `*C(` over a field with a 100 KB name, builds
-  about 900 MB of text before the output limit refuses it, because
-  `Emitter.joined` charges a part only after spelling it. Give each node
-  a pointer local, `const T *const __tc_pK = &parent->u.C.f;`, so that a
-  tag read and a binding are one step from it, or charge each node's
-  text before spelling its subtree.
+- [High] A match or a test holds its scrutinee through a pointer when
+  it is an lvalue (design 13.5, `Expressions.access_of`), and a
+  variant member of a packed structure is one: `match (p->i)` where
+  `i` is a member of a `#pragma pack(1)` structure lowers to
+  `const struct inner *const __tc_match = &( p->i )`, whose reads
+  UndefinedBehaviorSanitizer reports as misaligned. Decide in one place
+  when typec may take the address of a variant object: copy a
+  scrutinee that may be under-aligned, as a volatile one is.
 - [High] Build nested patterns in the single-pattern test, as in
   `while (case Some(Ok(v)) = next())`: design 4.6 and 4.7 rule 9, plan
   packages 3.9 and 3.10.

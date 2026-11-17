@@ -13,6 +13,11 @@ val of_ctype : Ctype.t -> string
     opaque array length [[<constant>]] and a type that typec does not know
     by its construct between [<] and [>], which are not C. *)
 
+val of_variant : Ctype.variant_name -> string
+(** The name of a variant as Type-C writes it: its name, or the
+    application of its generic, such as ["option(int)"], which a
+    qualified constructor names it by (design 3.3). *)
+
 val declaration : Ctype.t -> string -> string
 (** [declaration t name] declares [name] with type [t], such as
     ["int (*name)[3]"]. *)

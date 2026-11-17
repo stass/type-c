@@ -380,40 +380,32 @@ let scrutinee_holder (matching : _ Typec_sema.Expressions.matching_of) =
         Printf.sprintf "), *const %s = &%s; " scrutinee_pointer
           scrutinee_copy )
 
-(* The member access that reaches an object from one that [pointer]
-   says is reached through a pointer. *)
-let member_operator ~pointer = if pointer then "->" else "."
+(* Design 13.5: the pointer local numbered [local] of a nested match,
+   where 0 is the scrutinee's. *)
+let local_pointer local =
+  match local with
+  | 0 -> scrutinee_pointer
+  | _ -> Printf.sprintf "__tc_p%d" local
 
-(* The field that [steps] reach from the scrutinee (design 13.5), as
-   [__tc_match->u.Add.l->u.Num.value], and whether the object it reaches
-   is the one that the field points to. *)
-let field_access (steps : Typec_sema.Expressions.field_step list) =
-  (* One buffer, since a string built anew at each step would copy the
-     path once per step, quadratic in the depth of the field. *)
-  let path = Buffer.create 64 in
-  Buffer.add_string path scrutinee_pointer;
-  let add_step pointer (step : Typec_sema.Expressions.field_step) =
-    Buffer.add_string path (member_operator ~pointer);
-    Buffer.add_string path Tree.union_member;
-    Buffer.add_char path '.';
-    Buffer.add_string path (step.constructor :> string);
-    Buffer.add_char path '.';
-    Buffer.add_string path step.field;
-    step.through_pointer
-  in
-  let pointer = List.fold_left add_step true steps in
-  (Buffer.contents path, pointer)
+(* The member of a variant's union that holds [field], as [u.Num.value]
+   (design 10.1). *)
+let member_text (field : Typec_sema.Expressions.pattern_field) =
+  Printf.sprintf "%s.%s.%s" Tree.union_member
+    (field.constructor :> string)
+    field.field
 
-(* The tag of the variant at the end of [steps]. *)
-let tag_access steps =
-  let object_text, pointer = field_access steps in
-  object_text ^ member_operator ~pointer ^ Tree.tag_member
+(* The field that [reach] reaches, as [__tc_p1->u.Add.l] or
+   [__tc_match->u.Err.error.u.Wrapped.inner]: a pointer local and the
+   fields in place below it. *)
+let field_text ({ base; path; field } : Typec_sema.Expressions.reach) =
+  local_pointer base ^ "->"
+  ^ String.concat "." (List.map member_text (path @ [ field ]))
 
 (* The type of a binding is spelt [__typeof__] its field (design 2.4),
    because no name of the field's type that C11 can spell is sure to be
    visible, and not hidden, at the match. *)
 let binding_declaration (binding : Typec_sema.Expressions.binding) =
-  let field, _ = field_access binding.field in
+  let field = field_text binding.field in
   Printf.sprintf " const __typeof__(%s) %s = %s;" field binding.name field
 
 let binding_declarations output location bindings =
@@ -464,26 +456,72 @@ let constructor_cases output ~variant location
    the local holds the arms, each written once. *)
 let arm_local = "__tc_arm"
 
-let rec selection_text output location
-    (tree : Typec_sema.Expressions.selection_tree) =
-  match tree with
-  | Arm arm -> Printf.sprintf "%s = %d;" arm_local arm
-  | Read { tag; variant; branches } ->
-      let variant = Typec_sema.Encoding.variant_name variant in
-      let branch (constructors, subtree) =
-        Emitter.joined output location ~separator:" " (case_label ~variant)
-          constructors
-        ^ " "
-        ^ selection_text output location subtree
-        ^ " break;"
-      in
-      Printf.sprintf "switch (%s) { %s %s }" (tag_access tag)
-        (Emitter.joined output location ~separator:" " branch branches)
-        invalid_tag
+(* A pointer local of a nested match, declared before the tree, of the
+   type of the variant that it points to (design 13.5). The node that
+   reads the tag of its position points it at the object there, which
+   every path to a use passes (4.7 rule 6); the null pointer it starts
+   as only spares a backend that cannot see this a warning of a value
+   used uninitialized. *)
+let local_declaration
+    ({ local; local_variant } : Typec_sema.Expressions.pointer_local) =
+  let variant = Typec_sema.Encoding.variant_name local_variant in
+  Printf.sprintf "const struct %s *%s = 0;" (variant :> string)
+    (local_pointer local)
 
-let arm_case arm_numbers _location
-    (arm : Typec_sema.Expressions.matched_arm) =
-  Printf.sprintf "case %d:" (Hashtbl.find arm_numbers arm.arm)
+(* The statement that points the local of a position under a [*] at the
+   object there, before its tag is read. *)
+let point_local add (at : Typec_sema.Expressions.read_at) =
+  match at with
+  | Position { position_object = Pointed_by { local; pointer }; _ } ->
+      add
+        (Printf.sprintf "%s = %s;" (local_pointer local) (field_text pointer))
+  | Scrutinee _ | Position { position_object = In_place _; _ } -> ()
+
+(* The variant whose tag a node reads, and the tag. *)
+let read_tag (at : Typec_sema.Expressions.read_at) =
+  match at with
+  | Scrutinee variant -> (variant, scrutinee_pointer ^ "->" ^ Tree.tag_member)
+  | Position { variant; position_object = In_place reach } ->
+      (variant, field_text reach ^ "." ^ Tree.tag_member)
+  | Position { variant; position_object = Pointed_by { local; _ } } ->
+      (variant, local_pointer local ^ "->" ^ Tree.tag_member)
+
+(* The statements of [tree], each added through [add]: a node under a
+   [*] points the local of its position at the object there, then each
+   node switches on its tag. *)
+let rec write_selection add (tree : Typec_sema.Expressions.selection_tree) =
+  match tree with
+  | Arm arm -> add (Printf.sprintf "%s = %d;" arm_local arm)
+  | Read { at; branches } ->
+      point_local add at;
+      let variant, tag = read_tag at in
+      write_switch add ~variant ~tag branches
+
+and write_switch add ~variant ~tag branches =
+  let variant = Typec_sema.Encoding.variant_name variant in
+  let write_branch (constructors, subtree) =
+    List.iter (fun constructor -> add (case_label ~variant constructor))
+      constructors;
+    write_selection add subtree;
+    add "break;"
+  in
+  add (Printf.sprintf "switch (%s) {" tag);
+  List.iter write_branch branches;
+  add invalid_tag;
+  add "}"
+
+let arm_case _location (arm : Typec_sema.Expressions.matched_arm) =
+  Printf.sprintf "case %d:" arm.number
+
+(* The text before the arms of a nested match: the local of the arm and
+   the pointer locals, the tree, and the [switch] on the arm. *)
+let nested_selection output location
+    ({ locals; tree } : Typec_sema.Expressions.nested) =
+  Emitter.assembled output location ~separator:" " (fun add ->
+      add (Printf.sprintf "unsigned %s;" arm_local);
+      List.iter (fun local -> add (local_declaration local)) locals;
+      write_selection add tree;
+      add (Printf.sprintf "switch (%s) {" arm_local))
 
 (* The [switch] that holds the arms, and the [case] labels of an arm. *)
 let arms_switch output location ~variant
@@ -492,16 +530,7 @@ let arms_switch output location ~variant
   | None ->
       ( Printf.sprintf "switch (%s->%s) {" scrutinee_pointer Tree.tag_member,
         constructor_cases output ~variant )
-  | Some tree ->
-      let arm_numbers = Hashtbl.create 16 in
-      List.iteri
-        (fun number (arm : Typec_sema.Expressions.matched_arm) ->
-          Hashtbl.replace arm_numbers arm.arm number)
-        arms.matched;
-      ( Printf.sprintf "unsigned %s; %s switch (%s) {" arm_local
-          (selection_text output location tree)
-          arm_local,
-        arm_case arm_numbers )
+  | Some nested -> (nested_selection output location nested, arm_case)
 
 let match_statement output matching (arms : Typec_sema.Expressions.arms) =
   let tokens = tokens_of output in

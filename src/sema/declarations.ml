@@ -230,9 +230,12 @@ type state = {
   at_file_scope : (string, entity) Hashtbl.t;
   beside : (Tree.reference, entity option) Hashtbl.t;
   overloaded : (Tree.reference, unit) Hashtbl.t;
-  alone_readings : (Tree.reference, Expressions.alone_reading) Hashtbl.t;
-      (* how typing first read each identifier alone in a pattern, which
-         the parser declared (design 4.7 rule 3) *)
+  name_readings : (int, Expressions.name_reading) Hashtbl.t;
+      (* how typing first read each name whose meaning a type decides,
+         by its token: an identifier alone in a pattern, which the parser
+         declared (design 4.7 rule 3), and an unqualified name that may
+         be a constructor (3.3); an instance takes these readings (7.3
+         rule 3) *)
   generic_functions : (Tree.reference, generic_function) Hashtbl.t;
       (* each declaration of a generic function (design 7.1) *)
   mutable generic_part : generic_part option;
@@ -584,15 +587,23 @@ let refuse_constructor_word state span name variant =
           (quote name) (quote variant)
           (quote (variant ^ "." ^ name))))
 
+(* How typing read the name that [reference] declares, if it read it
+   as a name whose meaning a type decides: an identifier alone in a
+   pattern. *)
+let declared_reading state (reference : Tree.reference) =
+  match reference with
+  | In_tree (Ordinary_at token) -> Hashtbl.find_opt state.name_readings token
+  | Builtin _ -> None
+
 (* The entity that [reference] denotes at the use of [name] at [span]. *)
 let referenced state span name reference =
   match entity_used state span name reference with
   | Some entity -> entity
   | None -> (
-      match Hashtbl.find_opt state.alone_readings reference with
+      match declared_reading state reference with
       | Some (Constructor_word variant) ->
           refuse_constructor_word state span name variant
-      | Some Binding_word | None -> not_read state span name)
+      | Some Ordinary_word | None -> not_read state span name)
 
 (* Design 7.1 rule 7: when declarations of a generic function agree. *)
 let refuse_generic_agreement state span name reason =
@@ -4153,7 +4164,7 @@ and typing state : Expressions.context =
     type_declaration =
       (fun declaration -> ignore (read_type_declaration state declaration));
     binding = bind_binding state;
-    alone_reading = alone_reading state;
+    name_reading = name_reading state;
     needs_complete = needs_complete state;
     slice_instance = slice_instance state;
     block_literal = (fun () -> note_block_literal state);
@@ -4309,17 +4320,15 @@ and note_block_literal state =
   if Option.is_none facts.block_literal && not (in_instance_definition state)
   then facts.block_literal <- Some (Ctype.now state.tags)
 
-(* The reading of an identifier alone in a pattern that typing recorded
-   first, else [first ()], recorded: an instance of a generic function
-   reads it as the definition check did (design 4.7 rule 3, 7.1 rule
-   2). *)
-and alone_reading state (declared : Tree.declared) first =
-  let reference = Tree.In_tree declared.id in
-  match Hashtbl.find_opt state.alone_readings reference with
+(* The reading of the name at [token] that typing recorded first, else
+   [first ()], recorded: an instance of a generic function reads each
+   name as the definition check did (design 7.3 rule 3). *)
+and name_reading state token first =
+  match Hashtbl.find_opt state.name_readings token with
   | Some reading -> reading
   | None ->
       let reading = first () in
-      Hashtbl.replace state.alone_readings reference reading;
+      Hashtbl.replace state.name_readings token reading;
       reading
 
 (* A binding of a match (design 4.1 rule 4): an object without linkage
@@ -4790,7 +4799,7 @@ let read target text (scopes : Parser.scopes) =
       at_file_scope = Hashtbl.create 1024;
       beside = Hashtbl.create 64;
       overloaded = Hashtbl.create 64;
-      alone_readings = Hashtbl.create 16;
+      name_readings = Hashtbl.create 16;
       generic_functions = Hashtbl.create 16;
       generic_part = None;
       trial = false;

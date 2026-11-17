@@ -81,6 +81,14 @@ val joined : output -> Typec_cpp.Location.t -> separator:string ->
     built. The text is charged when the edit or piece that holds it is
     made. *)
 
+val assembled : output -> Typec_cpp.Location.t -> separator:string ->
+  ((string -> unit) -> unit) -> string
+(** [assembled output location ~separator write] is the parts that [write]
+    adds through the function it is given, in order, with [separator]
+    between them, for typec's own text at [location]. Each is held to
+    the limit as {!joined} holds an item, and the text takes time linear
+    in its length however [write] nests, as for the nodes of a tree. *)
+
 (** A [#pragma] line of moved text (design 13.5), at the location of
     its own line. Only the text of {!moved} holds one, so a packing
     bracket holds no pragma but its own. *)

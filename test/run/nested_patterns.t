@@ -327,3 +327,38 @@ below it.
   stopped
   whole -3
   trapped
+
+A field of variant type in a packed variant may be misaligned, so
+selection reads its tag and binds its fields by member access, which
+the backend knows to be packed, and takes no pointer to it (13.5):
+the alignment check of UndefinedBehaviorSanitizer passes.
+
+  $ cat > packed.tc <<'EOF'
+  > #include <stdio.h>
+  > type inner = | A | B(int x);
+  > #pragma pack(1)
+  > type outer = | O(char c, inner i) | P;
+  > #pragma pack()
+  > static int f(outer v) {
+  >   match (v) {
+  >   case O(_, A): return 1;
+  >   case O(_, B(x)): return x;
+  >   case P: return 0;
+  >   }
+  > }
+  > int main(void) {
+  >   outer o = O('a', B(42));
+  >   printf("%d %d\n", f(o), f(O('b', A)));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in "$clang" "$gcc"; do
+  >   for opt in -O0 -O2; do
+  >     typec --cc="$cc" $opt $flags $sanitize -o packed packed.tc &&
+  >       ./packed || echo "$cc $opt failed"
+  >   done
+  > done
+  42 1
+  42 1
+  42 1
+  42 1

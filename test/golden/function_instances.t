@@ -460,3 +460,20 @@ makes of it (6.7.4p7).
   > EOF
   $ ./golden.exe static_inline.tc | grep -c 'clear__i'
   3
+
+Rule 3: an instance reads each name as the check of its definition
+read it. The target type of `*out` is the opaque `T` in the check, no
+variant, so `Overflow` there is the parameter (3.3), and in the instance
+over `eval_error` it is still the parameter, not the constructor that
+the target type of the instance has. Where the check's target type is a
+variant, the name is the constructor in the check and in each instance.
+
+  $ cat > readings.tc <<'EOF'
+  > type eval_error = | DivByZero | Overflow;
+  > generic(T) void put(T *out, T Overflow) { *out = Overflow; }
+  > generic(T) void fail(eval_error *out, T Overflow) { *out = Overflow; }
+  > void f(eval_error *e) { put(e, DivByZero); fail(e, 0); }
+  > EOF
+  $ ./golden.exe readings.tc | grep '{ \* out ='
+  static void put__10eval_error ( __tc_arg__10eval_error * out , __tc_arg__10eval_error Overflow ) { * out = Overflow ; }
+  static void fail__i ( eval_error * out , __tc_arg__i Overflow ) { * out = ((struct eval_error){ .tag = eval_error_Overflow }) ; }

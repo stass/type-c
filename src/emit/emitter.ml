@@ -66,6 +66,15 @@ let is_plain_byte = function
   | '?' | '/' -> true
   | byte -> Char.code byte >= 0x80
 
+(* Whether [holds] holds at each index of [text]: a loop, since the text
+   of a node of a tree can be long, and a list of its indices would take
+   memory many times its length. *)
+let at_every_index text holds =
+  let rec from index =
+    index >= String.length text || (holds index && from (index + 1))
+  in
+  from 0
+
 (* A '?' that no other '?' can follow or precede, in this text or
    next to it, starts no trigraph. *)
 let is_trigraph_free text =
@@ -75,7 +84,7 @@ let is_trigraph_free text =
     || (index > 0 && index < last && text.[index - 1] <> '?'
        && text.[index + 1] <> '?')
   in
-  List.for_all lone (List.init (last + 1) Fun.id)
+  at_every_index text lone
 
 (* A '/' inside the text with neither '/' nor '*' beside it, as the
    division of the length of a slice (design 13.5) has, starts and ends
@@ -90,7 +99,7 @@ let is_comment_free text =
     || (index > 0 && index < last
        && beside_slash (index - 1) && beside_slash (index + 1))
   in
-  List.for_all lone (List.init (last + 1) Fun.id)
+  at_every_index text lone
 
 (* typec's own text stands on the line of its location and holds no
    pragma line, so a '#pragma pack' never escapes the probe that a
@@ -109,20 +118,27 @@ let generated output location text =
   check_own_text ~caller:"Emitter.generated" text;
   made_piece output { text; location }
 
-(* Each part is held to the limit as it is spelt, before the next is,
-   so a text that repeats a long name for each of many items is refused
-   before it is built; a separator is counted for each part, one more
-   than it holds. The text is charged once, where it is written. *)
-let joined output location ~separator spell items =
-  let add (length, parts) item =
-    let text = spell item in
-    let length = length + String.length text + String.length separator in
-    if output.charged + length > output.limit then
-      raise (Over_limit location);
-    (length, text :: parts)
+(* Each part is held to the limit as it is added, before the next is
+   spelt, so a text that repeats a long name for each of many parts is
+   refused before it is built. One buffer holds the text, so that a
+   writer that adds the parts of a tree takes time linear in its length
+   at any depth. The text is charged once, where it is written. *)
+let assembled output location ~separator write =
+  let text = Buffer.create 64 in
+  let started = ref false in
+  let add part =
+    if !started then Buffer.add_string text separator;
+    started := true;
+    if output.charged + Buffer.length text + String.length part > output.limit
+    then raise (Over_limit location);
+    Buffer.add_string text part
   in
-  let _, parts = List.fold_left add (0, []) items in
-  String.concat separator (List.rev parts)
+  write add;
+  Buffer.contents text
+
+let joined output location ~separator spell items =
+  assembled output location ~separator (fun add ->
+      List.iter (fun item -> add (spell item)) items)
 
 (* A pragma line is a whole line of the source, of a type of its own so
    that no bracket holds one, inside this module as outside it. *)

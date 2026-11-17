@@ -674,6 +674,32 @@ let output_limit () =
   under_limit "fewer nested array operands"
     (Budget_probes.nested_array_operands 4)
 
+(* The most that lowering may allocate for a pattern 120 deep under
+   [*] over a field name of 100 KB, which bounds the memory that it
+   takes: the text is about 12 MB, and lowering it allocates about
+   115 MB. *)
+let deep_pattern_allocation = 200_000_000.
+
+(* Design 13.5: each node of a selection tree under a [*] and each
+   binding below it is spelt from the pointer local of the nearest
+   position under a [*], so the text of a deep pattern of [*] over a
+   long field name grows with its depth, not with its square, and
+   lowering makes little more than that text before it is charged. *)
+let deep_patterns () =
+  let source depth = Budget_probes.deep_pattern ~length:4000 depth in
+  under_limit "a deep pattern" (source 120);
+  grows_linearly "the time to lower a deep pattern" ~small:24 (fun depth ->
+      ignore (lowered (source depth)));
+  let text, _, declarations =
+    read (Budget_probes.deep_pattern ~length:100_000 120)
+  in
+  let before = Gc.allocated_bytes () in
+  ignore (Lowering.edits text declarations);
+  let allocated = Gc.allocated_bytes () -. before in
+  if allocated > deep_pattern_allocation then
+    fails "the allocation of lowering a deep pattern over a long field"
+      (Printf.sprintf "%.0f bytes" allocated)
+
 let () =
   lowers "a variant without fields" "type e = | A | B;"
     "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
@@ -739,4 +765,5 @@ let () =
   places ();
   try_defers ();
   output_limit ();
+  deep_patterns ();
   if !failures > 0 then exit 1

@@ -91,6 +91,23 @@ constructor (3.3); the qualified constructor is the same value.
   $ sed 's/match (DivByZero)/match (eval_error.DivByZero)/' stray.tc > qualified.tc
   $ ./golden.exe qualified.tc | grep -c __tc_arm
   1
+  $ cat types.h - > stray_instance.tc <<'EOF'
+  > type wrapped = | W(option(int) o);
+  > int f(wrapped w) {
+  >   match (w) {
+  >   case W(None):
+  >     match (None) { case None: return 1; case Some(v): return v; }
+  >   default:
+  >     return 0;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe stray_instance.tc
+  stray_instance.tc:9: error: 'None' is a constructor of 'option(int)' in a pattern of this arm and binds nothing; the arm writes it 'option(int).None' [match-pattern]
+  [1]
+  $ sed 's/match (None)/match (option(int).None)/' stray_instance.tc > qualified_instance.tc
+  $ ./golden.exe qualified_instance.tc | grep -c __tc_arm
+  1
   $ cat types.h - > targeted.tc <<'EOF'
   > eval_error f(res r) {
   >   match (r) {
@@ -127,7 +144,7 @@ is opaque.
   > EOF
   $ ./golden.exe generic.tc > generic.c && grep -c '__tc_match->tag' generic.c
   1
-  $ grep -c 'u.Some.value.tag' generic.c
+  $ grep -c __tc_arm generic.c
   0
   [1]
   $ sed 's/case Some(Overflow):/case Some(Some(y)):/' generic.tc > opaque.tc
@@ -373,8 +390,8 @@ __tc_arm, then one switch on it over the arms (13.5).
   int g(const expr *e) {
   { const struct expr *const __tc_match = &(
   *e
-  ); unsigned __tc_arm; switch (__tc_match->tag) { case expr_Num: __tc_arm = 2; break; case expr_Add: switch (__tc_match->u.Add.l->tag) { case expr_Num: switch (__tc_match->u.Add.r->tag) { case expr_Num: __tc_arm = 0; break; case expr_Add: __tc_arm = 1; break; default: __builtin_trap(); } break; case expr_Add: __tc_arm = 1; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm) {
-  case 0: { const __typeof__(__tc_match->u.Add.l->u.Num.value) a = __tc_match->u.Add.l->u.Num.value; const __typeof__(__tc_match->u.Add.r->u.Num.value) b = __tc_match->u.Add.r->u.Num.value; {
+  ); unsigned __tc_arm; const struct expr *__tc_p1 = 0; const struct expr *__tc_p2 = 0; switch (__tc_match->tag) { case expr_Num: __tc_arm = 2; break; case expr_Add: __tc_p1 = __tc_match->u.Add.l; switch (__tc_p1->tag) { case expr_Num: __tc_p2 = __tc_match->u.Add.r; switch (__tc_p2->tag) { case expr_Num: __tc_arm = 0; break; case expr_Add: __tc_arm = 1; break; default: __builtin_trap(); } break; case expr_Add: __tc_arm = 1; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm) {
+  case 0: { const __typeof__(__tc_p1->u.Num.value) a = __tc_p1->u.Num.value; const __typeof__(__tc_p2->u.Num.value) b = __tc_p2->u.Num.value; {
       return a + b;
    } __builtin_trap(); }
   case 1: { const __typeof__(__tc_match->u.Add.l) l = __tc_match->u.Add.l; const __typeof__(__tc_match->u.Add.r) r = __tc_match->u.Add.r; {
