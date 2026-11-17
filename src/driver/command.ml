@@ -138,12 +138,19 @@ let make_directory path =
     stop Exit_status.Environment
       ("cannot create a temporary directory: " ^ message)
 
-let translate ~null (target : Target.t) (translation : Pipeline.translation)
-    =
+(* The counts go to stderr, as stdout may carry the emitted C. *)
+let report_counts (translation : Pipeline.translation) counts =
+  print_error
+    (Printf.sprintf "typec: stats: %s: %s" translation.source
+       (Front_end.counts_line counts))
+
+let translate ~null ~stats (target : Target.t)
+    (translation : Pipeline.translation) =
   make_directory translation.directory;
   preprocess ~null target.backend.compiler translation;
   let text = read_preprocessed translation in
-  let lowered = lower translation.dialect target text in
+  let lowered, counts = lower translation.dialect target text in
+  if stats then report_counts translation counts;
   write_emitted translation.emitted (Typec_emit.Emitter.emit text lowered);
   Option.iter
     (fun compile ->
@@ -154,10 +161,10 @@ let translate ~null (target : Target.t) (translation : Pipeline.translation)
 (* One target model serves every translation, as they share the options
    of the compile step, and names the compiler that the commands are for.
    The final command reads typec's stdin, which an input "-" names. *)
-let run_plan ~program (plan : Pipeline.t) =
+let run_plan ~program ~stats (plan : Pipeline.t) =
   let target = query_target ~program plan.target_options in
   with_file "/dev/null" [ Unix.O_RDONLY ] (fun null ->
-      List.iter (translate ~null target) plan.translations);
+      List.iter (translate ~null ~stats target) plan.translations);
   Option.iter
     (fun final ->
       run_step ~stdin:Unix.stdin ~stdout:Unix.stdout
@@ -175,7 +182,7 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
       Exit (Exit_status.code Exit_status.Environment)
   | Ok plan -> (
       try
-        run_plan ~program:invocation.program plan;
+        run_plan ~program:invocation.program ~stats:invocation.stats plan;
         Exit 0
       with
       | Stopped outcome -> outcome

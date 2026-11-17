@@ -28,6 +28,7 @@ type typec_option =
   | Cc  (** [--cc=PATH] *)
   | Print_target  (** [--print-target] *)
   | Emit_c  (** [--emit-c] *)
+  | Stats  (** [--stats] *)
 
 (** What an option is to the pipeline of a [.tc] input. *)
 type role =

@@ -1510,8 +1510,8 @@ line, and passes only when `ocamlc` rejects it with that text.
 The backend is the program named by the last `--cc=PATH` option, else by
 the `TYPEC_CC` environment variable when it is set and not empty, else
 `cc`. A name without a slash is looked up in `PATH`. `typec` consumes
-`--cc=`, `--print-target` and `--emit-c` where an option can stand (the
-value of `-o` is never one) and forwards every other argument, `--cc`
+`--cc=`, `--print-target`, `--emit-c` and `--stats` where an option can
+stand (the value of `-o` is never one) and forwards every other argument, `--cc`
 without `=` included, in its original order. The backend is run with an
 argument vector, never through a shell, so `TYPEC_CC` names one program:
 it cannot carry extra arguments such as `ccache gcc`.
@@ -1601,6 +1601,19 @@ the input; its target is the `-MT` or `-MQ` value, else the real output.
 
 `--emit-c` stops after step 2 and writes the C to the `-o` file, or to
 stdout; the command line then has exactly one input, a `.tc` file.
+
+`--stats` prints on stderr, for each `.tc` input, one line
+`typec: stats: FILE: ` and the fields `unit_bytes` (the preprocessed
+unit), `instance_bytes` (charged to the instance budget),
+`copy_bytes` (the front end's charge to the output limit for the
+copies of deferred statements, which `output_bytes` counts again),
+`output_bytes` (charged to the output limit by lowering, the unit's own
+text included), `output_limit`, `longest_instance_code` (the most bytes
+of the code of one instance, its generic's name and the encodings of its
+arguments, that the bound on encodings holds) and `longest_name` (of a
+type declaration or a generic function, the universe text included),
+each as `name=value`: the counts of design 3.5 rule 7 that the
+measurements of P30 read. A unit that typec refuses reports none.
 
 A `.tc` input refuses the options that stop the backend at
 preprocessing (`-E`, `-M`, `-MM`), that change the preprocessed text

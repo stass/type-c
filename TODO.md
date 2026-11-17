@@ -1333,6 +1333,17 @@ types (design 13.3).
 
 ## Design questions with a gate
 
+- [Low] Design 3.5 rule 7 and P30 say that the encodings of the
+  arguments of one instance hold at most 4096 bytes together, but
+  `Encoding.instance` bounds the whole code of the instance: `I`, the
+  generic's name with its length and the encodings, up to 259 bytes
+  more than the arguments. `typec --stats` reports that code
+  (`longest_instance_code`). Package 3.6 settles the bound; say in the
+  rule which quantity it bounds, or bound only the arguments.
+- [Low] `typec --stats` reports nothing for a unit that typec refuses,
+  which is the unit nearest a limit. If package 3.6 or the pilot wants
+  the counts of a refused unit, carry them in the error.
+
 - [High] Package 4.1 decides whether a Type-C translation unit may
   include an emitted header (design 9.3). The include guards are macros
   and do not survive `-E`, so what reaches a Type-C unit is the header's

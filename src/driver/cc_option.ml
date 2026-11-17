@@ -9,7 +9,7 @@ type dependency =
   | Dependency_target
   | Dependency_detail
 
-type typec_option = Cc | Print_target | Emit_c
+type typec_option = Cc | Print_target | Emit_c | Stats
 
 type role =
   | Preprocess
@@ -87,6 +87,7 @@ let table =
       entries (Typec Cc) Joined [ "--cc=" ];
       entries (Typec Print_target) Flag [ "--print-target" ];
       entries (Typec Emit_c) Flag [ "--emit-c" ];
+      entries (Typec Stats) Flag [ "--stats" ];
       (* What the command line makes and of what. *)
       entries Output Joined_or_separate [ "-o" ];
       long_entries Output [ "--output" ];

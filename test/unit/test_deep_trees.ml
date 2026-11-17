@@ -24,7 +24,7 @@ let lowered file text =
   let preprocessed = Preprocessed.text ~name:file text in
   Result.bind (Reader.read ~name:file preprocessed) (fun reader ->
       Result.map
-        (Typec_emit.Emitter.emit reader)
+        (fun (lowered, _) -> Typec_emit.Emitter.emit reader lowered)
         (Typec_driver.Front_end.lower Gnu lp64 reader))
 
 (* The failure of [chain], if it has one. *)

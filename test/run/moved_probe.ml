@@ -49,5 +49,5 @@ let () =
     in
     [ deleted; moved ]
   in
-  let edits = Result.get_ok (Emitter.limited unit edits) in
+  let edits, _ = Result.get_ok (Emitter.limited unit edits) in
   print_string (Emitter.emit unit { edits; assertions = [] })

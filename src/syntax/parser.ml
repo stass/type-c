@@ -214,6 +214,9 @@ type state = {
       (** the names of the generic types declared so far, those of the
           universe text included, whose instances claim names (design
           10.3) *)
+  mutable longest_type_name : int;
+      (** the bytes of the longest name of a type declaration or a
+          generic function read so far (design 3.5 rule 7) *)
   counter : Spanned.counter;  (** of the nodes made so far *)
 }
 
@@ -1515,7 +1518,10 @@ let declare_tag state (name : identifier) ~implicit =
 let checked_spelling state ~at_file_scope (name : identifier) ~what =
   let refuse diagnostic = fail_at_token state (token_of name) diagnostic in
   match Spelling.type_name ~at_file_scope name.node with
-  | Ok checked -> checked
+  | Ok checked ->
+      let length = String.length name.node in
+      state.longest_type_name <- max state.longest_type_name length;
+      checked
   | Error (Too_long length) ->
       refuse
         (Rule.c_text
@@ -5218,6 +5224,7 @@ type scopes = {
   universe : (scoped_type_declaration item * View.t) list;
   declarations : (external_declaration item * View.t) list;
   views : views;
+  longest_type_name : int;
 }
 
 (* [attribute_arguments] keeps a view under the first token of each span
@@ -5277,6 +5284,7 @@ let parse_with_scopes ~keywords reader =
           statements = Places.empty;
         };
       generics = Name_set.empty;
+      longest_type_name = 0;
       counter = Spanned.counter ~max_depth;
     }
   in
@@ -5293,7 +5301,13 @@ let parse_with_scopes ~keywords reader =
       let universe = List.map item universe in
       let declarations = List.map item declarations in
       let scopes =
-        { file_scope; universe; declarations; views = state.views }
+        {
+          file_scope;
+          universe;
+          declarations;
+          views = state.views;
+          longest_type_name = state.longest_type_name;
+        }
       in
       Ok (List.map fst declarations, scopes)
   | exception Failed error -> Error error

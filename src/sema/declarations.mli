@@ -172,6 +172,19 @@ val typed : t -> Expressions.t
     outside the definitions of generics: those whose constructs lowering
     replaces (design 13.5). *)
 
+val instance_bytes : t -> int
+(** The bytes that the readings for the unit's instances charged the
+    instance budget (design 3.5 rule 7). *)
+
+val copy_bytes : t -> int
+(** The bytes that the copies of the unit's deferred statements charged
+    the output limit in the front end (design 3.5 rule 7): the front
+    end's bound on the copies, which lowering charges again. *)
+
+val longest_instance_code : t -> int
+(** The most bytes of the code of one instance that the unit encoded,
+    those of definition checks included ({!Encoding.code_length}). *)
+
 val linked : t -> string -> entity option
 (** The object or function with linkage (6.2.2) of that name: the one
     entity that its declarations with linkage denote in any scope, as of

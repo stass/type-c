@@ -34,7 +34,7 @@ let at line : Location.t = { file = "a.c"; line; flags = No_flags }
 let emit unit edits = Emitter.emit unit { edits; assertions = [] }
 
 (* What [make] makes for an output of [unit], under the output limit. *)
-let made unit make = Result.get_ok (Emitter.limited unit make)
+let made unit make = fst (Result.get_ok (Emitter.limited unit make))
 
 let edit (unit : Reader.t) ~first ~count location text =
   made unit (fun output ->
@@ -612,8 +612,10 @@ let () =
     String.make (limit - written - 1 + extra) 'a'
     |> Emitter.generated output (at 3)
   in
-  check "edits are charged the bytes they write"
-    (Result.is_ok (Emitter.limited unit (filled 0)));
+  check "edits are charged the bytes they write, and the charge reported"
+    (match Emitter.limited unit (filled 0) with
+     | Ok (_, charged) -> charged = limit
+     | Error _ -> false);
   check "a byte past the limit is refused at the piece that passes it"
     (match Emitter.limited unit (filled 1) with
      | Error { location; message } ->

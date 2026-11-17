@@ -45,6 +45,11 @@ let add_length_prefixed code name =
 
 let length_prefixed name = string_of_int (String.length name) ^ name
 
+(* The start of the code of an instance of [generic], which its
+   encodings follow. *)
+let code_prefix (generic : Typec_syntax.Spelling.type_name) =
+  "I" ^ length_prefixed (generic :> string)
+
 let integer_code part : Integer.t -> string = function
   | Bool -> "b"
   | Char -> "c"
@@ -79,10 +84,10 @@ let add_qualifiers code (qualifiers : Qualifiers.t) =
   letter qualifiers.const "K"
 
 let instance_code (instance : Ctype.instance) =
-  "I"
-  ^ length_prefixed (instance.generic :> string)
-  ^ String.concat "" instance.arguments
-  ^ "E"
+  code_prefix instance.generic ^ String.concat "" instance.arguments ^ "E"
+
+(* The code that [instance] bounds is all but the closing [E]. *)
+let code_length instance = String.length (instance_code instance) - 1
 
 let instance_c_name (instance : Ctype.instance) =
   Typec_syntax.Spelling.instance instance.generic instance.arguments
@@ -221,7 +226,7 @@ let instance (type written) tags (generic : Typec_syntax.Spelling.type_name)
     | () -> Buffer.sub buffer start (Buffer.length buffer - start)
     | exception No_row no_row -> raise (Argument_refused (written, no_row))
   in
-  Buffer.add_string buffer ("I" ^ length_prefixed (generic :> string));
+  Buffer.add_string buffer (code_prefix generic);
   match List.map encode_argument arguments with
   | encodings ->
       let mentions_parameter =

@@ -97,6 +97,9 @@ type t = {
   linked : (string, entity) Hashtbl.t;
   typed : Expressions.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
+  instance_bytes : int;
+  copy_bytes : int;
+  longest_instance_code : int;
 }
 
 let tags result = result.tags
@@ -115,6 +118,9 @@ let type_declarations result =
          compare a.span.first b.span.first)
 
 let typed result = result.typed
+let instance_bytes result = result.instance_bytes
+let copy_bytes result = result.copy_bytes
+let longest_instance_code result = result.longest_instance_code
 let entity result reference = Hashtbl.find_opt result.entities reference
 let tag result id = Hashtbl.find_opt result.tag_types id
 let linked result name = Hashtbl.find_opt result.linked name
@@ -171,9 +177,12 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    [instance_bytes] counts the bytes of the text that the readings for
    instances so far give their instances, those of definition checks
    included, which a trial does not undo, and [copy_bytes] those of the
-   copies of deferred statements that the exits so far run. [external_facts]
-   are those of the external declaration being read, and [placements]
-   where the texts of the instances stand (design 10.3).
+   copies of deferred statements that the exits so far run.
+   [longest_instance_code] is the most bytes of the code of one instance
+   that the unit has encoded so far, which the bound of rule 7 holds.
+   [external_facts] are those of the external declaration being read,
+   and [placements] where the texts of the instances stand (design
+   10.3).
    [views] are the parser's views of the unit's unread text, and
    [definition_views] holds the view in front of each declaration of a
    generic, by its id, which is the own place of its definition (design
@@ -242,6 +251,7 @@ type state = {
          latest first (design 7.3) *)
   mutable instance_bytes : int;
   mutable copy_bytes : int;
+  mutable longest_instance_code : int;
   mutable external_facts : external_facts;
   mutable placements : placements;
   mutable place : place;
@@ -1588,6 +1598,17 @@ let for_declarator state specified attributes declarator =
     inexact =
       specified.inexact || attributes <> []
       || optional_declarator_is_inexact state declarator }
+
+(* The one funnel of the unit's instances to their encodings, which
+   keeps the longest code of one that it has met. *)
+let encoded_instance state generic arguments =
+  let encoded = Encoding.instance state.tags generic arguments in
+  let longest instance =
+    let length = Encoding.code_length instance in
+    state.longest_instance_code <- max state.longest_instance_code length
+  in
+  Result.iter longest encoded;
+  encoded
 
 (* The return type of a defined function, or the unknown type of the
    function: a typedef name of an unknown type may declare it (6.9.1p2).
@@ -3345,7 +3366,7 @@ and instance_of state (declaration : Tree.type_declaration) arguments =
   let written =
     List.map (fun ((_, t) as argument) -> (argument, t)) arguments
   in
-  match Encoding.instance state.tags declaration.node.name.node written with
+  match encoded_instance state declaration.node.name.node written with
   | Ok instance -> instance
   | Error ((span, argument), no_row) ->
       fail state span (no_row_diagnostic argument no_row)
@@ -3831,7 +3852,7 @@ and use_function_instance state span ~written reference type_arguments =
   let generic = generic_function_name state reference in
   let encoded = List.map (fun t -> (t, t)) type_arguments in
   let instance =
-    match Encoding.instance state.tags generic encoded with
+    match encoded_instance state generic encoded with
     | Ok instance -> instance
     | Error (argument, no_row) ->
         fail state span (no_row_diagnostic argument no_row)
@@ -4705,6 +4726,7 @@ let read target text (scopes : Parser.scopes) =
       slice_generic = None;
       instance_bytes = 0;
       copy_bytes = 0;
+      longest_instance_code = 0;
       nesting = None;
       queued = [];
       external_facts = declaration_state tags None Parser.View.empty;
@@ -4722,9 +4744,11 @@ let read target text (scopes : Parser.scopes) =
   match Fun.protect ~finally:end_deferral read_all with
   | items ->
       let { tags; entities; tag_types; linked; typed; type_declarations;
-            placements; _ } =
+            placements; instance_bytes; copy_bytes; longest_instance_code;
+            _ } =
         state
       in
       Ok { tags; items; placements; entities; tag_types; linked; typed;
-           type_declarations }
+           type_declarations; instance_bytes; copy_bytes;
+           longest_instance_code }
   | exception (Failed error | Instance_failed error) -> Error error

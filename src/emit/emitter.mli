@@ -33,11 +33,14 @@ type piece
 type output
 
 val limited :
-  Typec_cpp.Reader.t -> (output -> 'a) -> ('a, Typec_cpp.Reader.error) result
-(** [limited unit make] is [make output] for an output of [unit], or the
-    error at the location of the first piece, edit or {!joined} text
-    whose charge would pass the output limit of [unit], after which
-    nothing more is made.
+  Typec_cpp.Reader.t ->
+  (output -> 'a) ->
+  ('a * int, Typec_cpp.Reader.error) result
+(** [limited unit make] is [make output] for an output of [unit] with the
+    bytes charged for it, which are at most the limit, or the error at
+    the location of the first piece, edit or {!joined} text whose charge
+    would pass the output limit of [unit], after which nothing more is
+    made.
     [output] belongs to [make] alone: one that escapes it would raise
     past this function, and edits of two outputs are each held to a
     limit of their own. *)

@@ -31,7 +31,7 @@ let limited unit make =
   let size = Reader.length unit in
   let output = { unit; limit = Output_limit.of_unit unit; charged = size } in
   match make output with
-  | made -> Ok made
+  | made -> Ok (made, output.charged)
   | exception Over_limit location -> Error (over_limit output location)
 
 let unit output = output.unit

@@ -228,6 +228,10 @@ type scopes = {
       (** the unit's own external declarations in order, each with the
           view in front of it, which is file scope there *)
   views : views;
+  longest_type_name : int;
+      (** the bytes of the longest name of a type declaration or a
+          generic function in the unit, the universe text included
+          (design 3.5 rule 7) *)
 }
 
 val parse_with_scopes :

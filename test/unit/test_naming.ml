@@ -458,7 +458,9 @@ let with_bracket reader (lowered : Typec_emit.Emitter.lowered) =
     Typec_emit.Emitter.bracketed output ~at ~location
       [ Typec_emit.Emitter.generated output location "struct s { int i; };" ]
   in
-  let bracketed = Result.get_ok (Typec_emit.Emitter.limited reader bracketed) in
+  let bracketed, _ =
+    Result.get_ok (Typec_emit.Emitter.limited reader bracketed)
+  in
   { lowered with edits = bracketed :: lowered.edits }
 
 let emitted source =
@@ -466,6 +468,7 @@ let emitted source =
   let preprocessed = Preprocessed.text ~name:file source in
   let lower reader =
     Typec_driver.Front_end.lower Gnu target reader
+    |> Result.map fst
     |> Result.map (with_bracket reader)
     |> Result.map (Typec_emit.Emitter.emit reader)
   in

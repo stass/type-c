@@ -7,6 +7,7 @@ type t = {
   program : string;
   arguments : Command_line.argument list;
   action : action;
+  stats : bool;
 }
 
 type error = Empty_cc_option
@@ -52,6 +53,7 @@ let of_command_line ~env_cc words =
         program = choose_program ~env_cc cc_paths;
         arguments = backend_arguments;
         action = choose_action typec_options;
+        stats = List.mem_assoc Cc_option.Stats typec_options;
       }
 
 let error_message = function

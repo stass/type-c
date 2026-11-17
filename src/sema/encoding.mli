@@ -56,6 +56,11 @@ val instance :
     as written, that has no row. A type parameter of a definition check
     encodes as [_], its id and [_], which begin no encoding of 10.3. *)
 
+val code_length : Ctype.instance -> int
+(** The bytes of the code of the instance, but for its closing [E]: the
+    generic's name and the encodings of its arguments, which
+    {!max_length} bounds. *)
+
 val instance_name : Ctype.instance -> string
 (** The name that an instance lowers to: its generic, [__] and the
     encoding of each argument (design 10.3). *)

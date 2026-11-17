@@ -26,7 +26,7 @@ let () =
       (Reader.read ~name:path (preprocessed path source))
       (fun text ->
         Result.map
-          (fun (lowered : Typec_emit.Emitter.lowered) ->
+          (fun ((lowered : Typec_emit.Emitter.lowered), _) ->
             Typec_emit.Emitter.emit text { lowered with assertions = [] })
           (Typec_driver.Front_end.lower Gnu target text))
   in

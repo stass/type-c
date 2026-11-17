@@ -219,7 +219,15 @@ let built_rows () =
     "vector__P4expr";
   check "the name of result(uint32_t, parse_error)"
     (Encoding.instance_name (instance "result" [ "j"; "11parse_error" ]))
-    "result__j11parse_error"
+    "result__j11parse_error";
+  (* The code is the encoding of the instance as a type but its [E]. *)
+  check "the code of vector(int)"
+    (string_of_int (Encoding.code_length (instance "vector" [ "i" ])))
+    (string_of_int (String.length "I6vectori"));
+  check "the code of pair(vector(int), int)"
+    (string_of_int
+       (Encoding.code_length (instance "pair" [ "I6vectoriE"; "i" ])))
+    (string_of_int (String.length "I4pairI6vectoriEi"))
 
 let () =
   arithmetic_rows ();

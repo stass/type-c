@@ -29,5 +29,5 @@ let () =
       [ Emitter.generated output location
           "struct instance { char c; int i; };" ]
   in
-  let instance = Result.get_ok (Emitter.limited unit instance) in
+  let instance, _ = Result.get_ok (Emitter.limited unit instance) in
   print_string (Emitter.emit unit { edits = [ instance ]; assertions = [] })

@@ -4619,6 +4619,13 @@ language is defined here and not by the tool.
   front end after the option, as any `-Xclang` option reaches it.
 - `--emit-c` stops after emission and writes the C. `--emit-c-header` is
   described in 9.3.
+- `--stats` prints on stderr what each `.tc` unit counts against the
+  translation limits of 3.5 rule 7: the bytes of the preprocessed unit,
+  those charged to the instance budget and to the output limit, the
+  limit, the longest code of one instance and the longest name of a
+  type declaration or generic function. P30 is settled by these
+  counts, so `typec` reports them itself rather than leaving a
+  measurement to reconstruct them.
 - With a `.tc` input, `-fpack-struct` without a value is refused as an
   error of the command line: under it GCC ignores the three lines of
   the bracket that 10.3 writes around an instance and warns of each,

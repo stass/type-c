@@ -38,7 +38,7 @@ let read source =
 let lowered source =
   let text, unit, declarations = read source in
   match Lowering.edits text declarations with
-  | Ok edits -> (text, unit, edits)
+  | Ok (edits, _) -> (text, unit, edits)
   | Error error -> failwith (Reader.error_message error)
 
 let emitted source =
@@ -144,7 +144,7 @@ let bracketed_after_forward source =
     Emitter.bracketed output ~at ~location
       [ Emitter.generated output location "struct s { int i; };" ]
   in
-  let edits = Result.get_ok (Emitter.limited text bracket) :: edits in
+  let edits = fst (Result.get_ok (Emitter.limited text bracket)) :: edits in
   words (before_typec_text (Emitter.emit text { edits; assertions = [] }))
 
 let bracket =
