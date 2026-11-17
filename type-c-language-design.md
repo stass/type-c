@@ -762,46 +762,105 @@ id(stmt) s;                             /* e = s is an error */
    calls `g1`, for `T *` and for `const T *`, no chain holds more
    than 25 instances, and one use of `g0` causes 2^25 - 1 of them, no
    two of one type. Generic types that each hold two applications of
-   the next do the same. So `typec` also bounds the definitions that
-   a translation unit has it read for instances, by the *instance
-   budget* of 4194304 tokens. Each time it reads the definition of a
-   generic for an instance, to define the instance or to follow the
-   chain of a definition check, it counts the tokens of that
-   definition. Type instances and function instances share the one
-   count, and an instance that is declared and never defined adds
-   nothing to it. A reading that would take the count of the unit
-   past the budget is not made, so nothing of that instance is
-   written: the application or call that needs it is an error,
-   reported at that application or call. The message names the
-   instance and the budget, and cites the application or call that
-   began the chain, as that of the nesting limit does.
+   the next do the same. So `typec` also bounds the text of the
+   instances of a translation unit, by the *instance budget* of
+   16777216 bytes.
 
-   The budget counts tokens and not instances, because the time and
-   the memory of a reading grow with its definition: with 16384
-   instances allowed, a chain over a definition of 4000 members took
-   `typec` 20 s and 2 GB. It is a translation limit of `typec` (C11
-   5.2.4.1) and no rule of the language, unlike the nesting limit:
-   what it counts is the reading of this compiler, that of its checks
-   included, and a source is valid Type-C whatever it counts. The
-   refusal therefore carries no code (13.6).
+   The budget counts bytes of text, because an instance is text that
+   grows with its arguments as well as with its definition. Where an
+   instance differs from the definition, lowering writes a name
+   (10.3): the typedef of an argument for a use of a type parameter,
+   the name of an instance for an application or a call, and the
+   names that a variant instance derives for its tag and for each of
+   its constructors (10.1). A name holds the encodings of the
+   arguments, and the line marker before a text holds the name of
+   its file. A count of definitions or of their tokens bounds none
+   of this. Three sources that read fewer than 524288 tokens of
+   definitions for their instances show it (one x86-64 host).
+   Thirteen lines,
+   a tree of structures of 20 members over a tag of 4000 bytes, are
+   145 MB of text, which costs `typec` 2 s and 1 GB. Twelve lines
+   with a variant of 200 constructors, each of them a name in every
+   instance, are 226 MB, 5.5 s and 1.9 GB. Fourteen lines of
+   aliases, each of which applies the one before it twice and so
+   doubles the depth of a pointer, keep the front end reading for
+   12 s and write nothing.
 
-   *Provisional (P30).* The value is about eight times what a heavy
-   unit of C++ would count, which is the measure taken because no
-   Type-C unit of that weight exists. A C++20 unit that uses the
-   standard containers, regular expressions, futures, ranges and the
-   filesystem instantiates 4424 class templates and 2513 function
-   templates (Apple Clang 21, `-ftime-trace`). At 30 tokens for the
-   definition of a type, which is an estimate, and 152 for that of a
-   function, the mean of the 82 functions of tomlc99 (their median
-   is 72), those are 515000 tokens. A source that is written to
-   reach the budget costs what the budget lets through. `typec`
-   counts 524288 tokens of the same chain, written over generic
-   types, in 0.5 s. A unit that stays under the budget gives the
-   backend the text of its instances: 65536 instances of such a
-   chain of functions count about a third of the budget, and as C
-   text of the form that 10.3 gives them they are 8.5 MB, which
-   Apple Clang 21 compiles in 5 s at `-O0` and 33 s at `-O2` and
-   GCC 16 in 23 s and 8 s, in 1.2 GB at most (one x86-64 host).
+   `typec` counts the text where it makes it, which is in two
+   places, and holds each count to the budget:
+
+   - Lowering counts every byte of the texts that 10.3 places for
+     instances: the typedefs of their arguments, their declarations
+     and their definitions, with the line markers that it writes
+     with them. The count is of the text itself, taken where the
+     text is written, so it covers whatever lowering writes for an
+     instance, and no list of constructs decides what is counted.
+   - The front end counts what its reading gives that text, so that
+     a source is refused before `typec` has read what lowering
+     would refuse. Each time it reads the definition of a generic
+     for an instance, to define the instance or to follow the chain
+     of a definition check, it counts the bytes of the tokens of
+     that definition, and then the bytes of each name that the
+     reading puts among them. The chain of a definition check is
+     counted as a definition is, though lowering never writes its
+     text.
+
+   Type instances and function instances share each count. A count
+   that would pass the budget ends the translation: the front end
+   makes no further reading, lowering writes no further text, and
+   `typec` writes no output. The application or call that needs the
+   instance is an error, reported at that application or call; in
+   lowering it is the one that first needs the instance whose text
+   would pass the budget. The message names the instance and the
+   budget, and that of the front end cites the application or call
+   that began the chain, as that of the nesting limit does.
+
+   The budget bounds what instances add to a unit. The unit's own
+   text is lowered where it stands, with a name for each application
+   or call in it, so it grows with the source and by no more than
+   its names hold. A name is bounded in turn: the encodings of the
+   arguments of one instance hold at most 4096 bytes together, so
+   the name of an instance is at most that and the name of its
+   generic. An application or call whose instance would have a
+   longer name is an error, reported there, and the message names
+   the argument and the bound. Without the bound a name doubles
+   with each line of
+   `typedef pair(p0, p0) p1; typedef pair(p1, p1) p2;`, and the
+   identifiers that `typec` hands the backend grow with it.
+
+   The budget and the bound on encodings are translation limits of
+   `typec` (C11 5.2.4.1) and no rules of the language, unlike the
+   nesting limit: what they bound is the reading and the text of
+   this compiler, the reading of its checks included, and a source
+   is valid Type-C whatever they count. Their refusals therefore
+   carry no code (13.6).
+
+   *Provisional (P30).* The budget is between four and five times
+   the text of a heavy unit of C++, which is the measure taken
+   because no Type-C unit of that weight exists. A C++20 unit that
+   uses the standard containers, regular expressions, futures,
+   ranges and the filesystem instantiates 4424 class templates and
+   2513 function templates (Apple Clang 21, `-ftime-trace`). The
+   instance of a structure of two members is about 300 bytes of
+   text, with its declaration, the typedef of its argument and its
+   line markers, and that of a function of 152 tokens, the mean of
+   the 82 functions of tomlc99 (their median is 72), about 900.
+   Both sizes are estimates, and they make that unit 3.6 MB. The
+   bound on encodings rests on no measurement of a Type-C program.
+
+   A source that is written to reach the budget costs what the
+   budget lets through, and the cost grows with the budget in
+   proportion. On sources whose instance text is about the budget,
+   `typec` takes 4 s and 450 MB for 16.6 MB that are 55292 small
+   structures, and 4 s and 120 MB for 15.1 MB that are 511
+   structures over a pointer 3900 levels deep. Text of that size
+   which is long tags, the names of a variant's constructors or
+   line markers takes under 0.5 s and 150 MB (one x86-64 host). A
+   unit that stays under the budget gives the backend at most the
+   budget of text for its instances. Half the budget of such text,
+   8.5 MB that are 65536 instances of a chain of functions in the
+   form that 10.3 gives them, takes Apple Clang 21 5 s at `-O0` and
+   33 s at `-O2` and GCC 16 23 s and 8 s, in 1.2 GB at most.
 8. *Provisional (P23).* The definition of a generic, type or function
    (section 7), is moved text: lowering writes it in each instance,
    where 10.3 places it, and the resolution property of 13.5 holds for
@@ -1905,8 +1964,12 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    is matched against a member. Every scalar in it has the value
    zero: each member of a structure, each element of an array and the
    first member of a union, to any depth. Every byte of it outside
-   those scalars is zero: the padding of each structure and the rest
-   of each union. The bytes inside a scalar that hold none of its
+   those scalars is zero: the padding of each structure, the bits of
+   each unnamed bit-field and the rest of each union. C leaves an
+   unnamed member indeterminate after any initialiser (6.7.9p9), so
+   the bits of an unnamed bit-field are zero by what both backends
+   do with the lowered form, which the test of 13.5 holds. The bytes
+   inside a scalar that hold none of its
    value are not promised (below). The two spellings mean the same.
    So these are valid and mean the same in every instance:
 
@@ -2006,8 +2069,12 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    - What applies the default argument promotions (C11 6.5.2.2p6), which
      convert the values of some types and not of others: passing a `Ti`
      value through `...` or to a function without a prototype, and
-     `va_arg` with the type `Ti`, which is undefined where the argument
-     is `short` or `float` (7.16.1.1p2). For the same reason a function
+     `va_arg` with the type `Ti`, qualified, atomic or neither,
+     however its type name writes that type (rule 6), which is
+     undefined where the argument is `short` or `float`
+     (7.16.1.1p2): `va_arg(ap, const T)` is an error as
+     `va_arg(ap, T)` is, and both backends report it in the instance
+     for `char`. For the same reason a function
      type with a parameter of type `Ti` is compatible with no function
      type without a prototype (6.7.6.3p15): `void (*old)() = take;` with
      `void take(T t)` is an error in the instances for `short` and
@@ -2075,8 +2142,23 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      Clang 21, GCC 16). The pointer to its first element is a
      `const char *` in every instance. So the name is valid where C
      converts the array to that pointer (6.3.2.1p3), and every other
-     use of it is an error: as the operand of `sizeof`, of
-     `__alignof__`, of unary `&` and of `__typeof__`. As the
+     use of it is an error. The one place where C converts an array
+     decides this for every form. An expression that hands the array
+     on as it is, in parentheses, as the chosen association of
+     `_Generic`, as the chosen operand of `__builtin_choose_expr` or
+     under `__extension__`, is the array still, so the refusal
+     follows the value through such forms, however they nest, to the
+     use that converts it or does not. `sizeof`, `__alignof__`,
+     unary `&`, `__typeof__` and `__typeof_unqual__` do not:
+     `sizeof (__func__)`, `sizeof _Generic(0, int: __func__)`,
+     `sizeof __builtin_choose_expr(1, __func__, 0)`,
+     `sizeof __extension__ __func__` and
+     `sizeof(__typeof_unqual__(__func__))` are each 2 in `f` and 5
+     in `f__i`, and each is an error. The value of a statement
+     expression, the right operand of a comma, the controlling
+     expression of `_Generic` and the initialiser of an
+     `__auto_type` object are converted, and each is a pointer in
+     both functions (Apple Clang 21, GCC 16). As the
      initialiser of an array of `char` C refuses it in every
      function, since it is no string literal (6.7.9p14 and p16; both
      backends). The pointer serves what the name is written for. It
@@ -2293,8 +2375,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    - Where the parameter list ends in an ellipsis, the last named
      parameter does not have the type `Ti`, qualified, atomic or
      neither, however the head writes that type: `T last`,
-     `const T last`, `_Atomic(T) last`, `__typeof__(T) last` and,
-     with `type same(T) = T;`, `same(T) last` are errors. `va_start`
+     `const T last`, `_Atomic(T) last`, `__typeof__(T) last`,
+     `__typeof__(first) last` after `T first` and, with
+     `type same(T) = T;`, `same(T) last` are errors. `va_start`
      names that parameter, and its behaviour is undefined where the
      type of the parameter is not compatible with the type that the
      default argument promotions give a value of it (C11
@@ -2309,7 +2392,8 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      a packed enumeration, Apple Clang 21 reports "passing an object
      that undergoes default argument promotion to 'va_start' has
      undefined behavior" for a last parameter of the type `T`,
-     `const T`, `volatile T` and `__typeof__(T)`, and nothing where
+     `const T`, `volatile T`, `__typeof__(T)` and `__typeof__` of an
+     earlier parameter of the type `T`, and nothing where
      `T` is `int`, `double` or a structure. GCC 16 reports none of
      these. For `_Atomic(T)` Clang is silent, and GCC warns for
      every `T` that the parameter is not the last named one; the
@@ -2320,8 +2404,11 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      promoted in one instance and not in another, so the refusal
      names the type and no list of types. A pointer is not promoted,
      `T *` included, and neither is a structure or a union that
-     holds a `Ti`. C adjusts a parameter of array or function type
-     to a pointer (6.7.6.3p7 and p8). A type application is a
+     holds a `Ti`. A last named parameter that is declared with an
+     array or a function type makes `va_start` undefined whatever
+     its element or return type is (7.16.1.4p4): in every instance
+     alike, as in C text, so it is no difference between instances
+     and this rule leaves it to C. A type application is a
      variant, which is a structure (10.1), the type that an alias
      stands for, or a distinct type, whose underlying type is a
      pointer or an arithmetic type that is the same in every
@@ -2427,10 +2514,10 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
 
 Because of rules 2 to 4, an instance of a checked generic function is
 valid C for every value type. Instantiation fails only where a chain of
-instances exceeds the nesting limit or the unit its instance budget
-(3.5 rule 7), where a declaration changes what the definition names
-(3.5 rule 8), or where 10.3 or rule 2 or 4 of 7.3 refuses the
-instance's placement. A declaration of a name that an instance would
+instances exceeds the nesting limit (3.5 rule 7), where a declaration
+changes what the definition names (3.5 rule 8), where 10.3 or rule 2
+or 4 of 7.3 refuses the instance's placement, or at a translation
+limit of `typec` (13.6). A declaration of a name that an instance would
 take is refused whether or not the instance is
 used (10.3). What a backend warns of in one instance and not in another
 is no part of this (rule 4).
@@ -2484,8 +2571,8 @@ convert, is weighed with P11.
    in that translation unit as a function with internal linkage, named
    and placed as 10.3 says. A generic function that is not used produces
    no code. Rule 7 of 3.5 bounds what a use causes: a chain of
-   instances by the nesting limit, and the instances of the unit by
-   its instance budget.
+   instances by the nesting limit, and the text of the instances of
+   the unit by its instance budget.
 2. The definition of a generic function precedes the first use of each
    of its instances, since the instance is defined there (10.3): generic
    functions are defined in headers. A declaration that is not a
@@ -3113,7 +3200,9 @@ type or function, meets 3.1 rule 6 (7.1 rule 1), so the first
 `__` of an instance name ends the name of its generic, and by the same
 rule no name that a variant or an alias derives is an instance name. The
 names `I_tag` and `I_C` that a variant instance `I` derives are none
-either: they follow its last encoding with `_`.
+either: they follow its last encoding with `_`. The encodings of the
+arguments of one instance hold at most 4096 bytes together, which is a
+translation limit of `typec` (3.5 rule 7).
 
 Every type application and every use of a generic function names an
 instance. An application of an alias generic is transparent as a type
@@ -4401,8 +4490,13 @@ that meaning in the dialects that `typec` accepts. Measured with GCC
 and in gnu17, every byte is zero after `{}` in a type that has no
 padding inside a scalar. The types were a union with a longer second
 member, a structure with padding between its members, a structure of
-one member with padding after it, a variant's structure, a `double`
-and a pointer. The places were an object, a `const` object, an array,
+one member with padding after it, a variant's structure, a `double`,
+a pointer and three structures with unnamed bit-fields: one of 32 bits
+between two members, one of 40 bits before a bit-field, and one of
+width zero with another of 24 bits after the last member. C leaves an
+unnamed member indeterminate after any initialiser (C11 6.7.9p9), so
+the bits of these are zero by what the two backends do and by no rule
+of C. The places were an object, a `const` object, an array,
 a structure that begins with the type, a subobject of a longer list, a
 static object, and a compound literal read as a value, through its
 address and as the initialiser of a subobject.
@@ -4411,10 +4505,10 @@ The padding that C23's rule zeroes is that of structures and unions.
 The bytes of a scalar that hold none of its value are no part of it,
 and the same measurement finds them left as the stack held them. On
 x86-64 a `long double` holds its value in the first 10 of its 16
-bytes, and `_Complex long double` in 20 of its 32. After `{}`, Apple
-Clang 21 leaves the other 6 and 12 at each of the three levels, and
-GCC 16.2 leaves 6 and 12 at `-O0` and 4 and 8 at `-O2` and `-O3`, in
-these places:
+bytes, and `_Complex long double` in 20 of its 32. After `{}`, in the
+harness of this measurement, Apple Clang 21 leaves the other 6 and 12
+at each of the three levels, and GCC 16.2 leaves 6 and 12 at `-O0` and
+4 and 8 at `-O2` and `-O3`, in these places:
 
 | Type | Apple Clang 21 | GCC 16.2 |
 | --- | --- | --- |
@@ -4468,13 +4562,22 @@ and the test asserts that format by `LDBL_MANT_DIG` and the size; on
 arm64, which is not measured, the type has no such bytes and every
 byte must be zero. The same test over `{0}` must find a byte that is
 not zero under GCC 15 and later, which shows that the test reads the
-bytes it claims to read. On x86-64 the test also reads the 6 bytes
-that it passes over, in an object of the type `long double` after the
-lowered form, and must find one that is not zero under both backends
-at each of the three levels. That holds the limit of 7.1 rule 3 to what the
-backends do and shows that the test reads the bytes of a
-`long double`. A backend that zeroes them fails this part, and the
-measurement above is then taken again for it. A
+bytes it claims to read. No test asks for a byte that is not zero
+among those that this one passes over. How many of them are left
+depends on the harness as well as on the backend: on what the
+function called before left on the stack, and on how the backend
+compiles the function that holds the object. The counts above are
+those of one harness. Another, which hands the address of the object
+to a function that is not inlined, finds 3, 4 and none of the 6 bytes
+left with GCC 16.2 at `-O0`, `-O2` and `-O3`, in a `long double`
+object, in a `const` one and in a compound literal read through its
+address, and all 6 with Apple Clang 21 at each level. The counts are
+therefore a record of one measurement and nothing that a test can
+hold: 7.1 rule 3 needs of them only that some arrangement leaves a
+byte, which is why it promises none. The record is taken with the
+functions of this test, which count and print the bytes that the test
+passes over and assert nothing of them, so that it can be taken again
+for another backend. A
 second test compiles the lowered form under `-pedantic-errors` in the
 four dialects, and the same text without `__extension__` must fail
 there. The repair for a backend that fails either test is a form of
@@ -6047,11 +6150,15 @@ structures of the packing probe that ends one (10.3), one of each.
   catalogue of diagnostics; a code is never renumbered or reused.
 - A refusal of C text that states no rule of this design carries no
   code: C11, the GCC manual or the backend's own diagnostic names what
-  is wrong. A translation limit of `typec` (C11 5.2.4.1), such as the
-  parser's bound on the nesting of brackets or the instance budget
-  (3.5 rule 7), is such a refusal. The limit on nested instantiation
-  is none: 3.5 rule 7 states it as a rule of Type-C, so it carries a
-  code. A limit of the GNU profile, a
+  is wrong. A translation limit of `typec` (C11 5.2.4.1) is such a
+  refusal: it bounds what this compiler reads or writes and says
+  nothing of whether the source is valid, and its message names it
+  as a limit of `typec`. The parser's bound on the nesting of
+  brackets is one, and 3.5 rule 7 states two: the instance budget,
+  in bytes of the text of a unit's instances, and the bound of 4096
+  bytes on the encodings of the arguments of one instance. The limit
+  on nested instantiation is none: 3.5 rule 7 states it as a rule of
+  Type-C, so it carries a code. A limit of the GNU profile, a
   construct
   outside the profile or one that needs what `typec` does not compute,
   is a refusal of the accepted dialect by this design rather than by C,
@@ -6093,8 +6200,8 @@ a crash.
 | A `match` handles every constructor | Every `match` | Nothing; an invalid tag traps |
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
-| A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit and a unit past its instance budget (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 or 4 refuses are compile errors | Nothing |
-| The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
+| A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3), a placement that 10.3 or 7.3 rule 2 or 4 refuses and a translation limit of `typec` (13.6) are compile errors | Nothing |
+| The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure, the bits of each unnamed bit-field and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect and zeroes an unnamed bit-field, which C leaves indeterminate (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
@@ -6147,7 +6254,7 @@ with the scripts that reproduce them (`make size-split`,
 | P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
 | P28 | The test of a slice is an expression at each use, a comma expression of ISO C over temporaries of the function, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it; how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its code; how many of them stand where C does not evaluate them; and how many tests hold a call or a statement expression in an operand after the first, with what volatile temporaries for those tests alone cost there, the form that the owner decided against (section 8 rule 10). A hand-written sample gives the same instructions at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 29% and 23% more code at `-O0` (13.5) | The expression stays, and its temporaries are not volatile |
 | P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
-| P30 | The instance budget of a translation unit is 4194304 tokens (3.5 rule 7) | Stage 3, package 3.6: the tokens that each unit of the container library and of the pilot counts for its instances. The budget is at least eight times the largest count | 4194304 |
+| P30 | The instance budget of a translation unit is 16777216 bytes of text, and the encodings of the arguments of one instance hold at most 4096 bytes (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances, in the front end and in lowering, and the longest encodings of one instance in them. The budget is at least four times the largest count and the bound at least four times the longest; a larger budget costs in proportion (3.5 rule 7) | 16777216 bytes and 4096 bytes |
 
 ## 16. Non-goals
 

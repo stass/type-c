@@ -1431,14 +1431,20 @@ types (design 13.3).
   a declaration in the first clause of a `for`, an object whose own
   type is atomic. This is a security item: left as `{0}`, an instance
   for a union holds stack bytes under GCC 15 and later. Tests, as 13.5
-  states them: the lowered form in each place and for each type leaves
-  zero, on the backend of each host, every byte that rule 3 promises,
-  which is each byte but those inside a `long double` that hold none
-  of its value; the same test over `{0}` finds a byte that is not zero
-  under GCC 16, and on x86-64 an object of the type `long double`
-  holds one in those 6 bytes after the lowered form, under both
-  backends; the lowered form compiles under `-pedantic-errors` in the
+  states them: the lowered form in each place and for each type, the
+  three structures with unnamed bit-fields among them, leaves zero,
+  on the backend of each host, every byte that rule 3 promises, which
+  is each byte but those inside a `long double` that hold none of its
+  value; the same test over `{0}` finds a byte that is not zero under
+  GCC 16; the lowered form compiles under `-pedantic-errors` in the
   four dialects, and the same text without `__extension__` does not.
+  No test asks for a byte that is not zero among those passed over,
+  since how many are left depends on the harness: the functions of
+  the test count and print them and assert nothing. Take that record
+  on both backends at the three levels and put its counts in 13.5 in
+  place of those there, whose harness this repository does not hold
+  (another harness finds 3, 4 and none with GCC 16.2 where 13.5 has
+  6, 4 and 4).
 - [Medium] `Expressions.gives_dependence` lists the constructs that
   give dependence on a type parameter, where design 7.1 rule 4 wants it
   from the one place that gives a layout; the list refuses valid
@@ -1464,8 +1470,10 @@ types (design 13.3).
   `va_start` on that parameter is undefined in the instance for
   `char`, which a call deduces. Pairs: `generic(T) int f(T last,
   ...);` is refused, as it is with `const T last`, `_Atomic(T)
-  last`, `__typeof__(T) last` and, with `type same(T) = T;`,
-  `same(T) last`; `T *last`, `T last[4]`, `vector(T) last`,
+  last`, `__typeof__(T) last`, `T first, __typeof__(first) last`
+  and, with `type same(T) = T;`, `same(T) last`;
+  `T first, __typeof__(&first) last`, `T *last`, `T last[4]`,
+  `vector(T) last`,
   `T first, int count, ...` and `void (*log)(T last, ...), ...`
   stand, as does `int f(char last, ...)` without `generic`. The
   reason is tested on the backend: C text of the instance for
@@ -1473,11 +1481,45 @@ types (design 13.3).
   body, draws `-Wvarargs` from Apple Clang, and the same text with
   `int count` before the ellipsis draws nothing.
 - [High] The instance budget (design 3.5 rule 7), a security item: a
-  source of a few lines must not make `typec` read without bound.
-  - `Declarations.max_instance_tokens` is 524288, a value taken for
-    type instances alone. The design gives 4194304 for types and
-    functions together (P30); change the value and the comment that
-    argues for it.
+  source of a few lines must not make `typec` read or write without
+  bound. `Declarations.max_instance_tokens` counts 524288 tokens of
+  the definitions read, and the cost of a reading grows with its
+  arguments as well: each name in an instance holds their encodings,
+  up to `Encoding.max_length` bytes, and each line marker the name
+  of the file. Today's `typec` on one x86-64 host, each source
+  under the count of tokens:
+  - `type a0(T) = T *;`, `type aN(T) = aM(aM(T));` up to `a12` and
+    `a12(int) x;`, 14 lines: 11.8 s and 146 MB, then refused by the
+    bound on encodings and not by the budget.
+  - `a0` to `a11` so and `struct sK { int i; }; a11(struct sK) xK;`
+    for 48 structures: 19 s and 708 MB before the budget refuses.
+  - A structure with a tag of 4000 bytes, `type g0(T) = struct
+    { T f0; ... T f19; };`, `type gN(T) = struct { gM(T *) a;
+    gM(const T *) b; };` up to `g10` and one `g10` of the
+    structure, 13 lines: accepted, 145 MB of C in 2.1 s and 1 GB.
+  - The tree up to `g8` over `type g0(T) = struct { v(T) a; };`
+    with `type v(T) = | C0 | ... | C199 | D(T *p);` and a tag of
+    3900 bytes, 12 lines: accepted, 226 MB in 5.5 s and 1.9 GB. `v`
+    uses `T` once: the names of its constructors carry the tag.
+  - `#line 1 "n...n"` with a name of 100000 bytes before the
+    aliases up to `a9` and `a9(int) x;`: accepted, 157 MB and
+    1.2 GB, in the line markers of 1023 instances.
+
+  The design counts bytes of text in two places and holds each to
+  16777216:
+  - The front end. `in_instance` counts the bytes of the tokens of
+    the definition, in place of their number, before the reading,
+    and `note_name` the bytes of each name, also where
+    `moved.written` is false, so that the chain of a definition
+    check counts as a definition does. The constant and the comment
+    that argues for it become the design's.
+  - Lowering. The texts that design 10.3 places (`Lowering`,
+    "Instances") pass through one function that counts their bytes,
+    line markers included, and refuses past the budget.
+    `Lowering.edits` returns the refusal, and `Front_end` reports
+    it as it reports one of `Declarations`. The count stands where
+    the text is made and asks nothing of what kind of text it is,
+    so that no construct is listed.
   - `fail_instances` names the instance and not the application or
     call that began the chain, as `fail_nesting` does and the design
     asks: `type g0(T) = struct { T v; };`, then `type gN(T) = struct
@@ -1487,22 +1529,79 @@ types (design 13.3).
     instance counts on the same count, through the one function that
     counts a type's (`in_instance`), so that no reading goes
     uncounted.
+  - Tests, each refusal with a partner that compiles. A source that
+    must be refused is read under a time bound (`Timing`), since
+    without its count it does not end in the time a test waits:
+    - The aliases up to `a12`, and the 48 structures over `a11`, are
+      refused with the message of the budget; the aliases up to
+      `a9` compile. With the names left out of the front end's
+      count, the first is refused by the bound on encodings
+      instead, which shows that the test meets the count of names.
+    - The tree up to `g10` over the tag of 4000 bytes is refused;
+      the tree up to `g6` compiles (9.3 MB).
+    - The variant of 200 constructors under the tree up to `g8`,
+      and the file name of 100000 bytes, are refused by lowering:
+      the front end's count passes both (by estimate, 7 MB and
+      3 MB; confirm it). Partners: the variant under the tree up to
+      `g4` (14 MB) and a file name of 1000 bytes compile. With
+      lowering's count left out, both refusals are missing.
+    - A byte bound on what is accepted: for each partner, the
+      output less the unit's own text is at most the budget.
+    - `doubling_instances` in `test_declarations.ml` runs to the
+      budget; see what the count in bytes costs it.
   - Regression for package 3.3, the shallow branching chain: the
     generic functions `g0` to `g24`, each `generic(T) void gN(T *p)
     { const T *q = p; gM(&p); gM(&q); }` and the last with an empty
     body, and one use `g0(&x)`. No chain holds more than 25
     instances, so the nesting limit does not refuse it. It is
-    refused with the message of the budget, which names an instance
-    and cites the use, within a time bound, and no lowered text is
-    written. Partner: the chain of 10 functions compiles and runs,
-    and the lowered text holds its 1023 instances. With the count
-    of function instances left out, the chain of 25 does not end
-    within the bound, which is what shows that the test meets the
-    count. `doubling_instances` in `test_declarations.ml` is the
-    same chain over generic types; it runs to the budget, so see
-    what the larger value costs it.
-  - Package 3.6 measures the tokens that each unit of the container
-    library and of the pilot counts (P30).
+    refused with the message of the budget, within a time bound,
+    and no lowered text is written. The place is not the use. A
+    definition check follows its chain and counts (design 3.5 rule
+    7), the checks run in the order of the definitions, and one of
+    them passes the budget before the use is read: the checks of
+    such a chain read about twice what its one use does. So the
+    error stands at a call in the definition of some `gM`, the call
+    that needs the reading which would pass the budget, and cites
+    the call that began the chain, in the definition under check.
+    The test asserts that both stand in definitions and not which
+    `gM`, which the sizes of the texts decide. Partner: the chain
+    of 10 functions compiles and runs, and the lowered text holds
+    its 1023 instances. A second refusal has its place at a use:
+    the chain of 10, used with as many argument types as pass the
+    budget, is refused at a call in an instance, and the message
+    cites the use that began the chain. With the count of function
+    instances left out, the chain of 25 does not end within the
+    bound, which is what shows that the test meets the count.
+  - Package 3.6 measures the bytes that each unit of the container
+    library and of the pilot counts, in the front end and in
+    lowering, and its longest encodings (P30).
+- [Medium] The unit's own text grows with its names, which the
+  instance budget does not count (design 3.5 rule 7): 5000 lines of
+  `g(b) *pN;`, with `b` a typedef of a structure whose tag has 4000
+  bytes, are 72 KB of source and 20 MB of lowered C, a name of 4000
+  bytes for each application. The growth is linear in the source,
+  by at most `Encoding.max_length` bytes for an application. Decide
+  whether that factor stands or the bound on encodings should be
+  lower; package 3.6 measures the longest encodings of the library
+  and the pilot (P30).
+- [Medium] Function names in a generic function (design 7.1 rule
+  3): the refusal follows the array through the forms that hand it
+  on as it is. Pairs for `test/golden/generic_functions.t`, each
+  refused with TC0075 in a generic body: `sizeof (__func__)`,
+  `sizeof _Generic(0, int: __func__)`,
+  `sizeof __builtin_choose_expr(1, __func__, 0)` and
+  `sizeof __extension__ __func__`, which `typec` refuses and no test
+  holds, and `sizeof(__typeof_unqual__(__func__))`, which it refuses
+  for another reason: the front end does not read
+  `__typeof_unqual__` in source text and reports an undeclared
+  name. Decide whether the profile reads that specifier (design 13.3
+  names `typeof` alone); if it does, the refusal is TC0075. Partners
+  that stand, where C converts the array: `puts((__func__))`,
+  `puts(_Generic(0, int: __func__))`, `puts(__extension__ __func__)`,
+  `sizeof(({ __func__; }))`, `sizeof(0, __func__)` and
+  `_Generic(__func__, const char *: 1, default: 2)`. The reason is
+  tested on the backend: C text of each refused form gives 2 in `f`
+  and 5 in `f__i` under both.
 - [Medium] `Ctype.compatible` answers `Depends_on` for two unknown leaf
   types of one spelling (`_Float16`, `_Complex int`), so
   `pointers_differ` refuses `void (*q)(T, _Float16) = p;` where `p` has
