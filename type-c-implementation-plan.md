@@ -302,6 +302,20 @@ a generic function is lowered in an instance of package 3.3.
 | 3.11 | `try` inside expressions (design 5.1 rule 3, 13.5), after packages 3.3 and 3.4: `try` as a unary operator; one function of the typed tree from a `try` to its holder and the operators between them, which gives every refusal of place, `try-list` among them; one function from a holder to its prelude and its edits, in the order of 5.1, which ends the form of a `try` that is an initialiser of a braced list with the conversion of its value, from the type that typing gives the initialiser's object; the hoisted operands passed through the one check of the resolution property (package 2.1) and the pragma stretch, and through one walk of their own for `try-lifetime`: a compound literal in an operand under a condition, and an array that is no lvalue in any; `try-lvalue` and `try-loop`, and `try-void` by the discarded positions of design 5.2. A negative golden test for each refusal, and the tests of package 2.4 that refuse a `try` for its place take the places that stay refused. Before a `try` in a generic function is lowered so, the TODO item on `Moved` edits in the definition of a generic is closed. In the README, the first example and Status say that `try` inside an expression is built. |
 | 3.12 | Measurements of `try` inside expressions, from a script under `tools/measure`: the preludes of the container library, the pilot and the README against the same code with each `try` in a declaration of its own, size and speed, on both backends at `-O0` and at `-O2`, and the holders that hold a side effect before a `try` which C leaves unsequenced with it (P33); the refusals of `try-loop` and what each loop became (P34); the refusals of `try-list` and what each refused initialiser holds beside its `try` (P35); the refusals of `try-pragma` (P8). |
 
+
+**Measurements of 3.6.** The raw data and the numbers are in the data
+repository, at `/Volumes/Optaine/type-c-corpus/measure/3.6/2026-11-17-darwin-x86_64/`
+(its README, commit DATA_COMMIT), from Type-C commits `26e07f6dfb08` and
+`3b9eee224275`. No unit of the library or of Pilot B is refused by
+`instance-pragma` or `slice-check-place`; no index or `slice_sub` of
+either stands where C does not evaluate it; the library holds 15 tested
+indexes, 2 `slice_sub`s and 2 conversions over its six units, the pilot
+no slice; no test holds a call or a statement expression in an operand
+after the first, so volatile temporaries for those alone cost nothing.
+The long double record of the zero initialiser is not taken:
+`test/run/zero_initialisers.t` is not on master. The record of design
+section 8 rule 10 is `resume.csv` there.
+
 **Exit gate**
 
 1. The library compiles in separate translation units and runs with
