@@ -12,7 +12,7 @@ differently, and each runs a check that compares the two.
 
 | Example | What it shows |
 |---|---|
-| [`cut`](cut/) | FreeBSD's `cut(1)`, ported: lists read as `str` slices, errors as `result` and `try`, a `defer` for the line buffer, and the option flags as a variant that `match` takes apart. Its check runs both programs over the same command lines. |
+| [`cut`](cut/) | FreeBSD's `cut(1)`, ported with the original's functions, names and layout kept, so its diff is what Type-C changes: the column table and the lines become slices, which removes an upstream buffer overrun, and a `defer` frees the line buffer. Its check runs both programs over the same command lines. |
 
 ## Building one
 

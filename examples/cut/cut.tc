@@ -7,8 +7,6 @@
  *
  * This code is derived from software contributed to Berkeley by
  * Adam S. Moskowitz of Menlo Consulting and Marciano Pitargue.
- * It is a port to Type-C of FreeBSD's usr.bin/cut/cut.c, which
- * original/cut.c holds unchanged.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,662 +38,451 @@
 #include <errno.h>
 #include <limits.h>
 #include <locale.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <wchar.h>
 
-/*
- * The columns or fields that the lists of -b, -c and -f select. It is
- * kept as upstream keeps it, so that every list selects what it selects
- * there, odd lists such as "5-3-" included.
- */
-type selection = struct {
-	slice(bool)	marked;		/* marked[n]: column n; [0] unused */
-	size_t		last;		/* marked decides columns 1 to last */
-	size_t		open_from;	/* the least stop of an open item */
-	size_t		open_to;	/* the greatest N of a "-N", or 0 */
-};
+static int	bflag;
+static int	cflag;
+static wchar_t	dchar;
+static char	dcharmb[MB_LEN_MAX + 1];
+static int	dflag;
+static int	fflag;
+static int	nflag;
+static int	sflag;
+static int	wflag;
 
-/*
- * An open item ends in "-", as "N-" and "N-M-". open_from is 0 without
- * one; with one, every column past last is selected. marked always
- * holds column last, as raise_last grows it and nothing else raises
- * last.
- */
+static size_t	autostart, autostop, maxval;
+static slice(char) positions;
 
-/* What separates fields: one character (-d, a tab by default) or blanks. */
-type delimiter =
-    | Char(wchar_t code, str text)
-    | Blanks;					/* -w */
-
-/* How a line is cut. In a single-byte locale a character is a byte. */
-type mode =
-    | Bytes					/* -b */
-    | Chars					/* -c */
-    | WholeChars				/* -b -n */
-    | Fields(delimiter d, bool only_delimited);	/* -f, -s */
-
-type command = struct {
-	mode		how;
-	selection	what;
-};
-
-/* The errors of the command line, each of which ends the program. */
-type usage_error = | IllegalList | ZeroInList | BadDelimiter | Usage;
-
-/* The errors that end the reading of one input. */
-type input_error = | IllegalSequence | ReadFailed(int code);
-
-/* A line of input without its newline, and whether it had one. */
-type line = struct {
-	str	text;
-	bool	terminated;
-};
-
-/* A character of a line: its code and the bytes it takes. */
-type character = struct {
-	wchar_t	code;
-	size_t	len;
-};
-
-/* A field of a line, and the text after its delimiter if it has one. */
-type split = | Last(str field) | Before(str field, str rest);
-
-/* The options as given; choose_mode checks them against each other. */
-struct options {
-	selection		what;
-	bool			bytes;		/* -b */
-	bool			chars;		/* -c */
-	bool			fields;		/* -f */
-	bool			no_split;	/* -n */
-	bool			only_delimited;	/* -s */
-	bool			blanks;		/* -w */
-	option(delimiter)	delim;		/* -d */
-};
-
-static str
-str_of(const char *s)
-{
-	return (slice_unchecked(s, strlen(s)));
-}
-
-static str
-drop(str s, size_t n)
-{
-	return (slice_sub(s, n, s.len));
-}
-
-static bool
-starts_with(str s, char c)
-{
-	return (s.len > 0 && s[0] == c);
-}
-
-static bool
-starts_with_digit(str s)
-{
-	return (s.len > 0 && isdigit((unsigned char)s[0]));
-}
-
-static void
-put(str s)
-{
-	(void)fwrite(s.data, 1, s.len, stdout);
-}
-
-static bool
-selected(const selection *s, size_t column)
-{
-	if (column <= s->last)
-		return (s->marked[column]);
-	return (s->open_from != 0);
-}
-
-/* Raises last to column, growing marked to hold it, unmarked. */
-static void
-raise_last(selection *s, size_t column)
-{
-	size_t had = s->marked.len, need = column + 1;
-	bool *marks;
-
-	s->last = column;
-	if (need <= had)
-		return;
-	marks = realloc(s->marked.data, need * sizeof(bool));
-	if (marks == NULL)
-		err(1, "realloc");
-	memset(marks + had, 0, (need - had) * sizeof(bool));
-	s->marked = slice_unchecked(marks, need);
-}
-
-/*
- * Reads the number at the front of *text. A number past LONG_MAX reads
- * as LONG_MAX, as upstream's strtol has it, so that the marks for it
- * fail to allocate there and here alike, and column + 1 cannot wrap.
- */
-static size_t
-read_number(str *text)
-{
-	str t = *text;
-	size_t n = 0;
-	size_t digit;
-
-	while (starts_with_digit(t)) {
-		digit = (size_t)(t[0] - '0');
-		if (n > ((size_t)LONG_MAX - digit) / 10)
-			n = LONG_MAX;
-		else
-			n = n * 10 + digit;
-		t = drop(t, 1);
-	}
-	*text = t;
-	return (n);
-}
-
-/*
- * Adds one item of a list: N, N-M, -M or N-. As upstream, it takes
- * "-3-5" too, and an item whose range is reversed, as 5-3, selects no
- * column.
- */
-static result(void, usage_error)
-add_item(selection *s, str item)
-{
-	size_t start = 0, stop = 0;
-	bool from_first = false;
-
-	if (starts_with(item, '-')) {
-		item = drop(item, 1);
-		from_first = true;
-	}
-	if (starts_with_digit(item)) {
-		start = stop = read_number(&item);
-		if (from_first && start > s->open_to)
-			s->open_to = start;
-	}
-	if (starts_with(item, '-')) {
-		if (starts_with_digit(drop(item, 1))) {
-			item = drop(item, 1);
-			stop = read_number(&item);
-		}
-		if (starts_with(item, '-')) {
-			item = drop(item, 1);
-			if (s->open_from == 0 || s->open_from > stop)
-				s->open_from = stop;
-		}
-	}
-	if (item.len > 0)
-		return (Err(IllegalList));
-	if (start == 0 || stop == 0)
-		return (Err(ZeroInList));
-	if (stop > s->last)
-		raise_last(s, stop);
-	for (size_t column = start; column <= stop; column++)
-		s->marked[column] = true;
-	return (Ok);
-}
-
-static bool
-is_list_separator(char c)
-{
-	return (c == ',' || c == ' ' || c == '\t');
-}
-
-/*
- * Adds the list of a -b, -c or -f, whose items commas or blanks
- * separate. An empty item is an error, as upstream's strsep makes it.
- */
-static result(void, usage_error)
-add_list(selection *s, str list)
-{
-	size_t n;
-
-	for (;;) {
-		for (n = 0; n < list.len && !is_list_separator(list[n]); n++)
-			continue;
-		try add_item(s, slice_sub(list, 0, n));
-		if (n == list.len)
-			break;
-		list = drop(list, n + 1);
-	}
-	/* Past an "N-", every column is selected, so no mark decides one. */
-	if (s->open_from != 0 && s->last > s->open_from)
-		s->last = s->open_from;
-	/* A "-N" selects columns 1 to N. */
-	if (s->last < s->open_to)
-		raise_last(s, s->open_to);
-	for (size_t column = 1; column <= s->open_to; column++)
-		s->marked[column] = true;
-	return (Ok);
-}
-
-/* The delimiter of -d: one character, which is not NUL. */
-static result(delimiter, usage_error)
-parse_delimiter(const char *arg)
-{
-	str text = str_of(arg);
-	wchar_t code = L'\0';
-
-	if (mbrtowc(&code, text.data, text.len, NULL) != text.len ||
-	    code == L'\0')
-		return (Err(BadDelimiter));
-	return (Ok(Char(code, text)));
-}
-
-static result(delimiter, usage_error)
-field_delimiter(const struct options *o)
-{
-	if (o->blanks) {
-		if (case Some(_) = o->delim)
-			return (Err(Usage));
-		return (Ok(Blanks));
-	}
-	if (case Some(delimiter d) = o->delim)
-		return (Ok(d));
-	return (Ok(Char(L'\t', "\t")));
-}
-
-/* Checks the options against each other, as upstream's main does. */
-static result(mode, usage_error)
-choose_mode(const struct options *o)
-{
-	if (o->fields) {
-		if (o->bytes || o->chars || o->no_split)
-			return (Err(Usage));
-		return (Ok(Fields(try field_delimiter(o), o->only_delimited)));
-	}
-	if (!(o->bytes || o->chars) || o->only_delimited || o->blanks)
-		return (Err(Usage));
-	if (case Some(_) = o->delim)
-		return (Err(Usage));
-	if (o->no_split && !o->bytes)
-		return (Err(Usage));
-	if (MB_CUR_MAX == 1)
-		return (Ok(Bytes));
-	if (o->chars)
-		return (Ok(Chars));
-	if (o->no_split)
-		return (Ok(WholeChars));
-	return (Ok(Bytes));
-}
-
-static result(command, usage_error)
-parse_command(int argc, char *argv[])
-{
-	struct options o = { .delim = None };
-	command c;
-	int ch;
-
-	while ((ch = getopt(argc, argv, "b:c:d:f:snw")) != -1) {
-		switch (ch) {
-		case 'b':
-			try add_list(&o.what, str_of(optarg));
-			o.bytes = true;
-			break;
-		case 'c':
-			try add_list(&o.what, str_of(optarg));
-			o.chars = true;
-			break;
-		case 'd':
-			o.delim = Some(try parse_delimiter(optarg));
-			break;
-		case 'f':
-			try add_list(&o.what, str_of(optarg));
-			o.fields = true;
-			break;
-		case 's':
-			o.only_delimited = true;
-			break;
-		case 'n':
-			o.no_split = true;
-			break;
-		case 'w':
-			o.blanks = true;
-			break;
-		default:
-			return (Err(Usage));
-		}
-	}
-	c.how = try choose_mode(&o);
-	c.what = o.what;
-	return (Ok(c));
-}
-
-/* The character at the front of text; a NUL byte is one, as upstream has it. */
-static result(character, input_error)
-next_char(str text)
-{
-	mbstate_t state;
-	wchar_t code = L'\0';
-	size_t len;
-
-	memset(&state, 0, sizeof(state));
-	len = mbrtowc(&code, text.data, text.len, &state);
-	if (len == (size_t)-1 || len == (size_t)-2)
-		return (Err(IllegalSequence));
-	if (len == 0)
-		len = 1;
-	return (Ok((character){ code, len }));
-}
-
-/*
- * Ends a line cut by columns. As upstream, a last line that has no
- * newline gets one only where it reaches the last column of the list.
- */
-static void
-end_columns(line l, const selection *s, size_t columns)
-{
-	if (l.terminated || columns >= s->last)
-		(void)putchar('\n');
-}
-
-static void
-cut_bytes(line l, const selection *s)
-{
-	for (size_t i = 0; i < l.text.len; i++)
-		if (selected(s, i + 1))
-			(void)putchar(l.text[i]);
-	end_columns(l, s, l.text.len);
-}
-
-/*
- * As upstream, an invalid character past the last column of the list
- * ends the line before it fails the input.
- */
-static result(void, input_error)
-cut_chars(line l, const selection *s)
-{
-	str rest = l.text;
-	size_t column = 0;
-
-	while (rest.len > 0) {
-		match (next_char(rest)) {
-		case Ok(ch):
-			column++;
-			if (selected(s, column))
-				put(slice_sub(rest, 0, ch.len));
-			rest = drop(rest, ch.len);
-			break;
-		case Err(input_error e):
-			if (column >= s->last)
-				(void)putchar('\n');
-			return (Err(e));
-		}
-	}
-	end_columns(l, s, column);
-	return (Ok);
-}
-
-/*
- * Whether -n keeps the character of len bytes from byte column first.
- * cut(1) keeps one when a byte of it is selected and, after a prefix of
- * unselected bytes, the rest of its bytes are.
- */
-static bool
-keeps_whole(const selection *s, size_t first, size_t len)
-{
-	size_t column = first, end = first + len;
-
-	while (column < end && !selected(s, column))
-		column++;
-	if (column == end)
-		return (false);
-	while (column < end && selected(s, column))
-		column++;
-	return (column == end);
-}
-
-static result(void, input_error)
-cut_whole_chars(line l, const selection *s)
-{
-	str rest = l.text;
-	size_t column = 1;
-	character ch;
-
-	while (rest.len > 0) {
-		ch = try next_char(rest);
-		if (keeps_whole(s, column, ch.len))
-			put(slice_sub(rest, 0, ch.len));
-		column += ch.len;
-		rest = drop(rest, ch.len);
-	}
-	if (l.terminated)
-		(void)putchar('\n');
-	return (Ok);
-}
-
-static bool
-is_delimiter(delimiter d, wchar_t code)
-{
-	match (d) {
-	case Char(want, _):
-		return (code == want);
-	case Blanks:
-		return (code == L' ' || code == L'\t');
-	}
-}
-
-/* What the output puts between fields: -w puts a tab. */
-static str
-output_delimiter(delimiter d)
-{
-	match (d) {
-	case Char(_, text):
-		return (text);
-	case Blanks:
-		return ("\t");
-	}
-}
-
-/*
- * Whether text holds a delimiter. As upstream, it reads every character,
- * so that an invalid one fails the line, and a newline delimiter is in
- * every line.
- */
-static result(bool, input_error)
-has_delimiter(str text, delimiter d)
-{
-	bool found = is_delimiter(d, L'\n');
-	character ch;
-
-	while (text.len > 0) {
-		ch = try next_char(text);
-		if (is_delimiter(d, ch.code))
-			found = true;
-		text = drop(text, ch.len);
-	}
-	return (Ok(found));
-}
-
-static str
-skip_blanks(str text)
-{
-	while (starts_with(text, ' ') || starts_with(text, '\t'))
-		text = drop(text, 1);
-	return (text);
-}
-
-/* Splits the first field off text; -w reads a run of blanks as one. */
-static result(split, input_error)
-split_field(str text, delimiter d)
-{
-	size_t at = 0;
-	character ch;
-	str rest;
-
-	while (at < text.len) {
-		ch = try next_char(drop(text, at));
-		if (is_delimiter(d, ch.code)) {
-			rest = drop(text, at + ch.len);
-			if (case Blanks = d)
-				rest = skip_blanks(rest);
-			return (Ok(Before(slice_sub(text, 0, at), rest)));
-		}
-		at += ch.len;
-	}
-	return (Ok(Last(text)));
-}
-
-/*
- * Prints the selected fields of l. Past the last column of the list, an
- * "N-" prints the rest of the line as it stands, delimiters and all.
- */
-static result(void, input_error)
-cut_fields(line l, const selection *s, delimiter d, bool only_delimited)
-{
-	str rest = l.text;
-	bool printed = false;
-	bool wanted;
-
-	if (!try has_delimiter(l.text, d)) {
-		if (!only_delimited) {
-			put(l.text);
-			if (l.terminated)
-				(void)putchar('\n');
-		}
-		return (Ok);
-	}
-	for (size_t field = 1; field <= s->last; field++) {
-		wanted = s->marked[field];
-		if (wanted && printed)
-			put(output_delimiter(d));
-		printed = printed || wanted;
-		match (try split_field(rest, d)) {
-		case Last(text):
-			if (wanted)
-				put(text);
-			(void)putchar('\n');
-			return (Ok);
-		case Before(text, after):
-			if (wanted)
-				put(text);
-			rest = after;
-			break;
-		}
-	}
-	if (s->open_from != 0) {
-		if (printed)
-			put(output_delimiter(d));
-		put(rest);
-	}
-	(void)putchar('\n');
-	return (Ok);
-}
-
-static line
-split_line(str text)
-{
-	if (text.len > 0 && text[text.len - 1] == '\n')
-		return ((line){ slice_sub(text, 0, text.len - 1), true });
-	return ((line){ text, false });
-}
-
-static result(void, input_error)
-cut_line(line l, const command *c)
-{
-	match (c->how) {
-	case Bytes:
-		cut_bytes(l, &c->what);
-		return (Ok);
-	case Chars:
-		return (cut_chars(l, &c->what));
-	case WholeChars:
-		return (cut_whole_chars(l, &c->what));
-	case Fields(delimiter d, only_delimited):
-		return (cut_fields(l, &c->what, d, only_delimited));
-	}
-}
-
-static result(void, input_error)
-cut_file(FILE *fp, const command *c)
-{
-	char *buf = NULL;
-	size_t size = 0;
-	ssize_t n;
-
-	defer free(buf);
-	while ((n = getline(&buf, &size, fp)) >= 0)
-		try cut_line(split_line(slice_unchecked(buf, (size_t)n)), c);
-	if (ferror(fp))
-		return (Err(ReadFailed(errno)));
-	return (Ok);
-}
-
-/* Warns of the error of an input; returns the exit status it gives. */
-static int
-report(const char *name, result(void, input_error) r)
-{
-	match (r) {
-	case Ok:
-		return (0);
-	case Err(IllegalSequence):
-		warnx("%s: %s", name, strerror(EILSEQ));
-		return (1);
-	case Err(ReadFailed(code)):
-		warnx("%s: %s", name, strerror(code));
-		return (1);
-	}
-}
-
-/*
- * Cuts one operand, "-" for the standard input. As upstream, an error
- * in a named file is reported but leaves the exit status alone.
- */
-static int
-cut_path(const char *path, const command *c)
-{
-	FILE *fp;
-
-	if (strcmp(path, "-") == 0)
-		return (report("stdin", cut_file(stdin, c)));
-	fp = fopen(path, "r");
-	if (fp == NULL) {
-		warn("%s", path);
-		return (1);
-	}
-	defer fclose(fp);
-	(void)report(path, cut_file(fp, c));
-	return (0);
-}
-
-static _Noreturn void
-fail(usage_error e)
-{
-	match (e) {
-	case IllegalList:
-		errx(1, "[-bcf] list: illegal list value");
-	case ZeroInList:
-		errx(1, "[-bcf] list: values may not include zero");
-	case BadDelimiter:
-		errx(1, "bad delimiter");
-	case Usage:
-		(void)fprintf(stderr, "%s\n%s\n%s\n",
-		    "usage: cut -b list [-n] [file ...]",
-		    "       cut -c list [file ...]",
-		    "       cut -f list [-s] [-w | -d delim] [file ...]");
-		exit(1);
-	}
-}
+static int	b_cut(FILE *, const char *);
+static int	b_n_cut(FILE *, const char *);
+static int	c_cut(FILE *, const char *);
+static int	f_cut(FILE *, const char *);
+static void	get_list(char *);
+static int	is_delim(wchar_t);
+static void	needpos(size_t);
+static void	usage(void);
 
 int
 main(int argc, char *argv[])
 {
-	command c;
-	int status = 0;
+	FILE *fp;
+	int (*fcn)(FILE *, const char *);
+	int ch, rval;
+	size_t n;
 
 	setlocale(LC_ALL, "");
-	match (parse_command(argc, argv)) {
-	case Ok(parsed):
-		c = parsed;
-		break;
-	case Err(usage_error e):
-		fail(e);
+
+	fcn = NULL;
+	dchar = '\t';			/* default delimiter is \t */
+	strcpy(dcharmb, "\t");
+
+	while ((ch = getopt(argc, argv, "b:c:d:f:snw")) != -1)
+		switch(ch) {
+		case 'b':
+			get_list(optarg);
+			bflag = 1;
+			break;
+		case 'c':
+			get_list(optarg);
+			cflag = 1;
+			break;
+		case 'd':
+			n = mbrtowc(&dchar, optarg, MB_LEN_MAX, NULL);
+			if (dchar == '\0' || n != strlen(optarg))
+				errx(1, "bad delimiter");
+			strcpy(dcharmb, optarg);
+			dflag = 1;
+			break;
+		case 'f':
+			get_list(optarg);
+			fflag = 1;
+			break;
+		case 's':
+			sflag = 1;
+			break;
+		case 'n':
+			nflag = 1;
+			break;
+		case 'w':
+			wflag = 1;
+			break;
+		case '?':
+		default:
+			usage();
+		}
+	argc -= optind;
+	argv += optind;
+
+	if (fflag) {
+		if (bflag || cflag || nflag || (wflag && dflag))
+			usage();
+	} else if (!(bflag || cflag) || dflag || sflag || wflag)
+		usage();
+	else if (!bflag && nflag)
+		usage();
+
+	if (fflag)
+		fcn = f_cut;
+	else if (cflag)
+		fcn = MB_CUR_MAX > 1 ? c_cut : b_cut;
+	else if (bflag)
+		fcn = nflag && MB_CUR_MAX > 1 ? b_n_cut : b_cut;
+
+	rval = 0;
+	if (*argv)
+		for (; *argv; ++argv) {
+			if (strcmp(*argv, "-") == 0)
+				rval |= fcn(stdin, "stdin");
+			else {
+				if (!(fp = fopen(*argv, "r"))) {
+					warn("%s", *argv);
+					rval = 1;
+					continue;
+				}
+				fcn(fp, *argv);
+				(void)fclose(fp);
+			}
+		}
+	else
+		rval = fcn(stdin, "stdin");
+	exit(rval);
+}
+
+static void
+get_list(char *list)
+{
+	size_t setautostart, start, stop;
+	size_t pos;
+	char *p;
+
+	/*
+	 * set a byte in the positions array to indicate if a field or
+	 * column is to be selected; use +1, it's 1-based, not 0-based.
+	 * Numbers and number ranges may be overlapping, repeated, and in
+	 * any order. We handle "-3-5" although there's no real reason to.
+	 */
+	for (; (p = strsep(&list, ", \t")) != NULL;) {
+		setautostart = start = stop = 0;
+		if (*p == '-') {
+			++p;
+			setautostart = 1;
+		}
+		if (isdigit((unsigned char)*p)) {
+			start = stop = strtol(p, &p, 10);
+			if (setautostart && start > autostart)
+				autostart = start;
+		}
+		if (*p == '-') {
+			if (isdigit((unsigned char)p[1]))
+				stop = strtol(p + 1, &p, 10);
+			if (*p == '-') {
+				++p;
+				if (!autostop || autostop > stop)
+					autostop = stop;
+			}
+		}
+		if (*p)
+			errx(1, "[-bcf] list: illegal list value");
+		if (!stop || !start)
+			errx(1, "[-bcf] list: values may not include zero");
+		if (maxval < stop) {
+			maxval = stop;
+			needpos(maxval + 1);
+		}
+		for (pos = start; start++ <= stop; positions[pos++] = 1);
 	}
-	if (optind == argc)
-		return (cut_path("-", &c));
-	for (int i = optind; i < argc; i++)
-		status |= cut_path(argv[i], &c);
-	return (status);
+
+	/* overlapping ranges */
+	if (autostop && maxval > autostop) {
+		maxval = autostop;
+		needpos(maxval + 1);
+	}
+
+	/* reversed range with autostart */
+	if (maxval < autostart) {
+		maxval = autostart;
+		needpos(maxval + 1);
+	}
+
+	/* set autostart */
+	if (autostart)
+		memset(slice_sub(positions, 1, autostart + 1).data, '1',
+		    autostart);
+}
+
+static void
+needpos(size_t n)
+{
+	size_t npos, oldnpos;
+	char *newpos;
+
+	/* Grow the positions array to at least the specified size. */
+	if (n > positions.len) {
+		oldnpos = npos = positions.len;
+		if (npos == 0)
+			npos = n;
+		while (n > npos)
+			npos *= 2;
+		if ((newpos = realloc(positions.data, npos)) == NULL)
+			err(1, "realloc");
+		memset(newpos + oldnpos, 0, npos - oldnpos);
+		positions = slice_unchecked(newpos, npos);
+	}
+}
+
+static int
+b_cut(FILE *fp, const char *fname __unused)
+{
+	int ch, col;
+	size_t pos;
+
+	ch = 0;
+	for (;;) {
+		pos = 1;
+		for (col = maxval; col; --col) {
+			if ((ch = getc(fp)) == EOF)
+				return (0);
+			if (ch == '\n')
+				break;
+			if (positions[pos++])
+				(void)putchar(ch);
+		}
+		if (ch != '\n') {
+			if (autostop)
+				while ((ch = getc(fp)) != EOF && ch != '\n')
+					(void)putchar(ch);
+			else
+				while ((ch = getc(fp)) != EOF && ch != '\n');
+		}
+		(void)putchar('\n');
+	}
+	return (0);
+}
+
+/*
+ * Cut based on byte positions, taking care not to split multibyte characters.
+ * Although this function also handles the case where -n is not specified,
+ * b_cut() ought to be much faster.
+ */
+static int
+b_n_cut(FILE *fp, const char *fname)
+{
+	size_t col, i, bufsize = 0;
+	ssize_t lbuflen;
+	char *lbuf = NULL;
+	str line;
+	int canwrite, clen, warned;
+	mbstate_t mbs;
+
+	memset(&mbs, 0, sizeof(mbs));
+	warned = 0;
+	defer free(lbuf);
+	while ((lbuflen = getline(&lbuf, &bufsize, fp)) >= 0) {
+		line = slice_unchecked(lbuf, lbuflen);
+		for (col = 0; line.len > 0; col += clen) {
+			if ((clen = mbrlen(line.data, line.len, &mbs)) < 0) {
+				if (!warned) {
+					warn("%s", fname);
+					warned = 1;
+				}
+				memset(&mbs, 0, sizeof(mbs));
+				clen = 1;
+			}
+			if (clen == 0 || line[0] == '\n')
+				break;
+			if (col < maxval && !positions[1 + col]) {
+				/*
+				 * Print the character if (1) after an initial
+				 * segment of un-selected bytes, the rest of
+				 * it is selected, and (2) the last byte is
+				 * selected.
+				 */
+				i = col;
+				while (i < col + clen && i < maxval &&
+				    !positions[1 + i])
+					i++;
+				canwrite = i < col + clen;
+				for (; i < col + clen && i < maxval; i++)
+					canwrite &= positions[1 + i];
+				if (canwrite)
+					fwrite(line.data, 1, clen, stdout);
+			} else {
+				/*
+				 * Print the character if all of it has
+				 * been selected.
+				 */
+				canwrite = 1;
+				for (i = col; i < col + clen; i++)
+					if ((i >= maxval && !autostop) ||
+					    (i < maxval && !positions[1 + i])) {
+						canwrite = 0;
+						break;
+					}
+				if (canwrite)
+					fwrite(line.data, 1, clen, stdout);
+			}
+			line = slice_sub(line, clen, line.len);
+		}
+		if (line.len > 0)
+			putchar('\n');
+	}
+	return (warned);
+}
+
+static int
+c_cut(FILE *fp, const char *fname)
+{
+	wint_t ch;
+	int col;
+	size_t pos;
+
+	ch = 0;
+	for (;;) {
+		pos = 1;
+		for (col = maxval; col; --col) {
+			if ((ch = getwc(fp)) == WEOF)
+				goto out;
+			if (ch == '\n')
+				break;
+			if (positions[pos++])
+				(void)putwchar(ch);
+		}
+		if (ch != '\n') {
+			if (autostop)
+				while ((ch = getwc(fp)) != WEOF && ch != '\n')
+					(void)putwchar(ch);
+			else
+				while ((ch = getwc(fp)) != WEOF && ch != '\n');
+		}
+		(void)putwchar('\n');
+	}
+out:
+	if (ferror(fp)) {
+		warn("%s", fname);
+		return (1);
+	}
+	return (0);
+}
+
+static int
+is_delim(wchar_t ch)
+{
+	if (wflag) {
+		if (ch == ' ' || ch == '\t')
+			return 1;
+	} else {
+		if (ch == dchar)
+			return 1;
+	}
+	return 0;
+}
+
+static int
+f_cut(FILE *fp, const char *fname)
+{
+	wchar_t ch;
+	int field, i, isdelim;
+	size_t pos;
+	str line, p, chmb;
+	int output;
+	char *lbuf = NULL;
+	size_t clen, bufsize = 0, reallen;
+	ssize_t lbuflen;
+
+	defer free(lbuf);
+	while ((lbuflen = getline(&lbuf, &bufsize, fp)) >= 0) {
+		reallen = lbuflen;
+		/* Assert EOL has a newline. */
+		if (lbuflen > 0 && *(lbuf + lbuflen - 1) != '\n') {
+			/* Can't have > 1 line with no trailing newline. */
+			if ((ssize_t)bufsize < (lbuflen + 1)) {
+				bufsize = lbuflen + 1;
+				lbuf = realloc(lbuf, bufsize);
+			}
+			if (lbuf == NULL)
+				err(1, "realloc");
+			lbuf[lbuflen] = '\n';
+			reallen++;
+		}
+		line = slice_unchecked(lbuf, reallen);
+		output = 0;
+		for (isdelim = 0, p = line;; p = slice_sub(p, clen, p.len)) {
+			clen = mbrtowc(&ch, p.data, p.len, NULL);
+			if (clen == (size_t)-1 || clen == (size_t)-2) {
+				warnc(EILSEQ, "%s", fname);
+				return (1);
+			}
+			if (clen == 0)
+				clen = 1;
+			/* this should work if newline is delimiter */
+			if (is_delim(ch))
+				isdelim = 1;
+			if (ch == '\n') {
+				if (!isdelim && !sflag)
+					(void)fwrite(lbuf, lbuflen, 1, stdout);
+				break;
+			}
+		}
+		if (!isdelim)
+			continue;
+
+		pos = 1;
+		for (field = maxval, p = line; field; --field, ++pos) {
+			if (positions[pos] && output++)
+				for (i = 0; dcharmb[i] != '\0'; i++)
+					putchar(dcharmb[i]);
+			for (;;) {
+				clen = mbrtowc(&ch, p.data, p.len, NULL);
+				if (clen == (size_t)-1 || clen == (size_t)-2) {
+					warnc(EILSEQ, "%s", fname);
+					return (1);
+				}
+				if (clen == 0)
+					clen = 1;
+				chmb = slice_sub(p, 0, clen);
+				p = slice_sub(p, clen, p.len);
+				if (ch == '\n' || is_delim(ch)) {
+					/* compress whitespace */
+					if (wflag && ch != '\n')
+						while (is_delim(p[0]))
+							p = slice_sub(p, 1,
+							    p.len);
+					break;
+				}
+				if (positions[pos])
+					(void)fwrite(chmb.data, 1, chmb.len,
+					    stdout);
+			}
+			if (ch == '\n')
+				break;
+		}
+		if (ch != '\n') {
+			if (autostop) {
+				if (output)
+					for (i = 0; dcharmb[i] != '\0'; i++)
+						putchar(dcharmb[i]);
+				for (; (ch = p[0]) != '\n';
+				    p = slice_sub(p, 1, p.len))
+					(void)putchar(ch);
+			} else
+				for (; (ch = p[0]) != '\n';
+				    p = slice_sub(p, 1, p.len));
+		}
+		(void)putchar('\n');
+	}
+	return (0);
+}
+
+static void
+usage(void)
+{
+	(void)fprintf(stderr, "%s\n%s\n%s\n",
+		"usage: cut -b list [-n] [file ...]",
+		"       cut -c list [file ...]",
+		"       cut -f list [-s] [-w | -d delim] [file ...]");
+	exit(1);
 }

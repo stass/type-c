@@ -27,10 +27,10 @@ gmake where make is another, as on FreeBSD.
   > }
 
   $ check "$clang" -O0
-  cut: 101 cases agree with original/cut, 9 with cut(1)
+  cut: 102 cases agree with original/cut, 8 with cut(1)
   $ check "$clang" -O2
-  cut: 101 cases agree with original/cut, 9 with cut(1)
+  cut: 102 cases agree with original/cut, 8 with cut(1)
   $ check "$gcc" -O0
-  cut: 101 cases agree with original/cut, 9 with cut(1)
+  cut: 102 cases agree with original/cut, 8 with cut(1)
   $ check "$gcc" -O2
-  cut: 101 cases agree with original/cut, 9 with cut(1)
+  cut: 102 cases agree with original/cut, 8 with cut(1)

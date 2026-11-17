@@ -225,15 +225,13 @@ same "$utf8" 'cut -f 1 bad'
 same "$utf8" 'cut -f 1 <bad'
 same "$utf8" 'cut -f 1 <bad; cut -f 1 <fields'
 same "$utf8" 'cut -f 1 <truncated'
+# getwc reports or drops a sequence cut short as the C library does.
+same "$utf8" 'cut -c 1-3 <truncated'
 
 # The message of an invalid sequence in the standard input, in the words
 # of the C library.
 run original "$utf8" 'cut -f 1 <bad'
 illegal=$(cat "$work/original.err")
-
-# A sequence cut short by the end of the input, which the original's
-# getwc reports or drops as the C library does.
-expect "$utf8" 'cut -c 1-3 <truncated' 'caf\n' "$illegal" 1
 
 # -n in a multibyte locale: a is 1 byte, the e-acute 2, the euro sign 3.
 aeb='a\303\251\342\202\254b\n'
@@ -245,7 +243,7 @@ expect "$utf8" "printf '$aeb' | cut -n -b 5-" '\342\202\254b\n' '' 0
 expect "$utf8" "printf 'a\303\251\nb\303\247\n' | cut -n -b 1-3" \
     'a\303\251\nb\303\247\n' '' 0
 expect "$utf8" "printf 'a\303\251' | cut -n -b 1-3" 'a\303\251' '' 0
-expect "$utf8" "printf 'a\377b\n' | cut -n -b 1-3" 'a' "$illegal" 1
+expect "$utf8" "printf 'a\377b\n' | cut -n -b 1-3" 'a\377b\n' "$illegal" 1
 
 if [ "$failed" -ne 0 ]; then
 	exit 1

@@ -18,8 +18,9 @@ cut: cut.o
 %.o: %.tc
 	$(COMPILE.c) $(OUTPUT_OPTION) $<
 
-# compat.h supplies the names of the BSD C library that glibc lacks.
-original/cut.o: CPPFLAGS += -include original/compat.h
+# compat.h supplies the names of the BSD C library that glibc lacks and
+# that both files use.
+cut.o original/cut.o: CPPFLAGS += -include original/compat.h
 
 original/cut: original/cut.o
 	$(LINK.o) $^ $(LDLIBS) -o $@

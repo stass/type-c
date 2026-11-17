@@ -16,8 +16,11 @@ undefined behavior.", 2025-10-23), the last commit that changes the file
 on `main` (git blob `e4e322b4e5c99e4a5e91e3135df134ba9a685ffc`). Both
 carry the BSD-3-Clause license of the original.
 
-The port takes the same options, prints the same output and messages
-and exits with the same status, but for the differences listed
+The port keeps the original's functions, names, comments, variables,
+control flow and style(9) layout, and changes only what Type-C gives a
+better way to write, so `diff original/cut.c cut.tc` is the whole story.
+It takes the same options, prints the same output and messages and
+exits with the same status, but for the differences listed
 [below](#where-the-port-differs). `make check` shows it: it runs both
 programs over a hundred command lines and compares what they print and
 how they exit, and checks the port alone where the two differ.
@@ -28,194 +31,212 @@ make check
 TYPEC_CC=gcc-14 make clean check
 ```
 
-`original/cut.c` needs two names of the BSD C library that glibc lacks,
+Both files use two names of the BSD C library that glibc lacks,
 `__unused` and `warnc`. [`original/compat.h`](original/compat.h)
-defines them on Linux, and the [Makefile](Makefile) puts it before
-`cut.c` with `-include`, so the file itself stays as upstream has it.
+defines them on Linux, and the [Makefile](Makefile) puts it before each
+file with `-include`, so `cut.c` stays as upstream has it and the port
+keeps upstream's calls.
 
-## The port, step by step
+## The diff, step by step
 
-### Lists are slices, and their errors are values
+### The positions are a slice
 
-`cut -f 2-4,7-` selects fields by a list. The original reads the list
-with `strsep`, which writes NULs into the argument, and with `strtol`,
-which moves a `char *` along it; an error ends the program from inside
-the parser:
+The original keeps the columns that the lists select in `positions`, a
+`char *`, and its allocated size in a `static` of `needpos`. The port
+makes it a `slice(char)`, which carries its length, so every
+`positions[i]` is checked against it and traps past the end instead of
+reading on. The length is `positions.len`, the one record of the size:
 
-```c
-	for (; (p = strsep(&list, ", \t")) != NULL;) {
-		setautostart = start = stop = 0;
-		if (*p == '-') {
-			++p;
-			setautostart = 1;
-		}
-		if (isdigit((unsigned char)*p)) {
-			start = stop = strtol(p, &p, 10);
-			if (setautostart && start > autostart)
-				autostart = start;
-		}
-		...
-		if (*p)
-			errx(1, "[-bcf] list: illegal list value");
+```diff
+-static char *	positions;
++static slice(char) positions;
 ```
 
-The port reads each item as a `str`, a pointer and a length that
-`slice_sub` cuts and checks, and leaves the argument alone. An error is
-an `Err` that `try` hands up, through `add_list` and `parse_command`, to
-`main`, the one place that ends the program:
-
-```c
-static result(void, usage_error)
-add_item(selection *s, str item)
-{
-	size_t start = 0, stop = 0;
-	bool from_first = false;
-
-	if (starts_with(item, '-')) {
-		item = drop(item, 1);
-		from_first = true;
-	}
-	if (starts_with_digit(item)) {
-		start = stop = read_number(&item);
-		if (from_first && start > s->open_to)
-			s->open_to = start;
-	}
-	...
-	if (item.len > 0)
-		return (Err(IllegalList));
+```diff
+-	static size_t npos;
+-	size_t oldnpos;
++	size_t npos, oldnpos;
++	char *newpos;
+ 
+ 	/* Grow the positions array to at least the specified size. */
+-	if (n > npos) {
+-		oldnpos = npos;
++	if (n > positions.len) {
++		oldnpos = npos = positions.len;
+ 		if (npos == 0)
+ 			npos = n;
+ 		while (n > npos)
+ 			npos *= 2;
+-		if ((positions = realloc(positions, npos)) == NULL)
++		if ((newpos = realloc(positions.data, npos)) == NULL)
+ 			err(1, "realloc");
+-		memset((char *)positions + oldnpos, 0, npos - oldnpos);
++		memset(newpos + oldnpos, 0, npos - oldnpos);
++		positions = slice_unchecked(newpos, npos);
+ 	}
 ```
 
-The columns that a list selects are a `slice(bool)` instead of a `char *`
-and a separate `maxval`: `s->marked[column]` traps on a column past the
-end where `positions[column]` would read past it.
+`slice_unchecked` pairs a pointer with a length that the compiler takes
+on trust. The port has three: here, the `npos` bytes that `realloc`
+returned, and below, the length of a line that `getline` returned,
+once as it stands and once with the newline that `f_cut` appends.
 
-### One cleanup, however a line ends
+Where the original walks a `char *pos` along `positions`, the port
+walks an index of the same name, in `get_list`, `b_cut`, `c_cut` and
+`f_cut` alike:
 
-`f_cut` reads a line with `getline`, appends a newline when the last
-line lacks one, and frees the buffer on each of its three exits:
-
-```c
-		if (lbuflen > 0 && *(lbuf + lbuflen - 1) != '\n') {
-			/* Can't have > 1 line with no trailing newline. */
-			if ((ssize_t)bufsize < (lbuflen + 1)) {
-				bufsize = lbuflen + 1;
-				lbuf = realloc(lbuf, bufsize);
-			}
-			if (lbuf == NULL)
-				err(1, "realloc");
-			lbuf[lbuflen] = '\n';
-			reallen++;
-		}
-		...
-			if (clen == (size_t)-1 || clen == (size_t)-2) {
-				warnc(EILSEQ, "%s", fname);
-				free(lbuf);
-				return (1);
-			}
+```diff
+-	char *pos;
++	size_t pos;
+...
+-		pos = positions + 1;
++		pos = 1;
+...
+-			if (*pos++)
++			if (positions[pos++])
 ```
 
-In the port, one function reads the lines of every mode. A `defer` frees
-the buffer at every exit, `try` leaves at the first invalid character,
-and a line is a `str` and a flag that says whether it ended in a
-newline, so nothing is appended:
+`get_list` sets the columns of `-N` with `memset`, which takes a
+pointer. The port hands it the pointer of a `slice_sub` of those
+columns, so that the bound is checked there too:
 
-```c
-static result(void, input_error)
-cut_file(FILE *fp, const command *c)
-{
-	char *buf = NULL;
-	size_t size = 0;
-	ssize_t n;
-
-	defer free(buf);
-	while ((n = getline(&buf, &size, fp)) >= 0)
-		try cut_line(split_line(slice_unchecked(buf, (size_t)n)), c);
-	if (ferror(fp))
-		return (Err(ReadFailed(errno)));
-	return (Ok);
-}
+```diff
+-		memset(positions + 1, '1', autostart);
++		memset(slice_sub(positions, 1, autostart + 1).data, '1',
++		    autostart);
 ```
 
-### Seven flags become one variant
+### A line is a `str`, not a moving buffer
 
-The original keeps an `int` for each option, `bflag` to `wflag`, checks
-them against each other in `main`, and picks one of four functions
-through a pointer:
+`b_n_cut`, the function of `-b list -n` in a multibyte locale, reads a
+line with `getline` into `lbuf` and then walks the line by moving `lbuf`
+itself, `lbuf += clen`. That pointer goes back to `getline` for the next
+line and to `free` at the end: the bug [below](#what-the-port-found).
+The port leaves `lbuf` to `getline` and walks a `str` over the line, a
+pointer and a length that `slice_sub` shortens and checks:
 
-```c
-	if (fflag)
-		fcn = f_cut;
-	else if (cflag)
-		fcn = MB_CUR_MAX > 1 ? c_cut : b_cut;
-	else if (bflag)
-		fcn = nflag && MB_CUR_MAX > 1 ? b_n_cut : b_cut;
+```diff
+-		for (col = 0; lbuflen > 0; col += clen) {
+-			if ((clen = mbrlen(lbuf, lbuflen, &mbs)) < 0) {
++		line = slice_unchecked(lbuf, lbuflen);
++		for (col = 0; line.len > 0; col += clen) {
++			if ((clen = mbrlen(line.data, line.len, &mbs)) < 0) {
+...
+-			if (clen == 0 || *lbuf == '\n')
++			if (clen == 0 || line[0] == '\n')
+...
+-					fwrite(lbuf, 1, clen, stdout);
++					fwrite(line.data, 1, clen, stdout);
+...
+-			lbuf += clen;
+-			lbuflen -= clen;
++			line = slice_sub(line, clen, line.len);
+ 		}
+-		if (lbuflen > 0)
++		if (line.len > 0)
+ 			putchar('\n');
 ```
 
-`f_cut` then asks `wflag` again for each character. The port checks the
-options once, in `choose_mode`, and keeps what they mean as a variant:
-the delimiter and `-s` exist only in the case of `-f`, and `-w` is a
-delimiter, not a flag beside one. A `match` sends each line to its
-function and stops the build if a mode is added and not handled:
+`f_cut` does not move `lbuf`, but walks the line with a second pointer
+`p` and works out what is left of the line as `lbuf + reallen - p`. In
+the port `p` is a `str`, the rest of the line, so what is left is
+`p.len`, and stepping past a character is a `slice_sub`:
 
-```c
-type delimiter =
-    | Char(wchar_t code, str text)
-    | Blanks;					/* -w */
-
-type mode =
-    | Bytes					/* -b */
-    | Chars					/* -c */
-    | WholeChars				/* -b -n */
-    | Fields(delimiter d, bool only_delimited);	/* -f, -s */
+```diff
+-		for (isdelim = 0, p = lbuf;; p += clen) {
+-			clen = mbrtowc(&ch, p, lbuf + reallen - p, NULL);
++		line = slice_unchecked(lbuf, reallen);
++		for (isdelim = 0, p = line;; p = slice_sub(p, clen, p.len)) {
++			clen = mbrtowc(&ch, p.data, p.len, NULL);
 ```
 
-```c
-	match (c->how) {
-	case Bytes:
-		cut_bytes(l, &c->what);
-		return (Ok);
-	case Chars:
-		return (cut_chars(l, &c->what));
-	case WholeChars:
-		return (cut_whole_chars(l, &c->what));
-	case Fields(delimiter d, only_delimited):
-		return (cut_fields(l, &c->what, d, only_delimited));
-	}
+The original prints a character of a field after it has stepped past
+it, as `p - clen`. A slice cannot reach back before its start, so the
+port keeps the character's bytes, `chmb`, before it steps:
+
+```diff
+-				p += clen;
++				chmb = slice_sub(p, 0, clen);
++				p = slice_sub(p, clen, p.len);
+...
+-				if (*pos)
+-					(void)fwrite(p - clen, 1, clen,
++				if (positions[pos])
++					(void)fwrite(chmb.data, 1, chmb.len,
+ 					    stdout);
 ```
 
-## What got longer
+`f_cut` still appends a newline to a last line that lacks one, as the
+original does: its loops stop at that newline, and the port keeps them.
+The `p[0]` that those loops read is checked against the line, where
+`*p` would read past it if the newline were missing.
+
+### `defer` frees the buffer at every exit
+
+`f_cut` frees `lbuf` before each of its three `return`s. The port says
+it once, after the declarations, and a `defer` frees the buffer at
+whichever exit the function takes:
+
+```diff
++	defer free(lbuf);
+ 	while ((lbuflen = getline(&lbuf, &bufsize, fp)) >= 0) {
+...
+ 				warnc(EILSEQ, "%s", fname);
+-				free(lbuf);
+ 				return (1);
+```
+
+`b_n_cut` has one exit, but gets the same `defer`, so that its buffer
+is freed where it is declared, as in `f_cut`:
+
+```diff
+ 	memset(&mbs, 0, sizeof(mbs));
+ 	warned = 0;
++	defer free(lbuf);
+...
+-	free(lbuf);
+ 	return (warned);
+```
+
+### What the port leaves alone
+
+- **`main` is unchanged.** It closes each file right after the one call
+  that reads it, so a `defer fclose(fp)` would only move the line. The
+  option flags stay `int`s and the mode stays a function pointer: a
+  variant of the modes would need a `match` at each of the three places
+  that call `fcn`, or a new function to hold one, where the pointer
+  dispatches as it is.
+- **`get_list` keeps `errx`.** Every error of a list ends the program,
+  and `get_list` is called from three cases of the `getopt` switch in
+  `main`. As a `result`, it would need a `match` at each of the three,
+  since `main` returns an `int` and has nowhere to hand an error up with
+  `try`; `errx` in place says the same in one line.
+- **`get_list` keeps `strsep` and `strtol`.** They walk a NUL-terminated
+  argument, not a pointer with a length, so a `str` would only add a
+  number reader of its own.
+
+## The size
 
 | | `original/cut.c` | `cut.tc` |
 |---|---:|---:|
-| lines | 481 | 701 |
-| lines of code, without comments and blank lines | 390 | 535 |
-| functions | 9 | 34 |
+| lines | 481 | 488 |
+| lines of code, without comments and blank lines | 390 | 396 |
+| functions | 9 | 9 |
 
 The lines of code are those that
 `gcc -fpreprocessed -dD -E -P -x c FILE` prints that are not blank. The
-port is 37% longer in code. Almost all of it is function headers:
-it splits the original's 9 functions into 34 that each do one thing,
-and style(9) spends five or six lines on each, even on a one-line
-helper such as `drop` or `starts_with`. The type declarations add about
-40 lines that name what the original keeps in globals and flags. The
-comments grew too, mostly where the port keeps an odd behaviour of the
-original on purpose so that `make check` can compare the two.
-
-Nothing got shorter in lines. What went away is the bookkeeping: the
-global flags, the copies of `free(lbuf)` before each `return`, the
-`char *` that `strtol` and `strsep` move, the buffer grown to append a
-newline, and the function pointer.
+diff takes out 43 lines and puts in 50, one of them the copyright line
+of the port, and adds no function.
 
 ## What the port found
 
-`b_n_cut`, the function of `-b list -n` in a multibyte locale, moves
-`lbuf` along the line as it reads it, and hands the moved pointer back
-to `getline` for the next line and finally to `free`. `getline` then
-believes it has the whole buffer from the moved pointer on: it writes
-past the end when the next line is longer than what is left, or
-reallocates a pointer that `malloc` never returned. And the final
-`free` frees such a pointer whenever the loop moved it. Built with
-AddressSanitizer:
+`b_n_cut` moves `lbuf` along the line as it reads it, and hands the
+moved pointer back to `getline` for the next line and finally to
+`free`. `getline` then believes it has the whole buffer from the moved
+pointer on: it writes past the end when the next line is longer than
+what is left, or reallocates a pointer that `malloc` never returned. And
+the final `free` frees such a pointer whenever the loop moved it. Built
+with AddressSanitizer:
 
 ```console
 $ printf 'abcdefg\n0123456789\n' | LC_ALL=en_US.UTF-8 ./cut-asan -b 1-2 -n
@@ -227,38 +248,19 @@ WRITE of size 11 at 0x602000000100 thread T0
     #3 0x000103d786af in b_n_cut cut.c:279
 ```
 
-Type-C did not find it: it compiles the same pointer arithmetic. The
-port does not have it because a line is a `str` that the loop shortens
-with `drop`, a value of its own, while `buf` is touched only by
-`getline` and `defer free(buf)`. Nothing in the language stops a
-`buf += n`; the slice made it unnecessary to write one, and a
-`slice_sub` past the end of the line traps instead of reading on.
+Type-C did not find it: it compiles the same pointer arithmetic, and
+nothing in the language stops an `lbuf += clen`. The port does not have
+it because the `str` made it unnecessary to write one: `line` is a value
+of its own that the loop shortens, `lbuf` is touched only by `getline`
+and `defer free(lbuf)`, and a `slice_sub` past the end of the line traps
+instead of reading on.
 
 ## Where the port differs
 
 - **`-n` in a multibyte locale.** The original overruns its buffer
-  there, so the port follows `cut(1)` instead: a character is printed
-  when one of its bytes is selected and, after a prefix of unselected
-  bytes, the rest of its bytes are. An invalid byte sequence ends the
-  input with an error, as with `-c` and `-f`, where the original warns
-  and goes on; a NUL byte is a character, where the original ends the
-  line at it. `make check` compares these cases with the output that
-  `cut(1)` describes.
-- **A character cut short by the end of the input**, with `-c` in a
-  multibyte locale. The port reports it as an invalid byte sequence, as
-  the original does with the C library of FreeBSD or macOS; with glibc,
-  the original drops it without a word.
-- **Read errors.** The port reports a read error, such as `EIO`, in
-  every mode. The original reports one only with `-c` in a multibyte
-  locale.
-- **Memory.** The port reads a whole line at a time in every mode, so
-  its memory grows with the longest line. The original's `-b` and `-c`
-  read a character at a time, and cut a file with no newline, such as
-  `/dev/zero`, in constant memory.
-- **Lists past `INT_MAX`.** The original counts columns in an `int` with
-  `-b`, `-c` and `-f`, which a list item past `INT_MAX` overflows; the
-  port counts them in a `size_t`. Such a list takes gigabytes of marks
-  in both.
+  there, as [above](#what-the-port-found); the port does not. The
+  original's behaviour is undefined there, so `make check` compares
+  these cases with the output that `cut(1)` describes.
 
 Everything else is kept, the odd parts included, so that the outputs
 can be compared:
@@ -269,4 +271,18 @@ can be compared:
   column 4 on;
 - with `-b` and `-c`, a last line without a newline gets one only when
   it reaches the last column of the list; with `-f`, a line without a
-  delimiter is printed as it stands, with no newline added.
+  delimiter is printed as it stands, with no newline added;
+- with `-n`, an invalid byte sequence is warned of once and each of
+  its bytes taken for a character of one byte, a NUL byte ends the
+  line, and a character that reaches past the last column of the list
+  is printed when its bytes up to that column are, though `cut(1)` asks
+  for all of them: `cut -n -b 2` prints a whole three-byte euro sign;
+- `-b` and `-c` read a character at a time, so they cut a file with no
+  newline, such as `/dev/zero`, in constant memory, and only `-c` in a
+  multibyte locale reports a read error such as `EIO`;
+- with `-c`, a character cut short by the end of the input is reported
+  as an invalid byte sequence or dropped without a word, as the C
+  library's `getwc` has it: FreeBSD's and macOS's report it, glibc's
+  drops it;
+- `-b`, `-c` and `-f` count columns in an `int`, which a list item past
+  `INT_MAX` overflows; such a list takes gigabytes of positions first.

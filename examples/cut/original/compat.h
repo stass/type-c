@@ -4,9 +4,10 @@
  */
 
 /*
- * The two names of the BSD C library that cut.c uses and glibc lacks,
- * so that the unchanged cut.c builds on Linux too. The Makefile puts it
- * before cut.c with -include; on FreeBSD and macOS it adds nothing.
+ * The two names of the BSD C library that cut.c and its port cut.tc use
+ * and glibc lacks, so that the unchanged cut.c and the port build on
+ * Linux too. The Makefile puts it before each file with -include; on
+ * FreeBSD and macOS it adds nothing.
  */
 
 #ifdef __linux__
