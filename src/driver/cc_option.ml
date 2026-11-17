@@ -17,6 +17,7 @@ type typec_option =
   | Emit_c_header
   | Stats
   | Trap_function
+  | Version
 
 type role =
   | Preprocess
@@ -122,6 +123,7 @@ let table =
       entries (Typec Emit_c_header) Flag [ "--emit-c-header" ];
       entries (Typec Stats) Flag [ "--stats" ];
       long_joined_entries (Typec Trap_function) [ "--trap-function" ];
+      entries (Typec Version) Flag [ "--version" ];
       (* What the command line makes and of what. *)
       entries Output Joined_or_separate [ "-o" ];
       long_entries Output [ "--output" ];
@@ -324,6 +326,12 @@ let table =
       (* It keeps Clang from reading its default configuration files. *)
       entries Common Flag [ "--no-default-config" ];
     ]
+
+let typec_spellings =
+  List.filter_map
+    (fun entry ->
+      match entry.role with Typec _ -> Some entry.spelling | _ -> None)
+    table
 
 (* The response file of GCC and Clang, @FILE, holds more arguments. *)
 let response_file =

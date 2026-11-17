@@ -93,3 +93,10 @@
  (name test_header)
  (modules test_header)
  (libraries typec_cpp typec_emit typec_test_support))
+
+(test
+ (name test_manual)
+ (modules test_manual)
+ (libraries typec_driver)
+ (action
+  (run %{test} %{dep:../../docs/typec.1})))

@@ -26,7 +26,12 @@ val run : env_cc:string option -> outer_cc:string option -> string list -> 'a
     command fails, [typec] exits with its status, or ends by the signal
     that ended it, or by a signal that {!Signals} caught. To print the
     target model, it prints {!Typec_sema.Target.to_string} of the model
-    from {!Target_query.query} on stdout and exits with status 0.
+    from {!Target_query.query} on stdout and exits with status 0. To
+    print the version, it runs the backend with [--version] alone, then
+    prints ["typec "] and {!Version.release} on a last line whatever the
+    backend did, and exits with the backend's status or ends by its
+    signal; a backend that cannot be started is an [Environment]
+    failure.
 
     It never returns. When [typec] fails itself it prints one message
     on stderr and exits with the {!Exit_status.code} of the failure:

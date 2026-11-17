@@ -2,3 +2,5 @@
 # Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 _build/
+# dune build -p writes the install file of the package here.
+*.install

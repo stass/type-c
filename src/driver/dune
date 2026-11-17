@@ -4,3 +4,11 @@
 (library
  (name typec_driver)
  (libraries unix typec_cpp typec_emit typec_syntax typec_sema))
+
+; The release has one source, the version field of dune-project, which
+; dune expands here; dune-build-info would add a dependency for no more.
+
+(rule
+ (with-stdout-to
+  version.ml
+  (echo "let release = \"%{version:typec}\"\n")))

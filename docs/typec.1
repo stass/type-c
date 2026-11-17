@@ -1,0 +1,319 @@
+.\" SPDX-License-Identifier: BSD-2-Clause
+.\" Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+.\"
+.\" test/unit/test_manual.ml checks the options of typec listed under
+.\" DESCRIPTION and the statuses listed under EXIT STATUS against the
+.\" driver's tables.
+.\"
+.Dd November 17, 2026
+.Dt TYPEC 1
+.Os
+.Sh NAME
+.Nm typec
+.Nd Type-C compiler
+.Sh SYNOPSIS
+.Nm
+.Op Fl -cc Ns = Ns Ar path
+.Op Fl -stats
+.Op Fl -trap-function Ns = Ns Ar name
+.Op Ar cc-option ...
+.Ar file ...
+.Nm
+.Op Fl -cc Ns = Ns Ar path
+.Op Fl -stats
+.Op Fl -trap-function Ns = Ns Ar name
+.Fl -emit-c
+.Op Fl o Ar output
+.Op Ar cc-option ...
+.Ar file.tc
+.Nm
+.Op Fl -cc Ns = Ns Ar path
+.Op Fl -stats
+.Op Fl -trap-function Ns = Ns Ar name
+.Fl -emit-c-header
+.Op Fl o Ar output
+.Op Ar cc-option ...
+.Ar file.tci
+.Nm
+.Op Fl -cc Ns = Ns Ar path
+.Fl -print-target
+.Op Ar cc-option ...
+.Nm
+.Op Fl -cc Ns = Ns Ar path
+.Fl -version
+.Sh DESCRIPTION
+Type-C is C11 with variants, generics and errors as values.
+.Nm
+compiles it to C and hands that C to a C compiler, the
+.Em backend ,
+which compiles and links it as it would any C.
+.Nm
+takes the command line of
+.Xr cc 1
+and passes every input that is not a Type-C file, with its options, to
+the backend untouched, so it can stand in for
+.Xr cc 1
+in a build.
+.Pp
+An input whose name ends in
+.Pa .tc ,
+with no
+.Fl x
+other than
+.Fl x Cm none
+before it, is a Type-C unit.
+.Nm
+runs the backend's preprocessor on it, reads, checks and lowers the
+preprocessed text to C, and has the backend compile that C as it would
+compile the unit's
+.Pa .c
+file: the output, the dependency files of
+.Fl MD
+and
+.Fl MMD ,
+and the rule of
+.Fl M
+are named as for a
+.Pa .c
+input.
+.Nm
+stops at the first error in the source and prints it as
+.Ar file : Ns Ar line : Li error : Ar message .
+Without a
+.Pa .tc
+input
+.Nm
+replaces itself with the backend.
+.Pp
+The options of
+.Nm
+itself never reach the backend; each is one wherever an option can
+stand, but not as the value of another option such as
+.Fl o .
+They are as follows:
+.Bl -tag -width Ds
+.It Fl -cc Ns = Ns Ar path
+Use the C compiler at
+.Ar path
+as the backend.
+The last one given wins.
+.It Fl -emit-c
+Stop after lowering and write the C of the one
+.Pa .tc
+input to the file that
+.Fl o
+names, or to standard output.
+.It Fl -emit-c-header
+Write the C header of the one
+.Pa .tci
+input, so that C code can use its types, and compile nothing.
+.Ar M Ns Pa .tci
+gives
+.Ar M Ns Pa .h
+beside it, or the file that
+.Fl o
+names, or standard output under
+.Fl o Cm - .
+.It Fl -print-target
+Run the backend with the other arguments as options, which select the
+target, and print the target model that its predefined macros give, one
+.Ar field : Ar value
+per line.
+.It Fl -stats
+Print on standard error what each
+.Pa .tc
+input, or the
+.Pa .tci
+input of
+.Fl -emit-c-header ,
+counts against the translation limits of Type-C.
+.It Fl -trap-function Ns = Ns Ar name
+Make every trap of the emitted C, such as a slice index out of range,
+call the function
+.Ft _Noreturn void
+.Fn name void ,
+which the program supplies, before
+.Fn __builtin_trap .
+.Ar name
+is a C identifier of ASCII letters, digits and underscores that does
+not start with a digit; the last
+one given wins.
+.It Fl -version
+Run the backend with
+.Fl -version
+alone, pass on its output, then print
+.Nm
+and its release on a last line, so that a build tool that reads the
+output sees the backend.
+Nothing is compiled, whatever the rest of the command line asks, but an
+error in one of the options of
+.Nm
+is still one.
+The status is the backend's, or 81 when the backend cannot be started,
+and a backend that fails or cannot be started is named on standard
+error.
+.El
+.Ss Choosing the backend
+The backend is the program that the last
+.Fl -cc Ns = Ns Ar path
+names, else the one that
+.Ev TYPEC_CC
+names when it is set and not empty, else
+.Xr cc 1 .
+A name without a slash is looked up in
+.Ev PATH .
+.Nm
+runs the backend with an argument vector, never through a shell, so
+.Ev TYPEC_CC
+names one program and cannot carry arguments of its own.
+The backend is GCC or Clang, Apple's included, of the releases that the
+README names;
+.Nm
+refuses an older one.
+.Ss Options refused with a Type-C input
+With a
+.Pa .tc
+input, or under
+.Fl -emit-c-header ,
+.Nm
+refuses, as an error of the command line, the options that it cannot
+follow:
+.Fl E ;
+the options that change the preprocessed text, such as
+.Fl P ,
+.Fl C
+and every
+.Fl d
+option of dumps;
+.Fl save-temps ,
+.Fl ### ,
+.Fl ansi
+and
+.Fl - ;
+response files and the options that name a file of more options, such
+as
+.Fl specs= ;
+the queries that print a fact of the backend, such as
+.Fl print-file-name= ;
+the options that change a type of C that the target model cannot see,
+such as
+.Fl fshort-enums ;
+.Fl arch
+naming more than one architecture; a
+.Fl std=
+that names no form of C11 or C17; and every long option, spelled with
+.Ql -- ,
+that it does not know.
+The README lists them with the reason for each.
+Without a
+.Pa .tc
+input the backend sees them all.
+.Sh ENVIRONMENT
+.Bl -tag -width "TYPEC_OUTER_CC"
+.It Ev TYPEC_CC
+The backend, when no
+.Fl -cc Ns = Ns Ar path
+is given.
+.It Ev TYPEC_OUTER_CC
+.Nm
+sets it to the name of the backend in the environment of every backend
+that it runs.
+A
+.Nm
+started with it set exits with an error, as the backend would otherwise
+run
+.Nm
+again forever; to install
+.Nm
+as
+.Xr cc 1 ,
+set
+.Ev TYPEC_CC
+to the real C compiler.
+.It Ev TMPDIR
+The directory in which
+.Nm
+makes its private temporary directory, which it removes on every way
+out; by default
+.Pa /tmp .
+.It Ev PATH
+Where a backend named without a slash is looked up.
+.El
+.Sh FILES
+.Bl -tag -width "M.tci"
+.It Pa *.tc
+A Type-C unit, compiled as a
+.Pa .c
+file is.
+.It Pa *.tci
+A Type-C interface: a header that Type-C units include.
+.It Ar M Ns Pa .h
+The C header that
+.Fl -emit-c-header
+writes for
+.Ar M Ns Pa .tci .
+It begins with a line that says it is generated, and
+.Nm
+overwrites no other file.
+.El
+.Sh EXIT STATUS
+When
+.Nm
+replaces itself with the backend, the status is the backend's.
+Otherwise
+.Nm
+exits 0 when every step succeeds, with the status of the first backend
+step that fails, or ends by the signal that ended it;
+.Fl -print-target
+exits 81 when the backend fails.
+Its own failures have statuses chosen apart from those of C compiler
+drivers:
+.Bl -tag -width Ds
+.It 80
+The program is refused: an error in the source.
+.It 81
+An error of the environment: the command line, a backend that cannot be
+started or gives no target model, or a file that cannot be read or
+written.
+.It 82
+An internal error, a bug in
+.Nm .
+.El
+.Sh EXAMPLES
+Compile a Type-C unit to an object:
+.Pp
+.Dl $ typec -c area.tc
+.Pp
+Build a program from a Type-C unit and a C file, with GCC as the
+backend:
+.Pp
+.Dl $ typec --cc=gcc -o shape shape.tc util.c
+.Pp
+Print the C that
+.Nm
+hands to the backend:
+.Pp
+.Dl $ typec --emit-c token.tc
+.Pp
+Write
+.Pa port.h
+for the C code that uses the types of
+.Pa port.tci :
+.Pp
+.Dl $ typec --emit-c-header port.tci
+.Pp
+Build a project with
+.Nm
+in place of
+.Xr cc 1 :
+.Pp
+.Dl $ make CC=typec
+.Sh SEE ALSO
+.Xr cc 1 ,
+.Xr clang 1 ,
+.Xr gcc 1
+.Pp
+The README and the language design of the source distribution:
+.Lk https://github.com/stass/type-c
+.Sh AUTHORS
+.An Stanislav Sedov Aq Mt stas@deglitch.com

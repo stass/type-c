@@ -1582,10 +1582,10 @@ line, and passes only when `ocamlc` rejects it with that text.
 The backend is the program named by the last `--cc=PATH` option, else by
 the `TYPEC_CC` environment variable when it is set and not empty, else
 `cc`. A name without a slash is looked up in `PATH`. `typec` consumes
-`--cc=`, `--print-target`, `--emit-c`, `--stats` and `--trap-function=`
-where an option can stand (the value of `-o` is never one) and forwards
-every other argument, `--cc` without `=` included, in its original
-order. The backend is run with an
+`--cc=`, `--print-target`, `--emit-c`, `--emit-c-header`, `--stats`,
+`--trap-function=` and `--version` where an option can stand (the value
+of `-o` is never one) and forwards every other argument, `--cc` without
+`=` included, in its original order. The backend is run with an
 argument vector, never through a shell, so `TYPEC_CC` names one program:
 it cannot carry extra arguments such as `ccache gcc`.
 
@@ -1801,6 +1801,29 @@ Exit status: 0 with the model on stdout; 81 when the backend fails,
 cannot be started, is not supported or prints macros the model cannot
 be read from, when it compiles neither probe or both, or for a usage
 error; 82 for an internal error.
+
+## Printing the version
+
+`typec --version` runs `BACKEND --version`, passes on its output, then
+prints `typec` and its release on a last line, such as `typec 0.3`. A
+build tool that tells compilers apart by the output of `$CC --version`,
+such as Meson, or a script that reads its first line thus sees the
+backend. The rest of the command line does not reach the backend and
+nothing is compiled, as GCC and Clang compile nothing with their
+`--version`; an error in one of `typec`'s own options, such as `--cc=`
+without a path, is still one. The status is the backend's, or 81 when
+it cannot be started; a backend that fails or cannot be started is
+named on stderr, and `typec`'s line is still printed. The release has
+one source, the `version` field of `dune-project`, which the build
+writes into `typec`; a release tag `vX.Y` is made after it is set.
+
+## The manual page
+
+`docs/typec.1`, in mdoc(7), is installed by `dune install` as
+`man/man1/typec.1` under the prefix, or under the directory of
+`--mandir`. `test/unit/test_manual.ml` checks its lists of `typec`'s
+options and exit statuses against the driver's tables, and
+`mandoc -Tlint -Wwarning docs/typec.1` checks its markup.
 
 ## Developing typec
 

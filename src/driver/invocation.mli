@@ -22,6 +22,8 @@ type action =
   | Print_target
       (** Print the target model that the backend reports when it is run
           with the arguments as options ([--print-target]). *)
+  | Print_version
+      (** Print the release of [typec] and run nothing ([--version]). *)
 
 (** A backend command: the program to run, the arguments after its name,
     the action, whether to report the counts of each [.tc] input
@@ -51,7 +53,8 @@ val of_command_line :
 (** [of_command_line ~env_cc arguments] takes the backend from the last
     [--cc=PATH] in [arguments], else from [env_cc] (the value of
     [TYPEC_CC]) when it is set and not empty, else ["cc"]. The action is
-    [Print_target] when [--print-target] appears anywhere, else
+    [Print_version] when [--version] appears anywhere, else
+    [Print_target] when [--print-target] does, else
     [Emit_c_header] when [--emit-c-header] does, else [Emit_c] when
     [--emit-c] does, else [Compile]; [--emit-c] with [--emit-c-header] is
     an error; [stats] is whether [--stats]

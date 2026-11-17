@@ -1512,9 +1512,10 @@ types (design 13.3).
   names it.
 - [Low] A run record names `typec` by the digest of its binary and
   labels the revision its caller names for the checkout as that at run
-  time, because `typec` cannot report the revision it was built from. A
-  `typec --version` printing it would name the binary exactly; today
-  `--version` goes to the backend like any unknown option.
+  time, because `typec` cannot report the revision it was built from:
+  `typec --version` prints the release of `dune-project` only. Printing
+  the revision too would name the binary exactly, but needs git at build
+  time, which a release tarball lacks.
 - [Medium] The corpus runner trusts a test script to test every program
   that linked: gcc-torture and Csmith re-read the recipe and skip a
   program whose file is missing, c-testsuite globs its own list. The

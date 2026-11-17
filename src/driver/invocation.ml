@@ -1,7 +1,7 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-type action = Compile | Emit_c | Emit_c_header | Print_target
+type action = Compile | Emit_c | Emit_c_header | Print_target | Print_version
 
 type t = {
   program : string;
@@ -48,7 +48,8 @@ let choose_trap typec_options =
 
 let choose_action typec_options =
   let given option = List.mem_assoc option typec_options in
-  if given Cc_option.Print_target then Print_target
+  if given Cc_option.Version then Print_version
+  else if given Cc_option.Print_target then Print_target
   else if given Cc_option.Emit_c_header then Emit_c_header
   else if given Cc_option.Emit_c then Emit_c
   else Compile

@@ -127,6 +127,24 @@ let cases =
       arguments = [ "--print-target"; "--cc=" ];
       expected = Error Invocation.Empty_cc_option;
     };
+    {
+      name = "--version beats every other action";
+      env_cc = None;
+      arguments = [ "--emit-c"; "--print-target"; "--version"; "x.tc" ];
+      expected = Ok ("cc", [ "x.tc" ], Print_version);
+    };
+    {
+      name = "look-alikes of --version are forwarded";
+      env_cc = None;
+      arguments = [ "-version"; "-v" ];
+      expected = Ok ("cc", [ "-version"; "-v" ], Compile);
+    };
+    {
+      name = "--cc= without a path is an error with --version";
+      env_cc = None;
+      arguments = [ "--version"; "--cc=" ];
+      expected = Error Invocation.Empty_cc_option;
+    };
   ]
 
 let outcome case =

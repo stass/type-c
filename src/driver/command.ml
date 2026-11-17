@@ -60,19 +60,26 @@ let stop_if_caught () =
   | Some signal -> raise (Stopped (Signal signal))
   | None -> ()
 
-(* A step that fails ends the pipeline as the backend ended. waitpid
-   reports a stopped child only when asked to, which Process.run does not. *)
+(* How a backend [command] ended, or, as an error, typec's own failure
+   to run it, already reported. waitpid reports a stopped child only when
+   asked to, which Process.run does not. *)
+let run_backend ~stdin ~stdout command =
+  match Process.run ~stdin ~stdout ~stderr:Unix.stderr command with
+  | Unix.WEXITED status -> Ok (Exit status)
+  | Unix.WSIGNALED signal -> Ok (Signal signal)
+  | Unix.WSTOPPED _ ->
+      report "internal error, a bug in typec: the backend was reported stopped";
+      Error (Exit (Exit_status.code Exit_status.Internal))
+  | exception Unix.Unix_error (error, _, _) ->
+      report (cannot_run (List.hd command) error);
+      Error (Exit (Exit_status.code Exit_status.Environment))
+
+(* A step that fails ends the pipeline as the backend ended. *)
 let run_step ~stdin ~stdout command =
   stop_if_caught ();
-  (match Process.run ~stdin ~stdout ~stderr:Unix.stderr command with
-  | Unix.WEXITED 0 -> ()
-  | Unix.WEXITED status -> raise (Stopped (Exit status))
-  | Unix.WSIGNALED signal -> raise (Stopped (Signal signal))
-  | Unix.WSTOPPED _ ->
-      stop Exit_status.Internal
-        "internal error, a bug in typec: the backend was reported stopped"
-  | exception Unix.Unix_error (error, _, _) ->
-      stop Exit_status.Environment (cannot_run (List.hd command) error));
+  (match run_backend ~stdin ~stdout command with
+  | Ok (Exit 0) -> ()
+  | Ok outcome | Error outcome -> raise (Stopped outcome));
   stop_if_caught ()
 
 let with_file path flags f =
@@ -264,7 +271,8 @@ let run_pipeline (invocation : Invocation.t) temp_dir =
       run_planned
         (Pipeline.plan_header ~program ~temp_dir arguments)
         (run_header ~program ~stats ~trap)
-  | Invocation.Compile | Invocation.Emit_c | Invocation.Print_target ->
+  | Invocation.Compile | Invocation.Emit_c | Invocation.Print_target
+  | Invocation.Print_version ->
       let emit_c = invocation.action = Invocation.Emit_c in
       run_planned
         (Pipeline.plan ~program ~emit_c ~temp_dir arguments)
@@ -292,8 +300,44 @@ let compile_through_pipeline invocation =
   in
   finish outcome
 
+(* A backend that fails to answer is named, since some, like false(1),
+   fail without a word. *)
+let print_backend_version program =
+  let command = [ program; "--version" ] in
+  match run_backend ~stdin:Unix.stdin ~stdout:Unix.stdout command with
+  | Ok (Exit 0) -> Exit 0
+  | Ok (Exit _ as outcome) ->
+      report
+        (Printf.sprintf "the C compiler %S failed to print its version"
+           program);
+      outcome
+  | Ok (Signal _ as outcome) | Error outcome -> outcome
+
+(* A reader that stops at the backend's first line, as head -1 does, may
+   have closed the pipe before this line: that is no failure, so SIGPIPE,
+   ignored only now that the backend no longer inherits it, must not end
+   typec. Any other failed write fails the command. *)
+let print_release () =
+  let line = "typec " ^ Version.release ^ "\n" in
+  Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+  try ignore (Unix.write_substring Unix.stdout line 0 (String.length line))
+  with
+  | Unix.Unix_error (Unix.EPIPE, _, _) -> ()
+  | Unix.Unix_error (error, _, _) ->
+      fail Exit_status.Environment
+        ("cannot write the version: " ^ Unix.error_message error)
+
+(* The backend answers first, so a build tool that tells compilers apart
+   by the output of --version sees the backend; typec's line follows it
+   whatever the backend did. *)
+let print_version { Invocation.program; _ } =
+  let outcome = print_backend_version program in
+  print_release ();
+  finish outcome
+
 let perform (invocation : Invocation.t) =
   match invocation.action with
+  | Invocation.Print_version -> print_version invocation
   | Invocation.Print_target -> print_target invocation
   | Invocation.Emit_c | Invocation.Emit_c_header ->
       compile_through_pipeline invocation

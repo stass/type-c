@@ -5539,6 +5539,25 @@ language is defined here and not by the tool.
   how many of the tested indexes and `slice_sub`s hold a call or a
   statement expression in an operand after the first (rule 10): the
   counts that P28 reads.
+- `--version` runs the backend with `--version` alone, passes on its
+  output, then prints `typec` and its release on a last line, and exits
+  with the backend's status, or 81 when it cannot be started. Build
+  tools tell compilers apart by the output of `$CC --version`: Meson
+  knows a compiler only by it and reads the compiler's version from it,
+  and scripts read its first line. With the backend's lines first and
+  unchanged, they see the backend, so
+  `typec` keeps standing in for `cc`, while a packaged `typec` still
+  names its own release. The rest of the command line does not reach
+  the backend and nothing is compiled, as GCC and Clang compile nothing
+  with their `--version`; an error in one of `typec`'s own options is
+  still one. A backend that fails or cannot be started is named on
+  stderr, and `typec`'s line still follows, since the release is known
+  without it. Clang's `Target:` line follows the options that select
+  the target, which the backend does not get, so it names the default
+  target, not the one a `CC` such as `typec --target=...` selects. The
+  release is the
+  `version` field of `dune-project`, its one source, which the build
+  writes into the driver.
 - With a `.tc` input, `-fpack-struct` without a value is refused as an
   error of the command line: under it GCC ignores the three lines of
   the bracket that 10.3 writes around an instance and warns of each,

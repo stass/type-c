@@ -40,6 +40,7 @@ type typec_option =
   | Emit_c_header  (** [--emit-c-header] *)
   | Stats  (** [--stats] *)
   | Trap_function  (** [--trap-function=NAME] *)
+  | Version  (** [--version] *)
 
 (** What an option is to the pipeline of a [.tc] input. *)
 type role =
@@ -86,6 +87,10 @@ val classify : string -> t
     starts with ["--"] and [Common] with no value otherwise. An argument
     that starts with ['@'] is a response file, which is [Refused]:
     [typec] does not read the options inside it. *)
+
+val typec_spellings : string list
+(** The spellings of the options of [typec] in the table, a joined
+    value's spelling ending in ['='], such as ["--cc="]. *)
 
 val role : t -> string list -> role
 (** [role option values] is the role of [option] with its separate

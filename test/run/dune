@@ -24,6 +24,13 @@
  (action
   (run sh -c ". ./backends.sh && backends_report")))
 
+; version.t compares the output of --version with the release that
+; dune-project names.
+
+(cram
+ (applies_to version)
+ (deps %{project_root}/dune-project))
+
 ; read.t runs the reader on the output of both backends.
 
 (executable

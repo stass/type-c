@@ -15,3 +15,11 @@
  (deps diagnostics.md)
  (action
   (progn)))
+
+; The manual page; test/unit/test_manual.ml checks its lists of options
+; and exit statuses against the driver's.
+
+(install
+ (section man)
+ (package typec)
+ (files typec.1))
