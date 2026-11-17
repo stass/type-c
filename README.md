@@ -1739,6 +1739,12 @@ builds a universal binary from them, but step 1 preprocesses for one
 architecture only. Build each architecture with its own `-arch` and join
 the results with `lipo -create`.
 
+A freestanding build passes `-ffreestanding -nostdlib` as for C. The
+objects need from the environment what the same C needs, such as
+`memset`, and nothing more: a trap is `__builtin_trap()`, an
+instruction on x86-64 and AArch64
+([design 10.4](type-c-language-design.md#104-functions-and-objects)).
+
 The temporary directory is made with mode 0700 in `TMPDIR`, or `/tmp`,
 and removed on every way out. SIGHUP, SIGINT, SIGPIPE, SIGQUIT and
 SIGTERM are passed on to the running backend; `typec` then removes the

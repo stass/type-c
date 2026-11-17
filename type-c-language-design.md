@@ -4419,6 +4419,15 @@ Functions and objects that are not generic are C functions and objects
 under their source names with their C types. Nothing is mangled, and no
 runtime library is linked.
 
+So a freestanding program (`-ffreestanding -nostdlib`) needs from its
+environment what the same C needs there, and nothing more: the lowering
+calls no function but the trap function that the program names with
+`--trap-function` (10.5). That includes `memcpy`, `memmove`, `memset`
+and `memcmp`, which GCC and Clang require of every freestanding
+environment and call for copies and initialisers. The one fact that
+Type-C adds is the trap: GCC lowers `__builtin_trap` to a call of
+`abort` on a target without a trap instruction.
+
 ### 10.5 Traps
 
 A *trap* stops execution at the point of failure and never returns control

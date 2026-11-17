@@ -1088,7 +1088,12 @@ is [type-c-language-design.md](type-c-language-design.md).
   fact and `lvalue` instead of walking the syntax in `addressable`.
 - [Medium] `--trap-function=name` (design 10.5) is not implemented: a
   trap is `__builtin_trap()` alone. Add the option to the driver and
-  pass the name to lowering, with a run test on both backends. The name
+  pass the name to lowering, with a run test on both backends, and
+  build `test/run/freestanding.t` with it, the trap function declared
+  `extern` in its program like the other names it expects. Lowering
+  spells the trap in five places (`trap`, `slice_trap` and three
+  literals in `src/emit/lowering.ml`); make them one before the option
+  changes it. The name
   is the program's, so a block may hide it where a trap is written,
   against design 13.5 (every name lowering writes is claimed or
   reserved): say in 10.5 how the call reaches it, for example through
