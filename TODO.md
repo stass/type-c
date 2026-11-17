@@ -1540,12 +1540,6 @@ types (design 13.3).
   +432, `next_token` +208). Measure whether a `result` whose error
   type has no fields could be returned as a bare pointer or `int`
   (design 3.5, 13.4), which is one of the compact layouts of design 12.
-- [Medium] Pilot B's `RECORD.md` (branch `port`) argues function by
-  function that the repeated cleanups are not where the size goes, and
-  does not hold the measurement that design 15 (P9) rests on: the text
-  of `toml.tc` without its 9 `defer` statements and of `toml_goto.c`
-  without its 9 cleanups. Add the two builds and their table to the
-  record, then cite the record's commit in design 15.
 - [Medium] Alpine packages no csmith (3.24), so the csmith recipe
   fails to set up in the Alpine host images (`prepare.sh: csmith is not
   installed`). Build a pinned csmith from source in alpine.Dockerfile, or

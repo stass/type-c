@@ -4409,7 +4409,8 @@ A row whose last column reads **Decided** is settled: its third column
 holds the evidence, and the rules it names carry no mark. The stage
 numbers refer to the implementation plan. Pilot B is the rewrite of
 tomlc99, a TOML parser, in Type-C; its counts are in `RECORD.md`, on the
-branch `port` of the pilot's repository.
+branch `port` of the pilot's repository at commit 06d4eb8, with the
+scripts that reproduce them (`make size-split`, `tools/bench/run.sh`).
 
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
