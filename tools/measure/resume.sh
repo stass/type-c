@@ -22,7 +22,9 @@
 # array of its own evaluation), "use after free", "write after free",
 # "own[J]" (the store reached element J of the static array), "A[J]" and
 # "B[J]" (the address of the element J of the array of the first or of
-# the later evaluation) and "trap".
+# the later evaluation), "trap" (the test of the slice ended the
+# program), and, for a run that none of these names, "sanitizer: KIND"
+# or "status N".
 #
 # Usage: tools/measure/resume.sh OUT [CC...]
 #
@@ -123,6 +125,19 @@ trapped() {
   esac
 }
 
+# The result of a run that no result of its program names: the kind of
+# the sanitizer's report (C's own index, with no test, reaches beyond
+# the static array), else the exit status.
+unclassified() {
+  kind=$(sed -n 's/^.*ERROR: AddressSanitizer: \([a-z-]*\).*$/\1/p' \
+    "$build/run.err" | head -n 1)
+  if [ -n "$kind" ]; then
+    echo "sanitizer: $kind"
+  else
+    echo "status $status"
+  fi
+}
+
 # The result of resume: where the resumed evaluation read.
 resume_result() {
   if grep -q 'heap-use-after-free' "$build/run.err"; then
@@ -132,7 +147,7 @@ resume_result() {
   elif trapped; then
     echo trap
   else
-    echo "other: $(tail -n 1 "$build/run.out")"
+    unclassified
   fi
 }
 
@@ -145,7 +160,7 @@ arg_result() {
   elif trapped; then
     echo trap
   else
-    echo "other: $(tail -n 1 "$build/run.out")"
+    unclassified
   fi
 }
 
@@ -156,7 +171,7 @@ tear_result() {
   elif trapped; then
     echo trap
   else
-    echo "other: $(tail -n 1 "$build/run.out")"
+    unclassified
   fi
 }
 
