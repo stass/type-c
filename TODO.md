@@ -19,6 +19,181 @@ is [type-c-language-design.md](type-c-language-design.md).
   hosts in containers, the arm64 ones under emulation, and the FreeBSD
   one over ssh, on a machine of the owner's.)
 
+## Diagnostic quality (plan package 4.2)
+
+The records: Pilot A's `RECORD.md` and `WRITEUP.md`
+(`/Volumes/Optaine/type-c-pilot-a`, 323777ec9bca) count the sites of
+each friction by cause and list the diagnostics of the gate-6
+injections; Pilot B's `RECORD.md` (`/Volumes/Optaine/type-c-pilot-b`,
+06d4eb86245a, "What section 15 asks Pilot B to count") lists every
+refusal met while porting; Pilot C's `README.md`
+(`/Volumes/Optaine/type-c-pilot-c`, 83abeeab038f, "Features, and what
+`typec` made hard") met no diagnostic that was hard to act on. Missing:
+Pilot A kept no text or count of the diagnostics its port met, only the
+counts of the sites that friction shaped, so its frequencies below are
+those of the sites. The first part of the review, 45 mutations of
+Pilot B and the container library, is `/Volumes/Optaine/diag-review/
+review.md`; the probes of the items marked "probe", one common mistake
+of a C programmer each, are in `/Volumes/Optaine/diag-review/probes`
+(`probe.sh`, `probe2.sh`, `probe3.sh`, output in `out2.txt`). Read
+well already, saying what, where and what to write: a missed
+constructor, a dropped result, a result assigned to a C type, `try`
+outside a result function or on an option, `try` of a void result, a
+`switch` or `==` on a variant, a `break` that leaves an arm early, a
+jump into or out of a deferred statement. No message cites the design.
+The items are ordered by how often real code meets them.
+
+- [Medium] An operation on a distinct type does not name the
+  operation, and "crosses" is the design's word. `i++` and `a[i]` with
+  `type idx = distinct int` give "a value of the distinct type 'idx'
+  takes no such operation; a cast to its underlying type crosses to
+  it [distinct-operation]". Proposed: "'++' is not defined on the
+  distinct type 'idx'; cast to 'int' and back: 'i = (idx)((int)i +
+  1)'", and for an index "an index of the distinct type 'idx'; cast it
+  to 'int'". Source: Pilot A (15 increments, 7 index casts, 17 casts
+  to print, casts to compare against `int` limits); probe.
+- [Medium] A C idiom on a variant gets no type or no fix. `if (v)` and
+  `if (f())` on a result give C's "the operand is not of scalar type
+  (C11 6.8.4.1p1)", naming no type; `v.r`, `f() < 0`, `!o` and `o + 1`
+  give "the variant 'result(int, err)' takes no such operation; Type-C
+  text reaches its tag and fields only through constructors and
+  matching [variant-operation]", which names no operator and uses the
+  design's "Type-C text"; only `==` and `!=` get the hint of the
+  single-pattern test. Proposed: name the operator and the variant,
+  "'<' is not defined on the variant 'result(int, err)'"; then the fix
+  by what was written: for a condition, a comparison or `!`, "test it
+  with 'if (case Ok(v) = f())'"; for `.r`, "'r' is a field of
+  'Circle'; bind it with 'if (case Circle(r) = v)'". Source: Pilot A
+  (49 accessor calls and 92 predicate calls stand where C read the
+  field or the tag); review cases 19 and 35; probe.
+- [Medium] A binding in an arm of several labels: `case Circle(x): case
+  Square(x):` gives "the binding 'x' is in an arm of several labels,
+  which none of them may bind [shared-arm-binding]", which reads as a
+  contradiction. Proposed: "the labels 'Circle(x)' and 'Square(x)'
+  share an arm, so neither may bind a field; give each label its own
+  arm". Source: Pilot A (39 shared arms at Step 6, 18 at Step 7);
+  probe.
+- [Medium] An array or a pointer passed where a slice is expected:
+  `g(c)` with `char c[4]` and `size_t g(str s)` gives "a value of type
+  'char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)",
+  which names the decayed pointer where the user wrote an array; a
+  generic callee gives "the argument's type does not match its
+  parameter's: it has 'char *' where the parameter type has 'slice(T)'
+  [deduction-mismatch]". Proposed: "the array 'c' does not convert to
+  'slice(const char)'; pass 'slice_from_array(c)'", and for a pointer
+  "...; make a slice with 'slice_unchecked(p, n)'". Source: probe; the
+  first step of moving C's strings to `str` (Pilot B's string handling,
+  Pilot C's `slice_unchecked` at every trust boundary).
+- [Medium] The end of a match arm can be reached: a ported `switch`
+  whose last case has no `break`, or a C fall-through, gives "the end of
+  the match arm can be reached [match-arm-end]", naming neither the arm
+  nor the fix. Proposed: "the arm of 'Triangle(_, _, _)' can reach its
+  end; end it with break, return, continue or goto, as control does not
+  fall into the next arm". Source: Pilot A (gate-6 injection, class 3;
+  9 upstream switches fell out to code after them); probe.
+- [Medium] A binding used where it is not in scope reads as an
+  undeclared name: `r` after `if (case Circle(r) = s) ...;`, or `r` of
+  the Circle arm used in the Square arm, gives "'r' is not declared
+  (C11 6.5.1p2)". Proposed, when a pattern of the function binds the
+  name: "'r' is bound only in the arm of 'Circle(r)' at line 12".
+  Source: Pilot A (gate-6 injection, "'addr' is not declared"); the
+  smtp example's README quotes it (`from` in `rset`); probe.
+- [Medium] A constructor where no variant of it is the target type. A
+  universe constructor gets a note in the design's terms: `return
+  (Err(NoMemory));` in a function returning `err`, `return (None);` in
+  a result function and `(void)Some(3)` give "'Err' is not declared
+  (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is named
+  alone only where the target type is a variant with a constructor of
+  that name, and elsewhere is written qualified". A constructor of the
+  unit's own variant (`int x = NoMemory;`) and any constructor in C
+  text (a `.h`) get no note (`Expressions.undeclared`). Proposed:
+  "'Err' is a constructor of 'result(T, E)', and 'err' is expected
+  here", and in C text "...; in C text a constructor is written
+  qualified, 'result(int, e2).Err(Bad)'". Looking the name up among the
+  constructors of the visible variants would cover both and could
+  replace `Universe.constructors`, which reads the universe text a
+  second time beside the parser, as `Ctype.result_ok` and `result_err`
+  spell two of its names a third time (`test_naming` pins the three
+  together). Source: review cases 31 and 32 (Pilot B); probe.
+- [Medium] `try-name-capture` on `T *p = try f(sizeof(*p));` says
+  "'p' is not visible where lowering writes the text", naming lowering
+  and no remedy. Pilot B met it 4 times and wrote `sizeof(T)` each
+  time, which no longer follows the type of `p`. Proposed: "'p' is
+  declared by this declaration, so its initializer's try cannot name
+  it; write 'T *p; p = try f(sizeof(*p));'". Source: Pilot B; probe.
+- [Medium] Conversion hints for a variant. The hint of a refused
+  conversion (`Expressions.record_conversion_hint`) looks only at which
+  side is a structure: `option(point) o = p;` gets no "make one with a
+  constructor", a `result(void, E)` towards `int` is told to use `try`,
+  which has no value there, a pointer to an option is told to make one
+  where `*p` was meant, and `return (NULL);` for an `option(int)` is
+  told to "make one with a constructor of 'option(int)'" where `None`
+  is meant. The full conversion check of Type-C text gives C's own
+  message where a refusal used to carry a hint: `return c ? Some(1) :
+  0;` gets C11 6.5.15p3's operands message, and `return (Ok("x"));` for
+  a `result(int, err)` gets "a value of type 'char *' does not convert
+  to 'int' without a cast (C11 6.5.16.1p1)", naming neither `Ok` nor
+  its field. Proposed: decide the hint by what the variant holds (a
+  constructor whose field the source converts to, an Ok whose type
+  converts to the target, `None` for a null pointer constant), and name
+  the constructor's field as the `[constructor-expression]` messages
+  do: "the argument for the field 'value' of 'Ok' is of type 'char *',
+  not 'int'". Source: review cases 18, 22, 25 and 28; probe.
+- [Low] A typed binding of a field that is no variant: `case
+  Circle(double r)`, written as C declares, gives "expected a
+  sub-pattern, found `double`". Proposed: "a field of type 'double' is
+  bound by its name alone, 'Circle(r)'; a type stands before a binding
+  only at a field of a variant type". Source: probe (the tutorial's
+  `Setting(Port, value v)` shows the typed form).
+- [Low] A binding that its arm never uses fails a `-Werror` build with
+  the backend's `-Wunused-variable`, which quotes the lowered text,
+  `const __typeof__(__tc_match0->u.Circle.r) r = ...`. Proposed: the
+  lowered declaration carries the source line and spelling only, so the
+  backend quotes the pattern, or `typec` reports "the binding 'r' of
+  'Circle(r)' is not used; write '_'" and lowering marks bindings
+  unused; see the item on backend diagnostics of lowered constructs
+  under "Driver". Source: probe; Pilot B's record, friction 3.
+- [Low] `private-creation`: `(port)80` outside the owner gives "the
+  distinct type 'port' is private to './priv.tci', so only the text of
+  its owner creates its values", naming the owner by the path the
+  backend found it through, and not the cast. Proposed: "the cast makes
+  a value of 'port', which is private to 'priv.tci'; only that
+  interface's functions make one". Source: Pilot A (Step 10, gate-6
+  injections); probe.
+- [Low] A match of a pointer: "the scrutinee of a match is of type
+  'shape *', not a variant type; a pointer is not dereferenced
+  implicitly [match-scrutinee]". Proposed: add "; write 'match (*s)'".
+  Source: probe.
+- [Low] Messages print types without their typedef names: `str` as
+  `slice(const char)`, `size_t` as `unsigned long`. Source: review
+  cases 01, 04 and 22; probe.
+- [Low] The parser quotes names with backticks, the typing stages with
+  single quotes as GCC and Clang do, and some typing messages use
+  backticks too (`[early-break]`, `[deferred-exit]`); pick one, in
+  `Parser.quoted` and the literal backticks (about 260 golden lines).
+  `Parser.quoted` also cuts at 40 bytes, which may split a UTF-8
+  sequence, where the typing stages cut with `Shown.cut`; one cut goes
+  with the one quoting. Source: review; probe.
+- [Low] A misspelt constructor, `Circel(1.0)`, gives "'Circel' is not
+  declared (C11 6.5.1p2)". Proposed: add "; did you mean the
+  constructor 'Circle' of 'shape'?" when one constructor of a visible
+  variant is within an edit distance of one or two. Source: review case
+  03; probe.
+- [Low] A constructor given too few arguments: "the constructor
+  'Triangle' takes one argument for each of its 3 fields
+  [constructor-expression]". Proposed: "...; it is given 2". Source:
+  the smtp example's README; probe.
+- [Low] A mismatched argument of a generic call, `put(&b, "x")` with
+  `generic(T) void put(box(T) *b, T v)`, gives "a value of type 'char
+  *' does not convert to 'double' without a cast", naming neither the
+  argument nor the callee. Proposed: "the argument 'v' of 'put' is of
+  type 'char *', not 'double'". Source: probe.
+- [Low] An index out of range of a slice traps at run time with
+  "Illegal instruction" and no location, where C's `-Warray-bounds`
+  names the line for an array. Decide whether the tutorial's section on
+  checked indexing shows `--trap-function` with a handler that prints
+  the location, or the default trap carries one. Source: probe.
+
 ## Driver
 
 - [Low] `typec --cc=clang` fails with a backend error on the valid C
@@ -534,35 +709,6 @@ the order of its commits:
   `len` 0, which C accepts. Decide whether a braced list may initialise
   a slice member by member (design section 8), or refuse it as a
   variant's is refused.
-- [Medium] Diagnostics that need more than wording to read well
-  (cases in `/Volumes/Optaine/diag-review/review.md`):
-  - The hint of a refused conversion of a variant
-    (`Expressions.record_conversion_hint`) looks only at which side is
-    a structure: `option(point) o = p;` gets no "make one with a
-    constructor", a `result(void, E)` towards `int` is told to use
-    `try`, which has no value there, and a pointer to an option is told
-    to make one where `*p` was meant. Decide by what the variant holds:
-    a constructor whose field the source converts to, an Ok whose type
-    converts to the target.
-  - A constructor of the unit's own variant written alone where no
-    variant of it is expected reads "'A' is not declared"; only the
-    universe's constructors get a note (`Expressions.undeclared`).
-    Looking the name up among the constructors of the visible variants
-    would cover both and could replace `Universe.constructors`, which
-    reads the universe text a second time beside the parser, as
-    `Ctype.result_ok` and `result_err` spell two of its names a third
-    time (`test_naming` pins the three together).
-  - `if (v)` and `while (v)` on a variant get no hint towards
-    `if (case P = v)`, and `switch` on a variant is a C refusal without
-    the `[variant-operation]` name that `==` on one carries.
-  - Messages print types without their typedef names: `str` as
-    `slice(const char)`, `size_t` as `unsigned long`.
-  - The parser quotes names with backticks, the typing stages with
-    single quotes as GCC and Clang do; pick one, in `Parser.quoted`
-    and the parser's literal backticks (about 260 golden lines).
-    `Parser.quoted` also cuts at 40 bytes, which may split a UTF-8
-    sequence, where the typing stages cut with `Shown.cut`; one cut
-    goes with the one quoting.
 - [Medium] The `Unknown_type` arm of `Expressions.generic_call` types
   no callee at all and may be unreachable, as `generic-function-form`
   refuses the function types that could reach it: show it reachable
@@ -640,13 +786,6 @@ the order of its commits:
   error on lowered code. Type-C text checks it in full (design 5); a
   constructor is a Type-C construct, so checking its arguments in full
   in any text would leave the C-text record check needless.
-- [Low] The full conversion check of Type-C text (design 5) gives C's
-  own message where a refusal used to carry a Type-C hint: `return c ?
-  Some(1) : 0;` now gets C11 6.5.15p3's operands message, not the advice
-  to make the value with a constructor, and a variant field initialised
-  from a wrong type gets the plain conversion message. Decide in plan
-  4.2's review of diagnostics on the pilots which of them need the hint
-  back.
 - [Medium] A `transparent_union` attribute on a union specifier
   (`union __attribute__((transparent_union)) u { ... };`) makes only
   that specifier's type unknown, so a later `union u` parameter is a
@@ -2008,16 +2147,6 @@ types (design 13.3).
   own unwind entry (about 2 KB of .eh_frame and code). Find the .rodata
   mechanism before changing the lowering; see the item on the trapping
   default in a hot loop.
-- [Low] Two diagnostics from Pilot A's injections: `private-creation` gives no
-  column and names the owner by the path the backend found it through
-  (`./type.tci`); and a binding of another arm used in an arm reads
-  "'addr' is not declared (C11 6.5.1p2)" with no name, where a message
-  naming the arm that binds it would point at the mistake.
-- [Low] `try-name-capture` on `T *p = try f(sizeof(*p));` says that `p` is not
-  visible where lowering writes the text and names no remedy. Pilot B
-  met it 4 times and wrote `sizeof(T)` each time, which no longer
-  follows the type of `p`. Have the message suggest `T *p; p = try
-  f(sizeof(*p));`, which design 5.1 rule 3 accepts.
 - [Low] P9 was decided on deferred statements that are each a single
   call (design 15). The cost of repetition grows with the size of the
   deferred statement times the exits of its scope: measure it on code
