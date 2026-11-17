@@ -1213,7 +1213,7 @@ the try under an if on its truth (design 13.5).
    h(q *p, int c) {
     int x;
     
-  const int __tc_c0 = ( p ) ? 1 : 0; struct result__ii __tc_t0; if (__tc_c0) { __tc_t0 = ( check ( p ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); } }
+  const int __tc_c0 = ( p ) ? 1 : 0; struct result__ii __tc_t0 = { 0 }; if (__tc_c0) { __tc_t0 = ( check ( p ) ); if (__tc_t0.tag != result__ii_Ok) { if (__tc_t0.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t0.u.Err.error } }); } }
   if (
   __tc_c0
    && 
@@ -1221,7 +1221,7 @@ the try under an if on its truth (design 13.5).
    > 0)
       use(p);
     
-  const int __tc_c1 = ( c ) ? 1 : 0; struct result__ii __tc_t1; struct result__ii __tc_t2; if (__tc_c1) { __tc_t1 = ( f ( ) ); if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); } } else { (void)( g ( ) ); __tc_t2 = ( h2 ( ) ); if (__tc_t2.tag != result__ii_Ok) { if (__tc_t2.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); } }
+  const int __tc_c1 = ( c ) ? 1 : 0; struct result__ii __tc_t1 = { 0 }; struct result__ii __tc_t2 = { 0 }; if (__tc_c1) { __tc_t1 = ( f ( ) ); if (__tc_t1.tag != result__ii_Ok) { if (__tc_t1.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); } } else { (void)( g ( ) ); __tc_t2 = ( h2 ( ) ); if (__tc_t2.tag != result__ii_Ok) { if (__tc_t2.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); } }
   x = 
   __tc_c1
    ? 
@@ -1232,7 +1232,7 @@ the try under an if on its truth (design 13.5).
   __tc_t2.u.Ok.value
   );
     
-  struct result__ii __tc_t3 = ( f ( ) ); if (__tc_t3.tag != result__ii_Ok) { if (__tc_t3.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t3.u.Err.error } }); } const int __tc_c2 = ( __tc_t3.u.Ok.value ) ? 1 : 0; int __tc_c3; struct result__ii __tc_t4; if (!__tc_c2) { __tc_c3 = ( x ) ? 1 : 0; if (__tc_c3) { __tc_t4 = ( f ( ) ); if (__tc_t4.tag != result__ii_Ok) { if (__tc_t4.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t4.u.Err.error } }); } } }
+  struct result__ii __tc_t3 = ( f ( ) ); if (__tc_t3.tag != result__ii_Ok) { if (__tc_t3.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t3.u.Err.error } }); } const int __tc_c2 = ( __tc_t3.u.Ok.value ) ? 1 : 0; int __tc_c3 = 0; struct result__ii __tc_t4 = { 0 }; if (!__tc_c2) { __tc_c3 = ( x ) ? 1 : 0; if (__tc_c3) { __tc_t4 = ( f ( ) ); if (__tc_t4.tag != result__ii_Ok) { if (__tc_t4.tag != result__ii_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t4.u.Err.error } }); } } }
   x = 
   __tc_c2
    || (
@@ -1287,7 +1287,7 @@ reads nothing of it.
   ((void)0)
   , n++;
     
-  const int __tc_c0 = ( c ) ? 1 : 0; struct result__vi __tc_t1; struct result__vi __tc_t2; if (__tc_c0) { __tc_t1 = ( v ( ) ); if (__tc_t1.tag != result__vi_Ok) { if (__tc_t1.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); } } else { __tc_t2 = ( w ( ) ); if (__tc_t2.tag != result__vi_Ok) { if (__tc_t2.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); } }
+  const int __tc_c0 = ( c ) ? 1 : 0; if (__tc_c0) { struct result__vi __tc_t1 = ( v ( ) ); if (__tc_t1.tag != result__vi_Ok) { if (__tc_t1.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t1.u.Err.error } }); } } else { struct result__vi __tc_t2 = ( w ( ) ); if (__tc_t2.tag != result__vi_Ok) { if (__tc_t2.tag != result__vi_Err) __builtin_trap(); return ((struct result__ii){ .tag = result__ii_Err, .u.Err = { __tc_t2.u.Err.error } }); } }
   
   __tc_c0
    ? 
@@ -1404,7 +1404,7 @@ assigned in it.
   const int __tc_v10 = __tc_t10.u.Ok.value
   int x = { 
   __tc_v10
-  int __tc_v11
+  int __tc_v11 = 0
   __tc_v11 = __tc_t11.u.Ok.value
   ? (int[]){ 
   __tc_v11

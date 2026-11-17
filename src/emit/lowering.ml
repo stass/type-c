@@ -1103,32 +1103,56 @@ let try_temporary (site : Typec_sema.Expressions.try_site) =
   (variant, Printf.sprintf "struct %s %s" (variant :> string)
               (temporary_name site.temporary))
 
+(* Whether the holder reads the temporary of the try of [site] itself,
+   rather than nothing or the converted value. *)
+let holder_reads_temporary (site : Typec_sema.Expressions.try_site) =
+  match site.value with
+  | Read { conversion = Unconverted | To_slice _; _ } -> true
+  | Read { conversion = To_arithmetic _; _ } | No_value -> false
+
 (* The prelude of [holder] (design 13.5), from the text of each hoisted
    operand, [text_of], and the cleanups of the error path of each try,
-   [cleanups_of]. What a truth conditions stands under an if on it, and
-   a temporary assigned under an if is declared before the outermost
-   one. *)
+   [cleanups_of]. What a truth conditions stands under an if on it. A
+   temporary that the holder reads and an if assigns is declared before
+   the outermost if with the value 0, and every other one where it is
+   assigned, with its value, so that no path reads one that it has not
+   assigned: GCC 16 from -O1 cannot tell that the holder reads such a
+   temporary only where the if assigned it, and warns. *)
 let prelude output (holder : Typec_sema.Expressions.try_holder) ~text_of
     ~cleanups_of =
   let tokens = tokens_of output in
   let piece (hoisted : Plan.hoisted) text =
     try_piece output tokens.(hoisted.replaced.first).location text
   in
+  let zero_declared (hoisted : Plan.hoisted) declaration zero =
+    piece hoisted (Printf.sprintf "%s = %s;" declaration zero)
+  in
+  (* Whether the temporary of the try of [site] at [hoisted] is declared
+     before the outermost if over it rather than where it is assigned. *)
+  let declared_before_if (hoisted : Plan.hoisted) site =
+    hoisted.conditions <> [] && holder_reads_temporary site
+  in
   let declared (hoisted : Plan.hoisted) =
     match hoisted.form with
     | Tried { number } ->
         let site = site_of holder hoisted in
         let _, declaration = try_temporary site in
+        let temporary =
+          if declared_before_if hoisted site then
+            [ zero_declared hoisted declaration "{ 0 }" ]
+          else []
+        in
         let value =
           match converted_value site with
           | Some (_, type_name) ->
-              [ piece hoisted
-                  (Printf.sprintf "%s %s;" type_name (value_name number)) ]
+              [ zero_declared hoisted
+                  (Printf.sprintf "%s %s" type_name (value_name number))
+                  "0" ]
           | None -> []
         in
-        piece hoisted (declaration ^ ";") :: value
+        temporary @ value
     | Truth { number } ->
-        [ piece hoisted (Printf.sprintf "int %s;" (truth_name number)) ]
+        [ zero_declared hoisted ("int " ^ truth_name number) "0" ]
     | Discarded_left -> []
   in
   (* The conversion of the value of a try in a braced list after its
@@ -1146,11 +1170,11 @@ let prelude output (holder : Typec_sema.Expressions.try_holder) ~text_of
         [ try_piece output tokens.(site.try_span.first).location
             (Printf.sprintf "%s = %s;" target read) ]
   in
-  (* The form of a hoisted operand, which outside every if declares its
-     temporary and under one assigns it. *)
+  (* The form of a hoisted operand, which declares its temporary where
+     it is assigned unless that is under an if and the holder reads it. *)
   let evaluated ~outside (hoisted : Plan.hoisted) =
-    let taken ~declaration ~name ~after =
-      let target = if outside then declaration else name in
+    let taken ~declared_here ~declaration ~name ~after =
+      let target = if declared_here then declaration else name in
       [ piece hoisted (target ^ " = (") ]
       @ text_of hoisted
       @ [ piece hoisted after ]
@@ -1159,14 +1183,17 @@ let prelude output (holder : Typec_sema.Expressions.try_holder) ~text_of
     | Tried { number } ->
         let site = site_of holder hoisted in
         let variant, declaration = try_temporary site in
-        taken ~declaration ~name:(temporary_name number) ~after:");"
+        let declared_here = not (declared_before_if hoisted site) in
+        taken ~declared_here ~declaration ~name:(temporary_name number)
+          ~after:");"
         @ error_path output
             ~location:tokens.(hoisted.replaced.first).location ~variant site
             ~cleanups:(cleanups_of site)
         @ converted ~outside number site
     | Truth { number } ->
         let name = truth_name number in
-        taken ~declaration:("const int " ^ name) ~name ~after:") ? 1 : 0;"
+        taken ~declared_here:outside ~declaration:("const int " ^ name) ~name
+          ~after:") ? 1 : 0;"
     | Discarded_left ->
         [ piece hoisted "(void)(" ] @ text_of hoisted @ [ piece hoisted ");" ]
   in

@@ -73,11 +73,17 @@ Apple Clang keeps the order at -O0 and at -O2, and GCC at -O0.
 
 The partner, the lowered text with the two Ok fields read in the list
 and no __tc_v temporary, leaves 1: both conversions come after both
-calls, an order that C does not allow.
+calls, an order that C does not allow. Under the if, where each
+temporary of a try is declared inside it, the partner declares the
+temporaries before the if in place of the __tc_v ones.
 
   $ typec --cc=$clang --emit-c -o fenv.i fenv.tc
-  $ sed -e 's/const float __tc_v[0-9]* = [^;]*;//g' \
-  >   -e 's/float __tc_v[0-9]*;//g' -e 's/__tc_v[0-9]* = [^;]*;//g' \
+  $ sed -e '/^static result_float conditioned/,/^}/{
+  >     s/float __tc_v\([0-9]*\) = 0;/struct result__di __tc_t\1;/g
+  >     s/struct result__di \(__tc_t[0-9]*\) = (/\1 = (/g
+  >   }' \
+  >   -e 's/const float __tc_v[0-9]* = [^;]*;//g' \
+  >   -e 's/__tc_v[0-9]* = [^;]*;//g' \
   >   -e 's/__tc_v\([0-9]*\)/__tc_t\1.u.Ok.value/g' fenv.i > fenv_read.i
   $ grep -c __tc_v fenv_read.i
   0
@@ -1112,3 +1118,41 @@ nested, operand).
   > done
   moved: 2 moved: error 1 nested: 12 nested: error 2 operand: 602 operand: error 4 left: 11 left: error 3 initialised: 17 inner: 1 inner: 11 inner: error 5
   moved: 2 moved: error 1 nested: 12 nested: error 2 operand: 602 operand: error 4 left: 11 left: error 3 initialised: 17 inner: 1 inner: 11 inner: error 5
+
+A temporary that the holder reads and an if assigns is declared with
+the value 0, so the optimisers that cannot tell that the holder reads
+it only where the if assigned it warn of no uninitialised read: GCC 16
+from -O1 does so for the temporaries of assigned.tc without the value.
+Each program above, and assigned.tc, compiles without a warning at
+each level.
+
+  $ cat > assigned.tc <<'EOF'
+  > typedef result(int, int) result_int;
+  > result_int f(void);
+  > result_int g(void);
+  > result_int either(int c, int d) {
+  >   int y = (c || try f()) + (d ? try g() : try f());
+  >   return Ok(y);
+  > }
+  > result_int under(int c, int d) {
+  >   int y = c && d ? try f() : 0;
+  >   int z = (c ? try g() : 1) * (d || try f());
+  >   return Ok(y + z);
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   for o in -O1 -O2 -O3 -Os; do
+  >     for program in assigned holders partners beside voids nested; do
+  >       typec --cc=$cc $flags $o -c -o $program.o $program.tc ||
+  >         echo "$cc $o $program"
+  >     done
+  >   done
+  > done
+  $ typec --cc=$gcc --emit-c -o assigned.i assigned.tc
+  $ grep -o 'struct result__ii __tc_t[0-9]* = { 0 };' assigned.i
+  struct result__ii __tc_t0 = { 0 };
+  struct result__ii __tc_t1 = { 0 };
+  struct result__ii __tc_t2 = { 0 };
+  struct result__ii __tc_t0 = { 0 };
+  struct result__ii __tc_t1 = { 0 };
+  struct result__ii __tc_t2 = { 0 };

@@ -682,11 +682,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   = try f();`) takes the check and the object goes unchecked. Key the
   check to the holder's own initialiser, and keep the holder's state
   per holder rather than in mutable fields of the view.
-- [Medium] GCC 16 at `-O1`/`-Os` warns `maybe-uninitialized` on a
-  temporary assigned under an if in a prelude
-  (`int y = (c || try f()) + (d ? try g() : try f());`), which fails
-  `-Werror`. Initialise such temporaries or document it, and run GCC
-  at `-O1` in the run tests.
 - [Medium] A discarded expression whose effects all move to the prelude
   lowers to reads with none: `c && try f();` becomes
   `__tc_c0 && __tc_t0.u.Ok.value;`, which Clang reports under

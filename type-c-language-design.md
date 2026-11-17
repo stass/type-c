@@ -5358,7 +5358,7 @@ Two properties follow by construction:
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | Zero initialiser of an object whose type mentions a type parameter (7.1 rule 3) | The empty initialiser `{}`, whichever of `{0}` and `{}` the source writes, under `__extension__`: before the declaration whose initialiser holds it, `__extension__ T u = {};`, or, where the list of a compound literal holds it, before that literal, `__extension__ (T){}`. As said below the table ("The zero initialiser of a type parameter"). Every other initialiser stays as written. |
-| `try` | Before each holder (5.1 rule 3), its prelude: for each `try`, in the order of 5.1, a temporary of the result type that takes the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary. Then the holder, with the `Ok` field read where each `try` stood, or `((void)0)` where the value of the `try` is discarded or `T` is `void`, where `Ok` has no field (3.5 rule 6); a branch of a discarded conditional reads the field, and an expression statement whose value is such a conditional is cast to `void` (below the table). A `try` that is an initialiser of a braced list and whose value the list converts from one arithmetic type to another takes a second temporary, of the type converted to, which holds the converted value and which the list reads. A first operand that 5.1 evaluates with the `try` expressions takes a temporary of type `int`, and what it conditions stands under an `if` on that temporary, as said below the table. Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
+| `try` | Before each holder (5.1 rule 3), its prelude: for each `try`, in the order of 5.1, a temporary of the result type that takes the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary. Then the holder, with the `Ok` field read where each `try` stood, or `((void)0)` where the value of the `try` is discarded or `T` is `void`, where `Ok` has no field (3.5 rule 6); a branch of a discarded conditional reads the field, and such a conditional is cast to `void` (below the table). A `try` that is an initialiser of a braced list and whose value the list converts from one arithmetic type to another takes a second temporary, of the type converted to, which holds the converted value and which the list reads. A first operand that 5.1 evaluates with the `try` expressions takes a temporary of type `int`, and what it conditions stands under an `if` on that temporary, as said below the table. Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
 | `defer` | The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
 | Slice index, `slice_sub` | An expression at the use, and no call: a comma expression of ISO C that assigns the value of each operand to a temporary of the function, tests, traps (10.5) and then indexes, as said below the table ("The check of a slice"). An index is `(*(assignments, test, &element))`, an lvalue. Where C does not evaluate one, it has no test and no temporary: it is the trap and then its operands, each written once, `(*((void)__builtin_trap(), &(s).data[+(i)]))` for an index, so that it traps where C evaluates it after all. |
 | Conversion to `slice(const T)` (section 8 rule 5) | The form of a `slice_sub` with no bounds and no test: `((void)(__tc_s0 = (e)), (struct C){ __tc_s0.data, __tc_s0.len })`, where `struct C` is the instance converted to and `e` the expression that converts: the expression of a position that has a target type, or an operand that has the target type of the expression around it, or one operand of a conditional operator. Where C does not evaluate it, the form of a `slice_sub` there. A `slice_from_array`, a `slice_unchecked` and a string literal that denotes a `str` hold no temporary and are converted by being written for `struct C`, and so is the value of a `try`, the read of the `Ok` field of its temporary (5.1), which has no side effect: `(struct C){ v.data, v.len }`. |
@@ -5621,10 +5621,23 @@ writes three forms, each with the hoisted operand `e` in parentheses:
 - for the left operand of a comma, the operand as a statement,
   `(void)(e);`.
 
-A temporary that the prelude assigns under an `if` is declared without
-an initialiser directly before the outermost such `if`,
-`struct R __tc_t1;` or `int __tc_c1;`, and the form assigns it,
-`__tc_t1 = (e);`. The holder follows the prelude with three edits: the
+A temporary that the prelude assigns under an `if` and that the holder
+reads is declared with the value 0 directly before the outermost such
+`if`, `struct R __tc_t1 = { 0 };` or `int __tc_c1 = 0;`, and the form
+assigns it, `__tc_t1 = (e);`. Every other temporary is declared where
+the form assigns it, with its value: one whose value the holder
+discards or converts is read only inside its `if`. Without the value
+0, GCC 16 from `-O1` warns that the holder may read the temporary
+uninitialised (`-Wmaybe-uninitialized`), as it cannot tell that the
+holder reads it only where the `if` assigned it, and so fails a build
+under `-Werror`. No form without an initialiser escapes the warning:
+GCC 16 also flags a scalar copy of the `Ok` field made inside the `if`
+and read by the holder. The value is not free everywhere: on x86-64,
+for the six such temporaries of two functions, GCC 16 writes 12 more
+instructions at `-Os`, none more at `-O2` and 8 fewer at `-O1`, and
+Apple Clang 21 writes 2 more instructions at `-Os` and none more at
+`-O2`. The holder
+follows the prelude with three edits: the
 read of the `Ok` field where a `try` stood, `__tc_t0.u.Ok.value`; the
 temporary where a first operand stood, `__tc_c0`; and `(void)0` where
 the left operand of a comma stood. A hoisted operand that holds a
@@ -5675,8 +5688,10 @@ float a[2] = { __tc_v0, __tc_v1 };
 
 The edit of the holder is then the temporary where the `try` stood,
 and no read of the `Ok` field. `__tc_v` takes the number of its `try`,
-and under an `if` it is declared and assigned as the others are,
-`float __tc_v1;` and `__tc_v1 = __tc_t1.u.Ok.value;`.
+and under an `if` it is declared and assigned as the others that the
+holder reads are, `float __tc_v1 = 0;` and
+`__tc_v1 = __tc_t1.u.Ok.value;`, while `__tc_t1` is declared inside
+the `if`.
 
 The temporary has the type of the object that the initialiser
 initialises, without its qualifiers, which typing gives with the
