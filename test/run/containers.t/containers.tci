@@ -1,0 +1,313 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * A container library: a growable vector, a hash map that takes its hash
+ * and equality as function pointers, and a region allocator that frees
+ * everything it handed out at once.
+ */
+
+#ifndef CONTAINERS_TCI
+#define	CONTAINERS_TCI
+
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+
+type container_error = | OutOfMemory | TooLarge;
+
+/* Regions. */
+
+struct region_chunk;
+
+type region = struct {
+	struct region_chunk	*chunks;
+	size_t			 chunk_size;
+};
+
+void	 region_init(region *r, size_t chunk_size);
+void	*region_alloc(region *r, size_t size, size_t align);
+void	 region_release(region *r);
+option(str) region_copy_str(region *r, str s);
+
+generic(T) T *
+region_new(region *r)
+{
+
+	return (region_alloc(r, sizeof(T), _Alignof(T)));
+}
+
+/* Vectors. */
+
+type vector(T) = struct {
+	T	*data;
+	size_t	 length;
+	size_t	 capacity;
+};
+
+generic(T) void
+vector_init(vector(T) *v)
+{
+
+	v->data = NULL;
+	v->length = 0;
+	v->capacity = 0;
+}
+
+generic(T) void
+vector_free(vector(T) *v)
+{
+
+	free(v->data);
+	vector_init(v);
+}
+
+generic(T) result(void, container_error)
+vector_reserve(vector(T) *v, size_t capacity)
+{
+	T *data;
+
+	if (capacity <= v->capacity)
+		return (Ok);
+	if (capacity > SIZE_MAX / sizeof(T))
+		return (Err(TooLarge));
+	data = realloc(v->data, capacity * sizeof(T));
+	if (data == NULL)
+		return (Err(OutOfMemory));
+	v->data = data;
+	v->capacity = capacity;
+	return (Ok);
+}
+
+/* The capacity doubles, from VECTOR_FIRST_CAPACITY. */
+#define	VECTOR_FIRST_CAPACITY	8
+
+generic(T) result(void, container_error)
+vector_push(vector(T) *v, T value)
+{
+	size_t capacity;
+
+	if (v->length == v->capacity) {
+		capacity = VECTOR_FIRST_CAPACITY;
+		if (v->capacity != 0) {
+			if (v->capacity > SIZE_MAX / 2)
+				return (Err(TooLarge));
+			capacity = 2 * v->capacity;
+		}
+		try vector_reserve(v, capacity);
+	}
+	v->data[v->length++] = value;
+	return (Ok);
+}
+
+/*
+ * Appends items.  Growing moves the elements to a new buffer and frees
+ * the old one only after the copy, so items may lie in v.
+ */
+generic(T) result(void, container_error)
+vector_append(vector(T) *v, slice(const T) items)
+{
+	T *data;
+	size_t capacity, i;
+
+	/* The capacity is at most SIZE_MAX / sizeof(T), so this is exact. */
+	if (items.len > SIZE_MAX / sizeof(T) - v->length)
+		return (Err(TooLarge));
+	data = v->data;
+	capacity = v->capacity;
+	if (v->length + items.len > capacity) {
+		capacity = v->length + items.len;
+		data = malloc(capacity * sizeof(T));
+		if (data == NULL)
+			return (Err(OutOfMemory));
+		for (i = 0; i < v->length; i++)
+			data[i] = v->data[i];
+	}
+	for (i = 0; i < items.len; i++)
+		data[v->length + i] = items[i];
+	if (data != v->data) {
+		free(v->data);
+		v->data = data;
+		v->capacity = capacity;
+	}
+	v->length += items.len;
+	return (Ok);
+}
+
+generic(T) option(T)
+vector_pop(vector(T) *v)
+{
+
+	if (v->length == 0)
+		return (None);
+	return (Some(v->data[--v->length]));
+}
+
+generic(T) option(T)
+vector_get(const vector(T) *v, size_t i)
+{
+
+	if (i >= v->length)
+		return (None);
+	return (Some(v->data[i]));
+}
+
+/* The elements, each index of which is checked. */
+generic(T) slice(T)
+vector_items(vector(T) *v)
+{
+
+	return (slice_unchecked(v->data, v->length));
+}
+
+/* Maps. */
+
+type map_entry(K, V) = struct {
+	K	key;
+	V	value;
+	int	used;
+};
+
+type map(K, V) = struct {
+	map_entry(K, V)	*entries;
+	size_t		 count;
+	size_t		 capacity;
+	size_t		(*hash)(const K *);
+	int		(*equal)(const K *, const K *);
+};
+
+/*
+ * The table grows before it is more than three quarters full, so a probe
+ * always meets an empty entry.
+ */
+#define	MAP_LOAD_NUMERATOR	3
+#define	MAP_LOAD_DENOMINATOR	4
+#define	MAP_FIRST_CAPACITY	16
+
+generic(K, V) void
+map_init(map(K, V) *m, size_t (*hash)(const K *),
+    int (*equal)(const K *, const K *))
+{
+
+	m->entries = NULL;
+	m->count = 0;
+	m->capacity = 0;
+	m->hash = hash;
+	m->equal = equal;
+}
+
+generic(K, V) void
+map_free(map(K, V) *m)
+{
+
+	free(m->entries);
+	map_init(m, m->hash, m->equal);
+}
+
+/*
+ * The entry that holds key, or the empty one where it belongs.  The
+ * capacity is a power of two, so the mask wraps the probe; it is not 0,
+ * so the caller first grows an empty map or returns.
+ */
+generic(K, V) map_entry(K, V) *
+map_find(const map(K, V) *m, const K *key)
+{
+	map_entry(K, V) *e;
+	size_t i, mask;
+
+	mask = m->capacity - 1;
+	for (i = m->hash(key) & mask;; i = (i + 1) & mask) {
+		e = &m->entries[i];
+		if (!e->used || m->equal(&e->key, key))
+			return (e);
+	}
+}
+
+generic(K, V) result(void, container_error)
+map_grow(map(K, V) *m)
+{
+	map(K, V) bigger;
+	size_t capacity, i;
+
+	capacity = MAP_FIRST_CAPACITY;
+	if (m->capacity != 0) {
+		if (m->capacity > SIZE_MAX / 2 / sizeof(map_entry(K, V)))
+			return (Err(TooLarge));
+		capacity = 2 * m->capacity;
+	}
+	bigger = *m;
+	bigger.capacity = capacity;
+	bigger.entries = calloc(capacity, sizeof(map_entry(K, V)));
+	if (bigger.entries == NULL)
+		return (Err(OutOfMemory));
+	for (i = 0; i < m->capacity; i++)
+		if (m->entries[i].used)
+			*map_find(&bigger, &m->entries[i].key) =
+			    m->entries[i];
+	free(m->entries);
+	*m = bigger;
+	return (Ok);
+}
+
+/*
+ * Updating a key needs no room, so only a new key grows the table.  The
+ * products cannot overflow, as map_grow bounds the capacity by the size
+ * of an entry.
+ */
+generic(K, V) result(void, container_error)
+map_put(map(K, V) *m, K key, V value)
+{
+	map_entry(K, V) *e;
+
+	if (m->capacity != 0) {
+		e = map_find(m, &key);
+		if (e->used) {
+			e->value = value;
+			return (Ok);
+		}
+	}
+	if ((m->count + 1) * MAP_LOAD_DENOMINATOR >
+	    m->capacity * MAP_LOAD_NUMERATOR)
+		try map_grow(m);
+	e = map_find(m, &key);
+	e->key = key;
+	e->value = value;
+	e->used = 1;
+	m->count++;
+	return (Ok);
+}
+
+generic(K, V) option(V)
+map_get(const map(K, V) *m, K key)
+{
+	map_entry(K, V) *e;
+
+	if (m->count == 0)
+		return (None);
+	e = map_find(m, &key);
+	if (!e->used)
+		return (None);
+	return (Some(e->value));
+}
+
+/* Calls visit on each entry, in no particular order. */
+generic(K, V) void
+map_each(map(K, V) *m, void (*visit)(const K *, V *, void *), void *context)
+{
+	size_t i;
+
+	for (i = 0; i < m->capacity; i++)
+		if (m->entries[i].used)
+			visit(&m->entries[i].key, &m->entries[i].value,
+			    context);
+}
+
+/* Hashes and equalities of common keys. */
+size_t	hash_int(const int *key);
+int	equal_int(const int *a, const int *b);
+size_t	hash_str(const str *key);
+int	equal_str(const str *a, const str *b);
+
+#endif /* !CONTAINERS_TCI */

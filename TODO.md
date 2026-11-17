@@ -654,6 +654,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   a constraint violation and GCC and Clang only warn about. It drops no
   result, so design 5.2 does not need it refused; decide whether the
   rule against excess initialisers covers it.
+- [Low] A cast to a slice type, `(slice(const int))s` for a
+  `slice(int) s`, passes the check and the backend refuses it as a cast
+  to a structure, Clang quoting the lowered compound literal. The
+  conversion to const elements takes no cast, but a C programmer
+  writes one. Decide whether typec refuses a cast to a slice type with
+  a rule of its own, as it refuses a cast to a variant
+  (`variant-operation`), or leaves it to C. Reproducer: pass
+  `(slice(const int))slice_from_array(a)` for an `int a[3]` to a
+  function that takes a `slice(const int)`.
 
 ## Declarations
 

@@ -1,0 +1,21 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/* The units of the test that use the library. */
+
+#ifndef DEMO_TCI
+#define	DEMO_TCI
+
+#include "containers.tci"
+
+struct point {
+	int	x;
+	int	y;
+};
+
+result(void, container_error)	count_words(str text);
+result(void, container_error)	walk_points(int n);
+
+#endif /* !DEMO_TCI */

@@ -1,0 +1,114 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * Counts the words of a text in a map(str, int), keeps them in the order
+ * first seen in a vector(str), and copies each into a region.
+ */
+
+#include <stdio.h>
+
+#include "demo.tci"
+
+static int
+is_space(char c)
+{
+
+	return (c == ' ' || c == '\n' || c == '\t');
+}
+
+/* The length of the word at the start of text. */
+static size_t
+word_length(str text)
+{
+	size_t n;
+
+	for (n = 0; n < text.len && !is_space(text[n]); n++)
+		continue;
+	return (n);
+}
+
+static void
+add_count(const str *word, int *count, void *total)
+{
+
+	(void)word;
+	*(int *)total += *count;
+}
+
+static result(void, container_error)
+add_word(map(str, int) *counts, vector(str) *order, region *names, str word)
+{
+	option(str) copy;
+	int count;
+
+	match (map_get(counts, word)) {
+	case Some(seen):
+		count = seen;
+		break;
+	case None:
+		count = 0;
+		copy = region_copy_str(names, word);
+		match (copy) {
+		case Some(name):
+			/* The map keeps this first key; later ones update it. */
+			word = name;
+			break;
+		case None:
+			return (Err(OutOfMemory));
+		}
+		try vector_push(order, word);
+		break;
+	}
+	try map_put(counts, word, count + 1);
+	return (Ok);
+}
+
+result(void, container_error)
+count_words(str text)
+{
+	map(str, int) counts;
+	vector(str) order;
+	region names;
+	slice(str) words;
+	size_t i, n;
+	int total;
+
+	map_init(&counts, hash_str, equal_str);
+	defer map_free(&counts);
+	vector_init(&order);
+	defer vector_free(&order);
+	region_init(&names, 64);
+	defer region_release(&names);
+
+	i = 0;
+	while (i < text.len) {
+		if (is_space(text[i])) {
+			i++;
+			continue;
+		}
+		n = word_length(slice_sub(text, i, text.len));
+		try add_word(&counts, &order, &names, slice_sub(text, i, i + n));
+		i += n;
+	}
+
+	words = vector_items(&order);
+	for (i = 0; i < words.len; i++) {
+		match (map_get(&counts, words[i])) {
+		case Some(count):
+			printf("%.*s %d\n", (int)words[i].len, words[i].data,
+			    count);
+			break;
+		case None:
+			printf("lost %.*s\n", (int)words[i].len,
+			    words[i].data);
+			break;
+		}
+	}
+	total = 0;
+	map_each(&counts, add_count, &total);
+	printf("%d words, %zu distinct\n", total, counts.count);
+	return (Ok);
+}

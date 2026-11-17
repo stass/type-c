@@ -1,0 +1,102 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/* Runs the units of the test and a vector(int) of its own. */
+
+#include <stdio.h>
+
+#include "demo.tci"
+
+static const char *
+error_name(container_error e)
+{
+
+	match (e) {
+	case OutOfMemory:
+		return ("out of memory");
+	case TooLarge:
+		return ("too large");
+	}
+}
+
+static int
+report(result(void, container_error) r)
+{
+
+	match (r) {
+	case Ok:
+		return (0);
+	case Err(e):
+		printf("error: %s\n", error_name(e));
+		return (1);
+	}
+}
+
+static void
+print_int(option(int) o)
+{
+
+	match (o) {
+	case Some(v):
+		printf(" %d", v);
+		break;
+	case None:
+		printf(" none");
+		break;
+	}
+}
+
+static int primes[] = { 2, 3, 5, 7, 11 };
+
+static result(void, container_error)
+squares(int n)
+{
+	vector(int) v;
+	slice(int) items;
+	size_t i;
+	long sum;
+
+	vector_init(&v);
+	defer vector_free(&v);
+	for (i = 0; i < (size_t)n; i++)
+		try vector_push(&v, (int)(i * i));
+	items = vector_items(&v);
+	sum = 0;
+	for (i = 0; i < items.len; i++)
+		sum += items[i];
+	printf("squares %zu, sum %ld, capacity %zu:", v.length, sum,
+	    v.capacity);
+	print_int(vector_get(&v, 3));
+	print_int(vector_get(&v, (size_t)n));
+	print_int(vector_pop(&v));
+	print_int(vector_pop(&v));
+	printf("\n");
+	try vector_append(&v, slice_from_array(primes));
+	printf("appended %zu:", v.length);
+	print_int(vector_get(&v, v.length - 1));
+	try vector_append(&v, vector_items(&v));
+	printf(", doubled %zu:", v.length);
+	print_int(vector_get(&v, 0));
+	print_int(vector_get(&v, v.length - 1));
+	printf("\n");
+	vector_free(&v);
+	printf("freed:");
+	print_int(vector_pop(&v));
+	printf("\n");
+	return (Ok);
+}
+
+int
+main(void)
+{
+	int failed;
+
+	failed = report(squares(100));
+	failed |= report(count_words(
+	    "the quick brown fox jumps over the lazy dog\n"
+	    "the dog sleeps  and the fox runs\n"));
+	failed |= report(walk_points(1000));
+	return (failed);
+}

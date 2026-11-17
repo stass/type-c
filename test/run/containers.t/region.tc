@@ -1,0 +1,161 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/* The region allocator and the hashes of common keys. */
+
+#include <string.h>
+
+#include "containers.tci"
+
+/*
+ * A chunk is one malloc'd block; the region hands out its bytes in order
+ * and frees the chunks together.  The data member aligns the bytes for
+ * any object.
+ */
+struct region_chunk {
+	struct region_chunk	*next;
+	size_t			 used;
+	size_t			 size;
+	max_align_t		 data[];
+};
+
+void
+region_init(region *r, size_t chunk_size)
+{
+
+	r->chunks = NULL;
+	r->chunk_size = chunk_size;
+}
+
+/* The bytes of size from offset up to the next multiple of align. */
+static size_t
+padding(size_t offset, size_t align)
+{
+
+	return ((align - offset % align) % align);
+}
+
+static struct region_chunk *
+region_add_chunk(region *r, size_t size)
+{
+	struct region_chunk *c;
+
+	if (size < r->chunk_size)
+		size = r->chunk_size;
+	if (size > SIZE_MAX - sizeof(*c))
+		return (NULL);
+	c = malloc(sizeof(*c) + size);
+	if (c == NULL)
+		return (NULL);
+	c->next = r->chunks;
+	c->used = 0;
+	c->size = size;
+	r->chunks = c;
+	return (c);
+}
+
+/*
+ * Every chunk's data has the alignment of max_align_t, so an offset meets
+ * an align that is a power of two no greater than it; a stricter one gets
+ * no memory.
+ */
+void *
+region_alloc(region *r, size_t size, size_t align)
+{
+	struct region_chunk *c;
+	size_t start;
+
+	if (align == 0 || (align & (align - 1)) != 0 ||
+	    align > _Alignof(max_align_t))
+		return (NULL);
+	c = r->chunks;
+	if (c != NULL) {
+		start = c->used + padding(c->used, align);
+		if (start <= c->size && size <= c->size - start) {
+			c->used = start + size;
+			return ((char *)c->data + start);
+		}
+	}
+	c = region_add_chunk(r, size);
+	if (c == NULL)
+		return (NULL);
+	c->used = size;
+	return (c->data);
+}
+
+void
+region_release(region *r)
+{
+	struct region_chunk *c, *next;
+
+	for (c = r->chunks; c != NULL; c = next) {
+		next = c->next;
+		free(c);
+	}
+	r->chunks = NULL;
+}
+
+/* A copy of s in r, or None when r has no room. */
+option(str)
+region_copy_str(region *r, str s)
+{
+	char *copy;
+
+	copy = region_alloc(r, s.len, 1);
+	if (copy == NULL)
+		return (None);
+	if (s.len != 0)
+		memcpy(copy, s.data, s.len);
+	return (Some(slice_unchecked(copy, s.len)));
+}
+
+/* FNV-1a over the bytes of a key. */
+#define	FNV_OFFSET_BASIS	2166136261u
+#define	FNV_PRIME		16777619u
+
+static size_t
+fnv1a(const unsigned char *bytes, size_t n)
+{
+	uint32_t h;
+	size_t i;
+
+	h = FNV_OFFSET_BASIS;
+	for (i = 0; i < n; i++) {
+		h ^= bytes[i];
+		h *= FNV_PRIME;
+	}
+	return (h);
+}
+
+size_t
+hash_int(const int *key)
+{
+
+	return (fnv1a((const unsigned char *)key, sizeof(*key)));
+}
+
+int
+equal_int(const int *a, const int *b)
+{
+
+	return (*a == *b);
+}
+
+size_t
+hash_str(const str *key)
+{
+
+	return (fnv1a((const unsigned char *)key->data, key->len));
+}
+
+int
+equal_str(const str *a, const str *b)
+{
+
+	/* An empty str may have no data, which memcmp may not be given. */
+	if (a->len != b->len)
+		return (0);
+	return (a->len == 0 || memcmp(a->data, b->data, a->len) == 0);
+}
