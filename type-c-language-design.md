@@ -3629,7 +3629,7 @@ str greeting = "hello";                             /* len 5    */
    `str name = (slice_from_array(letters));` and
    `option(str) o = Some(slice_from_array(letters));` stand at file
    scope.
-6. *Provisional (P13).* A string literal whose target type is `str` denotes
+6. A string literal whose target type is `str` denotes
    a `str` over the characters of the literal. Its length excludes the
    terminating NUL, which is still present in storage. The literal is
    one of plain or UTF-8 characters, whose elements C11 writes as
@@ -7846,7 +7846,7 @@ with the scripts that reproduce them (`make size-split`,
 | P10 | The instance naming scheme (10.3) | The injectivity tests of the encoding, on types drawn from a seeded generator (`test/unit/test_naming.ml`); in Pilot B lldb shows an instance as `result__Pc8reported`, with its tags by name, and hides no value. gdb is untried | **Decided:** as specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | No conversion that surprised is reported in the container library; none was counted. It needs one explicit instance, `region_new(struct point)(r)`, and only because `T` appears in the return type alone | **Decided:** as specified |
 | P12 | Instances are per translation unit (7.3) | Plan, "Measurements of 3.6": the text of the benchmark program at `-O2` is 5192 bytes against 4920 for C with its functions defined once and 4568 with them `static inline` on Clang 21, and 4428 against 4523 and 3950 on GCC 16, within 6% of the external functions; at `-O0` 7113 against 5369 and 5785, and 7556 against 5447 and 5842. The Type-C side holds three functions that the twins leave out. `typec -c` of a unit takes 0.18 to 0.45 s against 0.06 to 0.25 s for `cc -c` of a C unit | **Decided:** per unit |
-| P13 | A string literal becomes `str` by target type (8) | A program that uses `str`: Pilot B uses no slice or `str`, and the container library uses `str` keys with no refusal or surprise recorded. Port the string handling of Pilot B, or one module of the corpus, to `str` and count the literals that needed a cast | As specified |
+| P13 | A string literal becomes `str` by target type (8) | A port of the string handling of Pilot B to `str`: 75 literals became `str` by their target type and none needed a cast or a wrapper; 21 stayed `char *` where a C string is meant (19 `printf` formats, `strchr`, `xstrdup`); no reading surprised, and 31 edge probes behave as this section says; the tests pass on Clang and GCC 16 at `-O0` and `-O2` (`measure/p13/2026-11-17-darwin-x86_64/RESULTS.md` in the data repository, commit `e7b60ce`) | **Decided:** as specified |
 | P14 | Slice checks cannot be turned off (8) | Plan, "Measurements of 3.6": the checked and the unchecked sum take 1.24 and 1.29 ms on Clang and 3.55 and 3.56 on GCC 16 at `-O2` for 10^4 elements (1.50 and 1.52, 3.46 and 3.43 for 10^6), the same within noise; at `-O0` 20.0 and 17.4 ms on Clang (+15%) and 21.3 and 17.3 on GCC 16 (+23%), a cost that does not justify an unsafe mode | **Decided:** always on |
 | P15 | The backend preprocesses (13.2) | Stage 4 review of diagnostic quality | Backend preprocesses |
 | P16 | The front end computes no aggregate layout (13.3) | Stage 0 corpus: constructs that need a layout value | No layout |

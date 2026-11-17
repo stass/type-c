@@ -647,7 +647,7 @@ typec accepts.
    - the fuzzing of the parser and the checker (Tests) starts from a
      corpus that holds `try` inside expressions.
 
-**Decided at the gate:** P11, P12, P14, P23, P27, P28 and P30 to P35, each
+**Decided at the gate:** P11 to P14, P23, P27, P28 and P30 to P35, each
 as the design specifies, on the measurements above and the builds and reports
 of the library (design section 15 holds the evidence of each row), and
 whether the measured cost of function-pointer
@@ -655,9 +655,9 @@ operations is evidence for constraints (design section 12): it is not, since
 all three sides of the benchmark call through function pointers, so
 constraints stay out. The member scrutinee stays copied: the copy costs
 nothing at `-O2` and the `aligned(1)` form is larger on ARMv5 (3.10). P13
-stays provisional, as no pilot uses `str`; porting the string handling of
-Pilot B, or one module of the corpus, to `str` and counting the literals that
-needed a cast settles it, and it carries to Stage 4. **Release 0.3.**
+is decided on the port of the string handling of Pilot B to `str`: 75
+literals became `str` by their target type and none needed a cast.
+**Release 0.3.**
 
 ## Stage 4: interoperation and release quality
 
@@ -677,9 +677,7 @@ needed a cast settles it, and it carries to Stage 4. **Release 0.3.**
 defaulted and the design is edited to say so; the three pilots build with
 the release; the core language is frozen as **release 1.0**.
 
-**Decided at the gate:** P13 (whether a string literal becomes `str` by its
-target type, settled by the port of the string handling of Pilot B, or of one
-corpus module, to `str`) and P15 (whether line-granular locations are good
+**Decided at the gate:** P15 (whether line-granular locations are good
 enough, or `typec` gets a preprocessor of its own).
 
 ## Stage 5: checked mode, tier 1

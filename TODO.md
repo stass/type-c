@@ -486,10 +486,14 @@ is [type-c-language-design.md](type-c-language-design.md).
   string literals (section 8, P13) and generic deduction (7.2) also take
   meaning from the target: before they land, state the rule as the first
   subobject on the elision chain whose type gives the target a meaning.
-- [Medium] P13 (design section 8 rule 6) is still provisional because no
-  pilot uses `str`. Before the Stage 4 gate, port the string handling of
-  Pilot B, or one corpus module, to `str` and count the literals that
-  needed a cast; the default is as specified.
+- [Medium] Three `str` and slice conversions are refused by the backend in
+  lowered names instead of by `typec`: a `const char *`, a char array or
+  a wide literal passed to a `str` parameter (Clang names `slice__Kc`,
+  GCC says only "incompatible"); a `(str)"x"` cast; a literal for
+  `slice(char)` (Clang names `slice__c`, GCC says "invalid
+  initializer"). Refuse each in `typec` with a diagnostic in the user's
+  terms. Repros are in the data repository at
+  `measure/p13/2026-11-17-darwin-x86_64/bugs/`.
 - [Low] `Ctype.first_variant` follows the elision chain that
   `Initialiser.first_level` encodes too. Split a pure first-subobject
   step that both use, keeping the rule 6 refusal at the callers that open
