@@ -385,17 +385,17 @@ is [type-c-language-design.md](type-c-language-design.md).
   backends pick a pragma by its first tokens, which makes that line an
   unknown pragma; have the reader keep the leading run of identifiers
   and match the list against it, so that such a line is refused.
-- [Medium] Clang replaces a macro in a pragma line when it compiles C
-  and not in its `-E` output (Clang 21 to 23, Apple Clang 21), and
-  `Pragma_words` (design 13.5) closes only part of that: a macro named
-  as a word of a layout pragma passes it (`#define natural packed`
-  before `#pragma options align=natural` packs in a `.c` unit alone,
-  silently), and the arguments of `weak`, `redefine_extname`,
-  `float_control` and `clang fp` are not looked at. Preprocessing with
-  `-dD` would let the reader know which identifiers of a pragma line
-  are macros and refuse those alone, closing the class, deleting the
-  table and admitting `pack` labels again; it needs the reader to take
-  `#define` and `#undef` lines. Measure the other pragmas first.
+- [Medium] Build the `-dD` reading of design 13.2 and 13.3 (the `-E`
+  step's `-dD`, definition lines read and left out of emission, the
+  table of macros) and the rule of 13.5 that refuses a macro in any
+  `#pragma` line, replacing `Pragma_words` and its rule `pragma-word`.
+- [Low] The reader's table records no fact of a replacement list, and
+  the refusal of design 9.3 needs one: whether a definition is its
+  name alone. Add it with `--emit-c-header` (plan 4.1).
+- [Low] A `#pragma` line of C text that is no sequence of tokens is
+  not looked at for macros (design 13.5, provisional); if a backend is
+  found to apply such a line, have the reader keep the identifiers
+  before its first part that is no token.
 - [Low] `Scope_pragma.placement_refusals` tests every place of a site
   against every annotated statement, quadratic in one scope with many
   of each. If it is reported slow, sort the places' tokens once and
