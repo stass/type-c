@@ -1431,23 +1431,31 @@ let in_place state read =
   state.place_start <- around_start;
   result
 
-(* The views of a hoisted operand of Type-C text that begins at the
-   cursor, in [state.place]; [hoist] records them once the operator that
-   hoists the operand is read, since an operand of [&&], [||], [?:] or a
-   comma is known to be a first operand only after it (design 5.1 rule
-   3). *)
-let hoistable state =
-  let start = state.position and place_start = state.place_start in
-  let place = state.place and own = view_here state in
-  let depth = scope_depth state in
+(* The views of an operand that begins at the cursor, in
+   [state.place], made when they are recorded: the place may begin at
+   the end of a text that ends early, where no token is and nothing is
+   recorded. *)
+let try_views_here state =
+  let place = state.place and place_start = state.place_start in
+  let own = view_here state and depth = scope_depth state in
   fun () ->
-    let token = first_token state start in
-    let views =
-      { place; place_before = first_token state place_start; own; depth }
-    in
-    if is_type_c_text_at state token then
-      state.views <-
-        { state.views with tries = Places.add token views state.views.tries }
+    { place; place_before = first_token state place_start; own; depth }
+
+(* Records [views] at [token], the first token of the span of a [try] or
+   of an operand that a holder may hoist, which typing reads them by. *)
+let record_try_views state token views =
+  state.views <-
+    { state.views with tries = Places.add token views state.views.tries }
+
+(* The views of an operand that begins at the cursor; [hoist operand]
+   records them once the operator that hoists the operand is read, since
+   an operand of [&&], [||], [?:] or a comma is known to be a first
+   operand only after it (design 5.1 rule 3). Every such operand has
+   them, whatever text it begins with. *)
+let hoistable state =
+  let views = try_views_here state in
+  fun (operand : expression) ->
+    record_try_views state operand.span.first (views ())
 
 (* At an [if] or a [switch], which holds a [try] in its controlling
    expression with its prelude in front of it, after its labels (design
@@ -1459,7 +1467,8 @@ let holds_place state =
 (* At the [try] that [begins_try] recognises: records its views and
    returns the node it makes of its operand. *)
 let try_prefix state =
-  hoistable state ();
+  record_try_views state (first_token state state.position)
+    (try_views_here state ());
   advance state;
   fun operand -> Tree.Try { operand }
 
@@ -3637,7 +3646,7 @@ and expression state =
   let hoist = hoistable state in
   let rec loop left =
     if accept state P.Comma then begin
-      hoist ();
+      hoist left;
       let right = assignment_expression state in
       loop (finish state start (Comma (left, right)))
     end
@@ -3679,7 +3688,7 @@ and conditional_expression state =
     let hoist = hoistable state in
     let condition = binary_expression state lowest_precedence in
     if accept state P.Question then begin
-      hoist ();
+      hoist condition;
       let if_true = middle_operand state in
       expect state P.Colon "`:` in a conditional expression";
       collect ((start, condition, if_true) :: branches)
@@ -3705,7 +3714,7 @@ and binary_expression state minimum =
   let rec loop left =
     match binary_operator (peek state) with
     | Some (operator, precedence) when precedence >= minimum ->
-        if operator = Logical_and || operator = Logical_or then hoist ();
+        if operator = Logical_and || operator = Logical_or then hoist left;
         advance state;
         let right = binary_expression state (precedence + 1) in
         loop (finish state start (Binary (operator, left, right)))

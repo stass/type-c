@@ -682,13 +682,6 @@ is [type-c-language-design.md](type-c-language-design.md).
   = try f();`) takes the check and the object goes unchecked. Key the
   check to the holder's own initialiser, and keep the holder's state
   per holder rather than in mutable fields of the view.
-- [High] typec crashes (`Invalid_argument "Expressions: a hoisted
-  operand without views"`) on a first operand that begins with
-  `__extension__` or with C text from a header:
-  `int x = __extension__ c && try f();`. The parser records the views
-  at its cursor (`hoistable`) and typing looks them up by
-  `span.first`; key both from one source, and refuse a missing view by
-  name.
 - [High] `if (c) if (case Ok(w) = try f(c)) n = w;` emits invalid C:
   the holder's closing `}` and the pattern test's tail are insertions
   after one token, and `with_tries` puts the holders' closings first.

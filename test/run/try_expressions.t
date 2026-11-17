@@ -923,3 +923,54 @@ inside it, once.
   truth: 1 truth: 0 truth: error 2 length: 34 length: error 3 store: 3 branch: 1 branch: 11 branch: error 5 comma: 11 comma: error 6 ternc: 13 ternc: 23 decl: 1 decl: error 9
   truth: 1 truth: 0 truth: error 2 length: 34 length: error 3 store: 3 branch: 1 branch: 11 branch: error 5 comma: 11 comma: error 6 ternc: 13 ternc: 23 decl: 1 decl: error 9
   truth: 1 truth: 0 truth: error 2 length: 34 length: error 3 store: 3 branch: 1 branch: 11 branch: error 5 comma: 11 comma: error 6 ternc: 13 ternc: 23 decl: 1 decl: error 9
+
+A first operand that begins with something other than the first token
+of the text the parser reads for it: __extension__, which makes no node,
+and the C text of a header included in the middle of the expression.
+Each is hoisted with the views that the parser took at it.
+
+  $ echo c > operand.h
+  $ cat > begins.tc <<'EOF'
+  > #include <stdio.h>
+  > typedef result(int, int) result_int;
+  > static result_int f(int n) {
+  >   if (n >= 0)
+  >     return Ok(n);
+  >   return Err(-n);
+  > }
+  > static result_int extension(int c, int n) {
+  >   int x = __extension__ c && try f(n);
+  >   return Ok(x);
+  > }
+  > static result_int included(int c, int n) {
+  >   int x =
+  > #include "operand.h"
+  >     || try f(n);
+  >   return Ok(x);
+  > }
+  > static void show(const char *name, result_int r) {
+  >   match (r) {
+  >   case Ok(v):
+  >     printf("%s: %d\n", name, v);
+  >     break;
+  >   case Err(e):
+  >     printf("%s: error %d\n", name, e);
+  >     break;
+  >   }
+  > }
+  > int main(void) {
+  >   show("extension", extension(1, 2));
+  >   show("extension", extension(0, -2));
+  >   show("extension", extension(1, -3));
+  >   show("included", included(1, -4));
+  >   show("included", included(0, 0));
+  >   show("included", included(0, -5));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -o begins begins.tc && ./begins |
+  >     paste -s -d ' ' -
+  > done
+  extension: 1 extension: 0 extension: error 3 included: 1 included: 0 included: error 5
+  extension: 1 extension: 0 extension: error 3 included: 1 included: 0 included: error 5
