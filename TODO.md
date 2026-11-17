@@ -1584,6 +1584,22 @@ types (design 13.3).
   of a slice writes its trap as an expression (design 13.5), and both
   supported backends have the builtin (design 2.4). Remove the clause
   from 10.5, or say what the expression is on such a backend.
+- [Medium] Design section 8 rule 10 says what a second return of a
+  call does to the values that a slice test holds. Every value that
+  lowering holds across text of the program is in the same position,
+  and no rule says so. A `return` in the scope of a `defer` holds its
+  value in `__tc_r` across the cleanups (design 13.5), and needs no
+  GNU form and no `getcontext` to meet the case: a deferred statement
+  marks a place with `setjmp` where C allows it, a `longjmp` to the
+  body abandons the `return`, the `return` is evaluated again, and its
+  cleanup resumes the first. Written by hand in the lowered form, the
+  resumed `return` yields the later value under Apple Clang 21 at
+  `-O0` and under GCC 16 at `-O0` and at `-O2` (`ret.c` beside
+  `longjmp/measure.sh`, design 13.5). The temporary of a `try` is
+  held across the left operand of the assignment that holds the `try`
+  (design 13.5), which is unmeasured. Go through the lowered forms for
+  such values and state one rule for all of them in section 14, with
+  rule 10 of section 8 as its case for slices.
 - [Medium] Returning a `result` by value costs code. In Pilot B the
   text of `toml.tc` is 11.9% larger under GCC 16 (2192 bytes) and 2.8%
   larger under Apple Clang 21 (528 bytes) than the `goto cleanup`

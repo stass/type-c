@@ -327,7 +327,17 @@ record of what it found.
      diagnostic; the partner, one of an array whose elements have size
      0, a structure without members and `int[sizeof(int) - 4]`, is
      refused by both backends with the message of design 13.5, in a
-     block and at file scope.
+     block and at file scope;
+   - under AddressSanitizer, an index whose operand returns a second
+     time reads its element again where its function has not begun to
+     evaluate it in between, with `setjmp` in a statement expression
+     and with a call of `getcontext` as the operand; the partner
+     evaluates the index in between over an array that the program
+     then frees, and the resumed evaluation reads the freed array at
+     `-O0` under both backends. The partner is the limit of design
+     section 8 rule 10 and shows that the first run was resumed inside
+     the index; it runs at `-O0` alone, since Apple Clang 21 at `-O2`
+     reads the live array there (design 13.5).
 4. The measurements of 3.6 are written up.
 
 **Decided at the gate:** P11 to P14, P23, P27, P28, and whether the

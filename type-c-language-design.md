@@ -2336,6 +2336,24 @@ str greeting = "hello";                             /* len 5    */
    judgement lets an index reach an element without its test: where C
    evaluates what `typec` took it to leave alone, the program traps
    before it evaluates an operand (13.5).
+10. The evaluation of an index or a `slice_sub` is not resumed after
+    its function has begun to evaluate it again. The values of the
+    operands are held in the function until the test, as C holds the
+    value of one operand of an expression while it evaluates the
+    next, and a call of the function has one place for each. A call
+    in an operand that returns a second time resumes an evaluation:
+    `setjmp` in a statement expression of the GNU profile,
+    `getcontext` and `__builtin_setjmp` are such calls. Where the same
+    call of the function has begun to evaluate the same index or
+    `slice_sub` between the two returns, the values that the resumed
+    evaluation held are indeterminate, as C11 7.13.2.1p3 has the
+    objects that a function changes between a `setjmp` and its
+    `longjmp`, and the behaviour is undefined. Where it has not, the
+    values are those that the evaluation had. `typec` refuses no
+    operand for this: no form of the test keeps the values, both
+    backends give a subscript of C the value of the later evaluation
+    as well, and the backend alone knows which calls return twice
+    (13.5).
 
 `slice` is a universe generic type with one piece of syntax, `[]`. The three
 functions are universe names that the compiler implements at each use; they
@@ -4744,8 +4762,11 @@ says of an index follows from that and needs no rule for any place:
   assigns none that the outer one holds, two tests that C leaves
   unsequenced, as in `f(s[i], t[j])`, assign different objects, and no
   name hides another under `-Wshadow`. Each call of the function has
-  temporaries of its own. An index or a `slice_sub` that C does not
-  evaluate holds no test and takes no number (below).
+  temporaries of its own, and in one call an evaluation of a test ends
+  before the next begins, unless a call in an operand returns a second
+  time ("An evaluation that is resumed", below). An index or a
+  `slice_sub` that C does not evaluate holds no test and takes no
+  number (below).
 
 Measured on Apple Clang 21 and GCC 16, in the ISO and the GNU form of
 C11 and of C17: the two forms compile without
@@ -4902,6 +4923,84 @@ there too. Neither backend takes a statement expression outside a
 function body (section 6, rationale for rule 11), and it is a fourth
 GNU form of lowered code (2.4).
 
+**An evaluation that is resumed.** The test holds the value of `s` in
+`__tc_s0` while `i` is evaluated, and that of a `slice_sub` holds `s`
+and `lo` so. A call in a later operand, at any depth, that returns a
+second time resumes the evaluation there. Where the same call of the
+function has evaluated the same test in between, or begun to,
+`__tc_s0` holds what that evaluation assigned, and C11 7.13.2.1p3
+makes it indeterminate: it is an object of the function, not volatile,
+that changed between the two returns. The resumed evaluation then
+tests and reaches a slice that the source does not index there. The
+copies of a deferred statement are one test in this, since they assign
+the same temporaries (above). Section 8 rule 10 makes the behaviour
+undefined. No form of the test and no refusal would make it defined
+(below), so lowering writes nothing for it and `typec` refuses
+nothing.
+
+C keeps `setjmp` out of an operand, and other calls not. A call of
+`setjmp` is a whole expression statement or the controlling expression
+of a statement, alone, under `!` or compared with a constant (C11
+7.13.1.1p4), and anywhere else its behaviour is undefined (p5): when
+it returns, no expression holds an operand that is evaluated and not
+yet used. A statement expression of the GNU profile puts such a
+statement inside an operand, and `getcontext` and `__builtin_setjmp`
+are calls that no rule keeps out of one. Measured on Apple Clang 21
+and GCC 16 under AddressSanitizer: a loop evaluates
+`s[__extension__ ({ if (!phase) { if (setjmp(env)) phase = 2; } 0; })]`
+over a static array and then over a heap array; the program then frees
+the heap array, restores `s` and calls `longjmp`. The resumed
+evaluation reads the freed array under Apple Clang 21 at `-O0` and
+under GCC 16 at `-O0` and at `-O2`; under Apple Clang 21 at `-O2` it
+reads the static array. The results are the same where the operand
+holds a call of `getcontext` or of `__builtin_setjmp` and no statement
+expression.
+
+No form of the test keeps the values. The evaluations of one test that
+are suspended at once in one call of a function have no bound, since
+each turn of a loop can mark a place of its own, and the objects of
+that call are those of the blocks it is executing, a fixed number. So
+no declaration gives each suspended evaluation a place for the value
+of `s`. In the program above:
+
+- temporaries declared `volatile` have the later evaluation's values
+  by C11 7.13.2.1p3, and the resumed evaluation reads the freed array
+  under both backends at both levels;
+- the statement expression set aside above, whose temporaries are
+  objects of its own block, gives the results of the comma expression;
+- a function that takes the operands as its arguments reads the freed
+  array under Apple Clang 21 at `-O0`, and one that takes the index as
+  its first parameter under GCC 16 at both levels;
+- C's own subscript does the same. `*(p() + i)`, where a call yields
+  the pointer and `i` is the operand above, reads the freed array
+  under Apple Clang 21 at `-O0` and under GCC 16 at both levels, with
+  each of the three calls.
+
+A slice index is there what a subscript of C is.
+
+No refusal is complete short of one that refuses every call in an
+operand. A refusal of the statement expression in the operands after
+the first would leave `getcontext` and `__builtin_setjmp`, which need
+none, and would refuse the macros that GNU C writes as statement
+expressions to evaluate an argument once, a `max` in an index among
+them. A refusal of the calls that return twice needs their list, which
+is the backend's. The headers of macOS declare `setjmp`, `sigsetjmp`,
+`getcontext` and `vfork` without an attribute, and each backend takes
+a call of each to return twice by its name, as it takes a call of a
+function declared with the GNU attribute `returns_twice`. A call
+through a pointer to `getcontext` both take to return once. A list in
+`typec` would be a second copy of each backend's, and no list holds
+the call through a pointer.
+
+An evaluation that is resumed before its function begins the next
+finds its values: `__tc_s0` did not change between the two returns,
+and the later operands are assigned after the second. Without the
+second turn of the loop, the program above reads the static array
+again under both backends at both levels, with each of the three
+calls. Checked text names a function that returns twice only in an
+`unsafe` block or as a trusted contract (11.1 rule 4), so tier 1 rests
+there on what it rests on elsewhere (section 14).
+
 **The cost of the expression.** The expression has three costs.
 
 - An index and a `slice_sub` that C evaluates stand in a function body
@@ -4937,8 +5036,9 @@ These measurements are of a sample written by hand in the lowered
 form, on one target and two backends. The sample is in no repository:
 it is at `/Volumes/Optaine/design-fix/slice` on the owner's machine, as
 it was measured. `comma/measure.sh` there repeats the measurements
-of the expression that this part cites, and `uneval/measure.sh` those
-of the operands that C does not evaluate and of `slice_from_array`.
+of the expression that this part cites, `uneval/measure.sh` those
+of the operands that C does not evaluate and of `slice_from_array`,
+and `longjmp/measure.sh` those of an evaluation that is resumed.
 Stage 3 settles the form
 (package 3.6): the cost of the tests in the container library and the
 pilot, without optimisation as well as with it, the refusals of rule 9
@@ -5140,7 +5240,7 @@ a crash.
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
-| A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length |
+| A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length. No evaluation of the index or the `slice_sub` is resumed, by a call in an operand that returns a second time, after its function has begun to evaluate it again: the values of its operands are then indeterminate, as C11 7.13.2.1p3 has the objects of a function after a `longjmp`, and the test does not protect the access (section 8 rule 10). `typec` does not refuse such an operand, and a subscript of C is no better off there (13.5) |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |
 
 Not guaranteed anywhere: object lifetimes, freedom from data races,
