@@ -13,9 +13,11 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 - [Medium] Decide where the corpus repository is hosted: it exists
   locally at `/Volumes/Optaine/type-c-corpus`, with no remote, and its
-  README says what it holds. (`tools/hosts` runs the Linux hosts in
-  containers, the arm64 ones under emulation, and the FreeBSD one over
-  ssh, on a machine of the owner's.)
+  README says what it holds. Pilot B's repository,
+  `/Volumes/Optaine/type-c-pilot-b`, is local in the same way, and
+  design 15 cites its record by commit. (`tools/hosts` runs the Linux
+  hosts in containers, the arm64 ones under emulation, and the FreeBSD
+  one over ssh, on a machine of the owner's.)
 
 ## Driver
 
@@ -1058,10 +1060,9 @@ is [type-c-language-design.md](type-c-language-design.md).
   expects: a name of a construct the sample lacks goes unchecked. Make
   one module mint every invented name, with a constructor for a name of
   one of a kind that refuses `__` and one for a kind word and its rest,
-  so design 13.5's rule holds by type. The kind words (`slice_index`,
-  `arg`, `module`, `header`, `pack_probe_1`, `pack_probe_2`) are not in
-  the code yet; with that module the test can check that no universe
-  function name is another kind's word.
+  so design 13.5's rule holds by type. The kind words (`arg`,
+  `module`, `header`, `pack_probe_1`, `pack_probe_2`) are not in the
+  code yet.
 - [Low] `Ctype.same_type` holds `Unspecified`, `Old_style []` and
   `Old_style [int]` to be three types, while design 10.3 encodes all
   three `N` and Clang takes `typedef int (*t)();` and
@@ -1529,6 +1530,25 @@ types (design 13.3).
   met it 4 times and wrote `sizeof(T)` each time, which no longer
   follows the type of `p`. Have the message suggest `T *p; p = try
   f(sizeof(*p));`, which design 5.1 rule 3 accepts.
+- [Low] P9 was decided on deferred statements that are each a single
+  call (design 15). The cost of repetition grows with the size of the
+  deferred statement times the exits of its scope: measure it on code
+  whose deferred statements hold several statements, against the same
+  code with a `goto cleanup`.
+- [Low] P10 was decided on instance names read in lldb (design 15).
+  Read them under gdb on a GCC build as well: an instance, its tags by
+  name, and a value of it.
+- [Low] The pragma clause of design 5.1 rule 3 was accepted unmeasured
+  (design 15, P8). Count in the corpus how often a pragma line stands
+  in, or directly before, a statement or declaration in one of the
+  three positions of a `try`, next to the refusals that package 3.6
+  counts in the library.
+- [Medium] Design 13.5 gives `slice_from_array(a)` as a compound
+  literal and does not say how its length is written. `sizeof (a) /
+  sizeof *(a)` writes the operand a second time: one that declares a
+  tag would declare it twice, and `sizeof` evaluates an operand of
+  variably modified type. State the form in package 3.4: a length that
+  the front end computes, a temporary, or a refusal.
 - [Medium] Returning a `result` by value costs code. In Pilot B the
   text of `toml.tc` is 11.9% larger under GCC 16 (2192 bytes) and 2.8%
   larger under Apple Clang 21 (528 bytes) than the `goto cleanup`

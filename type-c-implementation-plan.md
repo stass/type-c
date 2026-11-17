@@ -250,15 +250,17 @@ condition, with a field list optional in a test (design 4.2, 4.6).
 | 2.5 | `defer`: the rules, the jump constraints, lowering with name hygiene; interplay with `try`, `match` and loops. |
 | 2.6 | Pilot B: a binary reader or a parser with a single error path. |
 
-Pilot B records the statements rewritten to fit the `try` positions
-and the statements refused for a pragma (P8), the uses of `void` type
-arguments (P7), the code size and the
-refusal and diagnostic counts that the P9 row of design section 15
-lists, which is the one list of them, how often rule 5 of section 6 and
-design 4.3 refused a label address `&&L` that no `goto *` is given
-(design 4.4), how often a block literal was refused (P24), whether
-instance names read well in a debugger (P10), and the counts of type
-definitions that the P23 row lists (decided at Stage 3).
+Pilot B lives in a repository of its own, as Pilot A does, and design
+section 15 cites its record by path and commit. It records the
+statements rewritten to fit the `try` positions and the statements
+refused for a pragma (P8), the uses of `void` type arguments (P7), the
+code size and the counts of refusals and of diagnostics for P9, how
+often rule 5 of section 6 and design 4.3 refused a label address `&&L`
+that no `goto *` is given (design 4.4), how often a block literal was
+refused (P24), whether instance names read well in a debugger (P10),
+and the counts of type definitions that the P23 row lists (decided at
+Stage 3). The decided rows P7 to P10 of design section 15 are the
+record of what it found.
 
 **Exit gate**
 
@@ -286,7 +288,7 @@ definitions that the P23 row lists (decided at Stage 3).
 | 3.3 | Instantiation and emission: per-unit instances, typedef substitution, recursion limit, and rule 8 of design 3.5 for function definitions (P23). |
 | 3.4 | Slices and `str`: the universe declarations, `[]`, the three functions, literal typing, the const conversion. |
 | 3.5 | A container library written as a test: a vector, a hash map that takes its operations as function pointers, and a region allocator, used from several translation units with several element types. |
-| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks and of function-pointer operations, compile time. |
+| 3.6 | Measurements: code growth from duplicated instances, cost of bounds checks, without optimisation as well as with it (P28), and of function-pointer operations, compile time. The refusals, by their codes, of the pragma clause of design 5.1 rule 3 (P8), of design 7.3 rule 4 (P27) and of design section 8 rule 9 (P28), in the library and the pilot. |
 
 **Exit gate**
 
@@ -298,9 +300,9 @@ definitions that the P23 row lists (decided at Stage 3).
 3. Out-of-range slice accesses trap; the negative tests for slices pass.
 4. The measurements of 3.6 are written up.
 
-**Decided at the gate:** P11 to P14, P23, and whether the measured cost of
-function-pointer operations is evidence for constraints (design section
-12). **Release 0.3.**
+**Decided at the gate:** P11 to P14, P23, P27, P28, and whether the
+measured cost of function-pointer operations is evidence for constraints
+(design section 12). **Release 0.3.**
 
 ## Stage 4: interoperation and release quality
 
@@ -404,5 +406,6 @@ Type-C is considered here, not earlier.
 ## Open logistics
 
 - Where the continuous-integration hosts for Linux and FreeBSD run.
-- The repository that pins the corpora and holds the pilots.
+- Where the repository that pins the corpora and the repositories of
+  the pilots are hosted.
 - The choice of pilot A, and of the conformance suite for the corpus.

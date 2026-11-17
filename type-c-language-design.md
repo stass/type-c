@@ -17,11 +17,13 @@ The order of work is in
 [type-c-implementation-plan.md](type-c-implementation-plan.md) and open work
 is in [TODO.md](TODO.md).
 
-**How to read the status of a rule.** Nothing here is implemented. A rule
-stated without qualification is the design. A rule marked *Provisional (Pn)*
-is a choice that needs evidence; section 15 lists each one with what settles
-it and the default that stands if nothing does. Section 12 holds features
-that are deliberately outside the core.
+**How to read the status of a rule.** This document states the design and
+not how much of it is built: the README says what `typec` accepts
+([Status](README.md#status)), and the plan gives the order of the rest. A
+rule stated without qualification is the design. A rule marked
+*Provisional (Pn)* is a choice that needs evidence; section 15 lists each
+one with what settles it and the default that stands if nothing does.
+Section 12 holds features that are deliberately outside the core.
 
 ## 1. Principles
 
@@ -208,22 +210,25 @@ read; a build with such a GCC that wants its `.c` and `.tc` files in
 one dialect passes `-std=gnu17` or `-std=gnu11`. Everything Type-C
 lowers to compiles in the dialect the command line selects: ISO C11 plus only GNU
 forms that GCC and Clang accept in every dialect, also under
-`-pedantic-errors`. Three are used: `__typeof__`, which C23 standardises
+`-pedantic-errors`. Four are used: `__typeof__`, which C23 standardises
 as `typeof` and which names a type where no name for it is sure to be
-visible, the type of a field for a match binding and the return type of
-a function for the temporary of a `return` (13.5); `__typeof_unqual__`,
+visible, the type of a field for a match binding, the return type of a
+function for the temporary of a `return` and the type of a slice's
+length for the temporaries of its test (13.5); `__typeof_unqual__`,
 C23's `typeof_unqual`, which names an untagged type without the
-qualifiers that its one name carries (10.3); and `__builtin_trap`
-(10.5). Lowered code also writes the three packing pragmas of the
-bracket of 10.3 and, in its probe, `#pragma pack(1)` and `#pragma
-pack(2)`. C11 6.10.6 leaves a pragma to the implementation; GCC 14.2
-and 16.2, Clang 20 and Apple Clang 21 take the three of the bracket
-without a diagnostic in the ISO and the GNU form of C11, also under
-`-pedantic-errors`. The two of the probe were measured so with GCC
-16.2, Apple Clang 21 and Clang 22 and 23 alone. A backend that ignores
-the pragmas has no packing to keep out. The one exception is GCC under
-`-fpack-struct` without a value, which ignores them and warns of each;
-the driver refuses that option (13.2).
+qualifiers that its one name carries (10.3); `__builtin_trap` (10.5);
+and a statement expression under `__extension__`, which holds the test
+of a slice at its use (13.5). Lowered code also writes the three
+packing pragmas of the bracket of 10.3 and, in its probe, `#pragma
+pack(1)` and `#pragma pack(2)`. C11 6.10.6 leaves a pragma to the
+implementation; GCC 14.2 and 16.2, Clang 20 and Apple Clang 21 take the
+three of the bracket without a diagnostic in the ISO and the GNU form
+of C11, also under `-pedantic-errors`. The two of the probe were
+measured so with GCC 16.2, Apple Clang 21 and Clang 22 and 23 alone,
+and the statement expression with GCC 16.2 and Apple Clang 21 alone
+(13.5). A backend that ignores the pragmas has no packing to keep out.
+The one exception is GCC under `-fpack-struct` without a value, which
+ignores them and warns of each; the driver refuses that option (13.2).
 The emitted file is preprocessed output, with line markers, and is
 compiled as such (`-x cpp-output`). So the output dialect is the input
 dialect and nothing newer. Its line markers are the toolchain's text, not
@@ -1345,8 +1350,10 @@ result(uint32_t, parse_error) read_number(reader *r)
    first block item. A `try` in such a statement or declaration is an
    error. A null statement, `;`, after the pragma takes the next
    statement out of the stretch, so `DIAG_PUSH; ... DIAG_POP;` refuses
-   nothing. How often these refusals occur is not measured: the source
-   of Pilot B holds no pragma (section 15, P8).
+   nothing. The clause is accepted without a count of its refusals:
+   the source of Pilot B holds no pragma. It is a refusal, so relaxing
+   it breaks no program that it accepts, and the Stage 3 library and
+   the corpus count how often it refuses (section 15, P8).
 4. `try` cannot appear in a deferred statement.
 5. *Provisional (P21).* A `try` is an error where one of these rules
    asks something of an unknown type (13.3): whether the type of the
@@ -1866,9 +1873,10 @@ convert, is weighed with P11.
    with its size stands before an instance. The measurement of P23
    counts these.
 
-   The list of an enumeration that the source declares without one
-   before the definition is refused as well, whether or not the body
-   names the enumeration (13.5). In
+   Where the source declares an enumeration without its list before
+   the definition, the first use of an instance that is written after
+   the list is refused as well, whether or not the body names the
+   enumeration (13.5). In
 
    ```c
    enum E;
@@ -1888,14 +1896,15 @@ convert, is weighed with P11.
    force at the definition of its generic, as a `static inline`
    function of a header is under those of the header. It is not
    compiled under the pragmas in force at its first use, which it would
-   carry to every later use in the unit. Between the definition and the
-   place where an instance is written there stands therefore no
-   `#pragma` line that sets state for the text after it: the first use
-   of an instance after such a line is an error that cites the line.
-   13.5 says which lines set none: a packing line, since an instance
-   has the packing of the command line (10.3); a diagnostic line; and a
-   line inside a function body that reaches no further than a loop or
-   a block. In
+   carry to every later use in the unit. So no `#pragma` line that sets
+   state stands between the definition and the place where 10.3 writes
+   the instance: the first use of an instance is an error where such a
+   line stands between the two, and the error cites the line. Every
+   `#pragma` line sets state but for the three kinds that 13.5 lists,
+   each with its reason: a `pack` line, because every instance stands
+   in the bracket of 10.3 and has the packing of the command line; a
+   `GCC diagnostic` or `clang diagnostic` line; and a line of
+   `Statement_pragma` (13.5) that stands inside a function body. In
 
    ```c
    generic(T) float damp(T *state, float x) { return x * 0.0f; }
@@ -1959,11 +1968,30 @@ str greeting = "hello";                             /* len 5    */
    neither NUL termination nor an encoding.
 8. `data` and `len` are ordinary members and can be read and, outside
    checked mode, written.
+9. *Provisional (P28).* The test of an index and of a `slice_sub` is
+   code of the place where it stands. Lowering writes it there as an
+   expression and shares no function between the uses (13.5), so the
+   test is compiled under the pragmas in force at its use and lies in
+   the function and the section of that use, as `s.data[i]` does. A
+   function that the uses shared would be compiled once, under the
+   pragmas in force where the unit first uses it, for every later use.
+   The expression holds its operands in a block, and two limits follow:
+   * an index and a `slice_sub` stand in a function body. Outside one,
+     in the definition of a generic type (3.5), in the head of a
+     function, generic (section 7) or not, and in any other declaration
+     of file scope, each is an error, as a `defer` statement is
+     (section 6 rule 11): neither backend takes the expression there.
+     `sizeof(*s.data)` says there what `sizeof(s[0])` would;
+   * the operands declare no name that is in scope after them, which is
+     the third clause of the resolution property of 13.5 on the
+     operands. In `x = s[sizeof(enum { K = 5 })] + K;` the source names
+     the operand's `K` after the index, and the lowered code would name
+     an outer `K` there or none.
 
 `slice` is a universe generic type with one piece of syntax, `[]`. The three
-functions are universe names that the compiler implements; they need no
-library. Bounds checks address reads and writes past the end of a live
-buffer, and nothing else.
+functions are universe names that the compiler implements at each use; they
+need no library and no function of the unit. Bounds checks address reads and
+writes past the end of a live buffer, and nothing else.
 
 ## 9. Interfaces and privacy
 
@@ -2840,7 +2868,7 @@ a design change to this document, not an implementation detail.
 | --- | --- | --- |
 | Binding by reference | `case Block(&stmts):` binds a pointer to the field, for in-place update of a payload. | A lifetime tier in checked mode (11.3) that keeps a pointer into a payload from outliving an assignment that changes the object's tag. Pilot A shows the need (4.1): 24 payload updates, and payloads moved behind pointers to allow them. |
 | Nested and constant patterns | `case Add(Number(0), r):`. Needs matrix-based exhaustiveness and a rule that tells a binding from a constructor without fields. | Pilot code that routinely nests matches two deep. |
-| `try` inside expressions | `f(try g(), h())`, with a defined order for the hoisted operands. | Many rewrites forced by 5.1(3) in pilot code. Pilot B wanted no `try` inside an expression (section 15, P8). |
+| `try` inside expressions | `f(try g(), h())`, with a defined order for the hoisted operands. | Many rewrites forced by the three positions of 5.1 rule 3 in pilot code. Pilot B wanted no `try` inside an expression: its 4 rewrites came from what the operand may name, not from the positions (section 15, P8). |
 | `try` on `option` | Returns `None` from a function that returns an `option`. | Repeated hand-written propagation of `None`. |
 | Expression `match` | A match that yields a value. | Real code where a local assigned in each arm reads materially worse. |
 | Constraints | `requires(...)` on type parameters, resolved statically. Needs overloading or named instances. | Measured cost of function-pointer operations in the Stage 3 library: time, and noise at call sites. |
@@ -3462,7 +3490,8 @@ Two properties follow by construction:
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | `try` | A temporary of the result type, initialised with the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary; then the `Ok` field, read where the `try` stood. The temporary and the test stand directly before the statement or declaration that holds the `try` (5.1), as said below the table. A statement `try e;` reads no field: nothing is written after its test, as said below the table. It is the one position of a `try` whose `T` is `void` (5.1 rule 2), where `Ok` has no field (3.5 rule 6). Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
 | `defer` | The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
-| Slice index, `slice_sub` | A call to an internal inline function that tests and then indexes, named as said below the table. |
+| Slice index, `slice_sub` | An expression at the use, and no call: a statement expression under `__extension__` that holds each operand in a temporary, tests, traps (10.5) and then indexes, as said below the table ("The check of a slice"). An index is `(*__extension__ ({ temporaries test &element; }))`, an lvalue. |
+| `slice_from_array`, `slice_unchecked` | A compound literal of the instance, at the use. Neither holds a test. |
 | Checked-mode checks | Inline tests that trap. |
 
 A constructor passed by value to a function that the backend inlines,
@@ -3877,9 +3906,8 @@ each. A third clause covers the text around it.
   `-pedantic`, and an enumeration that is declared with a fixed type
   is not refused. Where the text is the definition of a generic, the
   measurement of P23 counts the refusal with the others of rule 8 of
-  3.5. A declaration is inexact if it or an earlier
-  declaration of
-  its entity that it sees holds an attribute, an alignment specifier or
+  3.5. A declaration is inexact if it or an earlier declaration of its
+  entity that it sees holds an attribute, an alignment specifier or
   a `__typeof__` of an expression (3.5 rule 2), or is written through a
   typedef name so declared. Clang gives `__typeof__(obj)` the alignment
   of `extern wide obj;` after `extern int obj;`, where `wide` is an
@@ -3933,8 +3961,10 @@ each. A third clause covers the text around it.
   the head of a generic function declares no type at all (3.5 rule 8).
   The one name of an untagged type declares nothing, and the typedef
   around it only its reserved name (2.3). The clause holds as well for
-  the operand of a `return` that lowering writes as a block, though
-  that text does not move (section 6 rule 12). Text that moves, of
+  two texts that do not move and that lowering writes in a block: the
+  operand of a `return` in the scope of a `defer` statement (section 6
+  rule 12), and the operands of a slice index and of a `slice_sub`
+  (section 8 rule 9). Text that moves, of
   every kind, also declares no object or function with linkage, even in
   a block of its own, as an `extern` declaration or a function
   declaration there: that entity is one the text around it sees, so
@@ -3948,12 +3978,14 @@ each. A third clause covers the text around it.
   tag that is not visible there.
 
 The property is stated here alone and checked in one place. Every move
-goes through one check of the three clauses, and so does the block that
-lowering makes around the operand of a `return` (above), where the
-third clause applies. No kind of moved text has a check of the property
-of its own: rules 8 and 12 of section 6, rule 8 of 3.5 and rule 3 of 5.1
-cite the property and show it on examples, and what rule 3 of 5.1 and
-rule 12 of section 6 say of a name that the operand declares is the
+goes through one check of the three clauses, and so do the two blocks
+that lowering makes around text that stays in place (above), that of
+the operand of a `return` and that of the operands of a slice index or
+a `slice_sub`, where the third clause applies. No kind of text has a
+check of the property of its own: rules 8 and 12 of section 6, rule 8
+of 3.5, rule 3 of 5.1 and rule 9 of section 8 cite the property and
+show it on examples, and what rule 3 of 5.1, rule 12 of section 6 and
+rule 9 of section 8 say of a name that an operand declares is the
 third clause on their text. The check is told the kind of text that it
 reads, and a failure carries the code of that kind (13.6): one code for
 each kind, whichever clause fails. The one name of an untagged type is
@@ -4159,9 +4191,11 @@ places (7.3 rule 4). The first use of an instance is an error where
 such a line stands, in any scope, between the definition of its generic
 and the place where 10.3 writes the instance, its prototype and its
 definition. The error cites the line. The state at a place is what the
-lines before it have set, so two places with no such line between them
-have one state, whatever the pragmas are and whatever a backend makes
-of them: `typec` does not read what a pragma does.
+`#pragma` lines before it have set, so two places with no such line
+between them have one state, whatever the pragmas are and whatever a
+backend makes of them: `typec` does not read what a pragma does. What a
+file-scope `__asm__(".section ...")` tells the assembler is no such
+state and is outside the rule.
 
 Without the rule, the place of one use would decide the code of an
 instance for every use in the unit, and that place differs between
@@ -4256,10 +4290,10 @@ before `#include <immintrin.h>` under GCC 16, has no instance first
 used after it. The same holds for one that is defined before a
 `#pragma weak`, `#pragma GCC visibility` or `#pragma message` line,
 which the `-E` of both backends keeps, or before a `#pragma mark` line
-under GCC 16 (above). A unit therefore includes the headers that define generic
-functions after the headers that hold such lines, and writes such a
-line of its own after the first use of each instance or before the
-definitions.
+under GCC 16 (above). A unit therefore includes the headers that define
+generic functions after the headers that hold such lines, and writes
+such a line of its own after the first use of each instance or before
+the definitions.
 
 Stage 3 settles the rule. The container library and the measurements
 (packages 3.5 and 3.6) count its refusals from the code of rule 4 of
@@ -4271,9 +4305,110 @@ Each pair enters one list with the measurement, for each backend, that
 its closing line restores everything that a line of the region can
 set. Without such a finding the refusal stays.
 
-The internal functions of slices (below) are written from no
-definition in the source, and the rule does not reach them: each is
-compiled under the state of the place where lowering writes it.
+**The check of a slice.** *Provisional (P28).* A function that served
+the indexes of a slice type would be written from no definition in the
+source, and the rule above would have nothing to hold it to. Lowering
+therefore writes none. A slice index `s[i]` is an expression at its use
+that holds both operands in temporaries, tests, traps (10.5) and only
+then indexes:
+
+```c
+(*__extension__ ({
+    const struct R __tc_s0 = (s);
+    const __typeof__(__tc_s0.len) __tc_i0 = (i);
+    if (!(__tc_i0 < __tc_s0.len))
+        trap;
+    &__tc_s0.data[__tc_i0];
+}))
+```
+
+and `slice_sub(s, lo, hi)` is one that yields the slice:
+
+```c
+(__extension__ ({
+    const struct R __tc_s0 = (s);
+    const __typeof__(__tc_s0.len) __tc_lo0 = (lo);
+    const __typeof__(__tc_s0.len) __tc_hi0 = (hi);
+    if (!(__tc_lo0 <= __tc_hi0 && __tc_hi0 <= __tc_s0.len))
+        trap;
+    (struct R){ __tc_s0.data + __tc_lo0, __tc_hi0 - __tc_lo0 };
+}))
+```
+
+`struct R` names the slice instance by its claimed tag, as the copy of
+a `match` does (the `match` row), and *trap* is the trap of 10.5.
+`__typeof__` of the member `len` names its type, since no name for it
+is sure to be visible. Each operand is written once and evaluated once,
+and the index is an lvalue: the target of the pointer that the
+expression yields. The temporaries take a number, which counts the
+slice indexes and the `slice_sub` expressions of the function from 0 in
+the order of the source. An index in an operand of another, as in
+`s[t[k]]`, then hides no temporary of the outer one; under one name for
+all, both backends report each such index under `-Wshadow`.
+`slice_from_array` and `slice_unchecked` hold no test, and each is a
+compound literal of the instance at its use.
+
+The test is text of its use, so it has the state of its use, as
+`s.data[i]` has, and no place of a first use decides the code of a
+later one. A function that the uses of a unit shared would be compiled
+under the state of the place where lowering wrote it, before its first
+use. Measured with such a function, `static inline` and written
+directly before the first function that indexes: inside a `#pragma GCC
+target("avx512f")` region, GCC 16 at `-O2` does not inline it into a
+function after the region's `#pragma GCC pop_options`, which calls it
+out of line, where under a region whose target adds nothing it inlines
+the function there. After `#pragma clang section text="..."`, Apple
+Clang 21 at `-O0` puts it into that section, and a function after the
+line that ends the section calls it there. With the expression, each
+of the two functions holds its own test in both cases.
+
+Rule 4 of 7.3 cannot take such a function in. The one place that could
+stand for its definition is the start of the unit, and the function
+names its slice instance, which 10.3 writes after the declaration of
+the type argument. The rule would so refuse the first index of each
+slice type that follows any line that sets state: every one after
+`#include <pthread.h>` under Apple Clang 21 and after `#include
+<immintrin.h>` under GCC 16 (above).
+
+The expression has four costs.
+
+- It is a fourth GNU form of lowered code (2.4). Apple Clang 21 and
+  GCC 16 take it without a diagnostic in the ISO and the GNU form of
+  C11 and of C17, under `-pedantic-errors -Wall -Wextra`. Without
+  `__extension__` both refuse it under `-pedantic-errors`.
+- It stands in a function body alone (section 8 rule 9). Both backends
+  refuse a statement expression in a declaration of file scope and in
+  the head of a function definition (section 6, rationale for rule
+  11), where a call of a function compiles: in `sizeof(s[0])` as the
+  size of an array of file scope, and in `s[0]` as the size of an
+  array parameter. Inside a body nothing is lost. Both backends take
+  `sizeof(s[0])` there as an integer constant expression, in a
+  `_Static_assert`, the size of a static array, the value of an
+  enumeration constant and a `case` label; they take the index in a
+  `__typeof__` and a `_Generic`, and in the size of an array parameter
+  of a prototype of block scope.
+- Its operands stand in a block. A tag or an enumeration constant that
+  one of them declares is not in scope after the index, and both
+  backends report a later use of it. The third clause of the
+  resolution property refuses such a declaration (above), with the
+  code of this kind of text.
+- Without optimisation the test is repeated at each use, where a call
+  would stand. On a sample of 20 tests in 12 functions, compiled for
+  x86-64, the code at `-O0` is 45% larger under Apple Clang 21 (1885
+  bytes against 1297) and 23% larger under GCC 16 (1818 against 1478).
+  With optimisation the two forms cost the same: at `-O2` the code has
+  the same size under both backends (609 and 422 bytes), and GCC 16
+  writes the same instructions; at `-O1` and `-Os` the expression is
+  of the same size or up to 16 bytes smaller. An index and a
+  `slice_sub` out of range end the program with the same trap in both
+  forms, at `-O0` and at `-O2`, and each operand is evaluated once.
+
+These measurements are of a sample written by hand in the lowered
+form, on one target and two backends. Stage 3 settles the form (package
+3.6): the cost of the tests in the container library and the pilot,
+without optimisation as well as with it, and the refusals of rule 9 of
+section 8, read from their codes. Without a finding against it the
+expression stays.
 
 The identifiers that the compiler invents begin with `__tc_`, which
 keeps them from every name in the text (2.3). One that is declared at
@@ -4281,10 +4416,6 @@ file scope or defined as a macro, and is one of many of its kind,
 continues with a word for its kind, then `__`, then what tells it from
 the others of its kind:
 
-- the internal function of a slice index or of a universe function:
-  `slice_index` or the name of the universe function, then the argument
-  encoding of the slice instance it serves (10.3), as in
-  `__tc_slice_sub__h` for a `slice(unsigned char)`;
 - the typedef of a type argument (10.3): `arg`, then the encoding of
   the type, as in `__tc_arg__Pi` for `int *`;
 - the include guard of an emitted header itself (9.3): `module`, then
@@ -4306,12 +4437,10 @@ the others of its kind:
 
 No kind word holds a `__` or ends in `_`, so the first `__` after the
 prefix ends the word, and names of different kinds differ: the guard of
-a header never meets the guard of an instance. The name of a universe
-function is the kind word of its internal functions, and no universe
-function has the word of another kind of this list as its name. Within
-a kind, an encoding is one type, an instance name one instance (10.3),
-and the written form of a module that last component alone, since
-every `_` in it begins an escape. The written form holds no `__` and
+a header never meets the guard of an instance. Within a kind, an
+encoding is one type, an instance name one instance (10.3), and the
+written form of a module that last component alone, since every `_` in
+it begins an escape. The written form holds no `__` and
 does not end in `_` either, so in the guard of an instance the first
 `__` after the kind word's ends the module, and the guard is one module
 and one instance. A generic of the universe shares its guards with no
@@ -4323,7 +4452,10 @@ return type of a function, is declared once in the outermost block of
 its function, and `__tc_r`, the temporary of a `return`, in a block of
 its own; neither needs more than the prefix. `__tc_t0`, `__tc_t1` and
 so on are the temporaries of the `try` expressions of a function, which
-share its blocks and take the number that tells them apart. `__tc_bits`
+share its blocks and take the number that tells them apart. `__tc_s0`,
+`__tc_i0`, `__tc_lo0` and `__tc_hi0` and so on are the temporaries of
+the test of a slice (above), with the number of their expression.
+`__tc_bits`
 and `__tc_enum_probe` are the probes of the assertions that end a unit
 (13.4), and `__tc_pack_probe_1` and `__tc_pack_probe_2` the two
 structures of the packing probe that ends one (10.3), one of each.
@@ -4389,7 +4521,7 @@ a crash.
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3) and a placement that 10.3 or 7.3 rule 2 or 4 refuses are compile errors | Nothing |
-| Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. An instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), an instance first used inside its region in one translation unit and outside it in another has one name and two layouts, and a function instance is compiled under the target, optimisation, attribute and section pragmas in force at its first use (13.5) |
+| Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. `typec` does not see a client's compile and cannot check this |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
 | A slice access stays in bounds | `s[i]`, `slice_sub` | The slice describes live storage of its length |
@@ -4408,14 +4540,18 @@ names what settles the choice and the default that stands if nothing does.
 A row whose last column reads **Decided** is settled: its third column
 holds the evidence, and the rules it names carry no mark. The stage
 numbers refer to the implementation plan. Pilot B is the rewrite of
-tomlc99, a TOML parser, in Type-C; its counts are in `RECORD.md`, on the
-branch `port` of the pilot's repository at commit 06d4eb8, with the
-scripts that reproduce them (`make size-split`, `tools/bench/run.sh`).
+tomlc99, a TOML parser, in Type-C. It lives in a repository of its own
+(plan, package 2.6), which has no remote: it is at
+`/Volumes/Optaine/type-c-pilot-b` on the owner's machine, and where it
+is hosted is open (plan, "Open logistics"). The pilot's counts are in
+`RECORD.md` on the branch `port` of that repository, at commit 06d4eb8,
+with the scripts that reproduce them (`make size-split`,
+`tools/bench/run.sh`).
 
 | | Decision | Settled by | Default |
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Pilot B: one `void` argument, `result(void, reported)`, the return type of 11 functions; no refusal and no rewrite | **Decided:** as specified |
-| P8 | `try` is limited to three positions, in a statement or declaration that neither holds nor directly follows a pragma line (5.1) | Pilot B: no `try` was wanted outside the three positions, and the limit forced 4 rewrites, all of `T *p = try f(sizeof(*p));`, whose operand names the object that the declaration declares. The clause on pragma lines is untested: tomlc99 holds no pragma | **Decided:** as specified |
+| P8 | `try` is limited to three positions, in a statement or declaration that neither holds nor directly follows a pragma line (5.1) | Pilot B: no `try` was wanted outside the three positions, and they forced no rewrite. The pilot's 4 rewrites, all of `T *p = try f(sizeof(*p));`, came from another clause of 5.1 rule 3, which is not provisional: the operand names nothing that the declaration holding the `try` declares. The clause on pragma lines is accepted unmeasured, as tomlc99 holds no pragma: it is a refusal, so relaxing it breaks no program that it accepts. The Stage 3 library and the corpus count its refusals | **Decided:** as specified |
 | P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11), and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Pilot B: rules 8, 9, 11 and 12 of section 6 and the form of a `return` (13.5) refused nothing, no diagnostic of the list of 13.5 was lost, and no diagnostic that the form adds broke a build. The 30 copies of the 9 deferred statements cost 1.1% of the text under Apple Clang 21 and 2.0% under GCC 16 more than the cleanups of a hand-written `goto cleanup` version, each cost measured by removing the cleanups from its source. The limit of the evidence: every deferred statement is a single call | **Decided:** repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | The injectivity tests of the encoding, on types drawn from a seeded generator (`test/unit/test_naming.ml`); in Pilot B lldb shows an instance as `result__Pc8reported`, with its tags by name, and hides no value. gdb is untried | **Decided:** as specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
@@ -4435,6 +4571,7 @@ scripts that reproduce them (`make size-split`, `tools/bench/run.sh`).
 | P25 | A generic whose definition holds a pragma is an error (10.3) | Stage 2, Pilot B, or the corpus: how many generic definitions hold a `#pragma` line or a `_Pragma` operator | The refusal stays |
 | P26 | A type argument holds no `__typeof__` of an expression (3.5 rule 2) | Stage 2, Pilot B, or the corpus: how many type arguments it refuses | The refusal stays |
 | P27 | A function instance is compiled under the pragma state of its generic's definition: a `#pragma` line that sets state between the definition and the place where the instance is written makes its first use an error (7.3 rule 4, 13.5) | Stage 3, packages 3.5 and 3.6: how often the rule refuses a use in the container library and the pilot, by the pragma of the cited line, read from the rule's code. If refusals are common: regions that are closed before the place of writing are passed over (13.5) | The refusal stays |
+| P28 | The test of a slice is an expression at each use, a statement expression under `__extension__`, and no function that the uses share, which needs rule 9 of section 8 (8, 13.5) | Stage 3, package 3.6: the cost of the tests in the container library and the pilot, without optimisation as well as with it, and how often rule 9 of section 8 refuses an index or a `slice_sub`, read from its codes. A hand-written sample gives the same code size at `-O2` and the same trap as a shared function under Apple Clang 21 and GCC 16, and 45% and 23% more code at `-O0` (13.5) | The expression stays |
 
 ## 16. Non-goals
 
