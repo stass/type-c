@@ -226,7 +226,9 @@ let rows =
          modified, holds a type without a row in the table of design \
          10.3, one declared outside file scope, an untagged type \
          without exactly one name or an attribute, written in it or in \
-         the declaration of a typedef name or alias that it uses." };
+         the declaration of a typedef name or alias that it uses; and a \
+         type argument of a generic function, deduced or explicit, that \
+         is no value type (design 7.2 rule 5)." };
     Live { name = "Instance_nesting"; code = 42;
       clause = Some "design 3.5 rule 7";
       meaning =
@@ -517,6 +519,31 @@ let rows =
          arguments name what the definition declares, where the table \
          of attributes does not record that both backends take it alike \
          for every type, kind of subject and argument list." };
+    Live { name = "Generic_function_use"; code = 80;
+      clause = Some "design 7.2";
+      meaning =
+        "The name of a generic function other than as the called \
+         expression of a call or before the type arguments of an \
+         explicit instance." };
+    Live { name = "Deduction_mismatch"; code = 81;
+      clause = Some "design 7.2 rule 2";
+      meaning =
+        "An argument of a call of a generic function whose type, after \
+         lvalue, array and function conversion, differs from the type of \
+         its parameter where that mentions a type parameter that no \
+         argument before it deduces, other than by qualifiers that a \
+         pointer parameter adds to the pointed-to type; or in which a \
+         type parameter that occurs twice meets two different types." };
+    Live { name = "Undeduced_type_parameter"; code = 82;
+      clause = Some "design 7.2 rule 3";
+      meaning =
+        "A call of a generic function that leaves a type parameter that \
+         no argument deduces." };
+    Live { name = "Instance_arguments"; code = 83;
+      clause = Some "design 7.2 rule 4";
+      meaning =
+        "An explicit instance of a generic function with a number of \
+         type arguments other than the number of its type parameters." };
   ]
 
 let () =

@@ -83,7 +83,8 @@ let generic name =
   | Error message -> failwith message
 
 let instance name arguments : Ctype.instance =
-  { generic = generic name; arguments; mentions_parameter = false }
+  { generic = generic name; arguments; argument_types = [];
+    mentions_parameter = false }
 
 let arithmetic_rows () =
   encodes "typedef void t;" "v";

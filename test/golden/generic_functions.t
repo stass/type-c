@@ -22,16 +22,6 @@ allows is checked and stops at the sentinel.
   last.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
   [1]
 
-A use of the name of a generic function, a call included, is refused.
-
-  $ cat > call.tc <<'EOF'
-  > generic(T) T *first(T *items) { return items; }
-  > int *f(int *p) { return first(p); }
-  > EOF
-  $ ./golden.exe call.tc
-  call.tc:2: 'first' is a generic function, whose calls and instances typec does not build yet (design 7.2; work package 3.2) [TC0023]
-  [1]
-
 Design 7.1 rule 3: a value of a type parameter is used only as C uses a
 structure, and as every value type gives the same meaning.
 

@@ -272,6 +272,9 @@ let rec expression reader (e : expression) =
   | Subscript { operand; index } -> here "index" [ sub operand; sub index ]
   | Call { callee; arguments } ->
       here "call" (sub callee :: List.map sub arguments)
+  | Instance { generic; type_arguments } ->
+      here "instance"
+        (sub generic :: List.map (type_name reader) type_arguments)
   | Member { operand; member } -> here "." [ sub operand; identifier member ]
   | Pointer_member { operand; member } ->
       here "->" [ sub operand; identifier member ]

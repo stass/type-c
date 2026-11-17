@@ -2554,9 +2554,19 @@ section 12 says what evidence would revisit this.
 3. Every type parameter must be deduced by the end of the argument list.
 4. `f(type, ..., type)` names an instance explicitly. It is a function
    designator of an ordinary C function type that can be called or have its
-   address taken.
+   address taken. After the name of a generic function and `(`, a token
+   that begins a type name begins the type arguments, since the parser
+   decides that before any type is known; so a typedef-named unqualified
+   constructor as the first argument of a call needs the qualified form,
+   as after the `(` of a cast (3.3). A parenthesised name, as in
+   `(max)(1, 2)`, is still called, as parentheses around a function
+   designator change nothing in C (C11 6.5.1p5).
 5. A type argument, deduced or explicit, is a value type that also meets
-   rule 2 of 3.5.
+   rule 2 of 3.5. A value type is unqualified, so `first(p)` with `p` a
+   `const int *` and `T *first(T *p)` is refused: a generic function
+   meant for const data declares `const T *`, which takes `int *` and
+   `const int *` alike by rule 2, as a C function meant for both
+   declares `const int *`, since `int *` takes no `const int *`.
 
 Example: with `vector(long) v`, the call `vector_push(&v, 0)` deduces `T` as
 `long` from the first argument and then converts `0` to `long`. The first

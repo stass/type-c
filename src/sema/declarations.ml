@@ -52,25 +52,38 @@ type instance_text = {
   typed : Expressions.t;
 }
 
+type function_instance = {
+  generic_function : Tree.reference;
+  instance : Ctype.instance;
+  type_arguments : Ctype.t list;
+  first_use : Tree.span;
+  anchor : Tree.anchor;
+}
+
 module Encodings = Set.Make (String)
 
 (* The instances used so far, the encodings of the arguments whose
    typedefs a text declares, the texts of instances met so far, latest
    first, the names that lowering writes for the applications of the
-   unit's own text, and the reading of each instance's definition, as
-   one value that a trial restores. *)
+   unit's own text, the reading of each instance's definition, and the
+   instances of generic functions used so far, latest first, as one
+   value that a trial restores. *)
 type placements = {
   used : unit Ctype.Instances.t;
   typedefs : Encodings.t;
   texts : placement list;
   names : (Tree.span * string) list;
   readings : instance_text Ctype.Instances.t;
+  functions_used : unit Ctype.Instances.t;
+  functions : function_instance list;
 }
 
 let no_placements =
   { used = Ctype.Instances.empty; typedefs = Encodings.empty; texts = [];
     names = [];
-    readings = Ctype.Instances.empty }
+    readings = Ctype.Instances.empty;
+    functions_used = Ctype.Instances.empty;
+    functions = [] }
 
 type t = {
   tags : Ctype.tags;
@@ -87,6 +100,7 @@ let tags result = result.tags
 let items result = result.items
 let placements result = List.rev result.placements.texts
 let instance_names result = result.placements.names
+let function_instances result = List.rev result.placements.functions
 
 let instance_text result instance =
   Ctype.Instances.find_opt instance result.placements.readings
@@ -144,9 +158,10 @@ type generic = { declaration : Tree.type_declaration; inexact : bool }
    The reading of an instance (design 10.3) and the definition check of
    a generic have [typed] and [type_names] of their own, as they read
    the text of the generic's definition again.
-   [generics] holds each generic type by the reference of each of its
-   declarations, with the latest declaration, which is the variant that
-   completes an incomplete one; [applied_at] the latest application of
+   [generics] holds each generic type by its name, which names one type
+   as a generic stands at file scope (design 3.5 rule 8), with the
+   latest declaration, which is the variant that completes an incomplete
+   one; [applied_at] the latest application of
    each instance, where an error of its definition is reported (design
    3.5 rule 5), and [nesting] the chain of instances whose definitions
    are being read (rule 7), none outside one.
@@ -200,7 +215,7 @@ type state = {
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
       (* the structure of each [type N;], which its variant completes *)
-  generics : (Tree.reference, generic) Hashtbl.t;
+  generics : (string, generic) Hashtbl.t;
   mutable applied_at : Tree.span Ctype.Instances.t;
   mutable nesting : nesting option;
   mutable instance_tokens : int;
@@ -1391,8 +1406,8 @@ and type_specifier_is_inexact state : Tree.type_specifier -> bool =
       match Hashtbl.find_opt state.entities declaration with
       | Some { declared = Typedef _; inexact; _ } -> inexact
       | Some _ | None -> false)
-  | Application { generic = reference; name = _; arguments = _ } -> (
-      match Hashtbl.find_opt state.generics reference with
+  | Application { name; generic = _; arguments = _ } -> (
+      match Hashtbl.find_opt state.generics name with
       | Some { inexact; declaration = _ } -> inexact
       | None -> false)
   | Typeof_expression _ -> true
@@ -1566,8 +1581,8 @@ and other_type state span ~(own : Tree.span) (specifier : Tree.type_specifier)
       refuse_opaque state type_name.span t "the type name of `typeof( )`";
       t
   | Typeof_expression expression -> typeof_expression state expression
-  | Application { name; generic; arguments } ->
-      applied_type state own name generic arguments
+  | Application { name; generic = _; arguments } ->
+      applied_type state own name arguments
   | Typedef_name { name; declaration } -> (
       match entity_used state span name declaration with
       | Some { declared = Typedef { typedef_type; _ }; _ } ->
@@ -2874,12 +2889,11 @@ and read_generic state (scoped : Tree.scoped_type_declaration) =
   let generic =
     { declaration; inexact = definition_is_inexact state declaration }
   in
-  Hashtbl.replace state.generics (Tree.In_tree declared.id) generic;
+  Hashtbl.replace state.generics
+    (declaration.node.name.node :> string)
+    generic;
   Hashtbl.replace state.definition_views declared.id
     state.external_facts.texts_at.view;
-  Option.iter
-    (fun earlier -> Hashtbl.replace state.generics earlier generic)
-    declared.earlier;
   let parameter (written : Tree.parameter_name) =
     let opaque = Ctype.declare_opaque state.tags written.name.node in
     (written.name.span, Ctype.record opaque)
@@ -2927,14 +2941,21 @@ and in_trial state read =
 
 (* A type application: its arguments, then the type that the generic's
    definition makes of them (rule 3). *)
-and applied_type state span name reference written =
-  let declaration = generic_declaration state span name reference in
+and applied_type state span name written =
+  let declaration = generic_declaration state span name in
   let argument (argument : Tree.type_name) =
     (argument.span, read_type_name state argument)
   in
   let arguments = List.map argument written in
   let instance = instance_of state declaration arguments in
   List.iter2 (refuse_inexact state) written arguments;
+  let applied = application state span declaration instance arguments in
+  note_name state span (Encoding.instance_name instance);
+  applied
+
+(* The type of an instance applied at [span], whose arguments are
+   [arguments] with the places that an error in them is reported at. *)
+and application state span declaration instance arguments =
   let first_use = note_application state instance arguments span in
   let types = List.map snd arguments in
   let applied =
@@ -2946,8 +2967,16 @@ and applied_type state span name reference written =
   if first_use then
     note_text state instance ~application:span
       (Declared { generic = declaration });
-  note_name state span (Encoding.instance_name instance);
   applied_type
+
+(* Design 7.2: [generic] applied to [types], which a substitution makes
+   of the arguments of one of its instances, at the call at [span]; the
+   call writes no application, so lowering writes no name for it. *)
+and applied_again state span (generic : Spelling.type_name) types =
+  let declaration = generic_declaration state span (generic :> string) in
+  let arguments = List.map (fun t -> (span, t)) types in
+  let instance = instance_of state declaration arguments in
+  application state span declaration instance arguments
 
 (* Design 3.5 rule 2: an inexact argument, refused from its text, as
    its type, which encodes it, holds no attribute, while the backend's
@@ -2965,8 +2994,8 @@ and refuse_inexact state (written : Tree.type_name) (_, t) =
 
 (* The latest declaration of the generic that an application names: the
    variant that completes an incomplete one, once read. *)
-and generic_declaration state span name reference =
-  match Hashtbl.find_opt state.generics reference with
+and generic_declaration state span name =
+  match Hashtbl.find_opt state.generics name with
   | Some { declaration; inexact = _ } -> declaration
   | None -> not_read state span name
 
@@ -3175,8 +3204,7 @@ and instance_type state (declaration : Tree.type_declaration) instance
       in
       obscured_by state attributes (Ctype.record record)
   | Variant _ | Incomplete_variant ->
-      let generic = Tree.In_tree declaration.node.declared.id in
-      let define = variant_instance state generic instance reading in
+      let define = variant_instance state instance reading in
       Ctype.record (Ctype.declare_variant_instance state.tags instance ~define)
 
 (* The definition of a variant instance, by the generic's latest
@@ -3186,8 +3214,10 @@ and instance_type state (declaration : Tree.type_declaration) instance
    incomplete variant only with a variant (design 3.1 rule 4). The
    instance derives its names from its instance name (design 10.3);
    typing declares none of them, as Type-C text names none. *)
-and variant_instance state generic instance reading record =
-  let { declaration; inexact = _ } = Hashtbl.find state.generics generic in
+and variant_instance state instance reading record =
+  let { declaration; inexact = _ } =
+    Hashtbl.find state.generics (instance.generic :> string)
+  in
   let define privacy constructors () =
     let span = declaration.span in
     let variant = Encoding.variant_name (Applied instance) in
@@ -3479,6 +3509,78 @@ and expression_type_name state (type_name : Tree.type_name) =
           depends on a type parameter");
   t
 
+(* Design 7.2 rule 5: a type argument of a generic function is a value
+   type that meets rule 2 of 3.5, checked as the argument of an
+   application is, but for the text of a deduced one, which is none. *)
+and check_type_argument state span (argument : Expressions.type_argument) =
+  let t =
+    match argument with
+    | Written (written, t) ->
+        refuse_inexact state written (span, t);
+        t
+    | Deduced t -> t
+  in
+  refuse_changed_mention state (span, t);
+  let refuse problem =
+    fail state span
+      (Rule.message Type_argument
+         (Printf.sprintf "the type argument %s %s"
+            (quote (Type_name.of_ctype t)) problem))
+  in
+  (match Value_type.problem state.tags t with
+  | Answer None -> ()
+  | Answer (Some problem) ->
+      refuse (Value_type.describe problem ^ ", no value type")
+  | Depends_on unknown ->
+      refuse
+        (Printf.sprintf
+           "may be no value type, as that depends on %s, whose type \
+            typec does not compute"
+           unknown.construct));
+  match Encoding.encode state.tags t with
+  | Ok _ -> ()
+  | Error no_row -> fail state span (no_row_diagnostic t no_row)
+
+(* Design 7.3 rule 1: the instances that the unit's own text uses, each
+   noted at its first use. One that the body of a generic function uses
+   is caused by the definition of each instance of that function (3.5
+   rule 7), not by its check. *)
+and use_function_instance state span reference type_arguments =
+  if not state.in_generic_function then begin
+    let generic = generic_function_name state reference in
+    let arguments = List.map (fun t -> (t, t)) type_arguments in
+    let instance =
+      match Encoding.instance state.tags generic arguments with
+      | Ok instance -> instance
+      | Error (argument, no_row) ->
+          fail state span (no_row_diagnostic argument no_row)
+    in
+    let placements = state.placements in
+    if not (Ctype.Instances.mem instance placements.functions_used) then
+      let used =
+        { generic_function = reference; instance; type_arguments;
+          first_use = span;
+          anchor = Option.get state.external_facts.anchor }
+      in
+      state.placements <-
+        { placements with
+          functions_used =
+            Ctype.Instances.add instance () placements.functions_used;
+          functions = used :: placements.functions }
+  end
+
+(* The name of a generic function as instance names begin with it
+   (design 10.3), which 7.1 rule 1 lets it be. *)
+and generic_function_name state reference =
+  let name =
+    match Hashtbl.find_opt state.entities reference with
+    | Some entity -> entity.name
+    | None -> invalid_arg "Declarations: a generic function not read"
+  in
+  match Spelling.type_name ~at_file_scope:true name with
+  | Ok generic -> generic
+  | Error _ -> invalid_arg "Declarations: a generic function's name"
+
 and typing state : Expressions.context =
   {
     typed = state.typed;
@@ -3488,7 +3590,14 @@ and typing state : Expressions.context =
     fail = (fun span diagnostic -> fail state span diagnostic);
     entity = referenced state;
     overloaded = Hashtbl.mem state.overloaded;
-    generic_function = Hashtbl.mem state.generic_functions;
+    generic_function =
+      (fun reference ->
+        Option.map
+          (fun generic -> generic.parameter_records)
+          (Hashtbl.find_opt state.generic_functions reference));
+    type_argument = check_type_argument state;
+    use_instance = use_function_instance state;
+    apply_generic = applied_again state;
     type_name = expression_type_name state;
     declaration = read_block_declaration state;
     type_declaration =

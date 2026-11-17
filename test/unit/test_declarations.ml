@@ -2653,11 +2653,9 @@ let generic_placement () =
   rejects ~file (in_c probe) "a block literal";
   accepts ~file (in_c ("struct X; " ^ probe))
 
-(* [source]'s texts of instances in the order they stand: each instance
-   name, whether the text is the typedefs of its arguments, with the tag
-   lines before each, its declaration or its definition, and the index
-   of the external declaration whose anchor it stands at. *)
-let placements source =
+(* Reads [source] as Type-C text for lp64, and gives with what it read
+   the index of the external declaration that an anchor stands at. *)
+let read_type_c source =
   let file = "in.tc" in
   let text =
     match Reader.read ~name:file (Preprocessed.text ~name:file source) with
@@ -2675,7 +2673,15 @@ let placements source =
     let starts_before item = (Tree.anchor item).before <= anchor.before in
     List.length (List.filter starts_before items) - 1
   in
-  match Declarations.read lp64 text scopes with
+  (declaration_at, Declarations.read lp64 text scopes)
+
+(* [source]'s texts of instances in the order they stand: each instance
+   name, whether the text is the typedefs of its arguments, with the tag
+   lines before each, its declaration or its definition, and the index
+   of the external declaration whose anchor it stands at. *)
+let placements source =
+  let declaration_at, read = read_type_c source in
+  match read with
   | Error error ->
       fail_case source ("error: " ^ Reader.error_message error);
       []
@@ -2697,6 +2703,51 @@ let placements source =
          declaration_at placement.at)
       in
       List.map shown (Declarations.placements result)
+
+(* [source]'s instances of generic functions in the order of their first
+   uses: each instance name and the index of the external declaration
+   that holds its first use. *)
+let function_instances source =
+  let declaration_at, read = read_type_c source in
+  match read with
+  | Error error ->
+      fail_case source ("error: " ^ Reader.error_message error);
+      []
+  | Ok result ->
+      List.map
+        (fun (used : Declarations.function_instance) ->
+          (Encoding.instance_name used.instance, declaration_at used.anchor))
+        (Declarations.function_instances result)
+
+let generic_function_instances () =
+  let expect source expected =
+    if function_instances source <> expected then
+      fail_case source "function instances"
+  in
+  let max = "generic(T) T max(T a, T b) { return a; } " in
+  (* Two calls whose deduced arguments are equal name one instance, at
+     the first of them. *)
+  expect
+    (max ^ "int f(int a) { return max(a, 1) + max(2, a); } \
+            long g(long x) { return max(x, 0) + max(1, 2); }")
+    [ ("max__i", 1); ("max__l", 2) ];
+  (* An explicit instance and a call name one instance. *)
+  expect
+    (max ^ "int (*p)(int, int) = max(int); \
+            int f(void) { return max(1, 2); }")
+    [ ("max__i", 1) ];
+  (* A call in the body of a generic function names no instance of the
+     unit: the instances of its function cause those (design 3.5 rule
+     7). *)
+  expect
+    (max ^ "generic(T) T both(T a) { max(1, 2); return max(a, a); } \
+            typedef unsigned long size; size h(size n) { return max(n, n); }")
+    [ ("max__m", 3) ];
+  (* A pointer argument deduces its referenced type. *)
+  expect
+    "struct s { int x; }; generic(T) T *first(T *p) { return p; } \
+     struct s *f(struct s *p) { return first(p); }"
+    [ ("first__T1s", 2) ]
 
 let placement_indexes () =
   let expect source expected =
@@ -3146,6 +3197,7 @@ let () =
   void_fields ();
   generic_placement ();
   placement_indexes ();
+  generic_function_instances ();
   generic_variants ();
   generic_arguments ();
   generic_definitions ();

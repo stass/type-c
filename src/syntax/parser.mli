@@ -94,6 +94,7 @@ type kind =
   | Type_parameter  (** within the definition of its generic *)
   | Derived_enumerator
       (** an enumerator that a variant claims for C (design 10.1 rule 6) *)
+  | Generic_function_name  (** of a generic function (design 7.1) *)
 
 (** What an ordinary identifier in scope denotes: its declaration and its
     kind. *)

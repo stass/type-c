@@ -342,11 +342,24 @@ val constant : t -> Tree.expression -> constant option
 (** The class of constant expression of an expression that has been
     typed. *)
 
+(** A type argument of an instance of a generic function (design 7.2
+    rule 5): one that an explicit instance writes, or one that a call
+    deduces. *)
+type type_argument =
+  | Written of Tree.type_name * Ctype.t
+  | Deduced of Ctype.t
+
 (** What the declaration reader gives typing. [fail] reports the first
     error at the start of a span and does not return; [entity] gives what
     a resolved use of a name denotes, and [overloaded] whether it names
-    a Clang overload set (design 13.3), and [generic_function] whether it
-    names a generic function (design 7.1); [type_name] reads a type name, once,
+    a Clang overload set (design 13.3), and [generic_function] the type
+    parameters of the generic function that it names, if it names one
+    (design 7.1); [type_argument] refuses a type argument of a generic
+    function that is not valid (design 7.2 rule 5), and [use_instance]
+    is told of each use of an instance of one, with its type arguments
+    (design 7.3); [apply_generic] applies a generic type to the types
+    that a substitution makes of the arguments of one of its instances,
+    at the call at the span (design 7.2); [type_name] reads a type name, once,
     declaring what it declares; [declaration] reads a declaration in a
     block, binding its identifiers and typing its initialisers, and
     [type_declaration] a type declaration there. [needs_complete] is
@@ -369,7 +382,11 @@ type context = {
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
-  generic_function : Tree.reference -> bool;
+  generic_function : Tree.reference -> Ctype.record_tag list option;
+  type_argument : Tree.span -> type_argument -> unit;
+  use_instance : Tree.span -> Tree.reference -> Ctype.t list -> unit;
+  apply_generic :
+    Tree.span -> Typec_syntax.Spelling.type_name -> Ctype.t list -> Ctype.t;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;

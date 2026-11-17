@@ -7,17 +7,26 @@ type record_kind = Struct | Union
 
 type privacy = Public | Private of Typec_cpp.File.t
 
+type enum_tag = {
+  enum_id : int;
+  enum_name : string option;
+  enum_at_file_scope : bool;
+}
+
+type length = Constant of int | Opaque | Unknown | Variable
+
 type instance = {
   generic : Typec_syntax.Spelling.type_name;
   arguments : string list;
+  argument_types : t list;
   mentions_parameter : bool;
 }
 
-type variant_name =
+and variant_name =
   | Declared of Typec_syntax.Spelling.type_name
   | Applied of instance
 
-type record_tag = {
+and record_tag = {
   record_id : int;
   kind : record_kind;
   record_name : record_name;
@@ -32,14 +41,7 @@ and record_name =
   | Instance_name of instance
   | Opaque_name of string
 
-type enum_tag = {
-  enum_id : int;
-  enum_name : string option;
-  enum_at_file_scope : bool;
-}
-type length = Constant of int | Opaque | Unknown | Variable
-
-type parameters =
+and parameters =
   | Prototype of { types : t list; variadic : bool }
   | Unspecified
   | Old_style of t list
@@ -126,16 +128,24 @@ type variant_definition = {
 
 module Ids = Map.Make (Int)
 
+(* Design 3.5 rule 3: an instance is its generic and the encodings of its
+   arguments, whatever types of the same encodings it carries. *)
+let compare_instances (a : instance) (b : instance) =
+  compare (a.generic, a.arguments) (b.generic, b.arguments)
+
 module Instances = Map.Make (struct
   type t = instance
 
-  let compare = compare
+  let compare = compare_instances
 end)
 
 module Record_instances = Map.Make (struct
   type t = record_kind * instance
 
-  let compare = compare
+  let compare (a_kind, a) (b_kind, b) =
+    match compare a_kind b_kind with
+    | 0 -> compare_instances a b
+    | order -> order
 end)
 
 type typedef_name = { name : string; declared : Typec_syntax.Tree.reference }

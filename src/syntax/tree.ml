@@ -243,6 +243,9 @@ and expression_node =
           typed. *)
   | Subscript of { operand : expression; index : expression }
   | Call of { callee : expression; arguments : expression list }
+  | Instance of { generic : expression; type_arguments : type_name list }
+      (** [f(T1, ..., Tn)], the instance of the generic function that
+          [generic], an identifier, names (design 7.2 rule 4) *)
   | Member of { operand : expression; member : identifier }  (** [.] *)
   | Pointer_member of { operand : expression; member : identifier }
       (** [->] *)

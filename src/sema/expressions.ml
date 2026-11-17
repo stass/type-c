@@ -381,6 +381,10 @@ let answered view =
 let types_compatible view (expression : Tree.expression) =
   Hashtbl.find_opt view.compatibilities expression.span
 
+type type_argument =
+  | Written of Tree.type_name * Ctype.t
+  | Deduced of Ctype.t
+
 type context = {
   typed : t;
   target : Target.t;
@@ -389,7 +393,11 @@ type context = {
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
-  generic_function : Tree.reference -> bool;
+  generic_function : Tree.reference -> Ctype.record_tag list option;
+  type_argument : Tree.span -> type_argument -> unit;
+  use_instance : Tree.span -> Tree.reference -> Ctype.t list -> unit;
+  apply_generic :
+    Tree.span -> Typec_syntax.Spelling.type_name -> Ctype.t list -> Ctype.t;
   type_name : Tree.type_name -> Ctype.t;
   declaration : Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;
@@ -1207,12 +1215,12 @@ let function_designator context span ~old_style_definition (t : Ctype.t) =
 let identifier context span name (resolution : Tree.resolution) =
   match resolution with
   | Undeclared -> predefined context span name
-  | Resolved reference when context.generic_function reference ->
+  | Resolved reference when context.generic_function reference <> None ->
       context.fail span
-        (Rule.message Not_implemented
+        (Rule.message Generic_function_use
            (quote name
-          ^ " is a generic function, whose calls and instances typec does \
-             not build yet (design 7.2; work package 3.2)"))
+          ^ " is a generic function, whose name alone is no function: it \
+             is called, or names an instance with type arguments"))
   | Resolved reference -> (
       match (context.entity span name reference).declared with
       (* typec does not resolve overloads, so the one a use names is
@@ -1964,6 +1972,7 @@ let value_operands (whole : Tree.expression) =
   | Comma (left, right) ->
       [ left; right ]
   | Call { callee; arguments } -> callee :: arguments
+  | Instance _ -> []
   | Conditional { condition; if_true; if_false } ->
       (condition :: Option.to_list if_true) @ [ if_false ]
   | Generic { controlling; associations } ->
@@ -2535,6 +2544,8 @@ let classify_node context (whole : Tree.expression) typed =
   | Label_address _ -> itself Address_constant
   | Call _ | Statement_expression _ | Va_arg _ | Block_literal _ ->
       itself Backend_constant
+  (* An instance is a function with internal linkage (design 7.3). *)
+  | Instance _ -> itself (Designator { static_storage = true; named = false })
   (* Lowering reads the value of a [try] from an automatic temporary
      (design 13.5). *)
   | Try _ -> itself Not_constant
@@ -3008,6 +3019,16 @@ let equality_operands context (op : Tree.binary_operator) (left, left_typed)
         (right, value_type right_typed)
   | _ -> ()
 
+(* Records the typing of [expression]. It stays outside the recursive
+   group of [expression]: as a member of it, the recursion over deep
+   trees overflowed the stack that test_deep_trees allows. *)
+let note_typed context (expression : Tree.expression) typed =
+  if Hashtbl.mem context.typed.types expression.span then
+    invalid_arg "Expressions: an expression typed twice";
+  Hashtbl.replace context.typed.types expression.span typed;
+  Hashtbl.replace context.typed.constants expression.span
+    (classify context expression typed)
+
 (* Statements (6.8) and the expressions that hold them *)
 
 (* The value of an expression that an operation reads (design 3.4): the
@@ -3035,9 +3056,7 @@ and positioned context position (expression : Tree.expression) =
     | Some (named, arguments) -> construct context expression named arguments
     | None -> expression_node context position expression
   in
-  Hashtbl.replace context.typed.types expression.span typed;
-  Hashtbl.replace context.typed.constants expression.span
-    (classify context expression typed);
+  note_typed context expression typed;
   (* The conversion reads the dependence of the value. *)
   record_dependence context expression;
   (match position with
@@ -3081,6 +3100,11 @@ and expression_node context position (whole : Tree.expression) =
       subscript context span array (typed index)
   | Qualified_constructor _ ->
       invalid_arg "Expressions: a constructor that is no constructor expression"
+  | Call { callee; arguments } when generic_callee context callee <> None ->
+      generic_call context span (Option.get (generic_callee context callee))
+        arguments
+  | Instance { generic; type_arguments } ->
+      explicit_instance context span generic type_arguments
   | Call { callee; arguments } ->
       refuse_parenthesized_constructor context callee;
       let callee_typed = typed callee in
@@ -3334,6 +3358,179 @@ and call_arguments context callee (callee_typed : typed) arguments =
   | _ ->
       let positions = prototype_positions context callee_typed arguments in
       List.map2 (argument context) positions arguments
+
+(* The generic function that the called expression names, through any
+   parentheses (design 7.2): the identifier, its name, its declaration
+   and its type parameters. *)
+and generic_callee context (callee : Tree.expression) =
+  match callee.node with
+  | Parenthesized inner -> generic_callee context inner
+  | Identifier { name; resolution = Resolved reference } ->
+      Option.map
+        (fun parameters -> (callee, name, reference, parameters))
+        (context.generic_function reference)
+  | _ -> None
+
+(* The type that the declaration of a generic function gives it. *)
+and generic_type context span name reference =
+  match (context.entity span name reference).declared with
+  | Function { function_type; _ } -> function_type
+  | Object _ | Enumerator _ | Typedef _ ->
+      invalid_arg "Expressions: a generic function that is no function"
+
+and substituted context span bindings t =
+  match
+    Deduction.substitute context.tags ~apply:(context.apply_generic span)
+      ~complete:context.needs_complete bindings t
+  with
+  | Ok t -> t
+  | Error failure -> fail_deduction context span failure
+
+and fail_deduction : 'a. context -> Tree.span -> Deduction.failure -> 'a =
+ fun context span failure ->
+  let shown t = quote (Type_name.of_ctype t) in
+  let refuse text = context.fail span (Rule.message Deduction_mismatch text) in
+  match failure with
+  | Mismatch { parameter_part; argument_part } ->
+      refuse
+        (Printf.sprintf
+           "the argument's type does not match its parameter's: it has %s \
+            where the parameter type has %s"
+           (shown argument_part) (shown parameter_part))
+  | Twice { first; second } ->
+      refuse
+        (Printf.sprintf
+           "a type parameter that the parameter type holds twice meets %s \
+            and %s"
+           (shown first) (shown second))
+  | Unknown_part unknown ->
+      refuse
+        (Printf.sprintf
+           "whether the argument's type matches its parameter's depends \
+            on %s, whose type typec does not compute"
+           unknown.construct)
+  | Not_built error -> checked context span (Error error)
+
+(* Design 7.2 rule 1: the arguments are typed from left to right, and
+   each either converts to its parameter's type, where the arguments
+   before it deduce every type parameter in that type, or deduces them.
+   The instance is used once every type parameter is deduced. *)
+and generic_call context span (callee, name, reference, parameters)
+    arguments =
+  let function_type = generic_type context callee.Tree.span name reference in
+  match function_type.shape with
+  | Function { parameters = Prototype { types; _ } as prototype; _ } ->
+      check_arity context span prototype (List.length arguments);
+      let bindings =
+        deduced_arguments context (Deduction.start parameters) types
+          arguments
+      in
+      let callee_typed =
+        instance_designator context span reference bindings function_type
+      in
+      note_typed context callee callee_typed;
+      value (call_type context span callee_typed (List.length arguments))
+  | Unknown_type unknown ->
+      List.iter
+        (fun each -> ignore (argument context Untargeted each))
+        arguments;
+      value (unknown_value unknown)
+  | _ -> invalid_arg "Expressions: a generic function without a prototype"
+
+(* Types each argument and gives what the arguments deduce. Those past
+   the parameters, which an ellipsis takes, have no target type. *)
+and deduced_arguments context bindings parameter_types arguments =
+  match (parameter_types, arguments) with
+  | _, [] -> bindings
+  | [], rest ->
+      List.iter (fun extra -> ignore (argument context Untargeted extra)) rest;
+      bindings
+  | parameter :: parameters, first :: rest ->
+      let bindings =
+        if Deduction.is_deduced_in bindings parameter then begin
+          let target = substituted context first.span bindings parameter in
+          ignore (argument context (Targeted target) first);
+          bindings
+        end
+        else deducing_argument context bindings parameter first
+      in
+      deduced_arguments context bindings parameters rest
+
+(* An argument typed on its own, whose type deduces the type parameters
+   in its parameter's type; it then converts to that type as any
+   argument does. *)
+and deducing_argument context bindings parameter (first : Tree.expression) =
+  let typed = whole_value context first in
+  let argument_type = Ctype.unqualified (value_type typed) in
+  let deduced =
+    match Deduction.deduce bindings ~parameter ~argument:argument_type with
+    | Ok deduced -> deduced
+    | Error failure -> fail_deduction context first.span failure
+  in
+  List.iter
+    (fun t -> context.type_argument first.span (Deduced t))
+    (Deduction.newly_deduced ~before:bindings ~after:deduced);
+  let target = substituted context first.span deduced parameter in
+  context.needs_complete typed.expression_type;
+  refuse_conversion context first.span target typed;
+  deduced
+
+(* The function designator of the instance whose type arguments
+   [bindings] holds, used at [span], once every one is deduced (rule
+   3). *)
+and instance_designator context span reference bindings function_type =
+  match Deduction.arguments bindings with
+  | Error (record : Ctype.record_tag) ->
+      let parameter =
+        match record.record_name with
+        | Opaque_name name -> quote name
+        | _ -> invalid_arg "Expressions: a type parameter that is no opaque"
+      in
+      context.fail span
+        (Rule.message Undeduced_type_parameter
+           (Printf.sprintf
+              "no argument deduces the type parameter %s; an explicit \
+               instance names it"
+              parameter))
+  | Ok type_arguments ->
+      context.use_instance span reference type_arguments;
+      let instance_type = substituted context span bindings function_type in
+      value
+        (function_designator context span ~old_style_definition:false
+           instance_type)
+
+(* Design 7.2 rule 4: [f(T1, ..., Tn)] is a function designator of the
+   instance. *)
+and explicit_instance context span (generic : Tree.expression) type_arguments
+    =
+  let name, reference =
+    match generic.node with
+    | Identifier { name; resolution = Resolved reference } -> (name, reference)
+    | _ -> invalid_arg "Expressions: an instance of no generic function"
+  in
+  let parameters = Option.get (context.generic_function reference) in
+  if List.compare_lengths parameters type_arguments <> 0 then
+    context.fail span
+      (Rule.message Instance_arguments
+         (Printf.sprintf
+            "the number of type arguments, %d, differs from the number of \
+             type parameters of the generic function %s, %d"
+            (List.length type_arguments) (quote name)
+            (List.length parameters)));
+  let read (written : Tree.type_name) =
+    let t = context.type_name written in
+    context.type_argument written.span (Written (written, t));
+    t
+  in
+  let bindings =
+    Deduction.explicit parameters (List.map read type_arguments)
+  in
+  let function_type = generic_type context generic.span name reference in
+  let designator =
+    instance_designator context span reference bindings function_type
+  in
+  note_typed context generic designator;
+  designator
 
 (* Design 3.4: a value moves into or out of the object that [first]
    points to as it is assigned, so a value of a distinct type moves only

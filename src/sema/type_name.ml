@@ -56,18 +56,6 @@ let parenthesized_under_pointer t =
   | Unknown_type _ ->
       false
 
-(* How a diagnostic names a structure, union, enumeration or distinct
-   type: by its tag, or by the name of its declaration. *)
-let shown_name t =
-  match t.shape with
-  | Enum tag -> tag_name "enum" tag.enum_name
-  | Record tag ->
-      tag_name (record_keyword tag.kind) (record_tag_name tag.record_name)
-  | Distinct distinct -> distinct.distinct_name
-  | Void | Arithmetic _ | Pointer _ | Va_list | Array _ | Function _
-  | Unknown_type _ ->
-      invalid_arg "Type_name.shown_name"
-
 type tag_line = { tag : string; line : string }
 
 let tag_lines t =
@@ -148,6 +136,35 @@ and parameter_list ~named = function
       let parameter t = declared ~named t "" in
       String.concat ", " (List.map parameter types @ ellipsis)
   | Unspecified | Old_style _ -> ""
+
+(* How a diagnostic names a structure, union, enumeration or distinct
+   type: by its tag, or by the name of its declaration. An instance whose
+   arguments mention a type parameter is named by its application, as
+   its instance name encodes the parameter by a number (design 10.3). *)
+let rec shown_name t =
+  match t.shape with
+  | Enum tag -> tag_name "enum" tag.enum_name
+  (* A type parameter is named as the generic names it. *)
+  | Record { record_name = Opaque_name name; _ } -> name
+  | Record
+      { record_name = Instance_name instance | Variant_name (Applied instance);
+        _ }
+  | Distinct { distinct_instance = Some instance; _ }
+    when instance.mentions_parameter ->
+      application_text instance
+  | Record tag ->
+      tag_name (record_keyword tag.kind) (record_tag_name tag.record_name)
+  | Distinct distinct -> distinct.distinct_name
+  | Void | Arithmetic _ | Pointer _ | Va_list | Array _ | Function _
+  | Unknown_type _ ->
+      invalid_arg "Type_name.shown_name"
+
+and application_text (instance : Ctype.instance) =
+  let argument t = declared ~named:shown_name t "" in
+  (instance.generic :> string)
+  ^ "("
+  ^ String.concat ", " (List.map argument instance.argument_types)
+  ^ ")"
 
 let declaration t name = declared ~named:shown_name t name
 let of_ctype t = declaration t ""

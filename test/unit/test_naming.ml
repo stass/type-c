@@ -327,7 +327,8 @@ let check_prefix_free () =
   check (List.sort compare unique_codes)
 
 let instance_name generic arguments =
-  Encoding.instance_name { generic; arguments; mentions_parameter = false }
+  Encoding.instance_name
+    { generic; arguments; argument_types = []; mentions_parameter = false }
 
 (* Design 10.3: the arguments of an instance name split one way, so one
    name is one list of one or two encodings. This follows from

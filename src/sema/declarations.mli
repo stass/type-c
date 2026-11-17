@@ -95,6 +95,19 @@ type instance_text = {
   typed : Expressions.t;
 }
 
+(** An instance of a generic function that the unit uses (design 7.3
+    rule 1): the declaration of its [generic_function], the instance,
+    whose name {!Encoding.instance_name} gives, its type arguments, and
+    the use that is its first, in front of whose external declaration,
+    at [anchor], its declaration stands (design 10.3). *)
+type function_instance = {
+  generic_function : Tree.reference;
+  instance : Ctype.instance;
+  type_arguments : Ctype.t list;
+  first_use : Tree.span;
+  anchor : Tree.anchor;
+}
+
 type t
 
 val tags : t -> Ctype.tags
@@ -113,6 +126,11 @@ val instance_names : t -> (Tree.span * string) list
 (** The name of the instance that each application of the unit's own
     text, outside the definitions of generics, lowers to (design 13.5).
     Spans may nest, as an application's arguments do. *)
+
+val function_instances : t -> function_instance list
+(** The instances of generic functions that the unit's own text uses,
+    outside the definitions of generic functions, in the order of their
+    first uses: one for each instance, however many uses name it. *)
 
 val instance_text : t -> Ctype.instance -> instance_text option
 (** The definition of an instance as its reading found it, [None] for

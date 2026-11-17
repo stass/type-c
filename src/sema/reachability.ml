@@ -670,6 +670,10 @@ and expression walk (value : Tree.expression) =
   | Call { callee; arguments } ->
       { (operands (callee :: arguments)) with
         completes = not (walk.facts.noreturn callee) }
+  | Instance { generic; type_arguments } ->
+      List.fold_left
+        (fun flow argument -> both flow (type_name_flow walk argument))
+        (expression walk generic) type_arguments
   | Label_address label ->
       record_jump walk Address label;
       completes

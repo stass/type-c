@@ -34,6 +34,7 @@ let kind_name : Parser.kind -> string = function
   | Declared_type { parameters; _ } -> Printf.sprintf "type/%d" parameters
   | Type_parameter -> "parameter"
   | Derived_enumerator -> "enumerator"
+  | Generic_function_name -> "generic function"
 
 (* Where a declaration is, by the line of its token, which a case keeps
    to one declaration a line. *)

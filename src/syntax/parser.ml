@@ -68,6 +68,7 @@ type kind =
   | Declared_type of { stage : stage; parameters : int }
   | Type_parameter
   | Derived_enumerator
+  | Generic_function_name
 
 type ordinary = { declaration : reference; kind : kind }
 
@@ -829,14 +830,16 @@ let initial_scope keywords ~universe =
     Builtin_typedef.table
 
 let names_type = function
-  | Not_a_type | Derived_enumerator -> false
+  | Not_a_type | Derived_enumerator | Generic_function_name -> false
   | Typedef_name | Declared_type _ | Type_parameter -> true
 
 (* The number of type parameters of the type that a name of [kind]
    names, which is not zero for a generic type (design 3.5 rule 1). *)
 let type_parameters_of = function
   | Declared_type { parameters; _ } -> parameters
-  | Not_a_type | Typedef_name | Type_parameter | Derived_enumerator -> 0
+  | Not_a_type | Typedef_name | Type_parameter | Derived_enumerator
+  | Generic_function_name ->
+      0
 
 let is_generic kind = type_parameters_of kind > 0
 
@@ -858,7 +861,9 @@ let token_of (name : identifier) = name.span.first
 
 let is_type_declared = function
   | Declared_type _ -> true
-  | Not_a_type | Typedef_name | Type_parameter | Derived_enumerator -> false
+  | Not_a_type | Typedef_name | Type_parameter | Derived_enumerator
+  | Generic_function_name ->
+      false
 
 let fail_claimed state (name : identifier) what text =
   fail_at_token state (token_of name)
@@ -1322,6 +1327,9 @@ module Deferred = struct
     | Call { callee; arguments } ->
         expression callee;
         List.iter expression arguments
+    | Instance { generic; type_arguments } ->
+        expression generic;
+        List.iter type_name type_arguments
     | Cast { type_name = name; operand } ->
         type_name name;
         expression operand
@@ -2515,7 +2523,7 @@ let is_unary_expression expression =
       false
   | Identifier _ | Constant _ | Character _ | String _ | Parenthesized _
   | Generic _ | Compound_literal _ | Qualified_constructor _ | Subscript _
-  | Call _ | Member _ | Pointer_member _ | Post_increment _
+  | Call _ | Instance _ | Member _ | Pointer_member _ | Post_increment _
   | Post_decrement _ | Unary _
   | Sizeof_expression _ | Sizeof_type _ | Alignof _ | Alignof_expression _
   | Statement_expression _ | Label_address _ | Va_arg _ | Offsetof _
@@ -3041,7 +3049,9 @@ and named_type state name (ordinary : ordinary) ~at =
   (match ordinary.kind with
   | Declared_type { stage = Defining; _ } -> fail_own_name state ~at name
   | Type_parameter -> refuse_parameter_in_alignment state ~at name
-  | Not_a_type | Typedef_name | Declared_type _ | Derived_enumerator -> ());
+  | Not_a_type | Typedef_name | Declared_type _ | Derived_enumerator
+  | Generic_function_name ->
+      ());
   let declaration = ordinary.declaration in
   match type_parameters_of ordinary.kind with
   | 0 -> Typedef_name { name; declaration }
@@ -3734,6 +3744,10 @@ and postfix_operators state start operand =
       let index = expression state in
       expect state P.Right_bracket "`]` after a subscript";
       continue_with (Subscript { operand; index })
+  | Punctuator_token P.Left_paren when names_instance state operand ->
+      advance state;
+      let type_arguments = type_arguments_of_instance state in
+      continue_with (Instance { generic = operand; type_arguments })
   | Punctuator_token P.Left_paren ->
       advance state;
       let arguments = arguments state in
@@ -3774,6 +3788,31 @@ and qualified_constructor state name ordinary =
   postfix_operators state start named
 
 (* After the [(] of a call, up to and including the [)]. *)
+(* Design 7.2 rule 4: at the [(] after the name of a generic function, a
+   type name begins the type arguments of an explicit instance. The
+   parser decides it before any target type is known, as it decides a
+   cast after [(] (design 3.3), so an unqualified constructor that is a
+   typedef name cannot be the first argument of a call of a generic. *)
+and names_instance state (operand : expression) =
+  match operand.node with
+  | Identifier { name; resolution = Resolved _ } -> (
+      match visible state name with
+      | Some { kind = Generic_function_name; _ } -> starts_type_name state 1
+      | Some _ | None -> false)
+  | _ -> false
+
+(* After the [(] of an explicit instance: the type names, to the [)]. *)
+and type_arguments_of_instance state =
+  let rec loop type_arguments =
+    let type_arguments = type_name state :: type_arguments in
+    if accept state P.Comma then loop type_arguments
+    else begin
+      expect state P.Right_paren "`,` or `)` after a type argument";
+      List.rev type_arguments
+    end
+  in
+  loop []
+
 and arguments state =
   if accept state P.Right_paren then []
   else
@@ -3980,10 +4019,12 @@ and scoped_declarator state specifiers =
   let declarator, named_function = named_declarator_and_function state in
   let asm_label = asm_label state in
   let trailing = attributes state in
+  let outside = declares_outside state in
+  let kind =
+    if outside then Generic_function_name else declared_kind specifiers
+  in
   let declared =
-    declare_in state ~outside:(declares_outside state)
-      ~kind:(declared_kind specifiers)
-      (named_identifier state declarator)
+    declare_in state ~outside ~kind (named_identifier state declarator)
   in
   {
     declarator_start;

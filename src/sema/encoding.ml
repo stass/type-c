@@ -226,5 +226,7 @@ let instance (type written) tags (generic : Typec_syntax.Spelling.type_name)
       let mentions_parameter =
         List.exists (fun (_, t) -> Ctype.mentions_opaque tags t) arguments
       in
-      Ok { Ctype.generic; arguments = encodings; mentions_parameter }
+      Ok
+        { Ctype.generic; arguments = encodings;
+          argument_types = List.map snd arguments; mentions_parameter }
   | exception Argument_refused (written, no_row) -> Error (written, no_row)

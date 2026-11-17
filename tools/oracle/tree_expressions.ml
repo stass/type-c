@@ -33,6 +33,9 @@ let rec expression visit (e : Tree.expression) =
   | Call { callee; arguments } ->
       expression visit callee;
       list expression visit arguments
+  | Instance { generic; type_arguments } ->
+      expression visit generic;
+      list type_name visit type_arguments
   | Member { operand; member = _ } | Pointer_member { operand; member = _ }
     ->
       expression visit operand

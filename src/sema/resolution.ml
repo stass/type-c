@@ -166,7 +166,7 @@ let is_c_typedef (found : Parser.ordinary option) =
       true
   | Some
       { kind = Not_a_type | Declared_type _ | Type_parameter
-             | Derived_enumerator; _ }
+             | Derived_enumerator | Generic_function_name; _ }
   | None ->
       false
 
@@ -175,7 +175,7 @@ let is_c_entity (found : Parser.ordinary option) =
   match found with
   | Some
       { kind = Not_a_type | Typedef_name | Declared_type { parameters = 0; _ }
-             | Derived_enumerator; _ } ->
+             | Derived_enumerator | Generic_function_name; _ } ->
       true
   | Some { kind = Declared_type _ | Type_parameter; _ } | None -> false
 

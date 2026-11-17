@@ -395,6 +395,31 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
+- [High] Package 3.3: a function instance gets none of the first-use
+  checks that `note_application` runs for a type instance
+  (`refuse_undeclared_argument`, the argument typedefs, the spelled-name
+  check): `enum e3 { C } v3, w3 = sizeof(f(v3));` is accepted where
+  `box(enum e3)` is refused, and the backend would reject `f__...`
+  placed before that external declaration. Route function instances
+  through the same first-use funnel when 3.3 places them.
+- [Medium] Package 3.3: in `(max)(1, 2)` only the identifier of a
+  generic callee is typed (`generic_callee`), so the `Parenthesized`
+  nodes have no entry in the typed tables that lowering reads; the
+  `Unknown_type` arm of `generic_call` types no callee at all and may be
+  unreachable (TC0077 refuses the function types that could reach it).
+- [Low] `Tree.Instance` holds its generic as an expression that is
+  always an identifier (`invalid_arg` in `explicit_instance`); a
+  `{ name; reference }` field would make that unrepresentable. The
+  `Call ... when generic_callee ... <> None` arm of `expression_node`
+  evaluates the lookup twice; dispatching inside one `Call` arm needs a
+  check that it keeps the frames of test_deep_trees within bound.
+- [Low] `deducing_argument` repeats the `Targeted` step of `positioned`
+  (`needs_complete`, `refuse_conversion`); one helper would keep them
+  together. `function_instance.type_arguments` repeats
+  `instance.argument_types`.
+- [Low] Deduction diagnostics: `Twice` does not name the type parameter,
+  and `(max)(int)` gives a bare "expected an expression".
+
 - [Medium] Design 13.5: the type name of an association of an answered
   `_Generic`, or an operand of an answered
   `__builtin_types_compatible_p`, is dropped with what it declares and

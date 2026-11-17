@@ -40,6 +40,24 @@ type privacy =
       (** The file whose text declares the type, whose owners
           {!Typec_cpp.File.owns} names. *)
 
+(** An enumerated type, created as a {!record_tag} is. *)
+type enum_tag = private {
+  enum_id : int;
+  enum_name : string option;
+  enum_at_file_scope : bool;  (** As for {!record_tag}. *)
+}
+
+(** The length of an array type (6.7.6.2p4). A variable length is
+    evaluated at run time, so the type does not carry it. *)
+type length =
+  | Constant of int
+  | Opaque
+      (** {e Provisional (design P16).} An integer constant expression
+          that the backend evaluates, such as [sizeof (struct s)]. It is
+          compatible with any other length, which the backend checks. *)
+  | Unknown
+  | Variable
+
 (** An application of a generic that is a type of its own (design 3.5
     rule 3). Its identity is its generic and the encodings of its
     arguments ({!Encoding.encode}), so two applications are one type
@@ -47,24 +65,24 @@ type privacy =
 type instance = {
   generic : Typec_syntax.Spelling.type_name;
   arguments : string list;  (** The encoding of each argument, in order. *)
+  argument_types : t list;
+      (** The type of each argument, in order, from which deduction and
+          substitution (design 7.2) apply the generic again; no part of
+          the instance's identity. *)
   mentions_parameter : bool;
       (** Whether an argument mentions a type parameter of a definition
           check ({!declare_opaque}), which no encoding of design 10.3
           writes; a function of [arguments]. *)
 }
 
-(** Persistent maps by instance, which a {!trial} restores by keeping
-    the map that it began with. *)
-module Instances : Map.S with type key = instance
-
 (** The name that a variant lowers to (design 10.1) and from which the
     names that it derives are made: that of its declaration, or that of
     an instance of a variant generic (10.3). *)
-type variant_name =
+and variant_name =
   | Declared of Typec_syntax.Spelling.type_name
   | Applied of instance
 
-type record_tag = private {
+and record_tag = private {
   record_id : int;
   kind : record_kind;
   record_name : record_name;
@@ -94,29 +112,11 @@ and record_name =
           3.5 rule 4, 7.1 rule 2), an opaque value type. Only
           {!declare_opaque} makes one. *)
 
-(** An enumerated type, created as a {!record_tag} is. *)
-type enum_tag = private {
-  enum_id : int;
-  enum_name : string option;
-  enum_at_file_scope : bool;  (** As for {!record_tag}. *)
-}
-
-(** The length of an array type (6.7.6.2p4). A variable length is
-    evaluated at run time, so the type does not carry it. *)
-type length =
-  | Constant of int
-  | Opaque
-      (** {e Provisional (design P16).} An integer constant expression
-          that the backend evaluates, such as [sizeof (struct s)]. It is
-          compatible with any other length, which the backend checks. *)
-  | Unknown
-  | Variable
-
 (** The parameters of a function type (6.7.6.3). Their types are adjusted
     and unqualified: an array or function parameter is a pointer, and a
     qualifier of a parameter belongs to the parameter, not to the type
     (6.7.6.3p7, p8, p15). *)
-type parameters =
+and parameters =
   | Prototype of { types : t list; variadic : bool }
   | Unspecified
       (** A declarator with an empty identifier list that is not part of a
@@ -177,6 +177,10 @@ and distinct = private {
       (** The unqualified arithmetic or pointer type that it has the size,
           alignment and representation of. *)
 }
+
+(** Persistent maps by instance, which a {!trial} restores by keeping
+    the map that it began with. *)
+module Instances : Map.S with type key = instance
 
 (** A member of a structure or union (6.7.2.1). An unnamed member of
     structure or union type that is not a bit-field is taken as an
