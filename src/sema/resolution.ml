@@ -583,6 +583,41 @@ let check_own context text place (own : own) =
       | None -> ())
   | Tag _ | Label _ -> ()
 
+(* The C entity of the ordinary identifier [name] that [view] sees, which
+   a declaration of [name] in a scope inside it hides. *)
+let hidden_in view name =
+  match Parser.View.find view name with
+  | Some { declaration; _ } as found when is_c_entity found ->
+      Some (Source (Ordinary declaration))
+  | Some _ | None -> None
+
+(* A name that a deferred statement declares hides, at each copy, what it
+   hides at the defer: a declaration of the scope that the copy lands in
+   would be hidden there alone, and -Wshadow warns of most such copies
+   of code that hides nothing as written (design 6 rule 8). Neither
+   backend warns of a tag or label that hides another. *)
+let check_hidden context text place (own : own) =
+  let { name; span; declaration } = own.declared in
+  match declaration with
+  | Ordinary _ -> (
+      match ordinary_at is_c_entity place name with
+      | Some cited when Some cited <> hidden_in text.own_place name ->
+          refuse span
+            (Printf.sprintf
+               "%s is declared in the statement of the defer, and at an \
+                exit where lowering copies the statement, %s is %s, \
+                which the copy would hide; rename one of them"
+               (quote name) (quote name) (cite context cited))
+      | Some _ | None -> ())
+  | Tag _ | Label _ -> ()
+
+(* Only the copies of a deferred statement are held to hiding what the
+   text hides at its own place. *)
+let keeps_what_it_hides = function
+  | Deferred_statement -> true
+  | Generic_definition | Try_operand | Return_operand | Array_operand ->
+      false
+
 (* Unread text of moved text, which a message names: the arguments of an
    attribute, or a [#pragma] line (design 13.5). *)
 type unread = { within : string; unread_view : Parser.View.t }
@@ -649,12 +684,18 @@ let check_pragma context window text place (index, unread_view) =
   | Punctuator _ ->
       ()
 
-(* The first two clauses and the window, at a place where lowering
-   writes the text. *)
+(* The first two clauses, the window and, for a deferred statement, what
+   its names hide, at a place where lowering writes the text. *)
 let check_reading context text place =
   let window = window_of text place in
   List.iter (check_use context window text place) text.uses;
-  List.iter (check_own context text place) text.declares;
+  (* Both clauses on one name before the next, so that a failure cites
+     the first name of the text that breaks either. *)
+  let check_declared own =
+    check_own context text place own;
+    if keeps_what_it_hides text.kind then check_hidden context text place own
+  in
+  List.iter check_declared text.declares;
   List.iter
     (check_attribute context window text place)
     (Parser.attributes_within context.views text.span);

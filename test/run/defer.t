@@ -472,3 +472,59 @@ of the block in the data, which C evaluates.
   3
   in
   3
+
+A name that a deferred statement declares hides at each copy only what
+it hides at the defer statement (design 6 rule 8), so a different name
+after the defer, the same name in a block that holds no exit, and the
+same name declared by a declaration that holds a try, whose error path
+copies the statement in front of it, compile under -Wshadow on each
+backend.
+
+  $ cat > apart.tc <<'EOF'
+  > #include <stdio.h>
+  > static int total;
+  > static void note(int n) { total += n; }
+  > static int apart(int c) {
+  >   defer {
+  >     int y = 100;
+  >     note(y);
+  >   }
+  >   int z = 2;
+  >   {
+  >     int y = c;
+  >     note(y);
+  >   }
+  >   return z;
+  > }
+  > static result(int, int) get(int c) {
+  >   if (c < 0)
+  >     return Err(c);
+  >   return Ok(c);
+  > }
+  > static result(int, int) held(int c) {
+  >   defer {
+  >     int y = 1000;
+  >     note(y);
+  >   }
+  >   {
+  >     int y = try get(c);
+  >     note(y);
+  >   }
+  >   return Ok(0);
+  > }
+  > int main(void) {
+  >   int z = apart(3);
+  >   printf("%d %d\n", z, total);
+  >   (void)held(4);
+  >   (void)held(-1);
+  >   printf("%d\n", total);
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -Wshadow -o apart apart.tc && ./apart
+  > done
+  2 103
+  2107
+  2 103
+  2107

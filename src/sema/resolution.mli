@@ -139,12 +139,13 @@ val check :
   (unit, Tree.span * Rule.diagnostic) result
 (** [check context text ~at] is [Ok ()] when [text] declares no name that
     is in scope after it, and, where lowering writes it at the place [at],
-    reads there as at its own place; otherwise it is a point of the text
-    that breaks the property, the first that the clauses meet in their
-    order, with the diagnostic that cites the declaration that makes it
-    so, under the name that the text's {!kind} gives. A text that
-    lowering writes nowhere, as
-    the definition of a generic is in its check, has no place [at]. *)
+    reads there as at its own place and, for a deferred statement, hides
+    there what it hides at its own place (design 6 rule 8); otherwise
+    it is a point of the text that breaks the property, the first that
+    the clauses meet in their order, with the diagnostic that cites the
+    declaration that makes it so, under the name that the text's {!kind}
+    gives. A text that lowering writes nowhere, as the definition of a
+    generic is in its check, has no place [at]. *)
 
 val check_spelled :
   context -> name list -> at:place -> (unit, Tree.span * Rule.diagnostic) result

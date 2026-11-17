@@ -1180,14 +1180,20 @@ is [type-c-language-design.md](type-c-language-design.md).
   rule 3; the rule it breaks is 4.1 rule 2 (a label of the match stands
   directly in its body). Give the label under a named label its own
   message.
-- [Medium] A copy of a deferred statement brings the declarations and
-  bindings of `S` to each exit, where a later declaration of the same
-  name is in scope, so `-Wshadow -Werror` fails on code that hides
-  nothing as written: `defer { int y = 1; note(y); } int y = 2;
-  return y;`, and a binding `x` of a deferred match before `int x`.
-  Design 6 rule 8 covers only what `S` reads. Either refuse a
-  declaration in the scope of a defer whose `S` declares the same name
-  (an extension of rule 8), or state the limit in design 6.
+- [Medium] An instance of a generic function stands in front of the
+  external declaration that first uses it (design 10.3), where a file
+  scope declaration made after the generic's definition is in scope, so
+  a local or parameter of the definition with that name hides it there
+  alone: `generic(T) static T twice(T v) { T n = v; return n; }
+  int n; int use(void) { return twice(n); }` fails under `-Wshadow
+  -Werror` on Clang and GCC, though it hides nothing as written. The
+  deferred statement is held to hiding at each copy what it hides at
+  its own place (design 6 rule 8, `check_hidden` in
+  `src/sema/resolution.ml`); dropping the `Deferred_statement` gate of
+  `keeps_what_it_hides` would hold a generic's definition to it as
+  well, and make the rule one clause of the resolution property of
+  13.5. Decide whether a generic is refused so, or the limit is stated
+  in 3.5.
 - [Low] Invented names are string literals in lowering, the emitter
   and the assertions, and `test/unit/test_naming.ml` finds them by
   scanning the C of one sample unit, with a count of the names it

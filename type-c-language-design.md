@@ -2499,6 +2499,29 @@ defer fclose(f);
    the substatement of an `if` is in C (C11 6.8.4p3), and each copy is
    written as one, `{ S }`: what `S` declares is in scope in `S` alone,
    at the `defer` statement as in each copy.
+   What `S` declares hides, at each exit, what it hides at the `defer`
+   statement. An ordinary identifier that `S` declares or binds is an
+   error when the declaration of that name in scope at an exit, outside
+   `S`, is not the one in scope at the `defer` statement, or none is in
+   scope there. The error stands at the name in `S`, and the message
+   cites the declaration at the exit; renaming either one removes it.
+   The copy at that exit would hide a declaration that nothing hides as
+   written, and `-Wshadow` warns of most such copies. In
+   `{ defer { int y = 1; note(y); } int y = 2; return y; }` the copy in
+   front of the `return` would hide the second `y`, and a binding `x`
+   of a match in `S` is refused in front of a later `int x` alike. As
+   with the names that `S` reads, a declaration whose scope holds no
+   exit reaches no copy: in
+   `{ defer { int y = 1; note(y); } { int y = 2; note(y); } }` the scope
+   of the second `y` ends before the one exit, which is allowed, and so
+   is a `y` of `S` that hides a parameter `y` at the `defer` statement
+   and at every exit alike. A parameter name in a function declarator
+   of `S`, and a name of `S` that would hide a function declared in a
+   block, are refused all the same, though neither backend warns of
+   them, so that the rule has no exception. No tag or label is in
+   question:
+   `S` declares neither (rule 9), and neither backend warns of one that
+   hides another.
 9. `S` contains no identifier label and no
    definition of an object with static or thread storage duration, and
    `S` declares no type. That leaves out a struct, union or enum

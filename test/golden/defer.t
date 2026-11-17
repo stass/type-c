@@ -1086,6 +1086,172 @@ clause fails.
   inexact_again.tc:4: error: the declaration of 'o' at inexact_again.tc:5, between the text and a place where lowering writes it, gives it a type that may hold an attribute or `typeof` of an expression, which may change the type that the text uses [defer-name-capture]
   [1]
 
+A name that S declares or binds hides at each exit what it hides at the
+defer statement: a later declaration of the name whose scope holds an
+exit is an error, as the copy there would hide it and -Wshadow would
+refuse code that hides nothing as written. The error stands at the
+name in S and cites the declaration.
+
+  $ cat > declared_again.tc <<'EOF'
+  > void note(int);
+  > int f(void) {
+  >   defer {
+  >     int y = 1;
+  >     note(y);
+  >   }
+  >   int y = 2;
+  >   return y;
+  > }
+  > EOF
+  $ ./golden.exe declared_again.tc
+  declared_again.tc:4: error: 'y' is declared in the statement of the defer, and at an exit where lowering copies the statement, 'y' is the one declared at declared_again.tc:7, which the copy would hide; rename one of them [defer-name-capture]
+  [1]
+
+  $ cat > bound_again.tc <<'EOF'
+  > void note(int);
+  > int f(option(int) v) {
+  >   defer match (v) {
+  >   case Some(x):
+  >     note(x);
+  >     break;
+  >   case None:
+  >     break;
+  >   }
+  >   int x = 2;
+  >   return x;
+  > }
+  > EOF
+  $ ./golden.exe bound_again.tc
+  bound_again.tc:4: error: 'x' is declared in the statement of the defer, and at an exit where lowering copies the statement, 'x' is the one declared at bound_again.tc:10, which the copy would hide; rename one of them [defer-name-capture]
+  [1]
+
+  $ cat > typedef_again.tc <<'EOF'
+  > void note(int);
+  > void f(void) {
+  >   defer {
+  >     typedef int u;
+  >     u v = 0;
+  >     note(v);
+  >   }
+  >   int u = 2;
+  >   note(u);
+  > }
+  > EOF
+  $ ./golden.exe typedef_again.tc
+  typedef_again.tc:4: error: 'u' is declared in the statement of the defer, and at an exit where lowering copies the statement, 'u' is the one declared at typedef_again.tc:8, which the copy would hide; rename one of them [defer-name-capture]
+  [1]
+
+The exit may lie in a block inside the scope, where a declaration of
+the block is in scope at the copy.
+
+  $ cat > declared_around_exit.tc <<'EOF'
+  > void note(int);
+  > void f(int c) {
+  >   defer {
+  >     int y = 1;
+  >     note(y);
+  >   }
+  >   {
+  >     int y = c;
+  >     if (y)
+  >       return;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe declared_around_exit.tc
+  declared_around_exit.tc:4: error: 'y' is declared in the statement of the defer, and at an exit where lowering copies the statement, 'y' is the one declared at declared_around_exit.tc:8, which the copy would hide; rename one of them [defer-name-capture]
+  [1]
+
+So may a break, whose copy stands in front of it. The copy of the
+error path of a try stands in front of the declaration that holds the
+try, where that declaration is not yet in scope, so it is allowed.
+
+  $ cat > declared_before_break.tc <<'EOF'
+  > void note(int);
+  > void f(int c) {
+  >   while (c) {
+  >     defer {
+  >       int y = 1;
+  >       note(y);
+  >     }
+  >     int y = c--;
+  >     if (y > 2)
+  >       break;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe declared_before_break.tc
+  declared_before_break.tc:5: error: 'y' is declared in the statement of the defer, and at an exit where lowering copies the statement, 'y' is the one declared at declared_before_break.tc:8, which the copy would hide; rename one of them [defer-name-capture]
+  [1]
+
+  $ cat > declared_by_try.tc <<'EOF'
+  > void note(int);
+  > result(int, int) g(void);
+  > result(int, int) f(void) {
+  >   defer {
+  >     int y = 1;
+  >     note(y);
+  >   }
+  >   {
+  >     int y = try g();
+  >     note(y);
+  >   }
+  >   return Ok(0);
+  > }
+  > EOF
+  $ ./golden.exe declared_by_try.tc > /dev/null
+
+A parameter name in a function declarator of S is refused as well,
+though neither backend warns of it, so that the rule has no exception.
+
+  $ cat > parameter_again.tc <<'EOF'
+  > void note(int);
+  > void f(int c) {
+  >   defer {
+  >     void (*fp)(int q) = 0;
+  >     (void)fp;
+  >   }
+  >   int q = c;
+  >   note(q);
+  > }
+  > EOF
+  $ ./golden.exe parameter_again.tc
+  parameter_again.tc:4: error: 'q' is declared in the statement of the defer, and at an exit where lowering copies the statement, 'q' is the one declared at parameter_again.tc:7, which the copy would hide; rename one of them [defer-name-capture]
+  [1]
+
+A different name is allowed, and so is the same name declared in a
+block that holds no exit, whose scope ends before every copy. So is a
+name that S hides at the defer statement and at every exit alike.
+
+  $ cat > declared_apart.tc <<'EOF'
+  > void note(int);
+  > int f(int c) {
+  >   defer {
+  >     int y = 1;
+  >     note(y);
+  >   }
+  >   int z = 2;
+  >   {
+  >     int y = c;
+  >     note(y);
+  >   }
+  >   return z;
+  > }
+  > EOF
+  $ ./golden.exe declared_apart.tc > /dev/null
+
+  $ cat > hidden_alike.tc <<'EOF'
+  > void note(int);
+  > void f(int y) {
+  >   defer {
+  >     int y = 1;
+  >     note(y);
+  >   }
+  >   note(y);
+  > }
+  > EOF
+  $ ./golden.exe hidden_alike.tc > /dev/null
+
 S declares no object or function with linkage, which the text around
 an exit would see (13.5), though rule 9 allows an `extern` declaration.
 The operand of a return, written at its own place, may.

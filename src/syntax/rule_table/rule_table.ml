@@ -432,7 +432,8 @@ let rows =
         "The statement of a defer, which is moved text, where it breaks \
          a clause of the resolution property at an exit of its scope on a \
          fact that typec knows: a declaration between the defer and the \
-         exit makes a name of the statement read otherwise there." };
+         exit makes a name of the statement read otherwise there, or is \
+         one that a name the statement declares would hide there." };
     Live { constructor = "Return_operand_moved";
       name = "defer-return-name-capture";
       clause = "design 6 rule 12, 13.5";
