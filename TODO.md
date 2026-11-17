@@ -637,6 +637,13 @@ the order of its commits:
   error on lowered code. Type-C text checks it in full (design 5); a
   constructor is a Type-C construct, so checking its arguments in full
   in any text would leave the C-text record check needless.
+- [Low] The full conversion check of Type-C text (design 5) gives C's
+  own message where a refusal used to carry a Type-C hint: `return c ?
+  Some(1) : 0;` now gets C11 6.5.15p3's operands message, not the advice
+  to make the value with a constructor, and a variant field initialised
+  from a wrong type gets the plain conversion message. Decide in plan
+  4.2's review of diagnostics on the pilots which of them need the hint
+  back.
 - [Medium] A `transparent_union` attribute on a union specifier
   (`union __attribute__((transparent_union)) u { ... };`) makes only
   that specifier's type unknown, so a later `union u` parameter is a
