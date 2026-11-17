@@ -2772,6 +2772,20 @@ let generic_definitions () =
     (box ^ " type pair(T) = struct { box(T) b; box(T *) p; };"
     ^ " pair(int) x;")
 
+(* Design 7.1 rule 4: each constant that C asks for in a generic
+   function is checked against the measurements of type parameters before
+   it, in time that grows no faster than the function. *)
+let generic_function_constants () =
+  let measured count =
+    "generic(T) void f(void) {"
+    ^ String.concat ""
+        (List.init count (fun n ->
+             Printf.sprintf " unsigned long m%d = sizeof(T); int a%d[1];" n n))
+    ^ " }"
+  in
+  reads_in_time ~file:"in.tc" ~degree:1 "constants after measurements"
+    ~small:2000 measured
+
 (* Design 13.5 and 3.5 rule 8: the definition of a generic reads where
    an instance's text stands as at the definition. *)
 let generic_resolution () =
@@ -3133,6 +3147,7 @@ let () =
   generic_variants ();
   generic_arguments ();
   generic_definitions ();
+  generic_function_constants ();
   generic_checks ();
   generic_resolution ();
   if !failures > 0 then exit 1

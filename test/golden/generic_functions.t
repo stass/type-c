@@ -134,9 +134,9 @@ prototype.
   [1]
 
   $ cat > old_pointer.tc <<'EOF'
-  > generic(T) void f(T t)
+  > generic(T) void f(T t, void (*take)(T))
   > {
-  >     void take(T);
+  >     (void)t;
   >     void (*old)() = take;
   >     (void)old;
   > }
@@ -170,6 +170,46 @@ type in it mentions a type parameter.
   > EOF
   $ ./golden.exe compatible.tc
   compatible.tc:1: __builtin_types_compatible_p compares a type that mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  [1]
+
+A declaration in the body that gives its identifier linkage has a type
+that mentions no type parameter, as every instance would declare the
+one object or function again with its own type. A static object has
+no linkage, and a type without a type parameter stands.
+
+  $ cat > linked.tc <<'EOF'
+  > generic(T) T *keep(T *t)
+  > {
+  >     static T cache;
+  >     extern int count;
+  >     int helper(int);
+  >     T (*pick)(T *);
+  >     cache = *t;
+  >     return &cache;
+  > }
+  > EOF
+  $ ./golden.exe linked.tc
+  linked.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+  $ cat > extern_object.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     extern T shared;
+  > }
+  > EOF
+  $ ./golden.exe extern_object.tc
+  extern_object.tc:3: a declaration in a generic function gives its identifier linkage and has a type that mentions a type parameter, so every instance would declare one object or function with another type (design 7.1 rule 3) [TC0075]
+  [1]
+
+  $ cat > block_function.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >     T helper(T);
+  > }
+  > EOF
+  $ ./golden.exe block_function.tc
+  block_function.tc:3: a declaration in a generic function gives its identifier linkage and has a type that mentions a type parameter, so every instance would declare one object or function with another type (design 7.1 rule 3) [TC0075]
   [1]
 
 The only braced initialisers of a type parameter are {0} and {}.
@@ -363,6 +403,16 @@ where their referenced types are compatible or one is void.
   pointer_branch.tc:1: pointers to incompatible types meet where one mentions a type parameter, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
   [1]
 
+Where typec does not know whether the referenced types are compatible,
+the pointers do not meet either.
+
+  $ cat > pointer_unknown.tc <<'EOF'
+  > generic(T) void f(T *p) { _Complex int *q = p; (void)q; }
+  > EOF
+  $ ./golden.exe pointer_unknown.tc
+  pointer_unknown.tc:1: pointers meet where one mentions a type parameter, and whether their types are compatible depends on '_Complex int', whose type typec does not compute, which is not valid C of one meaning for every value type (design 7.1 rule 3) [TC0075]
+  [1]
+
 A builtin that reads the object a pointer points to does not read a
 value of a type parameter.
 
@@ -464,6 +514,73 @@ definition.
   asm_label.tc:1: an assembler label would give every instance of a generic function one name (design 7.1 rule 6) [TC0077]
   [1]
 
+No parameter has a variably modified type once C has adjusted it, so
+`T a[n]` is `T *a` and stands.
+
+  $ cat > adjusted.tc <<'EOF'
+  > generic(T) void f(unsigned long n, T a[n], T b[][4], T c[static 4]);
+  > EOF
+  $ ./golden.exe adjusted.tc
+  adjusted.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+A parameter of a type that typec does not compute is left to rule 7,
+which agrees it with no other declaration.
+
+  $ cat > unknown_parameter.tc <<'EOF'
+  > generic(T) void f(T *t, _Complex int z) { (void)t; (void)z; }
+  > EOF
+  $ ./golden.exe unknown_parameter.tc
+  unknown_parameter.tc:1: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
+  $ cat > variable_pointer.tc <<'EOF'
+  > generic(T) void f(unsigned long n, T (*m)[n]);
+  > EOF
+  $ ./golden.exe variable_pointer.tc
+  variable_pointer.tc:1: no parameter of a generic function is variably modified (design 7.1 rule 6) [TC0077]
+  [1]
+
+  $ cat > variable_matrix.tc <<'EOF'
+  > generic(T) void f(unsigned long n, unsigned long k, T m[n][k]) {}
+  > EOF
+  $ ./golden.exe variable_matrix.tc
+  variable_matrix.tc:1: no parameter of a generic function is variably modified (design 7.1 rule 6) [TC0077]
+  [1]
+
+The head defines no structure, union or enumeration, which an instance
+would define twice, as its prototype and at its definition. The body
+may define one, and the head may name one declared before.
+
+  $ cat > head_enumeration.tc <<'EOF'
+  > generic(T) enum e { A } f(T);
+  > EOF
+  $ ./golden.exe head_enumeration.tc
+  head_enumeration.tc:1: the head of a generic function defines no structure, union or enumeration, which every instance would define twice (design 7.1 rule 6) [TC0077]
+  [1]
+
+  $ cat > head_parameter_structure.tc <<'EOF'
+  > generic(T) void f(T t, struct { int x; } *p);
+  > EOF
+  $ ./golden.exe head_parameter_structure.tc
+  head_parameter_structure.tc:1: the head of a generic function defines no structure, union or enumeration, which every instance would define twice (design 7.1 rule 6) [TC0077]
+  [1]
+
+  $ cat > named_tags.tc <<'EOF'
+  > struct s { int x; };
+  > generic(T) struct s *f(T *t)
+  > {
+  >     struct inner { T v; } box = { *t };
+  >     enum { B } e = B;
+  >     (void)box;
+  >     (void)e;
+  >     return 0;
+  > }
+  > EOF
+  $ ./golden.exe named_tags.tc
+  named_tags.tc:2: a generic function is checked, but typec does not write its instances yet (design 7.3; work package 3.3) [TC0023]
+  [1]
+
   $ cat > two.tc <<'EOF'
   > generic(T) void f(T *p), g(T *p);
   > EOF
@@ -479,7 +596,7 @@ definition.
   [1]
 
   $ cat > tag_only.tc <<'EOF'
-  > generic(T) struct s { int x; };
+  > generic(T) struct s;
   > EOF
   $ ./golden.exe tag_only.tc
   tag_only.tc:1: `generic( )` prefixes one function: its definition, or a declaration with one declarator, which declares a function (design 7.1 rule 6) [TC0077]

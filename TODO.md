@@ -1442,29 +1442,42 @@ types (design 13.3).
   not yet built, each with golden pairs: (1) no initialiser enters a
   type parameter but `{0}`/`{}`, which keeps its reach through elided
   braces, and brace elision into one is an error (`T arr[] = {0, 0}`,
-  `{ .a = 0 }`, `(T[]){0, 0}`); (2) a declaration in the body that gives
-  its identifier linkage has a type that mentions no type parameter
-  (`extern T x;`, `T helper(T);`; `static T cache;` stands); (3) rule 4
-  as one statement: null pointer constant status and
-  `__builtin_choose_expr` by a dependent constant are errors; (4)
-  attributes on a declaration whose type mentions a type parameter,
-  unless the 13.3 table of effects marks them as asking nothing of the
-  type, as one named check; (5) variably modified parameter types in
-  the head (`T (*m)[n]`).
+  `{ .a = 0 }`, `(T[]){0, 0}`); (2) rule 4 as one statement: null
+  pointer constant status and `__builtin_choose_expr` by a dependent
+  constant are errors; (3) attributes on a declaration whose type
+  mentions a type parameter, unless the 13.3 table of effects marks
+  them as asking nothing of the type, as one named check.
 - [Medium] Generic functions, from the review of package 3.1:
-  `pointers_differ` reports no gap where compatibility with a type
-  parameter is unknown (`T *` against `_Complex int *`), though rule 3
-  needs `Answer true`; `refuse_dependent` scans every measurement of
-  the view for each constant, quadratic on long input (index the spans
-  by `first`); attribute arguments that C asks to be constant
+  attribute arguments that C asks to be constant
   (`aligned(sizeof(x))`, `vector_size`) bypass `refuse_dependent`,
-  which wants one funnel for constant arguments; attributes inside the
-  declarator of a generic prototype (`void (__attribute__((cold))
+  which wants one funnel for constant arguments; and attributes inside
+  the declarator of a generic prototype (`void (__attribute__((cold))
   f)(T);`) pass rule 6, which wants one check over every attribute of
-  the declaration; and whether the head may define a tag or an
-  enumeration, which an instance would define twice, is an open design
-  question (`generic(T) enum E { A } f(T);` is accepted and `A` then
-  vanishes).
+  the declaration.
+- [Medium] A declaration with linkage in the body of a generic function
+  whose type names a tag that the body declares (`struct s { int a; };
+  extern struct s x;`) passes design 7.1 rule 3, though every instance
+  defines its own `struct s` and two instances then declare `x` with two
+  types. Decide whether rule 3 refuses every block-scope declaration with
+  linkage in a generic body, or one whose type mentions a tag of the
+  body as well.
+- [Medium] `Ctype.compatible` answers `Depends_on` for two unknown leaf
+  types of one spelling (`_Float16`, `_Complex int`), so
+  `pointers_differ` refuses `void (*q)(T, _Float16) = p;` where `p` has
+  that very type. Let an unknown record whether it can hide a derived
+  type, so that a leaf compares with its own spelling, and
+  `is_variably_modified` answers for it too.
+- [Low] `Ctype.same_length` takes two variable lengths for the same, and
+  `is_variably_modified` does not descend into function parameters, so
+  design 7.1 rule 7 agrees `void (*g)(T (*)[n])` with
+  `void (*g)(T (*)[n + 1])` against its claim that it reads no bound
+  that is not a constant. Give `Variable` no "same" answer under
+  `~exact:true`.
+- [Low] A tag that the head of a generic function declares in its
+  parameter list without a body (`generic(T) void f(T, struct s *p);`
+  where no `s` is visible) has prototype scope, so the prototype and the
+  definition of an instance would name two types and conflict. Decide
+  whether design 7.1 rule 6 refuses it with the bodies it refuses.
 - [Low] Generic functions, readability and representation:
   `in_generic_function` is an ambient flag that `earlier_entity` and
   `declare_in` read; pass the fact explicitly from

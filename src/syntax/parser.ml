@@ -193,6 +193,9 @@ type state = {
           name of a generic function, which is declared in the file
           scope around its type parameters (design 7.1 rule 1) *)
   mutable in_type_argument : bool;  (** design 3.5 rule 2 *)
+  mutable in_generic_head : bool;
+      (** whether the head of a generic function is being read, which
+          every instance writes twice (design 7.1 rule 6) *)
   mutable views : views;  (** taken so far *)
   mutable generics : Name_set.t;
       (** the names of the generic types declared so far, those of the
@@ -2814,6 +2817,17 @@ let refuse_generic_enumerators state =
           generic type, so that every instance would declare its \
           enumerators again")
 
+(* An instance writes the head of a generic function as its prototype
+   and again at its definition, so a body there would define its type
+   twice (design 7.1 rule 6). At the [{] of a structure, union or
+   enumeration specifier. *)
+let refuse_body_in_generic_head state =
+  if state.in_generic_head then
+    fail state
+      (Rule.message Generic_function_form
+         "the head of a generic function defines no structure, union or \
+          enumeration, which every instance would define twice")
+
 (* A distinct generic type's representation is not one of its type
    parameters, qualified or not (design 3.5 rule 4). *)
 let refuse_distinct_parameter state (representation : type_name) =
@@ -3062,7 +3076,10 @@ and record_specifier state kind ~alone ~claimed_by =
   let leading = attributes state in
   let tag_name = optional_identifier state in
   let has_body = peek state = Punctuator_token P.Left_brace in
-  if has_body then refuse_generic_body state ~tag_name;
+  if has_body then begin
+    refuse_body_in_generic_head state;
+    refuse_generic_body state ~tag_name
+  end;
   let declares = has_body || ends_alone state ~alone in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   if tag = None then Option.iter (claim_own_tag state) claimed_by;
@@ -3148,7 +3165,10 @@ and enum_specifier state ~alone =
   in
   let after_type = if underlying = None then [] else attributes state in
   let has_body = peek state = Punctuator_token P.Left_brace in
-  if has_body then refuse_generic_enumerators state;
+  if has_body then begin
+    refuse_body_in_generic_head state;
+    refuse_generic_enumerators state
+  end;
   let declares = has_body || (underlying <> None && ends_alone state ~alone) in
   let tag = Option.map (fun name -> bound_tag state name ~declares) tag_name in
   let enumerators =
@@ -4892,7 +4912,13 @@ let generic_prototype state start specifiers first =
    definition or the declaration of one function, and the declarator of
    its name. *)
 let generic_form state =
-  match declaration_start state with
+  let head () =
+    state.in_generic_head <- true;
+    Fun.protect
+      ~finally:(fun () -> state.in_generic_head <- false)
+      (fun () -> declaration_start state)
+  in
+  match head () with
   | First_declarator { start; specifiers; first } -> (
       check_generic_head state specifiers first;
       match first.named_function with
@@ -5081,6 +5107,7 @@ let parse_with_scopes ~keywords reader =
       parameter_depth = None;
       names_generic_function = false;
       in_type_argument = false;
+      in_generic_head = false;
       views =
         {
           attributes = Places.empty;

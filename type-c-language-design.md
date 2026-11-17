@@ -2065,6 +2065,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      GCC 16 stops at the assembler, and Apple Clang 21 compiles the unit
      without a message and sends the calls of one instance to the body
      of the other.
+   - The head defines no structure, union or enumeration, in its
+     specifiers or its parameters: an instance writes the head twice, so
+     it would define the type twice, and its enumerators with it.
 7. A generic function may be declared more than once at file scope and is
    defined at most once. Two declarations agree where they have the same
    number of type parameters and, with each type parameter of one read

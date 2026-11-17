@@ -471,9 +471,11 @@ let rows =
          on both, where one mentions a type parameter, such as a \
          function type with a parameter of the type parameter and one \
          without a prototype; an [asm] operand whose type mentions a \
-         type parameter; and [_Generic] or \
-         [__builtin_types_compatible_p] where a type in it mentions a \
-         type parameter (design 7.1 rule 4)." };
+         type parameter; [_Generic] or [__builtin_types_compatible_p] \
+         where a type in it mentions a type parameter, as design 7.1 \
+         rule 4 defines mentioning; and a declaration in the body that \
+         gives its identifier linkage and has a type that mentions a \
+         type parameter." };
     Live { name = "Type_parameter_constant"; code = 76;
       clause = Some "design 7.1 rule 4";
       meaning =
@@ -491,8 +493,10 @@ let rows =
          can be written from: a definition, or a declaration with one \
          declarator that declares a function, with a prototype and \
          neither [()] nor an identifier list, no storage-class specifier \
-         but [static], no assembler label, and on a declaration that is \
-         not a definition neither [_Noreturn] nor an attribute." };
+         but [static], no assembler label, no parameter of a variably \
+         modified type, no structure, union or enumeration defined in \
+         the head, and on a declaration that is not a definition neither \
+         [_Noreturn] nor an attribute." };
     Live { name = "Generic_function_agreement"; code = 78;
       clause = Some "design 7.1 rule 7";
       meaning =

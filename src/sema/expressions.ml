@@ -314,6 +314,11 @@ type checked_pattern = {
   sub_fields : (Tree.sub_pattern * Ctype.member) list;
 }
 
+(* The spans of the measurements of types that mention a type parameter
+   (design 7.1 rule 4): the last token of each, by its first. Of two that
+   begin at one token, the inner one is kept. *)
+module Measurements = Map.Make (Int)
+
 (* [enclosing] belongs to the walk in progress. Only the reader's failure
    leaves a walk early, and it ends the read, so it is not restored on
    it. [selections] and [compatibilities] hold the answers to the
@@ -324,7 +329,7 @@ type checked_pattern = {
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
-  mutable measurements : Tree.span list;
+  mutable measurements : int Measurements.t;
   selections : (Tree.span, Tree.expression Unknown.answer) Hashtbl.t;
   compatibilities : (Tree.span, bool Unknown.answer) Hashtbl.t;
   answered : (Tree.span, answered) Hashtbl.t;
@@ -342,7 +347,7 @@ let outside_functions =
 let create () =
   { types = Hashtbl.create 16;
     constants = Hashtbl.create 16;
-    measurements = [];
+    measurements = Measurements.empty;
     selections = Hashtbl.create 16;
     compatibilities = Hashtbl.create 16;
     answered = Hashtbl.create 16;
@@ -700,11 +705,20 @@ type pointer_gap =
           where two pointers to incompatible types meet, and the backend,
           which sees U for D, does not even warn, so typec decides in
           Type-C text. *)
-  | Parameter_gap
+  | Parameter_gap of string
       (** Design 7.1 rule 3: pointers to incompatible types where one
           mentions a type parameter are compatible for some arguments
           alone, as pointers to [void (T)] and to [void ()] are where [T]
-          is a structure. *)
+          is a structure; the use that is refused. *)
+
+let pointer_parameter_gap =
+  "pointers to incompatible types meet where one mentions a type parameter"
+
+let unknown_parameter_gap (unknown : Unknown.t) =
+  Printf.sprintf
+    "pointers meet where one mentions a type parameter, and whether their \
+     types are compatible depends on %s, whose type typec does not compute"
+    unknown.construct
 
 (* The one rule for conversions and for the operations on two pointers:
    two pointers whose referenced types [a] and [b] mention a distinct
@@ -712,23 +726,23 @@ type pointer_gap =
    is void. *)
 let pointers_differ context span (a : Ctype.t) (b : Ctype.t) =
   let a = Ctype.unqualified a and b = Ctype.unqualified b in
-  let gap =
-    if Ctype.is_void a <> Answer false || Ctype.is_void b <> Answer false
-    then None
-    else if
-      Ctype.mentions_opaque context.tags a
-      || Ctype.mentions_opaque context.tags b
-    then Some Parameter_gap
-    else if Ctype.mentions_distinct a || Ctype.mentions_distinct b then
-      Some Distinct_gap
-    else None
-  in
-  match gap with
-  | Some _ when differs context span a b -> gap
-  | Some _ | None -> None
-
-let pointer_parameter_gap =
-  "pointers to incompatible types meet where one mentions a type parameter"
+  let is_void t = Ctype.is_void t = Answer true in
+  let may_be_void t = Ctype.is_void t <> Answer false in
+  let mentions_parameter t = Ctype.mentions_opaque context.tags t in
+  if is_void a || is_void b then None
+  else if mentions_parameter a || mentions_parameter b then
+    (* Rule 3 wants the pointers to meet for every argument, so an
+       unknown answer is a gap too. *)
+    match compatible context span a b with
+    | Answer true -> None
+    | Answer false -> Some (Parameter_gap pointer_parameter_gap)
+    | Depends_on unknown -> Some (Parameter_gap (unknown_parameter_gap unknown))
+  else if may_be_void a || may_be_void b then None
+  else if
+    (Ctype.mentions_distinct a || Ctype.mentions_distinct b)
+    && differs context span a b
+  then Some Distinct_gap
+  else None
 
 (* Design 7.1 rule 3: a value of a type parameter converts to no other
    type, as a structure does not, though a scalar argument would. *)
@@ -755,8 +769,7 @@ let refuse_conversion context span target (typed : typed) =
     match (target.shape, source.shape) with
     | Pointer t, Pointer s -> (
         match pointers_differ context span t s with
-        | Some Parameter_gap ->
-            refuse_type_parameter context span pointer_parameter_gap
+        | Some (Parameter_gap use) -> refuse_type_parameter context span use
         | Some Distinct_gap -> true
         | None -> false)
     | (Record _ | Array _), _ -> false
@@ -861,8 +874,7 @@ let refuse_mixed_pointers context span left right =
   match (left, right) with
   | Pointer_operand a, Pointer_operand b -> (
       match pointers_differ context span a.referenced b.referenced with
-      | Some Parameter_gap ->
-          refuse_type_parameter context span pointer_parameter_gap
+      | Some (Parameter_gap use) -> refuse_type_parameter context span use
       | Some Distinct_gap when is_type_c_text context span ->
           context.fail span
             (Rule.message Distinct_operation
@@ -1808,20 +1820,36 @@ let measures_parameter context whole =
    an expression in it, evaluated or not, measures a type that mentions
    one. Every expression in it lies within its span, so the fact is
    derived from the spans of such measurements, which [measurements]
-   holds, latest first. *)
+   holds. *)
 let record_measurement context (whole : Tree.expression) =
+  let { Tree.first; last } = whole.span in
+  let inner = function
+    | Some other -> Some (min other last)
+    | None -> Some last
+  in
   if measures_parameter context whole then
-    context.typed.measurements <- whole.span :: context.typed.measurements
+    context.typed.measurements <-
+      Measurements.update first inner context.typed.measurements
 
 (* Refuses [expression] where C asks for a constant, if it depends on a
-   type parameter: whatever its class, that of an instance can differ. *)
+   type parameter: whatever its class, that of an instance can differ.
+   Spans of expressions nest, and each measurement begins with its own
+   keyword, which begins no expression inside it: so the first
+   measurement that begins within [expression] lies within it, and the
+   search costs a lookup and at most two entries however many the unit
+   holds. *)
 let refuse_dependent context (expression : Tree.expression) =
   let { Tree.first; last } = expression.span in
-  let within (measurement : Tree.span) =
-    first <= measurement.first && measurement.last <= last
+  let within (_, measured_last) = measured_last <= last in
+  let measurements =
+    Measurements.to_seq_from first context.typed.measurements
+    |> Seq.take_while (fun (measured_first, _) -> measured_first <= last)
   in
-  match List.find_opt within (List.rev context.typed.measurements) with
-  | Some measurement -> context.fail measurement parameter_dependent
+  match Seq.find within measurements with
+  | Some (measured_first, measured_last) ->
+      context.fail
+        { first = measured_first; last = measured_last }
+        parameter_dependent
   | None -> ()
 
 (* The constant of a [sizeof], [_Alignof] or [offsetof] at [span] of the

@@ -1170,6 +1170,33 @@ let note_at_file_scope state scope (entity : entity) =
 let declares_generic_function state scope =
   state.in_generic_function && scope = File_scope
 
+(* Design 7.1 rule 3: every declaration of an identifier with linkage
+   denotes one object or function (C11 6.2.2p2), which each instance of
+   a generic function would declare again with its own argument in the
+   type. *)
+let refuse_linked_declaration state scope span (declared : Entity.declared) =
+  let linked_type =
+    match declared with
+    | Object { object_type = t; linkage = External | Internal; _ }
+    | Function { function_type = t; linkage = External | Internal; _ } ->
+        Some t
+    | Object { linkage = No_linkage; _ }
+    | Function { linkage = No_linkage; _ }
+    | Typedef _ | Enumerator _ ->
+        None
+  in
+  match linked_type with
+  | Some t
+    when state.in_generic_function && scope = Block_scope
+         && Ctype.mentions_opaque state.tags t ->
+      fail state span
+        (Rule.message Type_parameter_operation
+           "a declaration in a generic function gives its identifier \
+            linkage and has a type that mentions a type parameter, so \
+            every instance would declare one object or function with \
+            another type")
+  | Some _ | None -> ()
+
 let unlinked : Entity.declared -> Entity.declared = function
   | Function declared -> Function { declared with linkage = No_linkage }
   | (Object _ | Typedef _ | Enumerator _) as declared -> declared
@@ -1184,6 +1211,7 @@ let declare_in state scope span specified declared (derived : derived) =
       let next =
         if declares_generic_function state scope then unlinked next else next
       in
+      refuse_linked_declaration state scope span next;
       let has_linkage = has_linkage next in
       let inexact = specified.inexact in
       let bind_after prior =
@@ -3719,6 +3747,24 @@ let check_agreement state span name ~earlier ~later =
             %s, whose type typec does not compute"
            unknown.construct)
 
+(* Design 7.1 rule 6: whether two variably modified types are the same
+   rests on their bounds at run time, so rule 7 could not compare two
+   declarations whose parameters have one. The parameter types are
+   adjusted, so [T a[n]] is [T *a] and stands. A type that typec does
+   not compute is left to rule 7, which agrees it with nothing. *)
+let refuse_variable_parameters state span reference =
+  let check parameter =
+    if Ctype.is_variably_modified parameter = Answer true then
+      fail state span
+        (Rule.message Generic_function_form
+           "no parameter of a generic function is variably modified")
+  in
+  match (generic_function_type state reference).shape with
+  | Function { parameters = Prototype { types; _ }; _ } ->
+      List.iter check types
+  | Unknown_type _ -> ()
+  | _ -> invalid_arg "Declarations: a generic function without a prototype"
+
 (* Design 7.1: each type parameter is a typedef name of an opaque value
    type (rule 2): its own in the first declaration, and in a later one
    that of the earlier declaration at the same position (rule 7). The
@@ -3777,6 +3823,7 @@ let read_generic_function state (generic : Tree.generic_function) =
     (fun (earlier, _) ->
       check_agreement state span name ~earlier ~later:reference)
     earlier;
+  refuse_variable_parameters state span reference;
   Generic_function_declaration
 
 let read_external state ((item : Tree.external_declaration Tree.item), view) =
