@@ -389,9 +389,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   step's `-dD`, definition lines read and left out of emission, the
   table of macros) and the rule of 13.5 that refuses a macro in any
   `#pragma` line, replacing `Pragma_words` and its rule `pragma-word`.
-- [Low] The reader's table records no fact of a replacement list, and
-  the refusal of design 9.3 needs one: whether a definition is its
-  name alone. Add it with `--emit-c-header` (plan 4.1).
+- [High] Refuse an option after `-Wp,`, `-Xpreprocessor` or `-Xclang`
+  that starts with `-d` (design 13.2): with the `-E` step's `-dD` the
+  reader accepts definition lines, so GCC's `-Wp,-dM` output reads as
+  an empty unit and compiles to an empty object, and `-Wp,-dU` leaves
+  the table of macros without the unused ones.
 - [Low] A `#pragma` line of C text that is no sequence of tokens is
   not looked at for macros (design 13.5, provisional); if a backend is
   found to apply such a line, have the reader keep the identifiers

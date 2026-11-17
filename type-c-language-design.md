@@ -5289,11 +5289,11 @@ language is defined here and not by the tool.
   writes each `#define` and `#undef` into the output at its place, from
   which the reader (13.3) knows the macros at each token; no other dump
   option does so on both families, as Clang 21 to 23 ignore `-dN` and
-  `-dU`. It costs the `-E` step no time (Apple Clang 21, Clang 23 and
-  GCC 16, a unit of eight system headers) and the reader under 1% of
-  the unit (13.3). Under `-M` or `-MM` the step prints the rule alone,
-  and gets no `-dD`. The
-  cost is that locations are a file and a line: columns and macro
+  `-dU`. It costs the `-E` step next to no time (Apple Clang 21, Clang
+  23 and GCC 16, a unit of eight system headers), and the unit 5% in
+  all (13.3). The step of `-M` or `-MM`, which prints the rule alone,
+  gets no `-dD`. The cost of preprocessing in the backend is that
+  locations are a file and a line: columns and macro
   backtraces are not available, and backend warnings that depend on
   macro provenance or on comments can differ from a direct compile. The
   reader requires a line marker naming a file before the first token of
@@ -5407,10 +5407,20 @@ language is defined here and not by the tool.
   does not show: a `specs` file in a directory of `-B` or `--prefix` or
   of `GCC_EXEC_PREFIX`, Clang's default configuration files (which
   `--no-default-config` turns off and so passes), and `-Xclang`, `-Wp,`
-  or `-Xpreprocessor` with `-dI`. Refusing `-B` would break cross and
-  linker setups, and the other routes are the environment of the
-  backend, so `typec` leaves them open. The reader refuses the
-  preprocessed text that they change and the assertions of 13.4 catch a
+  or `-Xpreprocessor` with `-P` or `-C`. Refusing `-B` would break
+  cross and linker setups, and the other routes are the environment of
+  the backend, so `typec` leaves them open. The reader refuses most of
+  the preprocessed text that they change, but not all: under `-Wp,-dM`
+  GCC 16 writes the definitions and no token, which reads as an empty
+  unit, and `-Wp,-dU` leaves out the definitions of unused macros. An
+  option that `-Wp,` (each part between its commas), `-Xpreprocessor`
+  or `-Xclang` passes on and that starts with `-d` is therefore refused
+  as the same option on its own is. *Provisional.* After `-Xclang` the
+  rule also refuses Clang's `-cc1` options of other meaning spelled
+  with `-d`, such as `-disable-O0-optnone` and `-disable-llvm-passes`,
+  which the driver's table does not know; no build of a `.tc` input is
+  known to pass one, and one that does is settled by a `-cc1` entry for
+  it. The assertions of 13.4 catch a
   type that they change; another change, such as an `-E` that a spec
   file adds to the compile step, is the backend's own configuration,
   which `typec` does not inspect.
@@ -5442,32 +5452,46 @@ after a blank, starts none. A *definition line* is `#define`, blanks,
 the macro's name and then `(`, a blank or the end of the line; or
 `#undef`, blanks, the name and the end of the line. The reader reads
 the name as it reads an identifier and skips the rest of a `#define`
-line byte by byte without lexing it: no consumer reads a replacement
-list or a parameter, and `-dD` makes the text 2.4 to 5.3 times as
-long, mostly in the definitions of system headers. Lexing those bytes
-would cost a unit of eight system headers about a third more time; the
-skip costs it 1.3 ms of 134 ms (Apple Clang 21). A body costs what any
-byte of the text costs, so reading stays linear in the text.
+line without lexing it: no consumer reads a replacement list or a
+parameter, and `-dD` makes the text 2.4 to 5.3 times as long, mostly
+in the definitions of system headers. Lexing those bytes would cost a
+unit of eight system headers about a third more time; reading the
+definitions without it costs that unit 5% (Apple Clang 21, 141 ms
+against 135 ms end to end, the `-E` step's larger output included).
+A line whose rest holds a `"` is lexed all the same, and fails as any
+text does: GCC and Clang read raw string literals (`R"x(...)x"`) in
+their GNU modes and `-dD` writes the newlines of one in a replacement
+list as they are, so the lines inside it would otherwise read as
+directives. The reader refuses a raw string literal wherever it
+stands, in a definition line or among the tokens, where one whose
+quotes balance on each line (`R"x("`, a line, `")x"`) would forge the
+lines inside it just as well. Its openers `R"`, `LR"`, `uR"`, `UR"`
+and `u8R"` open no valid C, since in C no identifier stands directly
+before a string literal, so refusing them costs no program. Either way
+a body costs what any byte of the text costs, so reading stays linear
+in the text.
 
-Definition lines are otherwise no part of the unit's text. Emission
-copies none of them and keeps the newline of each, so the lines after
-it keep their numbers: Clang 21 applies a `#define` that it reads in
-`-x cpp-output` input and would expand a name of the emitted text
-again. The counts of the unit's bytes, for the output limit (3.5 rule
-7) and `--stats`, leave them out, so `-dD` changes no limit.
+Definition lines are otherwise no part of the unit's text. A backend
+may apply a `#define` that it reads in `-x cpp-output` input, as Apple
+Clang 21 does, and would then expand a name of the emitted text again;
+so emission copies no definition line. It keeps the newline of each,
+so the lines after it keep their numbers. The counts of the unit's
+bytes, for the output limit (3.5 rule 7) and `--stats`, leave the
+definition lines out; the markers that GCC writes before its
+predefined macros, about 6 KB in all, count as any marker does.
 
-Each compiler writes the predefined macros first. Clang enters a file
-`<built-in>` with a marker of flag 1 after the marker of the main
+Each compiler writes the predefined macros and those of the command
+line first, before the first line of the main file. Clang enters a
+file `<built-in>` with a marker of flag 1 after the marker of the main
 file, writes the predefined macros there, then enters `<command line>`
-for those of `-D` and `-U`, and then the files of `-include` and
-`-imacros`. GCC 16 writes `# 0 "<built-in>"` before each predefined
-macro and `# 0 "<command-line>"` before each of `-D`, `-U` and some
-target macros, such as `__DYNAMIC__`; neither marker has flag 1, so
-those lines belong to the main file as their owner, as with every
-marker that enters no file, and are told by their presumed file. The
-reader reads every definition line alike, wherever it stands, and
-records the place of a definition as it records a token's: the owner
-and the presumed location of its line.
+for those of `-D` and `-U`. GCC 16 writes `# 0 "<built-in>"` before
+each predefined macro and `# 0 "<command-line>"` before each of `-D`,
+`-U` and some target macros, such as `__DYNAMIC__`; neither marker has
+flag 1, so those lines belong to the main file as their owner, as with
+every marker that enters no file. The reader reads every definition
+line alike, wherever it stands, and records the place of a definition
+as it records a token's: the owner and the presumed location of its
+line.
 
 The reader builds one table per unit, beside the tokens: for each
 macro name, in text order, the changes to it, each at a token position
@@ -5476,12 +5500,9 @@ of the definition, or undefined. The query `at name pos` gives the
 place of the definition in force at the token `pos`: that of the last
 change at or before `pos`, or none where that change is an `#undef` or
 there is no change. The pragma rule of 13.5 asks `at` of each
-identifier of a `#pragma` line. The refusal of 9.3 reads the same
-changes in another way: the definitions of a name before a point whose
-place is outside the text of `M.tci`, and for each whether its
-replacement list is the name alone, which the reader tells by
-comparing the bytes after the name with the name, again without
-lexing.
+identifier of a `#pragma` line. The table is a map ordered by name,
+not a hash table, since a header chooses the names and could choose
+ones that collide in a hash.
 
 The table knows what `-E` writes and no more. `#pragma push_macro` and
 `pop_macro` leave no line: after `#define X 1`, `push_macro("X")`,
@@ -5493,7 +5514,6 @@ macOS SDK, of Clang's or GCC's resource headers or of Pilot B does.
 The dynamic macros, such as `__LINE__`, `__FILE__`, `__COUNTER__` and
 `__has_include`, have no definition line, so `at` gives none for them:
 naming them would be a list, and no measured pragma line names one.
-`#pragma GCC poison` is applied by `-E` and leaves no line.
 
 **Parsing.** A hand-written recursive-descent parser over the complete
 token array. C's grammar needs scope feedback for typedef names; Type-C
@@ -6032,7 +6052,7 @@ Two properties follow by construction:
 
 - A translation unit without Type-C constructs yields the preprocessor's
   token sequence unchanged, hence the same object code as compiling that
-  preprocessed text directly.
+  preprocessed text, without its definition lines (13.3), directly.
 - The front end never prints plain C from its own understanding of it. A
   mistake in how it reads plain C can produce a wrong diagnostic, or wrong
   lowered code where a Type-C construct depends on the misread type; it
@@ -7105,24 +7125,28 @@ accept: `#pragma mark - Don't edit` in Type-C text is an error under
 GCC 16, whose `-E` keeps the line and warns of the `'`, and the mark
 has to be reworded. Apple Clang 21's `-E` drops a `#pragma mark` line,
 so `typec` does not read it there. In C text that does not move `typec`
-looks at the identifiers of a pragma for the rule on macros below
-alone, and passes every line on whole: GCC keeps some pragmas verbatim in its `-E`
-output, the free text of a `#pragma mark` line among them.
+looks at the identifiers of a pragma only to find macros (below),
+and passes every line on whole: GCC keeps some pragmas verbatim in its
+`-E` output, the free text of a `#pragma mark` line among them.
 
 A macro in a `#pragma` line can be read in one way in a C unit and in
 another in a Type-C unit. Clang 21 to 23 and Apple Clang 21 replace a
-macro among the words of `pack`, `align`, `options align`,
-`ms_struct`, `weak`, `redefine_extname`, `float_control` and `clang
-fp` when they compile C, and keep the line as written in their `-E`
+macro among the words of many pragmas, `pack`, `align`, `options
+align`, `ms_struct`, `weak`, `redefine_extname`, `float_control`,
+`clang fp` and `clang loop` among them, when they compile C, and keep
+the line as written in their `-E`
 output, which `typec` compiles. A header that holds `#define M_PACK 1`
 and `#pragma pack(push, M_PACK)` before `struct wire { char a; int b;
 };` gives the structure size 5 in a `.c` unit and size 8 in a `.tc`
 unit, where Clang reads `M_PACK` as a label of `push`, with no
 diagnostic: two units of one program would disagree on its layout.
 `#pragma redefine_extname` with macros for its names makes a call of
-another symbol, also silently; the four pragmas of layout and `weak`
-are ignored with a warning in the `-E` reading, and `float_control` and
-`clang fp` are errors there. GCC 16 replaces macros only in
+another symbol, also silently. Where a macro stands for a value that
+the pragma does not take as a word or a label, as in `#pragma
+pack(M_PACK)`, the four pragmas of layout and `weak` are ignored in the
+`-E` reading, with a warning outside a system header and silently in
+one, and `float_control`, `clang fp` and `clang loop` are errors
+there. GCC 16 replaces macros only in
 `redefine_extname` and `message`, and writes those lines already
 replaced in its `-E` output, so its two readings agree; GCC 14 and 16
 read the others as written in both. Which pragmas Clang reads after
@@ -7135,14 +7159,26 @@ A label of `push` or `pop`, as in `#pragma pack(push, saved, 1)`,
 passes unless it names a macro, and a macro named as a word of the
 pragma is refused as any other: under `#define natural packed`,
 `#pragma options align=natural` would pack a structure in a `.c` unit
-alone. A name that an `#undef` before the line removes passes. In the
-units measured (the container library, Pilot B, the README's examples
-and a unit of eight system headers of the macOS SDK) no pragma line
-names a macro, of 15 on Apple Clang 21 and 33 on GCC 16.
+alone. A name that an `#undef` before the line removes passes. The
+rule refuses some lines that both readings agree on: under `#define ON
+1`, `#pragma STDC FENV_ACCESS ON` is an error, though C11 6.10.6p1
+replaces no macro in a `STDC` pragma. *Provisional:* the rule costs
+nothing on the code measured: no pragma line names a macro in the
+units of the container library, Pilot B and the README's examples and
+a unit of eight system headers of the macOS SDK (15 lines on Apple
+Clang 21, 33 on GCC 16), nor in 54 headers of the macOS SDK
+(CoreFoundation, dispatch, xpc and mach among them, 1063 lines). A
+corpus of glibc and FreeBSD headers would settle it; a hit there that
+both readings agree on would call for an exemption by rule, and
+without one the rule stands.
 
-The rule sees the macros that the table knows: a name that `#pragma
-pop_macro` restores and the dynamic macros such as `__LINE__` pass it
-(13.3). `message`, `once`, `poison`, `push_macro` and `pop_macro` act
+The rule sees the macros that the table knows (13.3). A name that
+`#pragma pop_macro` restores after an `#undef` passes it: after
+`#define M_PACK 1`, `push_macro("M_PACK")`, `#undef M_PACK` and
+`pop_macro("M_PACK")`, `#pragma pack(push, M_PACK)` lays the structure
+out in two ways and the table holds no definition of `M_PACK`. The
+dynamic macros such as `__LINE__` pass it too. `message`, `once`,
+`poison`, `push_macro` and `pop_macro` act
 in the preprocessor, so `-E` has done their work, and `message`
 reaches the output already replaced. A pragma line of C text that is
 no sequence of tokens is not read. *Provisional:* that no backend
