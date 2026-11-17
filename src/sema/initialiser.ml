@@ -16,6 +16,8 @@ type typing = {
   location : Tree.span -> Typec_cpp.Location.t;
   index :
     Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
+  in_generic : bool;
+  lowers_zero : Tree.span -> unit;
 }
 
 (* Clang's default limit on nested brackets, which the parser keeps. *)
@@ -89,6 +91,49 @@ let zeroes_dependent typing (t : Ctype.t) (list : Tree.initialiser_list) =
   match t.shape with
   | Array { length = Unknown; _ } -> false
   | _ -> Ctype.mentions_opaque typing.tags t && is_zero_initialiser typing list
+
+(* Design 7.1 rule 3: the objects whose zero initialiser lowering
+   cannot write as [{}]. A variable length array takes no initialiser
+   (C11 6.7.9p3), which the backends would let [{}] give it as C23 does,
+   and Apple Clang 21 refuses braces around the initialiser of an object
+   whose own type is atomic; an array of atomic elements is not one. *)
+let refuse_unlowered_zero typing (span : Tree.span) (t : Ctype.t) =
+  let is_array = match t.shape with Array _ -> true | _ -> false in
+  if is_array && Ctype.is_variably_modified t = Answer true then
+    typing.fail span
+      (Rule.message Zero_initialiser_vla
+         "the zero initialiser of a variable length array whose type \
+          mentions a type parameter, which C11 gives no initialiser");
+  if t.qualifiers.atomic then
+    typing.fail span
+      (Rule.message Zero_initialiser_atomic
+         "the zero initialiser of an atomic object whose type mentions a \
+          type parameter, which Clang refuses in braces")
+
+(* Design 7.1 rule 3: lowering writes a zero initialiser as [{}] only
+   where the check types the list that holds it. A type that typec does
+   not compute may be an argument's, so in a generic function no braced
+   list initialises an object of one or one that holds one. *)
+let refuse_unknown_object typing (list : Tree.initialiser_list) t =
+  if typing.in_generic && Ctype.holds_unknown typing.tags t then
+    typing.fail list.span
+      (Rule.message Initialiser_type_unknown
+         "a braced initialiser, in a generic function, of an object whose \
+          type typec does not compute or holds one, which may mention a \
+          type parameter")
+
+(* Design 7.1 rule 3: where a list for an object whose type mentions a
+   type parameter has lost its place, the subobject of the next
+   initialiser depends on the argument, and with it whether that is a
+   zero initialiser that lowering writes as [{}]; only a designator
+   places it. *)
+let refuse_lost_place typing (span : Tree.span) (t : Ctype.t) =
+  if Ctype.mentions_opaque typing.tags t then
+    typing.fail span
+      (Rule.message Initialiser_place_lost
+         "the subobject that an initialiser reaches depends on what typec \
+          does not know, in an object whose type mentions a type \
+          parameter: place it with a designator")
 
 (* Subobjects (6.7.9p17) *)
 
@@ -553,7 +598,9 @@ and place_expression typing ~zeroes ~elided ~depth (level, outer) expression
 and braced typing (t : Ctype.t) (list : Tree.initialiser_list) =
   match (t.shape, list.node) with
   | _ when zeroes_dependent typing t list ->
+      refuse_unlowered_zero typing list.span t;
       List.iter (untargeted_element typing) list.node;
+      typing.lowers_zero list.span;
       t
   (* 6.7.9p14: a string literal in braces. *)
   | ( Array { element; _ },
@@ -637,6 +684,7 @@ and place_element typing ~zeroes t walk
       drop_excess typing ~zeroes element;
       walk
   | Lost ->
+      refuse_lost_place typing element.span t;
       untargeted typing initialiser;
       { cursor = Lost; extent = Opaque_extent }
 
@@ -712,7 +760,9 @@ let initialise typing (t : Ctype.t) (initialiser : Tree.initialiser) =
   in
   check_object typing span t;
   match (initialiser, t.shape) with
-  | Braced list, _ -> braced typing t list
+  | Braced list, _ ->
+      refuse_unknown_object typing list t;
+      braced typing t list
   | Expression_initialiser expression, Array { element; _ } ->
       array_initialiser typing t element expression
   | ( Expression_initialiser expression,

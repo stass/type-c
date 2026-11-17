@@ -53,6 +53,13 @@ open Typec_syntax
       or the span of what keeps it from being an integer constant
       expression.
     - [fail] is as in {!Expressions.context}.
+    - [in_generic] says that the initialiser is in the definition of a
+      generic function, head or body, which its check reads (design 7.1
+      rule 3).
+    - [lowers_zero] is told of the span of the braced list of each zero
+      initialiser of design 7.1 rule 3, which zeroes an object or
+      subobject whose type mentions a type parameter, and which lowering
+      writes as [{}].
 
     In Type-C text an initialiser opens no variant's members but through
     the [{0}] that zeroes it (design 3.2 rules 6 and 7). *)
@@ -69,6 +76,8 @@ type typing = {
   location : Tree.span -> Typec_cpp.Location.t;
   index :
     Tree.expression -> (Integer.t * Integer_constant.t, Tree.span) result;
+  in_generic : bool;
+  lowers_zero : Tree.span -> unit;
 }
 
 val max_levels : int

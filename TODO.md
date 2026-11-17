@@ -1483,27 +1483,20 @@ types (design 13.3).
 - [Low] Each edit of the emitter is wrapped in two line markers, so
   `--emit-c` shows a lowered alias over eight lines. An edit whose text
   and replaced tokens hold no newline could go without them.
-- [High] Package 3.3, the lowering half of design 7.1 rule 3's zero
-  initialiser: the zero initialiser of an object or subobject whose
-  type mentions a type parameter lowers to `{}` under `__extension__`
-  (13.5), with the three refusals of rule 3: a variable length array,
-  a declaration in the first clause of a `for`, an object whose own
-  type is atomic. This is a security item: left as `{0}`, an instance
-  for a union holds stack bytes under GCC 15 and later. Tests, as 13.5
-  states them: the lowered form in each place and for each type, the
-  three structures with unnamed bit-fields among them, leaves zero,
-  on the backend of each host, every byte that rule 3 promises, which
-  is each byte but those inside a `long double` that hold none of its
-  value; the same test over `{0}` finds a byte that is not zero under
-  GCC 16; the lowered form compiles under `-pedantic-errors` in the
-  four dialects, and the same text without `__extension__` does not.
-  No test asks for a byte that is not zero among those passed over,
-  since how many are left depends on the harness: the functions of
-  the test count and print them and assert nothing. Take that record
-  on both backends at the three levels and put its counts in 13.5 in
-  place of those there, whose harness this repository does not hold
-  (another harness finds 3, 4 and none with GCC 16.2 where 13.5 has
-  6, 4 and 4).
+- [Low] Design 7.1 rule 3: the refusal of the zero initialiser of a
+  variable length array passes an array whose variability
+  `Depends_on` an unknown type; refuse it unless it is `Answer false`.
+- [Medium] Design 7.1 rule 3: lowering writes `{}` only where the walk
+  of `Initialiser.braced` reaches a zero list, and the refusals of a lost
+  place and of an unknown type close the paths that do not reach it,
+  which is a list. Correct by construction instead: take from the parser
+  every braced list of a generic definition that reads as `{0}` or `{}`,
+  have the check classify each as lowered or kept, and refuse any left
+  unclassified.
+- [Medium] A type declaration in the body of a generic function, as
+  `type d = distinct int;`, reaches its instances unlowered, since
+  `Lowering.function_instance` passes no declarations, and the backend
+  refuses it. Lower it there or refuse it in the check.
 - [Medium] `Expressions.gives_dependence` lists the constructs that
   give dependence on a type parameter, where design 7.1 rule 4 wants it
   from the one place that gives a layout; the list refuses valid
@@ -1513,9 +1506,17 @@ types (design 13.3).
   operand of `__asm__`, which asks for a constant.
 - [Low] Generic functions, readability: `dependent_objects` stores a
   span that nothing reads; the message of `parameter_dependent` and the
-  meaning of `type-parameter-constant` name too few sources of dependence; "in a generic
-  function" is held both in `Declarations.state.generic_part`
-  and in `Expressions.enclosing.in_generic`.
+  meaning of `type-parameter-constant` name too few sources of
+  dependence; "in a generic function" is held in
+  `Declarations.state.generic_part`, in
+  `Expressions.context.generic_definition`, which follows it, and in
+  `Expressions.enclosing.in_generic`, which covers the body alone and
+  decides `__func__` and `gives_dependence`; derive the last from the
+  context.
+- [Low] typec accepts a scalar's initialiser in two pairs of braces,
+  `int *q = {{0}};`, which C11 6.7.9p11 does not allow and GCC 16
+  refuses ("braces around scalar initializer"); refuse the second pair
+  where the initialiser is read, for all text.
 - [Medium] GCC 16 warns of `unused` in a type name on a structure
   (`sizeof(struct s __attribute__((unused)))`, "ignoring attributes
   applied to 'struct s' after definition") and not on a `short`, so the

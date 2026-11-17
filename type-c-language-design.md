@@ -2780,8 +2780,9 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
    were. The `long double` of x86-64 holds its value in 10 of its 16
    bytes, and its complex type in 20 of 32. After the zero initialiser
    of an object of either type Apple Clang 21 leaves the other 6 and
-   12 as the stack held them, and GCC 16 leaves 6 and 12 without
-   optimisation and 4 and 8 at `-O2` (13.5). So the zero initialiser
+   12 as the stack held them, and GCC 16 leaves 6 of the complex
+   type's 12 without optimisation and 4 and 8 at `-O2` (13.5). So the
+   zero initialiser
    does not make the bytes of a `Ti` fit to hand on. A definition
    that gives the representation of an object to `memcmp`, to `write`
    or to a hash of the bytes clears the object with `memset` first,
@@ -2808,6 +2809,26 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      initializer type"), where GCC 16 takes them. A structure with an
      atomic member and an array of atomic elements take the zero
      initialiser whole (both).
+
+   Lowering writes `{}` where the check finds a zero initialiser, so
+   the check types every list of a definition, and two errors keep it
+   so. A list it could not type would reach the backend as C's `{0}`,
+   with the bytes that the stack held in it:
+
+   - A braced initialiser of an object whose type typec does not
+     compute (13.3), or holds a member or element of one, as
+     `__typeof__` of a call of a Clang overloaded function, or of a
+     conditional whose null pointer constant is a value that the
+     backend computes. The type may be the argument or hold it.
+   - In a list for an object whose type mentions a type parameter, an
+     initialiser without a designator after the list has lost its
+     place: after an element of an array whose length or designated
+     index the backend computes, or after an initialiser whose reach
+     typec does not know. Where it goes, and so whether it is a zero
+     initialiser, is the argument's to say. A designator places it:
+     `{ x, .a = {0} }` is valid where `{ x, x, {0} }` is not, for
+     `struct { int k[sizeof(struct s)]; T a; }`. A list for an object
+     whose type mentions no type parameter loses its place as in C.
 
    Other things that C allows of a structure are errors too, because
    another value type gives them another type or another meaning:
@@ -5379,14 +5400,15 @@ The bytes of a scalar that hold none of its value are no part of it,
 and the same measurement finds them left as the stack held them. On
 x86-64 a `long double` holds its value in the first 10 of its 16
 bytes, and `_Complex long double` in 20 of its 32. After `{}`, in the
-harness of this measurement, Apple Clang 21 leaves the other 6 and 12
-at each of the three levels, and GCC 16.2 leaves 6 and 12 at `-O0` and
-4 and 8 at `-O2` and `-O3`, in these places:
+record of the test below, Apple Clang 21 leaves the other 6 and 12 at
+each of the three levels, and GCC 16.2 leaves none of a
+`long double`'s 6 and 6 of the complex type's 12 at `-O0`, and 4 and
+8 at `-O2` and `-O3`, in these places:
 
 | Type | Apple Clang 21 | GCC 16.2 |
 | --- | --- | --- |
-| `long double`, `_Complex long double` | An object, a `const` object, a compound literal read as a value and through its address | The same, and a subobject of a longer list, also where a compound literal initialises it |
-| A structure whose one member has one of the two types | A compound literal of the structure of `long double`, read through its address | An object, a `const` object, a compound literal read as a value and through its address |
+| `long double`, `_Complex long double` | An object, a `const` object, a compound literal through its address | The same, and a subobject of a longer list, in an object and in a compound literal |
+| A structure whose one member has one of the two types | A compound literal of the structure of `long double`, through its address | An object, a `const` object, a compound literal through its address |
 
 In every other place of these four types the bytes were zero. They
 were zero in every place of a structure that holds a `long double`
@@ -5427,22 +5449,25 @@ dialects it is the backends' extension, measured with GCC 16.2 and
 Apple Clang 21 alone. A test of the suite holds the assumption for the
 backend of each test host. It compiles the lowered form in each place
 above for each type above, those that hold a `long double` or its
-complex type among them, calls each function after one that fills the
-stack with a non-zero byte, and finds zero every byte that 7.1 rule 3
-promises: each byte of the object but those inside a `long double`
-that hold none of its value. They are the last 6 of its 16 on x86-64,
-and the test asserts that format by `LDBL_MANT_DIG` and the size; on
+complex type among them, but in the two places that copy a compound
+literal, whose copy C leaves unspecified in its padding. It calls each
+function through a pointer, after one that fills the stack with a
+non-zero byte, at `-O0`, `-O2` and `-O3`, and finds zero every byte
+that 7.1 rule 3 promises: each byte of the object but those inside a
+`long double` that hold none of its value. They are the last 6 of its
+16 on x86-64, and the test asserts that format by `LDBL_MANT_DIG`; on
 arm64, which is not measured, the type has no such bytes and every
-byte must be zero. The same test over `{0}` must find a byte that is
-not zero under GCC 15 and later, which shows that the test reads the
-bytes it claims to read. No test asks for a byte that is not zero
+byte must be zero. A control in the same test, a union whose first
+member alone is assigned, must leave a byte that is not zero, which
+shows that the test reads the bytes it claims to read; the same test
+over `{0}` finds 31 of the 32 bytes of the union of 7.1 rule 3 left
+with GCC 16.2 at `-O2`. No test asks for a byte that is not zero
 among those that this one passes over. How many of them are left
 depends on the harness as well as on the backend: on what the
 function called before left on the stack, and on how the backend
 compiles the function that holds the object. The counts above are
-those of one harness. Another, which hands the address of the object
-to a function that is not inlined, finds 3, 4 and none of the 6 bytes
-left with GCC 16.2 at `-O0`, `-O2` and `-O3`, in a `long double`
+those of this test's harness. Another finds 3, 4 and none of the 6
+bytes left with GCC 16.2 at `-O0`, `-O2` and `-O3`, in a `long double`
 object, in a `const` one and in a compound literal read through its
 address, and all 6 with Apple Clang 21 at each level. The counts are
 therefore a record of one measurement and nothing that a test can

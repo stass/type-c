@@ -1452,6 +1452,50 @@ let body_blocks output (declarations : (Tree.span * string Lazy.t) list) =
   in
   List.concat_map block bodies
 
+(* Design 13.5: the list of a zero initialiser of 7.1 rule 3 is [{}],
+   whichever of [{0}] and [{}] the text writes: what stands between its
+   braces goes, and the braces stay with the edits that they own, as the
+   end of a conversion that a compound literal's [}] owns. *)
+let zero_list output (zero : Expressions.zero_initialiser) =
+  let tokens = tokens_of output in
+  let { Tree.first; last } = zero.list in
+  let inside index = first < index && index < last in
+  replace output ~location:tokens.(first).location ""
+    (List.filter inside (grammar_tokens tokens first last))
+
+(* The first tokens of the holders of [zero_initialisers], one each. *)
+let zero_holders (zero_initialisers : Expressions.zero_initialiser list) =
+  List.sort_uniq Int.compare
+    (List.map
+       (fun (zero : Expressions.zero_initialiser) -> zero.holder)
+       zero_initialisers)
+
+(* The [__extension__] that design 13.5 writes before each of [holders]
+   begins the edit that replaces the holder's first token, so that each
+   insertion before that token, the prelude of a try among them, goes
+   ahead of it ({!Emitter.in_order}) and it stands next to what it
+   holds. Gives [dropped] with the prefix on each range that begins at a
+   holder, and an edit of its own for each other holder, which another
+   edit that replaces the token would overlap, and emission refuses an
+   overlap. *)
+let with_extensions output holders dropped =
+  let tokens = tokens_of output in
+  let extension = "__extension__ " in
+  let begins_at holder range = range.span.first = holder in
+  let extended range =
+    if List.exists (fun holder -> begins_at holder range) holders then
+      { range with text = extension ^ range.text }
+    else range
+  in
+  let own holder =
+    if List.exists (begins_at holder) dropped then []
+    else
+      let spelling = Reader.spelling (Emitter.unit output) tokens.(holder) in
+      replace output ~location:tokens.(holder).location (extension ^ spelling)
+        [ holder ]
+  in
+  (List.map extended dropped, List.concat_map own holders)
+
 (* The edits of one text: the unit's own, or the definition of an
    instance. A type declaration may hold another, in a statement
    expression of its definition, and a constructor's arguments other
@@ -1467,9 +1511,12 @@ let body_blocks output (declarations : (Tree.span * string Lazy.t) list) =
    construction replaces them; with those of [answered], the edits
    inside one go, and the range's own edits replace them. Last, the
    tries are lowered ({!with_tries}), and the edits inside the operand
-   of one move with it. *)
+   of one move with it. [zero_initialisers] are those of design 7.1
+   rule 3 that the text holds, each [{}] with one [__extension__] before
+   each holder ({!with_extensions}). *)
 let text_edits output ~declarations ~void_field_spans ~replaced
-    typed =
+    ~zero_initialisers typed =
+  let holders = zero_holders zero_initialisers in
   let tokens = tokens_of output in
   let answered = Typec_sema.Expressions.answered typed in
   let constructions = Typec_sema.Expressions.constructions typed in
@@ -1479,11 +1526,12 @@ let text_edits output ~declarations ~void_field_spans ~replaced
      its removal ({!goes_with}); none stands there, since a field begins
      with a specifier, before which no lowering inserts. *)
   let removed span = { span; text = "" } in
-  let dropped =
-    outermost
-      (List.concat_map dropped_ranges answered
-      @ List.map removed void_field_spans
-      @ List.filter (fun range -> not (in_head range)) replaced)
+  let dropped, extensions =
+    with_extensions output holders
+      (outermost
+         (List.concat_map dropped_ranges answered
+         @ List.map removed void_field_spans
+         @ List.filter (fun range -> not (in_head range)) replaced))
   in
   let dropped_spans = cover (List.map (fun range -> range.span) dropped) in
   let kept edit = not (goes_with dropped_spans edit) in
@@ -1507,6 +1555,8 @@ let text_edits output ~declarations ~void_field_spans ~replaced
         (List.rev (Typec_sema.Expressions.matchings typed))
     @ List.concat_map (steered_controlling output) answered
     @ slice_tests
+    @ List.concat_map (zero_list output) zero_initialisers
+    @ extensions
   in
   let undeferred =
     with_slice_makings output
@@ -1559,7 +1609,7 @@ let instance_definition output instance ~first
           ~declarations:[ (lowered, generic) ]
           ~void_field_spans:reading.void_field_spans
           ~replaced:(List.map named reading.names)
-          reading.typed
+          ~zero_initialisers:[] reading.typed
       in
       generic_text output edits ~first ~last:generic.span.last
   | Function_generic _ -> invalid_arg "Lowering: a function as a type"
@@ -1590,7 +1640,7 @@ let added_static output (definition : Tree.function_definition) =
    instance's name, from its first token to [last], after which [ending]
    follows: the prototype ends before the body. *)
 let function_instance output location instance ~last ~ending
-    (reading : Typec_sema.Declarations.instance_text)
+    ~zero_initialisers (reading : Typec_sema.Declarations.instance_text)
     (definition : Tree.function_definition) =
   let (Ordinary_at name_token) = definition.node.declared.id in
   let name =
@@ -1601,6 +1651,7 @@ let function_instance output location instance ~last ~ending
     added_static output definition
     @ text_edits output ~declarations:[] ~void_field_spans:[]
         ~replaced:(name :: List.map named reading.names)
+        ~zero_initialisers
         reading.typed
   in
   generic_text output edits ~first:definition.span.first ~last
@@ -1622,6 +1673,11 @@ let argument_typedefs context location typedefs =
   in
   List.concat_map lines typedefs
   |> List.map (Emitter.generated context.output location)
+
+(* Those that the check of the generic function found (design 7.1 rule
+   3). *)
+let zero_initialisers context definition =
+  Typec_sema.Declarations.zero_initialisers context.declarations definition
 
 let reading context instance =
   match Typec_sema.Declarations.instance_text context.declarations instance with
@@ -1663,7 +1719,9 @@ let function_prototype context location instance =
     | Skipped span -> span.first
   in
   function_instance context.output location instance ~last:(body_first - 1)
-    ~ending:[ ";" ] reading definition
+    ~ending:[ ";" ]
+    ~zero_initialisers:(zero_initialisers context definition)
+    reading definition
 
 (* Step 2: the rest of 10.1 or 10.2, after the forward declaration, or
    the whole definition of a function instance. *)
@@ -1676,7 +1734,9 @@ let instance_rest context location instance =
       | None -> invalid_arg "Lowering.instance_rest: a typedef instance")
   | Function_generic { definition; _ } ->
       function_instance context.output location instance
-        ~last:definition.span.last ~ending:[] reading definition
+        ~last:definition.span.last ~ending:[]
+        ~zero_initialisers:(zero_initialisers context definition)
+        reading definition
 
 let application_location context
     (placement : Typec_sema.Declarations.placement) =
@@ -1755,6 +1815,7 @@ let unit_edits output declarations =
       (generics
       @ generic_functions declarations
       @ List.map named (Typec_sema.Declarations.instance_names declarations))
+    ~zero_initialisers:[]
     (Typec_sema.Declarations.typed declarations)
 
 let edits (text : Reader.t) declarations =

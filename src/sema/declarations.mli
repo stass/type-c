@@ -150,6 +150,12 @@ val function_instances : t -> function_instance list
     outside the definitions of generic functions, in the order of their
     first uses: one for each instance, however many uses name it. *)
 
+val zero_initialisers :
+  t -> Tree.function_definition -> Expressions.zero_initialiser list
+(** The zero initialisers of design 7.1 rule 3 in the definition of a
+    generic function, which every instance writes as lowering does
+    (13.5). *)
+
 val instance_text : t -> Ctype.instance -> instance_text option
 (** The definition of an instance as its reading found it, [None] for
     one whose definition no point needed. *)

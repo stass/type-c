@@ -100,6 +100,8 @@ type t = {
   instance_bytes : int;
   copy_bytes : int;
   longest_instance_code : int;
+  zero_initialisers :
+    (Tree.declaration_id, Expressions.zero_initialiser list) Hashtbl.t;
 }
 
 let tags result = result.tags
@@ -107,6 +109,10 @@ let items result = result.items
 let placements result = List.rev result.placements.texts
 let instance_names result = result.placements.names
 let function_instances result = List.rev result.placements.functions
+
+let zero_initialisers result (definition : Tree.function_definition) =
+  Hashtbl.find_opt result.zero_initialisers definition.node.declared.id
+  |> Option.value ~default:[]
 
 let instance_text result instance =
   Ctype.Instances.find_opt instance result.placements.readings
@@ -256,6 +262,10 @@ type state = {
   mutable placements : placements;
   mutable place : place;
   mutable next_entity : int;
+  zero_initialisers :
+    (Tree.declaration_id, Expressions.zero_initialiser list) Hashtbl.t;
+      (* those that the check of each generic function found, by the
+         function's declaration (design 7.1 rule 3) *)
 }
 
 (* The part of a generic function that its check reads (design 7.1 rule
@@ -2658,8 +2668,8 @@ and constant_expression state expression =
 
 (* The asm label names a symbol, which no type depends on. The
    initialiser is read after the declarator, whose identifier it sees
-   (6.2.1p7). *)
-and read_init_declarator state scope specified
+   (6.2.1p7), and [holder] holds it. *)
+and read_init_declarator state scope ~holder specified
     (init_declarator : Tree.init_declarator) =
   let { Tree.declarator; declared; asm_label = _; attributes; initialiser } =
     init_declarator.node
@@ -2691,13 +2701,15 @@ and read_init_declarator state scope specified
   match initialiser with
   | None -> entity
   | Some initialiser ->
-      initialised state scope init_declarator.span declared entity initialiser
+      initialised state scope ~holder init_declarator.span declared entity
+        initialiser
 
 (* 6.7.9: an initialised object, of static or thread storage duration
    with a constant initialiser (p4). The initialiser completes the type of
    an array of unknown size (p22), as a later declaration with the length
    would. *)
-and initialised state scope span declared (entity : entity) initialiser =
+and initialised state scope ~holder span declared (entity : entity)
+    initialiser =
   match entity.declared with
   | Object ({ object_type; linkage; storage; _ } as declared_object) -> (
       if scope = Block_scope && linkage <> No_linkage then
@@ -2707,7 +2719,7 @@ and initialised state scope span declared (entity : entity) initialiser =
               initialiser (C11 6.7.9p5)");
       let constant = storage <> Automatic_storage in
       let completed =
-        Expressions.initialiser (typing state) ~constant object_type
+        Expressions.initialiser (typing state) ~holder ~constant object_type
           initialiser
       in
       Expressions.note_object (typing state) (declared : Tree.declared).id
@@ -2740,14 +2752,16 @@ and declaration_specifiers state specifiers
       (List.filter_map naming_name declarators);
   specified
 
-and read_block_declaration state (declaration : Tree.declaration) =
+and read_block_declaration state holder (declaration : Tree.declaration) =
   match declaration.node with
   | Static_assert assertion -> static_assert state assertion
   | Declaration { specifiers; declarators } ->
       let specified = declaration_specifiers state specifiers declarators in
       List.iter
         (fun declarator ->
-          ignore (read_init_declarator state Block_scope specified declarator))
+          ignore
+            (read_init_declarator state Block_scope ~holder specified
+               declarator))
         declarators
 
 (* Type declarations (design 3.1). The parser has made each the only
@@ -3575,7 +3589,9 @@ and token_charge state (span : Tree.span) =
    resolution property (design 13.5) on what the reading found, at the
    place in front of the external declaration being read, where the
    instance's text stands. A reading whose text lowering writes is
-   recorded for it. *)
+   recorded for it. The definition of a generic type is no part of a
+   generic function whose check may read it, where an instance of a
+   generic function that the check reads is part of the trial. *)
 and read_definition :
       'a.
       state ->
@@ -3585,7 +3601,7 @@ and read_definition :
       (unit -> 'a) ->
       'a =
  fun state generic arguments purpose read ->
-  let outer = state.moved in
+  let outer = state.moved and outer_part = state.generic_part in
   let parameters = generic_parameters generic in
   let of_type =
     match generic with
@@ -3602,6 +3618,11 @@ and read_definition :
           (argument_names generic instance)
   in
   state.moved <- Some moved;
+  if of_type then state.generic_part <- None;
+  let restore () =
+    state.moved <- outer;
+    state.generic_part <- outer_part
+  in
   let read_and_check () =
     let (result, typed), found =
       finding state (definition_span generic) (fun () ->
@@ -3616,7 +3637,7 @@ and read_definition :
     | For_instance _ | Definition_check -> ());
     result
   in
-  Fun.protect ~finally:(fun () -> state.moved <- outer) read_and_check
+  Fun.protect ~finally:restore read_and_check
 
 (* The name of the typedef of each argument of [instance], by the
    reference of its type parameter (design 10.3). *)
@@ -4088,6 +4109,7 @@ and typing state : Expressions.context =
     fail = (fun span diagnostic -> fail state span diagnostic);
     entity = referenced state;
     overloaded = Hashtbl.mem state.overloaded;
+    generic_definition = in_generic_function state;
     generic_function =
       (fun reference ->
         Option.map
@@ -4280,7 +4302,10 @@ let read_declaration state (declaration : Tree.declaration) =
   | Declaration { specifiers; declarators } ->
       let specified = declaration_specifiers state specifiers declarators in
       Declaration
-        (List.map (read_init_declarator state File_scope specified) declarators)
+        (List.map
+           (read_init_declarator state File_scope
+              ~holder:(Expressions.Holder_at declaration.span.first) specified)
+           declarators)
 
 (* What reading a function definition gives: the entity, the type that
    the definition declares, its return type, and its defer statements
@@ -4465,8 +4490,10 @@ let refuse_variable_parameters state span reference =
    uses ({!gets_texts}) and its type outlives the check, and the body as
    a trial, which defines no instance (3.5 rule 7). It types the
    definition in views of its own, which no lowering reads: each
-   instance is typed again. *)
-let check_generic_function state read =
+   instance is typed again, but the zero initialisers that the check
+   finds are kept, as no instance, whose types are its arguments, finds
+   them. *)
+let check_generic_function state (declared : Tree.declared) read =
   let outer = state.moved in
   state.moved <- Some (fresh_moved ~written:false ~of_type:false []);
   state.generic_part <- Some Generic_head;
@@ -4478,8 +4505,15 @@ let check_generic_function state read =
     state.generic_part <- Some Generic_body;
     in_trial state read_body
   in
-  Fun.protect ~finally:restore (fun () ->
-      in_own_views state (fun () -> read ~body_reading))
+  let read_and_find () =
+    read ~body_reading;
+    Expressions.zero_initialisers state.typed
+  in
+  let found =
+    Fun.protect ~finally:restore (fun () ->
+        in_own_views state read_and_find)
+  in
+  Hashtbl.replace state.zero_initialisers declared.id found
 
 (* Design 7.1 rule 9: each instance is the definition read again under
    its arguments, which a body that a system header defines, passed
@@ -4546,9 +4580,12 @@ let read_generic_function state (generic : Tree.generic_function) =
         let specified =
           declaration_specifiers state specifiers [ declarator ]
         in
-        ignore (read_init_declarator state File_scope specified declarator)
+        ignore
+          (read_init_declarator state File_scope
+             ~holder:(Expressions.Holder_at generic.span.first)
+             specified declarator)
   in
-  check_generic_function state read;
+  check_generic_function state declared read;
   check_generic_attributes state generic.span;
   Option.iter
     (fun (earlier, _) ->
@@ -4733,6 +4770,7 @@ let read target text (scopes : Parser.scopes) =
       placements = no_placements;
       place = At_file_scope;
       next_entity = 0;
+      zero_initialisers = Hashtbl.create 8;
     }
   in
   declare_builtin_typedefs state;
@@ -4745,10 +4783,10 @@ let read target text (scopes : Parser.scopes) =
   | items ->
       let { tags; entities; tag_types; linked; typed; type_declarations;
             placements; instance_bytes; copy_bytes; longest_instance_code;
-            _ } =
+            zero_initialisers; _ } =
         state
       in
       Ok { tags; items; placements; entities; tag_types; linked; typed;
            type_declarations; instance_bytes; copy_bytes;
-           longest_instance_code }
+           longest_instance_code; zero_initialisers }
   | exception (Failed error | Instance_failed error) -> Error error

@@ -512,6 +512,13 @@ val holds_variant : tags -> t -> bool
     answer is found when a structure or union is defined, so asking costs
     no walk. *)
 
+val holds_unknown : tags -> t -> bool
+(** Whether the type, or the element of an array type, is one that typec
+    does not compute or a structure or union that holds a member of one,
+    at any depth, as {!holds} holds a member, or a distinct type whose
+    representation is one. An incomplete structure or union holds
+    none. *)
+
 val first_variant : tags -> t -> t option
 (** The first variant among the type and the subobjects that eliding its
     braces, then theirs, would put an initialiser in (C11 6.7.9p20): the

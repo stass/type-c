@@ -140,6 +140,10 @@ type try_place =
    and if so the try that the statement being typed gives one. *)
 type try_positions = No_positions | Positions of try_place
 
+(* What holds an initialiser most closely, for a zero initialiser of
+   design 7.1 rule 3 ({!zero_initialiser}). *)
+type initialiser_holder = Holder_at of int | For_clause
+
 (* What encloses the statement being typed: the function, for __func__,
    return and try, the switch or match that case labels need, and the
    positions of try. [return_type] and [body] are [None] outside
@@ -351,6 +355,8 @@ type checked_pattern = {
   sub_fields : (Tree.sub_pattern * Ctype.member) list;
 }
 
+type zero_initialiser = { list : Tree.span; holder : int }
+
 (* [enclosing] belongs to the walk in progress. Only the reader's failure
    leaves a walk early, and it ends the read, so it is not restored on
    it. [selections] and [compatibilities] hold the answers to the
@@ -360,7 +366,9 @@ type checked_pattern = {
    alone gives, once. [dependences] holds, by the span of each expression
    that depends on a type parameter, that of the first place in it where
    the dependence arises, and [dependent_objects] the same of the
-   initialiser of each [const] object (design 7.1 rule 4). *)
+   initialiser of each [const] object (design 7.1 rule 4).
+   [zero_initialisers] holds those of design 7.1 rule 3, latest
+   first. *)
 type t = {
   types : (Tree.span, typed) Hashtbl.t;
   constants : (Tree.span, constant) Hashtbl.t;
@@ -375,6 +383,7 @@ type t = {
   mutable function_tries : try_site list;
   mutable defers : function_defers list;
   mutable slice_sites : slice_site list;
+  mutable zero_initialisers : zero_initialiser list;
   slice_makings : (Tree.span, slice_making) Hashtbl.t;
 }
 
@@ -396,6 +405,7 @@ let create () =
     function_tries = [];
     defers = [];
     slice_sites = [];
+    zero_initialisers = [];
     slice_makings = Hashtbl.create 8 }
 
 let find_at view span = Hashtbl.find_opt view.types span
@@ -411,6 +421,7 @@ let constructions view = Sites.constructions view.sites
 let matchings view = Sites.matchings view.sites
 let tries view = List.rev view.tries
 let defers view = List.rev view.defers
+let zero_initialisers view = List.rev view.zero_initialisers
 
 (* A site outside a function that C evaluates is refused (design section
    8 rule 9), so every [Tested] form has a body. *)
@@ -447,6 +458,7 @@ type context = {
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
+  generic_definition : bool;
   generic_function : Tree.reference -> Ctype.record_tag list option;
   type_argument : Tree.span -> type_argument -> unit;
   use_instance :
@@ -454,7 +466,7 @@ type context = {
   apply_generic :
     Tree.span -> Typec_syntax.Spelling.type_name -> Ctype.t list -> Ctype.t;
   type_name : Tree.type_name -> Ctype.t;
-  declaration : Tree.declaration -> unit;
+  declaration : initialiser_holder -> Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
   needs_complete : Ctype.t -> unit;
@@ -3358,7 +3370,7 @@ and expression_node context position (whole : Tree.expression) =
       selected context position whole
         (List.map association_result associations)
   | Compound_literal { type_name; values } ->
-      compound_literal context type_name values
+      compound_literal context whole type_name values
   | Subscript { operand; index } -> (
       let array = typed operand in
       let index_typed = typed index in
@@ -3995,10 +4007,12 @@ and generic_association context span
 (* 6.5.2.5p4: an lvalue of the type name's type, which the initialiser
    completes where it is an array of unknown size; outside the body of a
    function its initialisers are constant (p3). *)
-and compound_literal context type_name values =
+and compound_literal context (whole : Tree.expression) type_name values =
   let t = context.type_name type_name in
   let constant = context.typed.enclosing.function_name = None in
-  lvalue (initialiser context ~constant t (Tree.Braced values))
+  lvalue
+    (initialiser context ~holder:(Holder_at whole.span.first) ~constant t
+       (Tree.Braced values))
 
 (* 6.5.15p3 to p6. A GNU [a ?: b] has [a] as its second operand. *)
 and conditional context span position condition if_true if_false =
@@ -4371,7 +4385,7 @@ and is_char_literal context literal =
   | Plain | Utf8 -> true
   | Char16 | Char32 | Wide -> false
 
-and initialiser context ~constant t initialiser =
+and initialiser context ~holder ~constant t initialiser =
   (* [value] types an expression, which classes it too; the other
      callbacks take one that it has typed, or type none. *)
   let value subobject initialising =
@@ -4402,11 +4416,28 @@ and initialiser context ~constant t initialiser =
       type_c_text = is_type_c_text context;
       location = location_of context;
       index = integer_constant context;
+      in_generic = context.generic_definition;
+      lowers_zero = record_zero_initialiser context holder;
     }
   in
   context.needs_complete t;
   place_declared_try context ~constant t initialiser;
   Initialiser.initialise typing t initialiser
+
+(* Design 7.1 rule 3: lowering writes the zero initialiser at [list] as
+   [{}] under [__extension__] before its holder, which Apple Clang 21
+   does not read before a declaration in the first clause of a [for]. *)
+and record_zero_initialiser context holder (list : Tree.span) =
+  match holder with
+  | Holder_at holder ->
+      context.typed.zero_initialisers <-
+        { list; holder } :: context.typed.zero_initialisers
+  | For_clause ->
+      context.fail list
+        (Rule.message Zero_initialiser_in_for
+           "the zero initialiser of an object whose type mentions a type \
+            parameter, in a declaration in the first clause of a for \
+            statement: declare the object before the loop")
 
 and block_items context (block : Tree.block) = items context block.node.items
 
@@ -4475,7 +4506,8 @@ and block_declaration context (declaration : Tree.declaration) =
                 standing = Block_item } }
     | None -> No_place
   in
-  holding context place (fun () -> context.declaration declaration)
+  holding context place (fun () ->
+      context.declaration (Holder_at declaration.span.first) declaration)
 
 and typed_statement context statement =
   standing_statement context Substatement None statement
@@ -4589,7 +4621,8 @@ and standing_statement context standing labels (statement : Tree.statement) =
    block. *)
 and for_clause context (clause : Tree.for_clause) =
   match clause with
-  | Clause_declaration declaration -> context.declaration declaration
+  | Clause_declaration declaration ->
+      context.declaration For_clause declaration
   | Clause_expression value -> discard context value
 
 (* 6.8.4.2p1. *)

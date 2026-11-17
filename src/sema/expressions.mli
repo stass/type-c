@@ -337,6 +337,17 @@ type function_defers = {
 val defers : t -> function_defers list
 (** The functions typed that hold a defer statement, in source order. *)
 
+(** The zero initialiser of an object or subobject whose type mentions a
+    type parameter (design 7.1 rule 3): its braced [list], which
+    lowering writes as [{}], and the first token of what holds it most
+    closely, the compound literal whose list holds it or else the
+    declaration whose initialiser does, before which lowering writes
+    [__extension__] (13.5). *)
+type zero_initialiser = { list : Tree.span; holder : int }
+
+val zero_initialisers : t -> zero_initialiser list
+(** The zero initialisers typed, in the order of typing. *)
+
 (** How lowering answers a construct that asks whether types are
     compatible where Type-C text compares a distinct type with them
     (design 13.5), as the backend would answer for its representation:
@@ -396,20 +407,32 @@ type type_argument =
   | Written of Tree.type_name * Ctype.t
   | Deduced of Ctype.t
 
+(** What holds an initialiser most closely: the declaration or compound
+    literal that begins at a token, before which lowering writes
+    [__extension__] for a zero initialiser of design 7.1 rule 3 that the
+    initialiser holds (13.5), or a declaration in the first clause of a
+    [for], which holds none, as Apple Clang 21 does not read
+    [__extension__] there. *)
+type initialiser_holder = Holder_at of int | For_clause
+
 (** What the declaration reader gives typing. [fail] reports the first
     error at the start of a span and does not return; [entity] gives what
     a resolved use of a name denotes, and [overloaded] whether it names
-    a Clang overload set (design 13.3), and [generic_function] the type
-    parameters of the generic function that it names, if it names one
-    (design 7.1); [type_argument] refuses a type argument of a generic
-    function that is not valid (design 7.2 rule 5), and [use_instance]
+    a Clang overload set (design 13.3), [generic_definition] whether the
+    text read is part of the definition of a generic function, head or
+    body, which its check reads (design 7.1 rule 3), and
+    [generic_function] the type parameters of the generic function
+    that it names, if it names one (design 7.1); [type_argument] refuses
+    a type argument of a generic function that is not valid (design 7.2
+    rule 5), and [use_instance]
     is told of each use of an instance of one, with its type arguments
     and the tokens that lowering writes as the instance's name (design
     7.3); [apply_generic] applies a generic type to the types
     that a substitution makes of the arguments of one of its instances,
     at the call at the span (design 7.2); [type_name] reads a type name, once,
-    declaring what it declares; [declaration] reads a declaration in a
-    block, binding its identifiers and typing its initialisers, and
+    declaring what it declares; [declaration holder] reads a declaration
+    in a block, binding its identifiers and typing its initialisers, which
+    [holder] holds, and
     [type_declaration] a type declaration there. [needs_complete] is
     the one function that every point that needs a type complete passes
     the type to (design 10.3), and [block_literal] is told of each block
@@ -433,6 +456,7 @@ type context = {
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
   overloaded : Tree.reference -> bool;
+  generic_definition : bool;
   generic_function : Tree.reference -> Ctype.record_tag list option;
   type_argument : Tree.span -> type_argument -> unit;
   use_instance :
@@ -440,7 +464,7 @@ type context = {
   apply_generic :
     Tree.span -> Typec_syntax.Spelling.type_name -> Ctype.t list -> Ctype.t;
   type_name : Tree.type_name -> Ctype.t;
-  declaration : Tree.declaration -> unit;
+  declaration : initialiser_holder -> Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
@@ -493,15 +517,20 @@ val integer_constant :
     error. An expression typed before raises [Invalid_argument]. *)
 
 val initialiser :
-  context -> constant:bool -> Ctype.t -> Tree.initialiser -> Ctype.t
-(** Types the initialiser of an object of the type ({!Initialiser}) and
-    gives the type of the object, which it completes where it is an array
-    of unknown size. [constant] says that the object has static or thread
-    storage duration, whose initialiser is constant (6.7.9p4): an
-    expression that is [Not_constant] is an error. Where the initialiser
-    is the [try] of a block-item declaration (design 5.1 rule 3), it is
-    the point that sees the object, and so decides whether the [try]
-    stands in a position. *)
+  context ->
+  holder:initialiser_holder ->
+  constant:bool ->
+  Ctype.t ->
+  Tree.initialiser ->
+  Ctype.t
+(** Types the initialiser of an object of the type ({!Initialiser}), which
+    [holder] holds, and gives the type of the object, which it completes
+    where it is an array of unknown size. [constant] says that the object
+    has static or thread storage duration, whose initialiser is constant
+    (6.7.9p4): an expression that is [Not_constant] is an error. Where
+    the initialiser is the [try] of a block-item declaration (design 5.1
+    rule 3), it is the point that sees the object, and so decides whether
+    the [try] stands in a position. *)
 
 val refuse_instance_name : context -> Tree.expression -> unit
 (** Refuses the expression typed before, where an operation takes it

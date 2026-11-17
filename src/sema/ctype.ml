@@ -810,6 +810,23 @@ let holds_variant tags t =
       | Array _ | Function _ | Unknown_type _ ) ) ->
       false
 
+(* A record cannot hold itself, so the walk ends. *)
+let rec holds_unknown tags t =
+  let element = innermost_element t in
+  match element.shape with
+  | Unknown_type _ -> true
+  | Record tag -> (
+      match record_members tags tag with
+      | Some members ->
+          List.exists (fun member -> holds_unknown tags member.member_type)
+            members
+      | None -> false)
+  | Distinct distinct -> holds_unknown tags distinct.representation
+  (* [Array] is not an innermost element. *)
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Va_list | Array _ | Function _
+    ->
+      false
+
 let members_hold_variant tags members =
   List.exists (fun member -> holds_variant tags member.member_type) members
 

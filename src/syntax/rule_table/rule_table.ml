@@ -523,6 +523,44 @@ let rows =
          that mentions a type parameter; and [_Generic] or \
          [__builtin_types_compatible_p] where a type parameter meets \
          another type in a comparison that decides." };
+    Live { constructor = "Zero_initialiser_vla";
+      name = "zero-initializer-vla";
+      clause = "design 7.1 rule 3";
+      meaning =
+        "In a generic function, the zero initialiser [{0}] or [{}] of a \
+         variable length array whose type mentions a type parameter." };
+    Live { constructor = "Zero_initialiser_in_for";
+      name = "zero-initializer-in-for";
+      clause = "design 7.1 rule 3";
+      meaning =
+        "In a generic function, the zero initialiser [{0}] or [{}] of an \
+         object or subobject whose type mentions a type parameter, in a \
+         declaration in the first clause of a [for] statement, outside a \
+         compound literal." };
+    Live { constructor = "Zero_initialiser_atomic";
+      name = "zero-initializer-atomic";
+      clause = "design 7.1 rule 3";
+      meaning =
+        "In a generic function, the zero initialiser [{0}] or [{}] of an \
+         object or subobject whose own type is atomic and mentions a type \
+         parameter." };
+    Live { constructor = "Initialiser_place_lost";
+      name = "initializer-place-lost";
+      clause = "design 7.1 rule 3";
+      meaning =
+        "In a generic function, an initialiser without a designator in a \
+         braced list for an object whose type mentions a type parameter, \
+         where the subobject that it reaches depends on what typec does \
+         not know: it follows an element of an array whose length or \
+         index the backend computes, or an initialiser whose own reach \
+         typec does not know." };
+    Live { constructor = "Initialiser_type_unknown";
+      name = "initializer-type-unknown";
+      clause = "design 7.1 rule 3";
+      meaning =
+        "In a generic function, a braced initialiser of an object whose \
+         type typec does not compute or holds a member or element of such \
+         a type." };
     Live { constructor = "Generic_function_form";
       name = "generic-function-form";
       clause = "design 7.1 rule 6";
