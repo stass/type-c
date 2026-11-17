@@ -1,25 +1,33 @@
 (* SPDX-License-Identifier: BSD-2-Clause
    Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com> *)
 
-(* golden FILE: the C that typec emits for FILE, or the diagnostic that
-   refuses it. A FILE.i holds the whole text that cc -E writes, and any
+(* golden [--int16] FILE: the C that typec emits for FILE, or the
+   diagnostic that refuses it. A FILE.i holds the whole text that cc -E writes, and any
    other FILE that text after the line marker that opens the main file
    under FILE's name, which golden writes. It runs the stages that typec
    runs after the backend preprocesses (Front_end.lower), for the LP64
    target of the unit tests in gnu11, so that its output depends on no
-   backend. It leaves out the assertions that end a lowered unit, which
+   backend; --int16 takes that target with an int of 16 bits instead,
+   for the rules that only such an int reaches. It leaves out the
+   assertions that end a lowered unit, which
    are the same for every unit and which test/run/target.t checks. *)
 
 open Typec_cpp
 
-let target = Typec_test_support.Canned_targets.(target lp64_macros)
+let lp64 = Typec_test_support.Canned_targets.(target lp64_macros)
+let int16 = Typec_test_support.Canned_targets.(target lp64_int16_macros)
 
 let preprocessed path source =
   if Filename.check_suffix path ".i" then source
   else Typec_test_support.Preprocessed.text ~name:path source
 
 let () =
-  let path = Sys.argv.(1) in
+  let target, path =
+    match Array.to_list Sys.argv with
+    | [ _; "--int16"; path ] -> (int16, path)
+    | [ _; path ] -> (lp64, path)
+    | _ -> failwith "usage: golden [--int16] FILE"
+  in
   let source = In_channel.with_open_bin path In_channel.input_all in
   let lowered =
     Result.bind

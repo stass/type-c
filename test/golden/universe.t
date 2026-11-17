@@ -25,7 +25,7 @@ from their tokens under markers for the lines of <universe>, with flag
   # 2 "some.tc"
   typedef int __tc_arg__i; struct option__i; typedef struct option__i option__i;
   # 1 "<universe>" 3
-  enum option__i_tag { option__i_None, option__i_Some }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
+  enum option__i_tag { option__i_None, option__i_Some, __tc_tag_max__option__i_tag = 2147483647 }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
   # 2 "some.tc"
   #pragma pack(pop)
   # 1 "some.tc"
@@ -76,7 +76,7 @@ from their tokens under markers for the lines of <universe>, with flag
   # 6 "some.tc"
   
   # 6 "some.tc"
-  default: __builtin_trap(); } }
+  case __tc_tag_max__option__i_tag: default: __builtin_trap(); } }
   # 6 "some.tc"
   
   }
@@ -119,7 +119,7 @@ The instance name encodes the arguments after typedef expansion
   # 2 "parse.tc"
    
   # 2 "parse.tc"
-  enum parse_error_tag { parse_error_Bad_line }; struct parse_error { enum parse_error_tag tag; union {
+  enum parse_error_tag { parse_error_Bad_line, __tc_tag_max__parse_error_tag = 2147483647 }; struct parse_error { enum parse_error_tag tag; union {
   # 2 "parse.tc"
    
   # 2 "parse.tc"
@@ -198,7 +198,7 @@ change the definition (design 3.5 rule 8).
   # 1 "hidden.tc"
   struct option__i; typedef struct option__i option__i;
   # 1 "<universe>" 3
-  enum option__i_tag { option__i_None, option__i_Some }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
+  enum option__i_tag { option__i_None, option__i_Some, __tc_tag_max__option__i_tag = 2147483647 }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
   # 1 "hidden.tc"
   struct w__i { option__i v ; } ;
   # 3 "hidden.tc"
@@ -244,7 +244,7 @@ type (design 3.3), and an int reads the enumerator.
   # 2 "enumerator.tc"
   typedef int __tc_arg__i; struct option__i; typedef struct option__i option__i;
   # 1 "<universe>" 3
-  enum option__i_tag { option__i_None, option__i_Some }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
+  enum option__i_tag { option__i_None, option__i_Some, __tc_tag_max__option__i_tag = 2147483647 }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
   # 2 "enumerator.tc"
   #pragma pack(pop)
   # 2 "enumerator.tc"

@@ -40,7 +40,7 @@ the block items keep their tokens and lines.
   case e_A: case e_C: {
       break;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
   { const struct e *const __tc_match1 = &(
   v
   ); switch (__tc_match1->tag) {
@@ -51,12 +51,12 @@ the block items keep their tokens and lines.
   case e_A: case e_B: case e_C: {
    return l;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
    } __builtin_trap(); }
   case e_A: case e_B: {
       break;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
     return 0;
   }
 
@@ -98,7 +98,7 @@ another array is reached through a pointer.
   case e_A: {
       return 0;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
   }
   int g(e a[2]) {
   { const struct e *const __tc_match1 = &(
@@ -107,7 +107,7 @@ another array is reached through a pointer.
   case e_A: case e_B: {
    return 1;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
   }
   int h(void) {
     register e a[2] = {
@@ -121,7 +121,7 @@ another array is reached through a pointer.
   case e_A: case e_B: {
    return 1;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
   }
 
 A scrutinee that is a member, reached from its base by member
@@ -161,12 +161,12 @@ base pointer formed by arithmetic, is copied.
   case e_A: {
    return 0;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
   }
   int g(struct holder h) {
   { __extension__ __auto_type const __tc_base1 = &(
    h
-  ); unsigned __tc_arm1; switch (__tc_base1->inner.wrapped.tag) { case w_W: switch (__tc_base1->inner.wrapped.u.W.x.tag) { case e_B: __tc_arm1 = 1; break; case e_A: __tc_arm1 = 0; break; default: __builtin_trap(); } break; case w_N: __tc_arm1 = 0; break; default: __builtin_trap(); } if (__tc_arm1 == 1) { const __typeof__(__tc_base1->inner.wrapped.u.W.x.u.B.i) i = __tc_base1->inner.wrapped.u.W.x.u.B.i;
+  ); unsigned __tc_arm1; switch (__tc_base1->inner.wrapped.tag) { case w_W: switch (__tc_base1->inner.wrapped.u.W.x.tag) { case e_B: __tc_arm1 = 1; break; case e_A: __tc_arm1 = 0; break; case __tc_tag_max__e_tag: default: __builtin_trap(); } break; case w_N: __tc_arm1 = 0; break; case __tc_tag_max__w_tag: default: __builtin_trap(); } if (__tc_arm1 == 1) { const __typeof__(__tc_base1->inner.wrapped.u.W.x.u.B.i) i = __tc_base1->inner.wrapped.u.W.x.u.B.i;
    return i;
    } else { } }
   return 0;
@@ -178,7 +178,7 @@ base pointer formed by arithmetic, is copied.
   case e_A: case e_B: {
    return 1;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
   }
   int m(struct holder *h) {
   { const struct e __tc_copy3 = (
@@ -187,7 +187,7 @@ base pointer formed by arithmetic, is copied.
   case e_A: case e_B: {
    return 1;
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__e_tag: default: __builtin_trap(); } }
   }
 
 Each refusal is located at the construct it concerns.

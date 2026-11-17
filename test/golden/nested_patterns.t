@@ -375,7 +375,7 @@ __tc_arm0, then one switch on it over the arms (13.5).
   int f(res r) {
   { const struct res *const __tc_match0 = &(
   r
-  ); unsigned __tc_arm0; switch (__tc_match0->tag) { case res_Ok: __tc_arm0 = 0; break; case res_Err: switch (__tc_match0->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm0 = 1; break; case eval_error_Overflow: __tc_arm0 = 2; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm0) {
+  ); unsigned __tc_arm0; switch (__tc_match0->tag) { case res_Ok: __tc_arm0 = 0; break; case res_Err: switch (__tc_match0->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm0 = 1; break; case eval_error_Overflow: __tc_arm0 = 2; break; case __tc_tag_max__eval_error_tag: default: __builtin_trap(); } break; case __tc_tag_max__res_tag: default: __builtin_trap(); } switch (__tc_arm0) {
   case 0: { const __typeof__(__tc_match0->u.Ok.value) value = __tc_match0->u.Ok.value; {
       return value;
    } __builtin_trap(); }
@@ -390,7 +390,7 @@ __tc_arm0, then one switch on it over the arms (13.5).
   int g(const expr *e) {
   { const struct expr *const __tc_match1 = &(
   *e
-  ); unsigned __tc_arm1; const struct expr *__tc_p1_1 = 0; const struct expr *__tc_p1_2 = 0; switch (__tc_match1->tag) { case expr_Num: __tc_arm1 = 2; break; case expr_Add: __tc_p1_1 = __tc_match1->u.Add.l; switch (__tc_p1_1->tag) { case expr_Num: __tc_p1_2 = __tc_match1->u.Add.r; switch (__tc_p1_2->tag) { case expr_Num: __tc_arm1 = 0; break; case expr_Add: __tc_arm1 = 1; break; default: __builtin_trap(); } break; case expr_Add: __tc_arm1 = 1; break; default: __builtin_trap(); } break; default: __builtin_trap(); } switch (__tc_arm1) {
+  ); unsigned __tc_arm1; const struct expr *__tc_p1_1 = 0; const struct expr *__tc_p1_2 = 0; switch (__tc_match1->tag) { case expr_Num: __tc_arm1 = 2; break; case expr_Add: __tc_p1_1 = __tc_match1->u.Add.l; switch (__tc_p1_1->tag) { case expr_Num: __tc_p1_2 = __tc_match1->u.Add.r; switch (__tc_p1_2->tag) { case expr_Num: __tc_arm1 = 0; break; case expr_Add: __tc_arm1 = 1; break; case __tc_tag_max__expr_tag: default: __builtin_trap(); } break; case expr_Add: __tc_arm1 = 1; break; case __tc_tag_max__expr_tag: default: __builtin_trap(); } break; case __tc_tag_max__expr_tag: default: __builtin_trap(); } switch (__tc_arm1) {
   case 0: { const __typeof__(__tc_p1_1->u.Num.value) a = __tc_p1_1->u.Num.value; const __typeof__(__tc_p1_2->u.Num.value) b = __tc_p1_2->u.Num.value; {
       return a + b;
    } __builtin_trap(); }

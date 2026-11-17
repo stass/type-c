@@ -5,6 +5,9 @@ Type-C code builds variants through constructors, qualified and
 unqualified, in the positions that have a target type (design 3.3), and
 C code reads them through the representation of design 10.6, on each
 backend. Static objects take constructors as constant initialisers.
+A C switch on a tag has a default, for a tag that is no constructor's;
+without one, -Wswitch reports the hidden enumerator that ends the
+enumeration of the tags (design 10.1 rule 2).
 
   $ . ./backends.sh
 
@@ -14,8 +17,8 @@ backend. Static objects take constructors as constant initialisers.
   >   case expr_Number: return e->u.Number.value;
   >   case expr_Nil: return 0;
   >   case expr_Add: return eval(e->u.Add.left) + eval(e->u.Add.right);
+  >   default: return -1;
   >   }
-  >   return -1;
   > }
   > static int is_on(flag f) { return f.tag == flag_On; }
   > static long first(pair p) { return eval(&p.u.Both.left); }

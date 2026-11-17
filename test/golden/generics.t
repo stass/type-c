@@ -170,7 +170,7 @@ opens it (design 3.3, 4).
   # 2 "construct.tc"
   typedef int __tc_arg__i; struct list__i; typedef struct list__i list__i;
   # 1 "construct.tc"
-  enum list__i_tag { list__i_Nil, list__i_Cons }; struct list__i { enum list__i_tag tag; union { struct { __tc_arg__i head ; list__i * tail ; } Cons; } u; };
+  enum list__i_tag { list__i_Nil, list__i_Cons, __tc_tag_max__list__i_tag = 2147483647 }; struct list__i { enum list__i_tag tag; union { struct { __tc_arg__i head ; list__i * tail ; } Cons; } u; };
   # 2 "construct.tc"
   #pragma pack(pop)
   # 2 "construct.tc"
@@ -226,7 +226,7 @@ opens it (design 3.3, 4).
   # 8 "construct.tc"
   
   # 8 "construct.tc"
-  default: __builtin_trap(); } }
+  case __tc_tag_max__list__i_tag: default: __builtin_trap(); } }
   # 8 "construct.tc"
   
   }

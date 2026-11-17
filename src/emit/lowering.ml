@@ -196,19 +196,21 @@ let variant_forward ~completes (variant : Spelling.c_name) =
   if completes then "" else record_declarations Struct ~tag:name name
 
 (* What comes between the forward declaration and the constructors: the
-   enumeration of the tags, numbered from 0 in order (rule 1), and the
+   enumeration of the tags, numbered from 0 in order (rule 1) and ended
+   by the hidden enumerator of the value INT_MAX (rule 2), and the
    structure up to its union where it has one (rule 3). *)
-let variant_head output ~location (variant : Spelling.c_name) ~has_union
-    constructors =
+let variant_head output ~tag_max ~location (variant : Spelling.c_name)
+    ~has_union constructors =
   let name = (variant :> string) in
   let enumerator (constructor : Tree.constructor) =
     Tree.enumerator_name ~variant constructor.node.name.node
   in
   let tag_enum = "enum " ^ Tree.enum_tag_name variant in
+  let tag_max = Typec_sema.Exact_integer.to_string tag_max in
   let union = if has_union then " union {" else "" in
-  Printf.sprintf "%s { %s }; struct %s { %s %s;%s" tag_enum
+  Printf.sprintf "%s { %s, %s = %s }; struct %s { %s %s;%s" tag_enum
     (Emitter.joined output location ~separator:", " enumerator constructors)
-    name tag_enum Tree.tag_member union
+    (Tree.tag_max_name variant) tag_max name tag_enum Tree.tag_member union
 
 let variant_tail ~has_union =
   if has_union then Printf.sprintf "} %s; };" Tree.union_member else "};"
@@ -250,7 +252,7 @@ let constructor_edits output ~void_fields (constructor : Tree.constructor) =
 
 (* [type N = ... ;]: the forward declaration replaces [type], the head
    [N =] and [private] where it follows, and the tail the [;]. *)
-let variant output ~location ~lowered ~void_fields
+let variant output ~tag_max ~location ~lowered ~void_fields
     (declaration : Tree.type_declaration) constructors =
   let tokens = tokens_of output in
   let completes = declaration.node.declared.earlier <> None in
@@ -259,7 +261,8 @@ let variant output ~location ~lowered ~void_fields
   let forward_tokens, forward_end = forward_declaration tokens declaration in
   replace output ~location (variant_forward ~completes lowered) forward_tokens
   @ replace output ~location
-      (variant_head output ~location lowered ~has_union constructors)
+      (variant_head output ~tag_max ~location lowered ~has_union
+         constructors)
       (grammar_tokens tokens forward_end (first_bar - 1))
   @ List.concat_map (constructor_edits output ~void_fields) constructors
   @ replace_at output ~first:declaration.span.last (variant_tail ~has_union)
@@ -267,7 +270,7 @@ let variant output ~location ~lowered ~void_fields
 
 (* The type declaration under the name [lowered], which is its own or,
    for the definition of a generic, that of an instance (design 10.3). *)
-let type_declaration output ~(lowered : Spelling.c_name)
+let type_declaration output ~tag_max ~(lowered : Spelling.c_name)
     ~void_fields (declaration : Tree.type_declaration) =
   let tokens = tokens_of output in
   let name = (lowered :> string) in
@@ -284,7 +287,7 @@ let type_declaration output ~(lowered : Spelling.c_name)
   | Record_alias record ->
       record_alias output ~location ~name declaration record
   | Variant { constructors; _ } ->
-      variant output ~location ~lowered ~void_fields declaration
+      variant output ~tag_max ~location ~lowered ~void_fields declaration
         constructors
 
 (* Design 13.5: a constructor expression becomes the compound literal
@@ -476,8 +479,27 @@ let binding_declarations output ~number ~scrutinee_text location bindings =
 let case_label ~variant constructor =
   Printf.sprintf "case %s:" (Tree.enumerator_name ~variant constructor)
 
-(* The [default] that only a tag that is no constructor's reaches. *)
-let invalid_tag output = "default: " ^ trap_statement output
+(* What a [switch] that lowering writes selects on, as the text of its
+   operand: the tag of a variant, or the local that holds the number of
+   the arm that a selection tree chose. *)
+type switched =
+  | Tag_of of { variant : Spelling.c_name; tag : string }
+  | Arm_number of string
+
+let switch_opening switched =
+  let operand = match switched with Tag_of { tag; _ } | Arm_number tag -> tag in
+  Printf.sprintf "switch (%s) {" operand
+
+(* The end of every [switch] that lowering writes, the one place that
+   writes its [default], which traps on a value that no [case] takes. A
+   switch on a tag first names the hidden enumerator (design 10.1 rule
+   2), so that -Wswitch-enum finds every enumerator handled. *)
+let switch_ending output switched =
+  let default = "default: " ^ trap_statement output ^ " }" in
+  match switched with
+  | Tag_of { variant; _ } ->
+      Printf.sprintf "case %s: %s" (Tree.tag_max_name variant) default
+  | Arm_number _ -> default
 
 (* The text that opens the block of an arm and the text that closes it
    after the last item. An arm that binds holds its items in a block of
@@ -564,29 +586,27 @@ let read_tag ~number ~scrutinee_text (at : Typec_sema.Expressions.read_at) =
 (* The statements of [tree], each added through [add]: a node under a
    [*] points the local of its position at the object there, then each
    node switches on its tag. *)
-let rec write_selection add ~invalid_tag ~number ~scrutinee_text
+let rec write_selection output add ~number ~scrutinee_text
     (tree : Typec_sema.Expressions.selection_tree) =
   match tree with
   | Arm arm -> add (Printf.sprintf "%s = %d;" (arm_local number) arm)
   | Read { at; branches } ->
       point_local add ~number ~scrutinee_text at;
       let variant, tag = read_tag ~number ~scrutinee_text at in
-      write_switch add ~invalid_tag ~number ~scrutinee_text ~variant ~tag
-        branches
+      write_switch output add ~number ~scrutinee_text ~variant ~tag branches
 
-and write_switch add ~invalid_tag ~number ~scrutinee_text ~variant ~tag
-    branches =
+and write_switch output add ~number ~scrutinee_text ~variant ~tag branches =
   let variant = Typec_sema.Encoding.variant_name variant in
   let write_branch (constructors, subtree) =
     List.iter (fun constructor -> add (case_label ~variant constructor))
       constructors;
-    write_selection add ~invalid_tag ~number ~scrutinee_text subtree;
+    write_selection output add ~number ~scrutinee_text subtree;
     add "break;"
   in
-  add (Printf.sprintf "switch (%s) {" tag);
+  let switched = Tag_of { variant; tag } in
+  add (switch_opening switched);
   List.iter write_branch branches;
-  add invalid_tag;
-  add "}"
+  add (switch_ending output switched)
 
 let arm_case _location (arm : Typec_sema.Expressions.matched_arm) =
   Printf.sprintf "case %d:" arm.number
@@ -600,20 +620,24 @@ let nested_selection output location ~number ~scrutinee_text ~reader
   Emitter.assembled output location ~separator:" " (fun add ->
       add (Printf.sprintf "unsigned %s;" (arm_local number));
       List.iter (fun local -> add (local_declaration ~number local)) locals;
-      write_selection add ~invalid_tag:(invalid_tag output) ~number
-        ~scrutinee_text tree;
+      write_selection output add ~number ~scrutinee_text tree;
       add reader)
 
-(* The [switch] that holds the arms, and the [case] labels of an arm. *)
+(* The [switch] that holds the arms, what it selects on, and the [case]
+   labels of an arm. *)
 let arms_switch output location ~number ~scrutinee_text ~variant
     (arms : Typec_sema.Expressions.arms) =
   match arms.nested with
   | None ->
-      ( Printf.sprintf "switch (%s%s) {" scrutinee_text Tree.tag_member,
-        constructor_cases output ~variant )
+      let switched =
+        Tag_of { variant; tag = scrutinee_text ^ Tree.tag_member }
+      in
+      (switch_opening switched, switched, constructor_cases output ~variant)
   | Some nested ->
-      let reader = Printf.sprintf "switch (%s) {" (arm_local number) in
+      let switched = Arm_number (arm_local number) in
+      let reader = switch_opening switched in
       ( nested_selection output location ~number ~scrutinee_text ~reader nested,
+        switched,
         arm_case )
 
 let match_statement output ~number matching
@@ -628,7 +652,7 @@ let match_statement output ~number matching
   let open_brace = grammar_token_after tokens close_paren in
   let opening, held = scrutinee_holder ~number matching in
   let location = tokens.(close_paren).location in
-  let switch, cases =
+  let switch, switched, cases =
     arms_switch output location ~number ~scrutinee_text ~variant arms
   in
   replace output ~location:tokens.(match_token).location opening
@@ -639,7 +663,7 @@ let match_statement output ~number matching
       arms.matched
   @ replace output
       ~location:tokens.(statement.last).location
-      (Printf.sprintf "%s } }" (invalid_tag output))
+      (switch_ending output switched ^ " }")
       [ statement.last ]
 
 (* Design 13.5: a single-pattern test becomes the block of a match that
@@ -668,10 +692,11 @@ let tag_declaration ~number ~scrutinee_text =
     Tree.tag_member (tag_local number) scrutinee_text Tree.tag_member
 
 let tag_check output location ~number ~variant constructors =
-  Printf.sprintf "switch (%s) { %s break; %s } " (tag_local number)
+  let switched = Tag_of { variant; tag = tag_local number } in
+  Printf.sprintf "%s %s break; %s " (switch_opening switched)
     (Emitter.joined output location ~separator:" " (case_label ~variant)
        constructors)
-    (invalid_tag output)
+    (switch_ending output switched)
 
 (* The text from the held operand to the [{] of the true branch, and the
    check of the tag on the false branch. *)
@@ -2081,7 +2106,7 @@ let with_extensions output holders dropped =
    are made: the text is tied to the copies in it through [lowered],
    which no copy forces before it is complete, so no copy depends on
    the order in which the constructs are lowered. *)
-let text_edits output ~declarations ~void_field_spans ~replaced
+let text_edits output ~tag_max ~declarations ~void_field_spans ~replaced
     ~zero_initialisers typed =
   let holders = zero_holders zero_initialisers in
   let tokens = tokens_of output in
@@ -2110,7 +2135,7 @@ let text_edits output ~declarations ~void_field_spans ~replaced
   let kept edit = not (goes_with dropped_spans edit) in
   let void_fields = Spans.of_list void_field_spans in
   let declaration (lowered, declaration) =
-    type_declaration output ~lowered ~void_fields declaration
+    type_declaration output ~tag_max ~lowered ~void_fields declaration
   in
   (* A check in a dropped range declares no temporaries, which nothing
      would use. *)
@@ -2191,13 +2216,13 @@ let generic_text output edits ~first ~last =
 (* The generic type's definition under the instance's name, with each
    type parameter and application written as the name that the reading
    found for it, from token [first] to its end. *)
-let instance_definition output instance ~first
+let instance_definition output ~tag_max instance ~first
     (reading : Typec_sema.Declarations.instance_text) =
   match reading.generic with
   | Type_generic generic ->
       let lowered = Typec_sema.Encoding.variant_name (Applied instance) in
       let edits =
-        text_edits output
+        text_edits output ~tag_max
           ~declarations:[ (lowered, generic) ]
           ~void_field_spans:reading.void_field_spans
           ~replaced:(List.map named reading.names)
@@ -2256,6 +2281,9 @@ type instance_context = {
   named_types : (Spelling.c_name * Tree.type_declaration) list;
 }
 
+let context_tag_max context =
+  Typec_sema.Declarations.tag_max context.declarations
+
 (* Design 10.3: each typedef after the lines that declare its tags. *)
 let argument_typedefs context location typedefs =
   let lines (typedef : Typec_sema.Declarations.argument_typedef) =
@@ -2297,7 +2325,7 @@ let function_instance context location instance ~last ~ending
   in
   let edits =
     added_static output definition
-    @ text_edits output
+    @ text_edits output ~tag_max:(context_tag_max context)
         ~declarations:(definition_type_declarations context definition)
         ~void_field_spans:[]
         ~replaced:(name :: List.map named reading.names)
@@ -2334,8 +2362,8 @@ let instance_declaration context location instance
   | Record_alias specifier -> forward specifier.node.kind
   | Alias _ | Distinct _ ->
       let reading = reading context instance in
-      instance_definition context.output instance ~first:generic.span.first
-        reading
+      instance_definition context.output ~tag_max:(context_tag_max context)
+        instance ~first:generic.span.first reading
 
 (* Step 1 of a function instance: its prototype, the head of the
    generic's definition. *)
@@ -2356,7 +2384,9 @@ let instance_rest context location instance =
   match reading.generic with
   | Type_generic generic -> (
       match Tree.forward_declaration_end generic with
-      | Some first -> instance_definition context.output instance ~first reading
+      | Some first ->
+          instance_definition context.output
+            ~tag_max:(context_tag_max context) instance ~first reading
       | None -> invalid_arg "Lowering.instance_rest: a typedef instance")
   | Function_generic { definition; _ } ->
       function_instance context location instance
@@ -2448,7 +2478,8 @@ let unit_edits context ~generic_types =
   let removed (declaration : Tree.type_declaration) =
     { span = declaration.span; text = "" }
   in
-  text_edits context.output ~declarations:context.named_types
+  text_edits context.output ~tag_max:(context_tag_max context)
+    ~declarations:context.named_types
     ~void_field_spans:[]
     ~replaced:
       (List.map removed generic_types

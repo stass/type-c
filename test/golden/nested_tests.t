@@ -120,7 +120,7 @@ that reads no tag below its constructor keeps the form of a flat test.
   int f(res r) {
   { const struct res *const __tc_match0 = &(
    r
-  ); unsigned __tc_arm0; switch (__tc_match0->tag) { case res_Err: switch (__tc_match0->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm0 = 1; break; case eval_error_Overflow: __tc_arm0 = 0; break; default: __builtin_trap(); } break; case res_Ok: __tc_arm0 = 0; break; default: __builtin_trap(); } if (__tc_arm0 == 1) {
+  ); unsigned __tc_arm0; switch (__tc_match0->tag) { case res_Err: switch (__tc_match0->u.Err.error.tag) { case eval_error_DivByZero: __tc_arm0 = 1; break; case eval_error_Overflow: __tc_arm0 = 0; break; case __tc_tag_max__eval_error_tag: default: __builtin_trap(); } break; case res_Ok: __tc_arm0 = 0; break; case __tc_tag_max__res_tag: default: __builtin_trap(); } if (__tc_arm0 == 1) {
       return -1;
    }
   else {
@@ -131,7 +131,7 @@ that reads no tag below its constructor keeps the form of a flat test.
     int sum = 0;
   for (;;) { const struct list *const __tc_match1 = &(
    *l
-  ); unsigned __tc_arm1; const struct list *__tc_p1_1 = 0; switch (__tc_match1->tag) { case list_Cons: __tc_p1_1 = __tc_match1->u.Cons.tail; switch (__tc_p1_1->tag) { case list_Cons: __tc_arm1 = 1; break; case list_Nil: __tc_arm1 = 0; break; default: __builtin_trap(); } break; case list_Nil: __tc_arm1 = 0; break; default: __builtin_trap(); } if (__tc_arm1 == 1) { const __typeof__(__tc_match1->u.Cons.head) h = __tc_match1->u.Cons.head; const __typeof__(__tc_p1_1->u.Cons.tail) t = __tc_p1_1->u.Cons.tail;
+  ); unsigned __tc_arm1; const struct list *__tc_p1_1 = 0; switch (__tc_match1->tag) { case list_Cons: __tc_p1_1 = __tc_match1->u.Cons.tail; switch (__tc_p1_1->tag) { case list_Cons: __tc_arm1 = 1; break; case list_Nil: __tc_arm1 = 0; break; case __tc_tag_max__list_tag: default: __builtin_trap(); } break; case list_Nil: __tc_arm1 = 0; break; case __tc_tag_max__list_tag: default: __builtin_trap(); } if (__tc_arm1 == 1) { const __typeof__(__tc_match1->u.Cons.head) h = __tc_match1->u.Cons.head; const __typeof__(__tc_p1_1->u.Cons.tail) t = __tc_p1_1->u.Cons.tail;
    {
       sum += h;
       l = t;
@@ -142,13 +142,13 @@ that reads no tag below its constructor keeps the form of a flat test.
   int k(const expr *e) {
   { const struct expr *const __tc_match2 = &(
    *e
-  ); unsigned __tc_arm2; const struct expr *__tc_p2_1 = 0; switch (__tc_match2->tag) { case expr_Add: __tc_p2_1 = __tc_match2->u.Add.l; switch (__tc_p2_1->tag) { case expr_Num: __tc_arm2 = 1; break; case expr_Add: __tc_arm2 = 0; break; default: __builtin_trap(); } break; case expr_Num: __tc_arm2 = 0; break; default: __builtin_trap(); } if (__tc_arm2 == 1) { const __typeof__(__tc_match2->u.Add.r) r = __tc_match2->u.Add.r;
+  ); unsigned __tc_arm2; const struct expr *__tc_p2_1 = 0; switch (__tc_match2->tag) { case expr_Add: __tc_p2_1 = __tc_match2->u.Add.l; switch (__tc_p2_1->tag) { case expr_Num: __tc_arm2 = 1; break; case expr_Add: __tc_arm2 = 0; break; case __tc_tag_max__expr_tag: default: __builtin_trap(); } break; case expr_Num: __tc_arm2 = 0; break; case __tc_tag_max__expr_tag: default: __builtin_trap(); } if (__tc_arm2 == 1) { const __typeof__(__tc_match2->u.Add.r) r = __tc_match2->u.Add.r;
       return k(r);
    } else { } }
   { const struct expr *const __tc_match3 = &(
    *e
   ); const __typeof__(__tc_match3->tag) __tc_tag3 = __tc_match3->tag; if (__tc_tag3 == expr_Add) {
       return 1;
-   } else { switch (__tc_tag3) { case expr_Num: case expr_Add: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag3) { case expr_Num: case expr_Add: break; case __tc_tag_max__expr_tag: default: __builtin_trap(); } } }
   return 0;
   }

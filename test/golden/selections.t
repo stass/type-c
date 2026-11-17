@@ -70,7 +70,7 @@ constructor in each association, and selections nested in both.
   ;
   struct e; typedef struct e e;
    
-  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  enum e_tag { e_A, e_B, __tc_tag_max__e_tag = 2147483647 }; struct e { enum e_tag tag; union {
    
    
   struct {

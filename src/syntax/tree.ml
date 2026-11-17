@@ -923,6 +923,11 @@ let claimed_tag (Ordinary_at token) = Tag_at token
     instance name, at no token of the tree. *)
 let enum_tag_name (variant : Spelling.c_name) = (variant :> string) ^ "_tag"
 
+(** The hidden enumerator that ends the enumeration {!enum_tag_name}
+    (design 10.1 rule 2, 13.5), a generated name that Type-C text cannot
+    spell. *)
+let tag_max_name variant = "__tc_tag_max__" ^ enum_tag_name variant
+
 let enumerator_name ~(variant : Spelling.c_name)
     (constructor : Spelling.constructor) =
   (variant :> string) ^ "_" ^ (constructor :> string)

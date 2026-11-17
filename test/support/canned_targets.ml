@@ -90,6 +90,22 @@ let ilp32_macros =
 let aarch64_macros =
   ("__aarch64__", "1") :: List.remove_assoc "__x86_64__" lp64_macros
 
+(* A target whose int is as wide as its short, as on 16-bit machines such
+   as msp430, where uint32_t is unsigned long. *)
+let lp64_int16_macros =
+  let int16_values =
+    [
+      ("__SIZEOF_INT__", "2");
+      ("__SIZEOF_LONG__", "4");
+      ("__UINT32_TYPE__", "long unsigned int");
+      ("__UINT64_TYPE__", "long long unsigned int");
+    ]
+  in
+  let int16_value (name, value) =
+    (name, Option.value (List.assoc_opt name int16_values) ~default:value)
+  in
+  List.map int16_value lp64_macros
+
 let dump_of macros =
   String.concat ""
     (List.map (fun (name, value) -> "#define " ^ name ^ " " ^ value ^ "\n")

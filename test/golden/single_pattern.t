@@ -38,7 +38,7 @@ loop, whose false branch ends in break (design 13.5, 4.5, 10.5).
    *l
   ); const __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 == list_Cons) { const __typeof__(__tc_match0->u.Cons.head) head = __tc_match0->u.Cons.head;
       total = head;
-   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } } }
   { const struct list *const __tc_match1 = &(
    v
   ); const __typeof__(__tc_match1->tag) __tc_tag1 = __tc_match1->tag; if (__tc_tag1 == list_Nil) {
@@ -48,7 +48,7 @@ loop, whose false branch ends in break (design 13.5, 4.5, 10.5).
       total++;
     }
    }
-  else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); }
       total--;
    } }
   for (;;) { const struct list *const __tc_match2 = &(
@@ -58,7 +58,7 @@ loop, whose false branch ends in break (design 13.5, 4.5, 10.5).
       total += head;
       l = tail;
     }
-   } else { switch (__tc_tag2) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+   } else { switch (__tc_tag2) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } break; } }
   { const struct list *const __tc_match3 = &(
    v
   ); const __typeof__(__tc_match3->tag) __tc_tag3 = __tc_match3->tag; if (__tc_tag3 == list_Cons) { const __typeof__(__tc_match3->u.Cons.head) head = __tc_match3->u.Cons.head;
@@ -66,8 +66,8 @@ loop, whose false branch ends in break (design 13.5, 4.5, 10.5).
    *l
   ); const __typeof__(__tc_match4->tag) __tc_tag4 = __tc_match4->tag; if (__tc_tag4 == list_Nil) {
    return head;
-   } else { switch (__tc_tag4) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
-   } else { switch (__tc_tag3) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag4) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } } }
+   } else { switch (__tc_tag3) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } } }
   return total;
   }
 
@@ -101,7 +101,7 @@ before the if, or in the body of that loop (design 4.4).
    ({ if (n == 2) continue; *l; })
   ), *const __tc_match0 = &__tc_copy0; const __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 == list_Cons) { const __typeof__(__tc_match0->u.Cons.head) head = __tc_match0->u.Cons.head;
         total += head;
-   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } } }
   for (;;) { const struct list __tc_copy1 = (
    ({ if (total > 9) break; *l; })
   ), *const __tc_match1 = &__tc_copy1; const __typeof__(__tc_match1->tag) __tc_tag1 = __tc_match1->tag; if (__tc_tag1 == list_Cons) { const __typeof__(__tc_match1->u.Cons.head) head = __tc_match1->u.Cons.head; const __typeof__(__tc_match1->u.Cons.tail) tail = __tc_match1->u.Cons.tail;
@@ -111,7 +111,7 @@ before the if, or in the body of that loop (design 4.4).
         break;
       total += head;
     }
-   } else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+   } else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } break; } }
   return total;
   }
 
@@ -152,11 +152,11 @@ test whose body is an if test with an else.
   ); const __typeof__(__tc_match1->tag) __tc_tag1 = __tc_match1->tag; if (__tc_tag1 == list_Nil) {
    return 1;
    }
-  else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag1) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); }
    return 2;
    } }
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__list_tag: default: __builtin_trap(); } }
   }
   long g(const list *l, list v) {
   { const struct list *const __tc_match2 = &(
@@ -164,13 +164,13 @@ test whose body is an if test with an else.
   ); const __typeof__(__tc_match2->tag) __tc_tag2 = __tc_match2->tag; if (__tc_tag2 == list_Nil) {
    return 0;
    }
-  else { switch (__tc_tag2) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag2) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); }
   { const struct list *const __tc_match3 = &(
    *l
   ); const __typeof__(__tc_match3->tag) __tc_tag3 = __tc_match3->tag; if (__tc_tag3 == list_Nil) {
    return 1;
    }
-  else { switch (__tc_tag3) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag3) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); }
    return 2;
    } }
    } }
@@ -185,10 +185,10 @@ test whose body is an if test with an else.
   ); const __typeof__(__tc_match5->tag) __tc_tag5 = __tc_match5->tag; if (__tc_tag5 == list_Nil) {
    break;
    }
-  else { switch (__tc_tag5) { case list_Nil: case list_Cons: break; default: __builtin_trap(); }
+  else { switch (__tc_tag5) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); }
    l = tail, n++;
    } }
-   } else { switch (__tc_tag4) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } break; } }
+   } else { switch (__tc_tag4) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } break; } }
   return n;
   }
 
@@ -266,7 +266,7 @@ and lowers as a test of a constructor without fields does.
    v
   ); const __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 == list_Cons) {
       return 1;
-   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag0) { case list_Nil: case list_Cons: break; case __tc_tag_max__list_tag: default: __builtin_trap(); } } }
   return 0;
   }
 

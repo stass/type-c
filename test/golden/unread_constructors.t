@@ -42,7 +42,7 @@ lowers to `v_A`, which the backend never reads as `A`.
   > int z = A;
   > EOF
   $ ./golden.exe unqualified.tc | grep 'v_A\|aligned\|z ='
-  enum v_tag { v_A, v_B }; struct v { enum v_tag tag; union {
+  enum v_tag { v_A, v_B, __tc_tag_max__v_tag = 2147483647 }; struct v { enum v_tag tag; union {
   int y __attribute__((aligned(A)));
   int z = A;
 

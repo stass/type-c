@@ -65,7 +65,7 @@ too. The literal holds a trigraph sequence, of which the backends warn.
   #include "cap.h"
   #include "base.h"
   struct room { char bytes [ ( CAPACITY + 1 ) ] ; } ;
-  struct shape ; typedef struct shape shape ; enum shape_tag { shape_Circle , shape_Square } ; struct shape { enum shape_tag tag ; union {
+  struct shape ; typedef struct shape shape ; enum shape_tag { shape_Circle , shape_Square , __tc_tag_max__shape_tag = 2147483647 } ; struct shape { enum shape_tag tag ; union {
   struct { int r ; } Circle ;
   struct { int s ; } Square ; } u ; } ;
   base_count area ( shape * s ) ;
@@ -359,7 +359,7 @@ trap, a header declares nothing of it.
   static inline _Noreturn void __tc_trap ( void ) ;
   return n ; } __tc_trap ( ) ; }
   return - n ; } __tc_trap ( ) ; }
-  default : __tc_trap ( ) ; } }
+  case __tc_tag_max__coin_tag : default : __tc_trap ( ) ; } }
   #ifndef __tc_trap__stop
   #define __tc_trap__stop
   static inline _Noreturn void __tc_trap ( void ) { _Noreturn void stop ( void ) ; stop ( ) ; __builtin_trap ( ) ; }

@@ -1427,6 +1427,27 @@ let static_initialisers () =
      int i; int j; } u = { 1, x };";
   accepts "void f(void) { static int a[] = (int[]){ 1, 2 }; }"
 
+(* A variant of [count] constructors. *)
+let variant_of count =
+  "type v = "
+  ^ String.concat " " (List.init count (Printf.sprintf "| C%d"))
+  ^ ";"
+
+(* Design 10.1 rule 2: the enumeration of the tags ends with a hidden
+   enumerator of the value INT_MAX, which a constructor may not reach;
+   only a target whose int has 16 bits makes that reachable. *)
+let constructor_counts () =
+  let file = "in.tc" in
+  let int16 = Canned_targets.target Canned_targets.lp64_int16_macros in
+  let int16_short = { int16 with enum_representation = Short } in
+  List.iter
+    (fun target ->
+      accepts ~file ~target (variant_of 32767);
+      rejects ~file ~target (variant_of 32768)
+        "a variant has 32768 constructors, more than INT_MAX (32767) on \
+         this target [constructor-count]")
+    [ int16; int16_short ]
+
 (* Type declarations (design 3.1) in Type-C text. *)
 let type_declarations () =
   let file = "in.tc" in
@@ -3377,6 +3398,7 @@ let typedef_windows () =
 
 let () =
   type_declarations ();
+  constructor_counts ();
   variants ();
   variant_operations ();
   distinct_types ();

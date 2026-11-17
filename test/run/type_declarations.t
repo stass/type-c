@@ -109,9 +109,27 @@ members; its assertions compare the layout with the structure that
   > }
   > EOF
   $ typec --cc=$clang -Wall -Werror -o clang-variant variant.tc && ./clang-variant
-  5 0 0
+  In file included from variant.tc:8:
+  ./client.h:28:11: error: enumeration value '__tc_tag_max__expr_tag' not handled in switch [-Werror,-Wswitch]
+     28 |   switch (e->tag) {
+        |           ^~~~~~
+  ./client.h:28:11: note: add missing switch cases
+     28 |   switch (e->tag) {
+        |           ^
+     29 |   case expr_Number: return e->u.Number.value;
+     30 |   case expr_Nil: return 0;
+     31 |   case expr_Add: return eval(e->u.Add.left) + eval(e->u.Add.right);
+     32 |   }
+  1 error generated.
+  [1]
   $ typec --cc=$gcc -Wall -Werror -o gcc-variant variant.tc && ./gcc-variant
-  5 0 0
+  In file included from variant.tc:8:
+  client.h: In function 'eval':
+  client.h:28:3: error: enumeration value '__tc_tag_max__expr_tag' not handled in switch [-Werror=switch]
+     28 |   switch (e->tag) {
+        |   ^~~~~~
+  cc1: all warnings being treated as errors
+  [1]
 
 The empty initialiser `{}` gives a variant its zero value, the first
 constructor with every field zero, as `{0}` does (design 3.2 rule 7).

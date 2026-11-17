@@ -173,7 +173,7 @@ typedef.
   # 2 "variant.tc"
    
   # 2 "variant.tc"
-  enum expr_tag { expr_Number, expr_Nil, expr_Add }; struct expr { enum expr_tag tag; union {
+  enum expr_tag { expr_Number, expr_Nil, expr_Add, __tc_tag_max__expr_tag = 2147483647 }; struct expr { enum expr_tag tag; union {
   # 2 "variant.tc"
   
       
@@ -407,7 +407,7 @@ structure that a variant lowers to (design 10.6).
   # 1 "header.tc"
    
   # 1 "header.tc"
-  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  enum e_tag { e_A, e_B, __tc_tag_max__e_tag = 2147483647 }; struct e { enum e_tag tag; union {
   # 1 "header.tc"
    
   # 1 "header.tc"
@@ -524,4 +524,21 @@ on the object refuses it (design 3.4).
   > EOF
   $ ./golden.exe store.tc
   store.tc:2: error: a value of type 'int' does not convert to 'id' without a cast [distinct-conversion]
+  [1]
+
+The enumeration of the tags ends with a hidden enumerator of the value
+INT_MAX of the target, which a constructor's tag may not reach. Only an
+int of 16 bits makes that reachable: there INT_MAX is 32767, and a
+variant of 32768 constructors is refused.
+
+  $ cat > one.tc <<'EOF'
+  > type one = | A;
+  > EOF
+  $ ./golden.exe --int16 one.tc | grep enum
+  enum one_tag { one_A, __tc_tag_max__one_tag = 32767 }; struct one { enum one_tag tag;
+  $ awk 'BEGIN { printf "type v ="
+  >   for (i = 0; i < 32768; i++) printf " | C%d", i
+  >   print ";" }' > count.tc
+  $ ./golden.exe --int16 count.tc
+  count.tc:1: error: a variant has 32768 constructors, more than INT_MAX (32767) on this target [constructor-count]
   [1]

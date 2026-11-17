@@ -6400,8 +6400,9 @@ promotes to `int` (below). The front end types both as measured.
 
 Every use of the enumerated type reads its compatible type, and so the
 size, in one place: the integer promotions, under which an object of
-an enumeration of lower rank than `int` promotes to `int` (C11
-6.3.1.1p2), measured with both; conversions and compatibility;
+an enumeration without a fixed type and of lower rank than `int`
+promotes to `int` (C11 6.3.1.1p2), measured with both, and one with a
+fixed type promotes as that type; conversions and compatibility;
 `sizeof`; the width that bounds a bit-field of the type, which GCC and
 Clang also hold to 8 bits for `enum { A }` under `-fshort-enums`; and
 the tag of a variant (10.1 rule 2), whose switch and comparisons

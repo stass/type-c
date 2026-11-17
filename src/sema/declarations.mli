@@ -250,3 +250,9 @@ val read :
 (** [read target ~product text scopes] reads the unit whose external
     declarations [scopes] holds, parsed from [text], for [target], as
     [product]. *)
+
+val tag_max : t -> Exact_integer.t
+(** The value of the hidden enumerator that ends the enumeration of
+    every variant's tags in the unit, [INT_MAX] of its target, so that
+    the tag has the size of [int] under either enumeration
+    representation. *)

@@ -51,6 +51,11 @@ let rows =
       clause = "design 3.2 rule 2";
       meaning =
         "Two constructors of one variant with one name." };
+    Live { constructor = "Constructor_count"; name = "constructor-count";
+      clause = "design 10.1 rule 2";
+      meaning =
+        "A variant of more than INT_MAX constructors, which a target \
+         whose int has 16 bits makes reachable." };
     Live { constructor = "Field_type"; name = "field-type";
       clause = "design 3.2 rule 4";
       meaning =

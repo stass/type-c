@@ -21,7 +21,7 @@ The arguments keep their tokens and lines.
   $ ./golden.exe construct.tc | grep -v '^# ' | grep .
   struct e; typedef struct e e;
    
-  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  enum e_tag { e_A, e_B, __tc_tag_max__e_tag = 2147483647 }; struct e { enum e_tag tag; union {
    
    
   struct {
@@ -32,7 +32,7 @@ The arguments keep their tokens and lines.
   } u; };
   struct pair; typedef struct pair pair;
    
-  enum pair_tag { pair_P }; struct pair { enum pair_tag tag; union {
+  enum pair_tag { pair_P, __tc_tag_max__pair_tag = 2147483647 }; struct pair { enum pair_tag tag; union {
    
   struct {
   e first
@@ -79,7 +79,7 @@ inside them it would be a statement expression of GNU C, and GCC under
 
   $ printf 'type e = | A | B(int i);\nstatic e x = (B(1));\nstatic e y = ((A));\nstruct s { e v; } z = { (B(2)) };\n' > parenthesized.tc
   $ ./golden.exe parenthesized.tc | grep -v '^# ' | grep -v '^ *$' | tr -s ' \n' ' '; echo
-  struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union { struct { int i ; } B; } u; }; static e x = { .tag = e_B, .u.B = { 1 } } ; static e y = { .tag = e_A } ; struct s { e v; } z = { { .tag = e_B, .u.B = { 2 } } }; 
+  struct e; typedef struct e e; enum e_tag { e_A, e_B, __tc_tag_max__e_tag = 2147483647 }; struct e { enum e_tag tag; union { struct { int i ; } B; } u; }; static e x = { .tag = e_B, .u.B = { 1 } } ; static e y = { .tag = e_A } ; struct s { e v; } z = { { .tag = e_B, .u.B = { 2 } } }; 
 
 An unqualified constructor may share its name with a visible typedef
 name: where the target type is a variant with that constructor, the
@@ -203,7 +203,7 @@ too.
   $ ./golden.exe zero.tc | grep -v '^# ' | grep .
   struct e; typedef struct e e;
    
-  enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union {
+  enum e_tag { e_A, e_B, __tc_tag_max__e_tag = 2147483647 }; struct e { enum e_tag tag; union {
    
    
   struct {

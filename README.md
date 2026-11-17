@@ -1058,9 +1058,13 @@ Clang.
 `typec` writes plain C11 with the GNU extensions that GCC and Clang
 share, and `--emit-c` prints it. A variant is a structure of an
 enumeration, its tag, and a union of one structure for each case that
-has fields. A `match` is a `switch` on the tag that copies the fields
-an arm binds into `const` locals, and traps after each arm and in the
-`default` that it adds for a tag that is none of the cases. A distinct
+has fields. The enumeration ends with a hidden enumerator of the value
+`INT_MAX`, so the tag has the size of `int` with or without
+`-fshort-enums`. A `match` is a `switch` on the tag that copies the
+fields an arm binds into `const` locals, and traps after each arm and in
+the `default` that it adds for a tag that is none of the cases, beside
+the `case` of the hidden enumerator. A C `switch` on a tag needs a
+`default` too, or `-Wswitch` reports that enumerator. A distinct
 type is a `typedef` of the type it is made from, and an instance of a
 generic type is a structure named after its arguments, as `list__i` is
 `list(int)`. C code and Type-C code call each other with no glue. C
@@ -1096,7 +1100,10 @@ and laid out for reading:
 <!-- emit-c: shape.tc -->
 ```c
 struct shape; typedef struct shape shape;
-enum shape_tag { shape_Circle, shape_Rect, shape_Triangle };
+enum shape_tag {
+  shape_Circle, shape_Rect, shape_Triangle,
+  __tc_tag_max__shape_tag = 2147483647
+};
 struct shape {
   enum shape_tag tag;
   union {
@@ -1137,6 +1144,7 @@ area(shape s)
       }
       __builtin_trap();
     }
+    case __tc_tag_max__shape_tag:
     default:
       __builtin_trap();
     }
@@ -1188,7 +1196,7 @@ laid out for reading:
 <!-- emit-c: pair.tc -->
 ```c
 struct error; typedef struct error error;
-enum error_tag { error_Busy };
+enum error_tag { error_Busy, __tc_tag_max__error_tag = 2147483647 };
 struct error { enum error_tag tag; };
 
 typedef int __tc_arg__i;
@@ -1203,14 +1211,20 @@ struct result__v5error; typedef struct result__v5error result__v5error;
 
 result__v5error join(int a, int b);
 
-enum result__v5error_tag { result__v5error_Err, result__v5error_Ok };
+enum result__v5error_tag {
+  result__v5error_Err, result__v5error_Ok,
+  __tc_tag_max__result__v5error_tag = 2147483647
+};
 struct result__v5error {
   enum result__v5error_tag tag;
   union {
     struct { __tc_arg__5error error; } Err;
   } u;
 };
-enum result__i5error_tag { result__i5error_Err, result__i5error_Ok };
+enum result__i5error_tag {
+  result__i5error_Err, result__i5error_Ok,
+  __tc_tag_max__result__i5error_tag = 2147483647
+};
 struct result__i5error {
   enum result__i5error_tag tag;
   union {
@@ -1533,7 +1547,10 @@ without the C headers of i386 runs the tests that include the C headers
 `TYPEC_TEST_REQUIRE_M32` to a non-empty value, and `dune test` then
 fails when the backends do not both compile `<limits.h>` with `-m32`;
 the check is a rule of `test/run/dune`, so a run of one test alone
-(`dune test test/run/abi.t`) skips it. There are no other dependencies.
+(`dune test test/run/abi.t`) skips it. `short_enums.t` also runs the
+`arm-none-eabi-gcc` that `TYPEC_TEST_ARM_GCC` names, or the one on the
+`PATH`, where present, and Clang for `thumbv7m-none-eabi` where Clang
+has that target. There are no other dependencies.
 
 ```sh
 dune build    # builds typec as _build/install/default/bin/typec

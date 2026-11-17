@@ -519,7 +519,7 @@ typedef, the variant to its structure.
   ;
   static void put__i ( __tc_arg__i * __tc_local_out , __tc_arg__i __tc_local_value ) {
   typedef int d ;
-  struct o; typedef struct o o; enum o_tag { o_Some, o_None }; struct o { enum o_tag tag; union { struct { __tc_arg__i x ; } Some; } u; };
+  struct o; typedef struct o o; enum o_tag { o_Some, o_None, __tc_tag_max__o_tag = 2147483647 }; struct o { enum o_tag tag; union { struct { __tc_arg__i x ; } Some; } u; };
   d __tc_local_n = ( d ) 0 ;
   o __tc_local_w = { .tag = o_Some, .u.Some = {  __tc_local_value  } } ;
   * __tc_local_out = __tc_local_value ; ( void ) __tc_local_n ; ( void ) __tc_local_w ;

@@ -43,7 +43,7 @@ one.
   # 2 "statement.tc"
   struct result__ii; typedef struct result__ii result__ii;
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok, __tc_tag_max__result__vi_tag = 2147483647 }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
   # 2 "statement.tc"
   #pragma pack(pop)
   # 2 "statement.tc"
@@ -118,7 +118,7 @@ read of the field is left as a statement of its own.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 2 "discarded.tc"
   #pragma pack(pop)
   # 2 "discarded.tc"
@@ -191,7 +191,7 @@ read of the field is left as a statement of its own.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 2 "assignment.tc"
   #pragma pack(pop)
   # 2 "assignment.tc"
@@ -264,7 +264,7 @@ read of the field is left as a statement of its own.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 2 "declaration.tc"
   #pragma pack(pop)
   # 2 "declaration.tc"
@@ -343,7 +343,7 @@ holds one as any block does.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 2 "labelled.tc"
   #pragma pack(pop)
   # 2 "labelled.tc"
@@ -424,7 +424,7 @@ holds one as any block does.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 2 "arm.tc"
   #pragma pack(pop)
   # 2 "arm.tc"
@@ -485,7 +485,7 @@ holds one as any block does.
   # 9 "arm.tc"
   
   # 9 "arm.tc"
-  default: __builtin_trap(); } }
+  case __tc_tag_max__result__ii_tag: default: __builtin_trap(); } }
   # 9 "arm.tc"
   
   }
@@ -557,7 +557,7 @@ that the labels stay under the statement around it.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok, __tc_tag_max__result__vi_tag = 2147483647 }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
   # 3 "substatement.tc"
   #pragma pack(pop)
   # 3 "substatement.tc"
@@ -679,7 +679,7 @@ without one. The Ok of the operand's type may be a result of its own.
   # 2 "void_error.tc"
   typedef long __tc_arg__l; struct result__lv; typedef struct result__lv result__lv;
   # 2 "<universe>" 3
-  enum result__lv_tag { result__lv_Err, result__lv_Ok }; struct result__lv { enum result__lv_tag tag; union { struct { __tc_arg__l value ; } Ok; } u; }; enum result__iv_tag { result__iv_Err, result__iv_Ok }; struct result__iv { enum result__iv_tag tag; union { struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__lv_tag { result__lv_Err, result__lv_Ok, __tc_tag_max__result__lv_tag = 2147483647 }; struct result__lv { enum result__lv_tag tag; union { struct { __tc_arg__l value ; } Ok; } u; }; enum result__iv_tag { result__iv_Err, result__iv_Ok, __tc_tag_max__result__iv_tag = 2147483647 }; struct result__iv { enum result__iv_tag tag; union { struct { __tc_arg__i value ; } Ok; } u; };
   # 2 "void_error.tc"
   #pragma pack(pop)
   # 2 "void_error.tc"
@@ -758,7 +758,7 @@ without one. The Ok of the operand's type may be a result of its own.
   # 2 "nested.tc"
   struct result__ci; typedef struct result__ci result__ci;
   # 2 "<universe>" 3
-  enum result__ci_tag { result__ci_Err, result__ci_Ok }; struct result__ci { enum result__ci_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__c value ; } Ok; } u; }; enum result__ic_tag { result__ic_Err, result__ic_Ok }; struct result__ic { enum result__ic_tag tag; union { struct { __tc_arg__c error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__I6resulticEi_tag { result__I6resulticEi_Err, result__I6resulticEi_Ok }; struct result__I6resulticEi { enum result__I6resulticEi_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__I6resulticE value ; } Ok; } u; };
+  enum result__ci_tag { result__ci_Err, result__ci_Ok, __tc_tag_max__result__ci_tag = 2147483647 }; struct result__ci { enum result__ci_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__c value ; } Ok; } u; }; enum result__ic_tag { result__ic_Err, result__ic_Ok, __tc_tag_max__result__ic_tag = 2147483647 }; struct result__ic { enum result__ic_tag tag; union { struct { __tc_arg__c error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__I6resulticEi_tag { result__I6resulticEi_Err, result__I6resulticEi_Ok, __tc_tag_max__result__I6resulticEi_tag = 2147483647 }; struct result__I6resulticEi { enum result__I6resulticEi_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__I6resulticE value ; } Ok; } u; };
   # 2 "nested.tc"
   #pragma pack(pop)
   # 2 "nested.tc"
@@ -827,7 +827,7 @@ without one. The Ok of the operand's type may be a result of its own.
   # 9 "nested.tc"
   
   # 9 "nested.tc"
-  default: __builtin_trap(); } }
+  case __tc_tag_max__result__ic_tag: default: __builtin_trap(); } }
   # 9 "nested.tc"
   
   }
@@ -883,9 +883,9 @@ name of an instance in it move with it.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 1 "<universe>" 3
-  enum option__i_tag { option__i_None, option__i_Some }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
+  enum option__i_tag { option__i_None, option__i_Some, __tc_tag_max__option__i_tag = 2147483647 }; struct option__i { enum option__i_tag tag; union { struct { __tc_arg__i value ; } Some; } u; };
   # 3 "moved.tc"
   typedef long __tc_arg__l; struct option__l; typedef struct option__l option__l;
   # 2 "moved.tc"
@@ -960,7 +960,7 @@ neither.
   # 1 "qualified.tc"
   typedef int __tc_arg__i; struct result__ii; typedef struct result__ii result__ii;
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 1 "qualified.tc"
   #pragma pack(pop)
   # 1 "qualified.tc"
@@ -976,7 +976,7 @@ neither.
   # 2 "qualified.tc"
   typedef long __tc_arg__l; struct result__li; typedef struct result__li result__li;
   # 2 "<universe>" 3
-  enum result__li_tag { result__li_Err, result__li_Ok }; struct result__li { enum result__li_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__l value ; } Ok; } u; };
+  enum result__li_tag { result__li_Err, result__li_Ok, __tc_tag_max__result__li_tag = 2147483647 }; struct result__li { enum result__li_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__l value ; } Ok; } u; };
   # 2 "qualified.tc"
   #pragma pack(pop)
   # 2 "qualified.tc"
@@ -1100,7 +1100,7 @@ reads each where it stood.
    f(void);
   int k(int);
   
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   
   result__ii
    h(void) {
@@ -1142,7 +1142,7 @@ reads each where it stood.
   result__ii
    g(int);
   
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   
   result__ii
    h(void) {
@@ -1207,7 +1207,7 @@ the try under an if on its truth (design 13.5).
   void use(q *);
   void g(void);
   
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   
   result__ii
    h(q *p, int c) {
@@ -1276,7 +1276,7 @@ reads nothing of it.
    w(void);
   
   struct result__ii; typedef struct result__ii result__ii;
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; }; enum result__vi_tag { result__vi_Err, result__vi_Ok, __tc_tag_max__result__vi_tag = 2147483647 }; struct result__vi { enum result__vi_tag tag; union { struct { __tc_arg__i error ; } Err; } u; };
   
   result__ii
    h(int c) {
@@ -1327,7 +1327,7 @@ A try that is an initialiser of a braced list is a whole initialiser.
   result__ii
    f(void);
   
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   
   result__ii
    h(void) {
@@ -1850,7 +1850,7 @@ pragma takes the next statement out.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 2 "pragma_then_null.tc"
   #pragma pack(pop)
   # 2 "pragma_then_null.tc"
@@ -2139,7 +2139,7 @@ ends inside the operand.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 3 "reads_alike.tc"
   #pragma pack(pop)
   # 3 "reads_alike.tc"

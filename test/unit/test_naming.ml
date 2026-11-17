@@ -426,10 +426,10 @@ let check_declared_names () =
   List.iter check (List.init 200 Fun.id)
 
 (* Design 13.5: an invented name that is one of many of its kind holds
-   [__] after [__tc_], and one that is not holds none, so names of
-   different kinds differ. The names that are not are read from what
-   typec emits for a unit with the constructs that invent them and a
-   bracketed edit, which ends the unit with the packing probe. *)
+   [__] after [__tc_] and its kind word, and one that is not holds none,
+   so names of different kinds differ. The names are read from what typec
+   emits for a unit with the constructs that invent them and a bracketed
+   edit, which ends the unit with the packing probe. *)
 let invented_source =
   "type list = | Nil | Cons(long head, list *tail);\n\
    list make(void);\n\
@@ -515,9 +515,14 @@ let prefix = "__tc_"
 
 (* The names that the sample invents: those of the matches and the test,
    flat and nested, of the return that runs a deferred statement, of the
-   assertions and of the probe. Fewer means that the sample no longer
-   reaches a construct, and the check would pass unread. *)
-let invented_in_sample = 14
+   assertions, of the probe and of the hidden enumerator of the tags.
+   Fewer means that the sample no longer reaches a construct, and the
+   check would pass unread. *)
+let invented_in_sample = 15
+
+(* The kind words of the names in the sample that are one of many of
+   their kind. *)
+let kinds_in_sample = [ "tag_max" ]
 
 let check_invented_names () =
   let invented =
@@ -532,9 +537,13 @@ let check_invented_names () =
     String.sub name (String.length prefix)
       (String.length name - String.length prefix)
   in
+  let of_kind name kind = String.starts_with ~prefix:(kind ^ "__") name in
   let check name =
-    if holds_double_underscore (after_prefix name) then
-      fail "an invented name with the shape of a kind" name
+    let name = after_prefix name in
+    if
+      holds_double_underscore name
+      && not (List.exists (of_kind name) kinds_in_sample)
+    then fail "an invented name with the shape of a kind" name
   in
   List.iter check invented;
   (* The name of a universe function is a kind word: no [__], no final

@@ -1973,7 +1973,7 @@ in front of the statement or declaration that holds the try.
   #pragma pack(push)
   #pragma pack()
   # 2 "<universe>" 3
-  enum result__ii_tag { result__ii_Err, result__ii_Ok }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
+  enum result__ii_tag { result__ii_Err, result__ii_Ok, __tc_tag_max__result__ii_tag = 2147483647 }; struct result__ii { enum result__ii_tag tag; union { struct { __tc_arg__i error ; } Err; struct { __tc_arg__i value ; } Ok; } u; };
   # 4 "declared_by_try.tc"
   #pragma pack(pop)
   # 4 "declared_by_try.tc"

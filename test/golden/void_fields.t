@@ -19,7 +19,7 @@ parentheses, and its patterns have no sub-pattern for it.
   > }
   > EOF
   $ ./golden.exe opt.tc | grep -v '^# ' | grep . | sed -n '/^enum/,/^}/p'
-  enum opt__v_tag { opt__v_No, opt__v_Yes }; struct opt__v { enum opt__v_tag tag; };
+  enum opt__v_tag { opt__v_No, opt__v_Yes, __tc_tag_max__opt__v_tag = 2147483647 }; struct opt__v { enum opt__v_tag tag; };
   #pragma pack(pop)
   opt__v
    o = 
@@ -35,7 +35,7 @@ parentheses, and its patterns have no sub-pattern for it.
   ((struct opt__v){ .tag = opt__v_No })
   ;
     
-   } else { switch (__tc_tag0) { case opt__v_No: case opt__v_Yes: break; default: __builtin_trap(); } } }
+   } else { switch (__tc_tag0) { case opt__v_No: case opt__v_Yes: break; case __tc_tag_max__opt__v_tag: default: __builtin_trap(); } } }
   { const struct opt__v *const __tc_match1 = &(
   o
   ); switch (__tc_match1->tag) {
@@ -52,7 +52,7 @@ parentheses, and its patterns have no sub-pattern for it.
    return o;
     
    __builtin_trap(); }
-  default: __builtin_trap(); } }
+  case __tc_tag_max__opt__v_tag: default: __builtin_trap(); } }
   }
 
 A void field in the middle of several goes with the comma after it.
@@ -62,7 +62,7 @@ A void field in the middle of several goes with the comma after it.
   > three(void) t = Three(1, 2);
   > EOF
   $ ./golden.exe pair.tc | grep -v '^# ' | grep . | sed -n '/^enum/,/^;/p'
-  enum three__v_tag { three__v_Three, three__v_Only }; struct three__v { enum three__v_tag tag; union { struct { int first ; long last ; } Three; } u; };
+  enum three__v_tag { three__v_Three, three__v_Only, __tc_tag_max__three__v_tag = 2147483647 }; struct three__v { enum three__v_tag tag; union { struct { int first ; long last ; } Three; } u; };
   #pragma pack(pop)
   three__v
    t = 

@@ -23,7 +23,7 @@ word itself lowers to nothing.
   > EOF
   > ) > owner.i
   $ ./golden.exe owner.i | grep -v '^# ' | tr -s ' \n' ' ' | sed 's/ $//'; echo
-   struct instruction; typedef struct instruction instruction; enum instruction_tag { instruction_Move, instruction_Halt }; struct instruction { enum instruction_tag tag; union { struct { int dst ; int src ; } Move; } u; }; typedef unsigned symbol ; static inline instruction halt(void) { return ((struct instruction){ .tag = instruction_Halt }) ; } instruction make_move(int d, int s) { return ((struct instruction){ .tag = instruction_Move, .u.Move = { d, s } }) ; } symbol intern(unsigned n) { return (symbol)n; }
+   struct instruction; typedef struct instruction instruction; enum instruction_tag { instruction_Move, instruction_Halt, __tc_tag_max__instruction_tag = 2147483647 }; struct instruction { enum instruction_tag tag; union { struct { int dst ; int src ; } Move; } u; }; typedef unsigned symbol ; static inline instruction halt(void) { return ((struct instruction){ .tag = instruction_Halt }) ; } instruction make_move(int d, int s) { return ((struct instruction){ .tag = instruction_Move, .u.Move = { d, s } }) ; } symbol intern(unsigned n) { return (symbol)n; }
 
 A client matches a private variant, reads its fields through the
 bindings, casts a private distinct value to its representation and

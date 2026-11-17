@@ -88,7 +88,8 @@ let grows_linearly name ~small run =
    alone; the arguments keep their tokens. *)
 let constructors () =
   let variant = "type e = | A | B(int x, int y);\n" in
-  let lowered = "struct e; typedef struct e e; enum e_tag { e_A, e_B }; \
+  let lowered = "struct e; typedef struct e e; enum e_tag { e_A, e_B, \
+                 __tc_tag_max__e_tag = 2147483647 }; \
                  struct e { enum e_tag tag; union { struct { int x ; int y ; \
                  } B; } u; };"
   in
@@ -122,7 +123,8 @@ let constructors () =
     (variant ^ "type p = | P(e first, e second);\n"
     ^ "p f(void) { return P(e.B(1, 2), A); }")
     (lowered
-   ^ " struct p; typedef struct p p; enum p_tag { p_P }; struct p { enum \
+   ^ " struct p; typedef struct p p; enum p_tag { p_P, \
+      __tc_tag_max__p_tag = 2147483647 }; struct p { enum \
       p_tag tag; union { struct { e first ; e second ; } P; } u; }; p \
       f(void) { return ((struct p){ .tag = p_P, .u.P = { { .tag = e_B, \
       .u.B = { 1, 2 } } , { .tag = e_A } } }) ; }")
@@ -169,15 +171,17 @@ let anchors () =
   compares "a bracket after the forward declaration of a variant"
     (bracketed_after_forward "type e = | A | B(int x);")
     ("struct e; typedef struct e e; " ^ bracket
-   ^ " enum e_tag { e_A, e_B }; struct e { enum e_tag tag; union { struct { \
-      int x ; } B; } u; };");
+   ^ " enum e_tag { e_A, e_B, \
+      __tc_tag_max__e_tag = 2147483647 }; struct e { enum e_tag tag; union { \
+      struct { int x ; } B; } u; };");
   (* The declaration that a variant completes wrote the forward
      declaration (design 10.1 rule 7), so the bracket begins the text of
      the variant. *)
   compares "a bracket after the forward declaration of a completed variant"
     (bracketed_after_forward "type list; type list = | Nil;")
     ("struct list; typedef struct list list; " ^ bracket
-   ^ " enum list_tag { list_Nil }; struct list { enum list_tag tag; };");
+   ^ " enum list_tag { list_Nil, \
+  __tc_tag_max__list_tag = 2147483647 }; struct list { enum list_tag tag; };");
   compares "a bracket after the forward declaration of a record alias"
     (bracketed_after_forward "type pair = struct { pair *next; };")
     ("struct pair; typedef struct pair pair; " ^ bracket
@@ -313,8 +317,8 @@ let many_void_fields () =
     (between
        (words (emitted (source small)))
        ~first:"enum many__v_tag" ~last:"#pragma pack(pop)")
-    "enum many__v_tag { many__v_A }; struct many__v { enum many__v_tag tag; \
-     }; #pragma pack(pop)";
+    "enum many__v_tag { many__v_A, __tc_tag_max__many__v_tag = 2147483647 }; \
+     struct many__v { enum many__v_tag tag; }; #pragma pack(pop)";
   grows_linearly "the work to lower many void fields" ~small
     (fun count -> ignore (emitted (source count)))
 
@@ -322,16 +326,19 @@ let void_fields () =
   let two = "type two(A, B) = | Two(A a, B b) | One(A only);\n" in
   lowers_instance "the first field void" (two ^ "two(void, long) t = One;")
     "two__vl"
-    "enum two__vl_tag { two__vl_Two, two__vl_One }; struct two__vl { enum \
+    "enum two__vl_tag { two__vl_Two, two__vl_One, \
+     __tc_tag_max__two__vl_tag = 2147483647 }; struct two__vl { enum \
      two__vl_tag tag; union { struct { __tc_arg__l b ; } Two; } u; };";
   lowers_instance "the last field void" (two ^ "two(long, void) t = One(1);")
     "two__lv"
-    "enum two__lv_tag { two__lv_Two, two__lv_One }; struct two__lv { enum \
+    "enum two__lv_tag { two__lv_Two, two__lv_One, \
+     __tc_tag_max__two__lv_tag = 2147483647 }; struct two__lv { enum \
      two__lv_tag tag; union { struct { __tc_arg__l a ; } Two; struct { \
      __tc_arg__l only ; } One; } u; };";
   lowers_instance "every field void" (two ^ "two(void, void) t = Two;")
     "two__vv"
-    "enum two__vv_tag { two__vv_Two, two__vv_One }; struct two__vv { enum \
+    "enum two__vv_tag { two__vv_Two, two__vv_One, \
+     __tc_tag_max__two__vv_tag = 2147483647 }; struct two__vv { enum \
      two__vv_tag tag; };";
   (* The name that an application in a removed field lowers to goes
      with the field. *)
@@ -339,7 +346,8 @@ let void_fields () =
     "type id(T) = T;\ntype three(A) = | Three(int a, id(A) b, long c);\n\
      three(void) t = Three(1, 2);"
     "three__v"
-    "enum three__v_tag { three__v_Three }; struct three__v { enum \
+    "enum three__v_tag { three__v_Three, \
+     __tc_tag_max__three__v_tag = 2147483647 }; struct three__v { enum \
      three__v_tag tag; union { struct { int a ; long c ; } Three; } u; };";
   compares "constructors of an instance with void fields"
     (between
@@ -529,23 +537,23 @@ let defers () =
     (tested_defer "if (case A(v) = p) a(v);")
     " { b(); { { const struct o *const __tc_match0 = &( p ); const \
      __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 \
-     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; \
-     a ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; \
-     default: __builtin_trap(); } } } } }";
+     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; a \
+     ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; case \
+     __tc_tag_max__o_tag: default: __builtin_trap(); } } } } }";
   compares "a single-pattern if with else that ends a deferred statement"
     (tested_defer "if (case A(v) = p) a(v); else b();")
     " { b(); { { const struct o *const __tc_match0 = &( p ); const \
      __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 \
-     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; \
-     a ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; \
-     default: __builtin_trap(); } b ( ) ; } } } }";
+     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; a \
+     ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; case \
+     __tc_tag_max__o_tag: default: __builtin_trap(); } b ( ) ; } } } }";
   compares "a single-pattern while that ends a deferred statement"
     (tested_defer "while (case A(v) = p) a(v);")
     " { b(); { for (;;) { const struct o *const __tc_match0 = &( p ); const \
      __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if (__tc_tag0 \
-     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; \
-     a ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; \
-     default: __builtin_trap(); } break; } } } }";
+     == o_A) { const __typeof__(__tc_match0->u.A.x) v = __tc_match0->u.A.x; a \
+     ( v ) ; } else { switch (__tc_tag0) { case o_A: case o_B: break; case \
+     __tc_tag_max__o_tag: default: __builtin_trap(); } break; } } } }";
   lowers "a defer in a statement expression of a kept type name"
     "void g(void); int f(int x) { return _Generic(x, __typeof__(({ int y = \
      0; { defer g(); } y; })): 1, default: 0); }"
@@ -554,11 +562,12 @@ let defers () =
   lowers "a defer in a match arm runs at its jumps alone"
     "type e = | A | B; void a(void); void f(e v) { match (v) { case A: \
      defer a(); return; case B: return; } }"
-    ("struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
+    ("struct e; typedef struct e e; enum e_tag { e_A, e_B, \
+      __tc_tag_max__e_tag = 2147483647 }; struct e { enum \
       e_tag tag; }; void a(void); void f(e v) { { const struct e *const \
       __tc_match0 = &( v ); switch (__tc_match0->tag) { case e_A: { { { a ( ) \
       ; } return ; } " ^ trap ^ " } case e_B: { return; " ^ trap
-   ^ " } default: " ^ trap ^ " } } }")
+   ^ " } case __tc_tag_max__e_tag: default: " ^ trap ^ " } } }")
 
 (* Design 6 rule 1: a goto leaves the scopes that hold it and not its
    label, which a label before the defer is not in. *)
@@ -603,12 +612,13 @@ let goto_defers () =
   lowers "a goto out of a match arm"
     "type e = | A | B; void a(void); void f(e v, int c) { match (v) { case \
      A: defer a(); if (c) goto L; return; case B: return; } L: ; }"
-    ("struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
+    ("struct e; typedef struct e e; enum e_tag { e_A, e_B, \
+      __tc_tag_max__e_tag = 2147483647 }; struct e { enum \
       e_tag tag; }; void a(void); void f(e v, int c) { { const struct e \
       *const __tc_match0 = &( v ); switch (__tc_match0->tag) { case e_A: { if \
       (c) { { a ( ) ; } goto L ; } { { a ( ) ; } return ; } " ^ trap
-   ^ " } case e_B: { return; " ^ trap ^ " } default: " ^ trap
-   ^ " } } L: ; }")
+   ^ " } case e_B: { return; " ^ trap
+   ^ " } case __tc_tag_max__e_tag: default: " ^ trap ^ " } } L: ; }")
 
 (* The places of each defer site of [source] (Reachability.place), which
    lowering, the check of the moved text and the pragma rule all read:
@@ -702,7 +712,8 @@ let try_defers () =
         __typeof__(__tc_match0->tag) __tc_tag0 = __tc_match0->tag; if \
         (__tc_tag0 == o_A) { const __typeof__(__tc_match0->u.A.x) v = \
         __tc_match0->u.A.x; k ( v ) ; } else { switch (__tc_tag0) { case o_A: \
-        case o_B: break; default: __builtin_trap(); } } } }")
+        case o_B: break; case __tc_tag_max__o_tag: default: \
+        __builtin_trap(); } } } }")
 
 let fails name message =
   incr failures;
@@ -800,29 +811,30 @@ let deep_patterns () =
 
 let () =
   lowers "a variant without fields" "type e = | A | B;"
-    "struct e; typedef struct e e; enum e_tag { e_A, e_B }; struct e { enum \
-     e_tag tag; };";
+    "struct e; typedef struct e e; enum e_tag { e_A, e_B, __tc_tag_max__e_tag \
+     = 2147483647 }; struct e { enum e_tag tag; };";
   lowers "a variant with fields"
     "type expr = | Number(long value) | Nil | Add(expr *left, expr *right);"
     "struct expr; typedef struct expr expr; enum expr_tag { expr_Number, \
-     expr_Nil, expr_Add }; struct expr { enum expr_tag tag; union { struct \
-     { long value ; } Number; struct { expr *left ; expr *right ; } Add; } \
-     u; };";
+     expr_Nil, expr_Add, __tc_tag_max__expr_tag = 2147483647 }; struct expr { \
+     enum expr_tag tag; union { struct { long value ; } Number; struct { expr \
+     *left ; expr *right ; } Add; } u; };";
   lowers "a variant that completes an incomplete one"
     "type list; type list = | Nil | Cons(int head, list *tail);"
     "struct list; typedef struct list list; enum list_tag { list_Nil, \
-     list_Cons }; struct list { enum list_tag tag; union { struct { int \
-     head ; list *tail ; } Cons; } u; };";
+     list_Cons, __tc_tag_max__list_tag = 2147483647 }; struct list { enum \
+     list_tag tag; union { struct { int head ; list *tail ; } Cons; } u; };";
   lowers "a pragma between the tokens of a constructor"
     "type e = | A\n#pragma pack()\n(int x);"
-    "struct e; typedef struct e e; enum e_tag { e_A }; struct e { enum e_tag \
-     tag; union { struct { #pragma pack() int x ; } A; } u; };";
+    "struct e; typedef struct e e; enum e_tag { e_A, __tc_tag_max__e_tag = \
+     2147483647 }; struct e { enum e_tag tag; union { struct { #pragma pack() \
+     int x ; } A; } u; };";
   lowers "an alias" "type id = unsigned int;" "typedef unsigned int id ;";
   lowers "names that hold the word _Pragma"
     "type my_Pragma = int; type box = | my_Pragma_of(int v);"
-    "typedef int my_Pragma ; struct box; typedef struct box box; enum \
-     box_tag { box_my_Pragma_of }; struct box { enum box_tag tag; union { \
-     struct { int v ; } my_Pragma_of; } u; };";
+    "typedef int my_Pragma ; struct box; typedef struct box box; enum box_tag \
+     { box_my_Pragma_of, __tc_tag_max__box_tag = 2147483647 }; struct box { \
+     enum box_tag tag; union { struct { int v ; } my_Pragma_of; } u; };";
   lowers "the name in a declarator" "type handler = void (*)(int);"
     "typedef void (* handler )(int);";
   lowers "the name before a suffix" "type table = char *[4];"

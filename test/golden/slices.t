@@ -270,7 +270,7 @@ the braced list alone, in place of the parentheses around it too
   # 4 "making.tc"
    
   # 4 "making.tc"
-  enum held_tag { held_Held, held_Empty }; struct held { enum held_tag tag; union {
+  enum held_tag { held_Held, held_Empty, __tc_tag_max__held_tag = 2147483647 }; struct held { enum held_tag tag; union {
   # 4 "making.tc"
    
   # 4 "making.tc"

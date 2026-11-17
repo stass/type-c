@@ -101,6 +101,7 @@ type t = {
   typed : Expressions.t;
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   instance_bytes : int;
+  tag_max : Exact_integer.t;
   copy_bytes : int;
   longest_instance_code : int;
   zero_initialisers :
@@ -150,6 +151,7 @@ let type_declarations result =
 
 let typed result = result.typed
 let instance_bytes result = result.instance_bytes
+let tag_max result = result.tag_max
 let copy_bytes result = result.copy_bytes
 let longest_instance_code result = result.longest_instance_code
 let entity result reference = Hashtbl.find_opt result.entities reference
@@ -509,6 +511,10 @@ let quote = Expressions.quote
 let checked state span = function
   | Ok t -> t
   | Error error -> fail state span (Rule.c_text (Ctype.error_message error))
+
+(* The value of the hidden enumerator that ends every enumeration of a
+   variant's tags (design 10.1 rule 2). *)
+let int_max target = Integer_constant.maximum target Int
 
 let integer_type state span integer =
   checked state span (Ctype.integer state.target integer)
@@ -3024,7 +3030,8 @@ and defined_record state span kind members =
 
 (* The enumeration of the tags, whose enumerators number the constructors
    from 0 in order (design 10.1 rule 1) and have type int, as C gives an
-   enumerator that int holds. *)
+   enumerator that int holds; the hidden enumerator [tag_max] ends it
+   (rule 2). *)
 and variant_tag_enum state (declaration : Tree.type_declaration)
     constructors =
   let span = declaration.span in
@@ -3041,11 +3048,23 @@ and variant_tag_enum state (declaration : Tree.type_declaration)
   enum
 
 and defined_tag_enum state span tag constructors =
+  let tag_max = int_max state.target in
+  let count = Exact_integer.of_int (List.length constructors) in
+  (* The tag of the constructor numbered INT_MAX would be the hidden one. *)
+  if Exact_integer.compare count tag_max > 0 then
+    fail state span
+      (Rule.message Constructor_count
+         (Printf.sprintf
+            "a variant has %s constructors, more than INT_MAX (%s) on \
+             this target"
+            (Exact_integer.to_string count)
+            (Exact_integer.to_string tag_max)));
   let enum =
     Ctype.declare_enum state.tags tag ~at_file_scope:(at_file_scope state)
   in
   let values =
     List.mapi (fun index _ -> Exact_integer.of_int index) constructors
+    @ [ tag_max ]
   in
   checked state span
     (Ctype.define_enum state.tags enum
@@ -5066,5 +5085,6 @@ let read target ~product text (scopes : Parser.scopes) =
       in
       Ok { product; tags; items; placements; entities; tag_types; linked; typed;
            type_declarations; instance_bytes; copy_bytes;
-           longest_instance_code; zero_initialisers }
+           longest_instance_code; zero_initialisers;
+           tag_max = int_max target }
   | exception (Failed error | Instance_failed error) -> Error error

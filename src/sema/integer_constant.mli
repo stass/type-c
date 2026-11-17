@@ -58,6 +58,9 @@ val known : Target.t -> Integer.t -> Exact_integer.t -> t
 val fits : Target.t -> Integer.t -> Exact_integer.t -> bool
 (** Whether the type holds the value. *)
 
+val maximum : Target.t -> Integer.t -> Exact_integer.t
+(** The greatest value of the type on the target. *)
+
 val convert : Target.t -> Integer.t -> t -> t
 (** The conversion to an integer type (6.3.1.2, 6.3.1.3). *)
 
