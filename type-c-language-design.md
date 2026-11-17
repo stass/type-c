@@ -1020,7 +1020,9 @@ id(stmt) s;                             /* e = s is an error */
    gives a tag that a member declares the scope around the structure. A
    name whose scope ends inside the definition, in a parameter list or
    in a block of a function's body, is declared in each instance as it
-   is at the definition.
+   is at the definition, and a local of a generic function (7.3 rule
+   7) under a name of typec's, which no declaration between the two
+   changes.
 
    The head of a generic function is the exception. An instance holds
    it twice, in its prototype and at its definition (10.3), so the
@@ -1040,11 +1042,12 @@ id(stmt) s;                             /* e = s is an error */
    generic is an error; with `struct item;` before it, both name the
    structure of file scope.
 
-   A universe name, a constructor and a type parameter are not written
-   into an instance as the definition spells them: lowering writes names
-   that cannot be hidden (13.5), so a declaration that hides one of them
-   changes nothing, and `type named(T) = struct { str name; T value; };
-   int str; named(int) n;` is valid.
+   A universe name, a constructor, a type parameter and a local of a
+   generic function are not written into an instance as the definition
+   spells them: lowering writes names that cannot be hidden (13.5), so
+   a declaration that hides one of them changes nothing, and
+   `type named(T) = struct { str name; T value; }; int str;
+   named(int) n;` is valid.
 
 Rationale for parentheses. `<` is ambiguous with less-than in C expressions.
 Parentheses need no lookahead once `G` is known to be generic, and they
@@ -3582,6 +3585,45 @@ convert, has no evidence behind it (section 15, P11).
    ```c
    int *int_vector_last(vector(int) *v) { return vector_last(v); }
    ```
+7. A name that the definition of a generic function declares without
+   linkage is a *local* of it: an object, a typedef name, an
+   enumeration constant, a parameter, a name of a prototype scope of
+   its head, and a binding of a match or a test. Each instance writes a
+   local, its declaration and every use, under a name of typec's,
+   `__tc_local_` followed by the local's name (13.5), so `T n = v;` is
+   `__tc_arg__i __tc_local_n = __tc_local_v;` in the instance over
+   `int`, and a debugger shows the local under that name. An instance
+   stands where a file-scope declaration made after the definition is
+   in scope (10.3), and a local that kept its name would hide such a
+   declaration there alone. In
+
+   ```c
+   generic(T) static T twice(T v) { T n = v; return n; }
+   int n;
+   int use(void) { return twice(n); }
+   ```
+
+   the local `n` of `twice__i` would hide the object `n`, which the
+   backends report under `-Wshadow`, though the source hides nothing.
+   Both report a parameter, an object and an enumeration constant that
+   hide an object of file scope, and a typedef name that hides a
+   typedef name; GCC 16 also a typedef name that hides an object and an
+   object that hides a typedef name (Apple Clang 21, GCC 16). Under its
+   own name a local hides no declaration of the unit and is hidden by
+   none, so the resolution property (13.5) has nothing to check of it:
+   a typedef name declared after the definition does not make the
+   declaration of a local of that name declare something else (3.5
+   rule 8). Two locals
+   hide each other where the definition's do. A tag and a label are
+   written as the source spells them: neither backend reports one under
+   `-Wshadow`, and a label's scope is its function. The names that a
+   type declaration in the body declares (3.1) are written as spelled
+   too, the typedef name of the type and the enumerator of each
+   constructor of a variant, which lowering derives from the type's
+   name (10.1 rule 6); `-Wshadow` reports one that hides a later
+   declaration of the unit. The arguments of an attribute name no
+   local, as an instance writes them as the source spells them (13.3,
+   "Attributes in a generic").
 
 Rationale. One instance per program needs either weak symbols or a
 compiler that sees the whole program and deduplicates. The first is not
@@ -5963,13 +6005,14 @@ whose specifier holds it. A subject mentions a type parameter where
 its type does, or where it is a type that does (7.1 rule 4). One rule
 reads the fact, for a generic type and a generic function alike (3.5
 rule 4; 7.1 rules 3 and 6): **in the definition of a generic, an
-attribute whose subject mentions a type parameter, or whose arguments
-name something that the definition declares, is an error unless the
-table records that fact of it.** An alignment specifier, `_Alignas`,
-is read under the rule as the attribute `aligned`.
+attribute whose subject mentions a type parameter is an error unless
+the table records that fact of it, and one whose arguments name
+something that the definition declares is an error.** An alignment
+specifier, `_Alignas`, is read under the rule as the attribute
+`aligned`.
 
 The backend judges an attribute against the types of the instance, by
-its subject and by its arguments, so the fact covers both:
+its subject and by its arguments:
 
 - By the type of the subject. `vector_size(16)`, on a member and in
   the type name of a `sizeof`, and `mode(DI)` on an object are errors
@@ -6001,7 +6044,11 @@ them. Of the arguments `typec` looks at the identifiers and at
 nothing else (13.5). One that denotes a parameter of the generic or
 something that its body declares ties the arguments to the instance,
 through a type as in `sizeof(t)` or through a value as with a `const`
-object whose initialiser depends on a type parameter (7.1 rule 4). An
+object whose initialiser depends on a type parameter (7.1 rule 4). In
+an instance of a generic function it would name nothing of the
+definition: the instance writes a local under a name of typec's and
+the arguments as the source spells them (7.3 rule 7). So no fact of
+the attribute lets its arguments name what the definition declares. An
 identifier that denotes a type parameter is an error in any attribute
 argument (13.5), and what is declared at file scope is the same for
 every instance. So `nonnull(1)` is refused also where parameter 1 is
@@ -7205,7 +7252,8 @@ each. A third clause covers the text around it.
 - Every other name that lowering writes there is its own: the name of
   what a type application, a universe name, a constructor or a type
   parameter denotes (10.1, 10.3), the name of the instance that a call
-  or a use of a generic function names, or a name that it invents. Each
+  or a use of a generic function names, or a name that it invents,
+  among them that of a local of a generic function (7.3 rule 7). Each
   is claimed (10.1, 10.3) or reserved (2.3), so no declaration hides
   one: not in a block, not in a copy of a deferred statement and not in
   an instance. The check leaves out the use of a generic function in
@@ -8401,10 +8449,11 @@ directives and probe lines that `typec` writes, never among the tokens
 of a run, so no macro bracket of 9.3 names it, and a guard that a run
 defines stays defined after it.
 
-No other invented name holds a `__` after the prefix, and no two
-invented locals that one block can see share a name, so none hides
-another and a backend's `-Wshadow` finds no invented name to report
-when the constructs of Type-C nest. A local takes a number wherever two
+No other invented name holds a `__` after the prefix, but for a local
+of an instance (below), and no two invented locals that one block can
+see share a name, so none hides another and a backend's `-Wshadow`
+finds no invented name to report when the constructs of Type-C nest.
+A local takes a number wherever two
 of its kind could
 be in scope at once, and the number is the only thing that tells them
 apart; a name without one is declared once in its function.
@@ -8443,6 +8492,16 @@ of a slice's length beside that operand. `__tc_bits`
 and `__tc_enum_probe` are the probes of the assertions that end a unit
 (13.4), and `__tc_pack_probe_1` and `__tc_pack_probe_2` the two
 structures of the packing probe that ends one (10.3), one of each.
+
+`__tc_local_` followed by a name of the source is that local of the
+definition of a generic function in each of its instances (7.3 rule
+7), as `__tc_local_n` for `n`. It keeps the source's name readable in
+the C and in a debugger, and it tells locals apart as their names do,
+so two hide each other exactly where the locals of the definition do,
+as `-Wshadow` reports in a function of C. The name may hold a `__`,
+but such a local is declared in a block or a parameter list, never at
+file scope or as a macro, and no other invented name begins with
+`local`, so it meets no invented name of another kind.
 
 ### 13.6 Diagnostics and debugging
 

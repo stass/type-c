@@ -684,6 +684,19 @@ let single_pattern_test output ~number matching
       ~controlled_last:test.controlled.last
       ~check
 
+(* The tokens of the patterns that a matching replaces whole: the
+   labels of each arm, and a test from its keyword to the [=] before its
+   operand. A name written inside them goes with them. *)
+let pattern_spans tokens (matching : Typec_sema.Expressions.matching) =
+  match matching.selects with
+  | Arms arms ->
+      List.map
+        (fun (arm : Typec_sema.Expressions.matched_arm) -> arm.labels)
+        arms.matched
+  | Test _ ->
+      let equals = grammar_token_before tokens matching.scrutinee.first in
+      [ { Tree.first = matching.statement.first; last = equals } ]
+
 (* The edits of matching [number] of the unit, which its locals carry. *)
 let matching output (number, (matching : Typec_sema.Expressions.matching)) =
   match matching.selects with
@@ -1532,42 +1545,13 @@ let place_edits output lowered returns ~number (place, leaving) =
             @ [ piece statement.last form.returned ])) ]
   | Left_by (Error_path _) -> []
 
-(* The name of a parameter that the call of [__tc_ret] passes an lvalue
-   of. The front end refuses a parameter without a name in a function
-   that gets [__tc_ret] (Return_form), but that of [(void)]. *)
-let parameter_name (parameter : Tree.parameter) =
-  let name =
-    match parameter.node.declarator with
-    | Named_parameter { declarator; _ } -> Tree.declared_name declarator
-    | Abstract_parameter _ -> None
-  in
-  match name with
-  | Some name -> name
-  | None -> invalid_arg "Lowering: a parameter without a name"
-
-(* The parameters that the call passes: none for [(void)], the one
-   parameter without a declarator that the front end lets through, and
-   the named ones of a variadic function. *)
-let parameter_names : Tree.parameters -> string list = function
-  | Identifier_list names ->
-      List.map (fun (name : Tree.parameter_name) -> name.name.node) names
-  | Prototype
-      {
-        parameters =
-          [ { node = { declarator = Abstract_parameter None; _ }; _ } ];
-        variadic = false;
-      } ->
-      []
-  | Prototype { parameters; variadic = _ } -> List.map parameter_name parameters
-
 (* Design 13.5: [typedef __typeof__(call of f) __tc_ret;], which the
    block around the body declares ({!body_blocks}). *)
 let return_typedef output (defers : Typec_sema.Expressions.function_defers) =
   let location = (tokens_of output).(defers.body.first).location in
   let lvalue name = Printf.sprintf "*(__typeof__(%s) *)0" name in
   let arguments =
-    Emitter.joined output location ~separator:", " lvalue
-      (parameter_names (Tree.defined_function defers.declarator).parameters)
+    Emitter.joined output location ~separator:", " lvalue defers.parameters
   in
   Printf.sprintf "typedef __typeof__(((__typeof__(%s) *)0)(%s)) %s;"
     defers.function_name arguments return_type_name
@@ -2050,15 +2034,24 @@ let text_edits output ~declarations ~void_field_spans ~replaced
   let tokens = tokens_of output in
   let answered = Typec_sema.Expressions.answered typed in
   let constructions = Typec_sema.Expressions.constructions typed in
-  let heads = cover (List.map (construction_head tokens) constructions) in
-  let in_head { span; _ } = covers heads ~first:span.first ~last:span.last in
+  (* A name inside tokens that a construct replaces whole is written by
+     the construct, if at all, and an edit of its own would overlap. *)
+  let replaced_whole =
+    cover
+      (List.map (construction_head tokens) constructions
+      @ List.concat_map (pattern_spans tokens)
+          (Typec_sema.Expressions.matchings typed))
+  in
+  let written_whole { span; _ } =
+    covers replaced_whole ~first:span.first ~last:span.last
+  in
   let removed span = { span; text = "" } in
   let dropped, extensions =
     with_extensions output holders
       (outermost
          (List.concat_map dropped_ranges answered
          @ List.map removed void_field_spans
-         @ List.filter (fun range -> not (in_head range)) replaced))
+         @ List.filter (fun range -> not (written_whole range)) replaced))
   in
   let dropped_spans = cover (List.map (fun range -> range.span) dropped) in
   let kept edit = not (goes_with dropped_spans edit) in

@@ -333,19 +333,29 @@ and purpose = Definition_check | For_instance of Ctype.instance
    check. The instances that the text uses first get texts by
    {!gets_texts}, whether the text is written or not. [parameters] holds the
    name of the typedef of each type parameter's argument, by the
-   parameter's reference, for the reading of an instance, and where
-   lowering writes the text [names] collects the name that it writes for
-   each use of a type parameter and each application.
+   parameter's reference, for the reading of an instance, and [names]
+   collects the name that lowering writes for each use of a type
+   parameter, each application and each token of a local, by its span,
+   which typing may read more than once.
    [void_field_spans] are the fields that a void argument removes (design
    3.5 rule 6). [of_type] says whether the text is a generic type's
-   definition. *)
+   definition. [locals] holds each local of a generic function's
+   definition that the reading has met (7.3 rule 7), by its reference,
+   with how an instance writes its declaration. *)
 and moved = {
   written : bool;
   of_type : bool;
   parameters : (Tree.reference * string) list;
-  mutable names : (Tree.span * string) list;
+  names : (Tree.span, string) Hashtbl.t;
   mutable void_field_spans : Tree.span list;
+  locals : (Tree.reference, local_declaration) Hashtbl.t;
 }
+
+(* How an instance writes the declaration of a local (design 7.3 rule
+   7): at the token that declares it, which the instance copies, or, for
+   a binding of a match, in the declaration that lowering writes for
+   the binding (13.5), whose token the instance does not copy. *)
+and local_declaration = At_its_token | Written_by_lowering
 
 (* The names that the reading of the text at [text_span] finds in it,
    latest first: those that it uses and those that it declares, which
@@ -386,7 +396,8 @@ and external_facts = {
 (* The record of a text that a reading of a generic's definition moves,
    before the reading finds anything in it. *)
 let fresh_moved ~written ~of_type parameters =
-  { written; of_type; parameters; names = []; void_field_spans = [] }
+  { written; of_type; parameters; names = Hashtbl.create 16;
+    void_field_spans = []; locals = Hashtbl.create 16 }
 
 (* How the definition of an instance is read: [read declaration f] runs
    [f] with the type parameters of [declaration] bound to the instance's
@@ -564,8 +575,8 @@ let finding state text_span read =
   let result = Fun.protect ~finally:(fun () -> state.found <- outer) read in
   (result, found)
 
-(* What [reference] denotes at the use of [name] at [span], if the reader
-   has met its declaration. A use of a generic function is no name of the
+(* What [reference] denotes at the use of [name] at [span], the token of
+   the name, if the reader has met its declaration. A use of a generic function is no name of the
    text where lowering writes it, which writes the name of an instance in
    its place (design 10.3), declared before the text by construction. *)
 let entity_used state span name reference =
@@ -628,7 +639,11 @@ let earlier_entity state span name (declared : Tree.declared) =
   | Some earlier -> (
       match Hashtbl.find_opt state.beside earlier with
       | Some passed_over -> passed_over
-      | None -> Some (referenced state span name earlier))
+      | None ->
+          (* The declaration uses the name at its token. *)
+          let (Ordinary_at token) = declared.id in
+          let at = { Tree.first = token; last = token } in
+          Some (referenced state at name earlier))
 
 (* Ordinary identifiers (6.2.2, 6.7p3, p4) *)
 
@@ -758,28 +773,47 @@ let record_again state name (declared : Tree.declared) (entity : entity) =
     Resolution.add_redeclared declared entity state.redeclared_at;
   record state name declared entity
 
+(* Design 7.3 rule 7: what the definition of a generic function
+   declares without linkage is a local of each of its instances, whose
+   declaration an instance writes as [local] says. *)
+let note_local state (declared : Tree.declared) local (entity : entity) =
+  match state.moved with
+  | Some moved
+    when (not moved.of_type) && linkage_of entity.declared = No_linkage ->
+      Hashtbl.replace moved.locals (Tree.In_tree declared.id) local
+  | Some _ | None -> ()
+
 (* Records what [declared] declares [name] as: a new entity, or [prior],
    the visible declaration it redeclares, with the composite of their
    types. [inexact] is the declaration's own; after an inexact [prior]
    the entity stays inexact, as the backend may keep an attribute that
-   a later declaration does not repeat. *)
-let bind_to state span name (declared : Tree.declared) prior ~inexact next =
-  if is_overload next then bind_overload state span name declared ~inexact next
-  else
-    match prior with
-    | None ->
-        record state name declared
-          { name; entity = fresh_entity state; declared = next; inexact }
-    | Some prior ->
-        record_again state name declared
-          { prior with
-            declared = redeclared state span name prior.declared next;
-            inexact = prior.inexact || inexact }
+   a later declaration does not repeat. Every declaration of C text and
+   every binding of a match is recorded here, and [local] says how an
+   instance writes it where it declares a local. *)
+let bind_to state span name (declared : Tree.declared) prior ~inexact ~local
+    next =
+  let entity =
+    if is_overload next then
+      bind_overload state span name declared ~inexact next
+    else
+      match prior with
+      | None ->
+          record state name declared
+            { name; entity = fresh_entity state; declared = next; inexact }
+      | Some prior ->
+          record_again state name declared
+            { prior with
+              declared = redeclared state span name prior.declared next;
+              inexact = prior.inexact || inexact }
+  in
+  note_local state declared local entity;
+  entity
 
-(* [bind_to] the declaration before [declared] in its scope. *)
+(* [bind_to] the declaration before [declared] in its scope, which C
+   text declares at its token. *)
 let bind state span name declared ~inexact next =
   bind_to state span name declared (earlier_entity state span name declared)
-    ~inexact next
+    ~inexact ~local:At_its_token next
 
 (* A declaration with linkage of a name whose declarations with linkage
    it does not see, as one in a block of another function: the same
@@ -1249,38 +1283,43 @@ let names_declared state definition (attribute : Tree.attribute) =
   | None, _ | Some _, None -> None
 
 (* Design 13.3, "Attributes in a generic": in the definition at
-   [definition], an attribute whose subject mentions a type parameter,
-   or whose arguments name what the definition declares, stands only
-   where the table records that both backends take it alike. One whose
-   subject no reading noted is refused, so a construct that the reading
-   misses costs a refusal and never an instance that the backend
-   rejects. *)
+   [definition], an attribute whose arguments name what the definition
+   declares is refused, and one whose subject mentions a type parameter
+   stands only where the table records that both backends take it
+   alike. One whose subject no reading noted is refused, so a construct
+   that the reading misses costs a refusal and never an instance that
+   the backend rejects. *)
 let check_generic_attribute state definition (attribute : Tree.attribute) =
   let name = attribute.node.name.node in
-  let refuse reason =
+  let refuse text =
     fail state attribute.span
       (Rule.message Generic_attribute
-         (Printf.sprintf
-            "the attribute %s %s, and the table of attributes does not \
-             record that both backends take it alike for every type"
-            (quote name) reason))
+         (Printf.sprintf "the attribute %s %s" (quote name) text))
   in
+  let refuse_subject reason =
+    refuse
+      (reason
+     ^ ", and the table of attributes does not record that both backends \
+        take it alike for every type")
+  in
+  (match names_declared state definition attribute with
+  | Some declared ->
+      refuse
+        ("names " ^ quote declared
+       ^ ", which the definition declares, and its arguments may name \
+          only what is declared outside the definition")
+  | None -> ());
   let alike =
     match find_attribute_entry name with
     | Some entry -> entry.alike
     | None -> false
   in
-  if not alike then begin
-    Option.iter
-      (fun declared ->
-        refuse
-          ("names " ^ quote declared ^ ", which the definition declares"))
-      (names_declared state definition attribute);
+  if not alike then
     match Hashtbl.find_opt state.attribute_subjects attribute.span.first with
     | Some false -> ()
-    | Some true -> refuse "stands on a subject that mentions a type parameter"
-    | None -> refuse "stands where typec does not read its subject"
-  end
+    | Some true ->
+        refuse_subject "stands on a subject that mentions a type parameter"
+    | None -> refuse_subject "stands where typec does not read its subject"
 
 let check_generic_attributes state definition =
   List.iter
@@ -1499,7 +1538,8 @@ let declare_in state scope span specified declared (derived : derived) =
       let has_linkage = has_linkage next in
       let inexact = specified.inexact in
       let bind_after prior =
-        bind_to state span name declared prior ~inexact next
+        bind_to state span name declared prior ~inexact ~local:At_its_token
+          next
       in
       let entity =
         match (earlier_entity state span name declared, scope) with
@@ -1798,7 +1838,7 @@ and universe_alias state span (alias : Tree.type_name) =
   | _ -> invalid_arg "Declarations.universe_alias"
 
 and typedef_type state span ~own name declaration =
-  match entity_used state span name declaration with
+  match entity_used state own name declaration with
   | Some { declared = Typedef { typedef_type; _ }; _ } ->
       note_parameter_use state own declaration;
       typedef_type
@@ -3270,15 +3310,22 @@ and note_application state instance arguments span =
    in the unit's own text, or in the definition of the instance being
    read where lowering writes it. The reading of an instance counts it
    whether lowering writes it or not, so that the chain of a definition
-   check counts as a definition does (3.5 rule 7). *)
+   check counts as a definition does (3.5 rule 7), and counts it once,
+   though typing may read the name again. *)
 and note_name state span name =
-  Option.iter
-    (fun link -> charge_reading state link (String.length name))
-    state.nesting;
+  let charge () =
+    Option.iter
+      (fun link -> charge_reading state link (String.length name))
+      state.nesting
+  in
   match state.moved with
   | Some moved ->
-      if moved.written then moved.names <- (span, name) :: moved.names
+      if not (Hashtbl.mem moved.names span) then begin
+        charge ();
+        Hashtbl.replace moved.names span name
+      end
   | None ->
+      charge ();
       let placements = state.placements in
       state.placements <-
         { placements with names = (span, name) :: placements.names }
@@ -3292,6 +3339,14 @@ and note_parameter_use state span reference =
       | Some name -> note_name state span name
       | None -> ())
   | None -> ()
+
+(* The name that lowering declares [name] under at [declared]: a
+   local's in an instance of a generic function (7.3 rule 7). *)
+and written_name state (declared : Tree.declared) name =
+  match state.moved with
+  | Some moved when Hashtbl.mem moved.locals (Tree.In_tree declared.id) ->
+      Encoding.local_name name
+  | Some _ | None -> name
 
 (* Design 10.3: the typedef of each argument that no earlier text
    declares stands at the first use of the instance, before the texts
@@ -3669,6 +3724,7 @@ and read_definition :
               let result = with_arguments state parameters arguments read in
               (result, state.typed)))
     in
+    note_locals state moved found;
     check_resolution state moved found generic;
     (match purpose with
     | For_instance instance when moved.written ->
@@ -3677,6 +3733,32 @@ and read_definition :
     result
   in
   Fun.protect ~finally:restore read_and_check
+
+(* Design 7.3 rule 7: each token of the text that names a local is
+   written under the local's name, its declaration where the text
+   copies it and every use. The uses are those that the reading noted
+   at their tokens, which the resolution check reads of every other
+   name, so a local that the check leaves out is renamed wherever it is
+   used. *)
+and note_locals state moved found =
+  let local_of (name : Resolution.name) =
+    match name.declaration with
+    | Ordinary reference -> Hashtbl.find_opt moved.locals reference
+    | Tag _ | Label _ -> None
+  in
+  let rename (name : Resolution.name) =
+    note_name state name.span (Encoding.local_name name.name)
+  in
+  let rename_declaration (own : Resolution.own) =
+    match local_of own.declared with
+    | Some At_its_token -> rename own.declared
+    | Some Written_by_lowering | None -> ()
+  in
+  let rename_use (use : Resolution.name) =
+    if Option.is_some (local_of use) then rename use
+  in
+  List.iter rename_declaration found.declares;
+  List.iter rename_use found.uses
 
 (* The name of the typedef of each argument of [instance], by the
    reference of its type parameter (design 10.3). *)
@@ -3688,7 +3770,7 @@ and argument_names generic (instance : Ctype.instance) =
 
 and note_instance_text state generic moved typed instance =
   let text =
-    { generic; names = moved.names;
+    { generic; names = List.of_seq (Hashtbl.to_seq moved.names);
       void_field_spans = moved.void_field_spans; typed }
   in
   let placements = state.placements in
@@ -3698,14 +3780,24 @@ and note_instance_text state generic moved typed instance =
 
 and check_resolution state moved found generic =
   let declared = definition_declared generic in
+  (* A local is written under a name of typec's (design 7.3 rule 7),
+     which no declaration of the unit hides or is hidden by. *)
+  let spelled (name : Resolution.name) =
+    match name.declaration with
+    | Ordinary reference -> not (Hashtbl.mem moved.locals reference)
+    | Tag _ | Label _ -> true
+  in
   let text =
     { Resolution.kind = Generic_definition;
       span = definition_span generic;
       (* The text is the declaration, which holds its own name. *)
       scope = declared.scope;
       own_place = Hashtbl.find state.definition_views declared.id;
-      uses = List.rev found.uses;
-      declares = List.rev found.declares }
+      uses = List.filter spelled (List.rev found.uses);
+      declares =
+        List.filter
+          (fun (own : Resolution.own) -> spelled own.declared)
+          (List.rev found.declares) }
   in
   let at = if moved.written then Some state.external_facts.texts_at else None in
   check_moved state text ~at
@@ -4163,6 +4255,7 @@ and typing state : Expressions.context =
     type_declaration =
       (fun declaration -> ignore (read_type_declaration state declaration));
     binding = bind_binding state;
+    written_name = written_name state;
     name_reading = name_reading state;
     needs_complete = needs_complete state;
     slice_instance = slice_instance state;
@@ -4352,7 +4445,8 @@ and bind_binding state (name : Tree.identifier) declared object_type =
   let earlier = earlier_entity state name.span name.node declared in
   (* A binding spells no type, so nothing in it is inexact. *)
   ignore
-    (bind_to state name.span name.node declared earlier ~inexact:false next)
+    (bind_to state name.span name.node declared earlier ~inexact:false
+       ~local:Written_by_lowering next)
 
 (* External declarations (6.9) *)
 

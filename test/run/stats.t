@@ -53,11 +53,11 @@ bytes and 256 for each byte of the unit.
   >     [ "$output_bytes" -ge "$unit_bytes" ] &&
   >     [ "$output_bytes" -le "$output_limit" ] || echo "limit: $cc"
   > done
-  instance_bytes=3215
+  instance_bytes=3239
   copy_bytes=160
   longest_instance_code=16
   longest_name=23
-  instance_bytes=3215
+  instance_bytes=3239
   copy_bytes=160
   longest_instance_code=16
   longest_name=23

@@ -97,6 +97,8 @@ let instance_name instance = (instance_c_name instance :> string)
 (* The prefix and kind word of the invented names of design 13.5. *)
 let argument_name encoding = "__tc_arg__" ^ encoding
 
+let local_name name = "__tc_local_" ^ name
+
 let variant_name : Ctype.variant_name -> Typec_syntax.Spelling.c_name =
   function
   | Declared name -> Typec_syntax.Spelling.declared name

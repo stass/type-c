@@ -207,8 +207,8 @@ type pattern_position = {
     variant of the object that it points to. *)
 type pointer_local = { local : int; local_variant : Ctype.variant_name }
 
-(** A binding of a match: its name and the field that it copies (design
-    4.1 rule 4, 4.7 rule 7). *)
+(** A binding of a match: the name that lowering declares it under and
+    the field that it copies (design 4.1 rule 4, 4.7 rule 7). *)
 type binding = { name : string; field : reach }
 
 (** An arm of a match: its number from 0 in source order, which a leaf
@@ -418,11 +418,13 @@ val slice_makings : t -> slice_making list
 type returns = Returns_void | Returns_value
 
 (** A function definition whose body holds a defer statement: its name
-    and declarator, which the [__tc_ret] of 13.5 is written from, the
-    span of its body, and its defer statements in source order. *)
+    and declarator, and the names of the parameters that the call in
+    the [__tc_ret] of 13.5 passes, which it is written from, the span of
+    its body, and its defer statements in source order. *)
 type function_defers = {
   function_name : string;
   declarator : Tree.declarator;
+  parameters : string list;
   body : Tree.span;
   returns : returns;
   sites : Reachability.defer_site list;
@@ -566,6 +568,9 @@ type context = {
   tags : Ctype.tags;
   fail : 'a. Tree.span -> Rule.diagnostic -> 'a;
   entity : Tree.span -> string -> Tree.reference -> Entity.t;
+      (** what the use of the name at the span, its token, denotes; a
+          generic function's instance writes the token under another
+          name where it names a local (design 7.3 rule 7) *)
   overloaded : Tree.reference -> bool;
   generic_definition : bool;
   generic_function : Tree.reference -> Ctype.record_tag list option;
@@ -579,6 +584,10 @@ type context = {
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
       (** declares a binding of a match as an object of the type *)
+  written_name : Tree.declared -> string -> string;
+      (** the name that lowering declares the name at the declaration
+          under: the name itself, or a local's in an instance of a
+          generic function (design 7.3 rule 7) *)
   name_reading : int -> (unit -> name_reading) -> name_reading;
       (** the reading of the name at the token that typing recorded
           first, else the one that the function gives, which it

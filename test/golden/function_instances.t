@@ -14,9 +14,9 @@ definition. A generic function that is not used leaves no text.
   > EOF
   $ ./golden.exe swap.tc | grep -v '^#' | grep -v '^ *$'
   typedef int __tc_arg__i;
-  static void swap__i ( __tc_arg__i * a , __tc_arg__i * b )
+  static void swap__i ( __tc_arg__i * __tc_local_a , __tc_arg__i * __tc_local_b )
   ;
-  static void swap__i ( __tc_arg__i * a , __tc_arg__i * b ) { __tc_arg__i t = * a ; * a = * b ; * b = t ; }
+  static void swap__i ( __tc_arg__i * __tc_local_a , __tc_arg__i * __tc_local_b ) { __tc_arg__i __tc_local_t = * __tc_local_a ; * __tc_local_a = * __tc_local_b ; * __tc_local_b = __tc_local_t ; }
   void f(int *a, int *b) { 
   swap__i
   (a, b); (
@@ -36,9 +36,9 @@ with the one `static` that every instance has.
   > EOF
   $ ./golden.exe static.tc | grep -v '^#' | grep -v '^ *$' | head -4
   typedef int __tc_arg__i;
-  inline static __tc_arg__i id__i ( __tc_arg__i x )
+  inline static __tc_arg__i id__i ( __tc_arg__i __tc_local_x )
   ;
-  inline static __tc_arg__i id__i ( __tc_arg__i x ) { return x ; }
+  inline static __tc_arg__i id__i ( __tc_arg__i __tc_local_x ) { return __tc_local_x ; }
 
 Generic functions that call each other: each instance's prototype
 stands before the definition that calls it.
@@ -51,11 +51,11 @@ stands before the definition that calls it.
   > EOF
   $ ./golden.exe parity.tc | grep -v '^#' | grep -v '^ *$'
   typedef long __tc_arg__l;
-  static int is_odd__l ( const __tc_arg__l * p , int n )
+  static int is_odd__l ( const __tc_arg__l * __tc_local_p , int __tc_local_n )
   ;
-  static int is_even__l ( const __tc_arg__l * p , int n )
-  ; static int is_odd__l ( const __tc_arg__l * p , int n ) { return n ? is_even__l ( p , n - 1 ) : 0 ; }
-  static int is_even__l ( const __tc_arg__l * p , int n ) { return n ? is_odd__l ( p , n - 1 ) : 1 ; }
+  static int is_even__l ( const __tc_arg__l * __tc_local_p , int __tc_local_n )
+  ; static int is_odd__l ( const __tc_arg__l * __tc_local_p , int __tc_local_n ) { return __tc_local_n ? is_even__l ( __tc_local_p , __tc_local_n - 1 ) : 0 ; }
+  static int is_even__l ( const __tc_arg__l * __tc_local_p , int __tc_local_n ) { return __tc_local_n ? is_odd__l ( __tc_local_p , __tc_local_n - 1 ) : 1 ; }
   int f(const long *p) { return 
   is_odd__l
   (p, 3); }
@@ -238,7 +238,8 @@ cites the use that began the chain (line 51).
 
 The error stands at the call that defines the instance, not at a later
 call of the same instance: each instance of `big` is charged its 16385
-tokens, and the 32nd passes the budget at its first call (line 74).
+tokens and the 4097 names of locals that it writes (design 7.3 rule 7),
+and the 30th passes the budget at its first call (line 72).
 
   $ { printf 'generic(T) void big(T *p) { int a;'; i=0
   >   while [ $i -lt 4095 ]; do printf ' a = 0;'; i=$((i + 1)); done
@@ -249,7 +250,7 @@ tokens, and the 32nd passes the budget at its first call (line 74).
   >   done; echo '}'
   > } > again.tc
   $ ./golden.exe again.tc 2>&1
-  again.tc:74: error: the use would define the instance 'big(struct s32)', whose reading would pass the instance budget of typec, 16777216 bytes of text for the instances of the unit, those that definition checks read included, in a chain of instances that the use at again.tc:74 began
+  again.tc:72: error: the use would define the instance 'big(struct s30)', whose reading would pass the instance budget of typec, 16777216 bytes of text for the instances of the unit, those that definition checks read included, in a chain of instances that the use at again.tc:72 began
   [1]
 
 A definition check reads each instance once: a ladder of 40 generic
@@ -274,7 +275,7 @@ ends, so `f__l` keeps its own parameters across the call of `f__c`.
   > unsigned long h(long *p) { return f(p, 1); }
   > EOF
   $ ./golden.exe recursive.tc | grep -v '^#' | grep 'f__l.*{'
-  ; static unsigned long f__l ( __tc_arg__l * p , int n ) { if ( n ) f__c ( ( char * ) p , 0 ) ; return g__l ( p ) ; } static unsigned long f__c ( __tc_arg__c * p , int n ) { if ( n ) f__c ( ( char * ) p , 0 ) ; return g__c ( p ) ; }
+  ; static unsigned long f__l ( __tc_arg__l * __tc_local_p , int __tc_local_n ) { if ( __tc_local_n ) f__c ( ( char * ) __tc_local_p , 0 ) ; return g__l ( __tc_local_p ) ; } static unsigned long f__c ( __tc_arg__c * __tc_local_p , int __tc_local_n ) { if ( __tc_local_n ) f__c ( ( char * ) __tc_local_p , 0 ) ; return g__c ( __tc_local_p ) ; }
 
 The check of a definition reads it against its opaque types before any
 instance that its calls define, which neither changes what the check
@@ -316,9 +317,9 @@ needs.
   $ ./golden.exe head.tc | grep -v '^#' | grep -v '^ *$' | grep -v pack_probe
   typedef int __tc_arg__i; struct box__i; typedef struct box__i box__i;
   struct box__i { __tc_arg__i v ; } ;
-  static box__i wrap__i ( __tc_arg__i x )
+  static box__i wrap__i ( __tc_arg__i __tc_local_x )
   ;
-  static box__i wrap__i ( __tc_arg__i x ) { box__i b ; b . v = x ; return b ; }
+  static box__i wrap__i ( __tc_arg__i __tc_local_x ) { box__i __tc_local_b ; __tc_local_b . v = __tc_local_x ; return __tc_local_b ; }
   int f(void) { return 
   wrap__i
   (1).v; }
@@ -336,9 +337,9 @@ and the definition agree on it.
   $ ./golden.exe concrete_head.tc | grep -v '^#' | grep -v '^ *$' | grep -v pack_probe
   typedef int __tc_arg__i; struct box__i; typedef struct box__i box__i;
   struct box__i { __tc_arg__i v ; } ;
-  static box__i count__i ( __tc_arg__i x )
+  static box__i count__i ( __tc_arg__i __tc_local_x )
   ;
-  static box__i count__i ( __tc_arg__i x ) { box__i b ; b . v = 1 ; return b ; }
+  static box__i count__i ( __tc_arg__i __tc_local_x ) { box__i __tc_local_b ; __tc_local_b . v = 1 ; return __tc_local_b ; }
   int f(void) { return 
   count__i
   (1).v; }
@@ -390,9 +391,9 @@ them too.
   typedef __tc_arg__i * ptr__i ;
   typedef long __tc_arg__l;
   typedef ptr__i handle__l ;
-  static int get__l ( handle__l h , __tc_arg__l x )
+  static int get__l ( handle__l __tc_local_h , __tc_arg__l __tc_local_x )
   ;
-  static int get__l ( handle__l h , __tc_arg__l x ) { return 0 ; }
+  static int get__l ( handle__l __tc_local_h , __tc_arg__l __tc_local_x ) { return 0 ; }
   int f(
   handle__l
    h) { return 
@@ -417,11 +418,11 @@ function: a use there is a use in the body.
   > EOF
   $ ./golden.exe body_declarator.tc | grep -v '^#' | grep -v '^ *$' | grep -v pack_probe
   typedef int __tc_arg__i;
-  static int g__i ( __tc_arg__i x )
+  static int g__i ( __tc_arg__i __tc_local_x )
   ;
-  static int one__i ( __tc_arg__i x )
-  ; static int g__i ( __tc_arg__i x ) { int ( * fp ) ( int a [ sizeof ( one__i ( x ) ) ] ) = 0 ; return fp == 0 ; }
-  static int one__i ( __tc_arg__i x ) { return 1 ; }
+  static int one__i ( __tc_arg__i __tc_local_x )
+  ; static int g__i ( __tc_arg__i __tc_local_x ) { int ( * __tc_local_fp ) ( int __tc_local_a [ sizeof ( one__i ( __tc_local_x ) ) ] ) = 0 ; return __tc_local_fp == 0 ; }
+  static int one__i ( __tc_arg__i __tc_local_x ) { return 1 ; }
   int f(void) { return 
   g__i
   (1); }
@@ -444,8 +445,8 @@ definition, which C23 puts before every specifier.
   > void f(int *p) { id(p); }
   > EOF
   $ ./golden.exe attribute.tc | grep 'id__i ('
-  [ [ maybe_unused ] ] static void id__i ( __tc_arg__i * x )
-  [ [ maybe_unused ] ] static void id__i ( __tc_arg__i * x ) { }
+  [ [ maybe_unused ] ] static void id__i ( __tc_arg__i * __tc_local_x )
+  [ [ maybe_unused ] ] static void id__i ( __tc_arg__i * __tc_local_x ) { }
 
 An instance has internal linkage, so no inline definition of a function
 with external linkage uses one in its head or its body (C11 6.7.4p3);
@@ -492,9 +493,9 @@ variant, the name is the constructor in the check and in each instance.
   > generic(T) void fail(eval_error *out, T Overflow) { *out = Overflow; }
   > void f(eval_error *e) { put(e, DivByZero); fail(e, 0); }
   > EOF
-  $ ./golden.exe readings.tc | grep '{ \* out ='
-  static void put__10eval_error ( __tc_arg__10eval_error * out , __tc_arg__10eval_error Overflow ) { * out = Overflow ; }
-  static void fail__i ( eval_error * out , __tc_arg__i Overflow ) { * out = ((struct eval_error){ .tag = eval_error_Overflow }) ; }
+  $ ./golden.exe readings.tc | grep '{ \* __tc_local_out ='
+  static void put__10eval_error ( __tc_arg__10eval_error * __tc_local_out , __tc_arg__10eval_error __tc_local_Overflow ) { * __tc_local_out = __tc_local_Overflow ; }
+  static void fail__i ( eval_error * __tc_local_out , __tc_arg__i __tc_local_Overflow ) { * __tc_local_out = ((struct eval_error){ .tag = eval_error_Overflow }) ; }
 
 Design 3.5 rule 8: a type declaration in the body of a generic
 function is declared in each instance as it is at the definition,
@@ -514,14 +515,14 @@ typedef, the variant to its structure.
   $ ./golden.exe body_types.tc | grep -v '^#' | grep -v '^ *$' |
   >   grep -v pack_probe
   typedef int __tc_arg__i;
-  static void put__i ( __tc_arg__i * out , __tc_arg__i value )
+  static void put__i ( __tc_arg__i * __tc_local_out , __tc_arg__i __tc_local_value )
   ;
-  static void put__i ( __tc_arg__i * out , __tc_arg__i value ) {
+  static void put__i ( __tc_arg__i * __tc_local_out , __tc_arg__i __tc_local_value ) {
   typedef int d ;
   struct o; typedef struct o o; enum o_tag { o_Some, o_None }; struct o { enum o_tag tag; union { struct { __tc_arg__i x ; } Some; } u; };
-  d n = ( d ) 0 ;
-  o w = { .tag = o_Some, .u.Some = {  value  } } ;
-  * out = value ; ( void ) n ; ( void ) w ;
+  d __tc_local_n = ( d ) 0 ;
+  o __tc_local_w = { .tag = o_Some, .u.Some = {  __tc_local_value  } } ;
+  * __tc_local_out = __tc_local_value ; ( void ) __tc_local_n ; ( void ) __tc_local_w ;
   }
   void f(int *out) { 
   put__i

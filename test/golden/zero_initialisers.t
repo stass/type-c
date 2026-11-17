@@ -25,12 +25,12 @@ do with the form.
   > void f(void) { places(double)(); }
   > EOF
   $ ./golden.exe places.tc | grep -e extension -e '{}'
-  __extension__ __tc_arg__d u = { } ;
-  __extension__ const __tc_arg__d c = { } ;
-  __extension__ static __tc_arg__d s = { } ;
-  __extension__ __tc_arg__d row [ 2 ] = { } , * p = & __extension__ ( __tc_arg__d ) { } ;
-  __extension__ struct { __tc_arg__d a ; int b ; } head = { } ;
-  __extension__ struct { __tc_arg__d a ; int b ; } sub = { { } , 5 } ;
+  __extension__ __tc_arg__d __tc_local_u = { } ;
+  __extension__ const __tc_arg__d __tc_local_c = { } ;
+  __extension__ static __tc_arg__d __tc_local_s = { } ;
+  __extension__ __tc_arg__d __tc_local_row [ 2 ] = { } , * __tc_local_p = & __extension__ ( __tc_arg__d ) { } ;
+  __extension__ struct { __tc_arg__d a ; int b ; } __tc_local_head = { } ;
+  __extension__ struct { __tc_arg__d a ; int b ; } __tc_local_sub = { { } , 5 } ;
   use ( & __extension__ ( struct { __tc_arg__d a ; int b ; } ) { { } , 5 } ) ;
 
 An initialiser of an object whose type mentions no type parameter is
@@ -51,8 +51,8 @@ definition's own text, which only its instances write.
   0
   [1]
   $ ./golden.exe kept.tc | grep -o -e '.* = { *0 *}'
-  int n = { 0 }
-  struct { int a ; long b ; } w = { 0 }
+  int __tc_local_n = { 0 }
+  struct { int a ; long b ; } __tc_local_w = { 0 }
   void f(long *q) { long z = {0}
 
 The text that lowering moves keeps the form: a deferred statement at
@@ -74,9 +74,9 @@ each of its copies and the operand of a try where its prelude holds it.
   $ ./golden.exe moved.tc | grep -o -e '{ { __extension__[^}]*}' \
   >   -e 'check__l ( ( const __tc_arg__l \* ) & __extension__ ([^)]*) { } )'
   check__l ( ( const __tc_arg__l * ) & __extension__ ( __tc_arg__l ) { } )
-  { { __extension__ __tc_arg__l d = { }
-  { { __extension__ __tc_arg__l d = { }
-  { { __extension__ __tc_arg__l d = { }
+  { { __extension__ __tc_arg__l __tc_local_d = { }
+  { { __extension__ __tc_arg__l __tc_local_d = { }
+  { { __extension__ __tc_arg__l __tc_local_d = { }
 
 The braces of the list stay, with what lowering writes after them: the
 end of the conversion of a slice whose compound literal the list ends.
@@ -90,8 +90,8 @@ end of the conversion of a slice whose compound literal the list ends.
   > }
   > void g(void) { f(long)(); }
   > EOF
-  $ ./golden.exe conversion.tc | grep -e ' c = '
-  slice__Kl c = ((void)(__tc_s0 = ( __extension__ ( slice__l ) { } )), (struct slice__Kl){ __tc_s0.data, __tc_s0.len }) ;
+  $ ./golden.exe conversion.tc | grep -e ' __tc_local_c = '
+  slice__Kl __tc_local_c = ((void)(__tc_s0 = ( __extension__ ( slice__l ) { } )), (struct slice__Kl){ __tc_s0.data, __tc_s0.len }) ;
 
 The form sets three limits. A variable length array takes no
 initialiser in C11, and the backends would give it {} as C23 does.
@@ -117,7 +117,7 @@ A pointer to a variable length array is no array, and takes it.
   > void g(void) { f(int)(3); }
   > EOF
   $ ./golden.exe vla_pointer.tc | grep extension
-  static void f__i ( int n ) { __extension__ __tc_arg__i ( * p ) [ n ] = { } ; ( void ) p ; }
+  static void f__i ( int __tc_local_n ) { __extension__ __tc_arg__i ( * __tc_local_p ) [ __tc_local_n ] = { } ; ( void ) __tc_local_p ; }
 
 Apple Clang 21 does not read __extension__ before a declaration in the
 first clause of a for statement, so none there holds the form.
@@ -146,7 +146,7 @@ declaration in a statement expression there.
   $ ./golden.exe for_literal.tc |
   >   grep -o -e 'p = & __extension__ ([^)]*) { }' -e '__extension__ [^=]*= { }'
   p = & __extension__ ( __tc_arg__i ) { }
-  __extension__ __tc_arg__i t = { }
+  __extension__ __tc_arg__i __tc_local_t = { }
 
 Apple Clang 21 refuses braces around the initialiser of an object
 whose own type is atomic, as an object or as a subobject.
@@ -182,8 +182,8 @@ it whole.
   > void g(void) { f(int)(); }
   > EOF
   $ ./golden.exe atomic_whole.tc | grep extension
-  __extension__ struct { __tc_arg__i * _Atomic a ; int b ; } w = { } ;
-  __extension__ __tc_arg__i * _Atomic row [ 2 ] = { } ;
+  __extension__ struct { __tc_arg__i * _Atomic a ; int b ; } __tc_local_w = { } ;
+  __extension__ __tc_arg__i * _Atomic __tc_local_row [ 2 ] = { } ;
 
 The check classifies every braced list that the parser reads in the
 definition, head and body, as one that lowering writes as {} or one
@@ -246,8 +246,8 @@ there is the argument's to decide.
   > void g(void) { f(char)(1); }
   > EOF
   $ ./golden.exe placed.tc | grep -o -e '[^ ;]* = {.*} ;'
-  w = { x , . a = { } } ;
-  v = { x , x , { 0 } } ;
+  __tc_local_w = { __tc_local_x , . a = { } } ;
+  __tc_local_v = { __tc_local_x , __tc_local_x , { 0 } } ;
 
 A braced initialiser of an object whose type typec does not compute,
 or that holds one, is an error in a generic function, as the type may
@@ -335,8 +335,8 @@ part of that check, and its instances write the form.
   > unsigned long h(void) { return g(int)(); }
   > EOF
   $ ./golden.exe nested.tc | grep -o -e '__extension__ [^=]*= { }'
-  __extension__ __tc_arg__i x = { }
-  __extension__ struct { __tc_arg__i a ; int b ; } y = { }
+  __extension__ __tc_arg__i __tc_local_x = { }
+  __extension__ struct { __tc_arg__i a ; int b ; } __tc_local_y = { }
 
 An expression initialises such an object, and outside a generic
 function the type mentions no type parameter.
@@ -358,7 +358,7 @@ function the type mentions no type parameter.
   > }
   > EOF
   $ ./golden.exe unknown_kept.tc | grep -o -e '[yz] = [^;]*;'
-  y = p [ 0 ] ;
+  y = __tc_local_p [ 0 ] ;
   z = {0};
 
 The prelude of a try that the statement holds goes before the

@@ -69,6 +69,11 @@ val argument_name : string -> string
 (** The typedef that an instance names the argument of this encoding
     through (design 10.3), as in [__tc_arg__Pi] for [int *]. *)
 
+val local_name : string -> string
+(** The name that an instance of a generic function declares a local of
+    the definition under (design 7.3 rule 7), as in [__tc_local_n] for
+    [n]. *)
+
 val variant_name : Ctype.variant_name -> Typec_syntax.Spelling.c_name
 (** The name that a variant lowers to, which begins each name that it
     derives (design 10.1 rule 6): its declared name, or its instance

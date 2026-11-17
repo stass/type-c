@@ -1403,7 +1403,7 @@ stands.
   > generic(T) void f(T t) { char b[8] __attribute__((aligned(sizeof(t)))); }
   > EOF
   $ ./golden.exe buffer.tc
-  buffer.tc:1: error: the attribute 'aligned' names 't', which the definition declares, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
+  buffer.tc:1: error: the attribute 'aligned' names 't', which the definition declares, and its arguments may name only what is declared outside the definition [generic-attribute]
   [1]
   $ cat > vector.tc <<'EOF'
   > generic(T) void f(T *p) { (void)sizeof(T __attribute__((vector_size(16)))); }
@@ -1452,7 +1452,7 @@ stands.
   > }
   > EOF
   $ ./golden.exe alignas_names.tc
-  alignas_names.tc:5: error: the attribute 'aligned' names 'A', which the definition declares, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
+  alignas_names.tc:5: error: the attribute 'aligned' names 'A', which the definition declares, and its arguments may name only what is declared outside the definition [generic-attribute]
   [1]
   $ cat > alignas_tag.tc <<'EOF'
   > generic(T) void f(T *p)
@@ -1462,7 +1462,7 @@ stands.
   > }
   > EOF
   $ ./golden.exe alignas_tag.tc
-  alignas_tag.tc:4: error: the attribute 'aligned' names 's', which the definition declares, and the table of attributes does not record that both backends take it alike for every type [generic-attribute]
+  alignas_tag.tc:4: error: the attribute 'aligned' names 's', which the definition declares, and its arguments may name only what is declared outside the definition [generic-attribute]
   [1]
   $ cat > pointer.tc <<'EOF'
   > generic(T) void f(T *p) { T *__attribute__((aligned(8))) q = p; }

@@ -132,6 +132,7 @@ type returns = Returns_void | Returns_value
 type function_defers = {
   function_name : string;
   declarator : Tree.declarator;
+  parameters : string list;
   body : Tree.span;
   returns : returns;
   sites : Reachability.defer_site list;
@@ -733,6 +734,7 @@ type context = {
   declaration : initialiser_holder -> Tree.declaration -> unit;
   type_declaration : Tree.scoped_type_declaration -> unit;
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
+  written_name : Tree.declared -> string -> string;
   name_reading : int -> (unit -> name_reading) -> name_reading;
   needs_complete : Ctype.t -> unit;
   slice_instance : Tree.span -> Ctype.t -> Ctype.t;
@@ -6218,7 +6220,8 @@ and refuse_shared_binding context = function
 
 and declare_binding context (found : found_binding) =
   context.binding found.identifier found.declared found.object_type;
-  { name = found.identifier.node; field = found.copied }
+  { name = context.written_name found.declared found.identifier.node;
+    field = found.copied }
 
 (* A field type is unqualified and no array (design 3.2 rule 4), so it
    takes [const]. *)
@@ -6281,6 +6284,26 @@ and stored_pointer (operand : Tree.expression) =
       true
   | _ -> false
 
+(* The names of the parameters that the call of [__tc_ret] passes an
+   lvalue of (design 13.5), as lowering declares them. A parameter
+   without a name passes none: it is the one of [(void)], or the front
+   end refuses it in a function that gets [__tc_ret] (Return_form). *)
+let call_parameters context (declarator : Tree.declarator) =
+  let named (parameter : Tree.parameter) =
+    match parameter.node.declarator with
+    | Named_parameter { declarator; declared } ->
+        Option.map
+          (context.written_name declared)
+          (Tree.declared_name declarator)
+    | Abstract_parameter _ -> None
+  in
+  let listed (name : Tree.parameter_name) =
+    context.written_name name.declared name.name.node
+  in
+  match (Tree.defined_function declarator).parameters with
+  | Identifier_list names -> List.map listed names
+  | Prototype { parameters; variadic = _ } -> List.filter_map named parameters
+
 (* The defer statements of the body, which reachability finds once
    typing has read it, as its facts need, and the function around them
    that the form of a return in their scopes needs (design 13.5). *)
@@ -6295,8 +6318,9 @@ let record_defers context ~name ~declarator ~enclosing (block : Tree.block) =
         if returns_void enclosing then Returns_void else Returns_value
       in
       let recorded =
-        { function_name = name; declarator; body = block.span; returns;
-          sites }
+        { function_name = name; declarator;
+          parameters = call_parameters context declarator; body = block.span;
+          returns; sites }
       in
       context.typed.defers <- recorded :: context.typed.defers;
       Some recorded

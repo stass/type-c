@@ -178,3 +178,53 @@ instance runs as the plain function with the same body does.
   > done
   3 3 3 3
   3 3 3 3
+
+An instance stands at the first use of its generic function, where a
+file-scope declaration made after the definition is in scope, and each
+local of the definition is written under a name of typec's (design 7.3
+rule 7), so that none hides such a declaration and the program builds
+under -Wshadow: a parameter and an object named like a later object, a
+typedef name and an enumeration constant named like later ones, the
+bindings of a match, and an object named like a later function. A plain
+function keeps the names that the source spells.
+
+  $ cat > locals.tc <<'EOF'
+  > #include <stdio.h>
+  > type outcome = | Done(int value) | Failed(int code);
+  > generic(T) static T twice(T v) { T n = v; return n; }
+  > generic(T) static int hidden(T *p) {
+  >   typedef int count;
+  >   enum { step = 2 };
+  >   count total = step;
+  >   outcome o = Done(total);
+  >   match (o) {
+  >   case Done(value):
+  >     total += value;
+  >     break;
+  >   case Failed(code):
+  >     total = code;
+  >     break;
+  >   }
+  >   int report = total + (p != 0);
+  >   return report;
+  > }
+  > int n = 20;
+  > typedef long count;
+  > int step, value, code, total;
+  > static int report(void) { return 1; }
+  > static int plain(int k) { int m = k; return m; }
+  > int main(void) {
+  >   int i = 0;
+  >   printf("%d %d %d\n", twice(n), hidden(&i), plain(3) + report());
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -Wshadow -o locals locals.tc && ./locals
+  > done
+  20 5 4
+  20 5 4
+  $ typec --emit-c -o - locals.tc | grep -e 'twice__i (' -e 'int plain('
+  static int plain(int k) { int m = k; return m; }
+  static __tc_arg__i twice__i ( __tc_arg__i __tc_local_v )
+  static __tc_arg__i twice__i ( __tc_arg__i __tc_local_v ) { __tc_arg__i __tc_local_n = __tc_local_v ; return __tc_local_n ; }

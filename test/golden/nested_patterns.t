@@ -402,3 +402,44 @@ __tc_arm0, then one switch on it over the arms (13.5).
    } __builtin_trap(); }
   default: __builtin_trap(); } }
   }
+
+The type name of a typed binding goes with the labels that the match
+replaces, whatever lowering writes for a name in it: an application,
+and in an instance a local typedef name (design 7.3 rule 7), in an arm
+and in a test.
+
+  $ cat > typed_names.tc <<'EOF'
+  > type inner = | X(int a) | Y;
+  > type outer = | W(inner i) | Z;
+  > type box(T) = | Full(T *a) | Empty;
+  > type boxed = | B(box(int) i) | N;
+  > generic(T) static int f(T *p) {
+  >   typedef inner in2;
+  >   outer o = W(X(3));
+  >   if (case W(in2 w) = o)
+  >     (void)w;
+  >   match (o) {
+  >   case W(in2 v):
+  >     match (v) { case X(a): return a + (p != 0); case Y: return 1; }
+  >   case Z:
+  >     return 0;
+  >   }
+  > }
+  > static int g(void) {
+  >   boxed o = B(Full((int *)0));
+  >   match (o) {
+  >   case B(box(int) v):
+  >     match (v) { case Full(a): return a != 0; case Empty: return 1; }
+  >   case N:
+  >     return 0;
+  >   }
+  > }
+  > int use(int *q) { return f(q) + g(); }
+  > EOF
+  $ ./golden.exe typed_names.tc | grep -o '__typeof__([^)]*) [_a-z0-9]* ='
+  __typeof__(__tc_match0->u.B.i) v =
+  __typeof__(__tc_match1->u.Full.a) a =
+  __typeof__(__tc_match0->tag) __tc_tag0 =
+  __typeof__(__tc_match0->u.W.i) __tc_local_w =
+  __typeof__(__tc_match1->u.W.i) __tc_local_v =
+  __typeof__(__tc_match2->u.X.a) __tc_local_a =
