@@ -750,15 +750,17 @@ compiler's runtime helpers as criterion 1 does.
    README defines a pass: the check task prints ten lines (50000
    ticks), every one of them `PASS`, before a timeout stops QEMU, since
    the demo never exits. Each `PASS` line says that every demo task has
-   made progress since the last one. A build of the demo with Clang is
-   provisional, since the demo's Makefile names GCC: a Clang build of
-   the original settles it, and if none can be made, Clang's object is
-   held to criteria 1 and 6 only.
+   made progress since the last one. Clang builds only the stream
+   buffer's object; the rest of the demo stays GCC's, at its default
+   short enumerations, which is sound because no structure shared
+   across that boundary holds an enumeration.
 3. With each compiler at -Os and `--trap-function`, a test task that
-   overwrites the read index of a message buffer with a value past the
-   end of its storage makes the next receive call the trap function,
-   which the pilot defines to print a line and stop the demo. The
-   original reads past the storage there. A corrupted length prefix
+   overwrites the read index of a message buffer with a value outside
+   its storage makes the next receive call the trap function, which
+   the pilot defines to print a line and stop the demo. The original
+   reads outside the storage for a value that wraps, such as
+   `0xffffffff`, which its assertion passes; a plain value past the
+   end stops at the assertion instead. A corrupted length prefix
    is no such test: the original clamps the length to the bytes
    available (`prvReadMessageFromBuffer`), so a faithful port reads
    within the storage too.
