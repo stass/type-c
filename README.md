@@ -22,89 +22,110 @@ the language is designed but not built yet ([Status](#status)).
 
 ## A first look
 
-A program that adds up the bytes that one user uploaded, from a log of
-events. `user_id` is a distinct type, `event` and `log_error` are
-variants, `result(event, log_error)` is an instance of a generic type
-that every Type-C file has, `try` passes an error on to the caller, and
-`defer` closes the log on every way out of the function:
+An evaluator of arithmetic expression trees, which reports a division
+by zero or an overflow as a value instead of crashing:
 
-<!-- file: uploads.tc -->
+<!-- file: eval.tc -->
 ```c
+#include <limits.h>
 #include <stdio.h>
 
-type user_id = distinct unsigned;
+type expr =
+  | Num(int value)
+  | Add(const expr *l, const expr *r)
+  | Mul(const expr *l, const expr *r)
+  | Div(const expr *l, const expr *r);
 
-type event = | Login(user_id user) | Upload(user_id user, long bytes);
+type eval_error = | DivByZero | Overflow;
 
-type log_error = | CannotOpen | BadLine(int number);
-
-static result(event, log_error) parse(const char *line, int number) {
-  unsigned user;
-  long bytes;
-  if (sscanf(line, "upload %u %ld", &user, &bytes) == 2)
-    return Ok(Upload((user_id)user, bytes));
-  if (sscanf(line, "login %u", &user) == 1)
-    return Ok(Login((user_id)user));
-  return Err(BadLine(number));
+static result(int, eval_error) eval(const expr *e) {
+  int a, b, n;
+  match (*e) {
+  case Num(value):
+    return Ok(value);
+  case Add(l, r):
+    a = try eval(l);
+    b = try eval(r);
+    if (__builtin_add_overflow(a, b, &n))
+      return Err(Overflow);
+    return Ok(n);
+  case Mul(l, r):
+    a = try eval(l);
+    b = try eval(r);
+    if (__builtin_mul_overflow(a, b, &n))
+      return Err(Overflow);
+    return Ok(n);
+  case Div(l, r):
+    a = try eval(l);
+    b = try eval(r);
+    if (b == 0)
+      return Err(DivByZero);
+    if (a == INT_MIN && b == -1)
+      return Err(Overflow);
+    return Ok(a / b);
+  }
 }
 
-static result(long, log_error) uploaded(const char *path, user_id user) {
-  FILE *log = fopen(path, "r");
-  if (!log)
-    return Err(CannotOpen);
-  defer fclose(log);
-  char line[128];
-  long total = 0;
-  for (int number = 1; fgets(line, sizeof line, log); number++) {
-    event e = try parse(line, number);
-    if (case Upload(who, bytes) = e)
-      if (who == user)
-        total += bytes;
+static void show(const expr *e) {
+  match (eval(e)) {
+  case Ok(value):
+    printf("%d\n", value);
+    return;
+  case Err(error):
+    match (error) {
+    case DivByZero:
+      printf("division by zero\n");
+      return;
+    case Overflow:
+      printf("overflow\n");
+      return;
+    }
   }
-  return Ok(total);
 }
 
 int main(void) {
-  match (uploaded("events.log", (user_id)7)) {
-  case Ok(total):
-    printf("user 7 uploaded %ld bytes\n", total);
-    return 0;
-  case Err(error):
-    match (error) {
-    case CannotOpen:
-      fprintf(stderr, "cannot open events.log\n");
-      break;
-    case BadLine(number):
-      fprintf(stderr, "events.log:%d: not an event\n", number);
-      break;
-    }
-    return 1;
-  }
+  expr two = Num(2), three = Num(3), four = Num(4), zero = Num(0);
+  expr sum = Add(&three, &four);
+  expr ratio = Div(&sum, &zero);
+  expr good = Mul(&two, &sum);    /* 2 * (3 + 4) */
+  expr bad = Mul(&two, &ratio);   /* 2 * ((3 + 4) / 0) */
+  show(&good);
+  show(&bad);
 }
 ```
 
-<!-- file: events.log -->
-```text
-login 7
-upload 7 1200
-login 3
-upload 3 50
-upload 7 300
-```
-
 ```console
-$ typec -std=c11 -Wall -Wextra uploads.tc -o uploads
-$ ./uploads
-user 7 uploaded 1500 bytes
-$ echo "upload seven" >> events.log
-$ ./uploads
-events.log:6: not an event
-[1]
+$ typec -std=c11 -Wall -Wextra eval.tc -o eval
+$ ./eval
+14
+division by zero
 ```
 
-The rest is C: the headers, `sscanf`, `FILE *`, the loop, and the C
-compiler that builds it. [What Type-C adds to C](#what-type-c-adds-to-c)
-explains each new piece, and shows the mistakes each one rules out.
+What it shows:
+
+- **Variants.** `expr` and `eval_error` are closed sums: a value is
+  exactly one of the cases, and holds the fields of that case only.
+  Code reaches the fields by naming them in a `case`, so Type-C code
+  cannot read an `Add` as a `Num`.
+- **An exhaustive `match`.** Each `match` here names every case, with
+  no `default`. Add a `Sub` case to `expr`, and the build stops at the
+  `match` in `eval` until it handles `Sub`
+  ([Variants and `match`](#variants-and-match)).
+- **`result` and `try`.** `result(int, eval_error)` is a variant that
+  every Type-C file has: `Ok` of an `int`, or `Err` of an `eval_error`.
+  `try eval(l)` gives the value of an `Ok`, or returns that `Err` from
+  the function at once: the division by zero inside `bad` comes up
+  through the `Mul` above it to `show`
+  ([`result` and `try`](#result-and-try)).
+- **No runtime.** `typec` writes C: a variant becomes a structure of a
+  tag and a union of the fields of its cases, a `match` a `switch` on
+  the tag, and `try` an early return
+  ([What the C looks like](#what-the-c-looks-like)). The rest is C: the
+  headers, the pointers, `printf`, the overflow builtins of GCC and
+  Clang, and the C compiler that builds it.
+
+[What Type-C adds to C](#what-type-c-adds-to-c) explains each new piece,
+and shows the mistakes each one rules out.
 
 ## Why Type-C
 
