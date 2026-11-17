@@ -1,0 +1,27 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * A match with a pattern inside a pattern and no pointer between them,
+ * which needs no pointer local.  outcome.c is the C twin.
+ */
+
+#include "nested.tci"
+
+long
+outcome(const result *r)
+{
+
+	match (*r) {
+	case Ok(v):
+		return (arm(1, v, 0));
+	case Err(NoMem):
+		return (arm(2, 0, 0));
+	case Err(Inval):
+		return (arm(3, 0, 0));
+	case Err(Io(n)):
+		return (arm(4, n, 0));
+	}
+}

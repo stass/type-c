@@ -644,3 +644,36 @@ is a record, not a test.
 ```sh
 tools/measure/zero_record.sh /Volumes/Optaine/measure-3.6/run/zero.csv
 ```
+
+`tools/measure/nested/` holds six matchers over nested patterns (package
+3.10), each a Type-C unit and a hand-written C twin of the same name:
+`fold` (a match of eight arms, three nodes deep through pointers),
+`fold_test` (three single-pattern tests), `sum_list` (a match five nodes
+deep), `outcome` (two nodes with no pointer between them), and
+`member_small` and `member_large` (a scrutinee that is a member, which
+`typec` copies). The twins are nested `switch` statements of the same
+decisions, with the arms written at the leaves and a trap for a tag that
+is no constructor; `member_small_aligned.c` and `member_large_aligned.c`
+read the member through a pointer to a typedef declared `aligned(1)`
+instead. `driver.c` builds the same values for every program and times
+each matcher. `tools/measure/nested.sh OUT [CC...]` builds the three
+programs (`typec`, `c`, `c_aligned`) with each backend at `-O0` and
+`-O2`, checks that they print the same checksums, and writes a CSV to
+`OUT`, as `containers.sh` does: the bytes of machine code of each object
+and program, the best of `RUNS` times of each matcher for each `N:ROUNDS`
+of `SIZES`, and what `typec --stats` reports for each unit. It also
+builds a match whose tree is as deep as design 4.7 rule 10 allows and
+records whether the backend compiles it.
+
+```sh
+tools/measure/nested.sh /Volumes/Optaine/measure-3.10/run/nested.csv
+```
+
+`tools/measure/selection_stats.sh OUT CC [TEST.t...]` writes the rows of
+`--stats` for the `.tc` files that the cram tests write (by default those
+of `test/run` and `test/golden`) and that `test/run/readme.sh` writes
+from the README, where a unit that `typec` refuses has the one row
+`refused`. The `selection_steps`, `selection_nodes` and
+`selection_depth` of a unit are the most that building the selection
+tree of one of its matches or tests took; `unit_stats.sh` reports the
+same for the container library and the pilot.

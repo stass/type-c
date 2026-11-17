@@ -1,0 +1,24 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * Three single-pattern tests with nested patterns, one after the other.
+ * fold_test.c is the C twin.
+ */
+
+#include "nested.tci"
+
+long
+fold_test(const expr *e)
+{
+
+	if (case Add(*Num(a), *Num(b)) = *e)
+		return (arm(1, a, b));
+	if (case Mul(*Add(*Num(a), _), *Num(b)) = *e)
+		return (arm(2, a, b));
+	if (case Neg(*Neg(*Num(a))) = *e)
+		return (arm(3, a, 0));
+	return (arm(4, 0, 0));
+}

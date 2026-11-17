@@ -1,0 +1,27 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/* The types of the Type-C matchers; nested.h is that of the C twins. */
+
+#ifndef NESTED_TCI
+#define	NESTED_TCI
+
+type expr = | Num(int value) | Add(const expr *l, const expr *r)
+    | Mul(const expr *l, const expr *r) | Neg(const expr *e);
+type list = | Nil | Cons(int head, const list *tail);
+type fault = | NoMem | Inval | Io(int error);
+type result = | Ok(int value) | Err(fault fault);
+type small = | Idle | Busy(int load) | Gone;
+type large = | Empty | Wide(long a, long b, long c, long d, long e, long f);
+
+struct node {
+	int	id;
+	small	small;
+	large	large;
+};
+
+long	arm(int id, long a, long b);
+
+#endif /* !NESTED_TCI */

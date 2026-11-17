@@ -98,10 +98,11 @@ is [type-c-language-design.md](type-c-language-design.md).
   gives `toml.tc` flags of its own. Decide whether a `.tc` input takes
   the option, and what the backend is then given, or the refusal stays
   and the README says how such a build switches a file.
-- [Medium] The measure scripts `containers.sh`, `unit_stats.sh` and
-  `resume.sh` each repeat the check that OUT lies outside the
+- [Medium] The measure scripts `containers.sh`, `unit_stats.sh`,
+  `resume.sh`, `nested.sh` and `selection_stats.sh` each repeat the
+  check that OUT lies outside the
   repository, the revision lookup, the build of typec, the CSV `row`
-  function and (the first two) the parser of the `--stats` line, and
+  function and (all but `resume.sh`) the parser of the `--stats` line, and
   the checks have drifted apart; only `zero_record.sh` writes its CSV
   to a scratch file and moves it over OUT when every run has passed.
   Move the shared set-up into one sourced `tools/measure/common.sh`.

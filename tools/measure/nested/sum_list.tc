@@ -1,0 +1,31 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * A match that looks four nodes down a list through pointers, the
+ * deepest tree of the measurements.  sum_list.c is the C twin.
+ */
+
+#include "nested.tci"
+
+long
+sum_list(const list *l)
+{
+
+	match (*l) {
+	case Cons(a, *Cons(b, *Cons(c, *Cons(d, *Nil)))):
+		return (arm(1, a + b, c + d));
+	case Cons(a, *Cons(b, *Cons(c, *Nil))):
+		return (arm(2, a + b, c));
+	case Cons(a, *Cons(b, *Nil)):
+		return (arm(3, a, b));
+	case Cons(a, *Nil):
+		return (arm(4, a, 0));
+	case Nil:
+		return (arm(5, 0, 0));
+	default:
+		return (arm(6, 0, 0));
+	}
+}

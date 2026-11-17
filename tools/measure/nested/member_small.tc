@@ -1,0 +1,26 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * A match on a member of a structure, with no nested pattern: typec
+ * copies the scrutinee, and the twin switches on the member in place.
+ * member_small.c is the C twin.
+ */
+
+#include "nested.tci"
+
+long
+member_small(const struct node *n)
+{
+
+	match (n->small) {
+	case Idle:
+		return (arm(1, n->id, 0));
+	case Busy(load):
+		return (arm(2, load, n->id));
+	case Gone:
+		return (arm(3, n->id, 0));
+	}
+}

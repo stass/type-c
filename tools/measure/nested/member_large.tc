@@ -1,0 +1,23 @@
+/*
+ * SPDX-License-Identifier: BSD-2-Clause
+ * Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
+ */
+
+/*
+ * The same with a variant of six longs, whose copy is larger.
+ * member_large.c is the C twin.
+ */
+
+#include "nested.tci"
+
+long
+member_large(const struct node *n)
+{
+
+	match (n->large) {
+	case Empty:
+		return (arm(1, n->id, 0));
+	case Wide(a, b, c, d, e, f):
+		return (arm(2, a + b + c, d + e + f));
+	}
+}
