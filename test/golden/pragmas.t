@@ -43,25 +43,25 @@ C text that does not move passes such a line on whole.
   #pragma mark - Don't edit
   int y;
 
-The arguments of a `#pragma pack`, `align`, `options` or `ms_struct`
-line are the pragma's own words and numbers (design 13.5). Clang
-replaces a macro there when it compiles C, but finds it as written in
-the preprocessed text that typec compiles, so another identifier is
-refused, in C text as in Type-C text: here Clang packs `struct wire` to
-1 in a `.c` unit and to its natural alignment in the `.tc` unit that
-includes the same header, where `M_PACK` reads as a label.
+An identifier of a `#pragma` line that names a macro there is refused,
+whatever the pragma, in C text as in Type-C text (design 13.5). Clang
+replaces a macro in many pragmas when it compiles C, but finds it as
+written in the preprocessed text that typec compiles: here Clang packs
+`struct wire` to 1 in a `.c` unit and to its natural alignment in the
+`.tc` unit that includes the same header, where `M_PACK` reads as a
+label.
 
   $ cat > wire.c <<'EOF'
+  > #define M_PACK 1
   > #pragma pack(push, M_PACK)
   > struct wire { char a; int b; };
   > #pragma pack(pop)
   > EOF
   $ ./golden.exe wire.c
-  wire.c:1: error: `M_PACK` in a `#pragma pack` line, which is none of the pragma's words (push, pop, show): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
+  wire.c:2: error: `M_PACK` in a `#pragma pack` line names the macro defined at wire.c:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
   [1]
 
-A label of `push` and `pop` is refused as well, since typec cannot tell
-it from a macro.
+A label of `push` and `pop` that names no macro passes.
 
   $ cat > label.tc <<'EOF'
   > #pragma pack(push, saved, 1)
@@ -69,48 +69,81 @@ it from a macro.
   > #pragma pack(pop, saved)
   > EOF
   $ ./golden.exe label.tc
-  label.tc:1: error: `saved` in a `#pragma pack` line, which is none of the pragma's words (push, pop, show): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
-  [1]
+  # 1 "label.tc"
+  #pragma pack(push, saved, 1)
+  struct wire { char a; int b; };
+  #pragma pack(pop, saved)
 
-The other pragmas of the table hold their own words alone too.
+A macro named as a word of the pragma is refused as any other: under
+it a `.c` unit packs the structure and a `.tc` unit does not.
 
-  $ cat > align.c <<'EOF'
-  > #pragma options align=ALIGNMENT
+  $ cat > natural.c <<'EOF'
+  > #define natural packed
+  > #pragma options align=natural
   > struct wire { char a; int b; };
   > EOF
-  $ ./golden.exe align.c
-  align.c:1: error: `ALIGNMENT` in a `#pragma options` line, which is none of the pragma's words (align, native, natural, packed, power, mac68k, reset): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
+  $ ./golden.exe natural.c
+  natural.c:2: error: `natural` in a `#pragma options` line names the macro defined at natural.c:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
   [1]
 
-  $ cat > ms_struct.c <<'EOF'
-  > #pragma ms_struct SWITCH
-  > struct wire { char a; int b; };
+A name that an `#undef` before the line removes passes, and a macro
+defined after the line is none there.
+
+  $ cat > undef.tc <<'EOF'
+  > #define M_PACK 1
+  > #undef M_PACK
+  > #pragma pack(push, M_PACK)
+  > #pragma pack(pop)
+  > #pragma pack(push, LATER)
+  > #define LATER 1
   > EOF
-  $ ./golden.exe ms_struct.c
-  ms_struct.c:1: error: `SWITCH` in a `#pragma ms_struct` line, which is none of the pragma's words (on, off, reset): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
-  [1]
+  $ ./golden.exe undef.tc
+  # 1 "undef.tc"
+  
+  
+  #pragma pack(push, M_PACK)
+  #pragma pack(pop)
+  #pragma pack(push, LATER)
+  
 
-  $ cat > align.tc <<'EOF'
-  > struct wire { char a; int b; };
-  > #pragma align=ALIGNMENT
+The rule holds for every pragma, not only those of layout.
+
+  $ cat > weak.c <<'EOF'
+  > #define TARGET g
+  > void f(void);
+  > #pragma weak f = TARGET
   > EOF
-  $ ./golden.exe align.tc
-  align.tc:2: error: `ALIGNMENT` in a `#pragma align` line, which is none of the pragma's words (native, natural, packed, power, mac68k, reset): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
+  $ ./golden.exe weak.c
+  weak.c:3: error: `TARGET` in a `#pragma weak` line names the macro defined at weak.c:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
   [1]
 
-A label after `pop` is refused as one after `push` is.
-
-  $ cat > pop.c <<'EOF'
-  > #pragma pack(push, 1)
-  > #pragma pack(pop, saved)
+  $ cat > extname.c <<'EOF'
+  > #define NEW_NAME other
+  > #pragma redefine_extname old NEW_NAME
   > EOF
-  $ ./golden.exe pop.c
-  pop.c:2: error: `saved` in a `#pragma pack` line, which is none of the pragma's words (push, pop, show): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
+  $ ./golden.exe extname.c
+  extname.c:2: error: `NEW_NAME` in a `#pragma redefine_extname` line names the macro defined at extname.c:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
   [1]
 
-Numbers and the pragmas' own words pass through, as do the identifiers
-of every other pragma, which both backends read as written in either
-mode.
+  $ cat > float_control.c <<'EOF'
+  > #define MODE precise
+  > #pragma float_control(MODE, on)
+  > EOF
+  $ ./golden.exe float_control.c
+  float_control.c:2: error: `MODE` in a `#pragma float_control` line names the macro defined at float_control.c:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
+  [1]
+
+The pragma's own name is held to the rule as its arguments are.
+
+  $ cat > name.c <<'EOF'
+  > #define pack align
+  > #pragma pack(1)
+  > EOF
+  $ ./golden.exe name.c
+  name.c:2: error: `pack` in a `#pragma pack` line names the macro defined at name.c:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
+  [1]
+
+Numbers and identifiers that name no macro pass, whatever the pragma.
 
   $ cat > words.tc <<'EOF'
   > #pragma pack(push, 1)

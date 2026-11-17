@@ -93,6 +93,22 @@ compiles itself (design 2.2).
   5 5
   5 5
 
+A label of `push` and `pop` that names no macro passes, and both
+backends read it as a label in both modes.
+
+  $ cat > wire.h <<'EOF'
+  > #pragma pack(push, saved, 1)
+  > struct wire { char a; int b; };
+  > #pragma pack(pop, saved)
+  > EOF
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags -c -o program.o program.tc &&
+  >     $cc $flags -c -o hand.o hand.c &&
+  >     $cc -o program program.o hand.o && ./program
+  > done
+  5 5
+  5 5
+
 Clang replaces a macro in the arguments of the pragma when it compiles C
 itself, and keeps it as written in -E output, where it reads as a label
 of `push`: the `.tc` unit would lay the structure out unpacked. typec
@@ -109,8 +125,8 @@ refuses the line.
   >     $cc $flags -c -o hand.o hand.c &&
   >     $cc -o program program.o hand.o && ./program
   > done
-  ./wire.h:2: error: `M_PACK` in a `#pragma pack` line, which is none of the pragma's words (push, pop, show): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
-  wire.h:2: error: `M_PACK` in a `#pragma pack` line, which is none of the pragma's words (push, pop, show): Clang replaces a macro there when it compiles C and keeps it as written in the preprocessed text that typec compiles; write the value the macro stands for [pragma-word]
+  ./wire.h:2: error: `M_PACK` in a `#pragma pack` line names the macro defined at ./wire.h:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
+  wire.h:2: error: `M_PACK` in a `#pragma pack` line names the macro defined at wire.h:1: Clang replaces a macro in many pragmas when it compiles C and keeps it as written in the preprocessed text that typec compiles; rename the identifier or #undef the macro before the line [pragma-macro]
   [80]
 
 The refusal rests on what the backends do with that header: Clang packs

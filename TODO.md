@@ -385,8 +385,19 @@ is [type-c-language-design.md](type-c-language-design.md).
   backends pick a pragma by its first tokens, which makes that line an
   unknown pragma; have the reader keep the leading run of identifiers
   and match the list against it, so that such a line is refused.
-- [Medium] Build the rule of design 13.5 that refuses a macro in any
-  `#pragma` line, replacing `Pragma_words` and its rule `pragma-word`.
+- [Medium] The rule `pragma-macro` (design 13.5) misses a macro that
+  `#pragma pop_macro` restores: GCC 16 and Apple Clang 21 write no
+  `#define` after it in `-E -dD` output, so `#pragma pack(push, M)`
+  after `push_macro("M")`, `#undef M` and `pop_macro("M")` passes and
+  lays the structure out in two ways. Have the reader track
+  `push_macro` and `pop_macro` lines if a header is found to use them
+  around a pragma.
+- [Low] The rule `pragma-macro` refuses a predefined macro such as
+  `__APPLE__` in a pragma line, though Apple Clang 21 expands a
+  built-in macro in `-x cpp-output` input too, so both readings agree
+  there; the message's "keeps it as written" is untrue for those.
+  Measure which macros the backends expand after `-E` and exempt them
+  by rule, or say so in 13.5.
 - [Low] A `#pragma` line of C text that is no sequence of tokens is
   not looked at for macros (design 13.5, provisional); if a backend is
   found to apply such a line, have the reader keep the identifiers
