@@ -4376,7 +4376,17 @@ would write the file twice at once. Under `-o -` no path names the
 header, so a dependency option needs `-MT` or `-MQ` from the user, and
 `-MD` and `-MMD` need `-MF` too; without them it is an error of the
 command line. The rule names the header as its target and `M.tci` and
-every file that it includes as its prerequisites. A file that `M.tci`
+every file that it includes as its prerequisites. The step writes the
+rule into `typec`'s temporary directory, with `-MF` naming a file
+there, and `typec` then moves it into place as it writes the header,
+through a new file renamed over the old one. Both new files are written
+before either is renamed: make never reads a rule cut short, and a
+header or a rule that `typec` refuses or fails to write leaves both
+paths as they were. The rule is renamed first, so that where the
+header's rename then fails, the old header is older than what changed
+and make builds it again. It replaces only a regular
+file: where the backend writes through a link or into a device such as
+`/dev/null`, a rename would replace the link or the device. A file that `M.tci`
 includes and that includes `M.h` makes the header a prerequisite of
 itself. That is an error of the user's includes: a build from clean
 fails to find `M.h` unless a stale one stands on the include path, and

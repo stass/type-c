@@ -33,7 +33,8 @@ type error =
   | Several_architectures of string list
   | Header_inputs
   | Header_stops
-  | Header_dependencies
+  | Header_rule_output
+  | Header_rule_names
   | Header_name of string
 
 (* Raised at the first reason the command line has no pipeline and
@@ -512,10 +513,18 @@ let plan ~program ~emit_c ~temp_dir arguments =
 
 (* The header of an interface (design 9.3). *)
 
+type rule = { written : string; destination : destination }
+
+type header_output =
+  | Header
+  | Header_and_rule of rule
+  | Rule of rule
+
 type header = {
   header_target_options : string list;
   interface : translation;
   name : Typec_emit.Header.name;
+  output : header_output;
 }
 
 let interface_input arguments =
@@ -530,8 +539,8 @@ let interface_input arguments =
       path
   | _ -> raise (Failed Header_inputs)
 
-let is_dependency_option = function
-  | Command_line.Option { role = Dependency _; _ } -> true
+let is_dependency_file = function
+  | Command_line.Option { role = Dependency Dependency_file; _ } -> true
   | _ -> false
 
 (* The header goes beside its interface unless -o names another path,
@@ -544,12 +553,62 @@ let header_destination ~output source =
       File
         (Filename.chop_suffix source Typec_cpp.File.interface_suffix ^ ".h")
 
+(* "-MF -" names stdout, for GCC and Clang alike. *)
+let rule_file_destination = function
+  | "-" -> Standard_output
+  | path -> File path
+
+(* What the command line asks --emit-c-header to write, the rule of its
+   -E step going to [written] first (design 9.3). Under "-o -" no path
+   names the header, so the user names the rule's target and its file. *)
+let header_output ~output ~header ~written arguments =
+  let has kind = has_role (Dependency kind) arguments in
+  let rule_file =
+    Option.map rule_file_destination
+      (last_value (Dependency Dependency_file) arguments)
+  in
+  if has Print_rule then begin
+    if Option.is_some output then raise (Failed Header_rule_output);
+    let destination = Option.value rule_file ~default:Standard_output in
+    Rule { written; destination }
+  end
+  else if has Write_dependencies then begin
+    match (header, rule_file) with
+    | File path, None ->
+        Header_and_rule { written; destination = File (path ^ ".d") }
+    | File _, Some destination -> Header_and_rule { written; destination }
+    | Standard_output, Some destination when has Dependency_target ->
+        Header_and_rule { written; destination }
+    | Standard_output, (Some _ | None) -> raise (Failed Header_rule_names)
+  end
+  else Header
+
+(* The arguments of the header's -E step and the options it alone gets:
+   with a rule, -MF names [written] in place of the user's file, and the
+   header is the rule's target unless -MT or -MQ names another. *)
+let header_step_options ~header output arguments =
+  match output with
+  | Header -> (arguments, [])
+  | Header_and_rule { written; _ } | Rule { written; _ } ->
+      let names_target = has_role (Dependency Dependency_target) arguments in
+      let target =
+        match header with
+        | File path when not names_target -> [ "-MQ"; path ]
+        | File _ | Standard_output -> []
+      in
+      let given = List.filter (fun a -> not (is_dependency_file a)) in
+      (given arguments, [ "-MF"; written ] @ target)
+
 (* -dI writes each #include in place, which the header copies; the
    interface's own guard, as a main file, draws -Wunused-macros, which no
    unit that includes it draws, so the option follows the user's. *)
-let header_preprocess_command shape arguments source =
+let header_preprocess_command shape ~header output arguments source =
+  let arguments, dependency_options =
+    header_step_options ~header output arguments
+  in
   preprocessing_command shape arguments source
-    ~own_options:[ "-dD"; "-dI"; "-Wno-unused-macros" ]
+    ~own_options:
+      ([ "-dD"; "-dI"; "-Wno-unused-macros" ] @ dependency_options)
 
 let plan_header ~program ~temp_dir arguments =
   try
@@ -557,8 +616,6 @@ let plan_header ~program ~temp_dir arguments =
     refuse_several_architectures arguments;
     let source = interface_input arguments in
     if goal_of arguments <> Linked then raise (Failed Header_stops);
-    if List.exists is_dependency_option arguments then
-      raise (Failed Header_dependencies);
     let name =
       match Typec_emit.Header.name_of_path source with
       | Some name -> name
@@ -582,14 +639,19 @@ let plan_header ~program ~temp_dir arguments =
       }
     in
     let directory = translation_directory temp_dir 0 in
+    let header = header_destination ~output source in
+    let written = Filename.concat directory "rule.d" in
+    let header_output = header_output ~output ~header ~written arguments in
     let interface =
       {
         source;
         directory;
-        preprocess = header_preprocess_command shape arguments source;
+        preprocess =
+          header_preprocess_command shape ~header header_output arguments
+            source;
         preprocessed = Filename.concat directory "preprocessed.i";
         dialect;
-        emitted = header_destination ~output source;
+        emitted = header;
         compile = None;
       }
     in
@@ -598,6 +660,7 @@ let plan_header ~program ~temp_dir arguments =
         header_target_options = target_options shape arguments;
         interface;
         name;
+        output = header_output;
       }
   with Failed error -> Error error
 
@@ -619,9 +682,14 @@ let error_message = function
   | Header_stops ->
       "--emit-c-header cannot be used with -c, -S or -fsyntax-only: it \
        writes a header and compiles nothing"
-  | Header_dependencies ->
-      "--emit-c-header cannot be used with a dependency option (-M, -MM, \
-       -MD, -MMD, -MF, -MT, -MQ, -MP, -MG, -MV)"
+  | Header_rule_output ->
+      "--emit-c-header cannot be used with -o under -M or -MM: it writes \
+       the rule and no header, so -o would name both; name the file of \
+       the rule with -MF"
+  | Header_rule_names ->
+      "--emit-c-header with -o - needs -MT or -MQ and -MF under -MD or \
+       -MMD: no path names the header, which the rule names as its target \
+       and beside which it goes"
   | Header_name path ->
       Printf.sprintf
         "%s cannot have a header: the last component of its path may hold \

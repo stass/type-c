@@ -92,7 +92,12 @@ type error =
   | Header_inputs
       (** [--emit-c-header] without exactly one input, a [.tci] *)
   | Header_stops  (** [--emit-c-header] with [-c], [-S] or [-fsyntax-only] *)
-  | Header_dependencies  (** [--emit-c-header] with a dependency option *)
+  | Header_rule_output
+      (** [--emit-c-header] with [-M] or [-MM] and [-o], which would name
+          the header and the file of the rule at once *)
+  | Header_rule_names
+      (** [--emit-c-header] with [-o -] and [-MD] or [-MMD], without
+          [-MT] or [-MQ] to name the rule's target or [-MF] its file *)
   | Header_name of string
       (** the path of an interface whose last component the header's
           redirect cannot name ({!Typec_emit.Header.name_of_path}) *)
@@ -111,16 +116,36 @@ val plan :
     command line has one input, a [.tc] file; its C goes to the [-o]
     file, else to stdout, and nothing is compiled. *)
 
+(** The dependency rule of the header's [-E] step, which the step writes
+    to [written], in the temporary directory, and typec moves to
+    [destination]: the [-MF] path, else the header's path followed by
+    [.d] under [-MD] and [-MMD], else stdout under [-M] and [-MM], as it
+    is under [-MF -]. *)
+type rule = { written : string; destination : destination }
+
+(** What [--emit-c-header] writes. *)
+type header_output =
+  | Header  (** the header alone *)
+  | Header_and_rule of rule  (** [-MD], [-MMD]: the header, then its rule *)
+  | Rule of rule  (** [-M], [-MM]: the rule in place of the header *)
+
 (** The command of [--emit-c-header] (design 9.3): the target options
     and the [-E] step of the one [.tci] input, as for a [.tc] input but
     with [-dI] and, after the user's options, [-Wno-unused-macros]; the
     header's destination, [emitted], beside the interface with the suffix
-    [.h], the [-o] file, or stdout under [-o -]; and the interface's name
-    for the header's redirect. [compile] is [None]. *)
+    [.h], the [-o] file, or stdout under [-o -]; the interface's name
+    for the header's redirect; and what is written. [compile] is [None].
+
+    Under [-M], [-MM], [-MD] and [-MMD] the step gets the dependency
+    options of the command line but [-MF], then [-MF] with [written] and,
+    unless the command line gives [-MT] or [-MQ], [-MQ] with the
+    header's path, so the rule names the header as its target. Without
+    them it gets the dependency options as given, which write nothing. *)
 type header = {
   header_target_options : string list;
   interface : translation;
   name : Typec_emit.Header.name;
+  output : header_output;
 }
 
 val plan_header :

@@ -1348,8 +1348,18 @@ $ ./admin
 `typec --emit-c-header M.tci` writes `M.h`, the C header of a `.tci`
 interface, so that C code gets its variants without a structure written
 by hand ([design 9.3](type-c-language-design.md#93-c-clients)). A Type-C
-unit that includes `M.h` reads `M.tci` itself. Not built yet (plan
-package 4.1): the dependency options and the enumeration assertion.
+unit that includes `M.h` reads `M.tci` itself. The dependency options
+work as for a `.tc` file, with the header as the target of the rule,
+which names `M.tci` and every file that it includes: `-MD` and `-MMD`
+write the rule to `M.h.d`, the header's path followed by `.d`, or to
+the file that `-MF` names, so a makefile rule `M.h: M.tci` whose
+command is `typec --emit-c-header -MMD -MP M.tci`, with `-include
+M.h.d` beside it, rebuilds `M.h` when an interface that `M.tci`
+includes changes. `-M` and `-MM` print the rule, or write it to the
+`-MF` file, and write no header, so they cannot be used with `-o`.
+Under `-o -` no path names the header, and `-MD` and `-MMD` need `-MT`
+or `-MQ` and `-MF`. Not built yet (plan package 4.1): the enumeration
+assertion.
 
 ## Measured on a real library
 

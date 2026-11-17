@@ -114,6 +114,36 @@ beside it, or the file that
 .Fl o
 names, or standard output under
 .Fl o Cm - .
+The dependency options work as for a
+.Pa .tc
+input, with the header as the target of the rule, which names the
+interface and every file that it includes.
+.Fl MD
+and
+.Fl MMD
+write the rule to the header's path followed by
+.Pa .d ,
+unless
+.Fl MF
+names another file.
+.Fl M
+and
+.Fl MM
+print the rule, or write it to the file that
+.Fl MF
+names, and write no header, so they cannot be used with
+.Fl o .
+Under
+.Fl o Cm - ,
+.Fl MD
+and
+.Fl MMD
+need
+.Fl MT
+or
+.Fl MQ ,
+and
+.Fl MF .
 .It Fl -print-target
 Run the backend with the other arguments as options, which select the
 target, and print the target model that its predefined macros give, one
@@ -255,6 +285,17 @@ writes for
 It begins with a line that says it is generated, and
 .Nm
 overwrites no other file.
+.It Ar M Ns Pa .h.d
+The dependency rule of
+.Ar M Ns Pa .h
+under
+.Fl MD
+or
+.Fl MMD
+with
+.Fl -emit-c-header .
+.Nm
+replaces only a regular file there.
 .El
 .Sh EXIT STATUS
 When

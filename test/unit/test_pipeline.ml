@@ -516,4 +516,74 @@ let () =
   check "-fasm with an unaccepted standard"
     (plan [ "-fasm"; "-std=c99"; "x.tc" ] = Error (Unaccepted_standard "c99"))
 
+(* --emit-c-header with the dependency options: what is written, and the
+   dependency options of the -E step, which follow its own. *)
+let () =
+  let plan_header words =
+    Pipeline.plan_header ~program:"cc" ~temp_dir (Command_line.read words)
+  in
+  let planned_header words =
+    match plan_header words with
+    | Ok header -> header
+    | Error error -> failwith (Pipeline.error_message error)
+  in
+  let output words = (planned_header words).output in
+  let step words = (planned_header words).interface.preprocess Gcc in
+  let step_for options input =
+    [ "cc"; "-E"; "-D__TYPEC__=1"; "-std=gnu17" ]
+    @ options
+    @ [ "-x"; "c"; input ]
+  in
+  let own = [ "-dD"; "-dI"; "-Wno-unused-macros" ] in
+  let written = "/T/0/rule.d" in
+  check "header: no rule" (output [ "m.tci" ] = Header);
+  check "header: -MD beside the header"
+    (output [ "-MD"; "d/m.tci" ]
+    = Header_and_rule { written; destination = File "d/m.h.d" });
+  check "header: -MMD beside the -o header"
+    (output [ "-MMD"; "m.tci"; "-o"; "o/x.h" ]
+    = Header_and_rule { written; destination = File "o/x.h.d" });
+  check "header: the last -MF"
+    (output [ "-MD"; "-MF"; "a.d"; "-MFb.d"; "m.tci" ]
+    = Header_and_rule { written; destination = File "b.d" });
+  check "header: -MD -MF - -MT -o -"
+    (output [ "-MD"; "-MF"; "-"; "-MT"; "t"; "m.tci"; "-o"; "-" ]
+    = Header_and_rule { written; destination = Standard_output });
+  check "header: -M to stdout"
+    (output [ "-M"; "m.tci" ]
+    = Rule { written; destination = Standard_output });
+  check "header: -M -MD prints the rule"
+    (output [ "-M"; "-MD"; "m.tci" ]
+    = Rule { written; destination = Standard_output });
+  check "header: -M -MF -"
+    (output [ "-M"; "-MF"; "-"; "m.tci" ]
+    = Rule { written; destination = Standard_output });
+  check "header: -M: -MF for the step, the header as target"
+    (step [ "-M"; "m.tci" ]
+    = step_for ([ "-M" ] @ own @ [ "-MF"; written; "-MQ"; "m.h" ]) "m.tci");
+  check "header: -MM -MF"
+    (output [ "-MM"; "-MF"; "r.d"; "m.tci" ]
+    = Rule { written; destination = File "r.d" });
+  check "header: -M -o"
+    (plan_header [ "-M"; "m.tci"; "-o"; "m.d" ] = Error Header_rule_output);
+  check "header: -MM -o -"
+    (plan_header [ "-MM"; "m.tci"; "-o"; "-" ] = Error Header_rule_output);
+  check "header: -MD -o - without a target"
+    (plan_header [ "-MD"; "-MF"; "m.d"; "m.tci"; "-o"; "-" ]
+    = Error Header_rule_names);
+  check "header: -MMD -o - without a file"
+    (plan_header [ "-MMD"; "-MQ"; "m.h"; "m.tci"; "-o"; "-" ]
+    = Error Header_rule_names);
+  check "header: -MD -MP: -MF for the step, the header as target"
+    (step [ "-MD"; "-MP"; "-MF"; "m.d"; "d/m.tci" ]
+    = step_for
+        ([ "-MD"; "-MP" ] @ own @ [ "-MF"; written; "-MQ"; "d/m.h" ])
+        "d/m.tci");
+  check "header: -MT names the target"
+    (step [ "-MMD"; "-MT"; "t"; "m.tci" ]
+    = step_for ([ "-MMD"; "-MT"; "t" ] @ own @ [ "-MF"; written ]) "m.tci");
+  check "header: without a rule, the options as given"
+    (step [ "-MP"; "-MF"; "m.d"; "m.tci" ]
+    = step_for ([ "-MP"; "-MF"; "m.d" ] @ own) "m.tci")
+
 let () = if !failures > 0 then exit 1

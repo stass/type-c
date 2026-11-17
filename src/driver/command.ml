@@ -92,13 +92,18 @@ let preprocess ~null compiler (translation : Pipeline.translation) =
   with_file translation.preprocessed new_file_flags (fun stdout ->
       run_step ~stdin:null ~stdout (translation.preprocess compiler))
 
+(* A file that a backend step wrote, [what] naming it in the message. *)
+let read_step_output ~what path =
+  try In_channel.with_open_bin path In_channel.input_all
+  with Sys_error message ->
+    stop Exit_status.Environment
+      (Printf.sprintf "cannot read %s: %s" what message)
+
+let read_preprocessed_text (translation : Pipeline.translation) =
+  read_step_output ~what:"the preprocessed text" translation.preprocessed
+
 let read_preprocessed (translation : Pipeline.translation) =
-  let text =
-    try In_channel.with_open_bin translation.preprocessed In_channel.input_all
-    with Sys_error message ->
-      stop Exit_status.Environment
-        ("cannot read the preprocessed text: " ^ message)
-  in
+  let text = read_preprocessed_text translation in
   match Typec_cpp.Reader.read ~name:translation.source text with
   | Ok unit -> unit
   | Error error -> refuse error
@@ -130,17 +135,24 @@ let lower dialect target ~trap text =
   | Ok lowered -> lowered
   | Error error -> refuse error
 
-let write_emitted (destination : Pipeline.destination) text =
+(* [what] names the text in the message. *)
+let print_text ~what text =
   try
-    match destination with
-    | Pipeline.Standard_output ->
-        print_string text;
-        flush stdout
-    | Pipeline.File path ->
+    print_string text;
+    flush stdout
+  with Sys_error message ->
+    stop Exit_status.Environment
+      (Printf.sprintf "cannot write %s: %s" what message)
+
+let write_emitted (destination : Pipeline.destination) text =
+  match destination with
+  | Pipeline.Standard_output -> print_text ~what:"the C" text
+  | Pipeline.File path -> (
+      try
         Out_channel.with_open_bin path (fun channel ->
             Out_channel.output_string channel text)
-  with Sys_error message ->
-    stop Exit_status.Environment ("cannot write the C: " ^ message)
+      with Sys_error message ->
+        stop Exit_status.Environment ("cannot write the C: " ^ message))
 
 let make_directory path =
   try Temp_dir.make_subdirectory path
@@ -171,12 +183,7 @@ let translate ~null ~stats ~trap (target : Target.t)
 (* The header of an interface (design 9.3). *)
 
 let read_interface (translation : Pipeline.translation) =
-  let text =
-    try In_channel.with_open_bin translation.preprocessed In_channel.input_all
-    with Sys_error message ->
-      stop Exit_status.Environment
-        ("cannot read the preprocessed text: " ^ message)
-  in
+  let text = read_preprocessed_text translation in
   match Typec_cpp.Reader.read_interface ~name:translation.source text with
   | Ok read -> read
   | Error error -> refuse error
@@ -194,23 +201,37 @@ let read_lowered (translation : Pipeline.translation) text =
           interface does not read: "
         ^ Typec_cpp.Reader.error_message error)
 
-let write_header (destination : Pipeline.destination) text =
-  match destination with
-  | Pipeline.Standard_output -> write_emitted destination text
-  | Pipeline.File path -> (
-      match
-        Header_file.write ~first_line:Typec_emit.Header.first_line ~path text
-      with
-      | Ok () -> ()
-      | Error message -> stop Exit_status.Environment message)
+let stop_on_error = function
+  | Ok () -> ()
+  | Error message -> stop Exit_status.Environment message
+
+(* A text bound for its destination, and the file that holds it there. *)
+type output = {
+  what : string;  (** names the text in a message *)
+  destination : Pipeline.destination;
+  text : string;
+  file : path:string -> string -> Header_file.file;
+}
+
+(* The files are written together, so that a refusal of one leaves
+   every path as it was, then the other texts are printed in order. *)
+let put outputs =
+  let file output =
+    match output.destination with
+    | Pipeline.File path -> Some (output.file ~path output.text)
+    | Pipeline.Standard_output -> None
+  in
+  stop_on_error (Header_file.write (List.filter_map file outputs));
+  List.iter
+    (fun output ->
+      if output.destination = Pipeline.Standard_output then
+        print_text ~what:output.what output.text)
+    outputs
 
 (* The header is written from the lowered text of the interface, read
    again so that the writer meets each token it writes as a token. *)
-let emit_header ~null ~stats ~trap (target : Target.t)
-    (plan : Pipeline.header) =
+let header_output ~stats ~trap (target : Target.t) (plan : Pipeline.header) =
   let translation = plan.interface in
-  make_directory translation.directory;
-  preprocess ~null target.backend.compiler translation;
   let read = read_interface translation in
   let tree, scopes =
     refuse_on_error (Front_end.parse translation.dialect target read.unit)
@@ -225,8 +246,34 @@ let emit_header ~null ~stats ~trap (target : Target.t)
   in
   if stats then report_counts translation counts;
   let lowered_read = read_lowered translation header_text in
-  write_header translation.emitted
-    (refuse_on_error (Typec_emit.Header.write plan.name lowered_read))
+  {
+    what = "the header";
+    destination = translation.emitted;
+    text = refuse_on_error (Typec_emit.Header.write plan.name lowered_read);
+    file = Header_file.header ~first_line:Typec_emit.Header.first_line;
+  }
+
+let rule_output (rule : Pipeline.rule) =
+  let what = "the dependency rule" in
+  {
+    what;
+    destination = rule.destination;
+    text = read_step_output ~what rule.written;
+    file = Header_file.rule;
+  }
+
+let emit_header ~null ~stats ~trap (target : Target.t)
+    (plan : Pipeline.header) =
+  let translation = plan.interface in
+  make_directory translation.directory;
+  preprocess ~null target.backend.compiler translation;
+  match plan.output with
+  | Pipeline.Header -> put [ header_output ~stats ~trap target plan ]
+  | Pipeline.Header_and_rule rule ->
+      let header = header_output ~stats ~trap target plan in
+      let rule = rule_output rule in
+      put [ header; rule ]
+  | Pipeline.Rule rule -> put [ rule_output rule ]
 
 (* One target model serves every translation, as they share the options
    of the compile step, and names the compiler that the commands are for.

@@ -336,9 +336,10 @@ guard where a point needs it complete, and at its end that of each
 other instance that its own applications name where the definition
 reads there, the layout typedef of each instance that it declares
 whose generic the step reads defined, the packing probe named for the
-header, and under `--trap-function` the trap's prototype and its
-definition under the guard of the trap function (design 9.3). The rest
-of the package, in the order of its commits:
+header, under `--trap-function` the trap's prototype and its
+definition under the guard of the trap function, and under the
+dependency options the rule of the header (design 9.3). The rest of
+the package, in the order of its commits:
 
 - [Medium] A layout digest covers its generic's tokens alone, so an
   instance that one header defines and another only declares hides a
@@ -355,11 +356,6 @@ of the package, in the order of its commits:
   `__FILE__` through another include path) gets two digests, and a
   client that includes both is refused. Design 9.3 states the
   assumption; a normal form of constants would lift part of it.
-- [High] Dependency options: `-MQ` with the header's path by default,
-  `M.h.d` for `-MD` and `-MMD` without `-MF`, `-M` and `-MM` printing
-  the rule and writing no header, `-o` with them refused, and `-o -`
-  needing `-MT` or `-MQ` (and `-MF`). `--emit-c-header` refuses every
-  dependency option until then.
 - [High] The output limit and `--stats`: charge the lines of the
   header, the macro brackets and the macro probe among them, to the
   unit's output limit and count them in `--stats` (3.5 rule 7);
@@ -385,9 +381,21 @@ of the package, in the order of its commits:
   atomic (a `link` would close the window for a new header), and no
   `fsync` precedes the rename. A message echoes the `-o` path and a
   refused interface path unescaped; an unreadable header of typec's is
-  reported as one typec did not write.
-- [Low] `Command.read_interface` repeats the file reading of
-  `read_preprocessed`, `Pipeline.plan_header` fills a `shape` with
+  reported as one typec did not write. A replaced header or rule keeps
+  the mode of the old file but takes the group of its directory (BSD,
+  macOS) or of the process (Linux), which may widen who reads it; keep
+  the group with `fchown` while the new file is still `0600`.
+- [Low] `--emit-c-header -MD -MF M.h` or `-M -MF M.tci` replaces the
+  header or the interface with the rule, as `cc -MD -MF x.c` does; `-o`
+  guards the header from this and `-MF` does not. Refuse an `-MF` file
+  that is the header or the interface (by device and inode at write
+  time, as names alias).
+- [Low] `-Wp,-MD,FILE` and `-Xpreprocessor -MF` reach the backend as
+  preprocessing options, so under `--emit-c-header` the backend writes
+  that rule itself, at the user's path, with the `.tci`'s default target
+  and not the header. Classify them as dependency options or refuse them
+  with `--emit-c-header`.
+- [Low] `Pipeline.plan_header` fills a `shape` with
   values of a translation to reuse its helpers, and `Invocation` defines
   `given` twice: factor them.
 - [Medium] The writer reads the lowered text of the interface again
