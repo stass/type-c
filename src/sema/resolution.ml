@@ -201,26 +201,18 @@ let type_of (entity : Entity.t) =
   | Typedef { typedef_type; _ } -> typedef_type
   | Enumerator { enumerator_type; _ } -> enumerator_type
 
+(* A C entity of the name, which lowering writes under that name. *)
+let is_c_entity (found : Parser.ordinary option) =
+  match found with
+  | Some { kind; _ } -> not (Parser.has_own_name kind)
+  | None -> false
+
 (* What the backend reads as a typedef name: a Type-C type that is no
    generic lowers to the typedef of its name (design 10.1). *)
 let is_c_typedef (found : Parser.ordinary option) =
   match found with
-  | Some { kind = Typedef_name | Declared_type { parameters = 0; _ }; _ } ->
-      true
-  | Some
-      { kind = Not_a_type | Declared_type _ | Type_parameter
-             | Derived_enumerator | Generic_function_name; _ }
-  | None ->
-      false
-
-(* A C entity of the name, which lowering writes under that name. *)
-let is_c_entity (found : Parser.ordinary option) =
-  match found with
-  | Some
-      { kind = Not_a_type | Typedef_name | Declared_type { parameters = 0; _ }
-             | Derived_enumerator | Generic_function_name; _ } ->
-      true
-  | Some { kind = Declared_type _ | Type_parameter; _ } | None -> false
+  | Some { kind; _ } -> Parser.names_type kind && is_c_entity found
+  | None -> false
 
 (* The declaration of the ordinary identifier [name] at the place, if
    [is_kind] holds of it there: the source's, or a typedef name that

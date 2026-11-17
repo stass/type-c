@@ -656,6 +656,20 @@ spelling C declares there.
   aligned.tc:2: error: in the instance 'g(int)' that this application names, at c.h:1: 'option' in the arguments of an attribute denotes a universe name, but where lowering writes the text the backend reads the declaration of 'option' there, the one declared at c.h:2 [generic-name-capture]
   [1]
 
+A generic function writes nothing under its own name, so where moved
+C text names one, the spelling hides no C entity and the backend
+decides.
+
+  $ cat > moved.tc <<'EOF'
+  > # 1 "c.h" 1
+  > generic(T) static void h(T *p) { }
+  > type g(T) = struct { T v; int n __attribute__((aligned(sizeof(h)))); };
+  > # 4 "moved.tc" 2
+  > g(int) x;
+  > EOF
+  $ ./golden.exe moved.tc | grep aligned
+  struct g__i { __tc_arg__i v ; int n __attribute__ ( ( aligned ( sizeof ( h ) ) ) ) ; } ;
+
 Type-C text names no generic and no universe name in the arguments of an
 attribute, whether a declaration of C would take the spelling or not:
 lowering leaves the arguments as written, so the backend would find
@@ -678,6 +692,20 @@ backend's to read.
   > EOF
   $ ./golden.exe bare.tc
   bare.tc:2: error: `g` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
+  [1]
+  $ cat > cleanup.tc <<'EOF'
+  > generic(T) static void f(T *p) { }
+  > void g(void) { int x __attribute__((cleanup(f))); }
+  > EOF
+  $ ./golden.exe cleanup.tc
+  cleanup.tc:2: error: `f` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
+  [1]
+  $ cat > instance.tc <<'EOF'
+  > generic(T) static void f(T *p) { }
+  > void g(void) { int x __attribute__((cleanup(f(int)))); }
+  > EOF
+  $ ./golden.exe instance.tc
+  instance.tc:2: error: `f` in the arguments of an attribute denotes a generic, which lowering writes under a name of its own, but it leaves the arguments as written [unread-renamed-name]
   [1]
   $ printf 'int y __attribute__((aligned(_Alignof(option(int)))));\n' \
   >   > universe.tc

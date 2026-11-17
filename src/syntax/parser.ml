@@ -2199,18 +2199,21 @@ let comma_separated state read =
    under the spelling of the source; parser.mli says more. *)
 type own_name = Own_type_parameter | Own_generic | Own_universe_name
 
+(* Whether lowering writes a declaration of [kind] under a name of its
+   own: a type parameter's argument, or a generic's instances. *)
+let has_own_name = function
+  | Type_parameter -> true
+  | kind -> names_generic kind
+
 (* No generic of a unit has a universe name (design 3.6), so a generic
    that has one is the universe's. *)
 let own_name (found : ordinary option) name =
   let universe_name = Option.is_some (Universe.find name) in
   match found with
+  | Some { kind; _ } when not (has_own_name kind) -> None
   | Some { kind = Type_parameter; _ } -> Some Own_type_parameter
-  | Some { kind = Declared_type { parameters; _ }; _ }
-    when parameters > 0 && universe_name ->
-      Some Own_universe_name
-  | Some { kind = Declared_type { parameters; _ }; _ } when parameters > 0 ->
-      Some Own_generic
-  | Some _ -> None
+  | Some _ when universe_name -> Some Own_universe_name
+  | Some _ -> Some Own_generic
   | None when universe_name -> Some Own_universe_name
   | None -> None
 

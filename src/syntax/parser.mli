@@ -96,6 +96,9 @@ type kind =
       (** an enumerator that a variant claims for C (design 10.1 rule 6) *)
   | Generic_function_name  (** of a generic function (design 7.1) *)
 
+val names_type : kind -> bool
+(** Whether a name of the kind names a type. *)
+
 (** What an ordinary identifier in scope denotes: its declaration and its
     kind. *)
 type ordinary = { declaration : Tree.reference; kind : kind }
@@ -105,6 +108,10 @@ type ordinary = { declaration : Tree.reference; kind : kind }
     spelling of the source, so the backend does not read such a name as
     Type-C means it. *)
 type own_name = Own_type_parameter | Own_generic | Own_universe_name
+
+val has_own_name : kind -> bool
+(** Whether lowering writes a declaration of the kind under a name of its
+    own: that of a type parameter or of a generic, type or function. *)
 
 val own_name : ordinary option -> string -> own_name option
 (** [own_name found name] is what the identifier [name] denotes, if it is

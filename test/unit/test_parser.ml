@@ -2535,6 +2535,12 @@ let universe_cases =
       "in.tc:1: error: `option` in the arguments of an attribute denotes a \
        universe name, which lowering writes under a name of its own, but it \
        leaves the arguments as written [unread-renamed-name]";
+    case "a generic function in the arguments of an attribute"
+      "generic(T) static void f(T *p) { }\n\
+       void g(void) { int x __attribute__((cleanup(f))); }"
+      "in.tc:2: error: `f` in the arguments of an attribute denotes a \
+       generic, which lowering writes under a name of its own, but it \
+       leaves the arguments as written [unread-renamed-name]";
     case "a universe name in parentheses is the parameter it declares"
       "int f(int (option));"
       "(declaration (int) (function f (int (paren option))))";
