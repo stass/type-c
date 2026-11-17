@@ -202,3 +202,130 @@ let catalogue rows =
        Buffer.add_string out retired_header;
        List.iter (add_retired out) retired);
   Buffer.contents out
+
+(* Prose cites a rule as [name]. The form is Markdown's own: square
+   brackets that it leaves as text, being neither a link nor in code, are
+   a citation, so no list of other bracketed words is kept. A writer puts
+   other brackets in code or escapes them as \[, or the check fails. The
+   documents write links inline, as [text](url); the scanner knows no
+   reference link, so one fails the check instead of hiding a citation. *)
+
+let backtick_run text i =
+  let rec past j =
+    if j < String.length text && text.[j] = '`' then past (j + 1) else j
+  in
+  past i - i
+
+(* A code fence opens with a run of three or more backticks and an info
+   string without a backtick; the length of the run. *)
+let fence_opening line =
+  let line = String.trim line in
+  let run = backtick_run line 0 in
+  if run >= 3 && not (String.contains_from line run '`') then Some run
+  else None
+
+(* A fence closes on a line of backticks alone, at least as many as
+   opened it; a shorter run or one with an info string is content. *)
+let closes_fence opening line =
+  let line = String.trim line in
+  let run = backtick_run line 0 in
+  run >= opening && run = String.length line
+
+(* Code blocks hold no citation, and blank lines end paragraphs; both
+   become empty lines, which keeps the numbers of the others. *)
+let prose_lines text =
+  let blank_code fence line =
+    match fence with
+    | Some opening when closes_fence opening line -> (None, "")
+    | Some _ -> (fence, "")
+    | None -> (
+        match fence_opening line with
+        | Some run -> (Some run, "")
+        | None when String.trim line = "" -> (None, "")
+        | None -> (None, line))
+  in
+  snd (List.fold_left_map blank_code None (String.split_on_char '\n' text))
+
+(* Where the paragraph that holds [i] ends: at the next empty line. *)
+let paragraph_end text i =
+  let rec from j =
+    match String.index_from_opt text j '\n' with
+    | None -> String.length text
+    | Some newline
+      when newline + 1 < String.length text && text.[newline + 1] = '\n' ->
+        newline
+    | Some newline -> from (newline + 1)
+  in
+  from i
+
+(* A run of [run] backticks at [i] opens a code span that the next run of
+   as many backticks in its paragraph closes; the index after that run.
+   With no such run the backticks are text. *)
+let code_span_end text i run =
+  let limit = paragraph_end text i in
+  let rec from j =
+    match String.index_from_opt text j '`' with
+    | Some next when next < limit ->
+        let length = backtick_run text next in
+        if length = run then Some (next + length) else from (next + length)
+    | _ -> None
+  in
+  from (i + run)
+
+(* The pairs of square brackets that the prose [text] leaves as text, as
+   the index of each '[' and what the pair holds. A pair followed by '('
+   is a link. A '[' left open at the end of a paragraph is text. *)
+let literal_brackets text =
+  let length = String.length text in
+  let link_follows i = i < length && text.[i] = '(' in
+  let close opening i found =
+    match opening with
+    | None -> found
+    | Some start ->
+        let held = String.sub text (start + 1) (i - start - 1) in
+        if link_follows (i + 1) then found else (start, held) :: found
+  in
+  let rec scan i opening found =
+    if i >= length then List.rev found
+    else
+      match text.[i] with
+      | '\\' -> scan (i + 2) opening found
+      | '`' -> (
+          let run = backtick_run text i in
+          match code_span_end text i run with
+          | Some after -> scan after opening found
+          | None -> scan (i + run) opening found)
+      | '[' -> scan (i + 1) (Some i) found
+      | ']' -> scan (i + 1) None (close opening i found)
+      | '\n' when paragraph_end text i = i -> scan (i + 1) None found
+      | _ -> scan (i + 1) opening found
+  in
+  scan 0 None []
+
+let line_of text index =
+  let rec count i lines =
+    if i >= index then lines
+    else count (i + 1) (if text.[i] = '\n' then lines + 1 else lines)
+  in
+  count 0 1
+
+let citation_problem rows name =
+  match List.find_opt (fun row -> row_name row = name) rows with
+  | Some (Live _) -> None
+  | Some (Retired _) -> Some "names a retired rule"
+  | None ->
+      Some
+        "names no rule; write other square brackets in code or as \\[, \
+         and links inline"
+
+let stale_citations rows ~file text =
+  let prose = String.concat "\n" (prose_lines text) in
+  let stale (start, name) =
+    match citation_problem rows name with
+    | None -> None
+    | Some problem ->
+        Some
+          (Printf.sprintf "%s:%d: [%s] %s" file (line_of prose start) name
+             problem)
+  in
+  List.filter_map stale (literal_brackets prose)

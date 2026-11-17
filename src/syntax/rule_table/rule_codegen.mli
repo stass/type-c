@@ -39,3 +39,10 @@ val ocaml : row list -> string
 (** [catalogue rows] is the Markdown catalogue: a table of the live rows,
     then the retired names. Raises [Invalid_table] as [check] does. *)
 val catalogue : row list -> string
+
+(** [stale_citations rows ~file text] is a message ["file:line: ..."] for
+    each citation in the Markdown [text] of [file] that names no live row
+    of [rows], in the order of the text. Prose cites a rule as [\[name\]]:
+    every pair of square brackets that Markdown leaves as text, being
+    neither a link nor in code, is a citation. *)
+val stale_citations : row list -> file:string -> string -> string list

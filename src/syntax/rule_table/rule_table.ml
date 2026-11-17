@@ -7,6 +7,9 @@
    lets the catalogue and the golden tests enumerate every rule: OCaml
    cannot list the constructors of a hand-written variant.
 
+   rule_table citations FILE...: fails, naming each, when a Markdown FILE
+   cites a rule as [name] that the table holds no live row of.
+
    A rule's name is what a diagnostic ends with and what users and tools
    match, as GCC and Clang name their warnings, so a name is never
    changed; review keeps it so, since no check sees a row renamed or
@@ -737,17 +740,29 @@ let rows =
          defined before it." };
   ]
 
+let usage () =
+  prerr_endline
+    "usage: rule_table ocaml | rule_table catalogue\n\
+    \       rule_table citations FILE...";
+  exit 2
+
+let read_file path = In_channel.with_open_bin path In_channel.input_all
+
+(* Every stale citation of every file is reported before the failure. *)
+let check_citations files =
+  let stale file = stale_citations rows ~file (read_file file) in
+  match List.concat_map stale files with
+  | [] -> ()
+  | messages ->
+      List.iter prerr_endline messages;
+      exit 1
+
 let () =
-  let generate =
-    match Sys.argv with
-    | [| _; "ocaml" |] -> ocaml
-    | [| _; "catalogue" |] -> catalogue
-    | _ ->
-        prerr_endline "usage: rule_table ocaml | rule_table catalogue";
-        exit 2
-  in
-  match generate rows with
-  | text -> print_string text
+  match Array.to_list Sys.argv with
+  | [ _; "ocaml" ] -> print_string (ocaml rows)
+  | [ _; "catalogue" ] -> print_string (catalogue rows)
+  | _ :: "citations" :: (_ :: _ as files) -> check_citations files
+  | _ -> usage ()
   | exception Invalid_table reason ->
       prerr_endline ("rule_table: " ^ reason);
       exit 1

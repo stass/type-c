@@ -1628,11 +1628,6 @@ types (design 13.3).
   headers, once `--emit-c-header` is complete), 12 (checked mode) and 13
   (the driver) of `docs/reference.md`, which point to the design and to
   typec(1) instead.
-- [Medium] Nothing checks that a bracketed rule name in
-  `docs/reference.md`, `docs/tutorial.md` or `README.md` is a live rule
-  of `src/syntax/rule_table/rule_table.ml`. The catalogue generator
-  could fail on a name it does not hold, so that a typo or a retired
-  name fails the build; a name on the wrong rule still needs review.
 - [Low] `docs/reference.md` does not state some rules that a user can
   meet: `[excess-initializer]` (design 5.2), the pragma rules
   `[try-pragma]`, `[deferred-pragma]` and `[instance-pragma]`, the

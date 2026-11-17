@@ -1042,7 +1042,7 @@ backends, where the host has the tool.
 `typec` stops at the first error it finds, prints it as GCC and Clang
 print theirs, `file:line: error: message`, and exits with status 80. An
 error under a rule of Type-C ends with the rule's name in brackets, as
-`[match-arm-end]`, the way GCC ends a warning with its option; the
+[match-arm-end], the way GCC ends a warning with its option; the
 catalogue of diagnostics (`dune build docs/diagnostics.md` writes it to
 `_build/default/docs/diagnostics.md`) gives each name's rule and the
 section of the [design](type-c-language-design.md) that states it. A

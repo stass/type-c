@@ -34,6 +34,16 @@ let contains text part =
 
 let accepts_name name = accepted [ live "Rule" name ]
 
+let stale text = stale_citations with_retired ~file:"f.md" text
+
+let cites_nothing_stale text = stale text = []
+
+(* Whether [text] has one stale citation, whose message begins [opening]. *)
+let one_stale text opening =
+  match stale text with
+  | [ message ] -> String.starts_with ~prefix:opening message
+  | _ -> false
+
 let failures () =
   let catalogue_of_all = catalogue with_retired in
   let source = ocaml with_retired in
@@ -74,6 +84,33 @@ let failures () =
         not (contains source "\"second\"") );
       ( "Rule keeps the live rules",
         contains source "| Third -> \"third-rule\"" );
+      ( "prose may cite a live rule",
+        cites_nothing_stale "A rule [first] and\n[third-rule]." );
+      ( "a citation of a retired rule is stale, with its line",
+        one_stale "One\n\ntwo [second]." "f.md:3: [second] names a retired rule"
+      );
+      ( "a citation of no rule is stale",
+        one_stale "[thrid-rule]" "f.md:1: [thrid-rule] names no rule" );
+      ( "an inline link is no citation",
+        cites_nothing_stale "[a](b.md) ![c](d.png) [e\nf](g.md)" );
+      ( "a reference link is checked as citations",
+        List.length (stale "[e][ref] [g][]\n\n[ref]: https://x") = 5 );
+      ( "a citation may begin a line before a colon",
+        one_stale "Text\n[x]: more text" "f.md:2: [x]" );
+      ( "code holds no citation",
+        cites_nothing_stale
+          "`a[i]` ``b`[j]`` `c\n[k]`\n\n```c\nd[l] = 0;\n```\n" );
+      ("an escaped bracket is no citation", cites_nothing_stale "\\[x]");
+      ( "backticks with a backtick after them open no fence",
+        one_stale "```c` x\n[x]\n" "f.md:2: [x]" );
+      ( "a fence closes only on as many backticks alone",
+        one_stale "````\n```c\n[i]\n```\n````\n[x]" "f.md:6: [x]" );
+      ( "lines are counted through code blocks",
+        one_stale "```\n[x]\n```\n[x]" "f.md:4: [x]" );
+      ( "a backtick without a closing run is text",
+        one_stale "a ` b [x]" "f.md:1: [x]" );
+      ( "a code span ends with its paragraph",
+        one_stale "a ` b\n\n[x] `" "f.md:3: [x]" );
     ]
 
 let () =

@@ -16,6 +16,21 @@
  (action
   (progn)))
 
+; Every rule that the documents for users cite as [name] in prose is a
+; live rule of the table (Rule_codegen.stale_citations). The documents
+; here include the catalogue that the rule above makes.
+
+(rule
+ (alias runtest)
+ (deps
+  ../README.md
+  (glob_files *.md)
+  (glob_files_rec ../examples/README.md))
+ (action
+  (chdir
+   %{workspace_root}
+   (run %{exe:../src/syntax/rule_table/rule_table.exe} citations %{deps}))))
+
 ; The manual page; test/unit/test_manual.ml checks its lists of options
 ; and exit statuses against the driver's.
 
