@@ -1280,6 +1280,17 @@ is [type-c-language-design.md](type-c-language-design.md).
 (musl) in containers, each on x86-64 and on arm64 (the latter under
 emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 
+- [Medium] The linearity checks of `test/unit/test_lowering.ml`
+  (`grows_linearly`, "the time to lower many tries in the scope of a
+  defer") compare wall-clock times, and failed once at a load average
+  of 9.5 (1.8 s against 0.22 s) and passed on rerun, so the gate can
+  fail on a busy host. Compare counts of work (allocated words, or
+  steps counted by the lowering) instead of time, or take the least of
+  several runs.
+- [Medium] The colima disk of `tools/hosts/run.sh` filled up ("No space
+  left on device", 43 GB of images reclaimable), so the Debian run
+  could not start; have the script prune the images it built before,
+  or say in docs/development.md how to.
 - [Low] Two runs of `tools/hosts/freebsd.sh` on one `DIR` at once are
   not guarded: each empties the other's source and corpus.
 - [Medium] `tools/hosts/run.sh` (`take_results`, `changed_records`) and
