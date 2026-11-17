@@ -2118,25 +2118,25 @@ let type_c_error_cases =
       "error: in.tc:1: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
        would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0057]";
+       [TC0072]";
     case "a defer in a block of a defer"
       "void f(void) { defer { f(); { defer f(); } } }"
       "error: in.tc:1: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
        would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0057]";
+       [TC0072]";
     case "a defer in a statement expression of a defer"
       "void f(void) { defer (void)({ { defer f(); } 0; }); }"
       "error: in.tc:1: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
        would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0057]";
+       [TC0072]";
     case "a defer as the statement of a defer"
       "void f(void) { defer defer f(); }"
       "error: in.tc:1: a `defer` statement in the statement of a defer, \
        which lowering copies to each exit of its scope, where each copy \
        would repeat every copy of the inner statement (design 6 rule 11) \
-       [TC0057]";
+       [TC0072]";
     case "a defer after the labels of an arm"
       "type t = | A | B;\nvoid f(t v) { match (v) { case A: defer f(v); \
        break; default: break; } }"

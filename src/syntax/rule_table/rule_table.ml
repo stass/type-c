@@ -318,9 +318,8 @@ let rows =
         "A [defer] statement that is no block item of a compound \
          statement or a match arm in a function body: the substatement \
          of a statement, the statement of a label, [case] or [default], \
-         anywhere in the deferred statement of another, a block item of \
-         the compound statement of a statement expression, or outside \
-         every function body." };
+         a block item of the compound statement of a statement \
+         expression, or outside every function body." };
     Live { name = "Deferred_exit"; code = 58;
       clause = Some "design 6 rule 4";
       meaning =
@@ -425,6 +424,11 @@ let rows =
          text declares for itself, or the text declares a name that is in \
          scope after it, such as a tag that the definition of a generic \
          type is the first to mention in file scope (design 3.5 rule 8)." };
+    Live { name = "Defer_in_deferred"; code = 72;
+      clause = Some "design 6 rule 11";
+      meaning =
+        "A [defer] statement anywhere in the deferred statement of \
+         another, which lowering copies to each exit of its scope." };
   ]
 
 let () =

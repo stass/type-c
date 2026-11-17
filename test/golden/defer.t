@@ -77,7 +77,7 @@ in a function body (design 6 rule 11).
   > void f(void) { defer defer g(); }
   > EOF
   $ ./golden.exe deferred.tc
-  deferred.tc:2: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
+  deferred.tc:2: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
   [1]
 
 No `defer` statement stands in the statement of another at any depth:
@@ -95,7 +95,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > }
   > EOF
   $ ./golden.exe deferred_block.tc
-  deferred_block.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
+  deferred_block.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
   [1]
 
   $ cat > deferred_value.tc <<'EOF'
@@ -108,7 +108,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > }
   > EOF
   $ ./golden.exe deferred_value.tc
-  deferred_value.tc:4: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
+  deferred_value.tc:4: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
   [1]
 
   $ cat > deferred_arm.tc <<'EOF'
@@ -125,7 +125,7 @@ not in a block of it, a statement expression in it or a match arm in it.
   > }
   > EOF
   $ ./golden.exe deferred_arm.tc
-  deferred_arm.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0057]
+  deferred_arm.tc:6: a `defer` statement in the statement of a defer, which lowering copies to each exit of its scope, where each copy would repeat every copy of the inner statement (design 6 rule 11) [TC0072]
   [1]
 
   $ cat > statement_expression.tc <<'EOF'

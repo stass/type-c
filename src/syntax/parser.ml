@@ -953,7 +953,7 @@ let fail_defer_position state where =
    each copy would hold every copy of the inner one, so the output would
    multiply with each level of nesting. *)
 let defer_in_deferred =
-  Rule.message Defer_position
+  Rule.message Defer_in_deferred
     "a `defer` statement in the statement of a defer, which lowering \
      copies to each exit of its scope, where each copy would repeat every \
      copy of the inner statement"

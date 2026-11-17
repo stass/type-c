@@ -1504,3 +1504,9 @@ types (design 13.3).
   region) ships with the compiler or stays a test.
 - [Low] Consider C2y named loops (`break name;`) as the way to leave an
   outer `match` or loop from an inner one, once backends accept them.
+- [Medium] A `defer` that is badly placed and also inside the statement of
+  another `defer`, as in `defer if (c) defer g();`, is refused as
+  `Defer_position`, because the position check runs while the inner
+  statement is read and the walk that raises `Defer_in_deferred` runs
+  after the outer one. Pilot B then undercounts the latter. Check
+  "inside a deferred statement" first, at one place (design 6 rule 11).

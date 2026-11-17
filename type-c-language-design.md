@@ -1648,7 +1648,9 @@ that typing does not read, where the scan of rule 13 refuses it.
 `defer` so does not depend on the C compiler implementing the TS.
 
 The measurement of P9 (section 15) counts apart the refusals of rule
-8, of rule 9, of rule 12 and of the form of a `return` on each of its
+8, of rule 9, of rule 12, of a `defer` statement in the statement of
+another (rule 11, which exists only because lowering repeats the
+statement at every exit) and of the form of a `return` on each of its
 grounds (13.5), and their diagnostics tell them apart (13.6). The
 count of a rule reads codes and matches no message text. A failure of the
 resolution property for a deferred statement is a refusal under rule
@@ -4114,7 +4116,7 @@ numbers refer to the implementation plan.
 | --- | --- | --- | --- |
 | P7 | A `void` type argument removes the field (3.5) | Stage 2 implementation and pilot | As specified |
 | P8 | `try` is limited to three positions, in a statement or declaration that neither holds nor directly follows a pragma line (5.1) | Stage 2, Pilot B: rewrites the limit forced, and statements refused for a pragma | As specified |
-| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11), and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 rejects code, read from their codes, a refusal of the resolution property that rests on an unknown type counted under P21 instead; how often each refusal of the form (13.5) rejects a function or a `return`; the returns, and the other jumps that run copies, where the plain statement reports a diagnostic of the list of 13.5 that its block loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
+| P9 | `defer` is lowered by repeating the cleanup at each exit, which needs rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11), and a `return` in the scope of a `defer` statement holds its value in a temporary whose type `__typeof__` takes from a call of the function (13.5) | Stage 2, Pilot B, which counts what this row lists and nothing else for P9: code size against a hand-written `goto cleanup` version; how often each of rules 8, 9 and 12 of section 6 and the refusal of a `defer` statement in a deferred statement (rule 11) rejects code, read from their codes, a refusal of the resolution property that rests on an unknown type counted under P21 instead; how often each refusal of the form (13.5) rejects a function or a `return`; the returns, and the other jumps that run copies, where the plain statement reports a diagnostic of the list of 13.5 that its block loses; and the builds that a diagnostic the form adds breaks | Repetition, and the temporary as specified |
 | P10 | The instance naming scheme (10.3) | Stage 2: injectivity tests; readability in a debugger | As specified |
 | P11 | Type arguments are deduced left to right, and later arguments convert (7.2) | Stage 3 container library: conversions that surprised | As specified |
 | P12 | Instances are per translation unit (7.3) | Stage 3: code size of the library and pilot | Per unit |
