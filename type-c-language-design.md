@@ -3226,7 +3226,11 @@ int *(*fp)(vector(int) *) = vector_last(int);   /* explicit instance */
      or takes a `T *`. The rule is about the function that the
      generic defines, the one place where its `va_start` stands: a
      function type elsewhere in the head or the body, as that of
-     `void (*log)(T last, ...)`, defines no function.
+     `void (*log)(T last, ...)`, defines no function. A last named
+     parameter of a type that typec does not compute is an error, as
+     that type may be `Ti` in C, and so is a function type that typec
+     does not compute, as an attribute that it does not know makes one,
+     since it may end in such a parameter (13.3).
    - `static` is the only storage-class specifier, on a definition or on
      a declaration, and it changes nothing: an instance has internal
      linkage whatever is written. `extern` is an error, since it would

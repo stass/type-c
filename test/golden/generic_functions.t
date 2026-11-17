@@ -976,6 +976,120 @@ which agrees it with no other declaration.
   variable_matrix.tc:1: error: no parameter of a generic function is variably modified [generic-function-form]
   [1]
 
+Where the parameter list ends in an ellipsis, the last named parameter
+does not have the type of a type parameter, qualified or not, read from
+the type and not from how the head spells it: `va_start` on it is
+undefined in the instance for `char`, which a call deduces.
+
+  $ printf 'generic(T) int f(T last, ...);\n' > last_type_parameter.tc
+  $ ./golden.exe last_type_parameter.tc
+  last_type_parameter.tc:1: error: the last named parameter before the ellipsis of a generic function does not have the type of a type parameter, which the default argument promotions change in some instances [generic-function-form]
+  [1]
+
+  $ printf 'generic(T) int f(const T last, ...);\n' > last_const.tc
+  $ ./golden.exe last_const.tc
+  last_const.tc:1: error: the last named parameter before the ellipsis of a generic function does not have the type of a type parameter, which the default argument promotions change in some instances [generic-function-form]
+  [1]
+
+  $ printf 'generic(T) int f(volatile T last, ...);\n' > last_volatile.tc
+  $ ./golden.exe last_volatile.tc
+  last_volatile.tc:1: error: the last named parameter before the ellipsis of a generic function does not have the type of a type parameter, which the default argument promotions change in some instances [generic-function-form]
+  [1]
+
+  $ printf 'generic(T) int f(T first, __typeof__(first) last, ...);\n' \
+  >   > last_typeof_first.tc
+  $ ./golden.exe last_typeof_first.tc
+  last_typeof_first.tc:1: error: the last named parameter before the ellipsis of a generic function does not have the type of a type parameter, which the default argument promotions change in some instances [generic-function-form]
+  [1]
+
+  $ printf 'type same(T) = T;\ngeneric(T) int f(same(T) last, ...);\n' \
+  >   > last_alias.tc
+  $ ./golden.exe last_alias.tc
+  last_alias.tc:2: error: the last named parameter before the ellipsis of a generic function does not have the type of a type parameter, which the default argument promotions change in some instances [generic-function-form]
+  [1]
+
+  $ printf 'generic(T) int f(T *p, __typeof__(*p) last, ...);\n' \
+  >   > last_through_pointer.tc
+  $ ./golden.exe last_through_pointer.tc
+  last_through_pointer.tc:1: error: the last named parameter before the ellipsis of a generic function does not have the type of a type parameter, which the default argument promotions change in some instances [generic-function-form]
+  [1]
+
+  $ cat > last_definition.tc <<'EOF'
+  > generic(T) int f(T last, ...) { (void)last; return 0; }
+  > EOF
+  $ ./golden.exe last_definition.tc
+  last_definition.tc:1: error: the last named parameter before the ellipsis of a generic function does not have the type of a type parameter, which the default argument promotions change in some instances [generic-function-form]
+  [1]
+
+A type that typec does not compute may be that of a type parameter in
+C, so it is refused there too (13.3), even where it is the same in
+every instance.
+
+  $ cat > last_unknown.tc <<'EOF'
+  > generic(T) int f(T *p,
+  >     __typeof__(_Generic((_Float16)0, int: *p, default: *p)) last, ...);
+  > EOF
+  $ ./golden.exe last_unknown.tc
+  last_unknown.tc:1: error: whether a generic function ends in an ellipsis after a parameter of the type of a type parameter depends on '_Float16', whose type typec does not compute [generic-function-form]
+  [1]
+  $ printf 'generic(T) int f(_Float16 last, ...);\n' > last_float16.tc
+  $ ./golden.exe last_float16.tc
+  last_float16.tc:1: error: whether a generic function ends in an ellipsis after a parameter of the type of a type parameter depends on '_Float16', whose type typec does not compute [generic-function-form]
+  [1]
+
+An attribute that typec does not know makes a function type that it
+does not compute, which may end in such a parameter, so it is refused
+with an ellipsis and without one.
+
+  $ cat > unknown_function.tc <<'EOF'
+  > generic(T) __attribute__((unknown_to_typec)) int f(
+  >     __typeof__(_Generic((_Float16)0, int: *(T *)0, default: *(T *)0))
+  >         last, ...) { return 0; }
+  > EOF
+  $ ./golden.exe unknown_function.tc
+  unknown_function.tc:1: error: whether a generic function ends in an ellipsis after a parameter of the type of a type parameter depends on the attribute 'unknown_to_typec', whose type typec does not compute [generic-function-form]
+  [1]
+  $ cat > unknown_function_fixed.tc <<'EOF'
+  > generic(T) int f(int x) __attribute__((unknown_to_typec)) { return x; }
+  > EOF
+  $ ./golden.exe unknown_function_fixed.tc
+  unknown_function_fixed.tc:1: error: whether a generic function ends in an ellipsis after a parameter of the type of a type parameter depends on the attribute 'unknown_to_typec', whose type typec does not compute [generic-function-form]
+  [1]
+
+The head refuses these forms of a type parameter before rule 6 reads
+it (design 3.5 rule 4).
+
+  $ printf 'generic(T) int f(_Atomic(T) last, ...);\n' > last_atomic.tc
+  $ ./golden.exe last_atomic.tc
+  last_atomic.tc:1: error: the type name of `_Atomic( )` depends on a type parameter [generic-definition]
+  [1]
+  $ printf 'generic(T) int f(_Atomic T last, ...);\n' > last_atomic_q.tc
+  $ ./golden.exe last_atomic_q.tc
+  last_atomic_q.tc:1: error: the type qualified by `_Atomic` depends on a type parameter [generic-definition]
+  [1]
+  $ printf 'generic(T) int f(__typeof__(T) last, ...);\n' > last_typeof.tc
+  $ ./golden.exe last_typeof.tc
+  last_typeof.tc:1: error: the type name of `typeof( )` depends on a type parameter [generic-definition]
+  [1]
+
+No other type that mentions a type parameter is promoted in one
+instance and not in another, so a pointer, an adjusted array, a type
+application, a parameter between the value and the ellipsis, the
+ellipsis of a function type in the head, and a function without
+`generic` all stand.
+
+  $ cat > last_stands.tc <<'EOF'
+  > type vector(T) = struct { T *data; unsigned long count; };
+  > generic(T) int a(T first, __typeof__(&first) last, ...);
+  > generic(T) int b(T *last, ...);
+  > generic(T) int c(T last[4], ...);
+  > generic(T) int d(vector(T) last, ...);
+  > generic(T) int e(T first, int count, ...);
+  > generic(T) int g(void (*log)(T last, ...), ...);
+  > int h(char last, ...);
+  > EOF
+  $ ./golden.exe last_stands.tc > /dev/null
+
 The head defines no structure, union or enumeration, which an instance
 would define twice, as its prototype and at its definition. The body
 may define one, and the head may name one declared before.

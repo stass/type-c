@@ -601,10 +601,12 @@ let rows =
          declarator that declares a function, with a prototype and \
          neither [()] nor an identifier list, no storage-class specifier \
          but [static], no assembler label, no parameter of a variably \
-         modified type, no structure, union or enumeration tag declared \
-         or body defined in the head, and on a declaration that is not \
-         a definition neither [_Noreturn] nor an attribute anywhere in \
-         it." };
+         modified type, no type parameter or type that typec does not \
+         compute as the type of the last named parameter before an \
+         ellipsis, no function type that typec does not compute, no \
+         structure, union or enumeration tag declared or body defined \
+         in the head, and on a declaration that is not a definition \
+         neither [_Noreturn] nor an attribute anywhere in it." };
     Live { constructor = "Generic_function_agreement";
       name = "generic-function-agreement";
       clause = "design 7.1 rule 7";

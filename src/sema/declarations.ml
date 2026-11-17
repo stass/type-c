@@ -4540,6 +4540,17 @@ let check_agreement state span name ~earlier ~later =
             %s, whose type typec does not compute"
            unknown.construct)
 
+(* The parameter types of the generic function that [reference]
+   declares and whether it is variadic, or the unknown type that it has:
+   every head has a prototype (design 7.1 rule 6), which the parser
+   checks. *)
+let generic_prototype state reference =
+  match (generic_function_type state reference).shape with
+  | Function { parameters = Prototype { types; variadic }; _ } ->
+      Unknown.Answer (types, variadic)
+  | Unknown_type unknown -> Depends_on unknown
+  | _ -> invalid_arg "Declarations: a generic function without a prototype"
+
 (* Design 7.1 rule 6: whether two variably modified types are the same
    rests on their bounds at run time, so rule 7 could not compare two
    declarations whose parameters have one. The parameter types are
@@ -4552,11 +4563,46 @@ let refuse_variable_parameters state span reference =
         (Rule.message Generic_function_form
            "no parameter of a generic function is variably modified")
   in
-  match (generic_function_type state reference).shape with
-  | Function { parameters = Prototype { types; _ }; _ } ->
-      List.iter check types
-  | Unknown_type _ -> ()
-  | _ -> invalid_arg "Declarations: a generic function without a prototype"
+  match generic_prototype state reference with
+  | Answer (types, _) -> List.iter check types
+  | Depends_on _ -> ()
+
+(* Design 7.1 rule 6: [va_start] names the last parameter before the
+   ellipsis and is undefined where the default argument promotions
+   change its type (C11 7.16.1.4p4). The check types [T] as a
+   structure, which the promotions leave alone, so a body that calls
+   [va_start] on a parameter of type [T] passes and the instance for
+   [char] is undefined. The adjusted type is read, however the head
+   spells it. A last parameter of a type that typec does not compute
+   may be [T], and a function type that it does not compute may end in
+   one, so both are refused too (13.3). *)
+let refuse_promoted_last_parameter state span reference =
+  let refuse reason =
+    fail state span (Rule.message Generic_function_form reason)
+  in
+  let refuse_unknown (unknown : Unknown.t) =
+    refuse
+      (Printf.sprintf
+         "whether a generic function ends in an ellipsis after a \
+          parameter of the type of a type parameter depends on %s, whose \
+          type typec does not compute"
+         unknown.construct)
+  in
+  let check_last last =
+    match last.Ctype.shape with
+    | Unknown_type unknown -> refuse_unknown unknown
+    | _ when Ctype.is_opaque last ->
+        refuse
+          "the last named parameter before the ellipsis of a generic \
+           function does not have the type of a type parameter, which \
+           the default argument promotions change in some instances"
+    | _ -> ()
+  in
+  match generic_prototype state reference with
+  | Answer (types, true) -> (
+      match List.rev types with last :: _ -> check_last last | [] -> ())
+  | Answer (_, false) -> ()
+  | Depends_on unknown -> refuse_unknown unknown
 
 (* Design 7.1 rule 3: the zero initialisers among [lists], each braced
    list that the parser read in a generic function, as the check of the
@@ -4689,6 +4735,7 @@ let read_generic_function state (generic : Tree.generic_function) =
       check_agreement state span name ~earlier ~later:reference)
     earlier;
   refuse_variable_parameters state span reference;
+  refuse_promoted_last_parameter state span reference;
   Generic_function_declaration generic.span
 
 let read_external_declaration state (declaration : Tree.external_declaration) =

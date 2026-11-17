@@ -1578,24 +1578,13 @@ types (design 13.3).
   applied to 'struct s' after definition") and not on a `short`, so the
   fact that design 13.3 records of `unused` does not hold under
   `-Werror` there. Decide whether a warning breaks the fact.
-- [High] Package 3.1, the place before an ellipsis (rule 6). Where
-  the parameter list
-  of a generic function ends in an ellipsis, the head is refused if
-  its last named parameter has the type of a type parameter, read
-  from the type and not from its spelling. This is a security item:
-  `va_start` on that parameter is undefined in the instance for
-  `char`, which a call deduces. Pairs: `generic(T) int f(T last,
-  ...);` is refused, as it is with `const T last`, `_Atomic(T)
-  last`, `__typeof__(T) last`, `T first, __typeof__(first) last`
-  and, with `type same(T) = T;`, `same(T) last`;
-  `T first, __typeof__(&first) last`, `T *last`, `T last[4]`,
-  `vector(T) last`,
-  `T first, int count, ...` and `void (*log)(T last, ...), ...`
-  stand, as does `int f(char last, ...)` without `generic`. The
-  reason is tested on the backend: C text of the instance for
-  `char` of the refused head, with `va_start(ap, last)` in its
-  body, draws `-Wvarargs` from Apple Clang, and the same text with
-  `int count` before the ellipsis draws nothing.
+- [Low] An attribute that typec does not know makes the type of a
+  generic function unknown, so design 7.1 rule 6 refuses it whether or
+  not the function ends in an ellipsis. No attribute changes the
+  parameter types or whether a function is variadic, so an obscured
+  function type could keep its prototype, as 13.3 keeps "whether it is
+  a function type", and the refusal would then fall on the ellipsis
+  case alone. Decide whether to keep the prototype.
 - [Medium] Follow-ups of the review of the instance budget: the
   messages echo the presumed file name unbounded (`fail_instances`,
   `fail_nesting`, the output limit's refusal and every location
