@@ -437,12 +437,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 
 ## Expression typing
 
-- [Low] In C text, a value of a distinct type that is a pointer to an
-  instance, `type dp = distinct holder(int) *;`, converts to
-  `holder(long) *` unrefused: `refuse_conversion` reaches
-  `pointers_differ` only when both types are pointers, and the distinct
-  type is not one. Clang warns in the C encodings. Read both types as
-  their representations there in C text.
 - [Low] `str s = { "abc" };` elides the braces of the slice and gives
   `len` 0, which C accepts. Decide whether a braced list may initialise
   a slice member by member (design section 8), or refuse it as a

@@ -1211,8 +1211,7 @@ let refuse_dependent_null context span ~target source =
 
 (* Design 7.1 rule 3: a value of a type parameter converts to no other
    type, as a structure does not, though a scalar argument would. *)
-let refuse_type_parameter_conversion context span target (typed : typed) =
-  let source = value_type typed in
+let refuse_type_parameter_conversion context span ~target ~source =
   if
     (Ctype.is_opaque target || Ctype.is_opaque source)
     && differs context span target source
@@ -1293,27 +1292,34 @@ let refuse_pointer_conversion context span ~target ~source =
    qualifier of the one that the value points to. [pointers_differ]
    compares the types without qualifiers, so the qualifiers are checked
    here, where a variant or an instance is part of either. *)
-let refuse_dropped_qualifiers context span ~target ~source =
-  match ((target : Ctype.t).shape, (source : Ctype.t).shape) with
-  | Pointer t, Pointer s
-    when (mentions_type_c_record t || mentions_type_c_record s)
-         && Qualifiers.union t.qualifiers s.qualifiers <> t.qualifiers ->
-      refuse_pointer_conversion context span ~target ~source
-  | _ -> ()
+let drops_qualifiers ~(target : Ctype.t) ~(source : Ctype.t) =
+  match (target.shape, source.shape) with
+  | Pointer t, Pointer s ->
+      (mentions_type_c_record t || mentions_type_c_record s)
+      && Qualifiers.union t.qualifiers s.qualifiers <> t.qualifiers
+  | _ -> false
 
 (* Design 3.4: Type-C text converts no value implicitly to or from a
    distinct type, nor a pointer but as [pointers_differ] allows. The
    backend sees a distinct type as its representation (design 10.2), so
    it cannot refuse these conversions; the others are its own, which
    typec refuses where a variant or an instance would make the backend
-   name a C encoding. *)
+   name a C encoding. C text sees the representations as the backend
+   does, so every rule below decides on the types as seen, and in C text
+   no distinct type is left to cross; messages name the types as
+   written. The record rule reads the written types, which are the seen
+   ones wherever it applies, as no distinct type is a record (design
+   3.4), so its message names the types as written too. *)
 let refuse_conversion context span target (typed : typed) =
   let target = Ctype.unqualified target in
   let source = value_type typed in
+  let seen_target = type_as_seen context span target in
+  let seen_source = type_as_seen context span source in
   refuse_record_conversion context span ~target ~source;
-  refuse_dropped_qualifiers context span ~target ~source;
+  if drops_qualifiers ~target:seen_target ~source:seen_source then
+    refuse_pointer_conversion context span ~target ~source;
   let crosses =
-    match (target.shape, source.shape) with
+    match (seen_target.shape, seen_source.shape) with
     | Pointer t, Pointer s -> (
         match pointers_differ context span t s with
         | Some (Parameter_gap use) -> refuse_type_parameter context span use
@@ -1323,18 +1329,20 @@ let refuse_conversion context span target (typed : typed) =
         | None -> false)
     | (Record _ | Array _), _ -> false
     | _ ->
-        (Ctype.as_distinct target <> None || Ctype.as_distinct source <> None)
-        && differs context span target source
+        (Ctype.as_distinct seen_target <> None
+        || Ctype.as_distinct seen_source <> None)
+        && differs context span seen_target seen_source
   in
-  if crosses && is_type_c_text context span then
+  if crosses then
     context.fail span
       (Rule.message Distinct_conversion
          (Printf.sprintf
             "a value of type %s does not convert to %s without a cast"
             (quote (Type_name.of_ctype source))
             (quote (Type_name.of_ctype target))));
-  refuse_dependent_null context span ~target source;
-  refuse_type_parameter_conversion context span target typed
+  refuse_dependent_null context span ~target:seen_target seen_source;
+  refuse_type_parameter_conversion context span ~target:seen_target
+    ~source:seen_source
 
 (* Design 13.5: typec answers a construct whose [types], as its text sees
    them, have a distinct type in them, which only Type-C text sees, and

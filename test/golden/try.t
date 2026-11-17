@@ -2281,6 +2281,86 @@ read as its representation, as the backend reads it.
   c.h:1: error: a value of type 'dp *' does not convert to 'holder(long) **' without a cast (C11 6.5.16.1p1)
   [1]
 
+A value whose distinct type is itself a pointer to an instance is that
+pointer in C text, so it converts there as the pointer would: to a
+pointer to the same instance or to void, and not to a pointer to
+another instance or one that drops a qualifier.
+
+  $ cp conversions.h pointer_c_distinct_value.tc
+  $ cat >> pointer_c_distinct_value.tc <<'EOF'
+  > type dp = distinct holder(int) *;
+  > dp x;
+  > # 1 "c.h" 1
+  > void u(void) { holder(long) *q = x; (void)q; }
+  > EOF
+  $ ./golden.exe pointer_c_distinct_value.tc
+  c.h:1: error: a value of type 'dp' does not convert to 'holder(long) *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ cp conversions.h pointer_c_distinct_const.tc
+  $ cat >> pointer_c_distinct_const.tc <<'EOF'
+  > type dc = distinct const holder(int) *;
+  > dc y;
+  > # 1 "c.h" 1
+  > void u(void) { holder(int) *w = y; (void)w; }
+  > EOF
+  $ ./golden.exe pointer_c_distinct_const.tc
+  c.h:1: error: a value of type 'dc' does not convert to 'holder(int) *' without a cast (C11 6.5.16.1p1)
+  [1]
+  $ cp conversions.h pointer_c_distinct_valid.tc
+  $ cat >> pointer_c_distinct_valid.tc <<'EOF'
+  > type dp = distinct holder(int) *;
+  > dp x;
+  > # 1 "c.h" 1
+  > void u(void) {
+  >   holder(int) *same = x;
+  >   const holder(int) *read = x;
+  >   void *any = x;
+  >   (void)same;
+  >   (void)read;
+  >   (void)any;
+  > }
+  > EOF
+  $ ./golden.exe pointer_c_distinct_valid.tc > /dev/null
+
+In Type-C text the value converts to no other type, not even to the
+pointer it represents.
+
+  $ cp conversions.h pointer_distinct_value.tc
+  $ cat >> pointer_distinct_value.tc <<'EOF'
+  > type dp = distinct holder(int) *;
+  > dp x;
+  > void u(void) { holder(int) *same = x; (void)same; }
+  > EOF
+  $ ./golden.exe pointer_distinct_value.tc
+  pointer_distinct_value.tc:9: error: a value of type 'dp' does not convert to 'holder(int) *' without a cast [distinct-conversion]
+  [1]
+
+In C text in a generic definition, an integer that converts to a
+distinct pointer type is asked to be a null pointer constant, as one
+that converts to the pointer is, so one whose value depends on a type
+parameter is refused; zero is the partner.
+
+  $ cat > pointer_c_distinct_null.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >   type dq = distinct long *;
+  > # 1 "c.h" 1
+  >   dq b = sizeof(T) - 4; (void)b;
+  > }
+  > EOF
+  $ ./golden.exe pointer_c_distinct_null.tc
+  c.h:1: error: the value depends on a type parameter here, through a layout, a builtin or a `const` object, and is another constant in each instance [type-parameter-constant]
+  [1]
+  $ cat > pointer_c_distinct_zero.tc <<'EOF'
+  > generic(T) void f(T t)
+  > {
+  >   type dq = distinct long *;
+  > # 1 "c.h" 1
+  >   dq b = 0; (void)b; (void)t;
+  > }
+  > EOF
+  $ ./golden.exe pointer_c_distinct_zero.tc > /dev/null
+
 The partners convert: a pointer to the same instance, to or from void,
 one that adds a qualifier, a null pointer constant, and an explicit
 cast, as in C.
