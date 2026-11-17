@@ -4,8 +4,9 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 -->
 
 <!--
-test/run/readme.t checks the examples of this file on Clang and GCC:
-test/run/readme.sh says how the blocks are marked.
+test/run/readme.t checks the examples of this file on Clang and GCC,
+but those marked untested: test/run/readme.sh says how the blocks are
+marked.
 -->
 
 # Type-C
@@ -17,15 +18,19 @@ with `try` and `defer`. Its compiler, `typec`, takes the command line of
 compiler. A C11 file is already a Type-C file, so a program adopts it
 one file at a time.
 
-Type-C is early: the examples on this page work today, and the rest of
-the language is designed but not built yet ([Status](#status)).
+Type-C is early: every example on this page but the first works today;
+the first previews two planned features, and the rest of the language
+is designed but not built yet ([Status](#status)).
 
 ## A first look
 
 An evaluator of arithmetic expression trees, which reports a division
-by zero or an overflow as a value instead of crashing:
+by zero or an overflow as a value instead of crashing. This example
+uses two features that are planned but not built yet, `try` inside an
+expression and nested patterns; every other C and Type-C example in
+this README is checked by its tests.
 
-<!-- file: eval.tc -->
+<!-- untested: planned syntax -->
 ```c
 #include <limits.h>
 #include <stdio.h>
@@ -38,65 +43,46 @@ type expr =
 
 type eval_error = | DivByZero | Overflow;
 
+/* With a 32-bit int, long long holds every sum, product and quotient. */
+static result(int, eval_error) fit(long long n) {
+  if (n < INT_MIN || n > INT_MAX)
+    return Err(Overflow);
+  return Ok((int)n);
+}
+
 static result(int, eval_error) eval(const expr *e) {
-  int a, b, n;
   match (*e) {
-  case Num(value):
-    return Ok(value);
-  case Add(l, r):
-    a = try eval(l);
-    b = try eval(r);
-    if (__builtin_add_overflow(a, b, &n))
-      return Err(Overflow);
-    return Ok(n);
-  case Mul(l, r):
-    a = try eval(l);
-    b = try eval(r);
-    if (__builtin_mul_overflow(a, b, &n))
-      return Err(Overflow);
-    return Ok(n);
+  case Num(value): return Ok(value);
+  case Add(l, r):  return fit((long long)try eval(l) + try eval(r));
+  case Mul(l, r):  return fit((long long)try eval(l) * try eval(r));
   case Div(l, r):
-    a = try eval(l);
-    b = try eval(r);
-    if (b == 0)
+    int d = try eval(r);
+    if (d == 0)
       return Err(DivByZero);
-    if (a == INT_MIN && b == -1)
-      return Err(Overflow);
-    return Ok(a / b);
+    return fit((long long)try eval(l) / d);
   }
 }
 
 static void show(const expr *e) {
   match (eval(e)) {
-  case Ok(value):
-    printf("%d\n", value);
-    return;
-  case Err(error):
-    match (error) {
-    case DivByZero:
-      printf("division by zero\n");
-      return;
-    case Overflow:
-      printf("overflow\n");
-      return;
-    }
+  case Ok(value):      printf("%d\n", value); break;
+  case Err(DivByZero): printf("division by zero\n"); break;
+  case Err(Overflow):  printf("overflow\n"); break;
   }
 }
 
 int main(void) {
   expr two = Num(2), three = Num(3), four = Num(4), zero = Num(0);
-  expr sum = Add(&three, &four);
-  expr ratio = Div(&sum, &zero);
-  expr good = Mul(&two, &sum);    /* 2 * (3 + 4) */
-  expr bad = Mul(&two, &ratio);   /* 2 * ((3 + 4) / 0) */
-  show(&good);
-  show(&bad);
+  expr sum = Add(&three, &four), ratio = Div(&sum, &zero);
+  expr good = Mul(&two, &sum), bad = Mul(&two, &ratio);
+  show(&good);  /* 2 * (3 + 4) */
+  show(&bad);   /* 2 * ((3 + 4) / 0) */
 }
 ```
 
-```console
-$ typec -std=c11 -Wall -Wextra eval.tc -o eval
-$ ./eval
+It prints:
+
+```text
 14
 division by zero
 ```
@@ -107,22 +93,28 @@ What it shows:
   exactly one of the cases, and holds the fields of that case only.
   Code reaches the fields by naming them in a `case`, so Type-C code
   cannot read an `Add` as a `Num`.
-- **An exhaustive `match`.** Each `match` here names every case, with
+- **An exhaustive `match`.** Each `match` here covers every case, with
   no `default`. Add a `Sub` case to `expr`, and the build stops at the
   `match` in `eval` until it handles `Sub`
-  ([Variants and `match`](#variants-and-match)).
+  ([Variants and `match`](#variants-and-match)). In `show`,
+  `Err(DivByZero)` nests one pattern in another, which is planned:
+  today a pattern binds the fields of one constructor, and `show` would
+  match the error in a second `match`.
 - **`result` and `try`.** `result(int, eval_error)` is a variant that
   every Type-C file has: `Ok` of an `int`, or `Err` of an `eval_error`.
   `try eval(l)` gives the value of an `Ok`, or returns that `Err` from
   the function at once: the division by zero inside `bad` comes up
   through the `Mul` above it to `show`
-  ([`result` and `try`](#result-and-try)).
+  ([`result` and `try`](#result-and-try)). Today `try` stands only as a
+  whole statement, assignment or initialiser, as in
+  `int d = try eval(r);`; inside an expression, as in
+  `try eval(l) + try eval(r)`, it is planned.
 - **No runtime.** `typec` writes C: a variant becomes a structure of a
   tag and a union of the fields of its cases, a `match` a `switch` on
   the tag, and `try` an early return
   ([What the C looks like](#what-the-c-looks-like)). The rest is C: the
-  headers, the pointers, `printf`, the overflow builtins of GCC and
-  Clang, and the C compiler that builds it.
+  headers, the pointers, `printf`, the arithmetic in `long long`, and
+  the C compiler that builds it.
 
 [What Type-C adds to C](#what-type-c-adds-to-c) explains each new piece,
 and shows the mistakes each one rules out.
@@ -162,8 +154,8 @@ and shows the mistakes each one rules out.
   11.9% (GCC) larger
   ([Measured on a real library](#measured-on-a-real-library)).
 - **Claims only what is checked.** Each guarantee says what it depends
-  on ([principle 5](#principles)), and the tests check each code example
-  on this page, on GCC and Clang.
+  on ([principle 5](#principles)), and the tests check each C and Type-C
+  example on this page but the first, on GCC and Clang.
 
 ## What Type-C adds to C
 
@@ -900,7 +892,8 @@ states the rule, and the rule's code, and exits with status 80. An error
 that the C compiler finds in the C that `typec` writes, as with the
 generic types above, comes with the C compiler's message and status.
 [`test/run/readme.t`](test/run/readme.t) checks the files and the output
-shown on this page on GCC and Clang.
+of every C and Type-C example on this page but the first, on GCC and
+Clang.
 
 ## What the C looks like
 
@@ -1306,6 +1299,11 @@ Stage 3 is in progress, and **not ready to use** yet:
   `generic(T) T *vector_last(vector(T) *v);`
 - slices with checked indexing:
   `slice(uint8_t) bytes = slice_from_array(buffer);`
+
+Planned, and previewed by [A first look](#a-first-look): `try` inside
+any expression, and nested patterns such as `case Err(DivByZero):`.
+The [design](type-c-language-design.md#12-outside-the-core) lists both
+outside the core until it adopts them.
 
 Designed and **not yet implemented**: a checked mode, whose rules are
 provisional, that rules out specific classes of memory errors in the

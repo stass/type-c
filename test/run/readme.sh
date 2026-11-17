@@ -12,7 +12,13 @@
 #   "typec --emit-c NAME", without its line markers and the assertions
 #   that typec appends; the comparison is of tokens, so that the block
 #   can be laid out for reading;
-# - "<!-- console: FAMILY -->" runs the console block on FAMILY only.
+# - "<!-- console: FAMILY -->" runs the console block on FAMILY only;
+# - "<!-- untested: REASON -->" skips the c block, which shows Type-C
+#   that typec does not build yet.
+#
+# Every c block carries a file, emit-c or untested marker, and a fence
+# of a language other than c, console, sh or text is an error, so that
+# a forgotten marker or a misspelt fence cannot drop a check.
 #
 # Every line "$ COMMAND" of a console block is run, with cc meaning
 # BACKEND and typec running it, and the lines up to the next command or
@@ -55,24 +61,31 @@ awk -v work="$work" -v family="$family" '
       system("mkdir -p " work "/" directory)
     return work "/" name
   }
-  function open_block(language) {
+  function open_block(language, kind) {
+    kind = marker
+    marker = ""
     block = "skipped"
-    if (marker == "console" && language != "console")
+    if (language !~ /^(c|console|sh|text)?$/)
+      fail("a fence of an unknown language: " language)
+    if (kind == "" && language == "c")
+      fail("a c block without a file, emit-c or untested marker")
+    if (kind == "untested" && language != "c")
+      fail("an untested marker before a block of " language)
+    if (kind == "console" && language != "console")
       fail("a console marker before a block of " language)
-    if ((marker == "file" || marker == "emit-c") && language == "console")
-      fail("a " marker " marker before a console block")
-    if (marker == "file") {
+    if ((kind == "file" || kind == "emit-c") && language == "console")
+      fail("a " kind " marker before a console block")
+    if (kind == "file") {
       block = "copied"
       target = open_file(checked_name(marked))
-    } else if (marker == "emit-c") {
+    } else if (kind == "emit-c") {
       block = "copied"
       target = open_file(checked_name(marked) ".emitted")
       print marked > (work "/emit-c.list")
     } else if (language == "console") {
-      if (marker != "console" || marked == family)
+      if (kind != "console" || marked == family)
         block = "console"
     }
-    marker = ""
   }
 
   block != "" && /^```/ { block = ""; next }
@@ -85,7 +98,13 @@ awk -v work="$work" -v family="$family" '
   }
   block == "skipped" { next }
   /^```/ { open_block(substr($0, 4)); next }
-  marker != "" { fail("a " marker " marker that no fence follows") }
+  marker != "" { fail("a marker that no fence follows: " marker) }
+  /^<!-- untested:/ {
+    if ($0 !~ /^<!-- untested: [^ ].* -->$/)
+      fail("a marker that does not parse: " $0)
+    marker = "untested"
+    next
+  }
   /^<!-- (file|emit-c|console):/ {
     if ($0 !~ /^<!-- (file|emit-c|console): [^ ]+ -->$/)
       fail("a marker that does not parse: " $0)

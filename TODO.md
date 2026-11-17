@@ -1797,9 +1797,29 @@ types (design 13.3).
 - [Medium] Decide whether to offer an option that zeroes padding and the
   inactive part of a variant on construction, against disclosure of stale
   memory (design 10.1 rule 5).
-- [Medium] Nested patterns need a rule that tells a binding from a
-  constructor without fields; a misspelled constructor must not become a
-  catch-all binding (design 12).
+- [High] `try` inside any expression, as in
+  `fit((long long)try eval(l) + try eval(r))` (owner: the README's first
+  example uses it). Design 5.1 rule 3 holds `try` to three positions,
+  and design 12 lists `try` inside expressions outside the core: move it
+  into section 5, with `try` as a unary operator, so that
+  `try f() + try g()` adds two values. C leaves the order of operands
+  unspecified, so which of `g(x)` and `try f()` runs first in
+  `g(x) + try f()`, and which error the README's `Add` reports when both
+  operands fail, needs a rule: the candidate is to evaluate operands left
+  to right, hoisting each into a temporary while keeping the sequencing
+  of `&&`, `||`, `?:` and `,`. Candidate lowering: a GNU statement
+  expression for each `try` that returns on `Err`, running the deferred
+  statements as a `return` does, over operands hoisted in that order;
+  without the hoisting it is what 5.1 rule 3 refuses inside a statement
+  expression today. The design text to rewrite: 5.1 rule 2 (the void
+  `try` "of the positions of rule 3"), all of rule 3 and its rationale
+  ("Rationale for the positions"), the `try` rows of 13.5 and section
+  15, P8.
+- [High] Nested patterns, as in `case Err(DivByZero):` (owner: the
+  README's first example uses them). Design 12 lists them outside the
+  core: move them into section 4, with matrix-based exhaustiveness and
+  a rule that tells a binding from a constructor without fields; a
+  misspelled constructor must not become a catch-all binding.
 - [Medium] Define which GNU attributes the front end must understand
   rather than merely carry (the tree holds each one's name and its
   argument tokens unread). The macOS headers use four that typing needs:
