@@ -871,11 +871,11 @@ The fine print, for a `.tc` file:
 
 The code that you write in Type-C compiles to plain C
 ([What the C looks like](#what-the-c-looks-like)). Of the code that the
-compiler adds without the source spelling it out, the traps of matching
-and the cleanups of `defer` are built; slice bounds checks and checked
-mode will add the rest ([principle 4](#principles)). The rest of a program
-links as before: Type-C functions are C functions under their own
-names, with no mangling, and `typec` adds no library to the link
+compiler adds without the source spelling it out, the traps of
+matching, the cleanups of `defer` and slice bounds checks are built;
+checked mode will add the rest ([principle 4](#principles)). The rest
+of a program links as before: Type-C functions are C functions under
+their own names, with no mangling, and `typec` adds no library to the link
 ([design 10.4](type-c-language-design.md#104-functions-and-objects)).
 Debuggers step through the lines of the `.tc` file
 ([design 13.6](type-c-language-design.md#136-diagnostics-and-debugging)),
@@ -1299,12 +1299,11 @@ interface files (`.tci`), generic types, `option` and `result`, `try`
 and `defer`. Stage 2's gate rests on
 [Pilot B](#measured-on-a-real-library).
 
-Stage 3 is in progress, and **not ready to use** yet:
-
-- generic functions:
-  `generic(T) T *vector_last(vector(T) *v);`
-- slices with checked indexing:
-  `slice(uint8_t) bytes = slice_from_array(buffer);`
+Stage 3 is in progress, and **not ready to use** yet. Slices with
+checked indexing are built,
+`slice(uint8_t) bytes = slice_from_array(buffer);`, and generic
+functions are not yet:
+`generic(T) T *vector_last(vector(T) *v);`.
 
 Planned, and previewed by [A first look](#a-first-look): `try` inside
 any expression, and nested patterns such as `case Err(DivByZero):`.
