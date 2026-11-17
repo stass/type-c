@@ -406,3 +406,69 @@ A pragma that sets state for the text after it is refused: a copy of
   pack.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   pack.tc:4: error: a `#pragma` line in a deferred statement, which lowering copies to each exit, that is not one of the pragmas that apply only to the statement after them [deferred-pragma]
   [80]
+
+A return in the operand of `slice_from_array` runs the copy of the
+deferred statement in each text of the operand: in place, where it
+gives the data, and in the length, which writes the operand again
+under `sizeof`, where C does not evaluate it. Each copy is made once
+every edit of the function is, so the length's holds the copy that the
+return runs, as the data's does: one copy at each of two exits, and
+one more in the length.
+
+  $ cat > length.tc <<'EOF'
+  > #include <stdio.h>
+  > static int m[2][3];
+  > static int length(int c) {
+  >   defer puts("left");
+  >   slice(int) s = slice_from_array(m[({ if (c) return -1; 0; })]);
+  >   return (int)s.len;
+  > }
+  > int main(void) {
+  >   printf("%d\n", length(0));
+  >   printf("%d\n", length(1));
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang --emit-c -o length.i length.tc
+  $ grep -c 'puts ( "left" )' length.i
+  3
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags $sanitize -o length length.tc && ./length
+  > done
+  left
+  3
+  left
+  -1
+  left
+  3
+  left
+  -1
+
+A defer statement in a block of the operand is lowered in the length
+as in the data: the length writes no `defer`, which the backend would
+refuse, and the copy of the deferred statement runs once, at the end
+of the block in the data, which C evaluates.
+
+  $ cat > inner.tc <<'EOF'
+  > #include <stdio.h>
+  > static int m[2][3];
+  > static int length(int c) {
+  >   slice(int) s = slice_from_array(m[({ { defer puts("in"); } c; })]);
+  >   return (int)s.len;
+  > }
+  > int main(void) {
+  >   printf("%d\n", length(1));
+  >   return 0;
+  > }
+  > EOF
+  $ typec --cc=$clang --emit-c -o inner.i inner.tc
+  $ grep -c 'defer' inner.i
+  0
+  [1]
+  $ for cc in $clang $gcc; do
+  >   typec --cc=$cc $flags $sanitize -o inner inner.tc && ./inner
+  > done
+  in
+  3
+  in
+  3

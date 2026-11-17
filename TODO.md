@@ -699,12 +699,15 @@ is [type-c-language-design.md](type-c-language-design.md).
   `opened` by position in four places; `hoisted_operands` returns unit
   and forces a `ref` and an `invalid_arg`; `refuse_not_held` takes a
   `try_place` and rejects `Held`.
-- [Medium] A copy of source text (`Lowering.copy_text`) is made from
-  the edits collected when it is made, so its correctness rests on the
-  order of the stages in `text_edits`: slice makings, then defers, then
-  tries, each copying text before the later stages add edits inside it.
-  Make a copy name its span and resolve every copy once, against the
-  final set of edits, so that the order cannot matter.
+- [Medium] A copy of source text forces the whole lowered text from
+  inside the pieces of a moved edit (`Lowering.text_edits`), so a copy
+  made eagerly while the text is lowered compiles and fails only at
+  run time, with `Lazy.Undefined`, on the inputs that reach it; and
+  copying ends only because no copy holds the edit it is copied for,
+  which rests on front-end rules (design 6 rule 4, 5.1, `try-position`).
+  Make a copy a value, its span and the moves it applies, among the
+  pieces of an edit, and resolve every copy in one pass over the final
+  edits, which can also refuse a cycle.
 - [Medium] Typing a holder whose expression hoists N operands costs
   O(uses x N): `Declarations.holding` filters every moved text being
   read for each use of a name. A `?:` chain of tries at the parser's
@@ -714,8 +717,6 @@ is [type-c-language-design.md](type-c-language-design.md).
 - [Low] A `slice_from_array` nested in the operand of another is copied
   into the outer one's length as well as its data, so N nested makings
   write 2^N copies of the innermost operand.
-- [Low] `Lowering.with_slice_makings` holds the edits afresh for each
-  making, O(M E log E) for M makings among E edits.
 - [Low] `(void)(c ? try e() : try e2())` is refused as `try-void`,
   though the branches of a void conditional are discarded (5.2), and
   `__real__ (try f()) = 1.0` is accepted, as `Try_plan` drops the

@@ -7,9 +7,25 @@ module Output_limit = Typec_sema.Output_limit
 
 type piece = { text : string; location : Location.t }
 
+(* A pragma line is a whole line of the source, of a type of its own so
+   that no bracket holds one, inside this module as outside it. *)
+type pragma_line = { line : piece }
+
+type moved_piece = Piece of piece | Pragma_line of pragma_line
+
+(* The pieces of a moved edit, made and charged when first forced. *)
+type moved_pieces = moved_piece list Lazy.t
+
 (* The output of a unit as lowering makes it: the bytes charged so far,
-   which only [charge] raises, and the limit they are held to. *)
-type output = { unit : Reader.t; limit : int; mutable charged : int }
+   which only [charge] raises, the limit they are held to, and the
+   pieces of each moved edit, latest first, which [limited] forces so
+   that every edit is charged before the charge is read. *)
+type output = {
+  unit : Reader.t;
+  limit : int;
+  mutable charged : int;
+  mutable moved : moved_pieces list;
+}
 
 (* The first charge that would pass the limit, at the location of what
    it charges; [limited] catches it, so nothing more is made. *)
@@ -29,8 +45,25 @@ let over_limit output location : Reader.error =
    that is charged before anything is made. *)
 let limited unit make =
   let size = Reader.length unit in
-  let output = { unit; limit = Output_limit.of_unit unit; charged = size } in
-  match make output with
+  let output =
+    { unit; limit = Output_limit.of_unit unit; charged = size; moved = [] }
+  in
+  (* Forcing pieces may make more moved edits, which are forced in
+     turn, until none is left unmade. *)
+  let rec force_moved () =
+    match output.moved with
+    | [] -> ()
+    | moved ->
+        output.moved <- [];
+        List.iter (fun pieces -> ignore (Lazy.force pieces)) (List.rev moved);
+        force_moved ()
+  in
+  let made_in_full () =
+    let made = make output in
+    force_moved ();
+    made
+  in
+  match made_in_full () with
   | made -> Ok (made, output.charged)
   | exception Over_limit location -> Error (over_limit output location)
 
@@ -140,12 +173,6 @@ let joined output location ~separator spell items =
   assembled output location ~separator (fun add ->
       List.iter (fun item -> add (spell item)) items)
 
-(* A pragma line is a whole line of the source, of a type of its own so
-   that no bracket holds one, inside this module as outside it. *)
-type pragma_line = { line : piece }
-
-type moved_piece = Piece of piece | Pragma_line of pragma_line
-
 (* Only a pragma line whose identifiers the rules of design 13.5 can
    read may move; the other lines are errors there, whose checks
    lowering makes. *)
@@ -156,14 +183,12 @@ let moved_token output index =
   | kind when Token.is_movable kind -> Some (Piece (own_piece output index))
   | _ -> None
 
-type moved_pieces = moved_piece list
-
 let copied output pieces =
   let copy = function
     | Piece piece -> Piece (made_piece output piece)
     | Pragma_line { line } -> Pragma_line { line = made_piece output line }
   in
-  List.map copy pieces
+  List.map copy (Lazy.force pieces)
 
 type text =
   | Code of { location : Location.t; code : string }
@@ -270,7 +295,7 @@ let written = function
   | Bracketed { location; pieces } ->
       let lines = moved_lines (List.map as_moved pieces) in
       "\n" ^ String.concat "\n" (bracketed_lines location lines)
-  | Moved pieces -> "\n" ^ String.concat "\n" (moved_lines pieces)
+  | Moved pieces -> "\n" ^ String.concat "\n" (moved_lines (Lazy.force pieces))
 
 (* The edit as the backend reads it: its text, which begins with a
    marker, then a marker for the location where the replaced tokens
@@ -286,65 +311,75 @@ let replacement (tokens : Token.t array) edit : Reader.replacement =
 let line_bytes lines =
   List.fold_left (fun bytes line -> bytes + String.length line + 1) 0 lines
 
-(* The bytes that [written] gives [text] beyond the lines of its runs,
-   whose pieces were charged as they were made ([made_piece]): the
-   markers of the runs, and the markers and code of a code edit or the
-   markers and pragmas of a bracket. Empty moved text is the line break
-   alone. *)
-let frame_bytes = function
-  | Code { location; code } ->
-      String.length (marker location) + String.length code
-  | Bracketed { location; pieces } ->
-      line_bytes (bracketed_lines location [])
-      + line_bytes (List.map run_marker (runs (List.map as_moved pieces)))
-  | Moved [] -> 1
-  | Moved pieces -> line_bytes (List.map run_marker (runs pieces))
+(* The bytes that [written] gives moved text beyond the lines of its
+   runs, whose pieces were charged as they were made ([made_piece]): the
+   markers of the runs. Empty moved text is the line break alone. *)
+let moved_frame_bytes = function
+  | [] -> 1
+  | pieces -> line_bytes (List.map run_marker (runs pieces))
 
-(* Each edit is charged as it is made, at the location of the construct
-   it writes, its frame and the marker after it ([replacement]). *)
-let made_edit output edit =
-  let location =
-    match edit.text with
-    | Code { location; _ } | Bracketed { location; _ } -> location
-    | Moved _ -> output.unit.tokens.(edit.owner).location
-  in
-  let after = marker (end_location output.unit.tokens edit.range) in
-  charge output location (frame_bytes edit.text + String.length after);
-  edit
+(* The bytes that [written] gives code: its marker and the code. *)
+let code_frame_bytes location code =
+  String.length (marker location) + String.length code
+
+(* The bytes that [written] gives a bracket beyond the lines of its
+   runs: its markers and pragmas, and the markers of the runs. *)
+let bracket_frame_bytes location pieces =
+  line_bytes (bracketed_lines location [])
+  + line_bytes (List.map run_marker (runs (List.map as_moved pieces)))
+
+(* Each edit is charged at the location of the construct it writes, its
+   frame and the marker after the tokens it replaces ([replacement]):
+   code and a bracket as they are made, moved text when its pieces
+   are. *)
+let charge_edit output location (range : Reader.range) ~frame =
+  let after = marker (end_location output.unit.tokens range) in
+  charge output location (frame + String.length after)
 
 let code output (range : Reader.range) ~location code =
   check_own_text ~caller:"Emitter.code" code;
-  made_edit output
-    { range;
-      text = Code { location; code };
-      owner = range.first;
-      extent = own_extent range.first range;
-      encloses = false }
+  charge_edit output location range ~frame:(code_frame_bytes location code);
+  { range;
+    text = Code { location; code };
+    owner = range.first;
+    extent = own_extent range.first range;
+    encloses = false }
 
 let closing output ~after ~location code =
   check_own_text ~caller:"Emitter.closing" code;
-  made_edit output
-    { range = Reader.range output.unit.tokens ~first:(after + 1) ~count:0;
-      text = Code { location; code };
-      owner = after;
-      extent = { first = after; last = after };
-      encloses = false }
+  let range = Reader.range output.unit.tokens ~first:(after + 1) ~count:0 in
+  charge_edit output location range ~frame:(code_frame_bytes location code);
+  { range;
+    text = Code { location; code };
+    owner = after;
+    extent = { first = after; last = after };
+    encloses = false }
 
 let bracketed output ~(at : Tree.anchor) ~location pieces =
-  made_edit output
-    { range = Reader.range output.unit.tokens ~first:at.before ~count:0;
-      text = Bracketed { location; pieces };
-      owner = at.before;
-      extent = { first = at.before; last = at.before };
-      encloses = false }
+  let range = Reader.range output.unit.tokens ~first:at.before ~count:0 in
+  charge_edit output location range
+    ~frame:(bracket_frame_bytes location pieces);
+  { range;
+    text = Bracketed { location; pieces };
+    owner = at.before;
+    extent = { first = at.before; last = at.before };
+    encloses = false }
 
 let moved output (range : Reader.range) pieces =
-  made_edit output
-    { range;
-      text = Moved pieces;
-      owner = range.first;
-      extent = own_extent range.first range;
-      encloses = false }
+  let owner = range.first in
+  let location = output.unit.tokens.(owner).location in
+  let charged =
+    lazy
+      (let made = Lazy.force pieces in
+       charge_edit output location range ~frame:(moved_frame_bytes made);
+       made)
+  in
+  output.moved <- charged :: output.moved;
+  { range;
+    text = Moved charged;
+    owner;
+    extent = own_extent owner range;
+    encloses = false }
 
 let extended edit ~(extent : Tree.span) =
   if extent.first > edit.extent.first || edit.extent.last > extent.last then

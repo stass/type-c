@@ -22,9 +22,12 @@ type piece
     and every edit is made for an output and charged, as it is made, the
     bytes that {!emit} writes for it, markers and pragmas included, and a
     piece at least 32 ({!Typec_sema.Output_limit.piece_charge}); the
-    unit's own text is charged in full first. So the charge covers all
-    that {!emit} writes for the unit but the static assertions that end
-    it, a fixed text of typec's. Only {!limited} makes an output.
+    unit's own text is charged in full first. The pieces of a {!moved}
+    edit are made when first forced, and they and the edit are charged
+    then; {!limited} forces every one before it returns. So the charge
+    covers all that {!emit} writes for the unit but the static
+    assertions that end it, a fixed text of typec's. Only {!limited}
+    makes an output.
 
     The charge holds only if lowering puts each piece it makes into one
     edit. A copy of moved text is made afresh: the pieces of a moved
@@ -40,7 +43,9 @@ val limited :
     bytes charged for it, which are at most the limit, or the error at
     the location of the first piece, edit or {!joined} text whose charge
     would pass the output limit of [unit], after which nothing more is
-    made.
+    made. The pieces of every {!moved} edit are forced, in the order the
+    edits were made, after [make] returns and before the charge is
+    read.
     [output] belongs to [make] alone: one that escapes it would raise
     past this function, and edits of two outputs are each held to a
     limit of their own. *)
@@ -108,14 +113,15 @@ val moved_token : output -> int -> moved_piece option
     line that is no such sequence, which can splice the line after it;
     moved text that holds one is an error (design 11.1, 13.5). *)
 
-(** The pieces of a {!Moved} edit, which lowering reads only through
-    {!copied}. *)
+(** The pieces of a {!Moved} edit, made when first read, which lowering
+    reads only through {!copied}. *)
 type moved_pieces
 
 val copied : output -> moved_pieces -> moved_piece list
-(** [copied output pieces] is [pieces] for a copy of the moved text that
-    holds them, each charged again as a piece, as {!emit} writes it once
-    more wherever the copy goes. *)
+(** [copied output pieces] is [pieces], made and charged if they were
+    not yet, for a copy of the moved text that holds them, each charged
+    again as a piece, as {!emit} writes it once more wherever the copy
+    goes. *)
 
 (** The text of an edit: C code as it is, at [location]; moved text in
     the packing bracket of design 10.3, at [location], which lays it out
@@ -189,13 +195,16 @@ val bracketed : output -> at:Typec_syntax.Tree.anchor ->
     of their own, stands where a declaration may and never inside an
     expression. *)
 
-val moved : output -> Typec_cpp.Reader.range -> moved_piece list -> edit
+val moved :
+  output -> Typec_cpp.Reader.range -> moved_piece list Lazy.t -> edit
 (** [moved output range pieces] replaces [range] by [pieces], each at its
     own location, without a bracket: the operand of a [try] and a copy of a
     deferred statement (design 13.5), whose pragma lines are the
     source's own. It takes any range, so the text of an instance, which
     needs the bracket, is kept from it only by the lowering that calls
-    it. *)
+    it. The pieces are forced when first read, by {!copied} or at the
+    end of {!limited}, so that a copy of source text in them is made
+    once every edit of the text is; the edit is charged then. *)
 
 val in_order : edit list -> edit list
 (** [edits] in the order in which they apply: by the first token of

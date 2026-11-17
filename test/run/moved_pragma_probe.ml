@@ -42,7 +42,7 @@ let () =
     let moved =
       Emitter.moved output
         (Reader.range unit.tokens ~first:start ~count:0)
-        (List.init start (moved_piece output))
+        (Lazy.from_val (List.init start (moved_piece output)))
     in
     [ deleted; moved ]
   in

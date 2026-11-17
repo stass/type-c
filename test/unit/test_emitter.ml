@@ -566,9 +566,9 @@ let moved_with_pragma =
       let moved index = Option.get (Emitter.moved_token output index) in
       Emitter.moved output
         (Reader.range pragmatic.tokens ~first:7 ~count:3)
-        [ moved 0; moved 1; moved 2; moved 3;
+        (Lazy.from_val [ moved 0; moved 1; moved 2; moved 3;
           Emitter.Piece (Emitter.generated output (at 2) "int c;");
-          moved 4; moved 5; moved 6 ])
+          moved 4; moved 5; moved 6 ]))
 
 let moved_pragma_text = emit pragmatic [ moved_with_pragma ]
 
@@ -616,7 +616,9 @@ let () =
    charged its bytes and the blank or line break after it, and the edits,
    all insertions, are charged exactly what they add: with a filler
    piece that takes the rest of the limit the unit passes, and with one
-   a byte longer it does not. *)
+   a byte longer it does not. The pieces of the moved text are made
+   when {!Emitter.limited} forces them, after the filler, so the moved
+   text is charged last and refused at its owner, token 8 on line 2. *)
 let () =
   let long output location =
     Emitter.generated output location (String.make 40 'a')
@@ -626,8 +628,9 @@ let () =
     [ Emitter.code output (insertion 1) ~location:(at 1) "int w;";
       Emitter.closing output ~after:3 ~location:(at 1) "int v;";
       Emitter.moved output (insertion 8)
-        [ Piece (long output (at 2)); Piece (long output (at 2));
-          Piece (long output (at 1)) ];
+        (lazy
+          [ Piece (long output (at 2)); Piece (long output (at 2));
+            Piece (long output (at 1)) ]);
       Emitter.bracketed output
         ~at:(Tree.anchor (List.nth (declarations unit) 2))
         ~location:(at 2)
@@ -647,10 +650,10 @@ let () =
     (match Emitter.limited unit (filled 0) with
      | Ok (_, charged) -> charged = limit
      | Error _ -> false);
-  check "a byte past the limit is refused at the piece that passes it"
+  check "a byte past the limit is refused at the moved text, charged last"
     (match Emitter.limited unit (filled 1) with
      | Error { location; message } ->
-         location = at 3
+         location = at 2
          && String.starts_with
               ~prefix:"the C text of the unit would pass the output limit"
               message

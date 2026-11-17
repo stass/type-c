@@ -50,7 +50,8 @@ let insert output ~before ~extent text =
        (Reader.range tokens ~first:before ~count:0)
        ~location:tokens.(before).location text)
 
-(* [pieces] in front of token [before], as part of [extent]. *)
+(* [pieces], made when first forced ({!Emitter.moved}), in front of
+   token [before], as part of [extent]. *)
 let insert_moved output ~before ~extent pieces =
   let tokens = tokens_of output in
   Emitter.extended ~extent
@@ -866,12 +867,19 @@ let outermost dropped =
 let goes_with dropped (edit : Emitter.edit) =
   covers dropped ~first:edit.extent.first ~last:edit.extent.last
 
-(* A stretch of tokens whose text moves elsewhere, an operand that a
-   holder of try hoists, its rank, its place in the order of 5.1 among
-   the hoisted operands of its holder, which tells the later of two with
-   one span, and the edits that write what stands in its place
-   ({!replacing}). *)
-type move = { moved : Tree.span; rank : int; replacement : Emitter.edit list }
+(* A stretch of tokens whose text moves elsewhere or goes: an operand
+   that a holder of try hoists, or a defer statement, which lowering
+   removes. [mover] is the construct that moves it, the holder's
+   statement or the defer statement, and [rank] its place among the
+   moves of that construct, for a holder in the order of 5.1, which
+   tells the later of two with one span. [replacement] are the edits
+   that write what stands in its place ({!replacing}). *)
+type move = {
+  moved : Tree.span;
+  mover : Tree.span;
+  rank : int;
+  replacement : Emitter.edit list;
+}
 
 (* Moves by first token. *)
 type held_moves = move array
@@ -908,30 +916,42 @@ let with_moves edits moves =
   @ List.concat_map (fun move -> move.replacement) outer
 
 (* The moves that a copy applies where they stand inside it: all of
-   them, or in the copy of a hoisted operand those that its holder
-   evaluates before it, of a rank below the operand's. *)
-type applied_moves = Every_move | Ranked_below of int
+   them, or in the copy of a hoisted operand all but those of its holder
+   that the holder evaluates after it, of a rank not below the
+   operand's. *)
+type applied_moves =
+  | Every_move
+  | Ranked_below of { mover : Tree.span; rank : int }
 
-(* What a copy of source text is made from: the edits of the text, its
-   moves, and those of them that the copy applies. *)
-type source = { held : held_edits; moves : held_moves; applies : applied_moves }
+(* Every edit that the lowering of one text makes and every move of its
+   tokens: the whole from which the text and each copy of it are made,
+   so that what a copy holds does not depend on the order in which
+   lowering makes the edits. *)
+type lowered_text = { held : held_edits; moves : held_moves }
 
-let source edits moves =
-  { held = hold edits; moves = hold_moves moves; applies = Every_move }
+let lowered_text edits moves = { held = hold edits; moves = hold_moves moves }
 
-(* The one way to copy source text: tokens [first] to [last] as moved
-   text, with exactly the edits that lie within them ({!lies_within}),
-   and the moves inside them in place, each applied once. A copy is
-   made only from a [source] that holds every edit inside it, so no
-   construct copies text that another has yet to lower. *)
-let copy_text output { held; moves; applies } ~first ~last =
+(* The edits of [text] as they apply to the whole of it, with the
+   outermost of its moves in place. *)
+let text_in_place { held; moves } =
+  with_moves (Array.to_list held) (Array.to_list moves)
+
+(* The one way to copy source text: tokens [first] to [last] of [text]
+   as moved text, with exactly the edits that lie within them
+   ({!lies_within}), and the moves inside them that the copy [applies]
+   in place, each applied once. The copy is made from the whole of
+   [text], so it forces it: while a text is lowered, only the pieces of
+   a moved edit ({!Emitter.moved}) make one, and a copy forced before
+   [text] is complete raises [Lazy.Undefined]. *)
+let copy_text output (text : lowered_text Lazy.t) applies ~first ~last =
+  let { held; moves } = Lazy.force text in
   let begins move = move.moved.first in
-  let ranked move =
+  let applies_move move =
     match applies with
     | Every_move -> true
-    | Ranked_below rank -> move.rank < rank
+    | Ranked_below { mover; rank } -> move.mover <> mover || move.rank < rank
   in
-  let applied move = ranked move && move.moved.last <= last in
+  let applied move = applies_move move && move.moved.last <= last in
   let inside =
     List.filter applied (beginning_within moves ~begins ~first ~last)
   in
@@ -1083,15 +1103,18 @@ let holder_moves output (holder : Typec_sema.Expressions.try_holder) =
   List.mapi
     (fun rank (hoisted : Plan.hoisted) ->
       { moved = hoisted.replaced;
+        mover = holder.holder.statement;
         rank;
         replacement = replacing output holder hoisted })
     holder.hoisted
 
-(* The text of the operand of the hoisted operand at [index] of a
-   holder whose moves are [moves], with the earlier ones that it holds
-   in place, from [held], the edits of the text. *)
-let operand_text output held moves index (hoisted : Plan.hoisted) =
-  copy_text output { held; moves; applies = Ranked_below index }
+(* The text of the operand of the hoisted operand at [rank] of [holder],
+   with the earlier ones that it holds in place, from [lowered], the
+   whole of the text. *)
+let operand_text output lowered (holder : Typec_sema.Expressions.try_holder)
+    rank (hoisted : Plan.hoisted) =
+  copy_text output lowered
+    (Ranked_below { mover = holder.holder.statement; rank })
     ~first:hoisted.operand.first ~last:hoisted.operand.last
 
 (* The temporary of a try, of the operand's result type named by its
@@ -1310,25 +1333,27 @@ let prelude output (holder : Typec_sema.Expressions.try_holder) ~text_of
 
 (* The edits of a holder: its prelude, after the null statement of its
    labels, in front of it, and around it the braces of a substatement. *)
-let lower_holder output held ~cleanups_of
-    ((holder : Typec_sema.Expressions.try_holder), moves) =
-  let moves = hold_moves moves in
+let lower_holder output lowered ~cleanups_of
+    (holder : Typec_sema.Expressions.try_holder) =
   let tokens = tokens_of output in
   let { Typec_sema.Expressions.statement; labels; standing } =
     holder.holder
   in
   let location = tokens.(statement.first).location in
-  let texts =
-    List.mapi
-      (fun index (hoisted : Plan.hoisted) ->
-        (hoisted.operand, operand_text output held moves index hoisted))
-      holder.hoisted
-  in
-  let text_of (hoisted : Plan.hoisted) = List.assoc hoisted.operand texts in
-  let null_statement =
-    match labels with
-    | Some _ -> [ try_piece output location ";" ]
-    | None -> []
+  let prelude_pieces () =
+    let texts =
+      List.mapi
+        (fun rank (hoisted : Plan.hoisted) ->
+          (hoisted.operand, operand_text output lowered holder rank hoisted))
+        holder.hoisted
+    in
+    let text_of (hoisted : Plan.hoisted) = List.assoc hoisted.operand texts in
+    let null_statement =
+      match labels with
+      | Some _ -> [ try_piece output location ";" ]
+      | None -> []
+    in
+    null_statement @ prelude output holder ~text_of ~cleanups_of
   in
   let first = (Option.value labels ~default:statement).first in
   let extent = { statement with first } in
@@ -1337,7 +1362,7 @@ let lower_holder output held ~cleanups_of
   let in_front =
     around
       (insert_moved output ~before:statement.first ~extent
-         (null_statement @ prelude output holder ~text_of ~cleanups_of))
+         (lazy (prelude_pieces ())))
   in
   match standing with
   | Block_item -> [ in_front ]
@@ -1347,7 +1372,9 @@ let lower_holder output held ~cleanups_of
         around (close output ~after:statement.last ~extent "}") ]
 
 (* The casts to void of the discarded conditionals in whose branches
-   [holder] reads a try, where the read would draw -Wunused-value. *)
+   [holder] reads a try, where the read would draw -Wunused-value. They
+   lower the source in place, so one inside a hoisted operand moves with
+   it like the other edits inside the tokens that it replaces. *)
 let void_casts output (holder : Typec_sema.Expressions.try_holder) =
   let cast (value : Tree.span) =
     [ insert output ~before:value.first ~extent:value "(void)(";
@@ -1359,19 +1386,13 @@ let void_casts output (holder : Typec_sema.Expressions.try_holder) =
   |> List.sort_uniq compare
   |> List.concat_map cast
 
-(* The edits of a text with its holders of try lowered. The casts to
-   void lower the source in place, so one inside a hoisted operand moves
-   with it like the other edits inside the tokens that it replaces;
-   its replacement takes their place. [cleanups_of] gives the cleanups
-   of the error path of a try. *)
-let with_tries output edits moved_holders ~cleanups_of =
-  let casts =
-    List.concat_map (fun (holder, _) -> void_casts output holder) moved_holders
-  in
-  let edits = edits @ casts in
-  let held = hold edits in
-  with_moves edits (List.concat_map snd moved_holders)
-  @ List.concat_map (lower_holder output held ~cleanups_of) moved_holders
+(* The edits of the holders of try of a text, each copy in them made
+   from [lowered], the whole of the text, and the casts to void in
+   them; the moves of their hoisted operands are {!holder_moves}.
+   [cleanups_of] gives the cleanups of the error path of a try. *)
+let holder_edits output lowered holders ~cleanups_of =
+  List.concat_map (lower_holder output lowered ~cleanups_of) holders
+  @ List.concat_map (void_casts output) holders
 
 (* Design 6 and 13.5: a defer statement is removed, and a copy of its
    statement [S], as a block, runs at each exit of its scope. An exit
@@ -1383,7 +1404,7 @@ let with_tries output edits moved_holders ~cleanups_of =
    statement; a [return e;] holds [e] first, in the temporary [__tc_r]
    of the type [__tc_ret], or in a function that returns void as an
    expression statement. The error path of a try gets its copies where
-   the try is lowered ({!with_tries}). A copy of [S] is the text of [S]
+   the try is lowered ({!holder_edits}). A copy of [S] is the text of [S]
    with the edits that lie within it; [S] holds no defer (design 6 rule
    11). *)
 
@@ -1417,16 +1438,17 @@ let places (sites : Reachability.defer_site list) =
 let defer_piece output location text =
   Emitter.Piece (Emitter.generated output location text)
 
-(* The copy of the statement of [site], [{ S }], from the edits [base]
-   of the text. *)
-let copy output base (site : Reachability.defer_site) =
+(* The copy of the statement of [site], [{ S }], from [lowered], the
+   whole of the text. *)
+let copy output lowered (site : Reachability.defer_site) =
   let tokens = tokens_of output in
   let deferred =
     Tree.deferred_text ~keyword:site.keyword ~statement:site.deferred
   in
   let location = tokens.(site.deferred.first).location in
   let moved =
-    copy_text output base ~first:deferred.first ~last:deferred.last
+    copy_text output lowered Every_move ~first:deferred.first
+      ~last:deferred.last
   in
   (defer_piece output location "{" :: moved)
   @ [ defer_piece output location "}" ]
@@ -1452,10 +1474,10 @@ let return_form : Typec_sema.Expressions.returns -> return_form = function
 (* The edits of one place of a function that [returns], which runs the
    copies of [leaving]; a trap stands once at the end of a block however
    many defers it holds. *)
-let place_edits output base returns (place, leaving) =
+let place_edits output lowered returns (place, leaving) =
   let tokens = tokens_of output in
   (* A trap and the error path of a try write no copies here. *)
-  let copies () = List.concat_map (copy output base) leaving in
+  let copies () = List.concat_map (copy output lowered) leaving in
   let at index = tokens.(index).location in
 
   let token index = Reader.range tokens ~first:index ~count:1 in
@@ -1463,21 +1485,22 @@ let place_edits output base returns (place, leaving) =
   match (place : Reachability.place) with
   | Block_end closing ->
       [ insert_moved output ~before:closing
-          ~extent:{ first = closing; last = closing } (copies ()) ]
+          ~extent:{ first = closing; last = closing } (lazy (copies ())) ]
   | Trap closing ->
       [ insert output ~before:closing
           ~extent:{ first = closing; last = closing } trap ]
   | Left_by (Jump jump) ->
       [ insert_moved output ~before:jump.first ~extent:jump
-          (piece jump.first "{" :: copies ());
+          (lazy (piece jump.first "{" :: copies ()));
         Emitter.code output (token jump.last) ~location:(at jump.last) "; }" ]
   | Left_by (Value_return { statement; operand = _ }) ->
       let form = return_form returns in
       [ Emitter.code output (token statement.first)
           ~location:(at statement.first) form.value_opening;
         Emitter.moved output (token statement.last)
-          ((piece statement.last form.value_closing :: copies ())
-          @ [ piece statement.last form.returned ]) ]
+          (lazy
+            ((piece statement.last form.value_closing :: copies ())
+            @ [ piece statement.last form.returned ])) ]
   | Left_by (Error_path _) -> []
 
 (* The name of a parameter that the call of [__tc_ret] passes an lvalue
@@ -1531,22 +1554,14 @@ let is_value_return : Reachability.place -> bool = function
    it never runs. *)
 let kept_token dropped index = not (covers dropped ~first:index ~last:index)
 
-let kept_sites dropped (sites : Reachability.defer_site list) =
-  List.filter
-    (fun (site : Reachability.defer_site) ->
-      kept_token dropped site.keyword.first)
-    sites
-
-let function_edits output base ~dropped
+let function_edits output lowered ~dropped
     (defers : Typec_sema.Expressions.function_defers) =
-  let tokens = tokens_of output in
   let kept_places =
     List.filter
       (fun (place, _) ->
         kept_token dropped (Reachability.place_token place))
       (places defers.sites)
   in
-  let kept_sites = kept_sites dropped defers.sites in
   let declarations =
     if
       defers.returns = Returns_value
@@ -1554,24 +1569,35 @@ let function_edits output base ~dropped
     then [ (defers.body, lazy (return_typedef output defers)) ]
     else []
   in
-  (* Every token of [defer S] goes, its pragma lines too, which move to
-     the copies; a [#pragma typec] line, which C text ignores, goes with
-     them. *)
+  ( List.concat_map (place_edits output lowered defers.returns) kept_places,
+    declarations )
+
+(* The removal of each defer statement of [functions]: every token of
+   [defer S] goes, its pragma lines too, which move to the copies, and
+   so do the edits that lie within it; a [#pragma typec] line, which C
+   text ignores, goes with them. *)
+let defer_moves output
+    (functions : Typec_sema.Expressions.function_defers list) =
+  let tokens = tokens_of output in
   let removal site =
     let span = defer_span site in
-    List.init (span.last - span.first + 1) (fun offset -> span.first + offset)
-    |> replace output ~location:tokens.(span.first).location ""
+    let replacement =
+      List.init (span.last - span.first + 1) (fun offset -> span.first + offset)
+      |> replace output ~location:tokens.(span.first).location ""
+    in
+    { moved = span; mover = span; rank = 0; replacement }
   in
-  ( List.concat_map (place_edits output base defers.returns) kept_places
-    @ List.concat_map removal kept_sites,
-    declarations )
+  List.concat_map
+    (fun (defers : Typec_sema.Expressions.function_defers) ->
+      List.map removal defers.sites)
+    functions
 
 (* The cleanups of the error path of each try (13.5, the [try] row):
    the copies of the scopes of [functions] that it leaves, the latest
-   first, from the edits [base] of the text. The sites are indexed by
-   the span of the try once, so that each try finds its own in constant
-   time. *)
-let error_path_cleanups output base
+   first, from [lowered], the whole of the text. The sites are indexed
+   by the span of the try once, so that each try finds its own in
+   constant time. *)
+let error_path_cleanups output lowered
     (functions : Typec_sema.Expressions.function_defers list) =
   let leaving = Hashtbl.create 16 in
   let index ((place : Reachability.place), sites) =
@@ -1585,29 +1611,20 @@ let error_path_cleanups output base
     functions;
   fun (site : Typec_sema.Expressions.try_site) ->
     match Hashtbl.find_opt leaving site.try_span with
-    | Some sites -> List.concat_map (copy output base) sites
+    | Some sites -> List.concat_map (copy output lowered) sites
     | None -> []
 
-(* The edits of a text with the defers of its functions lowered, and
-   the declarations of [__tc_ret] by body. The statements go, and the
-   edits that lie within them go with them, to their copies, which
-   [base], the source of the copies, gives. [dropped] is the text that
-   lowering drops, whose own edits delete a defer in it. *)
-let with_defers output edits ~base ~dropped
+(* The edits that lower the defers of [functions], each copy in them
+   made from [lowered], the whole of the text, and the declarations of
+   [__tc_ret] by body; the statements go by {!defer_moves}. [dropped] is
+   the text that lowering drops, whose own edits delete a defer in
+   it. *)
+let defer_edits output lowered ~dropped
     (functions : Typec_sema.Expressions.function_defers list) =
-  let sites =
-    List.concat_map
-      (fun (defers : Typec_sema.Expressions.function_defers) ->
-        kept_sites dropped defers.sites)
-      functions
+  let edits, declarations =
+    List.split (List.map (function_edits output lowered ~dropped) functions)
   in
-  let removed = cover (List.map defer_span sites) in
-  let lowered, declarations =
-    List.split (List.map (function_edits output base ~dropped) functions)
-  in
-  ( List.filter (fun edit -> not (goes_with removed edit)) edits
-    @ List.concat lowered,
-    List.concat declarations )
+  (List.concat edits, List.concat declarations)
 
 (* Slices (design 13.5, "The check of a slice") *)
 
@@ -1777,8 +1794,8 @@ let slice_edits output indexes =
 
 (* [slice_from_array] and [slice_unchecked] (design 13.5) *)
 
-(* [pieces] in place of the tokens at [indexes], as {!replace} puts
-   text there. *)
+(* [pieces], made when first forced ({!Emitter.moved}), in place of the
+   tokens at [indexes], as {!replace} puts text there. *)
 let replace_moved output ~location pieces indexes =
   let tokens = tokens_of output in
   match indexes with
@@ -1796,10 +1813,11 @@ let replace_moved output ~location pieces indexes =
    element, which the typedef of the instance's argument names, plus a
    term of the value 0 whose array type has a negative size where an
    element has none, which the backend refuses (section 8 rule 2). *)
-let array_length output source ~location ~element (operand : Tree.span) =
+let array_length output lowered ~location ~element (operand : Tree.span) =
   let piece code = Emitter.Piece (Emitter.generated output location code) in
   let copy =
-    copy_text output source ~first:operand.first ~last:operand.last
+    copy_text output lowered Every_move ~first:operand.first
+      ~last:operand.last
   in
   (piece "sizeof(" :: copy)
   @ [ piece
@@ -1843,17 +1861,19 @@ let string_making output ~outer ~opening ~location (literal : Tree.span) =
   let closing_edits =
     match after with
     | [] ->
-        replace_moved output ~location (moved literal.last @ length)
+        replace_moved output ~location
+          (Lazy.from_val (moved literal.last @ length))
           [ literal.last ]
-    | _ -> replace_moved output ~location length after
+    | _ -> replace_moved output ~location (Lazy.from_val length) after
   in
   opening_edits @ closing_edits
 
 (* The edits of one slice made from an array or a pointer, whose name
    and [(] become the opening of its compound literal or braced list,
    and its [)], with the parentheses around a braced list, the closing.
-   The operands keep their tokens, each in parentheses. *)
-let operator_making output source ~outer ~opening ~location
+   The operands keep their tokens, each in parentheses; the length of
+   an array copies its operand from [lowered], the whole of the text. *)
+let operator_making output lowered ~outer ~opening ~location
     (making : Expressions.slice_making) first_operand =
   let tokens = tokens_of output and span = making.span in
   let opening_edits =
@@ -1865,11 +1885,12 @@ let operator_making output source ~outer ~opening ~location
   match (making.making, making.instance.arguments) with
   | From_array { operand }, [ argument ] ->
       let element = Typec_sema.Encoding.argument_name argument in
-      let length = array_length output source ~location ~element operand in
+      let closing () =
+        (piece "), " :: array_length output lowered ~location ~element operand)
+        @ [ piece " }" ]
+      in
       opening_edits
-      @ replace_moved output ~location
-          ((piece "), " :: length) @ [ piece " }" ])
-          closing_tokens
+      @ replace_moved output ~location (lazy (closing ())) closing_tokens
   | Unchecked { pointer; count }, [ _ ] ->
       opening_edits
       @ replace output ~location "), (" (between tokens ~after:pointer count)
@@ -1877,32 +1898,18 @@ let operator_making output source ~outer ~opening ~location
   | (From_array _ | Unchecked _ | From_string _), _ ->
       invalid_arg "Lowering.operator_making: no operator over a slice"
 
-(* The edits of one slice that [making] makes. *)
-let slice_making output source (making : Expressions.slice_making) =
+(* The edits of one slice that [making] makes, each copy in them made
+   from [lowered], the whole of the text. *)
+let slice_making output lowered (making : Expressions.slice_making) =
   let location = (tokens_of output).(making.span.first).location in
   let outer, opening = slice_opening making in
   match making.making with
   | From_string { literal } ->
       string_making output ~outer ~opening ~location literal
   | From_array { operand } ->
-      operator_making output source ~outer ~opening ~location making operand
+      operator_making output lowered ~outer ~opening ~location making operand
   | Unchecked { pointer; _ } ->
-      operator_making output source ~outer ~opening ~location making pointer
-
-(* [edits] with those of the slices that [makings] make, each innermost
-   first, so that the copy of an operand holds the edits of those inside
-   it, and the [moves] of try inside it; an edit that [kept] refuses
-   goes, as from [undeferred]. *)
-let with_slice_makings output edits ~kept ~moves makings =
-  let width (making : Expressions.slice_making) =
-    making.span.last - making.span.first
-  in
-  let innermost_first a b = compare (width a) (width b) in
-  let add edits making =
-    let source = { held = hold edits; moves; applies = Every_move } in
-    edits @ List.filter kept (slice_making output source making)
-  in
-  List.fold_left add edits (List.stable_sort innermost_first makings)
+      operator_making output lowered ~outer ~opening ~location making pointer
 
 (* Design 13.5: the block around a function body whose first
    declarations are those of the body's [__tc_ret] and the temporaries of
@@ -1986,11 +1993,19 @@ let with_extensions output holders dropped =
    [replaced] are ranges that lowering replaces whole, such as an
    application by the name of its instance, unless the head of a
    construction replaces them; with those of [answered], the edits
-   inside one go, and the range's own edits replace them. Last, the
-   tries are lowered ({!with_tries}), and the edits inside the operand
-   of one move with it. [zero_initialisers] are those of design 7.1
-   rule 3 that the text holds, each [{}] with one [__extension__] before
-   each holder ({!with_extensions}). *)
+   inside one go, and the range's own edits replace them. The operand
+   of a try that its holder hoists and a defer statement move
+   ({!move}), and the edits that lie within them go with them.
+   [zero_initialisers] are those of design 7.1 rule 3 that the text
+   holds, each [{}] with one [__extension__] before each holder
+   ({!with_extensions}).
+
+   Each copy of source text, of a slice's operand, a deferred statement
+   or a hoisted operand, is made from the whole of the text, every edit
+   and move that the lowering of it makes ({!lowered_text}), once all
+   are made: the text is tied to the copies in it through [lowered],
+   which no copy forces before it is complete, so no copy depends on
+   the order in which the constructs are lowered. *)
 let text_edits output ~declarations ~void_field_spans ~replaced
     ~zero_initialisers typed =
   let holders = zero_holders zero_initialisers in
@@ -2022,7 +2037,7 @@ let text_edits output ~declarations ~void_field_spans ~replaced
     slice_edits output
       (List.filter kept_check (Expressions.slice_checks typed))
   in
-  let lowered =
+  let constructs =
     List.concat_map declaration declarations
     @ List.concat_map (construction output) constructions
     @ List.concat_map (matching output)
@@ -2032,33 +2047,37 @@ let text_edits output ~declarations ~void_field_spans ~replaced
     @ List.concat_map (zero_list output) zero_initialisers
     @ extensions
   in
-  (* The moves of the tries come first, as a copy of text that holds a
-     try writes what its holder reads there. *)
-  let moved_holders =
-    List.map
-      (fun holder -> (holder, holder_moves output holder))
-      (Typec_sema.Expressions.try_holders typed)
-  in
-  let moves = List.concat_map snd moved_holders in
-  let undeferred =
-    with_slice_makings output
-      (List.concat_map (dropped_edits output) dropped
-      @ List.filter kept lowered)
-      ~kept ~moves:(hold_moves moves) (Expressions.slice_makings typed)
-  in
+  let try_holders = Typec_sema.Expressions.try_holders typed in
   let functions = Typec_sema.Expressions.defers typed in
-  (* The copies of a deferred statement, at its exits and on the error
-     path of a try, are its text with the edits that lie within it,
-     which lowering the defers moves out of the text. *)
-  let base = source undeferred moves in
-  (* The defers go before the tries, so that a jump in the operand of a
-     try runs its copies wherever the operand moves. *)
-  let deferred, return_typedefs =
-    with_defers output undeferred ~base ~dropped:dropped_spans functions
+  (* Every edit and move of the text, each copy in them made from
+     [lowered]; nothing inside a dropped range is lowered or moves. *)
+  let kept_move move =
+    not (covers dropped_spans ~first:move.moved.first ~last:move.moved.last)
   in
-  let blocks = body_blocks output (return_typedefs @ slice_temporaries) in
-  with_tries output (deferred @ blocks) moved_holders
-    ~cleanups_of:(error_path_cleanups output base functions)
+  let whole_text lowered =
+    let defers, return_typedefs =
+      defer_edits output lowered ~dropped:dropped_spans functions
+    in
+    let edits =
+      constructs
+      @ List.concat_map (slice_making output lowered)
+          (Expressions.slice_makings typed)
+      @ defers
+      @ body_blocks output (return_typedefs @ slice_temporaries)
+      @ holder_edits output lowered try_holders
+          ~cleanups_of:(error_path_cleanups output lowered functions)
+    in
+    let moves =
+      List.concat_map (holder_moves output) try_holders
+      @ defer_moves output functions
+    in
+    lowered_text
+      (List.concat_map (dropped_edits output) dropped
+      @ List.filter kept edits)
+      (List.filter kept_move moves)
+  in
+  let rec lowered = lazy (whole_text lowered) in
+  text_in_place (Lazy.force lowered)
 
 let named (span, name) = { span; text = name }
 
@@ -2075,7 +2094,8 @@ let generic_text output edits ~first ~last =
     | Piece piece -> piece
     | Pragma_line _ -> invalid_arg "Lowering: a pragma line in a generic"
   in
-  copy_text output (source edits []) ~first ~last
+  copy_text output (Lazy.from_val (lowered_text edits [])) Every_move ~first
+    ~last
   |> List.map bracketed
 
 (* The generic type's definition under the instance's name, with each
