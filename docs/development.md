@@ -19,11 +19,16 @@ C library and OCaml by version: Debian 13 (glibc) and Alpine 3.24
 dune from Alpine's packages and from opam on Debian. A host is a
 Dockerfile and a platform, and its name says both: `debian-amd64`,
 `debian-arm64`, `alpine-amd64` and `alpine-arm64`.
-`tools/hosts/run.sh HOST [LOG]` builds the image `typec-host-HOST` and
-runs `dune build` and `dune test` in a container of it, with the source
-mounted read-only, the build inside the container and no network. It
-needs a running Docker with buildx (`docker-buildx` in Homebrew) that
-can mount the source tree (colima, for instance, shares the home
+`tools/hosts/run.sh HOST [LOG]` builds the image of HOST and runs
+`dune build` and `dune test` in a container of it, with the source
+mounted read-only, the build inside the container and no network. The
+image is tagged `typec-host-HOST:HASH`, HASH being the first twelve hex
+digits of the SHA-256 of its Dockerfile, so that the images of different
+Dockerfiles never replace each other; Docker's build cache makes the
+build of an unchanged Dockerfile instant. An image stays until
+`docker rmi` removes it (`docker image ls 'typec-host-*'` lists them).
+It needs a running Docker with buildx (`docker-buildx` in Homebrew)
+that can mount the source tree (colima, for instance, shares the home
 directory but not `/Volumes`), prints whether the suite passed, and
 writes the whole output to `LOG`, by default
 `${TMPDIR:-/tmp}/typec-host-HOST.log`.
@@ -38,6 +43,26 @@ tools/hosts/run.sh debian-amd64
 tools/hosts/run.sh alpine-arm64 /Volumes/Optaine/alpine-arm64.log
 ```
 
+The tooling (the Dockerfiles, `corpus-in-container.sh` and
+`tools/corpus/revision.sh`) is the tree the script sits in, and the
+source that the suite or the corpus runs on is by default the same
+tree. `--source DIR`, before the host, names another typec checkout
+instead, so that the current tooling runs an older revision, for
+instance one that a corpus record is to be made at, in a worktree of
+it. For the corpus the revision the records carry (`-dirty` included)
+is the source's, and the runner of the source must take the command
+line that `corpus-in-container.sh` gives it. The records name the
+source's revision and not the image, so the script also prints, and
+writes to `LOG`, the image tag and the tooling's revision. `DIR` must be
+a path that Docker shares, like the default tree for the suite, and is
+trusted like the tooling tree: git runs in it. The FreeBSD host takes no
+`--source`.
+
+```sh
+git worktree add ~/typec-old 5670550
+tools/hosts/run.sh --source ~/typec-old debian-amd64
+```
+
 The arm64 hosts have known failures, explained in `TODO.md` under Test
 hosts: among them `test_small_stack` with `FAIL: the backtrace names
 the stage` on both, and `target.t`, `pipeline.t` and
@@ -50,10 +75,10 @@ The corpus repository and its cache are `TYPEC_CORPUS` and
 `TYPEC_CORPUS_CACHE`, by default the paths that section names, and
 `fetch.sh` must have filled the cache. Nothing is mounted, so the
 paths need not be shared with Docker: the script sends the container
-the typec working tree and the corpus repository, each as the files git
+the source tree and the corpus repository, each as the files git
 tracks or does not ignore, and the sources of the cache as a tar
-stream, and `tools/hosts/corpus-in-container.sh` builds `typec` and the
-runner there and runs it. No git directory goes in, as the corpus
+stream, together with `tools/hosts/corpus-in-container.sh`, which builds
+`typec` and the runner there and runs it. No git directory goes in, as the corpus
 programs are third-party code: the script names the revision of each
 tree as it is outside the container, `-dirty` included, on the
 runner's command line, and the records carry it. The results come back

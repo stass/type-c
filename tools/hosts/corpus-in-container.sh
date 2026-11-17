@@ -5,12 +5,11 @@
 # Runs the corpus runner in a container of a Linux test host, for
 # tools/hosts/run.sh --corpus, which explains the layout.
 #
-# usage: sh typec/tools/hosts/corpus-in-container.sh TYPEC_REVISION \
-#          CORPUS_REVISION PROGRAM...
+# usage: sh corpus-in-container.sh TYPEC_REVISION CORPUS_REVISION PROGRAM...
 #
-# The current directory holds the inputs that run.sh sends: the trees
-# typec and corpus, without their git directories, and src, the sources
-# of the cache. The revisions name the two trees as run.sh found them;
+# The current directory holds the inputs that run.sh sends: this script,
+# the trees typec and corpus, without their git directories, and src, the
+# sources of the cache. The revisions name the two trees as run.sh found them;
 # the runner writes them into its records. The results go to stdout as a
 # tar stream: every record under corpus/runs, of which run.sh keeps those
 # that changed, the runner's logs under cache/build, and last the file

@@ -4,17 +4,28 @@
 
 # Runs typec's build and test suite, or the corpus runner, on a test host.
 #
-# usage: tools/hosts/run.sh HOST [LOG]
-#        tools/hosts/run.sh --corpus HOST LOG PROGRAM...
+# usage: tools/hosts/run.sh [--source DIR] HOST [LOG]
+#        tools/hosts/run.sh [--source DIR] --corpus HOST LOG PROGRAM...
 #
 # HOST is a name from the table below. A Linux host is a Dockerfile and a
 # platform: the script builds its image and runs the suite in a container
 # of it, with the source mounted read-only and no network, the container
-# removed afterwards. A platform that the machine does not run itself
-# needs emulation in Docker (binfmt and qemu-user), and the suite is slow
-# there. The FreeBSD host is a script, which no container gives, and is
-# run with LOG. Either kind writes to LOG, by default
-# ${TMPDIR:-/tmp}/typec-host-HOST.log, outside the repository.
+# removed afterwards. The image is tagged by the content of the
+# Dockerfile (typec-host-HOST:HASH), so that images of different
+# Dockerfiles live side by side; the build cache spares an unchanged one. A
+# platform that the machine does not run itself needs emulation in Docker
+# (binfmt and qemu-user), and the suite is slow there. The FreeBSD host
+# is a script, which no container gives, and is run with LOG. Either kind
+# writes to LOG, by default ${TMPDIR:-/tmp}/typec-host-HOST.log, outside
+# the repository.
+#
+# The tooling is the tree this script sits in: its Dockerfiles, its
+# corpus-in-container.sh and its revision.sh. The source is the typec
+# checkout that is tested or recorded, by default that same tree, or DIR
+# of --source, so that the tooling of one revision can run another (say,
+# the current images on a checkout of an older revision). The corpus
+# runner of the source must take the command line that
+# corpus-in-container.sh gives it. The FreeBSD host takes no --source.
 #
 # --corpus runs the corpus runner (docs/development.md, "Running the corpus") on
 # the named programs in a container of a Linux host, with the host's Clang and
@@ -29,7 +40,7 @@
 # Docker may not share either path, so nothing is mounted: the inputs go
 # into the container as a tar stream on its stdin, and the results come
 # out as one on its stdout (corpus-in-container.sh). The inputs are the
-# typec working tree and the corpus repository, each as the files git
+# source tree and the corpus repository, each as the files git
 # tracks or does not ignore, and the sources of the cache. No git
 # directory goes in, as the corpus programs are third-party code: the
 # revision of each tree as the machine sees it (tools/corpus/revision.sh)
@@ -39,18 +50,32 @@
 set -eu
 
 usage() {
-  echo "usage: $0 HOST [LOG]" >&2
-  echo "       $0 --corpus HOST LOG PROGRAM..." >&2
+  echo "usage: $0 [--source DIR] HOST [LOG]" >&2
+  echo "       $0 [--source DIR] --corpus HOST LOG PROGRAM..." >&2
   echo "hosts: debian-amd64 debian-arm64 alpine-amd64 alpine-arm64" \
     "freebsd (not with --corpus)" >&2
   exit 2
 }
 
-# After this, the arguments left are the programs of a corpus run.
+hosts_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
+tooling_dir=$(CDPATH='' cd "$hosts_dir/../.." && pwd)
+source_dir=$tooling_dir
+
 mode=suite
-if [ "${1:-}" = --corpus ]; then
-  mode=corpus
+while [ $# -gt 0 ]; do
+  case $1 in
+    --corpus) mode=corpus ;;
+    --source)
+      [ $# -ge 2 ] && [ -d "$2" ] || usage
+      source_dir=$(CDPATH='' cd "$2" && pwd)
+      shift
+      ;;
+    *) break ;;
+  esac
   shift
+done
+if [ "$mode" = corpus ]; then
+  # After this, the arguments left are the programs of the run.
   [ $# -ge 3 ] || usage
   host=$1 log=$2
   shift 2
@@ -72,15 +97,18 @@ case $host in
   *) usage ;;
 esac
 
-hosts_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
-repo=$(CDPATH='' cd "$hosts_dir/../.." && pwd)
-image=typec-host-$host
-
 if [ -n "$script" ]; then
   [ "$mode" = suite ] || usage
+  if [ "$source_dir" != "$tooling_dir" ]; then
+    echo "$host: the FreeBSD host takes no --source" >&2
+    exit 2
+  fi
   exec "$hosts_dir/$script" "$log"
 fi
 dockerfile=$hosts_dir/$dockerfile
+# The image of this host for this Dockerfile, whatever other Dockerfiles
+# were built before.
+image=typec-host-$host:$(shasum -a 256 < "$dockerfile" | cut -c1-12)
 
 fail() {
   echo "$host: $1" >&2
@@ -127,7 +155,7 @@ run_suite() {
     dune test --root /src --build-dir "$HOME/build" --diff-command "diff -u"'
   if ! docker run --platform "$platform" --rm --network none --cap-drop ALL \
     --security-opt no-new-privileges \
-    --mount "type=bind,source=$repo,target=/src,readonly" \
+    --mount "type=bind,source=$source_dir,target=/src,readonly" \
     "$image" sh -c "$suite" >> "$log" 2>&1; then
     fail "the suite fails; see $log"
   fi
@@ -159,9 +187,9 @@ run_container() {
     mkdir work
     cd work
     tar -xf -
-    exec sh typec/tools/hosts/corpus-in-container.sh "$@"'
+    exec sh corpus-in-container.sh "$@"'
   tar -cf - --no-xattrs --no-mac-metadata --no-acls \
-    -C "$stage/in" typec corpus -C "$cache" src \
+    -C "$stage/in" typec corpus corpus-in-container.sh -C "$cache" src \
     | docker run --platform "$platform" --rm --interactive --init \
       --network none --cap-drop ALL --security-opt no-new-privileges \
       "$image" sh -c "$unpack" sh "$@" 2>> "$log" \
@@ -234,9 +262,14 @@ run_corpus() {
   stage=$(mktemp -d "${TMPDIR:-/tmp}/typec-corpus.XXXXXX")
   trap 'rm -rf "$stage"' EXIT
   mkdir "$stage/in" "$stage/out"
-  typec_revision=$("$repo/tools/corpus/revision.sh" "$repo")
-  corpus_revision=$("$repo/tools/corpus/revision.sh" "$corpus")
-  stage_tree "$repo" "$stage/in" typec
+  revision_sh=$tooling_dir/tools/corpus/revision.sh
+  typec_revision=$("$revision_sh" "$source_dir")
+  corpus_revision=$("$revision_sh" "$corpus")
+  # The records name the source, not the image, so the log does.
+  echo "$host: image $image, tooling $("$revision_sh" "$tooling_dir")," \
+    "source $typec_revision" | tee -a "$log"
+  stage_tree "$source_dir" "$stage/in" typec
+  cp "$hosts_dir/corpus-in-container.sh" "$stage/in"
   stage_tree "$corpus" "$stage/in" corpus
 
   echo "$host: running the corpus runner on: $*"
