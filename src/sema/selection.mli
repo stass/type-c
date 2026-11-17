@@ -40,7 +40,9 @@ type step = {
 }
 
 type position = step list
-(** The steps from the scrutinee, which is [[]], to a position. *)
+(** The steps from a position up to the scrutinee, which is [[]], the
+    nearest first, so that the position one step below shares the list of
+    the position above it. *)
 
 (** What a value selects: the case label of that index among the case
     labels in source order, the [default], or nothing. *)
@@ -63,13 +65,16 @@ and branch = { constructors : Ctype.constructor list; subtree : tree }
     a [default]. *)
 type t = private { scrutinee : branch list; labels : int; default : bool }
 
-val max_size : int
-(** The most nodes and leaves in one tree, a translation limit of typec
-    (design 4.7 rule 10). *)
+val max_steps : int
+(** The most steps of selection in building one tree: each label that a
+    node looks at, each constructor that it sorts into a branch and each
+    look at a label's next test below a branch. A translation limit of
+    typec (design 4.7 rule 10), which bounds the work of {!select} and
+    the size of the tree. *)
 
-(** Why there is no tree: it would hold more than {!max_size} nodes and
-    leaves. *)
-type refusal = Too_large
+(** Why there is no tree: building it takes more than {!max_steps}
+    steps. *)
+type refusal = Too_many_steps
 
 val select :
   Ctype.constructor list ->

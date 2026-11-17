@@ -1618,16 +1618,27 @@ one node, for which 4.1 to 4.6 say everything.
    that holds another constructor. A constructor with fields may be
    written without its field list at any depth of a test's pattern
    (4.6(2)), and at no depth of a label's.
-10. **The bound on a tree.** *Provisional (P32).* The selection tree of
-    one match holds at most 65536 nodes and leaves. A match that needs
-    more is refused where the count is passed. This is a translation
-    limit of `typec` (C11 5.2.4.1) and no rule of the language, so the
-    refusal carries no name (13.6). Without it a few lines can ask for
-    a tree that doubles with each field: a label that several branches
-    leave possible is a leaf in each. The checks build the tree before
-    any text is made, so the output limit does not hold that work
-    (3.5 rule 7); the count bounds it, and the depth of the tree with
-    it.
+10. **The bound on selection.** *Provisional (P32).* Building the
+    selection tree of one match takes at most 4194304 steps. A step is
+    a label that a node looks at for the constructor it names there, a
+    constructor of the node's variant that the node sorts into a
+    branch, or a look, below a branch, at the next test of a label
+    that the node looked at. A match that needs more is refused where
+    the count is passed. This is a translation limit of `typec` (C11
+    5.2.4.1) and no rule of the language, so the refusal carries no
+    name (13.6). Without it a few lines can ask for a tree that doubles
+    with each field, since a label that several branches leave
+    possible is a leaf in each; and a small tree can ask for much
+    work, since each branch of a node looks at every label that the
+    node looked at. The checks build the tree before any text is
+    made, so the output limit does not hold that work (3.5 rule 7).
+    The count bounds it, and the size and depth of the tree with it,
+    since each branch costs a step; to keep that so, a step takes time
+    that does not grow with the depth of the positions it compares, so
+    selection names each position by a number, and the checks that
+    read the tree take time linear in its size. A match without nested
+    patterns, of L labels over as many constructors, takes about L²
+    steps: the bound holds one of 2046 labels.
 
 Rationale for deciding by the type of the position. An identifier in a
 sub-pattern could be a binding or a constructor without fields. A rule
@@ -7262,10 +7273,9 @@ structures of the packing probe that ends one (10.3), one of each.
   end counts first; the bound of 4096 bytes on the encodings of the
   arguments of one instance; and the bound of 255 bytes on the name
   of a type declaration or a generic function. 4.7 rule 10 states one
-  more, the bound on the selection tree of a match. The limit on nested
-  instantiation is none: 3.5 rule 7 states it as a rule of
-  Type-C, so it carries a name. A limit of the GNU profile, a
-  construct
+  more, the bound on the steps of selection of a match. The limit on
+  nested instantiation is none: 3.5 rule 7 states it as a rule of
+  Type-C, so it carries a name. A limit of the GNU profile, a construct
   outside the profile or one that needs what `typec` does not compute,
   is a refusal of the accepted dialect by this design rather than by C,
   so it carries a name. C text that breaks a rule of this design is
@@ -7363,7 +7373,7 @@ with the scripts that reproduce them (`make size-split`,
 | P29 | The conditional operator takes no value of a type parameter as its second or third operand (7.1 rule 3) | Stage 3, package 3.5: how often the container library wants the operator over such values, read from the code of the refusal. If that is common: the operator is allowed where its value is converted to the type parameter at once | The refusal stays |
 | P30 | The instance budget of a translation unit is 16777216 bytes of what the front end reads for its instances, each token at least 32; the output limit is 33554432 bytes and 256 for each byte of the preprocessed unit, on all the C text that `typec` writes for it, each piece at least 32, and on the front end's count of the copies of its deferred statements, each token at least 32 and each copy 64 more; the encodings of the arguments of one instance hold at most 4096 bytes; and the name of a type declaration or a generic function at most 255 (3.5 rule 7) | Stage 3, package 3.6: the bytes that each unit of the container library and of the pilot counts for its instances in the front end, the bytes that lowering charges for each of them and their ratio to the source, the longest encodings of one instance in them, and their longest name of a type declaration or generic function. The budget and the base of the limit are at least four times the largest count and charge, the factor at least four times the largest ratio and each bound at least four times the longest; a larger budget or limit costs in proportion, and a longer name in proportion to the constructors and uses that hold it (3.5 rule 7) | 16777216 bytes; 33554432 bytes and 256 for each byte; 4096 bytes; 255 bytes |
 | P31 | Selection sets a local that a second `switch` reads (13.5) | Stage 3, package 3.10: size and speed against hand-written nested `switch` statements, on both backends at `-O0` and at `-O2`. If the local costs at `-O2`: the leaves reach the arms by `goto` | The local stays |
-| P32 | The selection tree of a match holds at most 65536 nodes and leaves (4.7 rule 10) | Stage 3, package 3.10: the largest tree in the container library, the pilot and the tests. The bound is at least sixteen times the largest | 65536 |
+| P32 | Building the selection tree of a match takes at most 4194304 steps (4.7 rule 10) | Stage 3, package 3.10: the most steps of one match in the container library, the pilot and the tests. The bound is at least sixteen times the most; it holds sixteen times the steps of a match without nested patterns of 500 labels over as many constructors | 4194304 |
 | P33 | The `try` expressions of a holder are evaluated before the rest of it, in the order of the source, and not in the order of reading; the prelude that does so is ISO C and costs what the same code written by hand costs (5.1 rule 3, 13.5) | Stage 3, package 3.12: each holder in the container library, the pilot and the README that holds, before a `try`, an operand with a side effect that C leaves unsequenced with it, found by reading the holders, and whether the order of reading was meant there; size and speed of the preludes against the same code with each `try` in a declaration of its own, on both backends at `-O0` and at `-O2`. If such holders are common and mean the order of reading: the operands before a `try` are hoisted with it, with the forms and refusals that the rationale of 5.1 lists | The order stays |
 | P34 | No `try` stands in the condition or in a clause of a loop (5.1 rule 3) | Stage 3, package 3.12: how often `try-loop` refuses in the container library, the pilot and the README, read from the rule's name, and what each loop became. If loops that test a fallible call are common: the condition of a `while` and of a `for` is lowered as a test and a `break` that begin the body | The refusal stays |
 | P35 | In a braced list an initialiser that holds a `try` is itself a `try` expression (5.1 rule 3) | Stage 3, package 3.12: how often `try-list` refuses in the container library, the pilot and the README, read from the rule's name, and what each refused initialiser holds beside its `try`. If most hold a conversion of the value and nothing else: the design names the operators over a `try` that have no effect, and an initialiser may hold them | The refusal stays |

@@ -31,63 +31,95 @@ and branch = { constructors : Ctype.constructor list; subtree : tree }
 
 type t = { scrutinee : branch list; labels : int; default : bool }
 
-(* 2^16, provisional (P32): far above what a written match needs, and
-   small enough that the checks build the tree quickly. *)
-let max_size = 65536
+(* 2^22, provisional (P32): a match without nested patterns, of L labels
+   over as many constructors, takes about L * L steps, so one of 2046
+   labels fits, while a refusal still comes quickly. *)
+let max_steps = 4_194_304
 
-type refusal = Too_large
+type refusal = Too_many_steps
 
-exception Too_large_tree
+exception Too_many_steps_taken
 
 let name (constructor : Ctype.constructor) = constructor.constructor_name
 
-module Positions = Map.Make (struct
-  type t = position
+module Slots = Map.Make (Int)
+module Names = Set.Make (String)
+
+(* A position and the number that names it in one call of [select]: two
+   places are at one position where their slots are equal, so a step of
+   selection compares positions at a cost that does not grow with their
+   depth (rule 10). *)
+type place = { position : position; slot : int }
+
+let scrutinee_place = { position = []; slot = 0 }
+
+module Below = Map.Make (struct
+  type t = int * step
 
   let compare = compare
 end)
 
-module Names = Set.Make (String)
+(* The slots given so far in one call of [select], by the slot of the
+   place above and the step down from it, and the count of them. A map
+   rather than a hash table, so that no choice of constructor names
+   makes a lookup slow. *)
+type slots = { mutable given : int Below.t; mutable count : int }
+
+(* The place one [step] below [place]. *)
+let below slots place step =
+  let key = (place.slot, step) in
+  let slot =
+    match Below.find_opt key slots.given with
+    | Some slot -> slot
+    | None ->
+        (* The scrutinee holds slot 0. *)
+        slots.count <- slots.count + 1;
+        slots.given <- Below.add key slots.count slots.given;
+        slots.count
+  in
+  { position = step :: place.position; slot }
 
 (* A tag that a label asks for (rule 6): the constructor [named] at
-   [position], whose variant has the constructors [variant]. *)
+   [place], whose variant has the constructors [variant]. *)
 type test = {
-  position : position;
+  place : place;
   variant : Ctype.constructor list;
   named : Ctype.constructor;
 }
 
-(* The tests of [pattern] at [position], in the order in which the label
+(* The tests of [pattern] at [place], in the order in which the label
    writes its constructor patterns. *)
-let rec tests position (pattern : constructor_pattern) =
-  { position; variant = pattern.variant; named = pattern.constructor }
+let rec tests slots place (pattern : constructor_pattern) =
+  { place; variant = pattern.variant; named = pattern.constructor }
   :: List.concat
-       (List.mapi (field_tests position pattern.constructor) pattern.fields)
+       (List.mapi
+          (field_tests slots place pattern.constructor)
+          pattern.fields)
 
-and field_tests position (holder : Ctype.constructor) field sub_pattern =
-  let below through_pointer =
-    position @ [ { holder = name holder; field; through_pointer } ]
+and field_tests slots place (holder : Ctype.constructor) field sub_pattern =
+  let field_place through_pointer =
+    below slots place { holder = name holder; field; through_pointer }
   in
   match sub_pattern with
   | Any -> []
-  | Constructor pattern -> tests (below false) pattern
-  | Pointer pattern -> tests (below true) pattern
+  | Constructor pattern -> tests slots (field_place false) pattern
+  | Pointer pattern -> tests slots (field_place true) pattern
 
 (* A label that selection has not given up: its index, the tests that
    it has still to pass, the first at a tag not read, and the
-   constructor that it names at each position. *)
+   constructor that it names at each slot. *)
 type candidate = {
   index : int;
   remaining : test list;
-  names : Spelling.constructor Positions.t;
+  names : Spelling.constructor Slots.t;
 }
 
-let candidate index pattern =
-  let remaining = tests [] pattern in
+let candidate slots index pattern =
+  let remaining = tests slots scrutinee_place pattern in
   let names =
     List.fold_left
-      (fun names test -> Positions.add test.position (name test.named) names)
-      Positions.empty remaining
+      (fun names test -> Slots.add test.place.slot (name test.named) names)
+      Slots.empty remaining
   in
   { index; remaining; names }
 
@@ -96,27 +128,30 @@ let candidate index pattern =
    names. *)
 type held = One of Spelling.constructor | Unnamed
 
+(* The state of one call of [select]: the steps of selection taken so
+   far (rule 10) and whether the match has a [default]. *)
+type building = { mutable steps : int; with_default : bool }
+
+(* Every step of selection is taken here, so the bound holds the work of
+   building the tree and, since every branch costs a step, its size. *)
+let take building steps =
+  building.steps <- building.steps + steps;
+  if building.steps > max_steps then raise Too_many_steps_taken
+
 (* [candidate] past the tests that the tags [reads] pass, or [None]
    where its next test reads a tag that holds another constructor: the
    label is then given up before it reads another tag (rule 6), so it
-   is dropped at once. *)
-let rec advance reads candidate =
+   is dropped at once. Each look at the label's next test is a step. *)
+let rec advance building reads candidate =
+  take building 1;
   match candidate.remaining with
   | [] -> Some candidate
   | test :: rest -> (
-      match Positions.find_opt test.position reads with
+      match Slots.find_opt test.place.slot reads with
       | None -> Some candidate
       | Some (One held) when held = name test.named ->
-          advance reads { candidate with remaining = rest }
+          advance building reads { candidate with remaining = rest }
       | Some (One _ | Unnamed) -> None)
-
-(* The state of one call of [select]: the count of nodes and leaves made
-   so far and whether the match has a [default]. *)
-type building = { mutable size : int; with_default : bool }
-
-let count building =
-  building.size <- building.size + 1;
-  if building.size > max_size then raise Too_large_tree
 
 (* The tree below the tags [reads], where [candidates] are the labels
    that selection has not given up, in source order, each advanced past
@@ -124,34 +159,38 @@ let count building =
    once it has passed every test; otherwise a node reads the tag that it
    asks for next. *)
 let rec choose building candidates reads =
-  count building;
   match candidates with
   | [] -> Leaf (if building.with_default then Default else Nothing)
   | { index; remaining = []; _ } :: _ -> Leaf (Label index)
   | { remaining = test :: _; _ } :: _ ->
       Node
-        { position = test.position;
-          branches =
-            branches building candidates reads test.position test.variant }
+        { position = test.place.position;
+          branches = branches building candidates reads test.place test.variant
+        }
 
-(* The branches of a node at [position] over a variant of the
+(* The branches of a node at [place] over a variant of the
    constructors [variant]. The constructors that no candidate names
-   there lead to one subtree, since no label can tell them apart. *)
-and branches building candidates reads position variant =
+   there lead to one subtree, since no label can tell them apart. Each
+   candidate that the node looks at and each constructor that it sorts
+   is a step. *)
+and branches building candidates reads place variant =
+  take building (List.length candidates + List.length variant);
   let named =
     List.fold_left
       (fun named candidate ->
-        match Positions.find_opt position candidate.names with
+        match Slots.find_opt place.slot candidate.names with
         | Some constructor -> Names.add (constructor :> string) named
         | None -> named)
       Names.empty candidates
   in
   let is_named constructor = Names.mem (name constructor :> string) named in
   let branch constructors held =
-    let reads = Positions.add position held reads in
+    let reads = Slots.add place.slot held reads in
     { constructors;
       subtree =
-        choose building (List.filter_map (advance reads) candidates) reads }
+        choose building
+          (List.filter_map (advance building reads) candidates)
+          reads }
   in
   let own =
     List.map
@@ -163,37 +202,42 @@ and branches building candidates reads position variant =
   | others -> own @ [ branch others Unnamed ]
 
 let select scrutinee labels ~default =
-  let building = { size = 0; with_default = default } in
-  let candidates = List.mapi candidate labels in
-  let root () =
-    count building;
-    branches building candidates Positions.empty [] scrutinee
-  in
-  match root () with
+  let building = { steps = 0; with_default = default } in
+  let slots = { given = Below.empty; count = 0 } in
+  let candidates = List.mapi (candidate slots) labels in
+  match
+    branches building candidates Slots.empty scrutinee_place scrutinee
+  with
   | root_branches ->
       Ok { scrutinee = root_branches; labels = List.length labels; default }
-  | exception Too_large_tree -> Error Too_large
+  | exception Too_many_steps_taken -> Error Too_many_steps
 
-let rec leaves = function
-  | Leaf leaf -> [ leaf ]
-  | Node { branches; _ } -> branch_leaves branches
-
-and branch_leaves branches =
-  List.concat_map (fun branch -> leaves branch.subtree) branches
+(* [visit] applied to each leaf below [branches], in time linear in the
+   size of the tree whatever its depth. *)
+let rec iter_leaves visit branches =
+  List.iter
+    (fun branch ->
+      match branch.subtree with
+      | Leaf leaf -> visit leaf
+      | Node { branches; _ } -> iter_leaves visit branches)
+    branches
 
 let never_selected tree =
   let selected = Array.make tree.labels false in
-  List.iter
+  iter_leaves
     (function
       | Label index -> selected.(index) <- true
       | Default | Nothing -> ())
-    (branch_leaves tree.scrutinee);
+    tree.scrutinee;
   List.filter
     (fun index -> not selected.(index))
     (List.init tree.labels Fun.id)
 
 let default_never_selected tree =
-  tree.default && not (List.mem Default (branch_leaves tree.scrutinee))
+  let defaults = ref false in
+  iter_leaves (fun leaf -> if leaf = Default then defaults := true)
+    tree.scrutinee;
+  tree.default && not !defaults
 
 let defaulted tree =
   List.concat_map
@@ -244,16 +288,16 @@ end)
 let key position = List.map (fun step -> (step.holder, step.field)) position
 
 let through_pointer position =
-  match List.rev position with
+  match position with
   | [] -> false
-  | last :: _ -> last.through_pointer
+  | nearest :: _ -> nearest.through_pointer
 
 (* The value at the position of key [at], which holds [holder], where
    [chosen] gives each position read one constructor and whether a
    pointer leads to it. *)
 let rec value_at chosen at ~through_pointer holder =
   let field_value field _ =
-    let below = at @ [ (name holder, field) ] in
+    let below = (name holder, field) :: at in
     match Keys.find_opt below chosen with
     | None -> Unread
     | Some (constructor, through_pointer) ->

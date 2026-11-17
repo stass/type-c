@@ -4880,14 +4880,13 @@ and coverage context ~statement variant constructors labelled =
       (List.map (selection_pattern constructors) cases)
       ~default:has_default
   with
-  | Error Too_large ->
+  | Error Too_many_steps ->
       context.fail statement
         (Rule.c_text
            (Printf.sprintf
-              "the match needs a selection tree of more than %d nodes and \
-               leaves, the most that typec takes (a translation limit, C11 \
-               5.2.4.1)"
-              Selection.max_size))
+              "the match needs more than %d steps of selection, the most \
+               that typec takes (a translation limit, C11 5.2.4.1)"
+              Selection.max_steps))
   | Ok tree ->
       refuse_unselected_labels context tree labelled;
       refuse_missing context ~statement variant tree;

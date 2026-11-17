@@ -7,6 +7,7 @@
 
 open Typec_syntax
 open Typec_sema
+open Typec_test_support
 
 let failures = ref 0
 
@@ -36,7 +37,7 @@ let pattern variant constructor fields =
 let select scrutinee labels ~default =
   match Selection.select scrutinee labels ~default with
   | Ok tree -> tree
-  | Error Too_large -> failwith "a small tree refused as too large"
+  | Error Too_many_steps -> failwith "a small tree refused as too large"
 
 (* The missing values, where a constructor of the scrutinee stands for
    the value that holds it with every field unread. *)
@@ -213,52 +214,145 @@ let read_order () =
 
 (* The bound (rule 10) *)
 
-(* type bit = | X | Y; type word = | W(bit, ..., bit) of [fields] bits,
-   with [extra] constructors of no field beside it that no label
-   names. *)
+(* A variant of [labels] + [extra] constructors of no field and one
+   label for each of the first [labels]. *)
+let flat_match ~labels ~extra =
+  let scrutinee =
+    List.init (labels + extra) (fun i ->
+        constructor (Printf.sprintf "K%d" i) 0)
+  in
+  Selection.select scrutinee
+    (List.filteri (fun i _ -> i < labels) scrutinee
+    |> List.map (fun named -> pattern scrutinee named []))
+    ~default:false
+
+(* The steps of [flat_match] where [extra] > 0: the root looks at every label
+   and sorts every constructor; each label's own branch looks at every
+   label once and at its own label's empty rest once more; the branch of
+   the others looks at every label once. *)
+let flat_steps ~labels ~extra = (labels * labels) + (4 * labels) + extra
+
+(* The most labels of a [flat_match] within the bound. *)
+let flat_at_bound =
+  let rec largest labels =
+    if flat_steps ~labels:(labels + 1) ~extra:1 <= Selection.max_steps then
+      largest (labels + 1)
+    else labels
+  in
+  largest 0
+
+(* type bit = | X | Y; type chain = | A(chain *next) | W(bit, ..., bit) of
+   2n + 1 bits. *)
 let x = constructor "X" 0
 let y = constructor "Y" 0
 let bit = [ x; y ]
-
-let word ~fields ~extra =
-  let w = constructor "W" fields in
-  (w, w :: List.init extra (fun i -> constructor (Printf.sprintf "V%d" i) 0))
-
 let bits_x = Selection.Constructor (pattern bit x [])
 
-(* One label of [fields] X: a node and a leaf of nothing per field, the
-   root and the label's leaf. *)
-let linear ~fields ~extra =
-  let w, scrutinee = word ~fields ~extra in
-  Selection.select scrutinee
-    [ pattern scrutinee w (List.init fields (fun _ -> bits_x)) ]
+(* Label i < n names X at fields i and n + i of a W [depth] pointers
+   below the scrutinee. Each such label's tree holds the tree of the
+   labels after it twice: once where field i holds Y, once where field
+   n + i does. The [trailing] labels after them name X at field 2n
+   only, which no label before them reads, so every node of that tree
+   keeps them possible. *)
+let doubling ?(depth = 0) n ~trailing =
+  let fields = (2 * n) + 1 in
+  let a = constructor "A" 1 and w = constructor "W" fields in
+  let chain = [ a; w ] in
+  let rec label depth names_x =
+    if depth > 0 then
+      pattern chain a [ Selection.Pointer (label (depth - 1) names_x) ]
+    else
+      pattern chain w
+        (List.init fields (fun field ->
+             if names_x field then bits_x else Selection.Any))
+  in
+  let doubling_label i =
+    label depth (fun field -> field = i || field = n + i)
+  in
+  let trailing_label _ = label depth (fun field -> field = 2 * n) in
+  Selection.select chain
+    (List.init n doubling_label @ List.init trailing trailing_label)
     ~default:false
 
-(* Label i names X at fields i and n + i. Each label's tree holds the
-   tree of the labels after it twice: once where field i holds Y, once
-   where field n + i does. *)
-let doubling n =
-  let w, scrutinee = word ~fields:(2 * n) ~extra:0 in
-  let label i =
-    pattern scrutinee w
-      (List.init (2 * n) (fun field ->
-           if field = i || field = n + i then bits_x else Selection.Any))
-  in
-  Selection.select scrutinee (List.init n label) ~default:false
-
 let bound () =
-  let at_bound = (Selection.max_size - 2) / 2 in
-  (match linear ~fields:at_bound ~extra:0 with
+  let labels = flat_at_bound in
+  let extra = Selection.max_steps - flat_steps ~labels ~extra:0 in
+  (match flat_match ~labels ~extra with
    | Ok tree ->
-       check "the linear tree holds exactly the bound"
-         (tree_size tree = Selection.max_size)
-   | Error Too_large -> check "a tree at the bound is accepted" false);
-  check "a tree one over the bound is refused"
-    (linear ~fields:at_bound ~extra:1 = Error Too_large);
+       check "a flat match has a leaf per label and one for the others"
+         (tree_size tree = labels + 2)
+   | Error Too_many_steps ->
+       check "a match of exactly the bound's steps is accepted" false);
+  check "a match one step over the bound is refused"
+    (flat_match ~labels ~extra:(extra + 1) = Error Too_many_steps);
   check "a doubling tree of 4 labels is accepted"
-    (Result.is_ok (doubling 4));
+    (Result.is_ok (doubling 4 ~trailing:0));
   check "a doubling tree of 20 labels is refused"
-    (doubling 20 = Error Too_large)
+    (doubling 20 ~trailing:0 = Error Too_many_steps)
+
+(* The labels that a tree keeps possible cost steps at each of its
+   nodes, though the tree stays small: the bound refuses them in time
+   that does not grow with their number. *)
+let probe_labels = 13
+let probe_trailing = 1000
+
+let kept_possible () =
+  check "the doubling tree of the probe alone is accepted"
+    (Result.is_ok (doubling probe_labels ~trailing:1));
+  let all_refused = ref true in
+  let refuse trailing =
+    if doubling probe_labels ~trailing <> Error Selection.Too_many_steps then
+      all_refused := false
+  in
+  let times = Timing.outgrows ~degree:0 ~small:probe_trailing refuse in
+  check "a doubling tree that keeps many labels possible is refused"
+    !all_refused;
+  match times with
+  | None -> ()
+  | Some times ->
+      check ("the refusal does not grow with the labels kept possible: "
+             ^ times) false
+
+(* A step compares positions at a cost that does not grow with their
+   depth: the probe's labels, as many fields in all at each depth, are
+   refused in time that does not grow with the depth. *)
+let probe_depth = 16
+
+let deep_positions () =
+  let all_refused = ref true in
+  let refuse depth =
+    let trailing = probe_trailing * probe_depth / depth in
+    if doubling ~depth probe_labels ~trailing <> Error Selection.Too_many_steps
+    then all_refused := false
+  in
+  let times = Timing.outgrows ~degree:0 ~small:probe_depth refuse in
+  check "a deep doubling tree that keeps many labels possible is refused"
+    !all_refused;
+  match times with
+  | None -> ()
+  | Some times ->
+      check ("the refusal does not grow with the depth of the labels: "
+             ^ times) false
+
+(* A tree as deep as the bound lets it be is read in time linear in its
+   depth: one label of [fields] X makes a chain of a node per field. *)
+let small_chain = 5000
+
+let deep_tree () =
+  let read fields =
+    let w = constructor "W" fields in
+    let tree =
+      select [ w ]
+        [ pattern [ w ] w (List.init fields (fun _ -> bits_x)) ]
+        ~default:true
+    in
+    ignore (Selection.never_selected tree);
+    ignore (Selection.default_never_selected tree)
+  in
+  match Timing.outgrows ~degree:1 ~small:small_chain read with
+  | None -> ()
+  | Some times ->
+      check ("a deep tree is read in linear time: " ^ times) false
 
 (* Property test *)
 
@@ -380,16 +474,19 @@ let reference shape labels ~default root =
   let selected = first 0 labels in
   (selected, List.rev !read)
 
+(* The constructor and field of each step of [position], from the
+   scrutinee down, as [reference] names a position. *)
 let key (position : Selection.position) =
-  List.map (fun (step : Selection.step) -> (step.holder, step.field)) position
+  List.rev_map (fun (step : Selection.step) -> (step.holder, step.field))
+    position
 
-let rec value_at value (position : Selection.position) =
-  match (position, value) with
-  | [], _ -> value
-  | step :: rest, { fields; _ } -> (
-      match List.nth fields step.field with
-      | Some inner -> value_at inner rest
-      | None -> failwith "a read of a field of no variant")
+let value_at root (position : Selection.position) =
+  let down value (step : Selection.step) =
+    match List.nth value.fields step.field with
+    | Some inner -> inner
+    | None -> failwith "a read of a field of no variant"
+  in
+  List.fold_left down root (List.rev position)
 
 (* The leaf of [tree] that [root] reaches and the positions read on the
    way. *)
@@ -481,5 +578,8 @@ let () =
   read_order ();
   given_up_names ();
   bound ();
+  kept_possible ();
+  deep_positions ();
+  deep_tree ();
   property ();
   if !failures > 0 then exit 1

@@ -298,7 +298,7 @@ a generic function is lowered in an instance of package 3.3.
 | 3.7 | The selection tree of design 4.7 rule 6: a function from the typed labels of a match to its tree, with the checks of design 4.2 and the bound of design 4.7 rule 10 read from the tree and from nowhere else. Matches without nested patterns keep their diagnostics. Unit tests on label sets written as data, nested ones included, and a property test: for generated label sets and every value up to a depth, the tree selects the label that a matcher which tries the labels in order selects and reads no tag that the matcher does not, and it reports as missing or never selected exactly what the values show. |
 | 3.8 | Nested patterns in `match` (design 4.7): the grammar, sub-patterns typed by their position, typed bindings, `*`, bindings at any depth, and the lowering of selection (design 13.5). A negative golden test for each rule. A bare identifier that binds a field of variant type is refused from this package on (design 4.7 rule 3), so the tests that hold one take the typed form. In the README, the `case Err(error):` of the `result` section and the second `match` in its arm become the nested labels `case Err(Missing(name)):` and `case Err(NotANumber(name)):`; the first example, whose `show` writes `case Err(DivByZero):`, and Status say that nested patterns are built. |
 | 3.9 | Nested patterns in the single-pattern test (design 4.6, 4.7 rule 9), in `if` and in `while`: typing, the field list left out at any depth, lowering. |
-| 3.10 | Measurements of nested patterns: selection against hand-written nested `switch` statements, size and speed, on both backends at `-O0` and at `-O2` (P31); the largest selection tree in the container library, the pilot and the tests (P32). |
+| 3.10 | Measurements of nested patterns: selection against hand-written nested `switch` statements, size and speed, on both backends at `-O0` and at `-O2` (P31); the most steps of selection of one match in the container library, the pilot and the tests (P32). |
 | 3.11 | `try` inside expressions (design 5.1 rule 3, 13.5), after packages 3.3 and 3.4: `try` as a unary operator; one function of the typed tree from a `try` to its holder and the operators between them, which gives every refusal of place, `try-list` among them; one function from a holder to its prelude and its edits, in the order of 5.1, which ends the form of a `try` that is an initialiser of a braced list with the conversion of its value, from the type that typing gives the initialiser's object; the hoisted operands passed through the one check of the resolution property (package 2.1) and the pragma stretch, and through one walk of their own for `try-lifetime`: a compound literal in an operand under a condition, and an array that is no lvalue in any; `try-lvalue` and `try-loop`, and `try-void` by the discarded positions of design 5.2. A negative golden test for each refusal, and the tests of package 2.4 that refuse a `try` for its place take the places that stay refused. Before a `try` in a generic function is lowered so, the TODO item on `Moved` edits in the definition of a generic is closed. In the README, the first example and Status say that `try` inside an expression is built. |
 | 3.12 | Measurements of `try` inside expressions, from a script under `tools/measure`: the preludes of the container library, the pilot and the README against the same code with each `try` in a declaration of its own, size and speed, on both backends at `-O0` and at `-O2`, and the holders that hold a side effect before a `try` which C leaves unsequenced with it (P33); the refusals of `try-loop` and what each loop became (P34); the refusals of `try-list` and what each refused initialiser holds beside its `try` (P35); the refusals of `try-pragma` (P8). |
 
@@ -419,10 +419,10 @@ a generic function is lowered in an instance of package 3.3.
      text compiles under `-pedantic-errors` with the options that the
      tests of `match` use; the partner, the twin of the test of two
      overlapping labels with its labels' tests exchanged, differs;
-   - a match whose tree passes the bound of design 4.7 rule 10 is
-     refused as a limit of `typec`, within the time of the unit
-     tests; the partner, a match of the same shape whose tree stays
-     under the bound, compiles;
+   - a match whose selection passes the bound of design 4.7 rule 10
+     is refused as a limit of `typec`, within the time of the unit
+     tests; the partner, a match of the same shape whose selection
+     stays under the bound, compiles;
    - the property test of 3.7 passes; the partner, the same test over
      a tree that is built from the labels in reverse order, fails;
    - the fuzzing of the parser and the checker (Tests) starts from a
