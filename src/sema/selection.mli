@@ -19,14 +19,16 @@ type pattern =
   | Pointer of constructor_pattern
 
 (** A constructor pattern at a position: [variant] holds the
-    constructors of the position's variant in declaration order,
-    [constructor] is the one named, and [fields] holds one sub-pattern
-    per field, or none where a test leaves the field list out (4.6
-    rule 2), which reads no tag below. The [variant] of a label's own
-    pattern is not read, since {!select} takes the scrutinee's. *)
+    constructors of the position's variant in declaration order, which
+    selection does not change, so that the patterns at positions of one
+    variant can share it; [index] is the index in [variant] of the one
+    named; and [fields] holds one sub-pattern per field, or none where a
+    test leaves the field list out (4.6 rule 2), which reads no tag
+    below. The [variant] of a label's own pattern is not read, since
+    {!select} takes the scrutinee's. *)
 and constructor_pattern = {
-  variant : Ctype.constructor list;
-  constructor : Ctype.constructor;
+  variant : Ctype.constructor array;
+  index : int;
   fields : pattern list;
 }
 
@@ -67,17 +69,22 @@ type t = private { scrutinee : branch list; labels : int; default : bool }
 
 val max_steps : int
 (** The most steps of selection in building one tree: each label that a
-    node looks at, each constructor that it sorts into a branch and each
-    look at a label's next test below a branch. A translation limit of
-    typec (design 4.7 rule 10), which bounds the work of {!select} and
-    the size of the tree. *)
+    node looks at to sort it, each constructor that it sorts into a
+    branch and each look at a label's next test below a branch. A
+    translation limit of typec (design 4.7 rule 10), which bounds the
+    work of {!select} and the size of the tree. *)
+
+val max_depth : int
+(** The most nodes on one path of a tree, from the root to a leaf, which
+    lowering writes as nested [switch] statements (design 13.5). A
+    translation limit of typec (design 4.7 rule 10). *)
 
 (** Why there is no tree: building it takes more than {!max_steps}
-    steps. *)
-type refusal = Too_many_steps
+    steps, or the tree is deeper than {!max_depth}. *)
+type refusal = Too_many_steps | Too_deep
 
 val select :
-  Ctype.constructor list ->
+  Ctype.constructor array ->
   constructor_pattern list ->
   default:bool ->
   (t, refusal) result
@@ -87,24 +94,32 @@ val select :
     and which has a [default] where [default]. *)
 
 (** A value as a pattern that a label could hold: [Unread] is a position
-    that selection did not read, written [_]. *)
+    that selection did not read, written [_]. [read] holds the value of
+    each field read, by its index from 0, in increasing order; every
+    other field is [Unread], so a value has the size of the reads on
+    its path, not of the fields of its constructors. *)
 type value =
   | Unread
   | Holds of {
       constructor : Ctype.constructor;
       through_pointer : bool;
-      fields : value list;
+      read : (int * value) list;
     }
 
-(** What a match misses, read from the first leaf of nothing (4.2 rule
-    1): nothing; constructors of the scrutinee, where that leaf is a
+val max_named : int
+(** The most missing values that {!missing} names. *)
+
+(** What a match misses (4.2 rule 1), read from its leaves of nothing:
+    nothing; constructors of the scrutinee, where the one such leaf is a
     branch of the root, below which selection reads nothing; or values,
-    one for each constructor of the branch into the leaf. A branch
-    above it of several constructors is named by its first. *)
+    one for each constructor of the branch into each leaf, in the tree's
+    order. A branch above a leaf of several constructors is named by its
+    first. Either names the first {!max_named} and counts the [more]
+    after them. *)
 type missing =
   | Nothing_missing
-  | Scrutinee_constructors of Ctype.constructor list
-  | Values of value list
+  | Scrutinee_constructors of { named : Ctype.constructor list; more : int }
+  | Values of { named : value list; more : int }
 
 val missing : t -> missing
 
@@ -119,6 +134,8 @@ val defaulted : t -> Ctype.constructor list
     takes: those of the root's branches that are a leaf of the
     [default]. *)
 
-val spelling : value -> string
-(** [value] as it is written in a label: [Err(Overflow)],
-    [Add(_, *Num(_))]. *)
+val spelling : most:int -> value -> string
+(** [value] as it is written in a label, [Err(Overflow)] or
+    [Add(_, *Num(_))], cut after [most] + 1 bytes, so that a caller that
+    shows [most] can tell that it was cut; the work does not grow beyond
+    that. *)

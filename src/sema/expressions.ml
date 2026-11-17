@@ -347,6 +347,7 @@ type pattern_site = Match_label | Test_pattern
    builds one, so that no binding pairs sub-patterns left unchecked. *)
 type checked_pattern = {
   constructor : Ctype.constructor;
+  index : int;  (** of [constructor] in its variant's declaration order *)
   sub_fields : (Tree.sub_pattern * Ctype.member) list;
 }
 
@@ -4808,19 +4809,20 @@ and scrutinee_variant context ~what span t =
 and pattern_constructor context ~site variant constructors
     (label : Tree.span) (pattern : Tree.pattern) =
   let name = pattern.constructor.node in
-  match
-    List.find_opt
-      (fun (constructor : Ctype.constructor) ->
-        (constructor.constructor_name :> string) = name)
-      constructors
-  with
+  let named index (constructor : Ctype.constructor) =
+    if (constructor.constructor_name :> string) = name then
+      Some (index, constructor)
+    else None
+  in
+  match List.find_mapi named constructors with
   | None ->
       context.fail label
         (Rule.message Pattern
            (Printf.sprintf "%s names no constructor of the variant %s"
               (quote name) (quoted_variant variant)))
-  | Some constructor ->
+  | Some (index, constructor) ->
       { constructor;
+        index;
         sub_fields = sub_pattern_fields context ~site label pattern constructor
       }
 
@@ -4875,30 +4877,40 @@ and coverage context ~statement variant constructors labelled =
   let has_default =
     List.exists (fun (_, checked) -> Option.is_none checked) labelled
   in
+  let variant_constructors = Array.of_list constructors in
   match
-    Selection.select constructors
-      (List.map (selection_pattern constructors) cases)
+    Selection.select variant_constructors
+      (List.map (selection_pattern variant_constructors) cases)
       ~default:has_default
   with
-  | Error Too_many_steps ->
-      context.fail statement
-        (Rule.c_text
-           (Printf.sprintf
-              "the match needs more than %d steps of selection, the most \
-               that typec takes (a translation limit, C11 5.2.4.1)"
-              Selection.max_steps))
+  | Error refusal ->
+      context.fail statement (Rule.c_text (selection_refusal refusal))
   | Ok tree ->
       refuse_unselected_labels context tree labelled;
       refuse_missing context ~statement variant tree;
       refuse_unselected_default context tree labelled;
       Selection.defaulted tree
 
+(* A translation limit of typec on selection (4.7 rule 10, C11
+   5.2.4.1). *)
+and selection_refusal : Selection.refusal -> string = function
+  | Too_many_steps ->
+      Printf.sprintf
+        "the match needs more than %d steps of selection, the most that \
+         typec takes (a translation limit, C11 5.2.4.1)"
+        Selection.max_steps
+  | Too_deep ->
+      Printf.sprintf
+        "the selection tree of the match is deeper than %d nodes, the most \
+         that typec takes (a translation limit, C11 5.2.4.1)"
+        Selection.max_depth
+
 (* The pattern of a case label as selection reads it. Its sub-patterns
    are [_] and bindings, which read no tag. *)
-and selection_pattern constructors (checked : checked_pattern) :
+and selection_pattern variant_constructors (checked : checked_pattern) :
     Selection.constructor_pattern =
-  { variant = constructors;
-    constructor = checked.constructor;
+  { variant = variant_constructors;
+    index = checked.index;
     fields = List.map (fun _ -> Selection.Any) checked.sub_fields }
 
 (* In source order: a second [default] (4.2 rule 2), and a case label
@@ -4924,21 +4936,25 @@ and refuse_unselected_labels context tree labelled =
   in
   walk 0 ~after_default:false labelled
 
-(* The first leaf of nothing (4.2 rule 1). A constructor of the scrutinee
-   below which selection reads nothing is named as a constructor of the
-   variant; a deeper value is named as a pattern (4.7 rule 6). *)
+(* The values that no label takes (4.2 rule 1). *)
 and refuse_missing context ~statement variant tree =
-  let refuse text =
-    context.fail statement (Rule.message Exhaustiveness text)
-  in
-  match Selection.missing tree with
-  | Nothing_missing -> ()
-  | Scrutinee_constructors constructors ->
-      refuse
+  match missing_text variant (Selection.missing tree) with
+  | None -> ()
+  | Some text -> context.fail statement (Rule.message Exhaustiveness text)
+
+(* A constructor of the scrutinee below which selection reads nothing is
+   named as a constructor of the variant; a deeper value is named as a
+   pattern (4.7 rule 6). *)
+and missing_text variant (missing : Selection.missing) =
+  match missing with
+  | Nothing_missing -> None
+  | Scrutinee_constructors { named; more } ->
+      Some
         (Printf.sprintf "the match does not cover %s of the variant %s"
-           (constructor_list (List.map constructor_name constructors))
+           (constructor_list (List.map constructor_name named) ~more)
            (quoted_variant variant))
-  | Values values -> refuse ("the match does not cover " ^ value_list values)
+  | Values { named; more } ->
+      Some ("the match does not cover " ^ value_list named ~more)
 
 (* 4.2 rule 2: a [default] takes at least one value. *)
 and refuse_unselected_default context tree labelled =
@@ -4956,20 +4972,28 @@ and refuse_unselected_default context tree labelled =
 and constructor_name (constructor : Ctype.constructor) =
   constructor.constructor_name
 
-(* What a diagnostic calls the constructors [names]. *)
-and constructor_list names =
-  listed ~one:"the constructor" ~several:"the constructors"
+(* What a diagnostic calls the constructors [names] and [more] that it
+   does not name. *)
+and constructor_list names ~more =
+  listed ~one:"the constructor" ~several:"the constructors" ~more
     (List.map (fun (name : Spelling.constructor) -> quote (name :> string))
        names)
 
-(* What a diagnostic calls the values [values], written as patterns. *)
-and value_list values =
-  listed ~one:"the value" ~several:"the values"
-    (List.map (fun value -> quote (Selection.spelling value)) values)
+(* What a diagnostic calls the values [values], written as patterns, and
+   [more] that it does not name. *)
+and value_list values ~more =
+  listed ~one:"the value" ~several:"the values" ~more
+    (List.map
+       (fun value -> quote (Selection.spelling ~most:max_quoted value))
+       values)
 
-(* The quoted names [quoted], after the noun [one] or [several]. *)
-and listed ~one ~several quoted =
+(* The quoted names [quoted], after the noun [one] or [several], and the
+   count of [more] not named. *)
+and listed ~one ~several ~more quoted =
   match List.rev quoted with
+  | _ :: _ when more > 0 ->
+      Printf.sprintf "%s %s and %d more" several (String.concat ", " quoted)
+        more
   | [ only ] -> one ^ " " ^ only
   | last :: before ->
       Printf.sprintf "%s %s and %s" several

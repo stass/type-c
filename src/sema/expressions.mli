@@ -534,5 +534,9 @@ val function_body :
 val quote : string -> string
 (** A spelling from the text in a message, quoted and cut short. *)
 
+val missing_text : Ctype.variant_name -> Selection.missing -> string option
+(** The error of design 4.2 rule 1 for what a match on the variant of
+    this name misses, or [None] where it misses nothing. *)
+
 val needing : string -> Unknown.t -> Rule.diagnostic
 (** The refusal where [need] depends on an unknown type. *)

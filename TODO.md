@@ -1858,28 +1858,22 @@ types (design 13.3).
 - [High] Build nested patterns, as in `case Err(DivByZero):` (owner: the
   README's first example uses them): design 4.7, plan packages 3.8 to
   3.10.
-- [High] Before 3.8 parses nested patterns, bound what a missing value
-  costs: `Selection.missing` spells one value per constructor of the
-  last branch, each with every field of every constructor on its path,
-  so a scrutinee `W` of F fields of a variant of V constructors and
-  the one label `W(K0, _, ..., _)` take about V + 8 steps of selection
-  (design 4.7 rule 10) but V x F work and text (V = F = 8000: 7.8 s,
-  2.6 GB of heap, a diagnostic of 192 MB). Decide in 4.7 rule 6 how the
-  error names values that share a leaf (once, with the constructors of
-  the last position listed, or the first and a count), or charge the
-  values to the steps.
-- [Medium] Before 3.8 lowers nested patterns: the step bound of design
-  4.7 rule 10 lets a selection tree be about 700000 nodes deep, and
-  13.5 writes it as nested `switch` statements, beyond what a C
-  compiler takes (C11 5.2.4.1 asks for 127 nested blocks, Clang's
-  bracket depth is 256). Bound the depth of the tree within C's limits
-  or lower a deep path without nesting.
-- [Low] A match without nested patterns, of L labels over as many
-  constructors, takes about L² steps of selection (design 4.7 rule 10),
-  since each branch of the root looks at every label: one of more than
-  2046 labels is refused. If a written match reaches that, have a node
-  sort its labels by the constructor that each names there, so that a
-  branch looks only at its own labels and at those that name none.
+- [Medium] Before 3.8 lowers nested patterns: design 4.7 rule 10 bounds
+  the selection tree at 127 nodes deep so that its nested `switch`
+  statements (13.5) fit Clang's default bracket depth of 256, but the
+  nesting of the statements around the match counts against the same
+  256 and nothing bounds it below the parser's node depth, so a match
+  nested about 130 deep with a tree near the bound fails in the
+  backend. Bound the two together in one place, or lower a path of the
+  tree without nesting (a `switch` per node in sequence), which would
+  remove the depth bound.
+- [Medium] `Expressions.pattern_constructor` finds the constructor that a
+  label names by a linear search of its variant's constructors, so a
+  match of L labels over V constructors compares L x V names before
+  selection, which is linear in L (design 4.7 rule 10), runs: 20000
+  labels over as many constructors take 1.67 s, 5000 take 0.22 s. Look
+  a label up in a table of the variant's constructors by name, built
+  once per variant.
 - [Medium] With nested patterns (3.8) the errors of
   `Expressions.coverage` keep their flat wording: a never-selected
   label is "the constructor 'Err' is covered twice" and a `default`

@@ -419,10 +419,11 @@ a generic function is lowered in an instance of package 3.3.
      text compiles under `-pedantic-errors` with the options that the
      tests of `match` use; the partner, the twin of the test of two
      overlapping labels with its labels' tests exchanged, differs;
-   - a match whose selection passes the bound of design 4.7 rule 10
-     is refused as a limit of `typec`, within the time of the unit
-     tests; the partner, a match of the same shape whose selection
-     stays under the bound, compiles;
+   - a match whose selection passes a bound of design 4.7 rule 10,
+     on its steps or on the depth of its tree, is refused as a limit
+     of `typec`, within the time of the unit tests; the partner, a
+     match of the same shape whose selection stays within the bound,
+     compiles;
    - the property test of 3.7 passes; the partner, the same test over
      a tree that is built from the labels in reverse order, fails;
    - the fuzzing of the parser and the checker (Tests) starts from a
