@@ -3952,7 +3952,7 @@ The header's skeleton, in order:
 /* the macro probe of the macro brackets */
 /* the lowered declarations of M.tci, with its #include lines in place */
 /* the instances that it defines at its end, each under its own guard */
-/* the enumeration assertion, where it defines the tags of a variant */
+/* the enumeration assertion */
 /* the probe of 10.3, where it holds a packing bracket */
 /* (all of the above after the macro probe but the include lines: in
    runs, each in a macro bracket) */
@@ -4535,35 +4535,37 @@ states; the lowered text of a header that holds a packing bracket ends
 with the probe of that reading (10.3), so a client whose compiler
 reads the line otherwise fails to compile.
 
-The layout of a variant rests as well on the size of its tag, whose
-type is the enumeration that `typec` generates (10.1 rule 2), not text
-of the user's. A header that defines the enumeration of the tags of a
-variant, of `M.tci` or of an instance, therefore ends its lowered text
-with the enumeration assertion of 13.4, after the definitions of
-instances and before the probe of 10.3, outside the guard of every
-instance:
-the assertion holds for the whole client, whichever header defines an
-instance. Its enumerator is named for the header (13.5), since a
-client that includes two such headers would otherwise declare the
-enumerator twice, which C refuses. The assertion checks the
-representation that the target model learned for the step that
-generated the header (13.3), so a header generated for
-`arm-none-eabi-gcc` asserts `unsigned char` and one generated without
-short enumerations asserts `unsigned int`. A client compiled with the
-other representation, as with `-fshort-enums` against a header
-generated without it, would take a tag of another size and read every
-variant at offsets that the Type-C units do not use; it fails to
-compile instead, with the message that names the option. Two such
-headers generated under different representations hold assertions of
-which a client passes at most one, so a client never mixes them. The
-layout typedef needs no part of this: its digest is of the text of a
-definition, which the representation does not change, and the
-assertion covers the representation for the whole client. A header
-that defines no variant's tags holds no assertion, and an enumeration
-of the user's in it, as in an instance `vector(enum color)`, has C's
-exposure to the client's representation, as it has in any C header. The
-assertion is one enumeration standing for all, provisional as 13.4
-states. The other two
+Every emitted header ends its lowered text with the enumeration
+assertion of 13.4, after the definitions of instances and before the
+probe of 10.3, outside the guard of every instance: the assertion holds
+for the whole client, whichever header defines an instance. Its
+enumerator is named for the header (13.5), since a client that includes
+two headers would otherwise declare the enumerator twice, which C
+refuses. The assertion checks the enumeration representation that the
+target model learned for the step that generated the header (13.3), so
+a header generated for `arm-none-eabi-gcc` asserts `unsigned char` and
+one generated without short enumerations asserts `unsigned int`. The
+front end typed the header's lowered text by that representation: the
+layout of an instance over an enumeration of the user's, as
+`vector(enum color)`, and every selection that 13.5 resolves in a
+lowered body by the type of an enumeration, as a `_Generic` on
+`+(enum e)0` in an inline function. A client compiled with the other
+representation, as with `-fshort-enums` against a header generated
+without it, would lay out that instance and compile that body otherwise
+than the Type-C units and the front end did; it fails to compile
+instead, with the message that names the representation. A variant's
+tag is the same under both (10.1 rule 2), so it is no reason for the
+assertion, and a header without enumerations of the user's carries it
+all the same: whether a header's text depends on the representation is
+a list that no step keeps. Two headers generated under different
+representations hold assertions of which a client passes at most one,
+so a client never mixes them. The layout typedef needs no part of this:
+its digest is of the text of a definition, which the representation
+does not change, and the assertion covers the representation for the
+whole client. The assertion is one enumeration standing for all,
+provisional as 13.4 states.
+
+The other two
 assertions of 13.4 are not written. Neither the signedness of a plain
 `int` bit-field nor the type of an unsuffixed floating constant changes
 the layout of anything that lowering makes. The bit-fields and
@@ -4590,11 +4592,7 @@ describe a layout that no Type-C object has, and the front end would
 type `M.tci` under assumptions that the backend contradicts. With one
 table the configurations of headers and of units are one set, and the
 enumeration rule that the header asserts of its client is the rule of
-the configuration that generated it. The table accepts one
-configuration in which no unit builds, `-fshort-enums` on a target
-without `__ARM_SIZEOF_MINIMAL_ENUM` (13.3): a header of a variant
-generated under it asserts the type that the model gives, which its
-client contradicts, so the client fails to compile as the units do.
+the configuration that generated it.
 
 C clients can read and write everything the header exposes, and no
 Type-C rule binds them.
@@ -4622,21 +4620,42 @@ struct expr {
 
 1. Tags number the constructors from 0 in declaration order. Reordering or
    removing constructors changes the ABI. Appending one adds a tag on which
-   code compiled earlier traps, as long as the tag keeps its type. Under
-   short enumerations (rule 2) the 257th and the 65537th constructor
-   widen the tag, which changes the ABI as reordering does: code compiled
-   earlier reads one byte of a wider tag, and takes tag 256 for tag 0
-   on a little-endian target, without a trap.
+   code compiled earlier traps.
 2. The tag has the generated enumeration type, with the
    size and alignment the target's C ABI gives that enumeration. Debuggers
    then print constructors by name, and layout has one authority. The
-   front end types the tag by the enumeration rule of 13.4, so under
-   short enumerations, the default of `arm-none-eabi-gcc`, a variant of
-   at most 256 constructors has a tag of one byte, as an enumeration of
-   as many values in C code compiled with the same options has. Pilot A
-   gives no reason for a narrower tag: its structures shrink because the
-   payloads share one union, and in the two largest the union is aligned
-   to 16, so a smaller tag saves nothing.
+   enumeration ends with a hidden enumerator of the value `INT_MAX`.
+   Lowering writes the value as a decimal constant from the target
+   model (13.3) and the name by 13.5, and Type-C code cannot name it.
+   The tag then has the size of `int` under both enumeration
+   representations (13.4). Its type is `unsigned int`, except under
+   short enumerations where `int` has 16 bits: `unsigned short`, as
+   Apple Clang 21 gives it for `msp430-elf`. A variant of more than
+   `INT_MAX` constructors is an error, since its last tag would meet
+   the hidden one. Measured with
+   `arm-none-eabi-gcc` 14.2 with and without `-fno-short-enums`, GCC 16
+   for x86-64 under `-fshort-enums`, and Apple Clang 21 for
+   `thumbv7m-none-eabi` and `msp430-elf` under `-fshort-enums` and for
+   `hexagon-unknown-elf`, whose default is short enumerations. A tag
+   of one size makes the layout of a variant the same under both, so
+   appending a constructor never widens the tag (rule 1), and units and
+   C clients built under either representation agree on the tag of
+   every variant; a payload that holds an enumeration of the user's
+   differs between them as it does in C.
+   Pilot A gives no reason for a narrower tag: its structures shrink
+   because the payloads share one union, and in the two largest the
+   union is aligned to 16, so a smaller tag saves nothing. Under short
+   enumerations the tag costs up to 3 bytes on 32-bit targets, in a
+   variant whose payloads are aligned to less than `int`, as one
+   without fields; elsewhere padding takes them anyway.
+   The hidden enumerator draws `-Wswitch`, which `-Wall` holds, on a C
+   client's `switch` on the tag that names every constructor and has
+   no `default:`; such a client writes the `default:` that an invalid
+   tag needs anyway (4.5). Lowering writes every `switch` on a tag, of
+   a `match` and of each node of a selection tree (13.5), by one step
+   that ends it with the `case` of the hidden enumerator and `default:`
+   holding the trap, so neither `-Wswitch` nor `-Wswitch-enum` reports
+   lowered code.
 3. The union `u` has one member per constructor that has fields, named after
    the constructor: a struct of the fields in order. A variant whose
    constructors all lack fields has no union.
@@ -5492,21 +5511,16 @@ language is defined here and not by the tool.
   assertions of 13.4 cover the routes that the command line does not
   show. An option that changes a macro the target model reads (13.3),
   as `-funsigned-char` and `-fshort-wchar` do, reaches the model and is
-  accepted. So do `-fshort-enums` and `-fno-short-enums`: the model
-  reads the representation they choose from `__ARM_SIZEOF_MINIMAL_ENUM`,
-  and where the target defines no such macro the enumeration
-  assertion of 13.4 fails the build under `-fshort-enums`, naming the
-  option. A refusal would force one representation on firmware whose
+  accepted. So do `-fshort-enums` and `-fno-short-enums`: the target
+  query learns the representation they choose by its probe compile
+  (13.3). A refusal would force one representation on firmware whose
   libraries use the other: in the Arm GNU Toolchain 14.2.Rel1 every
   object of `libgcc.a` and of newlib's `libc.a` that records
   `Tag_ABI_enum_size` records it as small, and Clang for
-  `thumbv7m-none-eabi` records small only under `-fshort-enums`. The
-  units of one program that share a type, a variant's tag among them,
-  are built with one representation, as C already requires of units
-  that share an enumeration; `typec` checks each unit against its own
-  options and no more. Objects that disagree on the tag link with a
-  warning of GNU `ld` 2.43 and nothing more, and the AArch64 ELF ABI
-  has no such tag to disagree on.
+  `thumbv7m-none-eabi` records small only under `-fshort-enums`. Units
+  of one program that share an enumeration of the user's are built with
+  one representation, as C requires; a variant's tag is the same under
+  both (10.1 rule 2).
 - With a `.tc` input, a long option, one spelled with `--`, that the
   driver's table of options does not name is refused as an error of
   the command line, naming the option; an option that also has a form
@@ -5828,34 +5842,52 @@ as `-D` and `-undef` are left out: they cannot change the ABI of that
 step, and `-D__SIZEOF_LONG__=4` would make the model lie. `typec` has no
 target table of its own.
 
-The model also holds the *minimal enumeration size*: the fewest bytes
-that an enumeration without a fixed type takes. It is the value of
-`__ARM_SIZEOF_MINIMAL_ENUM` where the backend defines it, and the size
-of `int` where it does not; a value other than 1 or the size of `int`
-is an error of the model. The macro is the Arm C Language Extensions'
-statement of the AAPCS choice, which the ARM EABI also records in each
-object as `Tag_ABI_enum_size`. It is the one fact behind the short-enum
-representation, so no table of targets or options decides it:
-`arm-none-eabi-gcc` 14.2 defines it as 1 by default and as 4 under
-`-fno-short-enums`, and Apple Clang 21 for `thumbv7m-none-eabi`,
-`thumbv7em-none-eabihf`, `arm-none-eabi`, `armv7-linux-gnueabihf` and
-`aarch64-linux-gnu` defines it as 4 by default and as 1 under
-`-fshort-enums`, and for the first and the last as 1 under `-Xclang
--fshort-enums`, the two measured. GCC 16 and Apple Clang 21
-for x86-64 define no macro that names the representation, with the
-option or without it. The compatible type of an enumeration follows
-from the size by one rule (13.4), and every use of the enumeration's
-type reads it from there. *Provisional* in two parts. GCC for
-AArch64 and for hosted 32-bit Arm is unmeasured; a `-dM` dump of each
-under both options settles it, and until then the macro is trusted
-where it is present, with the assertion of 13.4 behind it. A target
-whose compiler gives short enumerations without the macro, as GCC and
-Clang for x86-64 do under `-fshort-enums`, gets the size of `int` from
-the model and fails that assertion. A program that needs short
-enumerations on such a target would settle it, with a probe compile in
-the target query (`-fsyntax-only` of `_Static_assert(sizeof(enum { A
-}) == 1, "")`, whose status is the bit); without one, the macro stays
-the only source.
+The model also holds the *enumeration representation*, one of two:
+*int-sized*, under which an enumeration without a fixed type is at
+least as wide as `int`, or *short*, under which it takes the smallest
+integer type that holds its values. It is a fact of two states and not
+a byte count, since where `int` has 16 bits a short enumeration and an
+int-sized one can have one size and differ in rank (13.4). No
+predefined macro states it on every target: the Arm C Language
+Extensions' `__ARM_SIZEOF_MINIMAL_ENUM` exists on Arm and AArch64
+alone, and Apple Clang 21 for `hexagon-unknown-elf` gives short
+enumerations by default with no macro that names them. The target
+query therefore learns it by two probe compiles beside the macro dump,
+with the same options and `-fsyntax-only -w -x c -`, each reading its
+text from a pipe that holds the whole text, under the capacity of a
+pipe, and is closed before the backend starts, so no write can meet a
+backend that exits early. The short probe is `typedef char
+__tc_enum_size[sizeof(enum { __tc_enum_probe }) == 1 ? 1 : -1];` and
+the int-sized one the same with `== sizeof(int)`; the backend's stdout
+and stderr go to `/dev/null`, since a probe fails by design. Exactly
+one probe exits with status 0 and names the representation. Both
+failing, as a setup error of the backend fails both, is an error of
+the query that names the probes and the options, and so is a signal;
+the backend's own message is not shown, and the macro dump, which the
+query runs first with the same options and shows, reports most such
+errors before the probes run. Two runs and not one, whose failure
+would read as the other representation, so that no setup error passes
+for an answer. `-w` keeps a `-Werror` of the user's from failing a
+probe on a warning of its reserved names, and the text is C89, so no
+`-std` or `-pedantic-errors` fails it. The option that chooses the
+representation, `-fshort-enums` or `-fno-short-enums`, a target's
+default and an `-Xclang -fshort-enums` reach the probe as they reach
+the compile of the unit, so no table of targets or options decides
+it. The short probe alone passes for `arm-none-eabi-gcc` 14.2 by
+default, for GCC 16 for x86-64 under `-fshort-enums`, and for Apple
+Clang 21 for x86-64 and `msp430-elf` under `-fshort-enums` and for
+`hexagon-unknown-elf` by default, and the short probe passes for
+`thumbv7m-none-eabi` under `-Xclang -fshort-enums`; the int-sized
+probe alone passes for `arm-none-eabi-gcc` under `-fno-short-enums`,
+for GCC 16 and Apple Clang 21 for x86-64 without an option, and for
+Apple Clang 21 for `msp430-elf` without one and for
+`hexagon-unknown-elf` under `-fno-short-enums`. The cost is two more
+runs of the backend for each step that queries the target, which the
+design accepts (simplicity over speed in the compiler). An option that makes the backend write
+files of its own, as GCC 16's `-fdiagnostics-add-output=sarif`, writes
+them for the failing probe as well. The compatible type of an
+enumeration follows from the representation by one rule (13.4), and
+every use of the enumeration's type reads it from there.
 
 The front end assumes two types that no predefined macro states.
 13.4 names them and asserts them in the emitted C, with the
@@ -6205,47 +6237,82 @@ inside a user's file and judge the lines after the marker that returns
 to it.
 
 **Enumeration rule.** The compatible type of an enumeration without a
-fixed type (C11 6.7.2.2p4) is the first type that holds every value of
-its enumerators and whose size is at least the minimal enumeration
-size of the model (13.3), from `unsigned char`, `unsigned short`,
-`unsigned int`, `unsigned long` and `unsigned long long` where no value
-is negative, and from `signed char`, `short`, `int`, `long` and `long
-long` where one is. An enumeration with `__attribute__((packed))` takes
-the rule with a minimal size of 1, whatever the model's size. That is
-the entry of `packed` on an enumeration in the table of effects of
-attributes (13.3), so its type is known rather than unknown. An
-enumeration with a fixed type keeps that type under every option and
-ignores `packed`. With the size of `int` the rule gives `unsigned int`
-or `int` to every enumeration of small values; with 1 it gives `enum {
-A }` the type `unsigned char`, `enum { A = -1, B = 128 }` the type
-`short` and `enum { A = -1, B = 32768 }` the type `int`. GCC 16 and
-Apple Clang 21 for x86-64, `arm-none-eabi-gcc` 14.2 by default, for
-Cortex-M3 and for Cortex-M4 with hardware floating point, and Apple
-Clang 21 for five Arm and AArch64 targets agree with the rule on the
-size, alignment and compatible type of 19 enumerations and 5 packed
-ones, under `-fshort-enums`, under `-fno-short-enums` and under
-neither. *Provisional* for the compilers that are not measured: a
-backend that gives one of those enumerations another type would
-settle it, and without one the rule stays. The constants of an
+fixed type (C11 6.7.2.2p4) is the first type of a list that holds
+every value of its enumerators. Under the int-sized representation of
+the model (13.3) the list is `unsigned int`, `unsigned long` and
+`unsigned long long` where no value is negative, and `int`, `long` and
+`long long` where one is. Under the short representation each list
+begins with the two types of lower rank: `unsigned char` and `unsigned
+short`, or `signed char` and `short`. The rule goes by rank and not by
+size: where `int` has 16 bits, `enum { A = 256 }` is `unsigned short`
+under short enumerations and `unsigned int` without, of one size, as
+Apple Clang 21 for `msp430-elf` gives them. An enumeration whose
+enumerator list stands in a specifier with `packed` takes the short
+list whatever the model's representation: `__attribute__((packed))`
+between `enum` and the tag or after the closing brace, and
+`[[gnu::packed]]` between `enum` and the tag. Both backends ignore
+`__attribute__((packed))` before `enum`; GCC 16 ignores
+`[[gnu::packed]]` after the closing brace with a warning and Apple
+Clang 21 refuses it there. That is the entry
+of `packed` on an enumeration in the table of effects of attributes
+(13.3), so its type is known rather than unknown. The attribute counts
+on that specifier alone. On an earlier declaration of the tag, as
+`enum __attribute__((packed)) E;` or a member `enum
+__attribute__((packed)) E *p;` before `enum E { A };`, the backends
+differ: GCC 16 ignores it and gives `enum E` the size of `int`, and
+Apple Clang 21 carries it to the definition and gives one byte. The
+type of an enumeration whose earlier declaration holds `packed` and
+whose defining specifier does not is therefore unknown (13.3, P21),
+with either backend. An enumeration with a fixed type keeps that type
+under every option and ignores `packed`. Under the int-sized
+representation the rule gives `unsigned int` or `int` to every
+enumeration of small values; under the short one it gives `enum { A }`
+the type `unsigned char`, `enum { A = -1, B = 128 }` the type `short`
+and, where `int` has 32 bits, `enum { A = -1, B = 32768 }` the type
+`int`. GCC 16 and Apple Clang 21 for x86-64, `arm-none-eabi-gcc` 14.2
+by default, for Cortex-M3 and for Cortex-M4 with hardware floating
+point, and Apple Clang 21 for five Arm and AArch64 targets agree with
+the rule on the size, alignment and compatible type of 19 enumerations
+and 5 packed ones, under `-fshort-enums`, under `-fno-short-enums` and
+under neither, and Apple Clang 21 for `msp430-elf` agrees on 5 under
+both representations. *Provisional* for the compilers that are not
+measured: a backend that gives one of those enumerations another type
+would settle it, and without one the rule stays. The constants of an
 enumeration keep their type: `int` where `int` holds the value,
-measured with both compilers under every option in `-std=gnu11`. An
-enumeration has a short type only where `int` holds every value, so
-the rule changes the type of objects and not of constants in C23 as
-well.
+measured with both compilers under every option in `-std=gnu11`, and
+the enumerated type where it does not. Where `int` has 32 bits or more
+an enumeration has a short type only where `int` holds every value, so
+the rule changes the type of objects and not of constants, in C23 as
+well. Where `int` has 16 bits it changes constants too: Apple Clang 21
+for `msp430-elf` gives the constant `A` of `enum
+__attribute__((packed)) { A = 40000 }` the type `unsigned short`, in
+`-std=gnu11` and `-std=c23`, and `+A` the type `unsigned int`, by the
+promotion of `unsigned short`, where an object of the enumeration
+promotes to `int` (below). The front end types both as measured.
+
 Every use of the enumerated type reads its compatible type, and so the
 size, in one place: the integer promotions, under which an object of
-an enumeration narrower than `int` promotes to `int` (C11 6.3.1.1p2),
-measured with both; conversions and compatibility; `sizeof`; the width
-that bounds a bit-field of the type, which GCC and Clang also hold to
-8 bits for `enum { A }` under `-fshort-enums`; and the tag of a variant
-(10.1 rule 2), whose switch and comparisons lowering writes on the tag
-without naming its integer type.
+an enumeration of lower rank than `int` promotes to `int` (C11
+6.3.1.1p2), measured with both; conversions and compatibility;
+`sizeof`; the width that bounds a bit-field of the type, which GCC and
+Clang also hold to 8 bits for `enum { A }` under `-fshort-enums`; and
+the tag of a variant (10.1 rule 2), whose switch and comparisons
+lowering writes on the tag without naming its integer type. The
+promotion is to `int` also where `int` does not hold every value:
+Apple Clang 21 for `msp430-elf` promotes an object of `enum
+__attribute__((packed)) { A = 40000 }`, which is `unsigned short`, to
+`int`, where C11 6.3.1.1p2 and its own `unsigned short` give `unsigned
+int`. The front end types the promotion as measured. *Provisional:*
+GCC for a target where `int` has 16 bits is unmeasured; a GCC that
+types such a constant, or promotes such an object, otherwise would
+settle it, and then that type becomes a difference of the backends
+(13.3). Until then Clang's types stand.
 
 The front end assumes two types that no predefined macro of the
 target model (13.3) states: a plain `int` bit-field is signed and an
 unsuffixed floating constant is `double`. It also takes the enumeration
-rule with the model's minimal size, which a predefined macro states
-only on the measured Arm and AArch64 compilers. A backend that holds
+rule with the representation that the target query's probe learned
+(13.3), which a later compile can contradict. A backend that holds
 otherwise would compile code that the front end has typed differently,
 with no message. The C of a unit with a Type-C construct therefore ends
 with static assertions of the two types and of the rule, and of no
@@ -6253,15 +6320,21 @@ other type assumption, under a marker for
 `<typec>` with flag 3, so the user's warnings do not judge them. The
 third, the *enumeration assertion*, asserts that an enumeration of the
 value 0 has the compatible type that the rule gives it, `unsigned char`
-or `unsigned int` on every measured target, so it checks the
-representation that the model learned and not a fixed one. The backend
-thus fails the build when an option, wrapper, config file or target
-default changes one of those types out of the model's sight, as
-`-fshort-enums` does on a target without `__ARM_SIZEOF_MINIMAL_ENUM`,
-or when the query and the compile disagree. One enumeration stands for
-all of them, because those routes change the rule for the whole unit,
-and the value 0 tells every minimal size apart. `#pragma GCC optimize`
-regions are not covered. *Provisional:* the one enumeration is
+under the short representation and `unsigned int` under the int-sized
+one, so it checks the representation that the model learned and not a
+fixed one. The backend thus fails the build when an option, wrapper,
+config file or target default changes one of those types out of the
+model's sight, or when the query and the compile disagree. One
+enumeration stands for all of them, because those routes change the
+rule for the whole unit, and the value 0 tells the two representations
+apart. `#pragma GCC optimize` regions and functions with
+`__attribute__((optimize))` are not covered, since the unit's assertion
+sees the options where the unit ends. Under `arm-none-eabi-gcc` 14.2's
+default, an enumeration declared inside a region of `#pragma GCC
+optimize ("no-short-enums")` has the size of `int`. Under
+`-fno-short-enums`, one declared in a function with
+`__attribute__((optimize ("short-enums")))` takes one byte.
+*Provisional:* the one enumeration is
 confirmed for the measured targets alone. A target whose rule differs
 from the model's only for values other than 0 would settle it
 otherwise, with an assertion for each enumeration; without one, the one
@@ -6270,17 +6343,19 @@ enumeration stays.
 A unit that holds a packing bracket ends, under the same marker, with
 one assertion more: the probe of 10.3, which asserts how the backend
 reads `#pragma pack()` and no type. The message of each of the four
-names the options known to break it; that of the enumeration assertion
-names `-fshort-enums` where the model's size is that of `int` and
-`-fno-short-enums` where it is 1. The driver refuses the options of the
-two types as well, and none for the enumeration rule or the probe
-(13.2). A unit without
-Type-C constructs gets none of this, since its text is the backend's
-own. The lowered text of an emitted header ends with the enumeration
-assertion where it defines the enumeration of the tags of a variant,
-with its enumerator named for the header (13.5), and with the probe
-where it holds a bracket; it carries neither of the other two type
-assertions (9.3).
+names the options known to break it. That of the enumeration assertion
+states the representation that the model expects and the option that
+breaks it: under the short one, "typec assumes short enumerations: an
+enumeration of small nonnegative values is compatible with unsigned
+char (-fno-short-enums?)", and under the int-sized one, "typec assumes
+int-sized enumerations: an enumeration of small nonnegative values is
+compatible with unsigned int (-fshort-enums?)". The driver refuses the
+options of the two types as well, and none for the enumeration rule or
+the probe of 10.3 (13.2). A unit without Type-C constructs gets none
+of this, since its text is the backend's own. The lowered text of every emitted header
+ends with the enumeration assertion, with its enumerator named for the
+header (13.5), and with the probe where it holds a bracket; it carries
+neither of the other two type assertions (9.3).
 
 Two properties follow by construction:
 
@@ -6298,10 +6373,10 @@ Two properties follow by construction:
 | --- | --- |
 | Variant declaration | The enum, struct and typedef of 10.1, at the point of declaration. |
 | Constructor expression | A compound literal, `((struct expr){ .tag = expr_Add, .u.Add = { a, b } })`, which names the claimed struct tag and enumerator (10.1 rule 6) rather than the typedef name, which a block may hide. As the initialiser of an object, or of a member or an element of one, that is declared with the variant's type, the braced list alone, also for a constructor nested in another's arguments, so that static initialisers remain constant. The braced list replaces the whole initialiser, with the parentheses that the source writes around the constructor, which change neither its type nor its value (C11 6.5.1p5): a braced list inside them would be a statement expression of GNU C, and GCC under `-pedantic-errors` refuses the compound literal inside them at file scope. An object that takes its type from its initialiser, as one declared with `__auto_type` does, has no type for a braced list, and its initialiser is the compound literal. |
-| `match` | A block: a pointer to the scrutinee where it is an lvalue whose address C aligns for its type, or else a copy. The address is aligned for a named object not declared `register`, a compound literal, the object of a pointer that is read as a stored value or returned by a call, and an element of an array whose address is aligned; it is not for a member of a structure or union, which a `#pragma pack` or an attribute may pack where typec does not see it and which the backend reads correctly through a member access only, nor for the object of a pointer that the scrutinee forms, as by converting a member array. The copy of a member is equal in size at `-O2` to a `switch` on the member in place, and a read through a pointer to a typedef of the variant declared `aligned(1)` is larger on ARMv5 (33 and 66 instructions against 19 and 21), so the copy stays. A volatile or atomic scrutinee is copied too. Then: a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
+| `match` | A block: a pointer to the scrutinee where it is an lvalue whose address C aligns for its type, or else a copy. The address is aligned for a named object not declared `register`, a compound literal, the object of a pointer that is read as a stored value or returned by a call, and an element of an array whose address is aligned; it is not for a member of a structure or union, which a `#pragma pack` or an attribute may pack where typec does not see it and which the backend reads correctly through a member access only, nor for the object of a pointer that the scrutinee forms, as by converting a member array. The copy of a member is equal in size at `-O2` to a `switch` on the member in place, and a read through a pointer to a typedef of the variant declared `aligned(1)` is larger on ARMv5 (33 and 66 instructions against 19 and 21), so the copy stays. A volatile or atomic scrutinee is copied too. Then: a `switch` on the tag with a `case` for every constructor; a block per arm that holds its block items as written and ends in a trap (10.5), `case X: { items trap }`; where the arm binds, that block declares the bindings first and holds the items in a block of their own, `case X: { bindings { items } trap }`; `break`, `continue` and `return` unchanged; `default:` and the `case` of the variant's hidden enumerator (10.1 rule 2) holding the trap. The copy is declared with the type `const struct R`, where `struct R` names the variant, or the instance, by its claimed tag (10.1 rule 6, 10.3): no declaration hides a claimed name, and nothing writes to the copy after its initialiser. |
 | Single-pattern test, `if` | A block: the operand held as a `match` holds its scrutinee; the tag, read once into a local; an `if` on that local. The true branch is a block that opens at the `)` of the test, declares the bindings and then holds what follows that `)` as written, the controlled statement `S` with a pragma that stands before it: `{ bindings S }`, whether the test binds or not and whether `S` is a compound statement or not. The false branch traps when the local is no constructor's tag and then holds the `else` statement, if there is one. |
 | Single-pattern test, `while` | The same block as the body of an endless loop, with a false branch that traps on an invalid tag and then ends in `break`. `break` and `continue` in the controlled statement stay unchanged, and the operand is evaluated in the body of that loop (4.4). |
-| Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm0;`, then a pointer local for each position under a `*` where a constructor pattern stands, `const struct V *__tc_p0_K = 0;` for the `K`th such position, of the variant `V`, and for each node a `switch` on the tag of the node's position. The locals are numbered from 1 in the order in which the labels name their positions, so that each follows the one it is reached from, and the scrutinee's pointer is `__tc_match0`. An object is reached from the nearest local above it, `__tc_match0` or one of a position under a `*`, through the members of 10.1: a node under a `*` first points its local at the object that the pointer field points to, `__tc_p0_1 = __tc_match0->u.Add.l;`, and switches on `__tc_p0_1->tag`; a node at a field in place switches on the field's tag, `__tc_match0->u.Err.error.tag`, `__tc_p0_1->u.Wrapped.inner.tag`. A field in place has no local, since its address may be misaligned in a packed variant, where a member access is not. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm0 = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm0)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm0`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_p0_1->u.Num.value`. The path from a local to an object never passes a `*`, so a variant is held in place at most once on it and its length is bounded by the variants of the unit and the depth of the tree, not by the depth of a pattern under `*`; spelling the whole path from `__tc_match0` at each node would make a 100 KB pattern 120 deep over a long field name about 900 MB of text. Every path to a node or to an arm passes the nodes that point the locals that it reads, since a label is selected only after every tag that it names is read (4.7 rule 6); the null pointer that a local starts as spares a backend that cannot see this a warning of a value used uninitialized. |
+| Selection with a nested pattern | A `match` or a single-pattern test whose selection tree has more than one node (4.7 rule 6) holds its scrutinee or operand as its row says and then writes the tree: a local, `unsigned __tc_arm0;`, then a pointer local for each position under a `*` where a constructor pattern stands, `const struct V *__tc_p0_K = 0;` for the `K`th such position, of the variant `V`, and for each node a `switch` on the tag of the node's position, which ends with the `case` of the hidden enumerator and `default:` holding the trap (10.1 rule 2). The locals are numbered from 1 in the order in which the labels name their positions, so that each follows the one it is reached from, and the scrutinee's pointer is `__tc_match0`. An object is reached from the nearest local above it, `__tc_match0` or one of a position under a `*`, through the members of 10.1: a node under a `*` first points its local at the object that the pointer field points to, `__tc_p0_1 = __tc_match0->u.Add.l;`, and switches on `__tc_p0_1->tag`; a node at a field in place switches on the field's tag, `__tc_match0->u.Err.error.tag`, `__tc_p0_1->u.Wrapped.inner.tag`. A field in place has no local, since its address may be misaligned in a packed variant, where a member access is not. The `switch` has a `case` for every constructor of the position's variant, each followed by the `switch` or the leaf of its branch and a `break`; constructors that no label names at the position share one branch, after their `case` labels; `default:` holds the trap. A leaf is `__tc_arm0 = k;`. In a `match`, `k` numbers the arms from 0 in source order, and after the tree stands `switch (__tc_arm0)`, with `case k:` where the labels of arm `k` stood, the block of each arm as in the `match` row, and `default:` holding the trap. In a test the leaf of the pattern is 1 and every other leaf is 0, and the `if` of the test's row is on `__tc_arm0`; its false branch checks no tag, since the tree has. A binding is declared from the field of its position, `const __typeof__(F) x = F;`, where `F` is such as `__tc_p0_1->u.Num.value`. The path from a local to an object never passes a `*`, so a variant is held in place at most once on it and its length is bounded by the variants of the unit and the depth of the tree, not by the depth of a pattern under `*`; spelling the whole path from `__tc_match0` at each node would make a 100 KB pattern 120 deep over a long field name about 900 MB of text. Every path to a node or to an arm passes the nodes that point the locals that it reads, since a label is selected only after every tag that it names is read (4.7 rule 6); the null pointer that a local starts as spares a backend that cannot see this a warning of a value used uninitialized. |
 | Distinct type | A typedef. Casts are kept. A construct that asks whether two types are compatible, `_Generic` and `__builtin_types_compatible_p`, is answered by the front end where Type-C text compares a distinct type: one of the types compared (the controlling type or an association's, either operand) is or contains one. The selection keeps its controlling expression and every association, so the backend sees the names they use and the tags they declare outside the association type names, and is steered to the front end's choice: the type name of the association at position `i` becomes `char (*)[i]`, and the controlling expression `e` becomes `((void)(e), (char (*)[k])0)`, where `k` is the position of the selected association. Arrays of different lengths make these types pairwise incompatible, and `default` stays, as its position is no type name's. The builtin becomes `1` or `0`. C text compares the representation (10.2), and the backend answers. |
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
@@ -6348,10 +6423,10 @@ claimed tag and `TRAP` the trap of 10.5:
     switch (__tc_match0->u.Err.error.tag) {
     case eval_error_DivByZero: __tc_arm0 = 1; break;
     case eval_error_Overflow: __tc_arm0 = 2; break;
-    default: TRAP
+    case __tc_tag_max__eval_error_tag: default: TRAP
     }
     break;
-  default: TRAP
+  case __tc_tag_max__R_tag: default: TRAP
   }
   switch (__tc_arm0) {
   case 0: { const __typeof__(__tc_match0->u.Ok.value) value =
@@ -6648,7 +6723,17 @@ writes that type in keywords alone, as it writes the `int` of a first
 operand: every arithmetic type has such a name, which no declaration
 hides. An enumerated type is written as the integer type that it is
 compatible with (C11 6.7.2.2p4), to which the conversion is the same
-(6.3p2), and a bit-field as the type that declares it. The line is an
+(6.3p2), and a bit-field as the type that declares it. That integer
+type is the one that the enumeration rule gives with the model's
+representation (13.4). Inside a region of `#pragma GCC optimize` or a
+function with `__attribute__((optimize))` that changes the
+representation, which the enumeration assertion does not cover (13.4),
+GCC gives the enumeration another type. Under `arm-none-eabi-gcc`'s
+default, an `enum wide { W0, W1 }` declared inside `#pragma GCC
+optimize ("no-short-enums")` takes 4 bytes, while the temporary that
+this paragraph writes for an initialiser of an `enum wide` has the
+type `unsigned char`: an initialiser of the value 300 reaches the
+object as 44, where the list alone would store 300. The line is an
 initialisation or an assignment and no cast, so C converts there as it
 converts in the list (C11 6.7.9p11, 6.5.16.1p2), the backend refuses
 there what it refuses in the list, and it reports the conversion as it
@@ -7560,7 +7645,9 @@ state of its own place, since no pragma stands between the two (5.1
 rule 3). A type instance is kept from `#pragma pack` by the bracket of
 10.3 and from no other pragma that changes a layout, among them
 `#pragma ms_struct on`, GCC's `#pragma scalar_storage_order` and a
-`#pragma clang attribute push` that applies `packed`. A type instance
+`#pragma clang attribute push` that applies `ms_struct` to records,
+which Apple Clang 21 accepts where it refuses `packed` and `aligned`.
+A type instance
 that is first used inside the region of one of them in one translation
 unit, and outside it in another, has one name and two layouts. Code
 under such a pragma keeps the first use of every type instance outside
@@ -8430,7 +8517,12 @@ the others of its kind:
   `__tc_macro_probe__ir_5fexpr`;
 - the enumerator of the enumeration assertion of an emitted header
   (9.3, 13.4): `enum_probe`, then the module of the header, as in
-  `__tc_enum_probe__ir_5fexpr`.
+  `__tc_enum_probe__ir_5fexpr`;
+- the hidden enumerator of the value `INT_MAX` that ends the
+  enumeration of a variant's tags (10.1 rule 2): `tag_max`, then the
+  enum tag of that enumeration, as in `__tc_tag_max__expr_tag` for
+  `enum expr_tag`. The enum tag is one variant or variant instance,
+  since the declaration claims it (10.1 rule 6).
 
 No kind word holds a `__` or ends in `_`, so the first `__` after the
 prefix ends the word, and names of different kinds differ: the guard of
@@ -8580,14 +8672,14 @@ a crash.
 | --- | --- | --- |
 | Plain C keeps its meaning and ABI | Every translation unit in the supported dialect, but for the one exception of 2.2 | Emission by token span (13.4) |
 | A variant value has a valid tag and the payload of that tag | Values made by constructors, the zero value, and copies of either | No code writing the bytes of the object behind its type (C code, casts, unions, `memcpy`); no read of an uninitialised automatic object |
-| A `match` selects an arm for every value of its scrutinee's type | Every `match` | An invalid tag traps where selection reads it (4.5); a pointer that a `*` sub-pattern follows points to an object of its type (4.7 rule 5); the units that share the variant were built with one enumeration representation, and with every tag that the variant had when each was built (13.2, 10.1 rule 1) |
+| A `match` selects an arm for every value of its scrutinee's type | Every `match` | An invalid tag traps where selection reads it (4.5); a pointer that a `*` sub-pattern follows points to an object of its type (4.7 rule 5) |
 | Distinct types do not mix without a cast | Type-C code | C code sees the underlying type |
 | Only the owner creates values of a private type, other than the zero value | Type-C code that does not write bytes behind the type | Not a security boundary (9.2) |
 | A generic function is valid for every instance | Every instance that compiles: a chain past the nesting limit (3.5 rule 7), a declaration that changes what the definition names (3.5 rule 8), a declaration of a name that a generic claims for its instances (10.3), a placement that 10.3 or 7.3 rule 2 or 4 refuses and a translation limit of `typec` (13.6) are compile errors | Nothing |
 | The zero initialiser of an object whose type mentions a type parameter gives every scalar in it the value zero and zeroes the padding of each structure, the bits of each unnamed bit-field and the rest of each union in it | Every instance of a generic function (7.1 rule 3). Not covered: the bytes inside a scalar that hold none of its value, as 6 of the 16 of the `long double` of x86-64 and 12 of the 32 of its complex type, which are unspecified as in C. Text that hands the representation on clears the object with `memset` first | The backend gives `{}` the meaning of C23 in the selected dialect and zeroes an unnamed bit-field, which C leaves indeterminate (13.5, provisional). A copy of the object is C's, which leaves the padding of a copy unspecified (C11 6.2.6.1p6) |
 | Text that lowering moves means what it means at its own place, and the text around it what it means without the move | Every kind of moved text that 13.5 names. Attribute arguments and `#pragma` lines are covered as far as 13.5 says: for the identifiers that denote something at the text's own place, and where a Type-C name hides a C entity | Pragma state is that of the place where the text is written. A type instance is kept from `#pragma pack` alone: under another pragma that changes a layout (`#pragma ms_struct`, `#pragma scalar_storage_order`, `#pragma clang attribute`), a type instance first used inside its region in one translation unit and outside it in another has one name and two layouts. A function instance has the state of its generic's definition, but for its packing, which is the command line's, and its diagnostics, which are those of the place where it is written (13.5), since its first use is an error where a line that sets state stands between the two (7.3 rule 4). The test of a slice is written at each use, in no function of its own, and has the state of that use (section 8 rule 9, 13.5) |
 | The C text that `typec` writes for a unit is at most its output limit, and what the front end reads for its instances at most the instance budget | Every unit and every byte of its C text but the fixed static assertions that end it, instances, copies, temporaries and line markers alike: emission charges each piece and edit as it makes it, with no list of constructs, and the front end counts the copies of deferred statements against the output limit as it finds their exits (3.5 rule 7) | Nothing; a unit past either bound is refused and nothing is written. The work of the parser and of the front end outside its readings for instances and its count of copies is not counted |
-| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for and none that the driver refuses, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. A client that GCC preprocesses apart under `-fdirectives-only` and compiles from that output cannot keep its macros that a run names, since the output keeps the `#undef` lines of the macro bracket and drops its pragmas; the macro probe fails its compile, and `typec` cannot cure it (9.3). The headers that the header includes declare for the client what they declared for the Type-C units, without the macros that the `.tci` defines before them and without `__TYPEC__`; a macro that changes what they declare is given on the command line of every compile (9.3). `typec` does not see a client's compile: the header's macro probe, enumeration assertion and packing probe (9.3) fail a client whose compiler, or whose build's split into preprocessing and compiling, does not restore a macro by `#pragma push_macro` and `#pragma pop_macro`, or whose rule for enumerations or reading of `#pragma pack()` differs from the one of the configuration that generated the header, and nothing else of this is checked. By construction, each run of lowered text holds no trigraph sequence, by the escape of its literals and the refusal of one in its include and pragma lines, and no name with a character outside the basic character set but `$`, which `--emit-c-header` refuses, and stands in a macro bracket that puts aside every macro of a name in it, so no macro of the header's includes, of the client's own headers or of its command line reaches that text, and two headers that write different definitions of one instance fail the client's compile, whether each defines it or only declares it, where each header's step reads the instance's generic defined (9.3). An instance whose generic a header's step reads declared alone has no layout typedef in that header, and nothing tells two of its definitions apart (9.3). Headers that one client includes were written by releases of `typec` that write each instance they share with the same tokens; headers of releases that write one otherwise refuse each other in that client |
+| A C client and a Type-C unit see one layout of what an emitted header declares | Headers written by `--emit-c-header` (9.3) | The client compiles the header as C11 or later, for the target and with the layout options it was generated for and none that the driver refuses, and includes it outside the region of every `#pragma pack` and of every other pragma that changes a layout. A client that GCC preprocesses apart under `-fdirectives-only` and compiles from that output cannot keep its macros that a run names, since the output keeps the `#undef` lines of the macro bracket and drops its pragmas; the macro probe fails its compile, and `typec` cannot cure it (9.3). The headers that the header includes declare for the client what they declared for the Type-C units, without the macros that the `.tci` defines before them and without `__TYPEC__`; a macro that changes what they declare is given on the command line of every compile (9.3). `typec` does not see a client's compile: the header's macro probe, enumeration assertion and packing probe (9.3) fail a client whose compiler, or whose build's split into preprocessing and compiling, does not restore a macro by `#pragma push_macro` and `#pragma pop_macro`, or whose enumeration representation or reading of `#pragma pack()` differs from that of the step that generated the header, and nothing else of this is checked. By construction, each run of lowered text holds no trigraph sequence, by the escape of its literals and the refusal of one in its include and pragma lines, and no name with a character outside the basic character set but `$`, which `--emit-c-header` refuses, and stands in a macro bracket that puts aside every macro of a name in it, so no macro of the header's includes, of the client's own headers or of its command line reaches that text, and two headers that write different definitions of one instance fail the client's compile, whether each defines it or only declares it, where each header's step reads the instance's generic defined (9.3). An instance whose generic a header's step reads declared alone has no layout typedef in that header, and nothing tells two of its definitions apart (9.3). Headers that one client includes were written by releases of `typec` that write each instance they share with the same tokens; headers of releases that write one otherwise refuse each other in that client |
 | A `result` is not discarded silently | Expression statements, left operands of `,`, clauses of `for`, `return` in a `void` function, branches of a `void` conditional | Explicit casts to `void`; types that `typec` knows (13.3) |
 | A slice access stays in bounds | `s[i]` and `slice_sub`, wherever C evaluates one, whatever `typec` took C to do there (13.5) | The slice describes live storage of its length. No full expression that holds an index, a `slice_sub` or a conversion of a slice is resumed, by a call that returns a second time (`setjmp`, `sigsetjmp`, `getcontext`, `vfork`, `__builtin_setjmp`, a function declared with the GNU attribute `returns_twice`), after the same call of its function has begun to evaluate it again: the values that it held are then indeterminate, as C11 7.13.2.1p3 has the objects of a function after a `longjmp`, and the test does not protect the access (section 8 rule 10). Measured: under GCC 16 at `-O2` such an index passes its test and points beyond the end of a slice whose array is live, and under both backends a call stores through the address of an element that it held across such a call in another argument, into an array that is freed, as C does with `&a[i]` there. `typec` does not refuse such an expression (13.5) |
 | Tier 1 of checked mode (11.2) | Checked functions | Live pointers, correct trusted contracts and `unsafe` blocks |

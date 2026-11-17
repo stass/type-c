@@ -160,9 +160,9 @@ the order of its commits:
   header, the macro brackets and the macro probe among them, to the
   unit's output limit and count them in `--stats` (3.5 rule 7);
   `--stats` reports the counts of the unit's lowering alone.
-- [High] The enumeration assertion of 13.4, named for the header
-  (`__tc_enum_probe__M`), where the header defines the tags of a
-  variant. Waits on the short-enum design, which changes it.
+- [High] The enumeration assertion of 13.4 at the end of every emitted
+  header, named for the header (`__tc_enum_probe__M`), with the message
+  of the model's representation (design 9.3, 13.4; plan 4.8).
 - [Medium] Two predicates decide the text of the interface: the reader's
   (`in_interface_text`: the main file at the bottom of the stack and
   the presumed name's last component) for include lines, refused
@@ -219,10 +219,15 @@ the order of its commits:
   ends. GCC's `#pragma GCC optimize ("short-enums")` and
   `("single-precision-constant")` change the types of the declarations
   and constants after them (measured with GCC 16), so a region between
-  `#pragma GCC push_options` and `pop_options` passes unseen; so may
-  `__attribute__((optimize))` (unmeasured). Refuse those pragmas in a
-  unit with Type-C constructs, or assert the type of each enumeration
-  at file scope where the unit ends.
+  `#pragma GCC push_options` and `pop_options` passes unseen; so does
+  `__attribute__((optimize ("short-enums")))` on a function
+  (`arm-none-eabi-gcc` 14.2). Inside such a region the front end types
+  an enumeration by the model's representation, and the temporary that
+  13.5 writes in the enumeration's integer type narrows a value of an
+  `enum` that the region makes 4 bytes to `unsigned char` (design 13.5).
+  Refuse those pragmas and attributes in a unit with Type-C constructs,
+  or assert the type of each enumeration at file scope where the unit
+  ends.
 - [Low] The target query gives the backend typec's stdin, which it never
   needs; a stray `-` among the options makes it read the terminal. Give
   it `/dev/null`.
