@@ -1730,8 +1730,10 @@ result(uint32_t, parse_error) read_number(reader *r)
 1. The operand of `try` has type `result(T, E)`, and the enclosing function
    returns `result(U, E)` with the identical `E`. Both are the `result` of
    the universe scope (3.6), also where a declaration hides that name.
-   Anything else is an error; there is no implicit conversion between
-   error types. The two `E` are identical where their encodings are
+   An operand of another type, or a function that returns another, is
+   an error (`try-operand`), and so are two `E` that differ
+   (`try-error-type`): there is no implicit conversion between error
+   types. The two `E` are identical where their encodings are
    equal (10.3), qualifiers at every level of `E` included: it is the
    one comparison that says whether two instances are one type (3.5
    rule 3). An operand of type `result(int, const char *)` is an error
@@ -1767,7 +1769,9 @@ result(uint32_t, parse_error) read_number(reader *r)
    (Appendix A): `try f() + try g()` adds two values,
    `(long long)try eval(l)` converts one, and `try r->next(r)` applies
    `try` to the call. An operand that is a conditional or an
-   assignment stands in parentheses, `try (c ? f() : g())`.
+   assignment stands in parentheses, `try (c ? f() : g())`: without
+   them `try c ? f() : g()` applies `try` to `c`, which rule 1
+   refuses where `c` is no `result` (`try-operand`).
 
    ```c
    n = g(x) + try f();                 /* f, then g */
@@ -1812,7 +1816,10 @@ result(uint32_t, parse_error) read_number(reader *r)
    operand of another before that one. Each is evaluated whole, its
    operand and then its test, before the next begins: the error path of
    a `try` returns before a later `try` is evaluated and before
-   anything else of the holder is. The rest of the holder is then
+   anything else of the holder is. One that is an initialiser of a
+   braced list is whole with a third step, the conversion of its value
+   to the object that it initialises (*The initialisers of a braced
+   list*, below). The rest of the holder is then
    evaluated as C evaluates it, each `try` standing for its value.
 
    The four operators that C sequences keep their order and their
@@ -1854,11 +1861,73 @@ result(uint32_t, parse_error) read_number(reader *r)
      braced list, which C evaluates before or after each other one
      of the list (6.7.9p23): an initialiser that holds a `try` is
      itself a `try` expression (`try-list`, below), which is
-     evaluated whole, so the order divides none. An expression that
-     is right in every order of C is right in this one.
+     evaluated whole, the conversion of its value included, so the
+     order divides none. An expression that is right in every order
+     of C is right in this one.
    * It is not the order of reading: `g(x) + try f()` calls `f` first.
      A holder that needs `g` first has a declaration for its value
      before it, as C code does that needs `g` before a second call.
+
+   **The initialisers of a braced list.** An initialiser gives its
+   object the value of its expression after a conversion to the
+   object's type, the one that an assignment makes (C11 6.7.9p11),
+   and C evaluates the initialisers of a list one whole after another
+   (6.7.9p23). C does not say whether the conversion is part of what
+   it evaluates whole. The design takes it to be: an order that
+   completes each conversion with its initialiser is an order of C
+   under either reading.
+   So a `try` that is an initialiser of a braced list, of a
+   declaration or of a compound literal, in parentheses or not, is
+   evaluated in three steps before the next `try` begins: its operand,
+   its test, and the conversion of its value to the type of the object
+   that it initialises. The list then reads the converted value.
+
+   ```c
+   float a[2] = { try f(), try g() };  /* f, to float, g, to float */
+   ```
+
+   The conversion counts because it can have an effect. One between
+   arithmetic types may raise a floating-point exception (C11 6.3.1.4,
+   6.3.1.5, Annex F), which C makes a side effect (5.1.2.3p2 and its
+   footnote) that a program under `#pragma STDC FENV_ACCESS ON` may
+   read (7.6.1). Above, `f` and `g` yield a `double`: `f` stores 1 in
+   `x` and yields `0x1.000001p0`, which no `float` holds, and `g`
+   yields `x`, plus 2 where the inexact exception is raised
+   (7.6.2.5). Where `x` is 0 and no exception is raised before the
+   declaration, the list leaves 3 in `a[1]`. That is one of the two
+   values that `{ f(), g() }` may leave, and 0 is the other, where
+   the second initialiser is evaluated first. With both conversions
+   after both calls the list would leave 1, which no order of C
+   leaves.
+
+   The step is taken where the conversion is from one arithmetic type
+   to another, an enumerated type and `_Bool` among them (C11
+   6.2.5p18), whatever the two types are: the rule keeps no list of
+   the conversions that have an effect. For a bit-field the type is
+   the one that declares it, and fitting an integer to the width is
+   left to the list: it has no effect (C11 6.3.1.3; where the type is
+   signed, both backends reduce the value and raise no signal, 13.5).
+   No other conversion of an initialiser has an effect
+   to keep in order. A pointer converts to another pointer type or to
+   `_Bool` (C11 6.3.2.3, 6.3.1.2) and a `slice(T)` to `slice(const T)`
+   (section 8 rule 5), which read the value and change no state; a
+   structure, a union, a variant and a distinct type (3.4) convert to
+   themselves alone. Those stay in the list.
+
+   No other place has the step, because C evaluates no operand and no
+   argument whole. The conversion of a value to the type of a
+   parameter, of a constructor's field, of the left operand of an
+   assignment, of an object whose initialiser stands in no braces, or
+   to the return type (C11 6.5.2.2p7, 3.3, 6.5.16.1p2, 6.7.9p11,
+   6.8.6.4p3) is made by the call, the constructor, the assignment,
+   the declaration or the `return` that reads the value, in the rest
+   of the holder. In `h(try f(), g())`, where `h` takes a `float` and
+   `f` yields a `double`, C sequences the conversion after `f` and
+   before the call of `h`, and leaves open whether it comes before
+   `g` or after (6.5.2.2p10): `f`, `g` and then the conversion is an
+   order of `h(f(), g())`. A holder that converts the value of its
+   one `try` and evaluates nothing else, as `float x = try f();` and
+   `return try f();` do, converts it directly after the test.
 
    **Where no `try` stands.** A `try` in any other place is an error,
    and typing gives it from one function of the tree, which finds the
@@ -1884,8 +1953,10 @@ result(uint32_t, parse_error) read_number(reader *r)
      operand of one that is. C evaluates the initialisers of a list
      one whole after another, in an order that it leaves open (C11
      6.7.9p23, 5.1.2.3p3). An initialiser that is a `try` expression
-     is evaluated whole with the `try` expressions of the holder, and
-     every other one whole after them, which is such an order:
+     is evaluated whole with the `try` expressions of the holder,
+     through the conversion of its value (*The initialisers of a
+     braced list*, above), and every other one whole after them,
+     which is such an order:
      `struct point p = { try coord(r), try coord(r) };` reads two
      coordinates in the order of the source. An initialiser that
      holds a `try` beside something else would be evaluated in two
@@ -1900,9 +1971,12 @@ result(uint32_t, parse_error) read_number(reader *r)
      order of `x = 1` and `read_x()`, and C allows no order that
      calls `read_x` between `set_two` and `x = 1`. The rule asks
      nothing about what else the initialiser holds, so it also
-     refuses a conversion of the value, as in
+     refuses a cast of the value, as in
      `{ .len = (size_t)try read_u32(r) }`, where the order divides
-     nothing that has an effect. P35 counts those.
+     nothing that has an effect. P35 counts those. The conversion
+     that the list itself makes of a value is no part of what the
+     source writes in the initialiser, and the rule refuses nothing
+     for it: `{ .len = try read_u32(r) }` stands.
    * `try-position`: every other place. Outside a function body. In a
      declaration of more than one declarator, where C sequences an
      earlier initialiser before the `try` (C11 6.8p4). In what C does
@@ -2032,14 +2106,21 @@ result(uint32_t, parse_error) read_number(reader *r)
    asks something of an unknown type (13.3): whether the type of the
    operand or the return type of the function is a `result`, and of
    which arguments, whether the type that a declaration holding the
-   `try` declares is variably modified, or whether a member of a
+   `try` declares is variably modified, whether a member of a
    value that is no lvalue, in a hoisted operand, is an array
-   (`try-lifetime`), which no unknown type says.
+   (`try-lifetime`), which no unknown type says, or to which type a
+   braced list converts an initialiser that is a `try` expression of
+   an arithmetic `T`. Typing also has no type for the object of such
+   an initialiser where the object follows a position of the list
+   that depends on a length or an index that `typec` does not compute
+   (P16), and lowering has none to write where the type is an
+   enumerated type whose integer type `typec` does not compute.
    Each is a point that needs the answer. Taking the type for one that
    passes would guess it, and the backend cannot make the check
    instead: it reads the lowered C, where the operand already stands
-   before the size expressions of the declaration. The measurement of
-   P21 counts these refusals.
+   before the size expressions of the declaration, and where lowering
+   has written the type that the value is converted to, or none. The
+   measurement of P21 counts these refusals.
 
 Rationale for the order. *Provisional (P33).* C leaves the evaluation
 order of operands and arguments unspecified and sequences `&&`, `||`,
@@ -2071,8 +2152,9 @@ orders were weighed.
   6.2.4p8), and an operand that C needs as an lvalue, as the left
   operand of an assignment is. Every one of those operands would be
   moved text as well.
-- The `try` expressions first. Lowering holds values of two kinds, a
-  `result` and the truth of a first operand, and names the type of each
+- The `try` expressions first. Lowering holds values of three kinds, a
+  `result`, the truth of a first operand and a value that a braced
+  list converts to an arithmetic type, and names the type of each
   without reading the operand (13.5). The lowered code is the C that a
   programmer writes for a fallible call inside an expression: a
   declaration and a test before the statement, which is also what a
@@ -2116,13 +2198,26 @@ order in a braced list. A list holds no `try`: it refuses
 `{ try coord(r), try coord(r) }`, which reads a structure member by
 member. An initialiser that holds a `try` is itself a `try`
 expression: the rule asks nothing about the rest of the initialiser,
-since there is none. An initialiser
+since the source writes none. An initialiser
 that holds a `try` holds nothing else that has an effect: it admits
 `(size_t)try read_u32(r)`, and takes a definition of what has an
 effect, which a call, an assignment, a volatile object, a slice test
 that traps (section 8) and a conversion that raises a floating-point
 exception all do. The second is the design, and P35 says what would
 widen it.
+
+Rationale for the conversion of a list. What the source does not
+write in such an initialiser, C adds: the conversion of the value to
+its object. Left to the list, as the C written by hand leaves it, the
+conversion of one initialiser would come after the calls of the later
+ones, in an order that C gives no list, and the second consequence of
+the order above would be false of one place. A refusal of every `try`
+that a list converts would cost a declaration for
+`{ .len = try read_u32(r) }` wherever `len` is not a `uint32_t`. A
+refusal of those alone whose conversion has an effect would need the
+list of such conversions. The prelude makes the conversion instead:
+the programmer has no rule to learn, and the cost is one object for
+each initialiser that is converted (13.5).
 
 ### 5.2 Results are not dropped
 
@@ -5096,7 +5191,7 @@ Two properties follow by construction:
 | Type application | The name of its instance; the instance is declared and defined at file scope in the two steps of 10.3. |
 | Generic function instance | A `static` function: the tokens of the definition, resolved as at the definition (3.5 rule 8), with each type parameter written as the typedef of its argument (10.3). Its prototype and its definition stand where 10.3 says. |
 | Zero initialiser of an object whose type mentions a type parameter (7.1 rule 3) | The empty initialiser `{}`, whichever of `{0}` and `{}` the source writes, under `__extension__`: before the declaration whose initialiser holds it, `__extension__ T u = {};`, or, where the list of a compound literal holds it, before that literal, `__extension__ (T){}`. As said below the table ("The zero initialiser of a type parameter"). Every other initialiser stays as written. |
-| `try` | Before each holder (5.1 rule 3), its prelude: for each `try`, in the order of 5.1, a temporary of the result type that takes the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary. Then the holder, with the `Ok` field read where each `try` stood, or `((void)0)` where the value of the `try` is discarded or `T` is `void`, where `Ok` has no field (3.5 rule 6). A first operand that 5.1 evaluates with the `try` expressions takes a temporary of type `int`, and what it conditions stands under an `if` on that temporary, as said below the table. Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
+| `try` | Before each holder (5.1 rule 3), its prelude: for each `try`, in the order of 5.1, a temporary of the result type that takes the operand; a test of whether its tag is `Ok`, the only test that success passes; where it is not, a trap unless the tag is `Err` (5.1 rule 2), then the active cleanups and a `return` of the `Err` built from the temporary. Then the holder, with the `Ok` field read where each `try` stood, or `((void)0)` where the value of the `try` is discarded or `T` is `void`, where `Ok` has no field (3.5 rule 6). A `try` that is an initialiser of a braced list and whose value the list converts from one arithmetic type to another takes a second temporary, of the type converted to, which holds the converted value and which the list reads. A first operand that 5.1 evaluates with the `try` expressions takes a temporary of type `int`, and what it conditions stands under an `if` on that temporary, as said below the table. Where `E` is `void`, `Err` has no field either, and the `Err` is built without one. |
 | `defer` | The deferred statement `S` is repeated, as written and as a compound statement `{ S }`, at every exit from its scope, in reverse order. The end of the block that holds the `defer` statement is an exit where that block can complete (4.4). Where it cannot, the end gets no copy and a trap (10.5) in its place, the trap that ends a match arm, which the block of an arm has already (section 6 rule 1). `S` holds no `defer` statement (section 6 rule 11), so the copies that a scope gets are linear in its exits times its `defer` statements. Every jump that runs copies is written as a block that holds them. The block stands in place of the jump, after the labels of its statement, so a jump that is the substatement of another statement, as in `if (c) break;` or `if (c) return e;`, stays one statement; a jump that is a block item gets the same block. For a `break`, `continue`, `goto` or `return;` the block holds the copies and then the jump, `{ copies jump; }`. For a `return e;` it has a form of its own, `{ __tc_ret __tc_r = (e); copies return __tc_r; }` or, in a function that returns `void`, `{ e; copies return; }`, as said below the table; "Moved text" below says at which place each exit has its copies. |
 | Slice index, `slice_sub` | An expression at the use, and no call: a comma expression of ISO C that assigns the value of each operand to a temporary of the function, tests, traps (10.5) and then indexes, as said below the table ("The check of a slice"). An index is `(*(assignments, test, &element))`, an lvalue. Where C does not evaluate one, it has no test and no temporary: it is the trap and then its operands, each written once, `(*((void)__builtin_trap(), &(s).data[+(i)]))` for an index, so that it traps where C evaluates it after all. |
 | Conversion to `slice(const T)` (section 8 rule 5) | The form of a `slice_sub` with no bounds and no test: `((void)(__tc_s0 = (e)), (struct C){ __tc_s0.data, __tc_s0.len })`, where `struct C` is the instance converted to and `e` the expression that converts: the expression of a position that has a target type, or an operand that has the target type of the expression around it, or one operand of a conditional operator. Where C does not evaluate it, the form of a `slice_sub` there. A `slice_from_array`, a `slice_unchecked` and a string literal that denotes a `str` hold no temporary and are converted by being written for `struct C`, and so is the value of a `try`, the read of the `Ok` field of its temporary (5.1), which has no side effect: `(struct C){ v.data, v.len }`. |
@@ -5392,6 +5487,55 @@ take a number, which counts the `try` expressions and the first
 operands of the function from 0 in the order of 5.1: the temporaries
 of one block share a scope, so each needs a name of its own.
 
+A `try` that is an initialiser of a braced list, and whose value the
+list converts from one arithmetic type to another (5.1 rule 3), has
+one line more in its form, after the test: a temporary that takes the
+value converted. `float a[2] = { try f(), try g() };`, where `f` and
+`g` yield a `double`, becomes
+
+```c
+struct R __tc_t0 = (f()); /* test of __tc_t0 */
+const float __tc_v0 = __tc_t0.u.Ok.value;
+struct R __tc_t1 = (g()); /* test of __tc_t1 */
+const float __tc_v1 = __tc_t1.u.Ok.value;
+float a[2] = { __tc_v0, __tc_v1 };
+```
+
+The edit of the holder is then the temporary where the `try` stood,
+and no read of the `Ok` field. `__tc_v` takes the number of its `try`,
+and under an `if` it is declared and assigned as the others are,
+`float __tc_v1;` and `__tc_v1 = __tc_t1.u.Ok.value;`.
+
+The temporary has the type of the object that the initialiser
+initialises, without its qualifiers, which typing gives with the
+position of the initialiser in its list (C11 6.7.9p17 to p20). Lowering
+writes that type in keywords alone, as it writes the `int` of a first
+operand: every arithmetic type has such a name, which no declaration
+hides. An enumerated type is written as the integer type that it is
+compatible with (C11 6.7.2.2p4), to which the conversion is the same
+(6.3p2), and a bit-field as the type that declares it. The line is an
+initialisation or an assignment and no cast, so C converts there as it
+converts in the list (C11 6.7.9p11, 6.5.16.1p2), the backend refuses
+there what it refuses in the list, and it reports the conversion as it
+reports it there: under `-Wconversion` Apple Clang 21 and GCC 16 give
+one warning for each `__tc_v` above, and one for each initialiser of
+`float a[2] = { f(), g() };`. For an enumerated type the backend
+reads the integer type, and the warnings differ: for an `int` and a
+`double` that initialise an `enum e` whose integer type is
+`unsigned`, both backends report both conversions to `unsigned`,
+where Apple Clang 21 reports the first alone to `enum e` and GCC 16
+neither. Each warning names a conversion that the source makes. The
+list then takes each value in the type of its object and converts
+nothing, or fits it to the width of a bit-field.
+
+No other conversion of an initialiser has a line: 5.1 says why none
+needs one, and lowering could not write the type of every object, a
+structure without a tag or a pointer to one among them. Nor has an
+argument of a constructor expression, which lowering writes as an
+initialiser of a braced list (the table above): 3.3 orders the
+arguments as those of a call, and the prelude is written from the
+tree of the source, where an argument is no initialiser.
+
 Where the value of a `try` is discarded (5.2), or `T` is `void` and
 `Ok` has no field, the holder has `((void)0)` in its place, so
 `try e;` becomes its prelude and `((void)0);`. A read of the field
@@ -5454,9 +5598,10 @@ the end of either: 5.1 rule 3 refuses the operand that makes one
   arrays.
 
 In a braced list an initialiser that holds a `try` is itself a `try`
-expression (`try-list`), so a prelude evaluates whole initialisers,
-the holder evaluates the others, and lowering has no form for the
-order of a list.
+expression (`try-list`), and its form ends with the conversion that
+the list would make of its value, so a prelude evaluates whole
+initialisers, the holder evaluates the others, and lowering has no
+form for the order of a list.
 
 The refusals rest on the forms that they refuse, lowered by hand and
 measured with Apple Clang 21 and GCC 16 on x86-64 at `-O0` and at
@@ -5477,6 +5622,24 @@ it (C11 6.2.4p2).
 `int a[2] = { (try set_two(), x = 1), try read_x() };` leaves 2 in
 `a[1]` in every build, and 1 with a call in place of each `try`.
 
+The temporary of a converted value rests on the same builds.
+`float a[2] = { try f(), try g() };`, with the `f` and `g` of 5.1 and
+`#pragma STDC FENV_ACCESS ON` at file scope, leaves 1 in `a[1]` in
+every build where the list reads the two `Ok` fields and converts
+them. With the two `__tc_v` temporaries it leaves 3 under Apple Clang
+21 at both levels and under GCC 16 at `-O0`, as
+`float a[2] = { f(), g() };` does in those three builds. GCC 16 does
+not implement the pragma, which it reports under `-Wunknown-pragmas`,
+and from `-O1` it converts the first value after the second call and
+leaves 1, in the list of two calls as in both lowered forms, with
+`-frounding-math` as without. The lowered C has the order that C
+gives the list. What GCC makes of it is what GCC makes of the list
+written in C, and no form of lowering answers for it. A member
+`int b : 3` initialised with 13 holds -3, and a member
+`unsigned u : 3` initialised with 5.5 holds 5, from a temporary of
+the declaring type as from a call, in every build, and no signal is
+raised.
+
 **The cost of a prelude.** *Provisional (P33).* A prelude is the C
 that a programmer writes for a fallible call inside an expression: a
 declaration and a test for the call, an `if` where the call is under a
@@ -5489,10 +5652,13 @@ the conditions need: the two compile to text of the same size at
 At `-O0` the prelude takes 722 bytes against 576 and 632 against 603,
 for the `int` temporaries and for the temporaries that it declares
 outside the `if`. The same function with each `try` as a statement
-expression takes 244 and 547 bytes at `-O2`. One function measures no
-program: package 3.12 of the plan measures the preludes of the
-container library, the pilot and the README, from a script that it
-keeps under `tools/measure`.
+expression takes 244 and 547 bytes at `-O2`. A converted initialiser
+of a braced list adds one object of an arithmetic type to its prelude,
+which C written by hand declares as well where it keeps the order of
+the list; its size and speed are not measured. One function measures
+no program: package 3.12 of the plan measures the preludes of the
+container library, the pilot and the README, those of braced lists
+among them, from a script that it keeps under `tools/measure`.
 
 **A `try` beside the other lowered forms.** The holder is lowered as it
 would be with the reads in place of its `try` expressions, and each
@@ -7047,7 +7213,9 @@ No other invented name holds a `__` after the prefix. `__tc_ret`, the
 return type of a function, is declared once in the outermost block of
 its function, and `__tc_r`, the temporary of a `return`, in a block of
 its own; neither needs more than the prefix. `__tc_t0`, `__tc_t1` and
-so on are the temporaries of the `try` expressions of a function, and
+so on are the temporaries of the `try` expressions of a function,
+`__tc_v0` and so on those of the values that a prelude converts for a
+braced list, each with the number of its `try`, and
 `__tc_c0` and so on those of the first operands that a prelude
 evaluates (above); they share its blocks and take the number that
 tells them apart. `__tc_s0`,

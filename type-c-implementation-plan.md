@@ -299,7 +299,7 @@ a generic function is lowered in an instance of package 3.3.
 | 3.8 | Nested patterns in `match` (design 4.7): the grammar, sub-patterns typed by their position, typed bindings, `*`, bindings at any depth, and the lowering of selection (design 13.5). A negative golden test for each rule. A bare identifier that binds a field of variant type is refused from this package on (design 4.7 rule 3), so the tests that hold one take the typed form. In the README, the `case Err(error):` of the `result` section and the second `match` in its arm become the nested labels `case Err(Missing(name)):` and `case Err(NotANumber(name)):`; the first example, whose `show` writes `case Err(DivByZero):`, and Status say that nested patterns are built. |
 | 3.9 | Nested patterns in the single-pattern test (design 4.6, 4.7 rule 9), in `if` and in `while`: typing, the field list left out at any depth, lowering. |
 | 3.10 | Measurements of nested patterns: selection against hand-written nested `switch` statements, size and speed, on both backends at `-O0` and at `-O2` (P31); the largest selection tree in the container library, the pilot and the tests (P32). |
-| 3.11 | `try` inside expressions (design 5.1 rule 3, 13.5), after packages 3.3 and 3.4: `try` as a unary operator; one function of the typed tree from a `try` to its holder and the operators between them, which gives every refusal of place, `try-list` among them; one function from a holder to its prelude and its edits, in the order of 5.1; the hoisted operands passed through the one check of the resolution property (package 2.1) and the pragma stretch, and through one walk of their own for `try-lifetime`: a compound literal in an operand under a condition, and an array that is no lvalue in any; `try-lvalue` and `try-loop`, and `try-void` by the discarded positions of design 5.2. A negative golden test for each refusal, and the tests of package 2.4 that refuse a `try` for its place take the places that stay refused. Before a `try` in a generic function is lowered so, the TODO item on `Moved` edits in the definition of a generic is closed. In the README, the first example and Status say that `try` inside an expression is built. |
+| 3.11 | `try` inside expressions (design 5.1 rule 3, 13.5), after packages 3.3 and 3.4: `try` as a unary operator; one function of the typed tree from a `try` to its holder and the operators between them, which gives every refusal of place, `try-list` among them; one function from a holder to its prelude and its edits, in the order of 5.1, which ends the form of a `try` that is an initialiser of a braced list with the conversion of its value, from the type that typing gives the initialiser's object; the hoisted operands passed through the one check of the resolution property (package 2.1) and the pragma stretch, and through one walk of their own for `try-lifetime`: a compound literal in an operand under a condition, and an array that is no lvalue in any; `try-lvalue` and `try-loop`, and `try-void` by the discarded positions of design 5.2. A negative golden test for each refusal, and the tests of package 2.4 that refuse a `try` for its place take the places that stay refused. Before a `try` in a generic function is lowered so, the TODO item on `Moved` edits in the definition of a generic is closed. In the README, the first example and Status say that `try` inside an expression is built. |
 | 3.12 | Measurements of `try` inside expressions, from a script under `tools/measure`: the preludes of the container library, the pilot and the README against the same code with each `try` in a declaration of its own, size and speed, on both backends at `-O0` and at `-O2`, and the holders that hold a side effect before a `try` which C leaves unsequenced with it (P33); the refusals of `try-loop` and what each loop became (P34); the refusals of `try-list` and what each refused initialiser holds beside its `try` (P35); the refusals of `try-pragma` (P8). |
 
 **Exit gate**
@@ -463,9 +463,43 @@ a generic function is lowered in an instance of package 3.3.
      `use` takes a `char *`, compiles under `-pedantic-errors`; the
      partner, the lowered text with a `const` temporary, is refused
      by both backends;
-   - `x = try c ? f() : g();` is refused as `try-operand`; the
-     partner, `x = try (c ? f() : g());`, compiles and calls one of
-     the two;
+   - `x = try c ? f() : g();`, where `c` is an `int`, is refused as
+     `try-operand` (design 5.1 rule 1), since the `try` applies to
+     `c`; the partner, `x = try (c ? f() : g());`, compiles and calls
+     one of the two;
+   - `float a[2] = { try f(), try g() };` leaves 3 in `a[1]`, under
+     `#pragma STDC FENV_ACCESS ON` at file scope, where `x` is 0 and
+     no exception is raised, `f` stores 1 in `x` and returns `Ok` of
+     the `double` `0x1.000001p0`, and `g` returns `Ok` of `x`, plus
+     2 where `fetestexcept(FE_INEXACT)` is not 0; the partner, the
+     lowered text with the two `Ok` fields read in the list and no
+     `__tc_v` temporary, leaves 1. The same holds where the list is
+     that of a compound literal under a condition,
+     `c ? (float[2]){ try f(), try g() }[1] : 0`. Both run under
+     Apple Clang at `-O0` and at `-O2` and under GCC at `-O0` alone:
+     GCC from `-O1` leaves 1 in `float a[2] = { f(), g() };` written
+     in C as well (design 13.5). A test of its own asserts that at
+     `-O2`, so that a GCC that keeps the order fails it and the
+     build joins these;
+   - the lowered text of that list draws one `-Wconversion` warning
+     for each `__tc_v` temporary from both backends, as
+     `float a[2] = { f(), g() };` draws one for each initialiser; the
+     partner, the lowered text with a cast in each temporary's
+     initialiser, draws none;
+   - `struct { int b : 3; unsigned u : 3; } s = { try i(), try d() };`,
+     where `i` returns `Ok` of the `int` 13 and `d` `Ok` of the
+     `double` 5.5, leaves -3 and 5, and its lowered text holds a
+     `__tc_v` of type `unsigned` and none for `b`; the partner, the
+     same with `d` returning `Ok` of the `unsigned` 5, holds none;
+   - `h(try f(), g())`, where `h` takes a `float` and `f` returns
+     `Ok` of a `double`, and `float x = try f();` hold no `__tc_v`
+     temporary; the partner, `float x = { try f() };`, holds one;
+   - `float a[99] = { [sizeof(struct s)] = 0, try f() };`, where `f`
+     returns `Ok` of a `double`, is refused for the type that it
+     needs (design 5.1 rule 5), the index being one that `typec` does
+     not compute; the partner,
+     `struct p b[99] = { [sizeof(struct s)] = { 0 }, try g() };` with
+     a `g` that returns `Ok` of a `struct p`, compiles;
    - each of these is refused under its name, and its partner
      compiles and runs: `while (try more(r))` (`try-loop`) and
      `for (;;) { if (!try more(r)) break; }`;

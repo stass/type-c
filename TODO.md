@@ -1830,7 +1830,11 @@ types (design 13.3).
   forms that `try-lifetime` and `try-list` refuse, lowered by hand: a
   compound literal under the `if` of a prelude, a temporary object
   read after its hoisted operand (under the address sanitizer as
-  well), and a braced list whose initialiser the order divides.
+  well), and a braced list whose initialiser the order divides; and
+  the braced list whose values are converted, with and without the
+  temporaries of the converted values, under the floating-point
+  environment, its `-Wconversion` warnings, and a bit-field
+  initialised through a temporary of its declaring type.
   Package 3.12 adds the script under `tools/measure`; have the design
   cite it.
 - [High] Build nested patterns, as in `case Err(DivByZero):` (owner: the
