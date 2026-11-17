@@ -1881,17 +1881,18 @@ types (design 13.3).
   initialised through a temporary of its declaring type.
   Package 3.12 adds the script under `tools/measure`; have the design
   cite it.
-- [High] A match or a test holds its scrutinee through a pointer when
-  it is an lvalue (design 13.5, `Expressions.access_of`), and a
-  variant member of a packed structure is one: `match (p->i)` where
-  `i` is a member of a `#pragma pack(1)` structure lowers to
-  `const struct inner *const __tc_match = &( p->i )`, whose reads
-  UndefinedBehaviorSanitizer reports as misaligned. Decide in one place
-  when typec may take the address of a variant object: copy a
-  scrutinee that may be under-aligned, as a volatile one is.
 - [High] Build nested patterns in the single-pattern test, as in
   `while (case Some(Ok(v)) = next())`: design 4.6 and 4.7 rule 9, plan
   packages 3.9 and 3.10.
+- [Medium] A match or a test copies a scrutinee that is a member, as
+  `match (n->kind)`, since typec cannot tell a packed structure from
+  another (design 13.5, `Expressions.access_of`), where hand-written C
+  switches on `n->kind.tag` in place. Measure the copy on both backends
+  at `-O0` and `-O2`, with arms that call functions; if it costs, reach
+  every lvalue scrutinee through a pointer to a typedef of the variant
+  declared `aligned(1)`, which both backends accept under
+  `-pedantic-errors` and which deletes the list of aligned forms, after
+  measuring its loads on a target that requires alignment.
 - [Medium] Design 4.7 rule 10 bounds the selection tree at 127 nodes
   deep so that its nested `switch` statements (13.5) fit Clang's
   default bracket depth of 256, but the nesting of the statements

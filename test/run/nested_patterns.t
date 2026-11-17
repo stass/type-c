@@ -362,3 +362,85 @@ the alignment check of UndefinedBehaviorSanitizer passes.
   42 1
   42 1
   42 1
+
+A variant that is a member of a packed structure may be misaligned, so
+a match or a test whose scrutinee is a member, an element of a member
+array, or the object of a pointer that the scrutinee forms from one,
+copies it rather than take its address (13.5), and the alignment check
+of UndefinedBehaviorSanitizer passes.
+
+  $ cat > member.tc <<'EOF'
+  > #include <stdio.h>
+  > type inner = | A | B(int x);
+  > #pragma pack(1)
+  > struct holder { char c; inner i; inner a[2]; };
+  > #pragma pack()
+  > static int selected(const struct holder *h) {
+  >   match (h->i) {
+  >   case A: return 1;
+  >   case B(x): return x;
+  >   }
+  > }
+  > static int tested(const struct holder *h) {
+  >   if (case B(x) = h->i)
+  >     return x;
+  >   return 0;
+  > }
+  > static int element(struct holder h, int k) {
+  >   if (case B(x) = h.a[k])
+  >     return x;
+  >   return 0;
+  > }
+  > static int formed(const struct holder *h, int k) {
+  >   int sum = 0;
+  >   if (case B(x) = *h->a)
+  >     sum += x;
+  >   match ((h->a)[k]) {
+  >   case A: return sum;
+  >   case B(x): return sum + x;
+  >   }
+  > }
+  > int main(void) {
+  >   struct holder h = { 'a', B(42), { B(1), B(2) } };
+  >   printf("%d %d\n", selected(&h), tested(&h));
+  >   printf("%d %d\n", element(h, 1), formed(&h, 1));
+  >   return 0;
+  > }
+  > EOF
+  $ for cc in "$clang" "$gcc"; do
+  >   for opt in -O0 -O2; do
+  >     typec --cc="$cc" $opt $flags $sanitize -o member member.tc &&
+  >       ./member || echo "$cc $opt failed"
+  >   done
+  > done
+  42 42
+  2 3
+  42 42
+  2 3
+  42 42
+  2 3
+  42 42
+  2 3
+
+The partner, the address of the member taken as a pointer to the
+scrutinee, is stopped by the alignment check.
+
+  $ cat > member.c <<'EOF'
+  > #include <stdio.h>
+  > struct inner { int tag; union { struct { int x; } B; } u; };
+  > #pragma pack(1)
+  > struct holder { char c; struct inner i; };
+  > #pragma pack()
+  > static int selected(const struct holder *h) {
+  >   const struct inner *const m = &(h->i);
+  >   return m->tag == 1 ? m->u.B.x : 1;
+  > }
+  > int main(void) {
+  >   struct holder h = { 'a', { 1, { { 42 } } } };
+  >   printf("%d\n", selected(&h));
+  >   return 0;
+  > }
+  > EOF
+  $ "$clang" -std=c11 -g -Wno-address-of-packed-member $sanitize \
+  >   -o member-c member.c && ./member-c 2>&1 | grep -c misaligned
+  1

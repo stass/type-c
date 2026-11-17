@@ -5566,41 +5566,56 @@ and non_modifiable t =
 and arm_items context (arm : Tree.arm) = items context arm.node.items
 
 (* Design 13.5: the lowered match reaches the scrutinee in place, through
-   a pointer to it, unless it is volatile or atomic or may not be
-   addressed. Any other scrutinee is copied, which only costs time. *)
+   a pointer to it, unless it is volatile or atomic or its address may be
+   misaligned. Any other scrutinee is copied, which only costs time. This
+   is the one place that decides whether typec takes a variant's address. *)
 and access_of context (scrutinee : Tree.expression) (t : Ctype.t) =
   if t.qualifiers.volatile || t.qualifiers.atomic then Through_copy
-  else if addressable context scrutinee then Through_pointer
+  else if aligned_lvalue context scrutinee then Through_pointer
   else Through_copy
 
-(* Whether [e] is an lvalue that C lets [&] take (C11 6.5.3.2p1): one that
-   a pointer reaches, a compound literal, a named object not declared
-   [register], or a member or element of one of those. Another lvalue is
-   taken as not, which is safe. No bit-field has a variant type
-   (6.7.2.1p5). *)
-and addressable context (e : Tree.expression) =
+(* Whether [e] is an lvalue that C lets [&] take (C11 6.5.3.2p1) and
+   whose address C aligns for its type: a named object not declared
+   [register], a compound literal, or the object that an address operand
+   designates. A member is not, since its structure may be packed by a
+   [#pragma pack] or an attribute that typec does not read. Another
+   lvalue is taken as not, which is safe: it is copied. *)
+and aligned_lvalue context (e : Tree.expression) =
   match e.node with
-  | Unary (Indirection, _) | Pointer_member _ | Compound_literal _ -> true
-  | Parenthesized inner | Member { operand = inner; _ } ->
-      addressable context inner
+  | Compound_literal _ -> true
+  | Parenthesized inner -> aligned_lvalue context inner
+  | Unary (Indirection, operand) -> aligned_address context operand
   | Subscript { operand; index } ->
-      subscripted_addressable context operand
-      && subscripted_addressable context index
+      aligned_address context operand && aligned_address context index
   | Identifier { name; resolution = Resolved reference } -> (
       match (context.entity e.span name reference).declared with
       | Object { register; _ } -> not register
       | Function _ | Typedef _ | Enumerator _ -> false)
   | _ -> false
 
-(* An operand of [e1[e2]] is a pointer, which reaches an object, or an
-   array, which converts to one only where C may take its address
-   (6.5.2.1p2, 6.3.2.1p3). *)
-and subscripted_addressable context (operand : Tree.expression) =
+(* Whether an operand of [*e] or [e1[e2]] gives an aligned address: an
+   array that is an aligned lvalue, since its elements are aligned where
+   it is (6.3.2.1p3); a pointer that is read as a stored value or
+   returned by a call, which the program formed, and the backend warned
+   of, where it was formed; or the index or a slice, which is no address
+   of a variant. A pointer formed in the operand, as by the conversion of
+   a member array or by arithmetic, may point into a packed structure. *)
+and aligned_address context (operand : Tree.expression) =
   match find context.typed operand with
   | Some { expression_type = { shape = Array _; _ }; _ } ->
-      addressable context operand
+      aligned_lvalue context operand
+  | Some { expression_type = { shape = Pointer _; _ }; _ } ->
+      stored_pointer operand
   | Some _ -> true
   | None -> false
+
+and stored_pointer (operand : Tree.expression) =
+  match operand.node with
+  | Parenthesized inner -> stored_pointer inner
+  | Identifier _ | Member _ | Pointer_member _ | Subscript _
+  | Unary (Indirection, _) | Call _ ->
+      true
+  | _ -> false
 
 (* The defer statements of the body, which reachability finds once
    typing has read it, as its facts need, and the function around them

@@ -167,7 +167,8 @@ val constructions : t -> construction list
 
 (** How a lowered match reaches its scrutinee (design 13.5): through a
     pointer to it, or through a copy where the scrutinee is volatile or
-    atomic or is no lvalue that typec knows [&] may take. *)
+    atomic or is not an lvalue whose address typec knows C aligns for
+    its type; a member is not, since its structure may be packed. *)
 type access = Through_pointer | Through_copy
 
 (** The member [field] of the constructor [constructor] that a position
