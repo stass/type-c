@@ -1404,6 +1404,19 @@ types (design 13.3).
 - [Low] `typec --stats` reports nothing for a unit that typec refuses,
   which is the unit nearest a limit. If package 3.6 or the pilot wants
   the counts of a refused unit, carry them in the error.
+- [High] Stage 3 exit gate item 3 and design 13.5 (the paragraphs on
+  `slice_from_array`) name `int[sizeof(struct four) - 4]` as an
+  element of size 0 that the backend refuses for the negative size of
+  an array. An array is no type argument (section 8 rule 2, 3.5 rule
+  2), so typec refuses the `slice_from_array` first, with
+  `[type-argument]`, and the backend never sees the size:
+  `struct four { int x; }; typedef int element[sizeof(struct four) - 4];`
+  `extern element buffer[8];`
+  `size_t f(void) { return slice_from_array(buffer).len; }`.
+  An element whose size is that layout constant reaches the backend as
+  a structure whose one member is the array, which
+  test/run/slice_lowering.t runs in its place. Reword the gate bullet
+  and 13.5 to name that structure.
 
 - [High] Package 4.1 decides whether a Type-C translation unit may
   include an emitted header (design 9.3). The include guards are macros
