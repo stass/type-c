@@ -175,7 +175,7 @@ rules of each construct.
   ([Measured on a real library](#measured-on-a-real-library)).
 - **Claims only what is checked.** Each guarantee says what it depends
   on ([principle 5](#principles)), and the tests check each C and Type-C
-  example on this page but the first, on GCC and Clang.
+  example on this page, on GCC and Clang.
 
 ## What Type-C adds to C
 
@@ -1062,8 +1062,7 @@ begins with `typec:` instead. An error
 that the C compiler finds in the C that `typec` writes, as with the
 generic types above, comes with the C compiler's message and status.
 [`test/run/readme.t`](test/run/readme.t) checks the files and the output
-of every C and Type-C example on this page but the first, on GCC and
-Clang.
+of every C and Type-C example on this page, on GCC and Clang.
 
 ## What the C looks like
 

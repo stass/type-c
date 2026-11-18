@@ -270,6 +270,8 @@ it:
 ```console
 $ typec -O2 -Wall -Wextra -Werror -c eqmix.tc
 eqmix.tc:192: error: a value of type '_Bool (*)(int, int)' does not convert to '_Bool (*)(slice(const char), slice(const char))' without a cast (C11 6.5.16.1p1)
+  192 | 	h = map_new(str, int)(str_hash, int_equal);
+[80]
 ```
 
 A slip that both catch is reported in different places. Swap the key
@@ -299,6 +301,8 @@ at the line of the swap, in the types that the line names:
 ```console
 $ typec -O2 -Wall -Wextra -Werror -c swap.tc
 swap.tc:192: error: a value of type 'unsigned int (*)(slice(const char))' does not convert to 'unsigned int (*)(int)' without a cast (C11 6.5.16.1p1)
+  192 | 	h = map_new(int, str)(str_hash, str_equal);
+[80]
 ```
 
 ## Where the port differs

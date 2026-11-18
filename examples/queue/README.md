@@ -175,6 +175,7 @@ The port has no link to name. The nearest mistake is to hand a node of
 ```console
 $ typec -O2 -Wall -Wextra -Werror -c sched.tc
 sched.tc:171: error: a value of type 'list_node(struct job *) *' does not convert to 'list_node(struct job) *' without a cast (C11 6.5.16.1p1)
+  171 | 		list_remove(&s->all, n);
 [80]
 ```
 
@@ -212,6 +213,7 @@ argument itself, as C refuses the same assignment:
 ```console
 $ typec -O2 -Wall -Wextra -Werror -c sched.tc
 sched.tc:111: error: a value of type 'struct job *' does not convert to 'struct job' (C11 6.5.16.1p1)
+  111 | 		queued = list_insert_tail(&s->all, j);
 [80]
 ```
 

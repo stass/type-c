@@ -261,8 +261,8 @@ and `strtoul` with no binding, and `load.c` calls `conf_apply`, which is
 Type-C now, as any C function: no mangling, no glue. C sees a variant as
 the structure of a tag and a union
 ([Using Type-C types from C](../README.md#using-type-c-types-from-c)),
-but no tool writes a header for it, so a C file that reads one declares
-the structure by hand. The functions that C calls keep C types, as
+and `typec --emit-c-header key.tci` writes `key.h`, the header that a C
+file includes to read one. The functions that C calls keep C types, as
 `conf_apply` does.
 
 A pitfall: `typec` takes C11 and C17 only, so a build that gives its C

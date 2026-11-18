@@ -275,6 +275,17 @@ The items are ordered by how often real code meets them.
   `__builtin_offsetof`. Recording call sites in the typed view, where
   `leave_untested` already clears what C does not evaluate, would make
   the count exact and delete the walker.
+- [Low] The refusals of options with a `.tc` input also apply under
+  `--emit-c-header`, as `typec(1)` says, but the message of
+  `typec --emit-c-header -E key.tci` says "cannot be used with a .tc
+  input" and sends the user to `--emit-c`, which `--emit-c-header`
+  refuses. Build the message in `src/driver/pipeline.ml` from the kind
+  of input that the command has.
+- [Medium] The console blocks of `examples/*/README.md` are not tested,
+  so they kept the diagnostic format of before the source line was
+  printed until a review found them. Run each example's README through
+  `test/run/readme.sh`, turning its `sed` and diff mutations into
+  commands that build the mutated copy.
 
 ## C headers (plan package 4.1)
 

@@ -166,7 +166,11 @@ which the program supplies, before
 .Fn __builtin_trap .
 .Ar name
 is a C identifier of ASCII letters, digits and underscores that does
-not start with a digit; the last
+not start with a digit and does not begin with
+.Ql __tc_ ,
+which
+.Nm
+reserves; the last
 one given wins.
 .It Fl -version
 Run the backend with

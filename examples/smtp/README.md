@@ -282,8 +282,12 @@ build at a time: `mail`, and once `mail` handles `Auth`, `serve`:
 ```console
 $ typec -Wall -Wextra -c smtpd.tc
 smtpd.tc:265: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
+  265 | 	match (s->state) {
+[80]
 $ typec -Wall -Wextra -c smtpd.tc       # with Auth in mail's match
 smtpd.tc:457: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
+  457 | 		match (s->state) {
+[80]
 ```
 
 With `Auth` in both matches the port builds again, and those are all
@@ -350,6 +354,8 @@ constructor, and `typec` refuses the program:
 ```console
 $ typec -Wall -Wextra -c smtpd.tc
 smtpd.tc:270: error: the constructor 'Mail' takes 3 arguments, its fields 'client', 'from' and 'to'; 2 are given [constructor-expression]
+  270 | 		s->state = Mail(client, cmd->address);
+[80]
 ```
 
 The sender is a field of `Mail` by value, and for it the port keeps
@@ -362,6 +368,8 @@ or the test that matched `Mail`, and nowhere else is it in scope:
 ```console
 $ typec -Wall -Wextra -c smtpd.tc       # from.text in rset, outside the test
 smtpd.tc:327: error: 'from' is not declared (C11 6.5.1p2)
+  327 | 	reply("250 Ok, <%s> forgotten", from.text);
+[80]
 ```
 
 ## What it costs

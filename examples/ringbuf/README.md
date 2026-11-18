@@ -248,8 +248,11 @@ Apple Clang 21 and GCC 16, the `__text` section that `size -m` gives;
 for a Cortex-M3 (`-mcpu=cortex-m3`), with Arm GNU GCC 14.2 and with
 Apple Clang 21 `--target=thumbv7m-none-eabi`, the sum of the sizes of
 the functions, which `nm -S` gives. The Arm GCC builds both cores with
-`-fno-short-enums`, as `typec` does not take the short enumerations
-that `arm-none-eabi` has by default.
+`-fno-short-enums`, so that the enumerations of the original are
+`int`-sized, as the tags of a variant always are, and not the short ones
+that `arm-none-eabi` has by default. Under the default the original's
+enumerations take one byte and the tags of the port stay four, which the
+Arm GCC rows leave out.
 
 | | `original/firmware.o` | `firmware.o` | growth |
 |---|---:|---:|---:|
