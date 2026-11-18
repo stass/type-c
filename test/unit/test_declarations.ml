@@ -1990,7 +1990,7 @@ let distinct_types () =
   let arithmetic operator =
     Printf.sprintf
       "'%s' is not defined on the distinct type 'id'; cast to 'unsigned \
-       int' and back"
+       int'"
       operator
   in
   let converts body =

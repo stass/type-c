@@ -126,6 +126,24 @@ The items are ordered by how often real code meets them.
   the constructor's field as the `[constructor-expression]` messages
   do: "the argument for the field 'value' of 'Ok' is of type 'char *',
   not 'int'". Source: review cases 18, 22, 25 and 28; probe.
+- [Medium] `Expressions.distinct_reader` and `quoted_labels` find an
+  operator, and a label's pattern, by token index in `Reader` tokens,
+  which hold pragma tokens the parser skips: `QUIET(i) + 1` with a
+  macro that wraps its operand in `_Pragma` quotes the pragma as the
+  operator. Have the parser record the operator's token in `Binary`,
+  `Assignment`, `Member` and `Pointer_member` (and the pattern's span
+  in a label), or spell the operator from its constructor.
+- [Medium] A distinct object refused by an atomic builtin
+  (`__atomic_fetch_add(&x, 1, 5)` with `id x`) is told "cast to
+  'unsigned int'", where the fix casts the pointer, `(unsigned int
+  *)&x`; name the pointer type there. The uses typed through the plain
+  entry (a switch, a case or enum constant, a designator index, an
+  array length, a scrutinee) say "this operation"; each could name its
+  role, as an index does.
+- [Medium] The refusals of a shared arm and of a reachable arm end list
+  every label of the arm (`listed ~more:0`), so an arm of many labels
+  makes a long message; bound them as `Selection.max_named` bounds the
+  constructors of a coverage message.
 - [Low] A typed binding of a field that is no variant: `case
   Circle(double r)`, written as C declares, gives "expected a
   sub-pattern, found `double`". Proposed: "a field of type 'double' is

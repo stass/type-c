@@ -468,11 +468,11 @@ implicit conversions that design 3.4 leaves out, each at its operation.
   d x = (d)0;
   $ printf 'type d = distinct int;\nint f(d a) { return a + 1; }\n' > add.tc
   $ ./golden.exe add.tc
-  add.tc:2: error: '+' is not defined on the distinct type 'd'; cast to 'int' and back [distinct-operation]
+  add.tc:2: error: '+' is not defined on the distinct type 'd'; cast to 'int' [distinct-operation]
   [1]
   $ printf 'type idx = distinct int;\nint f(idx i) { i++; return ((int)i); }\n' > increment.tc
   $ ./golden.exe increment.tc
-  increment.tc:2: error: '++' is not defined on the distinct type 'idx'; cast to 'int' and back [distinct-operation]
+  increment.tc:2: error: '++' is not defined on the distinct type 'idx'; cast to 'int' [distinct-operation]
   [1]
   $ printf 'type idx = distinct int;\nint f(int *a, idx i) { return (a[i]); }\n' > index.tc
   $ ./golden.exe index.tc
@@ -521,7 +521,7 @@ on the object refuses it (design 3.4).
   > unsigned f(volatile id *p) { return __atomic_load_n(p, 5) * 2u; }
   > EOF
   $ ./golden.exe qualified.tc
-  qualified.tc:2: error: '*' is not defined on the distinct type 'id'; cast to 'unsigned int' and back [distinct-operation]
+  qualified.tc:2: error: '*' is not defined on the distinct type 'id'; cast to 'unsigned int' [distinct-operation]
   [1]
   $ cat > load.tc <<'EOF'
   > type id = distinct unsigned;

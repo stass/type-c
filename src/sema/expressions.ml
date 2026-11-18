@@ -1089,10 +1089,7 @@ let reads_distinct : Tree.expression_node -> bool = function
 (* What reads a value of a distinct type where the table refuses it, as
    its message names it. *)
 type distinct_reader =
-  | Operator of { spelling : string; casts_back : bool }
-      (** An operator as written, or a builtin by its name; [casts_back]
-          says whether its result is a value of the operand's type, which
-          the fix casts back to the distinct type. *)
+  | Operator of string  (** An operator as written, or a builtin. *)
   | Operand of string  (** The operand's role, as "an index". *)
   | Unnamed_operation
 
@@ -1101,11 +1098,7 @@ let refuse_distinct context span reader (distinct : Ctype.distinct) =
   let underlying = quote (Type_name.of_ctype distinct.representation) in
   let refusal =
     match reader with
-    | Operator { spelling; casts_back = true } ->
-        Printf.sprintf
-          "%s is not defined on the distinct type %s; cast to %s and back"
-          (quote spelling) name underlying
-    | Operator { spelling; casts_back = false } ->
+    | Operator spelling ->
         Printf.sprintf "%s is not defined on the distinct type %s; cast to %s"
           (quote spelling) name underlying
     | Operand role ->
@@ -1544,38 +1537,19 @@ let token_spelling context index =
 
 let spelling context (span : Tree.span) = token_spelling context span.first
 
-(* Whether [op] makes a value of its operands' type, as the arithmetic
-   operators do and the comparisons do not. *)
-let binary_casts_back : Tree.binary_operator -> bool = function
-  | Multiply | Divide | Remainder | Add | Subtract | Shift_left | Shift_right
-  | Bitwise_and | Bitwise_xor | Bitwise_or ->
-      true
-  | Less_than | Greater_than | Less_or_equal | Greater_or_equal | Equal_to
-  | Not_equal_to | Logical_and | Logical_or ->
-      false
-
-let unary_casts_back : Tree.unary_operator -> bool = function
-  | Unary_plus | Unary_minus | Bitwise_not | Pre_increment | Pre_decrement ->
-      true
-  | Address | Indirection | Logical_not | Real_part | Imaginary_part -> false
-
 (* The operation of [whole], as a refusal of a distinct operand names it:
    an operator by its token, which follows a left operand and begins a
    prefix operation. *)
 let distinct_reader context (whole : Tree.expression) =
-  let operator ~casts_back token =
-    Operator { spelling = token_spelling context token; casts_back }
-  in
+  let operator token = Operator (token_spelling context token) in
   match whole.node with
-  | Binary (op, left, _) ->
-      operator ~casts_back:(binary_casts_back op) (left.span.last + 1)
-  | Assignment (_, left, _) -> operator ~casts_back:true (left.span.last + 1)
-  | Unary (op, _) -> operator ~casts_back:(unary_casts_back op) whole.span.first
-  | Post_increment _ | Post_decrement _ ->
-      operator ~casts_back:true whole.span.last
+  | Binary (_, left, _) | Assignment (_, left, _) ->
+      operator (left.span.last + 1)
+  | Unary _ -> operator whole.span.first
+  | Post_increment _ | Post_decrement _ -> operator whole.span.last
   | Member { operand; _ } | Pointer_member { operand; _ } ->
-      operator ~casts_back:false (operand.span.last + 1)
-  | Subscript _ -> Operator { spelling = "[]"; casts_back = false }
+      operator (operand.span.last + 1)
+  | Subscript _ -> Operator "[]"
   | Call _ -> Operand "a called function"
   | _ -> Unnamed_operation
 
@@ -3429,7 +3403,7 @@ let pointee_of_first context span name first =
   | Pointer_operand { referenced = { shape = Distinct distinct; _ }; _ }
     when is_type_c_text context span ->
       refuse_distinct context span
-        (Operator { spelling = name; casts_back = false })
+        (Operator name)
         distinct
   | Pointer_operand _ | Arithmetic_operand _ | Distinct_operand _
   | Other_operand _ | Unknown_operand _ ->
