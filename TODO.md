@@ -1508,11 +1508,24 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   FreeBSD over ssh (x86-64) runs it, with no arm64 or glibc run. Add a
   Debian host that takes the image's `/usr/bin/gcc`, for example by a
   `run.sh` host name that passes `TYPEC_TEST_GCC` to the container.
-- [Medium] The trixie pins of `tools/hosts/debian.Dockerfile`
-  (`linux-libc-dev`, `libc6-dev`, `opam`) go stale when trixie's archive
-  drops their versions at a point release or security upload. Point the
-  base image's apt sources at snapshot.debian.org at one timestamp, as
-  the GCC 16 source is, so that every Debian pin stays installable.
+- [High] The Alpine hosts fail the suite on both architectures, as
+  tests written for glibc and macOS meet musl: GCC on musl has no
+  sanitizer runtimes at all and the image no Clang ones (`compiler-rt`
+  is not installed), which fails every test that links with
+  `-fsanitize=address,undefined` (`defer.t`, `nested_patterns.t`,
+  `nested_tests.t`, `slices.t`, `slice_lowering.t`,
+  `containers.t`, `try_expressions.t`); musl has no `getcontext`, used
+  by `slice_lowering.t`; and the examples that `examples.t` builds need
+  `<sys/cdefs.h>` (xargs) and a UTF-8 locale (cut's `check.sh`), which
+  musl and the image lack. Decide whether such a test probes for what it
+  needs and skips without it, with a `TYPEC_TEST_REQUIRE_` variable that
+  the Debian hosts set, as `-m32`, the Arm backends and lldb do in
+  `test/run/backends.sh`, or whether the image or the examples change.
+- [Low] `test/run/version.t` failed once on alpine-amd64 with status
+  141: in `typec --cc="$gcc" --version | head -1`, the backend can die of
+  SIGPIPE when `head` closes the pipe before its last write, and typec
+  passes the signal on as its own outcome, while the test says a reader
+  that stops at the first line is no failure.
 - [Low] `test/run/c_header.t` cannot tell `-MD` from `-MMD`, nor `-M`
   from `-MM`: its interface includes no system header and the rules are
   made under `-nostdinc`, so a driver that passed the one for the other
@@ -1570,8 +1583,7 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
 - [Medium] The arm64 hosts run under qemu-user 10.2.3 (registered with
   `tonistiigi/binfmt --install arm64` after uninstalling the VM's 7.0.0
   handler; a `colima restart` may bring 7.0.0 back, which kills about 1
-  in 100 GCC compilations). Both hosts build and run the suite; their
-  remaining failures are the items of this section. A native arm64
+  in 100 GCC compilations). A native arm64
   machine would settle the provisional causes and remove the emulator
   from the results.
 - [Medium] `Target.architecture` is the first of a list of predefined
