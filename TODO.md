@@ -154,8 +154,9 @@ The items are ordered by how often real code meets them.
   column, where the backend's give one: `p05.tc:2: error: ...` beside
   Clang's `p19.tc:2:48: warning: ...`. The first part of the review
   ("Columns") measured what recovering them costs and recommends
-  printing the source line instead (the item on design 13.6 under
-  "Reader of preprocessed text"); decide there. Source: Pilot A
+  printing the source line instead; P15 is decided on that ground (the
+  backend preprocesses), so print the source line (the item on design
+  13.6 under "Reader of preprocessed text"). Source: Pilot A
   (`private-creation`); probe.
 - [Low] The parser quotes names with backticks, the typing stages with
   single quotes as GCC and Clang do, and some typing messages use
