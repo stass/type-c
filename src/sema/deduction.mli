@@ -42,6 +42,11 @@ val deduce :
     and deduces each type parameter that the parameter type holds as
     the part of the argument's type at its place. *)
 
+val slice_meets : t -> slice:Ctype.t -> (Ctype.t -> bool) option
+(** Where [slice] is a slice type, whether a slice of a given element
+    type would meet it (rule 2): deduce the type parameters that it
+    holds, or, where it holds none, be the same instance. *)
+
 val arguments : t -> (Ctype.t list, Ctype.record_tag) result
 (** The type arguments, in order, or the first type parameter that is
     not deduced (rule 3). *)

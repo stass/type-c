@@ -1416,14 +1416,19 @@ let record_conversion_hint ~source ~target =
   | true, false -> opening_hint source
   | false, true -> making_hint target
 
-(* C11 6.5.16.1p1: a value of type [source] does not convert to
-   [target] as by assignment; [hint] says what likely makes it. *)
-let refuse_assignment context span ~target ~source ~hint =
+(* What a refused conversion names: the value converted, by its type or
+   as written, and the step that likely makes what was meant. *)
+type refused = { subject : string; hint : string }
+
+let value_of_type (source : Ctype.t) hint =
+  { subject = "a value of type " ^ quote (Type_name.of_ctype source); hint }
+
+(* C11 6.5.16.1p1: the [refused] value does not convert to [target] as
+   by assignment. *)
+let refuse_assignment context span ~target { subject; hint } =
   context.fail span
     (Rule.c_text
-       (Printf.sprintf "a value of type %s does not convert to %s%s \
-                        (C11 6.5.16.1p1)"
-          (quote (Type_name.of_ctype source))
+       (Printf.sprintf "%s does not convert to %s%s (C11 6.5.16.1p1)" subject
           (quote (Type_name.of_ctype target))
           hint))
 
@@ -1437,11 +1442,16 @@ let cast_hint ~(target : Ctype.t) ~(source : Ctype.t) =
    to no other type, as a structure does not. The backend would refuse it
    too, naming both types by their C encodings; typec names them as
    Type-C writes them. A refusal of C, so it carries no rule's name,
-   unless a type argument decides it (design 7.1 rule 4). *)
-let refuse_record_conversion context span ~target ~source =
+   unless a type argument decides it (design 7.1 rule 4). [named] names
+   the value as written, where it can, once the refusal is certain. *)
+let refuse_record_conversion context span ~target ~source ~named =
   let refuse () =
-    refuse_assignment context span ~target ~source
-      ~hint:(record_conversion_hint ~source ~target)
+    let refused =
+      match named () with
+      | Some refused -> refused
+      | None -> value_of_type source (record_conversion_hint ~source ~target)
+    in
+    refuse_assignment context span ~target refused
   in
   if is_type_c_record source || is_type_c_record target then
     match
@@ -2147,40 +2157,59 @@ let made_slice context span element making =
 let refuse_slice_operand context (operand : Tree.expression) reason =
   context.fail operand.span (Rule.message Slice_operand reason)
 
+(* Whether [slice_from_array] takes an array operand, or refuses it
+   where [slice_unchecked] needs the count that the program holds, or
+   refuses it outright. Each refusal says why. *)
+type array_slicing =
+  | Sliceable
+  | Needs_count of string
+  | Unsliceable of string
+
 (* Design section 8 rule 2: [slice_from_array(a)] takes an lvalue of a
    complete array type that is not variably modified, which lowering
    writes again as the operand of a [sizeof] that C does not evaluate
    (13.5). An element type that mentions a type parameter is no
-   variable length array (10.3). *)
-let slice_from_array context span (operand : Tree.expression) (array : typed) =
-  let refuse = refuse_slice_operand context operand in
+   variable length array (10.3). [operand] is [array], of [length]. *)
+let array_slicing context (operand : Tree.expression) (array : typed)
+    (length : Ctype.length) =
   let tokens = context.text.tokens in
   let rec pragma_from index =
     index <= operand.span.last
     && (is_pragma tokens.(index) || pragma_from (index + 1))
   in
+  let unchecked_takes_count =
+    "`slice_unchecked` takes the count that the program holds"
+  in
   if pragma_from operand.span.first then
-    refuse
+    Unsliceable
       "the operand of `slice_from_array` holds a pragma line, which its \
-       second writing, as the operand of `sizeof`, would repeat";
+       second writing, as the operand of `sizeof`, would repeat"
+  else
+    match length with
+    | (Constant _ | Opaque) when array.category <> Lvalue ->
+        Unsliceable "the operand of `slice_from_array` is no lvalue"
+    | Constant _ | Opaque -> (
+        match Ctype.is_variably_modified array.expression_type with
+        | Answer false | Depends_on _ -> Sliceable
+        | Answer true ->
+            Needs_count
+              ("the operand of `slice_from_array` is variably modified, and \
+                C would evaluate it again as the operand of `sizeof`; "
+              ^ unchecked_takes_count))
+    | Unknown | Variable ->
+        Needs_count
+          ("the operand of `slice_from_array` is an array of unknown or \
+            variable length; " ^ unchecked_takes_count)
+
+let slice_from_array context span (operand : Tree.expression) (array : typed) =
+  let refuse = refuse_slice_operand context operand in
   match array.expression_type.shape with
-  | Array { element; length = Constant _ | Opaque } -> (
-      if array.category <> Lvalue then
-        refuse "the operand of `slice_from_array` is no lvalue";
-      match Ctype.is_variably_modified array.expression_type with
-      | Answer false | Depends_on _ ->
+  | Array { element; length } -> (
+      match array_slicing context operand array length with
+      | Sliceable ->
           made_slice context span element
             (From_array { operand = operand.span })
-      | Answer true ->
-          refuse
-            "the operand of `slice_from_array` is variably modified, and \
-             C would evaluate it again as the operand of `sizeof`; \
-             `slice_unchecked` takes the count that the program holds")
-  | Array { length = Unknown | Variable; _ } ->
-      refuse
-        "the operand of `slice_from_array` is an array of unknown or \
-         variable length; `slice_unchecked` takes the count that the \
-         program holds"
+      | Needs_count why | Unsliceable why -> refuse why)
   | Unknown_type unknown ->
       context.fail operand.span
         (needing "the type of the operand of `slice_from_array`" unknown)
@@ -4258,7 +4287,14 @@ and refuse_conversion context (converted : Tree.expression) target
   let source = value_type typed in
   let seen_target = type_as_seen context span target in
   let seen_source = type_as_seen context span source in
-  refuse_record_conversion context span ~target ~source;
+  let named () =
+    match Deduction.slice_meets (Deduction.start []) ~slice:target with
+    | Some is_target ->
+        slicing_fix context converted typed ~takes:(fun element ->
+            is_target element || is_const_slice_of context span ~target element)
+    | None -> None
+  in
+  refuse_record_conversion context span ~target ~source ~named;
   let crosses =
     match (seen_target.shape, seen_source.shape) with
     | Pointer t, Pointer s -> (
@@ -4302,8 +4338,8 @@ and refuse_unassignable context (converted : Tree.expression) ~target ~source
     assignable context converted ~target:seen_target ~source:seen_source
   in
   if checked && not (converts ()) then
-    refuse_assignment context converted.span ~target ~source
-      ~hint:(cast_hint ~target ~source)
+    refuse_assignment context converted.span ~target
+      (value_of_type source (cast_hint ~target ~source))
 
 (* Whether the value of [converted], of type [source], converts to
    [target] as by assignment (C11 6.5.16.1p1). Whether it is a null
@@ -4780,6 +4816,16 @@ and deducing_argument context bindings parameter (first : Tree.expression) =
   let deduced =
     match Deduction.deduce bindings ~parameter ~argument:argument_type with
     | Ok deduced -> deduced
+    | Error (Mismatch _ as failure) -> (
+        let fix =
+          match Deduction.slice_meets bindings ~slice:parameter with
+          | Some takes -> slicing_fix context first typed ~takes
+          | None -> None
+        in
+        match fix with
+        | Some refused ->
+            refuse_slice_deduction context first ~parameter refused
+        | None -> fail_deduction context first.span failure)
     | Error failure -> fail_deduction context first.span failure
   in
   List.iter
@@ -4789,6 +4835,16 @@ and deducing_argument context bindings parameter (first : Tree.expression) =
   context.needs_complete typed.expression_type;
   refuse_conversion context first target typed;
   deduced
+
+(* Design 7.2 rule 2: the [refused] argument [argument], which a slice
+   that a builtin makes of it would match, does not match [parameter]. *)
+and refuse_slice_deduction context (argument : Tree.expression) ~parameter
+    { subject; hint } =
+  context.fail argument.span
+    (Rule.message Deduction_mismatch
+       (Printf.sprintf "%s does not match the parameter type %s%s" subject
+          (quote (Type_name.of_ctype parameter))
+          hint))
 
 (* The function designator of the instance whose type arguments
    [bindings] holds, used at [span], once every one is deduced (rule
@@ -5393,6 +5449,48 @@ and convert_value context (expression : Tree.expression) ~instance
       record_check context
         { whole = expression.span; instance;
           check = Conversion { converted_to }; late_call = false }
+
+(* The value of [converted], of [typed], refused where a slice is
+   expected, named as written, with the builtin of section 8 that makes
+   the slice where [takes] holds of the slice's element type. A string
+   literal is a slice only as rule 6 says. *)
+and slicing_fix context (converted : Tree.expression) (typed : typed)
+    ~takes =
+  let written = excerpt context converted.span in
+  let as_written what hint =
+    Some { subject = what ^ " " ^ quote written; hint }
+  in
+  let rec is_string_literal (e : Tree.expression) =
+    match e.node with
+    | String _ -> true
+    | Parenthesized inner -> is_string_literal inner
+    | _ -> false
+  in
+  let call builtin arguments =
+    quote (Printf.sprintf "%s(%s)" builtin arguments)
+  in
+  let unchecked = call "slice_unchecked" (written ^ ", n") in
+  if is_string_literal converted then
+    as_written "the string literal"
+      "; a string literal is a slice only where its target type is 'str'"
+  else
+    match typed.expression_type.shape with
+    | Array { element; length } when takes element -> (
+        match array_slicing context converted typed length with
+        | Sliceable ->
+            as_written "the array"
+              ("; slice it with " ^ call "slice_from_array" written)
+        | Needs_count _ ->
+            as_written "the array"
+              ("; slice its first n elements with " ^ unchecked)
+        | Unsliceable _ -> None)
+    | Array _ -> None
+    | _ -> (
+        match (value_type typed).shape with
+        | Pointer element when takes element ->
+            as_written "the pointer"
+              ("; slice the n elements it points to with " ^ unchecked)
+        | _ -> None)
 
 (* A string literal that rule 6 of section 8 lets denote a [str]: plain
    or UTF-8 characters, whose elements C writes as [char]. *)

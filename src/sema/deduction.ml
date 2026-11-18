@@ -198,6 +198,20 @@ let deduce bindings ~parameter ~argument =
   | bindings -> Ok bindings
   | exception Failed failure -> Error failure
 
+(* Where [slice] is a slice type [slice(P)], whether a slice of a given
+   element type meets it as one instance meets another in
+   [matched_shape]: [P] matches the element exactly. *)
+let slice_meets bindings ~slice =
+  match applied_instance (Ctype.unqualified slice) with
+  | Some { generic; argument_types = [ element_parameter ]; _ }
+    when (generic :> string) = Ctype.universe_slice ->
+      Some
+        (fun element ->
+          match matched bindings ~adds:false element_parameter element with
+          | _ -> true
+          | exception Failed _ -> false)
+  | Some _ | None -> None
+
 let arguments bindings =
   let argument (record, deduced) =
     match deduced with Some t -> Ok t | None -> Error record

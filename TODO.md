@@ -48,17 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] An array or a pointer passed where a slice is expected:
-  `g(c)` with `char c[4]` and `size_t g(str s)` gives "a value of type
-  'char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)",
-  which names the decayed pointer where the user wrote an array; a
-  generic callee gives "the argument's type does not match its
-  parameter's: it has 'char *' where the parameter type has 'slice(T)'
-  [deduction-mismatch]". Proposed: "the array 'c' does not convert to
-  'slice(const char)'; pass 'slice_from_array(c)'", and for a pointer
-  "...; make a slice with 'slice_unchecked(p, n)'". Source: probe; the
-  first step of moving C's strings to `str` (Pilot B's string handling,
-  Pilot C's `slice_unchecked` at every trust boundary).
 - [Medium] A binding used where it is not in scope reads as an
   undeclared name: `r` after `if (case Circle(r) = s) ...;`, or `r` of
   the Circle arm used in the Square arm, gives "'r' is not declared
@@ -189,6 +178,14 @@ The items are ordered by how often real code meets them.
   *' does not convert to 'double' without a cast", naming neither the
   argument nor the callee. Proposed: "the argument 'v' of 'put' is of
   type 'char *', not 'double'". Source: probe.
+- [Low] The fix that a refusal of an array or a pointer where a generic
+  function's slice parameter is expected proposes is checked only for
+  matching that parameter, not for a valid type argument: `char a[2][3]`,
+  a `void *` and a pointer to a function get `slice_from_array(a)` or
+  `slice_unchecked(p, n)`, which the refusal of the type argument then
+  meets. Fix the class: a funnel in `Declarations` that answers whether
+  the slice instance of an element type is made, without refusing, so
+  the fix asks the rule itself rather than a copy of it.
 
 ## Driver
 
@@ -1038,6 +1035,10 @@ the package, in the order of its commits:
   depth bound takes 20 s, and `test_deep_trees` pays it. Index the moved
   texts, which nest, by token, so a use finds those that hold it along
   one chain.
+- [Medium] `slice_from_array("x")` is accepted and gives a `slice(char)`
+  of a string literal, through which a write is undefined, and of
+  length 2 with the null character. Decide whether the design refuses a
+  string literal as its operand or gives its elements `const`.
 - [Low] A `slice_from_array` nested in the operand of another is copied
   into the outer one's length as well as its data, so N nested makings
   write 2^N copies of the innermost operand.

@@ -455,23 +455,55 @@ to a slice.
   [1]
   $ printf 'str w = L"w";\n' > conversion_wide.tc
   $ ./golden.exe conversion_wide.tc
-  conversion_wide.tc:1: error: a value of type 'int *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
+  conversion_wide.tc:1: error: the string literal 'L"w"' does not convert to 'slice(const char)'; a string literal is a slice only where its target type is 'str' (C11 6.5.16.1p1)
   [1]
 
 Only a string literal becomes a slice: a pointer or an array of
 characters does not, and a literal is no slice of modifiable elements.
+The refusal names the operand as written and the builtin that makes the
+slice: `slice_from_array` for an array that it takes, `slice_unchecked`
+for a pointer or an array of variable length.
 
   $ printf 'void take(str s);\nvoid f(const char *p) { take(p); }\n' > conversion_pointer.tc
   $ ./golden.exe conversion_pointer.tc
-  conversion_pointer.tc:2: error: a value of type 'const char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
+  conversion_pointer.tc:2: error: the pointer 'p' does not convert to 'slice(const char)'; slice the n elements it points to with 'slice_unchecked(p, n)' (C11 6.5.16.1p1)
   [1]
   $ printf 'void take(str s);\nchar a[4];\nvoid f(void) { take(a); }\n' > conversion_array.tc
   $ ./golden.exe conversion_array.tc
-  conversion_array.tc:3: error: a value of type 'char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
+  conversion_array.tc:3: error: the array 'a' does not convert to 'slice(const char)'; slice it with 'slice_from_array(a)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'struct s { char name[8]; };\nslice(char) f(struct s *p) { return p->name; }\n' > conversion_member.tc
+  $ ./golden.exe conversion_member.tc
+  conversion_member.tc:2: error: the array 'p->name' does not convert to 'slice(char)'; slice it with 'slice_from_array(p->name)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'void take(str s);\nvoid f(int n) { char v[n]; take(v); }\n' > conversion_variable.tc
+  $ ./golden.exe conversion_variable.tc
+  conversion_variable.tc:2: error: the array 'v' does not convert to 'slice(const char)'; slice its first n elements with 'slice_unchecked(v, n)' (C11 6.5.16.1p1)
+  [1]
+
+An array or a pointer of other elements, even compatible ones, or a
+pointer that drops const, gets no such fix, as no slice that a builtin
+makes of it converts.
+
+  $ printf 'void take(str s);\nint a[4];\nvoid f(void) { take(a); }\n' > conversion_other.tc
+  $ ./golden.exe conversion_other.tc
+  conversion_other.tc:3: error: a value of type 'int *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'void take(str s);\nextern char a[];\nvoid f(void) { take(a); }\n' > conversion_unknown.tc
+  $ ./golden.exe conversion_unknown.tc
+  conversion_unknown.tc:3: error: the array 'a' does not convert to 'slice(const char)'; slice its first n elements with 'slice_unchecked(a, n)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'enum e { A };\nvoid take(slice(enum e) s);\nunsigned a[4];\nvoid f(void) { take(a); }\n' > conversion_enum.tc
+  $ ./golden.exe conversion_enum.tc
+  conversion_enum.tc:4: error: a value of type 'unsigned int *' does not convert to 'slice(enum e)' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'void take(slice(char) s);\nvoid f(const char *p) { take(p); }\n' > conversion_dropped.tc
+  $ ./golden.exe conversion_dropped.tc
+  conversion_dropped.tc:2: error: a value of type 'const char *' does not convert to 'slice(char)' (C11 6.5.16.1p1)
   [1]
   $ printf 'slice(char) m = "x";\n' > conversion_modifiable.tc
   $ ./golden.exe conversion_modifiable.tc
-  conversion_modifiable.tc:1: error: a value of type 'char *' does not convert to 'slice(char)' (C11 6.5.16.1p1)
+  conversion_modifiable.tc:1: error: the string literal '"x"' does not convert to 'slice(char)'; a string literal is a slice only where its target type is 'str' (C11 6.5.16.1p1)
   [1]
 
 An index in a range that lowering drops, as the operands of a

@@ -349,6 +349,26 @@ An instance of another generic, or of other arguments, does not match.
   applied_refused.tc:5: error: the argument's type does not match its parameter's: it has 'list(long)' where the parameter type has 'vector(T)' [deduction-mismatch]
   [1]
 
+A generic function's slice parameter meets an array or a pointer whose
+slice would deduce it; the refusal names the builtin that makes one.
+
+  $ printf 'generic(T) T first(slice(T) s) { return (s[0]); }\nint f(int *p) { int a[4] = { 0 }; return (first(a) + first(p)); }\n' > slice_array.tc
+  $ ./golden.exe slice_array.tc
+  slice_array.tc:2: error: the array 'a' does not match the parameter type 'slice(T)'; slice it with 'slice_from_array(a)' [deduction-mismatch]
+  [1]
+  $ printf 'generic(T) T first(slice(T) s) { return (s[0]); }\nint f(int *p) { return (first(p)); }\n' > slice_pointer.tc
+  $ ./golden.exe slice_pointer.tc
+  slice_pointer.tc:2: error: the pointer 'p' does not match the parameter type 'slice(T)'; slice the n elements it points to with 'slice_unchecked(p, n)' [deduction-mismatch]
+  [1]
+  $ printf 'generic(T) T first(slice(const T) s) { return (s[0]); }\nint f(int *p) { return (first(p)); }\n' > slice_const.tc
+  $ ./golden.exe slice_const.tc
+  slice_const.tc:2: error: the argument's type does not match its parameter's: it has 'int *' where the parameter type has 'slice(const T)' [deduction-mismatch]
+  [1]
+  $ printf 'generic(T) T first(slice(T) s) { return (s[0]); }\nchar f(void) { return (first(("abc"))); }\n' > slice_literal.tc
+  $ ./golden.exe slice_literal.tc
+  slice_literal.tc:2: error: the string literal '("abc")' does not match the parameter type 'slice(T)'; a string literal is a slice only where its target type is 'str' [deduction-mismatch]
+  [1]
+
   $ cat > applied_twice.tc <<'EOF'
   > type pair(A, B) = struct { A first; B second; };
   > generic(T) void same(pair(T, T) *p);
