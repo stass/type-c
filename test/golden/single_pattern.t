@@ -300,7 +300,34 @@ statement (4.6 rule 4).
   > }
   > EOF
   $ ./golden.exe otherwise.tc
-  otherwise.tc:6: error: 'head' is not declared (C11 6.5.1p2)
+  otherwise.tc:6: error: 'head' is not declared here (C11 6.5.1p2); the test 'if (case Cons(head, _) = v)' at otherwise.tc:3 binds it only in its statement
+  [1]
+
+A use of a binding after the test, or after a loop's test, is refused
+by naming the test whose statement binds it.
+
+  $ cat > after.tc <<'EOF'
+  > type list = | Nil | Cons(long head, list *tail);
+  > long f(list v) {
+  >   if (case Cons(head, _) = v)
+  >     return head;
+  >   return head;
+  > }
+  > EOF
+  $ ./golden.exe after.tc
+  after.tc:5: error: 'head' is not declared here (C11 6.5.1p2); the test 'if (case Cons(head, _) = v)' at after.tc:3 binds it only in its statement
+  [1]
+
+  $ cat > after_loop.tc <<'EOF'
+  > type list = | Nil | Cons(long head, list *tail);
+  > long f(const list *l) {
+  >   while (case Cons(head, tail) = *l)
+  >     l = tail;
+  >   return head;
+  > }
+  > EOF
+  $ ./golden.exe after_loop.tc
+  after_loop.tc:5: error: 'head' is not declared here (C11 6.5.1p2); the test 'while (case Cons(head, tail) = *l)' at after_loop.tc:3 binds it only in its statement
   [1]
 
 Only a successful test enters the controlled statement, so no goto from

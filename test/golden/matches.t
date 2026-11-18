@@ -310,6 +310,61 @@ block that lowering makes around the items would hide the binding.
   redeclared.tc:5: error: 'i' is declared twice in one scope without linkage (C11 6.7p3)
   [1]
 
+A binding of one arm used in another arm, or after the match, is
+refused by naming the label that binds it.
+
+  $ cat > other_arm.tc <<'EOF'
+  > type shape = | Circle(double r) | Square(double s);
+  > double f(shape v) {
+  >   match (v) {
+  >   case Circle(r):
+  >     return r;
+  >   case Square(s):
+  >     return r * s;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe other_arm.tc
+  other_arm.tc:7: error: 'r' is not declared here (C11 6.5.1p2); the pattern 'Circle(r)' at other_arm.tc:4 binds it only in its arm
+  [1]
+
+A name that no pattern of the function binds is undeclared, as in C;
+nor does a binding of another function count.
+
+  $ cat > undeclared.tc <<'EOF'
+  > type shape = | Circle(double r) | Square(double s);
+  > double g(shape v) {
+  >   match (v) {
+  >   case Circle(r):
+  >     return r;
+  >   case Square(s):
+  >     return s;
+  >   }
+  > }
+  > double f(shape v) {
+  >   (void)v;
+  >   return r;
+  > }
+  > EOF
+  $ ./golden.exe undeclared.tc
+  undeclared.tc:12: error: 'r' is not declared (C11 6.5.1p2)
+  [1]
+  $ cat > file_scope.tc <<'EOF'
+  > type shape = | Circle(double r) | Square(double s);
+  > double g(shape v) {
+  >   match (v) {
+  >   case Circle(r):
+  >     return r;
+  >   case Square(s):
+  >     return s;
+  >   }
+  > }
+  > double h(int n, double a[r]);
+  > EOF
+  $ ./golden.exe file_scope.tc
+  file_scope.tc:10: error: 'r' is not declared (C11 6.5.1p2)
+  [1]
+
 A match body is a sequence of arms, each of labels and at least one
 block item (design 4.1 rule 2).
 

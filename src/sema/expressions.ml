@@ -191,11 +191,20 @@ let without_holders positions text =
    design 7.1 rule 3 ({!zero_initialiser}). *)
 type initialiser_holder = Holder_at of int | For_clause
 
+(* The pattern that binds a name (design 4.1 rule 4, 4.6 rule 4): the
+   label of an arm, whose items the binding's scope is, or the head
+   [if (case P = e)] or [while (case P = e)] of a single-pattern test,
+   whose statement it is. *)
+type binder = Arm_label of Tree.span | Test_head of Tree.span
+
 (* What encloses the statement being typed: the function, for __func__,
    return and try, the switch or match that case labels need, and the
    positions of try. [return_type] and [body] are [None] outside
    functions. [in_generic]: the function is the definition of a generic
-   function. *)
+   function. [binders] holds, by name, the last pattern of the function
+   that binds the name, so that a use the parser finds undeclared,
+   outside every binding's scope, can name a pattern; one entry per name
+   bounds it by the function's text, and only a function has one. *)
 type enclosing = {
   function_name : string option;
   body : Tree.span option;
@@ -203,6 +212,7 @@ type enclosing = {
   return_type : Ctype.t Unknown.answer option;
   case_labels : label_owner;
   try_positions : try_positions;
+  binders : (string, binder) Hashtbl.t option;
 }
 
 (* Rule 3 (try-lifetime): an object that an expression of a holder makes,
@@ -250,6 +260,7 @@ type pattern_position = {
 }
 
 type pointer_local = { local : int; local_variant : Ctype.variant_name }
+
 type binding = { name : string; field : reach }
 
 type matched_arm = {
@@ -649,7 +660,7 @@ type t = {
 let outside_functions =
   { function_name = None; body = None; in_generic = false; return_type = None;
     case_labels = No_switch;
-    try_positions = No_positions try_outside_functions }
+    try_positions = No_positions try_outside_functions; binders = None }
 
 let create () =
   { types = Hashtbl.create 16;
@@ -1808,11 +1819,29 @@ let string_type context (literal : Tree.string_literal) =
 
 (* Identifiers (6.5.1p2, 6.4.2.2) *)
 
+(* 6.5.1p2: a name that a pattern of the function binds, used outside
+   the scope of the binding; [binder] is one such pattern of several. *)
+let bound_elsewhere context span name binder =
+  let what, pattern_span, scope =
+    match binder with
+    | Arm_label pattern -> ("the pattern", pattern, "its arm")
+    | Test_head head -> ("the test", head, "its statement")
+  in
+  let location = location_of context pattern_span in
+  context.fail span
+    (Rule.c_text
+       (Printf.sprintf
+          "%s is not declared here (C11 6.5.1p2); %s %s at %s:%d binds it \
+           only in %s"
+          (quote name) what
+          (quote (excerpt context pattern_span))
+          location.file location.line scope))
+
 (* 6.5.1p2. A name of a constructor of a universe variant, written alone
    where the target type is no variant with a constructor of that name,
    names nothing (design 3.3); the note says so, as the user likely meant
    the constructor. *)
-let undeclared context span name =
+let not_declared context span name =
   let constructor_note =
     match Universe.find_constructor name with
     | Some constructor when is_type_c_text context span ->
@@ -1826,6 +1855,13 @@ let undeclared context span name =
   context.fail span
     (Rule.c_text
        (quote name ^ " is not declared (C11 6.5.1p2)" ^ constructor_note))
+
+(* 6.5.1p2: a name that the parser finds no declaration of. *)
+let undeclared context span name =
+  let binders = context.typed.enclosing.binders in
+  match Option.bind binders (fun binders -> Hashtbl.find_opt binders name) with
+  | Some binder -> bound_elsewhere context span name binder
+  | None -> not_declared context span name
 
 (* An undeclared identifier may name a builtin function of the backend
    (design 13.3). One with a prototype has its function type; one that a
@@ -5955,21 +5991,28 @@ and single_pattern_test context (statement : Tree.statement) ~pattern_span
            (fun () ->
              let reading = pattern_reading Test_pattern in
              let root = indexed_in reading variant t constructors in
-             tested context reading root ~pattern_span pattern controlled
-               form) })
+             (* The head ends at the parenthesis after the operand. *)
+             let head =
+               { Tree.first = statement.span.first;
+                 last = operand.span.last + 1 }
+             in
+             tested context reading root ~head ~pattern_span pattern
+               controlled form) })
 
-(* The selection tree of a test, its bindings, then its statement, which
-   is in their scope
-   and in which no case or default label of a switch around it may stand
-   (4.6 rules 4 and 6). *)
-and tested context reading root ~pattern_span (pattern : Tree.pattern)
+(* The selection tree of a test, its bindings, which [head] binds, then
+   its statement, which is in their scope and in which no case or default
+   label of a switch around it may stand (4.6 rules 4 and 6). *)
+and tested context reading root ~head ~pattern_span (pattern : Tree.pattern)
     (controlled : Tree.statement) form =
   let checked =
     constructor_pattern context reading root ~position:[]
       ~reached:scrutinee_reach pattern_span pattern
   in
   let size, nested = test_tree context ~pattern_span reading root checked in
-  let bindings = List.map (declare_binding context) checked.bindings in
+  let bindings =
+    List.map (declare_binding context (Test_head head))
+      checked.bindings
+  in
   let enclosing =
     { context.typed.enclosing with case_labels = Test_statement }
   in
@@ -6561,8 +6604,10 @@ and matched_arm context (arm : Tree.arm) labelled defaulted ~number =
   let first = List.hd labels and last = List.hd (List.rev labels) in
   let bindings =
     match labelled with
-    | [ (_, Some (checked : checked_pattern)) ] ->
-        List.map (declare_binding context) checked.bindings
+    | [ ({ node = Pattern_label pattern; _ }, Some (checked : checked_pattern))
+      ] ->
+        List.map (declare_binding context (Arm_label pattern.span))
+          checked.bindings
     | _ ->
         List.iter (refuse_shared_binding context arm) labelled;
         []
@@ -6603,8 +6648,11 @@ and quoted_label context (label : Tree.arm_label) =
   | Pattern_label pattern -> quote (excerpt context pattern.span)
   | Default_arm_label -> quote "default"
 
-and declare_binding context (found : found_binding) =
+and declare_binding context binder (found : found_binding) =
   context.binding found.identifier found.declared found.object_type;
+  Option.iter
+    (fun binders -> Hashtbl.replace binders found.identifier.node binder)
+    context.typed.enclosing.binders;
   { name = context.written_name found.declared found.identifier.node;
     field = found.copied }
 
@@ -6746,7 +6794,8 @@ let function_body context ~name ~in_generic ~declarator ~return_type
   let enclosing =
     { function_name = Some name; body = Some block.span; in_generic;
       return_type = Some return_type;
-      case_labels = No_switch; try_positions = Positions not_held }
+      case_labels = No_switch; try_positions = Positions not_held;
+      binders = Some (Hashtbl.create 8) }
   in
   view.next_try <- 0;
   view.next_truth <- 0;

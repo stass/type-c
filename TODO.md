@@ -48,15 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] A binding used where it is not in scope reads as an
-  undeclared name: `r` after `if (case Circle(r) = s) ...;`, or `r` of
-  the Circle arm used in the Square arm, gives "'r' is not declared
-  (C11 6.5.1p2)". Proposed, when a pattern of the function binds the
-  name: "'r' is bound only in the arm of 'Circle(r)' at line 12", and
-  for a single-pattern test "'r' is bound only in the statement of the
-  test 'if (case Circle(r) = s)' at line 12".
-  Source: Pilot A (gate-6 injection, "'addr' is not declared"); the
-  smtp example's README quotes it (`from` in `rset`); probe.
 - [Medium] A constructor where no variant of it is the target type. A
   universe constructor gets a note in the design's terms: `return
   (Err(NoMemory));` in a function returning `err`, `return (None);` in
