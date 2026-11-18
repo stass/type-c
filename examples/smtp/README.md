@@ -295,11 +295,29 @@ smtpd.tc:265: error: the match does not cover the constructor 'Auth' of the vari
 [80]
 ```
 
-<!-- untested: the page does not show the arm of Auth in mail -->
+<!-- stage: auth_in_mail -->
+<!-- edit: smtpd.tc -->
+```diff
+     | Greeted(struct domain client)	/* after HELO, between messages */
++    | Auth(struct domain client)	/* after AUTH, reading credentials */
+     | Mail(struct domain client, struct address from, struct recipients *to)
+```
+
+<!-- edit: smtpd.tc -->
+```diff
+ 	case Data(_, _):
+ 		reply("503 Nested MAIL command");
+ 		break;
++	case Auth(_):
++		reply("503 Finish AUTH first");
++		break;
+ 	}
+```
+
 ```console
-$ typec -Wall -Wextra -c smtpd.tc       # with Auth in mail's match
-smtpd.tc:457: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
-  457 | 		match (s->state) {
+$ typec -Wall -Wextra -c smtpd.tc
+smtpd.tc:459: error: the match does not cover the constructor 'Auth' of the variant 'state' [match-coverage]
+  459 | 		match (s->state) {
 [80]
 ```
 
@@ -381,9 +399,17 @@ any state but `Mail`, prints a sender that is stale or was never set.
 The port has no `s->from` to write: the sender is a binding of the arm
 or the test that matched `Mail`, and nowhere else is it in scope:
 
-<!-- untested: the page does not show the line in rset -->
+<!-- stage: sender_outside_test -->
+<!-- edit: smtpd.tc -->
+```diff
+ 	if (case Mail(client, _, _) = s->state)
+ 		s->state = Greeted(client);
+-	reply("250 Ok");
++	reply("250 Ok, <%s> forgotten", from.text);
+```
+
 ```console
-$ typec -Wall -Wextra -c smtpd.tc       # from.text in rset, outside the test
+$ typec -Wall -Wextra -c smtpd.tc
 smtpd.tc:327: error: 'from' is not declared (C11 6.5.1p2)
   327 | 	reply("250 Ok, <%s> forgotten", from.text);
 [80]

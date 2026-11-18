@@ -275,11 +275,6 @@ The items are ordered by how often real code meets them.
   `__builtin_offsetof`. Recording call sites in the typed view, where
   `leave_untested` already clears what C does not evaluate, would make
   the count exact and delete the walker.
-- [Low] Two console blocks of `examples/smtp/README.md` that show
-  `typec` refusing a program are marked untested, because the page
-  describes the change in words without showing it: the arm of `Auth`
-  in `mail`, and `from.text` in `rset`. Show each as a diff block with
-  an edit marker, so that `test/run/example_readmes.t` runs them.
 - [Low] The refusals of options of the backend name what the command
   has by its input (`a .tc input`, or `--emit-c-header`), so under
   `--emit-c` they say "a .tc input" with no input and `-E` is told to
