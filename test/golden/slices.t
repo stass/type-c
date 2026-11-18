@@ -126,6 +126,31 @@ not variably modified (rule 2), and `slice_unchecked(p, n)` a pointer
   array_value.tc:3: error: the operand of `slice_from_array` is no lvalue [slice-operand]
   [1]
 
+A string literal is no operand, through parentheses and with any
+prefix: a write through its slice would be undefined (C11 6.4.5p7).
+A plain or UTF-8 one is a `str` (rule 6).
+
+  $ printf 'int f(void) { return (int)slice_from_array("x").len; }\n' > array_literal.tc
+  $ ./golden.exe array_literal.tc
+  array_literal.tc:1: error: the operand of `slice_from_array` is the string literal '"x"', whose slice would be writable; a string literal is a slice only where its target type is 'str' [slice-operand]
+  [1]
+  $ printf 'int f(void) { return (int)slice_from_array((u8"x")).len; }\n' > array_literal_parenthesized.tc
+  $ ./golden.exe array_literal_parenthesized.tc
+  array_literal_parenthesized.tc:1: error: the operand of `slice_from_array` is the string literal 'u8"x"', whose slice would be writable; a string literal is a slice only where its target type is 'str' [slice-operand]
+  [1]
+  $ printf 'int f(void) { return (int)slice_from_array(L"x").len; }\n' > array_literal_wide.tc
+  $ ./golden.exe array_literal_wide.tc
+  array_literal_wide.tc:1: error: the operand of `slice_from_array` is the string literal 'L"x"', whose slice would be writable; a string literal of wide characters is a slice only through an array that it initialises [slice-operand]
+  [1]
+  $ printf 'int f(void) { return (int)slice_from_array(_Generic(0, default: "x")).len; }\n' > array_literal_generic.tc
+  $ ./golden.exe array_literal_generic.tc
+  array_literal_generic.tc:1: error: the operand of `slice_from_array` is the string literal '"x"', whose slice would be writable; a string literal is a slice only where its target type is 'str' [slice-operand]
+  [1]
+  $ printf 'int f(void) { return (int)slice_from_array(__builtin_choose_expr(1, "x", "y")).len; }\n' > array_literal_chosen.tc
+  $ ./golden.exe array_literal_chosen.tc
+  array_literal_chosen.tc:1: error: the operand of `slice_from_array` is the string literal '"x"', whose slice would be writable; a string literal is a slice only where its target type is 'str' [slice-operand]
+  [1]
+
 An array of arrays is no operand: its elements are of array type, which
 no type argument is (design section 8 rule 2, 3.5 rule 2).
 
@@ -455,7 +480,7 @@ to a slice.
   [1]
   $ printf 'str w = L"w";\n' > conversion_wide.tc
   $ ./golden.exe conversion_wide.tc
-  conversion_wide.tc:1: error: the string literal 'L"w"' does not convert to 'slice(const char)'; a string literal is a slice only where its target type is 'str' (C11 6.5.16.1p1)
+  conversion_wide.tc:1: error: the string literal 'L"w"' does not convert to 'slice(const char)'; a string literal of wide characters is a slice only through an array that it initialises (C11 6.5.16.1p1)
   [1]
 
 Only a string literal becomes a slice: a pointer or an array of
@@ -504,6 +529,14 @@ makes of it converts.
   $ printf 'slice(char) m = "x";\n' > conversion_modifiable.tc
   $ ./golden.exe conversion_modifiable.tc
   conversion_modifiable.tc:1: error: the string literal '"x"' does not convert to 'slice(char)'; a string literal is a slice only where its target type is 'str' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'slice(char) m = ("x");\n' > conversion_literal_parenthesized.tc
+  $ ./golden.exe conversion_literal_parenthesized.tc
+  conversion_literal_parenthesized.tc:1: error: the string literal '"x"' does not convert to 'slice(char)'; a string literal is a slice only where its target type is 'str' (C11 6.5.16.1p1)
+  [1]
+  $ printf 'str m = _Generic(0, default: "x");\n' > conversion_literal_generic.tc
+  $ ./golden.exe conversion_literal_generic.tc
+  conversion_literal_generic.tc:1: error: a value of type 'char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)
   [1]
 
 An index in a range that lowering drops, as the operands of a

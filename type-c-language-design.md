@@ -3717,7 +3717,17 @@ str greeting = "hello";                             /* len 5    */
 2. `slice_from_array(a)` takes an lvalue of array type `T[N]` and yields a
    `slice(T)` of length `N`. A pointer is not accepted, and neither is
    an array of arrays, as `int rows[3][4]`: its `T` is an array type,
-   which no type argument is (3.5 rule 2). The length is
+   which no type argument is (3.5 rule 2). Nor is a string literal of
+   any prefix, through parentheses and the selections of `_Generic`
+   and `__builtin_choose_expr`: its slice would let the program write
+   to the literal, which C leaves undefined (C11 6.4.5p7). Rule 6
+   makes one of plain or UTF-8 characters a `str`, read-only and of a
+   length without the terminating NUL; one of wide characters becomes
+   a slice through an array that it initialises. This refuses the
+   spellings of a literal, not every route to its array: one reached
+   through a pointer, as `*&"x"`, or selected by a `_Generic` that
+   depends on a type parameter is not tracked, as a `char *` that
+   points to a literal is not. The length is
    the backend's: lowering writes the operand a second time, as the
    operand of a `sizeof` (13.5), and `a` is still evaluated once. Four
    limits follow:

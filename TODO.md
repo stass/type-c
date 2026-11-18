@@ -1027,10 +1027,6 @@ the package, in the order of its commits:
   depth bound takes 20 s, and `test_deep_trees` pays it. Index the moved
   texts, which nest, by token, so a use finds those that hold it along
   one chain.
-- [Medium] `slice_from_array("x")` is accepted and gives a `slice(char)`
-  of a string literal, through which a write is undefined, and of
-  length 2 with the null character. Decide whether the design refuses a
-  string literal as its operand or gives its elements `const`.
 - [Low] A `slice_from_array` nested in the operand of another is copied
   into the outer one's length as well as its data, so N nested makings
   write 2^N copies of the innermost operand.

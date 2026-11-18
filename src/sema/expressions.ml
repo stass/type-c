@@ -2165,11 +2165,56 @@ type array_slicing =
   | Needs_count of string
   | Unsliceable of string
 
+(* The expression whose value [expression] is, through parentheses and
+   the selections of _Generic and __builtin_choose_expr (6.5.1p5,
+   6.5.1.1p4) that [select] gives. *)
+let rec source_through select (expression : Tree.expression) =
+  match expression.node with
+  | Parenthesized inner -> source_through select inner
+  | Generic _ | Choose _ -> (
+      match select expression with
+      | Unknown.Answer chosen -> source_through select chosen
+      | Depends_on unknown -> Unknown.Depends_on unknown)
+  | _ -> Answer expression
+
+(* The source of an expression that has been typed, through the
+   selections that typing has made. *)
+let value_source context =
+  source_through (fun (selecting : Tree.expression) ->
+      match Hashtbl.find_opt context.typed.selections selecting.span with
+      | Some selection -> selection
+      | None -> invalid_arg "Expressions: an untyped selection")
+
+(* A string literal that rule 6 of section 8 lets denote a [str]: plain
+   or UTF-8 characters, whose elements C writes as [char]. *)
+let is_char_literal context literal =
+  match joined_encoding context literal with
+  | Plain | Utf8 -> true
+  | Char16 | Char32 | Wide -> false
+
+(* The string literal, of any prefix, whose array [expression] is,
+   through parentheses and the selections that typing has made: a write
+   to it is undefined (C11 6.4.5p7). None where a selection depends on a
+   type parameter, as each instance may select another operand. *)
+let string_literal_source context expression =
+  match value_source context expression with
+  | Unknown.Answer { node = String literal; span } -> Some (span, literal)
+  | Answer _ | Depends_on _ -> None
+
+(* The fix that a refusal of [literal] as a slice names. *)
+let string_literal_slice_fix context literal =
+  match is_char_literal context literal with
+  | true -> "a string literal is a slice only where its target type is 'str'"
+  | false ->
+      "a string literal of wide characters is a slice only through an array \
+       that it initialises"
+
 (* Design section 8 rule 2: [slice_from_array(a)] takes an lvalue of a
    complete array type that is not variably modified, which lowering
    writes again as the operand of a [sizeof] that C does not evaluate
-   (13.5). An element type that mentions a type parameter is no
-   variable length array (10.3). [operand] is [array], of [length]. *)
+   (13.5), and that is no string literal, whose slice would be writable.
+   An element type that mentions a type parameter is no variable length
+   array (10.3). [operand] is [array], of [length]. *)
 let array_slicing context (operand : Tree.expression) (array : typed)
     (length : Ctype.length) =
   let tokens = context.text.tokens in
@@ -2180,26 +2225,33 @@ let array_slicing context (operand : Tree.expression) (array : typed)
   let unchecked_takes_count =
     "`slice_unchecked` takes the count that the program holds"
   in
-  if pragma_from operand.span.first then
-    Unsliceable
-      "the operand of `slice_from_array` holds a pragma line, which its \
-       second writing, as the operand of `sizeof`, would repeat"
-  else
-    match length with
-    | (Constant _ | Opaque) when array.category <> Lvalue ->
-        Unsliceable "the operand of `slice_from_array` is no lvalue"
-    | Constant _ | Opaque -> (
-        match Ctype.is_variably_modified array.expression_type with
-        | Answer false | Depends_on _ -> Sliceable
-        | Answer true ->
-            Needs_count
-              ("the operand of `slice_from_array` is variably modified, and \
-                C would evaluate it again as the operand of `sizeof`; "
-              ^ unchecked_takes_count))
-    | Unknown | Variable ->
-        Needs_count
-          ("the operand of `slice_from_array` is an array of unknown or \
-            variable length; " ^ unchecked_takes_count)
+  match string_literal_source context operand with
+  | Some (span, literal) ->
+      Unsliceable
+        ("the operand of `slice_from_array` is the string literal "
+        ^ quote (excerpt context span)
+        ^ ", whose slice would be writable; "
+        ^ string_literal_slice_fix context literal)
+  | None when pragma_from operand.span.first ->
+      Unsliceable
+        "the operand of `slice_from_array` holds a pragma line, which its \
+         second writing, as the operand of `sizeof`, would repeat"
+  | None -> (
+      match length with
+      | (Constant _ | Opaque) when array.category <> Lvalue ->
+          Unsliceable "the operand of `slice_from_array` is no lvalue"
+      | Constant _ | Opaque -> (
+          match Ctype.is_variably_modified array.expression_type with
+          | Answer false | Depends_on _ -> Sliceable
+          | Answer true ->
+              Needs_count
+                ("the operand of `slice_from_array` is variably modified, and \
+                  C would evaluate it again as the operand of `sizeof`; "
+                ^ unchecked_takes_count))
+      | Unknown | Variable ->
+          Needs_count
+            ("the operand of `slice_from_array` is an array of unknown or \
+              variable length; " ^ unchecked_takes_count))
 
 let slice_from_array context span (operand : Tree.expression) (array : typed) =
   let refuse = refuse_slice_operand context operand in
@@ -3284,26 +3336,6 @@ let comma_constant context span left right =
 let association_result (association : Tree.generic_association) =
   match association.node with
   | Association (_, result) | Default_association result -> result
-
-(* The expression whose value [expression] is, through parentheses and
-   the selections of _Generic and __builtin_choose_expr (6.5.1p5,
-   6.5.1.1p4) that [select] gives. *)
-let rec source_through select (expression : Tree.expression) =
-  match expression.node with
-  | Parenthesized inner -> source_through select inner
-  | Generic _ | Choose _ -> (
-      match select expression with
-      | Unknown.Answer chosen -> source_through select chosen
-      | Depends_on unknown -> Unknown.Depends_on unknown)
-  | _ -> Answer expression
-
-(* The source of an expression that has been typed, through the
-   selections that typing has made. *)
-let value_source context =
-  source_through (fun (selecting : Tree.expression) ->
-      match Hashtbl.find_opt context.typed.selections selecting.span with
-      | Some selection -> selection
-      | None -> invalid_arg "Expressions: an untyped selection")
 
 (* Design 7.1 rule 3: the name of the function is read as an array, of
    the instance's length, by an operation that takes it whole; any other
@@ -5453,51 +5485,40 @@ and convert_value context (expression : Tree.expression) ~instance
 (* The value of [converted], of [typed], refused where a slice is
    expected, named as written, with the builtin of section 8 that makes
    the slice where [takes] holds of the slice's element type. A string
-   literal is a slice only as rule 6 says. *)
+   literal written in place is a slice only as rule 6 says; one that a
+   selection gives has no fix, as [array_slicing] refuses it. *)
 and slicing_fix context (converted : Tree.expression) (typed : typed)
     ~takes =
   let written = excerpt context converted.span in
   let as_written what hint =
     Some { subject = what ^ " " ^ quote written; hint }
   in
-  let rec is_string_literal (e : Tree.expression) =
-    match e.node with
-    | String _ -> true
-    | Parenthesized inner -> is_string_literal inner
-    | _ -> false
-  in
   let call builtin arguments =
     quote (Printf.sprintf "%s(%s)" builtin arguments)
   in
   let unchecked = call "slice_unchecked" (written ^ ", n") in
-  if is_string_literal converted then
-    as_written "the string literal"
-      "; a string literal is a slice only where its target type is 'str'"
-  else
-    match typed.expression_type.shape with
-    | Array { element; length } when takes element -> (
-        match array_slicing context converted typed length with
-        | Sliceable ->
-            as_written "the array"
-              ("; slice it with " ^ call "slice_from_array" written)
-        | Needs_count _ ->
-            as_written "the array"
-              ("; slice its first n elements with " ^ unchecked)
-        | Unsliceable _ -> None)
-    | Array _ -> None
-    | _ -> (
-        match (value_type typed).shape with
-        | Pointer element when takes element ->
-            as_written "the pointer"
-              ("; slice the n elements it points to with " ^ unchecked)
-        | _ -> None)
-
-(* A string literal that rule 6 of section 8 lets denote a [str]: plain
-   or UTF-8 characters, whose elements C writes as [char]. *)
-and is_char_literal context literal =
-  match joined_encoding context literal with
-  | Plain | Utf8 -> true
-  | Char16 | Char32 | Wide -> false
+  match (Try_plan.without_parentheses converted).node with
+  | String literal ->
+      as_written "the string literal"
+        ("; " ^ string_literal_slice_fix context literal)
+  | _ -> (
+      match typed.expression_type.shape with
+      | Array { element; length } when takes element -> (
+          match array_slicing context converted typed length with
+          | Sliceable ->
+              as_written "the array"
+                ("; slice it with " ^ call "slice_from_array" written)
+          | Needs_count _ ->
+              as_written "the array"
+                ("; slice its first n elements with " ^ unchecked)
+          | Unsliceable _ -> None)
+      | Array _ -> None
+      | _ -> (
+          match (value_type typed).shape with
+          | Pointer element when takes element ->
+              as_written "the pointer"
+                ("; slice the n elements it points to with " ^ unchecked)
+          | _ -> None))
 
 (* The try at [span] converts the value that its holder reads. *)
 and convert_try context span conversion =

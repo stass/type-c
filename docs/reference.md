@@ -1157,7 +1157,10 @@ str             is slice(const char)
    No option removes the check; `s.data[i]` is the unchecked access.
 2. `slice_from_array(a)` is the slice of all of the array lvalue `a`, of
    type `T[N]`, with length `N`. It takes no pointer, no variable length
-   array and no array of unknown bound [slice-operand]; an array of
+   array, no array of unknown bound and no string literal, even in
+   parentheses or selected by `_Generic` [slice-operand]: a plain or
+   UTF-8 one is a `str` instead (rule 6), and a wide one is sliced
+   through an array that it initialises. An array of
    arrays is refused because an array is no type argument
    [type-argument]. The C compiler refuses an array of elements of
    size 0. The operand declares no tag,

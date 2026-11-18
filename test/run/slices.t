@@ -41,7 +41,8 @@ trap instruction raises.
   >   return total;
   > }
   > static size_t length(str s) { return s.len; }
-  > static str word(int which) { return which ? "yes" : slice_from_array("no"); }
+  > static char no[] = "no";
+  > static str word(int which) { return which ? "yes" : slice_from_array(no); }
   > static void index_once(void) {
   >   calls = 0;
   >   int x = counted(all)[at(2)];
