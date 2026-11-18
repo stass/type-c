@@ -1863,10 +1863,12 @@ let constructors () =
   (* An ordinary identifier of the name does not stand in the way
      (design 3.3). *)
   accepts ~file (variant ^ "int A; e x = A; int *p = &A;");
-  (* Without a target type, the name is looked up as in C. *)
-  rejects ~file (in_function "(void)A; return v;") "is not declared";
+  (* Without a target type, the name is looked up as in C, and the
+     refusal names the variant that has the constructor. *)
+  rejects ~file (in_function "(void)A; return v;")
+    "'A' is a constructor of 'e'";
   rejects ~file (in_function "int i = B(1, 0); return v;")
-    "is not declared";
+    "'B' is a constructor of 'e'";
   constructor_error "return e.C;"
     "the variant 'e' has no constructor 'C'";
   constructor_error "return e.B;" "the constructor 'B' takes arguments";

@@ -604,6 +604,10 @@ type context = {
       (** the reading of the name at the token that typing recorded
           first, else the one that the function gives, which it
           records *)
+  visible_variants : Tree.span -> Tree.type_declaration list;
+      (** the declarations of the variants, the universe's and the
+          unit's, whose names are in scope at the span, the latest
+          first *)
   needs_complete : Ctype.t -> unit;
   slice_instance : Tree.span -> Ctype.t -> Ctype.t;
       (** the instance of the universe [slice] over an element type that

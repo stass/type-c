@@ -73,5 +73,5 @@ say, as for any name (design 13.5).
   > int y = sizeof(B(1));
   > EOF
   $ ./golden.exe read.tc
-  read.tc:2: error: 'B' is not declared (C11 6.5.1p2)
+  read.tc:2: error: 'B' is a constructor of 'v', written without its variant only where a variant with it is expected; here none is, so write the variant before it, as 'v.B' [constructor-expression]
   [1]

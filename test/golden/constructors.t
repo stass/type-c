@@ -163,32 +163,33 @@ Constructors are refused where they do not fit.
   [1]
   $ printf 'type e = | A;\nint n = A;\n' > untargeted.tc
   $ ./golden.exe untargeted.tc
-  untargeted.tc:2: error: 'A' is not declared (C11 6.5.1p2)
+  untargeted.tc:2: error: 'A' is a constructor of 'e', written without its variant only where a variant with it is expected; here a value of type 'int' is expected [constructor-expression]
   [1]
 
-A constructor of `option` or `result` alone where no instance of it is
-expected names nothing either; the message says which variant it
-belongs to and what is expected there. C text names no constructor, so
-its message says where constructors are written.
+A constructor alone where no variant with it is expected names nothing;
+the message says which variant in scope has it, the one declared last,
+and what is expected there. C text names no constructor, so its message
+says where constructors are written. Out of its variant's scope, the
+name is undeclared.
 
   $ printf 'void f(void) { (void)Err(1); }\n' > untargeted_err.tc
   $ ./golden.exe untargeted_err.tc
-  untargeted_err.tc:1: error: 'Err' names a constructor only where a variant with it is expected, such as 'result(T, E)'; here none is, so write the variant before it, as 'result(T, E).Err' with its type arguments [constructor-expression]
+  untargeted_err.tc:1: error: 'Err' is a constructor of 'result(T, E)', written without its variant only where a variant with it is expected; here none is, so write the variant before it, as 'result(T, E).Err' with its type arguments [constructor-expression]
   [1]
   $ printf 'int n = None;\n' > untargeted_none.tc
   $ ./golden.exe untargeted_none.tc
-  untargeted_none.tc:1: error: 'None' names a constructor only where a variant with it is expected, such as 'option(T)'; here a value of type 'int' is expected [constructor-expression]
+  untargeted_none.tc:1: error: 'None' is a constructor of 'option(T)', written without its variant only where a variant with it is expected; here a value of type 'int' is expected [constructor-expression]
   [1]
   $ cat > other_variant.tc <<'EOF'
   > type err = | NoMemory | BadInput(int code);
   > err g(void) { return (Err(NoMemory)); }
   > EOF
   $ ./golden.exe other_variant.tc
-  other_variant.tc:2: error: 'Err' names a constructor only where a variant with it is expected, such as 'result(T, E)'; here a value of type 'err' is expected [constructor-expression]
+  other_variant.tc:2: error: 'Err' is a constructor of 'result(T, E)', written without its variant only where a variant with it is expected; here a value of type 'err' is expected [constructor-expression]
   [1]
   $ printf '# 1 "c.h" 1\nint n = None;\n' > c_text_none.tc
   $ ./golden.exe c_text_none.tc
-  c.h:1: error: 'None' is not declared (C11 6.5.1p2); a constructor such as that of 'option(T)' is written only in a Type-C file, a .tc or .tci
+  c.h:1: error: 'None' is not declared (C11 6.5.1p2); as a constructor of 'option(T)' it is written only in a Type-C file, a .tc or .tci
   [1]
   $ cat > c_text_err.tc <<'EOF'
   > type e2 = | Bad;
@@ -196,8 +197,63 @@ its message says where constructors are written.
   > static result(int, e2) h(void) { return (Err(Bad)); }
   > EOF
   $ ./golden.exe c_text_err.tc
-  c.h:1: error: 'Err' is not declared (C11 6.5.1p2); a constructor such as that of 'result(T, E)' is written only in a Type-C file, a .tc or .tci
+  c.h:1: error: 'Err' is not declared (C11 6.5.1p2); as a constructor of 'result(T, E)' it is written only in a Type-C file, a .tc or .tci
   [1]
+  $ cat > own_variant.tc <<'EOF'
+  > type err = | NoMemory | Bad;
+  > int f(void) {
+  >   int x = NoMemory;
+  >   return x;
+  > }
+  > EOF
+  $ ./golden.exe own_variant.tc
+  own_variant.tc:3: error: 'NoMemory' is a constructor of 'err', written without its variant only where a variant with it is expected; here a value of type 'int' is expected [constructor-expression]
+  [1]
+  $ cat > own_ok.tc <<'EOF'
+  > type res = | Ok | Failed;
+  > void f(void) { (void)Ok; }
+  > EOF
+  $ ./golden.exe own_ok.tc
+  own_ok.tc:2: error: 'Ok' is a constructor of 'res', written without its variant only where a variant with it is expected; here none is, so write the variant before it, as 'res.Ok' [constructor-expression]
+  [1]
+  $ cat > own_generic.tc <<'EOF'
+  > type list(T) = | Nil | Cons(T head, list(T) *tail);
+  > void f(void) { (void)Nil; }
+  > EOF
+  $ ./golden.exe own_generic.tc
+  own_generic.tc:2: error: 'Nil' is a constructor of 'list(T)', written without its variant only where a variant with it is expected; here none is, so write the variant before it, as 'list(T).Nil' with its type arguments [constructor-expression]
+  [1]
+  $ cat > out_of_scope.tc <<'EOF'
+  > void f(void) {
+  >   {
+  >     type err = | NoMemory | Bad;
+  >   }
+  >   int x = NoMemory;
+  > }
+  > EOF
+  $ ./golden.exe out_of_scope.tc
+  out_of_scope.tc:5: error: 'NoMemory' is not declared (C11 6.5.1p2)
+  [1]
+  $ cat > c_text_own.tc <<'EOF'
+  > type e3 = | Missing;
+  > # 1 "c.h" 1
+  > static int h(void) { return Missing; }
+  > EOF
+  $ ./golden.exe c_text_own.tc
+  c.h:1: error: 'Missing' is not declared (C11 6.5.1p2); as a constructor of 'e3' it is written only in a Type-C file, a .tc or .tci
+  [1]
+
+A constructor is no function, so its name in parentheses is not called.
+
+  $ printf 'option(int) f(void) { return (Some)(1); }\n' > parenthesized.tc
+  $ ./golden.exe parenthesized.tc
+  parenthesized.tc:1: error: 'Some' is a constructor of 'option(T)', not a function, so it is not called in parentheses; write 'Some(...)' [constructor-expression]
+  [1]
+  $ printf 'type e = | A | B(int v);\ne f(void) { return (A)(1); }\n' > parenthesized_unit.tc
+  $ ./golden.exe parenthesized_unit.tc
+  parenthesized_unit.tc:2: error: 'A' is a constructor of 'e', not a function, so it is not called in parentheses; write 'A' [constructor-expression]
+  [1]
+
   $ cat > targeted_none.tc <<'EOF'
   > option(int) o = None;
   > void f(void) { (void)result(int, int).Err(1); }

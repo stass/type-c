@@ -758,6 +758,7 @@ type context = {
   binding : Tree.identifier -> Tree.declared -> Ctype.t -> unit;
   written_name : Tree.declared -> string -> string;
   name_reading : int -> (unit -> name_reading) -> name_reading;
+  visible_variants : Tree.span -> Tree.type_declaration list;
   needs_complete : Ctype.t -> unit;
   slice_instance : Tree.span -> Ctype.t -> Ctype.t;
   block_literal : unit -> unit;
@@ -1837,10 +1838,14 @@ let bound_elsewhere context span name binder =
           (quote (excerpt context pattern_span))
           location.file location.line scope))
 
+(* The pattern of the enclosing function that binds [name], if any. *)
+let binder_of context name =
+  let binders = context.typed.enclosing.binders in
+  Option.bind binders (fun binders -> Hashtbl.find_opt binders name)
+
 (* 6.5.1p2: a name that the parser finds no declaration of. *)
 let undeclared context span name =
-  let binders = context.typed.enclosing.binders in
-  match Option.bind binders (fun binders -> Hashtbl.find_opt binders name) with
+  match binder_of context name with
   | Some binder -> bound_elsewhere context span name binder
   | None ->
       context.fail span
@@ -3893,60 +3898,141 @@ let constructor_expression context position (whole : Tree.expression) =
       Some (qualified_constructor context variant constructor, Some arguments)
   | _ -> None
 
-(* The constructor of a universe variant that [expression] names alone
-   or calls, where the parser finds the name declared as nothing else. *)
-let stray_constructor (expression : Tree.expression) =
+(* How a name that the parser finds declared as nothing else stands
+   where it may mean a constructor. *)
+type stray_form =
+  | Alone_or_called  (** [C] or [C(arguments)] *)
+  | Called_in_parentheses  (** [(C)(arguments)] *)
+
+(* The undeclared name that [callee] is, in parentheses. *)
+let rec parenthesized_name (callee : Tree.expression) =
+  match callee.node with
+  | Parenthesized { node = Identifier { name; resolution = Undeclared }; _ }
+    ->
+      Some name
+  | Parenthesized inner -> parenthesized_name inner
+  | _ -> None
+
+(* The undeclared name that [expression] is, calls, or calls in
+   parentheses. An undeclared name may still be a builtin, which a
+   constructor never shadows: every builtin is spelled with a reserved
+   identifier, which no constructor may be. *)
+let stray_name (expression : Tree.expression) =
   match expression.node with
   | Identifier { name; resolution = Undeclared }
   | Call
       { callee = { node = Identifier { name; resolution = Undeclared }; _ };
         _ } ->
-      Universe.find_constructor name
+      Some (Alone_or_called, name)
+  | Call { callee; _ } ->
+      Option.map
+        (fun name -> (Called_in_parentheses, name))
+        (parenthesized_name callee)
   | _ -> None
 
-(* 6.5.1p2 and design 3.3: such a constructor names nothing where no
-   variant with it is expected, and C text names no constructor at all
-   (design 2.1). A variant of the unit may have a constructor of the
-   same name, so the refusal gives the universe variant as an example
-   only, and says what is expected there or where constructors are
-   written. *)
-let stray_constructor_message context span position
-    (constructor : Universe.constructor) =
-  let name = quote constructor.constructor_name
-  and variant = quote constructor.variant_head in
-  let named_only =
+(* A variant declaration with the constructor of a name. *)
+type declared_constructor = {
+  variant : Tree.type_declaration;
+  constructor : Tree.constructor;
+}
+
+let declared_constructor name (variant : Tree.type_declaration) =
+  let named (c : Tree.constructor) = (c.node.name.node :> string) = name in
+  match variant.node.definition with
+  | Variant { constructors; _ } ->
+      Option.map
+        (fun constructor -> { variant; constructor })
+        (List.find_opt named constructors)
+  | Incomplete_variant | Alias _ | Distinct _ | Record_alias _ -> None
+
+(* The constructor [name] of the variant declared last of those in scope
+   at [span]: the innermost, or the unit's over the universe's, which is
+   the one most likely meant. *)
+let constructor_in_scope context (span : Tree.span) name =
+  List.find_map (declared_constructor name) (context.visible_variants span)
+
+(* A variant as its declaration writes it, as 'err' or 'result(T, E)'. *)
+let variant_head (declaration : Tree.type_declaration) =
+  let name = (declaration.node.name.node :> string) in
+  match declaration.node.type_parameters with
+  | [] -> name
+  | parameters ->
+      let parameter (written : Tree.parameter_name) =
+        (written.name.node :> string)
+      in
+      name ^ "(" ^ String.concat ", " (List.map parameter parameters) ^ ")"
+
+(* The constructor qualified by its variant, with what a generic one
+   still needs. *)
+let qualified_example found name =
+  let qualified = quote (variant_head found.variant ^ "." ^ name) in
+  match found.variant.node.type_parameters with
+  | [] -> qualified
+  | _ :: _ -> qualified ^ " with its type arguments"
+
+(* The constructor as a constructor expression writes it. *)
+let called_example found name =
+  match found.constructor.node.fields with
+  | [] -> quote name
+  | _ :: _ -> quote (name ^ "(...)")
+
+(* 6.5.1p2 and design 3.3: a constructor names nothing where no variant
+   with it is expected, C text names no constructor at all (design 2.1),
+   and a constructor is no function, so its name in parentheses is not
+   called. The refusal says which variant has the constructor and what
+   the position expects, or how the constructor is written. *)
+let stray_constructor_message context span position form found =
+  let name = (found.constructor.node.name.node :> string) in
+  let quoted = quote name and variant = quote (variant_head found.variant) in
+  let unqualified_only =
     Printf.sprintf
-      "%s names a constructor only where a variant with it is expected, \
-       such as %s"
-      name variant
+      "%s is a constructor of %s, written without its variant only where a \
+       variant with it is expected"
+      quoted variant
   in
-  match (is_type_c_text context span, position) with
-  | false, _ ->
+  match (is_type_c_text context span, form, position) with
+  | false, _, _ ->
       Rule.c_text
         (Printf.sprintf
-           "%s is not declared (C11 6.5.1p2); a constructor such as that of \
-            %s is written only in a Type-C file, a .tc or .tci"
-           name variant)
-  | true, (Targeted t | Listed t) ->
-      constructor_message
-        (Printf.sprintf "%s; here a value of type %s is expected" named_only
-           (quote (Type_name.of_ctype t)))
-  | true, (Untargeted | Discarded | Discarded_branch) ->
+           "%s is not declared (C11 6.5.1p2); as a constructor of %s it is \
+            written only in a Type-C file, a .tc or .tci"
+           quoted variant)
+  | true, Called_in_parentheses, _ ->
       constructor_message
         (Printf.sprintf
-           "%s; here none is, so write the variant before it, as %s with \
-            its type arguments"
-           named_only
-           (quote
-              (constructor.variant_head ^ "." ^ constructor.constructor_name)))
+           "%s is a constructor of %s, not a function, so it is not called \
+            in parentheses; write %s"
+           quoted variant (called_example found name))
+  | true, Alone_or_called, (Targeted t | Listed t) ->
+      constructor_message
+        (Printf.sprintf "%s; here a value of type %s is expected"
+           unqualified_only
+           (quote (Type_name.of_ctype t)))
+  | true, Alone_or_called, (Untargeted | Discarded | Discarded_branch) ->
+      constructor_message
+        (Printf.sprintf
+           "%s; here none is, so write the variant before it, as %s"
+           unqualified_only
+           (qualified_example found name))
+
+(* The constructor that a stray name means, if any. A binding used past
+   its scope is refused as one, whatever its spelling. *)
+let stray_constructor context (expression : Tree.expression) =
+  match stray_name expression with
+  | Some (_, name) when Option.is_some (binder_of context name) -> None
+  | Some (form, name) ->
+      Option.map
+        (fun found -> (form, found))
+        (constructor_in_scope context expression.span name)
+  | None -> None
 
 (* Refuses before [expression_node] would type the name as undeclared. *)
 let refuse_stray_constructor context position (expression : Tree.expression) =
-  match stray_constructor expression with
-  | Some constructor ->
+  match stray_constructor context expression with
+  | Some (form, found) ->
       context.fail expression.span
-        (stray_constructor_message context expression.span position
-           constructor)
+        (stray_constructor_message context expression.span position form
+           found)
   | None -> ()
 
 (* Try (design 5.1) *)

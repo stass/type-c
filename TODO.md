@@ -81,20 +81,17 @@ The items are ordered by how often real code meets them.
   coverage alone, next to `Shown.cut` as a bound on message text. The
   shared-arm refusal may leave out the label that binds when it is past
   the eighth; name that one first.
-- [Low] A constructor of the unit's own variant where no variant with
-  it is expected (`int x = NoMemory;`, or any in C text) reads "'NoMemory'
-  is not declared (C11 6.5.1p2)", where a universe constructor is told
-  its variant and what is expected (`Expressions.stray_constructor`).
-  That refusal can only give the universe variant as an example: a unit
-  variant with a constructor `Ok` gets 'result(T, E).Ok' as its fix; a
-  pattern binding named `Ok`, used past its scope, gets it in place of
-  the binding's message; and `(Some)(1)` is told no variant is
-  expected. Looking the name up among the constructors of the visible
-  variants would cover all of these and could replace `Universe.constructors`, which
-  reads the universe text a second time beside the parser, as
-  `Ctype.result_ok` and `result_err` spell two of its names a third time
-  (`test_naming` pins the three together). Source: review cases 31 and
-  32 (Pilot B); probe.
+- [Low] The refusal of a constructor where no variant with it is
+  expected names the variant by its declaration's name, and its fix
+  qualifies the constructor with that name, though an ordinary
+  identifier may hide it at the use: `int e = 0; (void)A;` is told to
+  write 'e.A', and `int result = 0; (void)Err(1);` 'result(T, E).Err'.
+  Ask the parser's scopes whether the name still denotes the variant
+  there, and leave the qualified fix out where it does not.
+- [Low] `Ctype.result_ok` and `result_err` spell two constructor names
+  that the universe text declares; derive them from result's
+  declaration (its constructors through `Ctype.constructors`), so the
+  universe text is their one source.
 - [Low] A binding written with a C type, `Circle(double r)`, is refused
   by the parser, which does not know the field's type, so its fix names
   both forms ("write `r` ... (at a field of a variant type, a typedef

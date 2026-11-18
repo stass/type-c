@@ -35,37 +35,6 @@ let declared_names =
     (fun line -> Scanf.sscanf line "type %[a-z_]" Fun.id)
     declaration_lines
 
-(** A constructor of a variant of the universe text, and the head of
-    that variant's declaration, such as [result(T, E)]. *)
-type constructor = { constructor_name : string; variant_head : string }
-
-(* A line [type head = | C1 | C2(...);] declares a variant: its
-   definition begins with [|], which no other definition does, and each
-   constructor begins after a [|]. The unit tests pin the result, so a
-   universe line that this reading misses fails them. *)
-let line_constructors line =
-  let equals = String.index line '=' in
-  let keyword = String.length "type " in
-  let variant_head = String.trim (String.sub line keyword (equals - keyword)) in
-  let definition =
-    String.trim (String.sub line (equals + 1) (String.length line - equals - 1))
-  in
-  let constructor alternative =
-    let constructor_name = Scanf.sscanf alternative " %[A-Za-z0-9_]" Fun.id in
-    { constructor_name; variant_head }
-  in
-  match String.split_on_char '|' definition with
-  | "" :: alternatives -> List.map constructor alternatives
-  | _ -> []
-
-let constructors = List.concat_map line_constructors declaration_lines
-
-(** The constructor of a universe variant that [name] names, if any. *)
-let find_constructor name =
-  List.find_opt
-    (fun constructor -> constructor.constructor_name = name)
-    constructors
-
 let declared name = { name; meaning = Declared }
 
 let slice_operator (name, operator) =

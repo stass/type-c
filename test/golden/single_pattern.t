@@ -303,6 +303,20 @@ statement (4.6 rule 4).
   otherwise.tc:6: error: 'head' is not declared here (C11 6.5.1p2); the test 'if (case Cons(head, _) = v)' at otherwise.tc:3 binds it only in its statement
   [1]
 
+A binding spelled as a constructor is still a binding past its scope.
+
+  $ cat > bound_ok.tc <<'EOF'
+  > type wrap = | Ok(int v) | Nothing;
+  > int f(wrap w) {
+  >   if (case Ok(Ok) = w)
+  >     return 1;
+  >   return Ok;
+  > }
+  > EOF
+  $ ./golden.exe bound_ok.tc
+  bound_ok.tc:5: error: 'Ok' is not declared here (C11 6.5.1p2); the test 'if (case Ok(Ok) = w)' at bound_ok.tc:3 binds it only in its statement
+  [1]
+
 A use of a binding after the test, or after a loop's test, is refused
 by naming the test whose statement binds it.
 

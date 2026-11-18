@@ -312,6 +312,9 @@ type state = {
   type_declarations : (Tree.declaration_id, Tree.type_declaration) Hashtbl.t;
   incomplete_variants : (Tree.reference, Ctype.record_tag) Hashtbl.t;
       (* the structure of each [type N;], which its variant completes *)
+  mutable variants : Tree.scoped_type_declaration list;
+      (* every variant declaration read, the universe's and the unit's,
+         generic or not, the latest first *)
   packed_earlier : (int, Tree.attribute) Hashtbl.t;
       (* by the identity of an enumeration, the first [packed] on a
          specifier of it without its list: GCC 16 ignores it at the list
@@ -1786,6 +1789,24 @@ let return_type (function_type : Ctype.t) : Ctype.t Unknown.answer =
   | Array _ ->
       invalid_arg "Declarations: a function definition of no function type"
 
+let note_variant state (scoped : Tree.scoped_type_declaration) =
+  match scoped.declaration.node.definition with
+  | Variant _ -> state.variants <- scoped :: state.variants
+  | Incomplete_variant | Alias _ | Distinct _ | Record_alias _ -> ()
+
+(* The variant declarations whose scope holds [use], the latest first:
+   the names of a variant denote it from its declaration to the end of
+   the scope that holds it (design 10.1 rule 6). *)
+let visible_variants state (use : Tree.span) =
+  let holds (scoped : Tree.scoped_type_declaration) =
+    scoped.declaration.span.first <= use.first
+    && use.last <= scoped.scope_end
+  in
+  List.filter_map
+    (fun (scoped : Tree.scoped_type_declaration) ->
+      if holds scoped then Some scoped.declaration else None)
+    state.variants
+
 let rec read_specifiers state (specifiers : Tree.specifiers) =
   let span = (List.hd specifiers).span in
   let sorted = sort_specifiers specifiers in
@@ -2951,6 +2972,7 @@ and read_type_declaration state (scoped : Tree.scoped_type_declaration) =
   let declaration = scoped.declaration in
   Hashtbl.replace state.type_declarations declaration.node.declared.id
     declaration;
+  note_variant state scoped;
   match declaration.node.type_parameters with
   | [] -> Some (read_named_type state scoped)
   | _ :: _ ->
@@ -4402,6 +4424,7 @@ and typing state : Expressions.context =
     binding = bind_binding state;
     written_name = written_name state;
     name_reading = name_reading state;
+    visible_variants = visible_variants state;
     needs_complete = needs_complete state;
     slice_instance = slice_instance state;
     block_literal = (fun () -> note_block_literal state);
@@ -5021,6 +5044,7 @@ let read_universe_generic state
   | { type_parameters = []; definition = Alias alias; declared; _ } ->
       Hashtbl.replace state.universe_aliases (Tree.In_tree declared.id) alias
   | { name; _ } ->
+      note_variant state item.declaration;
       let anchor = Some (Tree.universe_anchor item) in
       state.external_facts <- declaration_state state.tags anchor view;
       read_generic state item.declaration;
@@ -5161,6 +5185,7 @@ let read target ~product text (scopes : Parser.scopes) =
       applied_at = Ctype.Instances.empty;
       applied_generics = Hashtbl.create 16;
       slice_generic = None;
+      variants = [];
       instance_bytes = 0;
       copy_bytes = 0;
       longest_instance_code = 0;
