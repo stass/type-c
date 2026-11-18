@@ -48,6 +48,30 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
+- [Medium] A distinct value refused by a reader that is no operator
+  still says "this operation": `Expressions.operation_of` falls back
+  to `Unnamed_operation`, the default reader of the `typed` closure in
+  `expression`, so a bound of `slice_sub`, the count of
+  `slice_unchecked` (which `refuse_slice_index` would name) and the
+  operand of `va_arg` with `id` values get it. Delete
+  `Unnamed_operation` and make every reader name its role.
+- [Medium] The role a refusal names is a plain string copied at each
+  use: "the value of an enumeration constant" twice in
+  `Declarations`, "an index of a designator" twice in `Expressions`,
+  and the scrutinee of a match and the operand of a single-pattern
+  test each once as `~role` and once as `~what` of
+  `scrutinee_variant`. Bind each role once and pass the binding.
+- [Medium] Two message lists still join every name they are given:
+  the fields that void removes (`void_fields_note`, "the field(s)")
+  and the declarations that name one type (`Several_names` in
+  `Declarations`). Move `Expressions.listed` into `Shown` over
+  `Shown.few` and make it the only way message text joins names; then
+  `Shown.few` can take a head and a tail, so the empty list that
+  `listed` refuses with `invalid_arg` cannot be built.
+- [Low] A distinct scrutinee of a match or a single-pattern test is
+  told to cast it to its representation, which is never a variant, so
+  the cast only leads to the next refusal; refuse it as no variant.
+
 - [Low] The refusal of a constructor where no variant with it is
   expected names the variant by its declaration's name, and its fix
   qualifies the constructor with that name, though an ordinary

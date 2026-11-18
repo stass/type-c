@@ -2292,6 +2292,51 @@ likely step, before the backend would name their C encodings.
   $ ./golden.exe chosen.tc
   chosen.tc:8: error: a value of type 'double' does not convert to 'num'; make one with 'D(1.5)' (C11 6.5.16.1p1)
   [1]
+  $ { cat conversions.h; printf 'option(int *) z(void) { return 0; }\n'; } > zero_pointer.tc
+  $ ./golden.exe zero_pointer.tc
+  zero_pointer.tc:7: error: a value of type 'int' does not convert to 'option(int *)'; write 'None' for no value (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void n(option(int) o) { option(int) *p = o; (void)p; }\n'; } > address.tc
+  $ ./golden.exe address.tc
+  address.tc:7: error: a value of type 'option(int)' does not convert to 'option(int) *'; write '&o' for a pointer to it (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void n(void) { option(int) *p = g(); (void)p; }\n'; } > unaddressed.tc
+  $ ./golden.exe unaddressed.tc
+  unaddressed.tc:7: error: a value of type 'option(int)' does not convert to 'option(int) *' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'int m(error e) { return e; }\n'; } > fieldless.tc
+  $ ./golden.exe fieldless.tc
+  fieldless.tc:7: error: a value of type 'error' does not convert to 'int'; match it to tell which constructor made it (C11 6.5.16.1p1)
+  [1]
+
+A hint refuses nothing of its own: a value whose class depends on a
+type parameter is no null pointer constant it may name, and a
+conditional in a braced initialiser names no subobject.
+
+  $ { cat conversions.h; printf 'generic(T) option(T *) d(T *p) { (void)p; return sizeof(T) - sizeof(T); }\n'; } > dependent.tc
+  $ ./golden.exe dependent.tc
+  dependent.tc:7: error: a value of type 'unsigned long' does not convert to 'option(T *)'; make one with a constructor of 'option(T *)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'struct outer { struct { int a; } s; int b; };\nvoid o(int c, struct outer x) { struct outer y = { c ? 1 : x.s }; (void)y; }\n'; } > subobject.tc
+  $ ./golden.exe subobject.tc
+  subobject.tc:8: error: the operands have types that the operator does not take (C11 6.5.15p3)
+  [1]
+  $ { cat conversions.h; printf 'option(int) z(int c, int d) { return c ? (d ? Some(1) : 0) : None; }\n'; } > nested_branch.tc
+  $ ./golden.exe nested_branch.tc
+  nested_branch.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with 'Some(0)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'option(int) z(int c, error e) { return Some(c ? 1 : e); }\n'; } > argument_branch.tc
+  $ ./golden.exe argument_branch.tc
+  argument_branch.tc:7: error: a value of type 'error' does not convert to 'int'; match it to tell which constructor made it (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void z(int c) { option(int) a[1] = { c ? Some(1) : 0 }; (void)a; }\n'; } > element_branch.tc
+  $ ./golden.exe element_branch.tc
+  element_branch.tc:7: error: a value of type 'int' does not convert to 'option(int)'; make one with 'Some(0)' (C11 6.5.16.1p1)
+  [1]
+  $ { cat conversions.h; printf 'void n(const option(int) o) { option(int) *p = o; (void)p; }\n'; } > const_address.tc
+  $ ./golden.exe const_address.tc
+  const_address.tc:7: error: a value of type 'option(int)' does not convert to 'option(int) *' (C11 6.5.16.1p1)
+  [1]
 
 The partners convert nothing: try and constructors take the steps, a
 zero initialiser zeroes the option, and a braced list reaches a

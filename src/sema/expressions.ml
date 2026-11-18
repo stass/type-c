@@ -460,7 +460,8 @@ end
    its conversion where it places it; and that of a branch of a
    conditional, whose value converts as the composite type of both
    branches does (6.5.15p6), which the conditional's own position
-   checks. *)
+   checks; and that of the argument for a field of a constructor, whose
+   conversion the constructor checks to name the field. *)
 type position =
   | Untargeted
   | Targeted of Ctype.t
@@ -1296,6 +1297,19 @@ let is_type_c_record (t : Ctype.t) =
   | Record { record_name = Variant_name _ | Instance_name _; _ } -> true
   | Record _ | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
   | Array _ | Function _ | Unknown_type _ ->
+      false
+
+(* Whether a value in a braced initialiser at a subobject of type [t]
+   may initialise a member of it through elided braces (6.7.9p20): a
+   structure, union or array of C, or a type that typec does not know.
+   A variant or an instance takes only a value of its own type
+   (design 5). *)
+let enters_by_elided_braces (t : Ctype.t) =
+  match t.shape with
+  | Record _ -> not (is_type_c_record t)
+  | Array _ | Unknown_type _ -> true
+  | Void | Arithmetic _ | Enum _ | Pointer _ | Distinct _ | Va_list
+  | Function _ ->
       false
 
 let mentions_type_c_record t = Ctype.has_part is_type_c_record t
@@ -4493,11 +4507,15 @@ and assigned context expression ~target typed =
    the types as written. The record rule reads the written types, which
    are the seen ones wherever it applies, as no distinct type is a record
    (design 3.4), so its message names the types as written too. What is
-   left is C's own rule, which [refuse_unassignable] applies. *)
+   left is C's own rule, which [refuse_unassignable] applies. The value
+   converts as if assigned to an object of [target], which is complete
+   (6.3.2.1p1, 6.5.2.2p4), as a parameter's type in a prototype alone
+   need not be. *)
 and refuse_conversion ?(receiver = Assigned) context
     (converted : Tree.expression) target (typed : typed) =
   let span = converted.span in
   let target = Ctype.unqualified target in
+  context.needs_complete target;
   let source = value_type typed in
   let seen_target = type_as_seen context span target in
   let seen_source = type_as_seen context span source in
@@ -4565,8 +4583,21 @@ and refuse_unassignable context (converted : Tree.expression) ~receiver ~target
    [target] as by assignment (C11 6.5.16.1p1). Whether it is a null
    pointer constant is asked only where a pointer takes an integer, as
    asking refuses one that depends on a type parameter. *)
-and assignable context (converted : Tree.expression) ~(target : Ctype.t)
-    ~(source : Ctype.t) =
+and assignable context converted ~target ~source =
+  let may_be_null () = null_pointer_constant context converted <> Not_null in
+  converts_as_assigned context converted ~target ~source ~may_be_null
+
+(* [assignable] for a hint, which refuses nothing: an integer converts to
+   a pointer only where it is known to be a null pointer constant. *)
+and hint_assignable context converted ~target ~source =
+  let may_be_null () = null_pointer_class context converted = Null in
+  converts_as_assigned context converted ~target ~source ~may_be_null
+
+(* C11 6.5.16.1p1 for [converted], of type [source], and [target], where
+   [may_be_null] tells whether an integer may be a null pointer
+   constant. *)
+and converts_as_assigned context (converted : Tree.expression)
+    ~(target : Ctype.t) ~(source : Ctype.t) ~may_be_null =
   let span = converted.span in
   match (target.shape, source.shape) with
   | Unknown_type _, _ | _, Unknown_type _ -> true
@@ -4575,9 +4606,7 @@ and assignable context (converted : Tree.expression) ~(target : Ctype.t)
   | Pointer referenced, Pointer source_referenced ->
       pointer_assignable context span ~target:referenced
         ~source:source_referenced
-  | Pointer _, _ ->
-      Ctype.is_integer source = Answer true
-      && null_pointer_constant context converted <> Not_null
+  | Pointer _, _ -> Ctype.is_integer source = Answer true && may_be_null ()
   | ( ( Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
       | Array _ | Function _ ),
       _ ) ->
@@ -4585,8 +4614,8 @@ and assignable context (converted : Tree.expression) ~(target : Ctype.t)
 
 (* The step that likely gives what was meant where [converted], a value
    of type [source], does not convert to [target]: making the variant
-   [target] of it, reaching what the variant [source] holds, or a cast
-   between two scalars. *)
+   [target] of it, or reaching what the variant [source] holds. A hint
+   refuses nothing: it reads only what is typed and known already. *)
 and conversion_hint context converted ~(source : Ctype.t) ~(target : Ctype.t)
     =
   match (Ctype.as_variant target, Ctype.as_variant source) with
@@ -4600,16 +4629,19 @@ and conversion_hint context converted ~(source : Ctype.t) ~(target : Ctype.t)
    one constructor without fields for a null pointer, or a constructor
    whose one field takes it. *)
 and making_hint context (converted : Tree.expression) ~source ~target =
-  let constructors = hinted_constructors context target in
+  let constructors = known_constructors context target in
+  let holder =
+    holding_constructor context converted ~source ~target constructors
+  in
   let name (c : Ctype.constructor) = (c.constructor_name :> string) in
   if points_to context converted.span ~pointer:source target then
     Printf.sprintf "; write %s for the value it points to"
       (quote (scrutinee_text context (Pointed_to converted)))
   else
     match
-      ( is_null_pointer context converted source,
+      ( says_no_value context converted ~source holder,
         List.filter (Fun.negate has_fields) constructors,
-        holding_constructor context converted ~source ~target constructors )
+        holder )
     with
     | true, [ empty ], _ ->
         Printf.sprintf "; write %s for no value" (quote (name empty))
@@ -4619,11 +4651,11 @@ and making_hint context (converted : Tree.expression) ~source ~target =
     | _, _, None ->
         "; make one with a constructor of " ^ quote (Type_name.of_ctype target)
 
-(* The constructors of the variant [t] that a hint names; an instance
-   named only in a prototype is completed first, as a constructor
-   written there would complete it. *)
-and hinted_constructors context t =
-  context.needs_complete t;
+(* The constructors of the variant [t] that a hint may name. The
+   conversion has completed its target, and a value's type is complete;
+   a hint completes nothing, as completing an instance could refuse it
+   in place of the conversion. *)
+and known_constructors context t =
   Option.value (Ctype.constructors context.tags t) ~default:[]
 
 (* Whether [pointer] points to a type compatible with [target]. *)
@@ -4636,11 +4668,21 @@ and points_to context span ~(pointer : Ctype.t) target =
   | Function _ | Unknown_type _ ->
       false
 
-(* Whether [converted], of type [source], is a null pointer constant of
-   pointer type, which says "no value", as an integer 0 need not. *)
-and is_null_pointer context converted (source : Ctype.t) =
-  is_plain_void_pointer (Ctype.unqualified source)
-  && null_pointer_constant context converted = Null
+(* Whether [converted], of type [source], is a null pointer that says
+   "no value": a null pointer constant of pointer type, or an integer one
+   that the field of [holder] would take as a pointer; an integer 0 that
+   the field takes as a number is a value. *)
+and says_no_value context converted ~(source : Ctype.t) holder =
+  let holds_pointer (c : Ctype.constructor) =
+    match c.fields with
+    | [ field ] -> Ctype.is_pointer field.member_type = Answer true
+    | _ -> false
+  in
+  let takes_as_pointer =
+    match holder with Some c -> holds_pointer c | None -> false
+  in
+  null_pointer_class context converted = Null
+  && (is_plain_void_pointer (Ctype.unqualified source) || takes_as_pointer)
 
 (* The constructor of the variant [target] whose one field a value of
    type [source] converts to: the one whose field is of that very type,
@@ -4654,7 +4696,7 @@ and holding_constructor context converted ~source ~target constructors =
   in
   let takes c =
     match field_type c with
-    | Some field -> assignable context converted ~target:field ~source
+    | Some field -> hint_assignable context converted ~target:field ~source
     | None -> false
   in
   let same c =
@@ -4671,22 +4713,61 @@ and holding_constructor context converted ~source ~target constructors =
       List.find_opt (is_named Ctype.result_ok) takers
   | _ -> None
 
-(* The step that likely reaches what the variant [source] holds: try,
-   where it is a result whose Ok holds a value that converts to
-   [target], or else matching. *)
-and opening_hint context converted ~source ~target =
+(* The step that likely reaches what the variant [source] holds where it
+   does not convert to [target]: its address where [target] points to
+   it; try where it is a result whose Ok holds a value that converts to
+   [target]; matching, which tells its constructors apart where none of
+   them holds a value. *)
+and opening_hint context (converted : Tree.expression) ~source ~target =
+  let constructors = known_constructors context source in
   let ok_converts (c : Ctype.constructor) =
     match c.fields with
     | [ field ] ->
         is_named Ctype.result_ok c
-        && assignable context converted ~target
+        && hint_assignable context converted ~target
              ~source:(Ctype.unqualified field.member_type)
     | _ -> false
   in
-  let constructors = hinted_constructors context source in
-  if Ctype.as_result source <> None && List.exists ok_converts constructors
-  then "; take its value with try, or match it"
-  else "; match it to reach what it holds"
+  let opens_by_try =
+    Ctype.as_result source <> None && List.exists ok_converts constructors
+  in
+  let holds_nothing =
+    constructors <> [] && not (List.exists has_fields constructors)
+  in
+  match
+    ( points_to context converted.span ~pointer:target source,
+      opens_by_try,
+      holds_nothing )
+  with
+  | true, _, _ -> address_hint context converted ~target
+  | false, true, _ -> "; take its value with try, or match it"
+  | false, false, true -> "; match it to tell which constructor made it"
+  | false, false, false -> "; match it to reach what it holds"
+
+(* Taking the address of [converted] where the pointer [target] to it
+   was meant: only an lvalue has one (6.5.3.2p1), and [target] must keep
+   its qualifiers. *)
+and address_hint context (converted : Tree.expression) ~(target : Ctype.t) =
+  let typed = operand_typed context converted in
+  let written = excerpt context converted.span in
+  let address =
+    match converted.node with
+    | Identifier _ -> "&" ^ written
+    | _ -> "&(" ^ written ^ ")"
+  in
+  let takes_address =
+    match (Ctype.unqualified target).shape with
+    | Pointer referenced ->
+        typed.category = Lvalue
+        && pointer_assignable context converted.span ~target:referenced
+             ~source:typed.expression_type
+    | Void | Arithmetic _ | Enum _ | Record _ | Distinct _ | Va_list
+    | Array _ | Function _ | Unknown_type _ ->
+        false
+  in
+  if takes_address then
+    Printf.sprintf "; write %s for a pointer to it" (quote address)
+  else ""
 
 (* [typed], the value of [expression] in a braced initialiser, made a
    slice where [target] is one (design section 8 rule 5); the
@@ -5494,15 +5575,20 @@ and conditional_type context span position second third =
 
 (* Branches that have no type in common: where the conditional has a
    target type, one that does not convert to it is the likely mistake,
-   as in 'c ? Some(1) : 0', so its conversion is refused first. *)
+   as in 'c ? Some(1) : 0', so its conversion is refused first. A
+   [Listed] target that elided braces may enter decides nothing, as the
+   value may initialise only a member of it. *)
 and refuse_unconverted_branch context position branches =
+  let refuse target =
+    List.iter
+      (fun { branch; branch_typed } ->
+        refuse_conversion context branch target branch_typed)
+      branches
+  in
   match position with
-  | Targeted target | Listed target ->
-      List.iter
-        (fun { branch; branch_typed } ->
-          refuse_conversion context branch target branch_typed)
-        branches
-  | Untargeted | Discarded | Discarded_branch -> ()
+  | Targeted target -> refuse target
+  | Listed target when not (enters_by_elided_braces target) -> refuse target
+  | Listed _ | Untargeted | Discarded | Discarded_branch -> ()
 
 (* 6.5.15p6: a null pointer constant takes the other operand's type, a
    pointer to void makes the result one. Whether an operand of a value
@@ -5524,38 +5610,63 @@ and pointer_conditional context span (second, a) (third, b) =
       qualified_void_pointer context span a b
   | Not_null, Not_null -> composite_pointer context span a b
 
-(* 6.3.2.3p3: an integer constant expression of value 0, or one cast to
-   void *. *)
+(* 6.3.2.3p3: whether [candidate] is a null pointer constant, an
+   integer constant expression of value 0 or one cast to void *. Asking
+   refuses an integer that depends on a type parameter, as whether it is
+   one differs between arguments (design 7.1 rule 4). *)
 and null_pointer_constant context (candidate : Tree.expression) =
+  match zero_candidate context candidate with
+  | Some zero ->
+      refuse_dependent_integer context zero;
+      zero_constant context zero
+  | None -> Opaque_constant
+
+(* [null_pointer_constant] without refusing, as a hint asks it: an
+   integer that depends on a type parameter is opaque. *)
+and null_pointer_class context candidate =
+  match zero_candidate context candidate with
+  | Some zero -> zero_constant context zero
+  | None -> Opaque_constant
+
+(* The integer expression whose value 0 makes [candidate] a null pointer
+   constant: [candidate] or the operand of its cast to void *; none where
+   which expression [candidate] stands for depends on a type parameter. *)
+and zero_candidate context (candidate : Tree.expression) =
   match value_source context candidate with
-  | Depends_on _ -> Opaque_constant
+  | Depends_on _ -> None
   | Answer source -> (
       match source.node with
       | Cast { operand; _ }
         when is_plain_void_pointer
-               (operand_typed context source).expression_type
-        ->
-          zero_constant context operand
-      | _ -> zero_constant context source)
+               (operand_typed context source).expression_type ->
+          Some operand
+      | _ -> Some source)
+
+(* Refuses the integer [candidate] if it depends on a type parameter,
+   which [zero_constant] reads as opaque. *)
+and refuse_dependent_integer context candidate =
+  let typed = operand_typed context candidate in
+  if Ctype.is_integer typed.expression_type = Answer true then
+    refuse_dependent context candidate
 
 (* An operation that fails gives an opaque value rather than an error:
    this is no constant expression context. Whether an operand of unknown
    type is one is unknown too, and whether one that depends on a type
    parameter is one differs between arguments (design 7.1 rule 4). *)
-and zero_constant context candidate =
+and zero_constant context (candidate : Tree.expression) =
   let typed = operand_typed context candidate in
-  let is_integer = Ctype.is_integer typed.expression_type in
-  if is_integer = Answer true then refuse_dependent context candidate;
-  match (is_integer, operand_constant context candidate) with
-  | Depends_on _, _ -> Opaque_constant
-  | _, Integer_expression { value = Known value; flaw = None }
-    when Exact_integer.equal value Exact_integer.zero ->
-      Null
-  | _,
-      ( Integer_expression { value = Opaque; _ }
-      | Unevaluable _ ) ->
-      Opaque_constant
-  | _, (Integer_expression _ | Not_integer _) -> Not_null
+  let depends = dependence_at context candidate.span <> None in
+  match Ctype.is_integer typed.expression_type with
+  | Depends_on _ -> Opaque_constant
+  | Answer true when depends -> Opaque_constant
+  | Answer _ -> (
+      match operand_constant context candidate with
+      | Integer_expression { value = Known value; flaw = None }
+        when Exact_integer.equal value Exact_integer.zero ->
+          Null
+      | Integer_expression { value = Opaque; _ } | Unevaluable _ ->
+          Opaque_constant
+      | Integer_expression _ | Not_integer _ -> Not_null)
 
 (* 6.5.16p2, p3: the left operand is a modifiable lvalue, whose type after
    lvalue conversion the result has; a compound assignment takes what its
