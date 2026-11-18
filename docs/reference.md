@@ -1810,8 +1810,8 @@ The unit `ticket.tc` of [9.2](#92-private) with its dependency file,
 
 ```console
 $ typec -Wall -Wextra -Werror -Iinclude -MMD -c ticket.tc
-$ cat ticket.d
-ticket.o: ticket.tc include/ticket.tci
+$ grep -o '[a-z/]*\.tci' ticket.d
+include/ticket.tci
 $ typec -Iinclude --emit-c -o queue.i queue.tc
 $ cc -std=gnu17 -Wall -Wextra -Werror -c queue.i
 $ cc -o tickets queue.o ticket.o

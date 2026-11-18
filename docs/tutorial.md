@@ -1078,15 +1078,19 @@ To a build, `typec` is a C compiler, so a build changes in two places:
 the rule for a `.tc` file, which is the rule for a `.c` file, and the
 compiler's name, `CC=typec`. The dependency options work as for C, and
 the file lists each `.tci` that a source reads, so that make and ninja
-rebuild what a change reaches. The README gives the rules for [make,
+rebuild what a change reaches. It lists the other files that the
+backend reports as well, among them, with Apple clang, the
+`SDKSettings.json` of the macOS SDK. The README gives the rules for [make,
 ninja and CMake](../README.md#in-a-build), which its tests build with.
 Here the program is built as objects:
 
 <!-- stage: c8 -->
 ```console
 $ typec -Wall -Wextra -MMD -c conf.tc
-$ cat conf.d
-conf.o: conf.tc conf.tci conf.h units.h line.tci key.tci
+$ grep -o '[a-z]*\.tci' conf.d
+conf.tci
+line.tci
+key.tci
 $ typec -Wall -Wextra -c main.c line.tc key.tc load.tc
 $ typec main.o conf.o line.o key.o load.o -o conf
 $ ./conf demo.conf

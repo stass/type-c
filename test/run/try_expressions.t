@@ -404,8 +404,9 @@ Each line above has a partner that fails where the prelude is missing
 or wrong. Written where it stands as a statement expression that
 returns, each try of two runs in the order of the arguments that the
 backend chooses, which C leaves unspecified: GCC gives the error of b
-on x86-64 and that of a on AArch64, in place of typec's error of a.
-Either way one call alone runs, and its error is returned.
+on x86-64 and that of a on AArch64. One call alone runs, and its error
+is returned; only where the backend goes right to left does the
+partner differ from typec's error of a.
 
   $ typec --cc=$gcc --emit-c -o holders.i holders.tc
   $ sed '/^static result_int both(void)/,/^}/c\

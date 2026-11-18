@@ -1740,6 +1740,17 @@ types (design 13.3).
   nodes that share a range is outermost, and it holds only because
   Clang writes a node's range before its children. A field with each
   record's depth among the expressions would state it.
+- [Medium] own_rules (test/run/dependency_rules.sh) drops every
+  absolute path from a printed dependency rule, so a rule that leaked a
+  path of typec's temporary directory would pass; drop only paths
+  outside the test's directory and TMPDIR. The tests that age files to
+  a stamp (make_rule.t, ninja_rule.t, c_header.t) assume the file
+  system's clock steps between the stamp and the next touch, which a
+  1-2 s clock may not.
+- [Low] The partner of `two` in test/run/try_expressions.t tells a
+  missing prelude from typec's order only where the backend evaluates
+  arguments right to left (GCC on x86-64); a probe of the backend's
+  order would make it a control on every target.
 - [Low] test/run/target.t keys the expected plain-char signedness,
   long double size and wchar_t on `uname -sm` (x86-64, Linux aarch64,
   Darwin arm64), a hand list that each new host extends; take the

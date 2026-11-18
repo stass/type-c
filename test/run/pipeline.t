@@ -145,23 +145,22 @@ line emptied, since the backend would apply a definition that it reads.
 A dependency file comes from the preprocessing step. It is named as cc
 names it, and its target is the real output.
 
+  $ . ./dependency_rules.sh
   $ typec --cc=$clang -MD -c x.tc -o out/x.o
-  $ head -1 out/x.d | cut -d ' ' -f 1-2
-  out/x.o: x.tc
-  $ grep -c ' x.h' out/x.d
-  1
+  $ own_rules < out/x.d
+  out/x.o: x.tc x.h
   $ typec --cc=$gcc -MMD -MF out/deps -MT target -c x.tc
-  $ head -1 out/deps
+  $ own_rules < out/deps
   target: x.tc x.h
-  $ typec --cc=$clang -MD -c x.tc && grep -c ' x.h' x.d
-  1
+  $ typec --cc=$clang -MD -c x.tc && own_rules < x.d
+  x.o: x.tc x.h
 
 The long forms of the options are the same options, and only the
 preprocessing step gets them: the target query and the compile step of
 Clang would each write a dependency file of their own.
 
   $ typec --cc=$clang --write-user-dependencies -c x.tc -o out/long.o
-  $ cat out/long.d
+  $ own_rules < out/long.d
   out/long.o: x.tc x.h
   $ ls *.d
   x.d
@@ -170,14 +169,14 @@ Clang would each write a dependency file of their own.
 nothing, as cc does for a .c input: to stdout, or to the file of -o or
 -MF. The other inputs get the command line without the .tc ones.
 
-  $ typec --cc=$clang -MM -c x.tc
+  $ typec --cc=$clang -MM -c x.tc | own_rules
   x.o: x.tc x.h
-  $ typec --cc=$gcc -MM -MT t -o out/rule x.tc && cat out/rule
+  $ typec --cc=$gcc -MM -MT t -o out/rule x.tc && own_rules < out/rule
   t: x.tc x.h
   $ typec --cc=$clang --user-dependencies -MP -MF out/rules x.tc twice.c
-  $ cat out/rules
+  $ own_rules < out/rules
   twice.o: twice.c
-  $ typec --cc=$gcc -MM x.tc twice.c
+  $ typec --cc=$gcc -MM x.tc twice.c | own_rules
   x.o: x.tc x.h
   twice.o: twice.c
   $ typec --cc=$clang -M -o out/rule x.tc twice.c

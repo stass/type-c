@@ -24,6 +24,12 @@
  (action
   (run sh -c ". ./backends.sh && backends_report")))
 
+; The tests that print dependency rules print them through own_rules.
+
+(cram
+ (applies_to pipeline c_header make_rule)
+ (deps dependency_rules.sh))
+
 ; version.t compares the output of --version with the release that
 ; dune-project names.
 
