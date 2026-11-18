@@ -71,10 +71,11 @@ git worktree add ~/typec-old 5670550
 tools/hosts/run.sh --source ~/typec-old debian-amd64
 ```
 
-The arm64 hosts have known failures, explained in `TODO.md` under Test
-hosts: among them `test_small_stack` with `FAIL: the backtrace names
-the stage` on both, and `target.t`, `pipeline.t` and
-`tools/corpus/runner.t` with a missing C compiler on `debian-arm64`.
+The Alpine hosts and `debian-arm64` have known failures, explained in
+`TODO.md` under Test hosts: the sanitizer, `getcontext` and example
+tests on both Alpine hosts, which musl and the image cannot run, and
+every test that assembles with GCC 16 on `debian-arm64`, whose
+binutils does not know the directives that GCC 16 writes there.
 
 `tools/hosts/run.sh --corpus HOST LOG PROGRAM...` runs the corpus
 runner (see "Running the corpus") on the named programs in a container

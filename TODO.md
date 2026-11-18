@@ -1521,6 +1521,14 @@ emulation), and on FreeBSD 16.0-CURRENT over ssh, x86-64.
   needs and skips without it, with a `TYPEC_TEST_REQUIRE_` variable that
   the Debian hosts set, as `-m32`, the Arm backends and lldb do in
   `test/run/backends.sh`, or whether the image or the examples change.
+- [Critical] debian-arm64 fails nearly every test that assembles with
+  GCC: on arm64 GCC 16 writes the AArch64 build attributes
+  (`.aeabi_subsection`, `.aeabi_attribute`), which trixie's binutils
+  2.44 rejects, while gcc-16 declares only binutils >= 2.39. Forky's
+  binutils (2.47.50) knows them but Breaks libc6-dev < 2.42-10, so it
+  cannot join trixie's held C library. Decide between moving the Debian
+  host to testing's glibc (forky as the base), a binutils of 2.45 or
+  later built for trixie, or testing GCC 16 only on another arm64 host.
 - [Low] `test/run/version.t` failed once on alpine-amd64 with status
   141: in `typec --cc="$gcc" --version | head -1`, the backend can die of
   SIGPIPE when `head` closes the pipe before its last write, and typec
