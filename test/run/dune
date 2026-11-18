@@ -169,12 +169,12 @@
  (enabled_if
   (and %{bin-available:cmake} %{bin-available:ninja})))
 
-; short_enums.t also runs the arm-none-eabi-gcc that TYPEC_TEST_ARM_GCC
-; names, or the one on the PATH, where present. The universe dependency
-; reruns it each time, as the report of backends.sh does, so a cached pass
-; from before a backend was installed never stands beside a report that
-; the backend runs.
+; short_enums.t and c_header.t also run the arm-none-eabi-gcc that
+; TYPEC_TEST_ARM_GCC names, or the one on the PATH, where present. The
+; universe dependency reruns them each time, as the report of backends.sh
+; does, so a cached pass from before a backend was installed never stands
+; beside a report that the backend runs.
 
 (cram
- (applies_to short_enums)
+ (applies_to short_enums c_header)
  (deps (universe)))

@@ -1358,8 +1358,7 @@ M.h.d` beside it, rebuilds `M.h` when an interface that `M.tci`
 includes changes. `-M` and `-MM` print the rule, or write it to the
 `-MF` file, and write no header, so they cannot be used with `-o`.
 Under `-o -` no path names the header, and `-MD` and `-MMD` need `-MT`
-or `-MQ` and `-MF`. Not built yet (plan package 4.1): the enumeration
-assertion.
+or `-MQ` and `-MF`.
 
 ## Measured on a real library
 
@@ -1556,10 +1555,10 @@ without the C headers of i386 runs the tests that include the C headers
 `TYPEC_TEST_REQUIRE_M32` to a non-empty value, and `dune test` then
 fails when the backends do not both compile `<limits.h>` with `-m32`;
 the check is a rule of `test/run/dune`, so a run of one test alone
-(`dune test test/run/abi.t`) skips it. `short_enums.t` also runs the
-`arm-none-eabi-gcc` that `TYPEC_TEST_ARM_GCC` names, or the one on the
-`PATH`, where present, and Clang for `thumbv7m-none-eabi` where Clang
-has that target. The rule that reports `-m32` also prints which of
+(`dune test test/run/abi.t`) skips it. `short_enums.t` and
+`c_header.t` also run the `arm-none-eabi-gcc` that `TYPEC_TEST_ARM_GCC`
+names, or the one on the `PATH`, where present, and Clang for
+`thumbv7m-none-eabi` where Clang has that target. The rule that reports `-m32` also prints which of
 the two Arm backends ran and which were skipped, and fails when one is
 missing and `TYPEC_TEST_REQUIRE_ARM` is set to a non-empty value.
 There are no other dependencies.

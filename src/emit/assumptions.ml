@@ -45,23 +45,28 @@ let representation_and_option (target : Target.t) =
   | Int_sized -> ("int-sized", "-fshort-enums")
   | Short -> ("short", "-fno-short-enums")
 
-let enumeration target =
+(* The enumeration is declared on a line of its own, not in the cast, as
+   GCC's -Wc++-compat reports a type defined in a cast and a header has no
+   marker that exempts its text from a client's warnings. Its tag and its
+   enumerator share one name, as they live in different name spaces. *)
+let enumeration target ~suffix =
+  let probe = "__tc_enum_probe" ^ suffix in
   let compatible =
     Integer.name
       (Option.get
          (Arithmetic.enum_compatible_type target ~packed:false zero_range))
   in
   let representation, option = representation_and_option target in
-  assertion
-    ~holds:
-      (Printf.sprintf
-         "_Generic((enum { __tc_enum_probe })0, %s: 1, default: 0)"
-         compatible)
-    ~assumes:
-      (representation
-     ^ " enumerations: an enumeration of small nonnegative values is \
-        compatible with " ^ compatible)
-    ~option
+  [ Printf.sprintf "enum %s { %s };" probe probe;
+    assertion
+      ~holds:
+        (Printf.sprintf "_Generic((enum %s)0, %s: 1, default: 0)" probe
+           compatible)
+      ~assumes:
+        (representation
+       ^ " enumerations: an enumeration of small nonnegative values is \
+          compatible with " ^ compatible)
+      ~option ]
 
 let assertions target =
-  [ signed_bit_field target; double_constant; enumeration target ]
+  [ signed_bit_field target; double_constant ] @ enumeration target ~suffix:""

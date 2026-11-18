@@ -354,9 +354,6 @@ the package, in the order of its commits:
   header, the macro brackets and the macro probe among them, to the
   unit's output limit and count them in `--stats` (3.5 rule 7);
   `--stats` reports the counts of the unit's lowering alone.
-- [High] The enumeration assertion of 13.4 at the end of every emitted
-  header, named for the header (`__tc_enum_probe__M`), with the message
-  of the model's representation (design 9.3, 13.4; plan 4.8).
 - [Low] `Trap.calling` takes a name of typec's reserved `__tc_` space:
   `--trap-function=__tc_trap` defines `__tc_trap` as calling itself, so
   a trap recurses instead of trapping. Refuse the reserved prefix, with
@@ -407,8 +404,8 @@ the package, in the order of its commits:
   chose. A `-nostdlib` link there needs `-lgcc` to resolve the
   helpers. Plan package 4.7, criterion 1, lists them.
 - [Medium] The message of the enumeration assertion of design 13.4
-  points at `<typec>:3:1`, a line of text that `typec` generates, which
-  a user cannot open. Name the option or the target default that
+  points at a line of `<typec>`, text that `typec` generates, which a
+  user cannot open. Name the option or the target default that
   changed the enumeration's size, and the target, instead. Feeds plan
   package 4.2.
 

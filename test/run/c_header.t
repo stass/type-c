@@ -70,6 +70,8 @@ too. The literal holds a trigraph sequence, of which the backends warn.
   struct { int s ; } Square ; } u ; } ;
   base_count area ( shape * s ) ;
   static const char * const room_mark = "(?\?\?=)" ;
+  enum __tc_enum_probe__room { __tc_enum_probe__room } ;
+  _Static_assert ( _Generic ( ( enum __tc_enum_probe__room ) 0 , unsigned int : 1 , default : 0 ) , "typec assumes int-sized enumerations: an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)" ) ;
   #endif
   #endif
 
@@ -359,11 +361,12 @@ declarations reach the header alike.
   size_t b ;
 
 Two headers that name one instance each write its declaration and its
-definition, the definition under the instance's guard and the probe of
-the packing brackets under names of the header, so a client includes
-them together, in either order and twice. A client's macros of the
-names of the instances and of the typedef of their argument do not reach
-the text, and the client finds the layout that a Type-C unit finds.
+definition, the definition under the instance's guard, and the
+enumeration assertion and the probe of the packing brackets under names
+of the header, so a client includes them together, in either order and
+twice. A client's macros of the names of the instances and of the
+typedef of their argument do not reach the text, and the client finds
+the layout that a Type-C unit finds.
 
   $ cat > vec.tci <<'EOF'
   > #ifndef VEC_TCI
@@ -396,6 +399,8 @@ the text, and the client finds the layout that a Type-C unit finds.
   #define __tc_instance__link__i
   struct __tc_pack_probe_1__left { char c ; int i ; } ;
   struct __tc_pack_probe_2__left { char c ; int i ; } ;
+  $ grep -o 'enum __tc_enum_probe__[a-z]* {' left.h
+  enum __tc_enum_probe__left {
   $ cat > layout.tc <<'EOF'
   > #include <stddef.h>
   > #include "left.h"
@@ -668,3 +673,38 @@ its own text, after the edits of the included text.
   > EOF
   $ "$clang" -std=c11 $strict flip.c -o flip && ./flip
   0
+
+The lowered text of every header ends with the enumeration assertion
+(design 13.4), with the representation of the target it was made for,
+so a client that compiles the header under the other representation
+fails with its message, and one under the same compiles, under GCC's
+-Wc++-compat too, as the header holds no line marker that would exempt
+the assertion from the client's warnings. base.tci holds no Type-C
+construct.
+
+  $ printf '#include "base.h"\n' > base_client.c
+  $ assumption() {
+  >   sed -n 's/.*\(typec assumes [^"]*?)\).*/\1/p' | sort -u
+  > }
+  $ for cc in "$clang" "$gcc"; do
+  >   "$cc" -std=c11 $strict -Wc++-compat -fsyntax-only base_client.c
+  > done
+  $ "$clang" -std=c11 $strict -fshort-enums -fsyntax-only base_client.c \
+  >   2>&1 | assumption
+  typec assumes int-sized enumerations: an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)
+
+On the Arm backends present, a header made under each representation
+compiles under it and fails under the other with the message of the
+representation it was made for.
+
+  $ arm_configurations | while read -r cc target this other; do
+  >   typec --cc="$cc" $target $this --emit-c-header -o arm.h base.tci
+  >   printf '#include "arm.h"\n' > arm_client.c
+  >   "$cc" $target $this -std=c11 $strict -fsyntax-only arm_client.c ||
+  >     echo "failed: $cc $this"
+  >   expected="typec assumes int-sized"
+  >   [ "$this" = -fshort-enums ] && expected="typec assumes short"
+  >   "$cc" $target $other -std=c11 $strict -fsyntax-only arm_client.c \
+  >     2>&1 | grep -q "$expected enumerations" ||
+  >     echo "no assertion: $cc $this"
+  > done

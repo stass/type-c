@@ -28,14 +28,24 @@ val assertions : Typec_sema.Target.t -> string list
       implementation), as typec types it as [int];
     - an unsuffixed floating constant has type [double] (C11 6.4.4.2p4),
       which GCC's [-fsingle-precision-constant] breaks;
-    - an enumeration of the value 0 has the compatible type that
-      {!Typec_sema.Arithmetic.enum_compatible_type} gives it under the
-      representation of [target], which [-fshort-enums] or
-      [-fno-short-enums] changes; the message names the representation
-      and the option that gives the other. One enumeration stands for
-      every one, as the options that change the rule change it for the
-      whole unit.
-      {e Provisional}: that a target whose rule differs also differs at
-      the value 0; [test/run/types.t] run on more targets would settle
-      it. Its enumerator, [__tc_enum_probe], is declared at file scope
-      under a name reserved to typec. *)
+    - the enumeration assertion, {!enumeration} [target ~suffix:""], with
+      the declaration of its enumeration. *)
+
+val enumeration : Typec_sema.Target.t -> suffix:string -> string list
+(** [enumeration target ~suffix] is the enumeration assertion (design
+    13.4) after the declaration of its enumeration, one per line, valid
+    where {!assertions} are, also under GCC's [-Wc++-compat]: a static
+    assertion that an enumeration of the value 0 has the compatible type
+    that
+    {!Typec_sema.Arithmetic.enum_compatible_type} gives it under the
+    representation of [target], which [-fshort-enums] or
+    [-fno-short-enums] changes; the message names the representation and
+    the option that gives the other. One enumeration stands for every
+    one, as the options that change the rule change it for the whole
+    unit. Its tag and its enumerator, each [__tc_enum_probe] followed by
+    [suffix], are declared at file scope under a name reserved to typec;
+    a unit's
+    suffix is empty, and a header's names the header (design 13.5), as a
+    client may include several.
+    {e Provisional}: that a target whose rule differs also differs at the
+    value 0; [test/run/types.t] run on more targets would settle it. *)

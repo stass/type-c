@@ -45,13 +45,15 @@ val edits :
 
 val header_text :
   Typec_cpp.Reader.t ->
+  target:Typec_sema.Target.t ->
   trap:Trap.t ->
   header_module:string ->
   Typec_sema.Declarations.t ->
   (string * int, Typec_cpp.Reader.error) result
-(** [header_text text ~trap ~header_module declarations] is {!edits} for
-    the header of an interface (design 9.3), whose [declarations] were read
-    as {!Typec_sema.Declarations.Header_text}: the lowered text that
+(** [header_text text ~target ~trap ~header_module declarations] is
+    {!edits} for the header of an interface (design 9.3), whose
+    [declarations] were read for [target] as
+    {!Typec_sema.Declarations.Header_text}: the lowered text that
     {!Emitter.header_text} writes from them for the header's module
     [header_module], with each definition of an instance under its guard
     ({!Emitter.Guarded}), and the bytes charged. {!edits} takes the

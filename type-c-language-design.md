@@ -8676,9 +8676,9 @@ the others of its kind:
 - the macro of the macro probe of an emitted header (9.3):
   `macro_probe`, then the module of the header, as in
   `__tc_macro_probe__ir_5fexpr`;
-- the enumerator of the enumeration assertion of an emitted header
-  (9.3, 13.4): `enum_probe`, then the module of the header, as in
-  `__tc_enum_probe__ir_5fexpr`;
+- the enumeration and the enumerator of the enumeration assertion of
+  an emitted header (9.3, 13.4), one name for both: `enum_probe`, then
+  the module of the header, as in `__tc_enum_probe__ir_5fexpr`;
 - the hidden enumerator of the value `INT_MAX` that ends the
   enumeration of a variant's tags (10.1 rule 2): `tag_max`, then the
   enum tag of that enumeration, as in `__tc_tag_max__expr_tag` for

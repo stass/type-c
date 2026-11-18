@@ -17,10 +17,10 @@
 # gates of different worktrees do not share them.
 # TYPEC_TEST_CLANG names the Clang of the oracle tests as for the other
 # tests. The gate first prints the report of test/run/backends.sh: the
-# Arm backends of short_enums.t that run and those skipped, and a dropped
-# -m32; a TYPEC_TEST_REQUIRE_ARM or TYPEC_TEST_REQUIRE_M32 that is set
-# makes a skip of what it names fail the gate. Exits 0 only when every
-# step passes.
+# Arm backends of short_enums.t and c_header.t that run and those
+# skipped, and a dropped -m32; a TYPEC_TEST_REQUIRE_ARM or
+# TYPEC_TEST_REQUIRE_M32 that is set makes a skip of what it names fail
+# the gate. Exits 0 only when every step passes.
 
 set -u
 

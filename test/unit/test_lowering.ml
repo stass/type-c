@@ -46,7 +46,10 @@ let lowered source =
    module [m], whose traps call as [trap] does. *)
 let header_text ?(trap = Trap.builtin) source =
   let text, _, declarations = read ~product:Header_text source in
-  match Lowering.header_text text ~trap ~header_module:"m" declarations with
+  match
+    Lowering.header_text text ~target:lp64 ~trap ~header_module:"m"
+      declarations
+  with
   | Ok (text, _) -> text
   | Error error -> failwith (Reader.error_message error)
 
@@ -260,7 +263,12 @@ let header_guards () =
      box__i; typedef struct box__i box__i; typedef struct \
      __tc_digest__284ac50ed3e82ce972e3f57298c9c75f *__tc_layout__box__i; \
      #ifndef __tc_instance__box__i struct box__i { __tc_arg__i value ; } ; \
-     #endif #pragma pack(pop) struct s { box__i b; }; #pragma pack(push) \
+     #endif #pragma pack(pop) struct s { box__i b; }; \
+     enum __tc_enum_probe__m { __tc_enum_probe__m }; \
+     _Static_assert(_Generic((enum __tc_enum_probe__m)0, unsigned int: 1, \
+     default: 0), \"typec assumes int-sized enumerations: an \
+     enumeration of small nonnegative values is compatible with unsigned \
+     int (-fshort-enums?)\"); #pragma pack(push) \
      #pragma pack(1) #pragma pack(push) \
      #pragma pack() struct __tc_pack_probe_1__m { char c; int i; }; \
      #pragma pack(pop) #pragma pack(2) #pragma pack(push) #pragma pack() \

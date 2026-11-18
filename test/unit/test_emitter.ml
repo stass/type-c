@@ -4,6 +4,7 @@
 open Typec_cpp
 open Typec_syntax
 open Typec_emit
+open Typec_test_support
 
 let failures = ref 0
 
@@ -708,13 +709,16 @@ let () =
   check "read back, nothing follows the moved text"
     (Array.length read_back = 17)
 
+let lp64 = Canned_targets.target Canned_targets.lp64_macros
+
 (* Design 9.3: a header's text guards the definition of an instance and
-   ends with the packing probe under names of the header. *)
+   ends with the enumeration assertion and the packing probe under names
+   of the header. *)
 let () =
   let anchor = Tree.anchor (List.nth (declarations unit) 2) in
   let text =
     made unit (fun output ->
-        Emitter.header_text output ~header_module:"m"
+        Emitter.header_text output ~target:lp64 ~header_module:"m"
           [ Emitter.bracketed output ~at:anchor ~location:(at 2)
               [ Guarded
                   { instance = c_name "s";
@@ -728,7 +732,15 @@ let () =
         struct s { int n; };\n#endif\n# 2 \"a.c\"\n#pragma pack(pop)\n");
   check "the probe of a header's text is named for the header"
     (contains text "struct __tc_pack_probe_1__m { char c; int i; };"
-    && contains text "_Alignof(struct __tc_pack_probe_2__m)")
+    && contains text "_Alignof(struct __tc_pack_probe_2__m)");
+  check "the enumeration assertion of a header's text, before its probe"
+    (contains text
+       "\nenum __tc_enum_probe__m { __tc_enum_probe__m };\n\
+        _Static_assert(_Generic((enum __tc_enum_probe__m)0, unsigned int: \
+        1, default: 0), \"typec assumes int-sized enumerations: an \
+        enumeration of small nonnegative values is compatible with \
+        unsigned int (-fshort-enums?)\");\n\
+        #pragma pack(push)\n")
 
 (* Design 9.3, 10.5: where lowering wrote a trap, a header's text
    declares the trap of a trap function in front of the main file's text
@@ -739,7 +751,7 @@ let () =
   let header trap ~calls =
     let lowered output =
       let code = if calls then Emitter.trap_call output ^ ";" else ";" in
-      Emitter.header_text output ~header_module:"m"
+      Emitter.header_text output ~target:lp64 ~header_module:"m"
         [ Emitter.code output (Reader.range unit.tokens ~first:0 ~count:0)
             ~location:(at 1) code ]
     in
@@ -757,7 +769,11 @@ let () =
   check "no trap in a header's text without a trap"
     (not (contains (header trap_function ~calls:false) "__tc_trap"));
   check "no declarations of the builtin trap in a header's text"
-    (not (contains (header Trap.builtin ~calls:true) "__tc_trap"))
+    (not (contains (header Trap.builtin ~calls:true) "__tc_trap"));
+  check "the enumeration assertion after the trap, in a text with no probe"
+    (contains text
+       "#endif\nenum __tc_enum_probe__m { __tc_enum_probe__m };\n"
+    && not (contains text "__tc_pack_probe"))
 
 (* Design 3.5 rule 7: an output is charged what emission writes for the
    unit, its own text and each edit with its markers and pragmas, and

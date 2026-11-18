@@ -2534,8 +2534,10 @@ let edits (text : Reader.t) ~trap declarations =
     declarations;
   Emitter.limited text ~trap (fun output -> all_edits output declarations)
 
-let header_text (text : Reader.t) ~trap ~header_module declarations =
+let header_text (text : Reader.t) ~target ~trap ~header_module declarations
+    =
   check_product ~caller:"Lowering.header_text"
     Typec_sema.Declarations.Header_text declarations;
   Emitter.limited text ~trap (fun output ->
-      Emitter.header_text output ~header_module (all_edits output declarations))
+      Emitter.header_text output ~target ~header_module
+        (all_edits output declarations))

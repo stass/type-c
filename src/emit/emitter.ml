@@ -581,17 +581,25 @@ let header_trap_lines output =
     (Trap.prototype output.trap, guarded_trap_definition output.trap)
   else ([], [])
 
-(* Reader.rewrite checks that the ranges do not overlap. *)
-let header_text output ~header_module edits =
+(* Every header carries the enumeration assertion before its packing
+   probe, whatever its text holds, as a client's layout of its
+   enumerations rests on it (design 9.3). Their names are the header's,
+   as a client may include several.
+   Reader.rewrite checks that the ranges do not overlap. *)
+let header_text output ~target ~header_module edits =
   force_moved output;
   let unit = output.unit in
   let edits = in_order edits in
   List.iter (check_one_file unit.tokens) edits;
   let prototype, definition = header_trap_lines output in
+  let suffix = "__" ^ header_module in
   Reader.rewrite unit
     (with_prototype unit.tokens prototype
        ~first:(first_main_token unit.tokens) edits)
-  ^ assertion_block (definition @ probes ~suffix:("__" ^ header_module) edits)
+  ^ assertion_block
+      (definition
+      @ Assumptions.enumeration target ~suffix
+      @ probes ~suffix edits)
 
 let emit (unit : Reader.t) { trap; edits; assertions } =
   let edits = in_order edits in

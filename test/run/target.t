@@ -225,7 +225,7 @@ alone, they are valid C11 and C17 under -pedantic-errors.
   $ typec --cc=$clang --emit-c -o - lowered.tc |
   >   sed -n '/^# 1 "<typec>" 3$/,$p' | grep -v '^# ' > assertions.c
   $ wc -l < assertions.c | tr -d ' '
-  3
+  4
   $ for cc in $clang $gcc; do
   >   for std in c11 c17; do
   >     $cc -std=$std -Wall -Wextra -pedantic-errors -fsyntax-only \

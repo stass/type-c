@@ -175,7 +175,8 @@ the assertions that end every unit with a Type-C construct.
   count n;
   _Static_assert(_Generic(+(struct { int __tc_bits : 32; }){ 0 }.__tc_bits, int: 1, default: 0), "typec assumes plain int bit-fields are signed (-funsigned-bitfields?)");
   _Static_assert(_Generic(1.5, double: 1, default: 0), "typec assumes unsuffixed floating constants are double (-fsingle-precision-constant?)");
-  _Static_assert(_Generic((enum { __tc_enum_probe })0, unsigned int: 1, default: 0), "typec assumes int-sized enumerations: an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)");
+  enum __tc_enum_probe { __tc_enum_probe };
+  _Static_assert(_Generic((enum __tc_enum_probe)0, unsigned int: 1, default: 0), "typec assumes int-sized enumerations: an enumeration of small nonnegative values is compatible with unsigned int (-fshort-enums?)");
 
 A distinct type is the typedef of its representation (design 10.2): the
 same size and alignment on each backend, and a C header reads its value

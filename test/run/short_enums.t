@@ -11,20 +11,11 @@ The tests run on a Cortex-M3: Clang for thumbv7m-none-eabi, whose
 default is int-sized enumerations, and arm-none-eabi-gcc, whose default
 is short ones, named by TYPEC_TEST_ARM_GCC; each runs where present,
 under each representation, and backends_report in backends.sh says
-which ran. A configuration is a backend, its target option, the option
-of a representation and that of the other.
+which ran. A configuration (arm_configurations in backends.sh) is a
+backend, its target option, the option of a representation and that of
+the other.
 
   $ . ./backends.sh
-  $ configurations() {
-  >   if arm_clang_present; then
-  >     echo "$clang $arm_clang_target -fno-short-enums -fshort-enums"
-  >     echo "$clang $arm_clang_target -fshort-enums -fno-short-enums"
-  >   fi
-  >   if arm_gcc_present; then
-  >     echo "$arm_gcc -mcpu=cortex-m3 -fshort-enums -fno-short-enums"
-  >     echo "$arm_gcc -mcpu=cortex-m3 -fno-short-enums -fshort-enums"
-  >   fi
-  > }
 
 A flat match, a match with a nested pattern and a single-pattern test,
 each over a variant of two constructors.
@@ -64,7 +55,7 @@ bytes of tag.
   > _Static_assert(sizeof(struct list) == 12, "list");
   > _Static_assert(__builtin_offsetof(struct list, u) == 4, "list.u");
   > EOF
-  $ configurations | while read -r cc target this other; do
+  $ arm_configurations | while read -r cc target this other; do
   >   typec --cc="$cc" $target $this -Wall -Wswitch-enum -Werror -c list.tc ||
   >     echo "refused: $cc $this"
   >   typec --cc="$cc" $target $this --emit-c -o list.i list.tc &&
@@ -76,7 +67,7 @@ bytes of tag.
 The C that --emit-c writes under one representation fails under the
 other with the enumeration assertion.
 
-  $ configurations | while read -r cc target this other; do
+  $ arm_configurations | while read -r cc target this other; do
   >   typec --cc="$cc" $target $this --emit-c -o other.i list.tc
   >   "$cc" $target $other -fsyntax-only other.i 2>&1 |
   >     grep -q 'typec assumes' || echo "no assertion: $cc $this"
@@ -84,7 +75,7 @@ other with the enumeration assertion.
 
 --print-target names the representation of each configuration.
 
-  $ configurations | while read -r cc target this other; do
+  $ arm_configurations | while read -r cc target this other; do
   >   expected=short
   >   [ "$this" = -fno-short-enums ] && expected=int-sized
   >   typec --cc="$cc" $target $this --print-target |
@@ -100,7 +91,7 @@ and not the backend's.
   $ cat > bitfield.tc <<'EOF'
   > struct s { enum { A } f : 9; };
   > EOF
-  $ configurations | while read -r cc target this other; do
+  $ arm_configurations | while read -r cc target this other; do
   >   expected=accepted
   >   [ "$this" = -fshort-enums ] && expected=refused
   >   outcome=accepted
@@ -126,7 +117,7 @@ under each configuration.
   > enum __attribute__((packed)) p7;
   > enum p7 { P7 };
   > EOF
-  $ configurations | while read -r cc target this other; do
+  $ arm_configurations | while read -r cc target this other; do
   >   typec --cc="$cc" $target $this -c packed.tc ||
   >     echo "refused: $cc $this"
   > done

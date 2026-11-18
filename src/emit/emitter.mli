@@ -285,17 +285,26 @@ val emit : Typec_cpp.Reader.t -> lowered -> string
     marker that enters or leaves a file without its partner; [emit]
     raises [Invalid_argument] otherwise. *)
 
-val header_text : output -> header_module:string -> edit list -> string
-(** [header_text output ~header_module edits] is the text of the unit of
-    [output] with each edit, made for [output], applied as {!emit} writes
-    it, without the assertions: the lowered text that the header of an
-    interface takes its runs from (design 9.3). It forces the pieces of
-    every {!moved} edit first. Where lowering wrote a trap
+val header_text :
+  output ->
+  target:Typec_sema.Target.t ->
+  header_module:string ->
+  edit list ->
+  string
+(** [header_text output ~target ~header_module edits] is the text of the
+    unit of [output] with each edit, made for [output], applied as
+    {!emit} writes it, without the assertions: the lowered text that the
+    header of an interface takes its runs from (design 9.3). It forces
+    the pieces of every {!moved} edit first. Where lowering wrote a trap
     ({!trap_call}), the trap's prototype stands in front of the first
     token of the main file, the text of the interface, and its definition
     follows the text under the guard of {!Trap.definition_guard}; with
-    {!Trap.builtin} there is neither. Where an edit is bracketed, the
-    text ends with the packing probe as {!emit} writes it, its structures
-    named for the header, whose module (design 13.5) is [header_module]:
-    [struct __tc_pack_probe_1__M] and [struct __tc_pack_probe_2__M] for
-    the module [M]. [Invalid_argument] as for {!emit}. *)
+    {!Trap.builtin} there is neither. The text then ends, under the
+    marker of {!emit}'s assertions, with the enumeration assertion of
+    [target] ({!Assumptions.enumeration}) and, where an edit is
+    bracketed, the packing probe as {!emit} writes it, their names those
+    of the header, whose module (design 13.5) is [header_module]: the
+    enumeration and enumerator [__tc_enum_probe__M] and
+    [struct __tc_pack_probe_1__M]
+    and [struct __tc_pack_probe_2__M] for the module [M].
+    [Invalid_argument] as for {!emit}. *)

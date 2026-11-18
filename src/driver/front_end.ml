@@ -139,7 +139,8 @@ let lower_header target ~trap ~header_module text scopes =
     Declarations.read target ~product:Header_text text scopes
   in
   let* header_text, output_bytes =
-    Typec_emit.Lowering.header_text text ~trap ~header_module declarations
+    Typec_emit.Lowering.header_text text ~target ~trap ~header_module
+      declarations
   in
   Ok (header_text, counts_of text scopes declarations ~output_bytes)
 
