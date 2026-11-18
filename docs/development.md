@@ -72,9 +72,14 @@ tools/hosts/run.sh --source ~/typec-old debian-amd64
 
 The report of `test/run/backends.sh`, which `dune test` prints, names
 each backend facility that a host lacks and the tests skip, such as
-`getcontext` on musl. The Debian image and the FreeBSD host set
+`getcontext` on musl, or the sanitizer runtimes of Alpine's GCC on
+arm64. A backend without the sanitizers runs the sanitized tests with
+their plain flags and skips only their checks of a sanitizer's report.
+The Debian image and the FreeBSD host set
 `TYPEC_TEST_REQUIRE_GETCONTEXT`, as their C libraries have it, so that a
-skip of it fails the run there.
+skip of it fails the run there. `TYPEC_TEST_REQUIRE_SANITIZERS` does the
+same for the sanitizers: the FreeBSD host sets it, and `run.sh` sets it
+for each Linux host but `alpine-arm64`.
 
 `tools/hosts/run.sh --corpus HOST LOG PROGRAM...` runs the corpus
 runner (see "Running the corpus") on the named programs in a container
@@ -177,10 +182,10 @@ it, drop `TYPEC_TEST_REQUIRE_LLDB` below and the gate skips them.
 
 Running the gate from the checkout, with its log and the oracle's
 build in `$HOME/typec-gate`. The `TYPEC_TEST_REQUIRE_*` variables turn
-a skip of the Arm backends, of lldb or of `getcontext` into a failure.
-Without them the gate passes and only reports the skip. `tee` hides
-the gate's exit status: the gate passed when `gate.out` ends in
-`gate: passed`.
+a skip of the Arm backends, of lldb, of `getcontext` or of a backend's
+sanitizers into a failure. Without them the gate passes and only
+reports the skip. `tee` hides the gate's exit status: the gate passed
+when `gate.out` ends in `gate: passed`.
 
 ```sh
 export OPAMROOT=$HOME/typec-opam
@@ -188,7 +193,8 @@ out=$HOME/typec-gate
 mkdir -p "$out"
 ORACLE_BUILD=$out/_build GATE_LOG=$out/gate.log \
   TYPEC_TEST_REQUIRE_ARM=1 TYPEC_TEST_REQUIRE_LLDB=1 \
-  TYPEC_TEST_REQUIRE_GETCONTEXT=1 tools/gate.sh 2>&1 | tee "$out/gate.out"
+  TYPEC_TEST_REQUIRE_GETCONTEXT=1 TYPEC_TEST_REQUIRE_SANITIZERS=1 \
+  tools/gate.sh 2>&1 | tee "$out/gate.out"
 { uname -a; sw_vers; /usr/bin/clang --version
   command -v gcc-16; gcc-16 -dumpmachine; gcc-16 --version
   for cc in /usr/bin/clang gcc-16; do

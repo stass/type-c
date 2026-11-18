@@ -1,19 +1,19 @@
 SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-Single-pattern tests with nested patterns (design 4.6, 4.7 rule 9,
-13.5) and their hand-written twin, a switch on each tag nested in a
-switch on the tag around it, give the same output on each backend at
--O0 and -O2 under -pedantic-errors, AddressSanitizer and
-UndefinedBehaviorSanitizer. The programs cover an if test on a field
-of variant type, a while test that follows a pointer, field lists left
-out at depth, the jumps of 4.6 rule 5 in the statement of a while test,
-and an operand with a side effect, which a test evaluates once each
-time its condition is evaluated.
+Single-pattern tests with nested patterns (design 4.6, 4.7 rule 9, 13.5)
+and their hand-written twin, a switch on each tag nested in a switch on
+the tag around it, give the same output on each backend at -O0 and -O2
+under -pedantic-errors, and under AddressSanitizer and
+UndefinedBehaviorSanitizer on a backend that links them (backends.sh).
+The programs cover an if test on a field of variant type, a while test
+that follows a pointer, field lists left out at depth, the jumps of 4.6
+rule 5 in the statement of a while test, and an operand with a side
+effect, which a test evaluates once each time its condition is
+evaluated.
 
   $ . ./backends.sh
   $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Werror -g"
-  $ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all"
   $ cat > main.h <<'EOF'
   > int main(void) {
   >   res ok = make_ok(4), zero = make_err(0), over = make_err(1);
@@ -204,6 +204,7 @@ The twin, a tagged structure read by nested switches.
 Each program prints the same lines.
 
   $ for cc in "$clang" "$gcc"; do
+  >   sanitize=$(sanitizer_flags "$cc")
   >   for opt in -O0 -O2; do
   >     typec --cc="$cc" $opt $flags $sanitize -o tests-tc tests.tc &&
   >     "$cc" $opt $flags $sanitize -o tests-c tests.c || exit 1
@@ -246,7 +247,8 @@ constructor there, where a flat test that binds the field runs its
 statement; and selection stops at the first tag that holds another
 constructor, so a null pointer under a constructor that the test gives
 up is never followed, where one under the constructor that it asks for
-is, and the address sanitizer stops the program.
+is, and UndefinedBehaviorSanitizer stops the program on a backend that
+links it.
 
   $ cat > corrupt.h <<'EOF'
   > static void corrupt(res *r) { r->u.Err.error.tag = (enum eval_error_tag)7; }
@@ -284,32 +286,28 @@ is, and the address sanitizer stops the program.
   > }
   > EOF
   $ for cc in "$clang" "$gcc"; do
+  >   sanitize=$(sanitizer_flags "$cc")
   >   for opt in -O0 -O2; do
   >     typec --cc="$cc" $opt $flags $sanitize -o trap trap.tc || exit 1
   >     sh -c "./trap; exit \$?" 2> /dev/null
   >     test $? -gt 128 && echo trapped
-  >     sh -c "./trap null; exit \$?" 2> trap.null
-  >     grep -q 'runtime error: member access within null pointer' trap.null &&
-  >       echo stopped
+  >     if [ -n "$sanitize" ]; then
+  >       sh -c "./trap null; exit \$?" > trap.null 2> trap.report
+  >       printf 'given up\n' | cmp -s - trap.null &&
+  >         grep -q 'runtime error: member access within null pointer' \
+  >           trap.report || echo "$cc $opt: null pointer not stopped"
+  >     fi
   >   done
   > done
   given up
   bound
   trapped
   given up
-  stopped
+  bound
+  trapped
   given up
   bound
   trapped
   given up
-  stopped
-  given up
   bound
   trapped
-  given up
-  stopped
-  given up
-  bound
-  trapped
-  given up
-  stopped

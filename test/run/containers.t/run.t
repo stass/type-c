@@ -15,11 +15,11 @@ them the vector's own elements.
 
 Each backend builds the library at -O0 and -O2 under the strictest
 warnings, with and without AddressSanitizer and
-UndefinedBehaviorSanitizer, and each build prints the same output.
+UndefinedBehaviorSanitizer where the backend links them (backends.sh),
+and each build prints the same output.
 
   $ . ../backends.sh
   $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Werror"
-  $ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all"
   $ units="region words points main"
   $ build() {
   >   build_cc=$1
@@ -56,6 +56,7 @@ UndefinedBehaviorSanitizer, and each build prints the same output.
   index 1000: none
   indexed 334
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for options in "-O0" "-O2" "-O0 $sanitize" "-O2 $sanitize"; do
   >     build $cc $options && ./containers > output &&
   >       cmp output expected || echo "differs: $cc $options"

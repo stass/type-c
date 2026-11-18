@@ -4,16 +4,16 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 Matches with nested patterns (design 4.7, 13.5) and their hand-written
 twins, a switch on each tag nested in a switch on the tag around it,
 give the same output on each backend at -O0 and -O2 under
--pedantic-errors, AddressSanitizer and UndefinedBehaviorSanitizer. The
-programs cover the examples of 4.7, overlapping labels that select the
-first in source order, a default written first, a scrutinee with a
+-pedantic-errors, and under AddressSanitizer and
+UndefinedBehaviorSanitizer on a backend that links them (backends.sh).
+The programs cover the examples of 4.7, overlapping labels that select
+the first in source order, a default written first, a scrutinee with a
 side effect, which selection evaluates once, and a generic function's
 binding below `Some` in an instance whose argument is a variant. Each
 program flushes its output before the case that stops it.
 
   $ . ./backends.sh
   $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Werror -g"
-  $ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all"
   $ cat > types.h <<'EOF'
   > type eval_error = | DivByZero | Overflow;
   > type res = | Ok(int value) | Err(eval_error error);
@@ -341,23 +341,25 @@ other order, as `swapped` does: the partner, which must differ.
   > #include "main.h"
   > EOF
 
-Each program prints the same lines; `swapped` follows the null pointer
-that `ordered` does not, where UndefinedBehaviorSanitizer stops the
-program; a tag that is no constructor of its variant, below a label
-that reads it, traps (4.5), where a label that binds the field whole
-reads no tag below it. The twin with its labels' tests exchanged
-differs from them by these lines alone: another line for `ordered`,
-and the null pointer followed there.
+Each program prints the same lines; a tag that is no constructor of
+its variant, below a label that reads it, traps (4.5), where a label
+that binds the field whole reads no tag below it. The twin with its
+labels' tests exchanged differs from them by one line, for `ordered`.
+On a backend that links UndefinedBehaviorSanitizer, `swapped` follows
+the null pointer that `ordered` does not, where the sanitizer stops the
+program; the exchanged twin follows it in `ordered` instead, which then
+prints nothing.
 
   $ cat > exchanged.diff <<'EOF'
   > 4c4
   > < ordered 1 17 0
   > ---
   > > ordered 17 17 0
-  > 10d9
-  > < ordered 1
   > EOF
+  $ printf '%s\n' 'ordered 1' stopped > stopped.expected
+  $ echo stopped > stopped-exchanged.expected
   $ for cc in "$clang" "$gcc"; do
+  >   sanitize=$(sanitizer_flags "$cc")
   >   for opt in -O0 -O2; do
   >     typec --cc="$cc" $opt $flags $sanitize -o nested-tc nested.tc &&
   >     "$cc" $opt $flags $sanitize -o nested-c nested.c &&
@@ -365,16 +367,24 @@ and the null pointer followed there.
   >       exit 1
   >     for program in nested-tc nested-c nested-x; do
   >       ./$program > $program.out
-  >       sh -c "./$program null; exit \$?" >> $program.out 2> $program.null
-  >       grep -q 'runtime error: member access within null pointer' \
-  >         $program.null &&
-  >         echo stopped >> $program.out
   >       sh -c "./$program corrupt; exit \$?" >> $program.out 2> /dev/null
   >       test $? -gt 128 && echo trapped >> $program.out
+  >       if [ -n "$sanitize" ]; then
+  >         sh -c "./$program null; exit \$?" > $program.null \
+  >           2> $program.report
+  >         grep -q 'runtime error: member access within null pointer' \
+  >           $program.report && echo stopped >> $program.null
+  >       fi
   >     done
   >     cmp nested-tc.out nested-c.out || echo "$cc $opt differs"
   >     diff nested-tc.out nested-x.out | cmp -s - exchanged.diff ||
   >       echo "$cc $opt exchanged twin differs otherwise"
+  >     if [ -n "$sanitize" ]; then
+  >       cmp -s nested-tc.null stopped.expected &&
+  >         cmp -s nested-c.null stopped.expected &&
+  >         cmp -s nested-x.null stopped-exchanged.expected ||
+  >         echo "$cc $opt: null pointer not stopped"
+  >     fi
   >   done
   > done
   $ cat nested-tc.out
@@ -387,8 +397,6 @@ and the null pointer followed there.
   once 4 1 2
   calls 3
   unwrapped 0 -1 -2
-  ordered 1
-  stopped
   whole -3
   trapped
 
@@ -417,6 +425,7 @@ the alignment check of UndefinedBehaviorSanitizer passes.
   > }
   > EOF
   $ for cc in "$clang" "$gcc"; do
+  >   sanitize=$(sanitizer_flags "$cc")
   >   for opt in -O0 -O2; do
   >     typec --cc="$cc" $opt $flags $sanitize -o packed packed.tc &&
   >       ./packed || echo "$cc $opt failed"
@@ -472,6 +481,7 @@ of UndefinedBehaviorSanitizer passes.
   > }
   > EOF
   $ for cc in "$clang" "$gcc"; do
+  >   sanitize=$(sanitizer_flags "$cc")
   >   for opt in -O0 -O2; do
   >     typec --cc="$cc" $opt $flags $sanitize -o member member.tc &&
   >       ./member || echo "$cc $opt failed"
@@ -487,7 +497,8 @@ of UndefinedBehaviorSanitizer passes.
   2 3
 
 The partner, the address of the member taken as a pointer to the
-scrutinee, is stopped by the alignment check.
+scrutinee, is stopped by the alignment check where Clang links the
+sanitizers.
 
   $ cat > member.c <<'EOF'
   > #include <stdio.h>
@@ -505,6 +516,9 @@ scrutinee, is stopped by the alignment check.
   >   return 0;
   > }
   > EOF
-  $ "$clang" -std=c11 -g -Wno-address-of-packed-member $sanitize \
-  >   -o member-c member.c && ./member-c 2>&1 | grep -c misaligned
-  1
+  $ sanitize=$(sanitizer_flags "$clang")
+  $ if [ -n "$sanitize" ]; then
+  >   "$clang" -std=c11 -g -Wno-address-of-packed-member $sanitize \
+  >     -o member-c member.c && ./member-c 2>&1 | grep -q misaligned ||
+  >     echo "$clang: misaligned member not stopped"
+  > fi

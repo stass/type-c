@@ -15,7 +15,9 @@
 # set and not empty, declares that lldb runs on the host for the
 # examples of docs/tutorial.md that use it. TYPEC_TEST_REQUIRE_GETCONTEXT,
 # when set and not empty, declares that both backends link getcontext,
-# for slice_lowering.t.
+# for slice_lowering.t. TYPEC_TEST_REQUIRE_SANITIZERS, when set and not
+# empty, declares that both backends link the sanitizers of the
+# sanitized tests.
 
 clang=${TYPEC_TEST_CLANG:-/usr/bin/clang}
 gcc=${TYPEC_TEST_GCC:-gcc-16}
@@ -64,6 +66,33 @@ getcontext_present() (
   rm -rf "$context_dir"
   return $context_status
 )
+
+# The options of the sanitized tests: AddressSanitizer and
+# UndefinedBehaviorSanitizer, stopping the program at the first error.
+sanitizer_options="-fsanitize=address,undefined -fno-sanitize-recover=all"
+
+# sanitizers_present CC: whether CC links a program with
+# sanitizer_options: a backend may have no sanitizer runtimes, as
+# Alpine's GCC on aarch64. The directory is made in the current one, as
+# for lldb_present.
+sanitizers_present() (
+  sanitizer_dir=$(mktemp -d ./sanitizers.XXXXXX) || return 1
+  printf 'int main(void) { return 0; }\n' > "$sanitizer_dir/probe.c"
+  "$1" $sanitizer_options -o "$sanitizer_dir/probe" \
+    "$sanitizer_dir/probe.c" > /dev/null 2>&1
+  sanitizer_status=$?
+  rm -rf "$sanitizer_dir"
+  return $sanitizer_status
+)
+
+# sanitizer_flags CC: prints sanitizer_options where CC links them and
+# nothing where it does not, so that a sanitized test builds with its
+# plain flags there and only its checks of a sanitizer's report skip.
+sanitizer_flags() {
+  if sanitizers_present "$1"; then
+    echo "$sanitizer_options"
+  fi
+}
 
 # The configurations of the Arm backends present, one per line: a
 # backend, its target option, the option of an enumeration
@@ -127,6 +156,7 @@ backends_report() (
   arm_report || report_status=1
   lldb_report || report_status=1
   getcontext_report || report_status=1
+  sanitizers_report || report_status=1
   return $report_status
 )
 
@@ -209,6 +239,29 @@ getcontext_report() {
     return 1
   fi
 }
+
+# Prints, for each backend, whether the sanitized tests build with the
+# sanitizers or skip them, and fails when one skips them and
+# TYPEC_TEST_REQUIRE_SANITIZERS is set.
+sanitizers_report() (
+  sanitizers_missing=
+  for report_cc in "$clang" "$gcc"; do
+    if sanitizers_present "$report_cc"; then
+      echo "backends.sh: the sanitized tests run the sanitizers of" \
+        "$report_cc"
+    else
+      echo "backends.sh: the sanitized tests skip the sanitizers of" \
+        "$report_cc, which does not link $sanitizer_options"
+      sanitizers_missing=yes
+    fi
+  done
+  if [ -n "$sanitizers_missing" ] &&
+    [ -n "${TYPEC_TEST_REQUIRE_SANITIZERS:-}" ]; then
+    echo "backends.sh: TYPEC_TEST_REQUIRE_SANITIZERS is set, but a" \
+      "backend does not link the sanitizers" >&2
+    return 1
+  fi
+)
 
 # compile_emitted CC FILE OPTION...: checks the preprocessed text in FILE
 # with backend CC under the strictest user options and OPTION..., reading

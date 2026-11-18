@@ -3,19 +3,18 @@ Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
 A defer statement runs its statement at each exit of its scope, the
 latest first (design 6, 13.5), on each backend with -Wall -Wextra
--Werror, under AddressSanitizer and UndefinedBehaviorSanitizer. Each
-function appends to a log, so a line shows the exact order: the end of
-a block, break and continue out of a loop and a switch, return with and
-without a value (the value is computed before the cleanups, and they
-see the state at the exit), a goto out of nested scopes past a block
-that cannot complete, whose trap is not taken, the error path of a try,
-a match arm, and `_Defer` in C text that the Type-C file includes.
-The resource example counts what it allocates and opens, and every path
-out of it gives each back.
+-Werror, under AddressSanitizer and UndefinedBehaviorSanitizer where the
+backend links them (backends.sh). Each function appends to a log, so a
+line shows the exact order: the end of a block, break and continue out
+of a loop and a switch, return with and without a value (the value is
+computed before the cleanups, and they see the state at the exit), a
+goto out of nested scopes past a block that cannot complete, whose trap
+is not taken, the error path of a try, a match arm, and `_Defer` in C
+text that the Type-C file includes. The resource example counts what it
+allocates and opens, and every path out of it gives each back.
 
   $ . ./backends.sh
   $ flags="-std=gnu11 -Wall -Wextra -Werror -g"
-  $ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all"
   $ cat > cleanup.h <<'EOF'
   > static void header_cleanup(void (*note)(const char *)) {
   >   _Defer note("h");
@@ -201,6 +200,7 @@ out of it gives each back.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   typec --cc=$cc $flags $sanitize -o program program.tc && ./program
   > done
   block: ab21c
@@ -324,6 +324,7 @@ log shows the cleanups that did run.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   typec --cc=$cc $flags $sanitize -o reached reached.tc && ./reached
   > done
   return taken: o
@@ -373,6 +374,7 @@ statement to each exit, and both backends compile each copy.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   typec --cc=$cc $flags $sanitize -o unroll unroll.tc && ./unroll
   > done
   total: 34
@@ -435,6 +437,7 @@ one more in the length.
   $ grep -c 'puts ( "left" )' length.i
   3
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   typec --cc=$cc $flags $sanitize -o length length.tc && ./length
   > done
   left
@@ -468,6 +471,7 @@ of the block in the data, which C evaluates.
   0
   [1]
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   typec --cc=$cc $flags $sanitize -o inner inner.tc && ./inner
   > done
   in

@@ -1566,6 +1566,10 @@ missing and `TYPEC_TEST_REQUIRE_ARM` is set to a non-empty value.
 debugs the programs of both backends; the same rule prints whether they
 run on this host, and fails when they do not and
 `TYPEC_TEST_REQUIRE_LLDB` is set to a non-empty value.
+The sanitized tests add AddressSanitizer and UndefinedBehaviorSanitizer
+on each backend that links them; the rule prints whether each backend
+does, and fails when one does not and `TYPEC_TEST_REQUIRE_SANITIZERS`
+is set to a non-empty value.
 There are no other dependencies.
 
 ```sh
@@ -1583,8 +1587,8 @@ runs its tests, which `dune test` skips (see
 switch `tools` and fails, saying where to find how to create it, when the
 switch is missing. Before its steps it prints that report, which
 `dune test` writes only to the log, so a skipped Arm backend shows, and
-stops where `TYPEC_TEST_REQUIRE_ARM`, `TYPEC_TEST_REQUIRE_M32` or
-`TYPEC_TEST_REQUIRE_LLDB` names one that is missing. It prints the end
+stops where a `TYPEC_TEST_REQUIRE_*` variable of `test/run/backends.sh`
+names one that is missing. It prints the end
 of the log when a step fails; the variables in the header of the script
 set the opam root, the oracle's build directory and the log.
 

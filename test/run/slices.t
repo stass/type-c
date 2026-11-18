@@ -1,16 +1,16 @@
 SPDX-License-Identifier: BSD-2-Clause
 Copyright (c) 2026 Stanislav Sedov <stas@deglitch.com>
 
-The lowered forms of slices (design 8, 13.5) run on each backend at
--O0 and -O2 under the strictest warnings, with and without
-AddressSanitizer and UndefinedBehaviorSanitizer: an index read and
-written, `slice_sub`, `slice_from_array` of a static array, a local one
-and a compound literal, `slice_unchecked`, the conversion to const
-elements at an initialiser, an assignment, an argument, each branch of
-`?:`, the right operand of a comma and the value of a `try`, string
-literals as `str`, and an index and a `slice_sub` that C does not
-evaluate. A counter shows that
-the test of an index, a `slice_sub` and a conversion evaluates each
+The lowered forms of slices (design 8, 13.5) run on each backend at -O0
+and -O2 under the strictest warnings, with and without AddressSanitizer
+and UndefinedBehaviorSanitizer where the backend links them
+(backends.sh): an index read and written, `slice_sub`,
+`slice_from_array` of a static array, a local one and a compound
+literal, `slice_unchecked`, the conversion to const elements at an
+initialiser, an assignment, an argument, each branch of `?:`, the right
+operand of a comma and the value of a `try`, string literals as `str`,
+and an index and a `slice_sub` that C does not evaluate. A counter shows
+that the test of an index, a `slice_sub` and a conversion evaluates each
 operand once. Each index and `slice_sub` out of range traps (design
 10.5): the process ends by SIGILL or SIGTRAP, whichever the target's
 trap instruction raises.
@@ -18,7 +18,6 @@ trap instruction raises.
   $ . ./backends.sh
   $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Wshadow -Wconversion"
   $ flags="$flags -Wsign-conversion -Werror"
-  $ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all"
   $ cat > program.tc <<'EOF'
   > #include <stdio.h>
   > #include <string.h>
@@ -136,6 +135,7 @@ trap instruction raises.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for build in "-O0 $sanitize" "-O2 $sanitize" "-O2"; do
   >     typec --cc=$cc $flags $build -o program program.tc && ./program &&
   >     for how in index negative order end str; do

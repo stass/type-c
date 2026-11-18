@@ -18,13 +18,10 @@
 # repository, where NAME is the name of the checkout's directory, so
 # gates of different worktrees do not share them.
 # TYPEC_TEST_CLANG names the Clang of the oracle tests as for the other
-# tests. The gate first prints the report of test/run/backends.sh: the
-# Arm backends of short_enums.t and c_header.t that run and those
-# skipped, a dropped -m32, whether the lldb examples of the tutorial run,
-# and whether slice_lowering.t runs getcontext; a TYPEC_TEST_REQUIRE_ARM,
-# TYPEC_TEST_REQUIRE_M32, TYPEC_TEST_REQUIRE_LLDB or
-# TYPEC_TEST_REQUIRE_GETCONTEXT that is set makes a skip of what it names
-# fail the gate. Exits 0 only when every step passes.
+# tests. The gate first prints the report of test/run/backends.sh, which
+# names what the tests skip on this host; a TYPEC_TEST_REQUIRE_* variable
+# of backends.sh that is set makes a skip of what it names fail the
+# gate. Exits 0 only when every step passes.
 
 set -u
 

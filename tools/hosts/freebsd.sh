@@ -250,7 +250,8 @@ status=0
 for clang in "$@"; do
   echo "== dune test with $clang and $gcc"
   TYPEC_TEST_CLANG=$clang TYPEC_TEST_GCC=$gcc \
-    TYPEC_TEST_REQUIRE_GETCONTEXT=1 proccontrol -m aslr -s disable \
+    TYPEC_TEST_REQUIRE_GETCONTEXT=1 TYPEC_TEST_REQUIRE_SANITIZERS=1 \
+    proccontrol -m aslr -s disable \
     dune test --root src --build-dir "$PWD/build" --diff-command "diff -u" \
     || status=1
 done

@@ -14,7 +14,6 @@ what the text would be without the form.
   $ . ./backends.sh
   $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Wshadow -Wconversion"
   $ flags="$flags -Wsign-conversion -Werror"
-  $ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all"
   $ traps() {
   >   sh -c "ulimit -c 0; $*; exit \$?" 2>/dev/null
   >   case $? in
@@ -33,9 +32,9 @@ A compound literal in an operand of an index or of a `slice_sub`
 belongs to the block around the use, so the elements that the
 expression reaches are alive after it: through a pointer that the
 index yields, through the slice that a `slice_sub` yields, and through
-a pointer that an index operand stores. GCC's AddressSanitizer reports
-a read of a literal that had died. The partner indexes one past the
-literal and traps.
+a pointer that an index operand stores. GCC's AddressSanitizer, where
+GCC links it (backends.sh), reports a read of a literal that had died.
+The partner indexes one past the literal and traps.
 
   $ cat > literal.tc <<'EOF'
   > #include <stdio.h>
@@ -63,6 +62,7 @@ literal and traps.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for level in -O0 -O2; do
   >     typec --cc=$cc $flags $level $sanitize -o literal literal.tc &&
   >     ./literal && traps ./literal past
@@ -104,6 +104,7 @@ it has the test, and traps.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for level in -O0 -O2; do
   >     typec --cc=$cc $flags $level $sanitize -o file_sizes file_sizes.tc &&
   >     ./file_sizes && traps ./file_sizes vla
@@ -183,6 +184,7 @@ AddressSanitizer would otherwise report.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for level in -O0 -O2; do
   >     typec --cc=$cc $flags $level $sanitize -o layout layout.tc &&
   >     ./layout && traps ./layout out
@@ -319,6 +321,7 @@ would evaluate, is refused by typec (design 8 rule 2).
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for level in -O0 -O2; do
   >     typec --cc=$cc $flags $level $sanitize -o once once.tc && ./once
   >     typec --cc=$cc $flags $level -c -o variable.o variable.tc 2>&1 |
@@ -496,6 +499,7 @@ backends refuse each.
   > slice(const int) pick(int k) { return k ? m : c; }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for level in -O0 -O2; do
   >     typec --cc=$cc $flags $level $sanitize -o conversions conversions.tc &&
   >     ./conversions &&

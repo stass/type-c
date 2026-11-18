@@ -86,12 +86,16 @@ else
 fi
 
 # The hosts: the Dockerfile and the platform of each Linux host, which is
-# the host's own on whatever machine runs it, and the script of the
-# others.
-dockerfile='' platform='' script=''
+# the host's own on whatever machine runs it, the
+# TYPEC_TEST_REQUIRE_SANITIZERS of its suite, and the script of the
+# others. Alpine's GCC has no sanitizer runtimes on arm64, so that host
+# alone runs without the requirement.
+dockerfile='' platform='' require_sanitizers='' script=''
 case $host in
-  debian-amd64) dockerfile=debian.Dockerfile platform=linux/amd64 ;;
-  alpine-amd64) dockerfile=alpine.Dockerfile platform=linux/amd64 ;;
+  debian-amd64)
+    dockerfile=debian.Dockerfile platform=linux/amd64 require_sanitizers=1 ;;
+  alpine-amd64)
+    dockerfile=alpine.Dockerfile platform=linux/amd64 require_sanitizers=1 ;;
   alpine-arm64) dockerfile=alpine.Dockerfile platform=linux/arm64 ;;
   freebsd) script=freebsd.sh ;;
   *) usage ;;
@@ -192,6 +196,7 @@ run_suite() {
   fi
   if ! docker run --platform "$platform" --rm --network none --cap-drop ALL \
     --security-opt no-new-privileges --env "ASAN_OPTIONS=$asan_options" \
+    --env "TYPEC_TEST_REQUIRE_SANITIZERS=$require_sanitizers" \
     --mount "type=bind,source=$source_dir,target=/src,readonly" \
     "$image" sh -c "$suite" >> "$log" 2>&1; then
     fail "the suite fails; see $log"

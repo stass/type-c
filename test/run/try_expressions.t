@@ -179,20 +179,20 @@ unsigned, holds none.
 The holders below each hold a try somewhere other than at their top. A
 log shows which operands ran and in what order; each runs on both
 backends at -O0 and at -O2, under AddressSanitizer and
-UndefinedBehaviorSanitizer as well. The tries of one holder run in the
-order of the operands, left before right, and the first that fails
-returns its error (two); an operand left of a try in the same holder
-runs after it, in the holder, so a failure leaves pos as it was (emit),
-where the same call after int at = pos++; finds it one higher;
-a try under && or ?: runs only where C would evaluate its operand
-(guard, choose); a try in the scope of a defer runs the deferred
-statement once on its error path (deferred); and an index in the
-holder is checked after the try, so a failing try returns before the
-index traps (index). The array member of a try's value converts to a
-pointer to char that the callee may write through (use).
+UndefinedBehaviorSanitizer as well where the backend links them
+(backends.sh). The tries of one holder run in the order of the operands,
+left before right, and the first that fails returns its error (two); an
+operand left of a try in the same holder runs after it, in the holder,
+so a failure leaves pos as it was (emit), where the same call after int
+at = pos++; finds it one higher; a try under && or ?: runs only where C
+would evaluate its operand (guard, choose); a try in the scope of a
+defer runs the deferred statement once on its error path (deferred); and
+an index in the holder is checked after the try, so a failing try
+returns before the index traps (index). The array member of a try's
+value converts to a pointer to char that the callee may write through
+(use).
 
   $ flags="-std=c11 -pedantic-errors -Wall -Wextra -Werror"
-  $ sanitize="-fsanitize=address,undefined -fno-sanitize-recover=all"
   $ cat > holders.tc <<'EOF'
   > #include <stdio.h>
   > #include <stdlib.h>
@@ -300,6 +300,7 @@ pointer to char that the callee may write through (use).
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for build in "-O0 $sanitize" "-O2 $sanitize" "-O2"; do
   >     typec --cc=$cc $flags $build -o holders holders.tc && ./holders &&
   >     sh -c "ulimit -c 0; ./holders trap; exit \$?" 2>/dev/null
@@ -745,6 +746,7 @@ whose type a designator does not change (designated).
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for build in "-O0 $sanitize" "-O2 $sanitize" "-O2"; do
   >     typec --cc=$cc $flags $build -o partners partners.tc && ./partners |
   >       paste -s -d ' ' -
@@ -832,6 +834,7 @@ holds no pragma line (design 10.3).
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for build in "-O0 $sanitize" "-O2"; do
   >     typec --cc=$cc $flags $build -o generic generic.tc && ./generic |
   >       paste -s -d ' ' -
@@ -927,6 +930,7 @@ inside it, once.
   > }
   > EOF
   $ for cc in $clang $gcc; do
+  >   sanitize=$(sanitizer_flags $cc)
   >   for build in "-O0 $sanitize" "-O2"; do
   >     typec --cc=$cc $flags $build -o beside beside.tc && ./beside |
   >       paste -s -d ' ' -
