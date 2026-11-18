@@ -294,7 +294,7 @@ number_value(token t)
 ```console
 $ typec -c token.tc
 $ typec -c peek.tc
-peek.tc:6: error: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+peek.tc:6: error: '.' is not defined on the variant 'token'; test it with 'if (case Number(value) = t)' [variant-operation]
 [80]
 ```
 

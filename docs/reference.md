@@ -219,8 +219,11 @@ type name = | C1 | C2(type field, ...) | ...;
    operand of `sizeof`, `_Alignof`, unary `&`, parentheses, the second
    and third operands of `?:`, `,`, an expression statement, a cast to
    `void` and `_Generic`. Member access, `offsetof`, `==`, a cast to or
-   from a variant type and every operator that takes a scalar are errors
-   [variant-operation].
+   from a variant type, every operator that takes a scalar and a
+   variant as the condition of `if`, `while`, `do`, `for` or `?:` are
+   errors [variant-operation]; the message suggests the
+   [single-pattern test](#3-matching) or the binding that replaces the
+   C idiom.
 6. The zero value of a variant is its first constructor with every field
    zero: an object of static storage duration, `{0}`, `{}` and the bytes
    that `calloc` and `memset` zero all hold it (C11 6.7.9p10, p21). `{0}` and

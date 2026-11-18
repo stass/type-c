@@ -311,12 +311,45 @@ access, no comparison and no cast to or from one.
 
   $ printf 'type e = | A;\nint f(e v) { return v.tag; }\n' > member.tc
   $ ./golden.exe member.tc
-  member.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  member.tc:2: error: '.' is not defined on the variant 'e'; test it with 'if (case A = v)' [variant-operation]
   [1]
   $ printf 'type e = | A;\nint f(e v, e w) { return v == w; }\n' > equal.tc
   $ ./golden.exe equal.tc
-  equal.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching; a single-pattern test, 'if (case Pattern = value)', tells which constructor made it [variant-operation]
+  equal.tc:2: error: '==' is not defined on the variant 'e'; test it with 'if (case A = v)' [variant-operation]
   [1]
+
+A C idiom on a variant names the operator and the variant, and the test
+or the binding that replaces it, as the variant's constructors spell it.
+A condition or an operator tests for the first constructor with fields,
+'!' for the first without, and a member binds its field.
+
+  $ cat > idiom.h <<'EOF'
+  > type shape = | Circle(double r) | Ring(double w, double r) | Dot;
+  > type err = | Bad;
+  > result(int, err) next(void);
+  > result(void, err) put(void);
+  > EOF
+  $ for body in 'if (s) return 1;' 'while (next()) n++;' \
+  >     'return next() < 0;' 'return !o;' 'return o + 1;' \
+  >     'return (int)s.r;' 'return (int)p->w;' 'return s.tag;' \
+  >     'return n ? s == s : 0;' 'return !put();' 'return (int)s;'; do
+  >   cat idiom.h > idiom.tc
+  >   printf 'int f(shape s, shape *p, option(int) o, int n) { %s return n; }\n' "$body" >> idiom.tc
+  >   ./golden.exe idiom.tc
+  > done
+  idiom.tc:5: error: a condition may not be of the variant 'shape'; test it with 'if (case Circle(r) = s)' [variant-operation]
+  idiom.tc:5: error: a condition may not be of the variant 'result(int, err)'; test it with 'if (case Ok(value) = next())' [variant-operation]
+  idiom.tc:5: error: '<' is not defined on the variant 'result(int, err)'; test it with 'if (case Ok(value) = next())' [variant-operation]
+  idiom.tc:5: error: '!' is not defined on the variant 'option(int)'; test it with 'if (case None = o)' [variant-operation]
+  idiom.tc:5: error: '+' is not defined on the variant 'option(int)'; test it with 'if (case Some(value) = o)' [variant-operation]
+  idiom.tc:5: error: '.' is not defined on the variant 'shape'; 'r' is a field of 'Circle' and 'Ring'; bind it with 'if (case Circle(r) = s)' [variant-operation]
+  idiom.tc:5: error: '->' is not defined on the variant 'shape'; 'w' is a field of 'Ring'; bind it with 'if (case Ring(w, _) = *p)' [variant-operation]
+  idiom.tc:5: error: '.' is not defined on the variant 'shape'; test it with 'if (case Circle(r) = s)' [variant-operation]
+  idiom.tc:5: error: '==' is not defined on the variant 'shape'; test it with 'if (case Circle(r) = s)' [variant-operation]
+  idiom.tc:5: error: '!' is not defined on the variant 'result(void, err)'; test it with 'if (case Err(error) = put())' [variant-operation]
+  idiom.tc:5: error: the operand of a cast may not be of the variant 'shape' [variant-operation]
+  [1]
+
   $ printf 'type e = | A;\nint f(e v) { switch (v) { default: return 0; } }\n' > switch.tc
   $ ./golden.exe switch.tc
   switch.tc:2: error: the controlling expression of a switch is not an integer (C11 6.8.4.2p1); a variant is taken apart with match
@@ -328,11 +361,11 @@ access, no comparison and no cast to or from one.
   $ ./golden.exe tested.tc > /dev/null
   $ printf 'type e = | A;\nvoid f(e v) { (void)(long)v; }\n' > cast.tc
   $ ./golden.exe cast.tc
-  cast.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  cast.tc:2: error: the operand of a cast may not be of the variant 'e' [variant-operation]
   [1]
   $ printf 'type e = | A;\ne f(void) { return (e)0; }\n' > cast_to.tc
   $ ./golden.exe cast_to.tc
-  cast_to.tc:2: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  cast_to.tc:2: error: the target of a cast may not be of the variant 'e' [variant-operation]
   [1]
 
 The member path of offsetof, which expands to __builtin_offsetof, may
@@ -349,12 +382,12 @@ end at a variant but not reach into one.
   >   printf 'unsigned long f(void) { return __builtin_offsetof(struct s, %s); }\n' "$path" >> offsetof.tc
   >   ./golden.exe offsetof.tc
   > done
-  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
-  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
-  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
-  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
-  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
-  offsetof.tc:5: error: the variant 'e' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  offsetof.tc:5: error: '.' is not defined on the variant 'e' [variant-operation]
+  offsetof.tc:5: error: '.' is not defined on the variant 'e' [variant-operation]
+  offsetof.tc:5: error: '.' is not defined on the variant 'e' [variant-operation]
+  offsetof.tc:5: error: '.' is not defined on the variant 'e' [variant-operation]
+  offsetof.tc:5: error: '.' is not defined on the variant 'e' [variant-operation]
+  offsetof.tc:5: error: '.' is not defined on the variant 'e' [variant-operation]
   [1]
   $ cat offsetof.h > offsetof.tc
   $ cat >> offsetof.tc <<'EOF'

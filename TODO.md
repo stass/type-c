@@ -48,23 +48,6 @@ jump into or out of a deferred statement. No message cites a design
 section.
 The items are ordered by how often real code meets them.
 
-- [Medium] A C idiom on a variant gets no type or no fix. `if (v)`,
-  `while (v)` and `if (f())` on a variant give C's "the operand is not
-  of scalar type (C11 6.8.4.1p1)", naming no type. `f() < 0` on a
-  `result(int, err)`, `s.r` on a `shape`, and `!o` and `o + 1` on an
-  `option(int)` give, each naming its own variant, "the variant
-  'option(int)' takes no such
-  operation; Type-C text reaches its tag and fields only through
-  constructors and matching [variant-operation]", which names no
-  operator and uses the design's "Type-C text"; `==` and `!=` get the
-  same words and add the hint of the single-pattern test. Proposed, for
-  every operator: "'<' is not defined on the variant 'result(int,
-  err)'", then the fix by what was written: for a condition or a
-  comparison of a result, "test it with 'if (case Ok(v) = f())'"; for
-  `!o`, "test it with 'if (case None = o)'"; for `s.r`, "'r' is a field
-  of 'Circle'; bind it with 'if (case Circle(r) = s)'". Source: Pilot A
-  (49 accessor calls and 92 predicate calls stand where C read the
-  field or the tag); review cases 19 and 35; probe.
 - [Medium] An array or a pointer passed where a slice is expected:
   `g(c)` with `char c[4]` and `size_t g(str s)` gives "a value of type
   'char *' does not convert to 'slice(const char)' (C11 6.5.16.1p1)",
@@ -141,6 +124,12 @@ The items are ordered by how often real code meets them.
   coverage alone, next to `Shown.cut` as a bound on message text. The
   shared-arm refusal may leave out the label that binds when it is past
   the eighth; name that one first.
+- [Low] The test that a refusal of a variant suggests is always 'if
+  (case P = e)': for `while (next())` the drop-in form is `while (case
+  Ok(value) = next())`, and a `for` or `do` condition can hold no test,
+  so the fix there is a loop around a test; `require_condition` could
+  take the statement. The scrutinee of `->` is parenthesised after `*`
+  unless it is a name, so `(p)->j` reads `*((p))`.
 - [Low] A typed binding of a field that is no variant: `case
   Circle(double r)`, written as C declares, gives "expected a
   sub-pattern, found `double`". Proposed: "a field of type 'double' is

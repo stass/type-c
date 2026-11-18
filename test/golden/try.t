@@ -2468,7 +2468,7 @@ operation that opens it.
 
   $ { cat conversions.h; printf 'int c(option(int) o) { return (int)o; }\n'; } > cast_variant.tc
   $ ./golden.exe cast_variant.tc
-  cast_variant.tc:7: error: the variant 'option(int)' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  cast_variant.tc:7: error: the operand of a cast may not be of the variant 'option(int)' [variant-operation]
   [1]
 
 C text, which may use the structure that a variant lowers to, is held to

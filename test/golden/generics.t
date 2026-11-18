@@ -266,7 +266,7 @@ messages name it by its instance name (design 10.3).
   > int tag(list(int) l) { return l.tag; }
   > EOF
   $ ./golden.exe opened.tc
-  opened.tc:2: error: the variant 'list(int)' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  opened.tc:2: error: '.' is not defined on the variant 'list(int)'; test it with 'if (case Cons(head, tail) = l)' [variant-operation]
   [1]
 
 A generic type is declared at file scope only (design 3.1).

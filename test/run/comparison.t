@@ -194,7 +194,7 @@ operation on a variant (variant-operation).
   token.tc:4: error: the enumerator `token_Name` is not available to Type-C text, as a type declaration claims it [claimed-name]
   [80]
   $ typec --cc=$clang -DNO_TAG_TEST -c token.tc -o tc.o
-  token.tc:7: error: the variant 'token' takes no such operation; Type-C text reaches its tag and fields only through constructors and matching [variant-operation]
+  token.tc:7: error: '.' is not defined on the variant 'token'; test it with 'if (case Number(value) = t)' [variant-operation]
   [80]
 
 3. A missing break at the end of an arm (design 4.3). GCC's -Wextra

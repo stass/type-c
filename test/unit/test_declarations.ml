@@ -2180,17 +2180,15 @@ let variant_operations () =
   let file = "in.tc" in
   let variant = "type e = | A | B(int i); " in
   let in_function body = variant ^ "e f(e v, e w, e *p) { " ^ body ^ " }" in
-  let refused_as remedy body =
-    rejects ~file (in_function body)
-      ("the variant 'e' takes no such operation; Type-C text reaches its \
-        tag and fields only through constructors and matching" ^ remedy
-     ^ " [variant-operation]")
+  let refused_as refusal body =
+    rejects ~file (in_function body) (refusal ^ " [variant-operation]")
   in
-  let refused = refused_as "" in
-  let compared =
+  let tested operator scrutinee =
     refused_as
-      "; a single-pattern test, 'if (case Pattern = value)', tells which \
-       constructor made it"
+      (Printf.sprintf
+         "'%s' is not defined on the variant 'e'; test it with 'if (case \
+          B(i) = %s)'"
+         operator scrutinee)
   in
   accepts ~file
     (in_function
@@ -2199,23 +2197,38 @@ let variant_operations () =
   accepts ~file (in_function "return ({ v; });");
   accepts ~file (in_function "return (v);");
   accepts ~file (in_function "v; return v;");
-  refused "(void)v.tag; return v;";
-  refused "(void)p->tag; return v;";
-  refused "(void)(*p).u; return v;";
-  refused "(void)f(v, w, p).tag; return v;";
-  refused "(void)sizeof(v.tag); return v;";
-  compared "(void)(v == w); return v;";
-  compared "(void)(v != w); return v;";
-  refused "(void)!v; return v;";
-  refused "v += w; return v;";
-  refused "(void)(int)v; return v;";
+  tested "." "v" "(void)v.tag; return v;";
+  tested "->" "*p" "(void)p->tag; return v;";
+  tested "." "(*p)" "(void)(*p).u; return v;";
+  tested "." "f(v, w, p)" "(void)f(v, w, p).tag; return v;";
+  tested "." "v" "(void)sizeof(v.tag); return v;";
+  refused_as
+    "'.' is not defined on the variant 'e'; 'i' is a field of 'B'; bind it \
+     with 'if (case B(i) = v)'"
+    "return v.i;";
+  tested "==" "v" "(void)(v == w); return v;";
+  tested "!=" "v" "(void)(v != w); return v;";
+  refused_as
+    "'!' is not defined on the variant 'e'; test it with 'if (case A = v)'"
+    "(void)!v; return v;";
+  tested "+=" "v" "v += w; return v;";
+  refused_as "the operand of a cast may not be of the variant 'e'"
+    "(void)(int)v; return v;";
+  refused_as
+    "a condition may not be of the variant 'e'; test it with 'if (case B(i) \
+     = v)'"
+    "if (v) return v; return w;";
   accepts ~file (in_function "(void)v; (void)*p; return v;");
   accepts ~file
     (in_function "return _Generic(v, e: v, default: w);");
-  refused "return (e)v;";
-  refused "return (e)1;";
-  refused "return (const e)v;";
-  refused "(void)__builtin_offsetof(e, tag); return v;";
+  let cast_to =
+    refused_as "the target of a cast may not be of the variant 'e'"
+  in
+  cast_to "return (e)v;";
+  cast_to "return (e)1;";
+  cast_to "return (const e)v;";
+  refused_as "'.' is not defined on the variant 'e'"
+    "(void)__builtin_offsetof(e, tag); return v;";
   (* C text, here a header that the Type-C file includes, reads the
      representation. *)
   accepts ~file
@@ -2501,10 +2514,12 @@ let generic_variants () =
      int g(lst(int) x) { x = Cons(1, p); match (x) { case No: return 0; \
      case Cons(h, _): return h; } }";
   (* Design 3.2 rule 6: only constructors and matching open it. *)
-  let refused = "the variant 'list(int)' takes no such operation" in
-  rejects ~file (in_function "(void)v.tag;") refused;
-  rejects ~file (in_function "(void)p->u;") refused;
-  rejects ~file (in_function "(void)(v == v);") refused;
+  let refused operator =
+    Printf.sprintf "'%s' is not defined on the variant 'list(int)'" operator
+  in
+  rejects ~file (in_function "(void)v.tag;") (refused ".");
+  rejects ~file (in_function "(void)p->u;") (refused "->");
+  rejects ~file (in_function "(void)(v == v);") (refused "==");
   rejects ~file (in_function "list(int) x = { 1 }; (void)x;")
     "an initialiser reaches into the variant 'list(int)'";
   (* An instance of a variant not complete yet has no constructors. *)

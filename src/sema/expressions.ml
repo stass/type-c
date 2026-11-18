@@ -888,23 +888,159 @@ let fail_operands context span clause =
        ("the operands have types that the operator does not take (C11 " ^ clause
       ^ ")"))
 
-(* Design 3.2 rule 6: Type-C text reaches the tag and fields of a
-   variant only through constructors and matching, so an operation at [span]
-   whose operand, or the type it converts to or reaches into, is the
-   variant [t] is refused there. C text may use the structure that a
-   variant lowers to (design 10.6). *)
+(* Whether [span] is in Type-C text, which the rules of the design bind,
+   rather than in C text. *)
 let is_type_c_text context (span : Tree.span) =
   File.is_type_c_text context.text.tokens.(span.first).owner
 
-let refuse_variant ?(remedy = "") context (span : Tree.span) (t : Ctype.t) =
+(* The quoted names [quoted], after the noun [one] or [several], and the
+   count of [more] not named. *)
+let listed ~one ~several ~more quoted =
+  match List.rev quoted with
+  | _ :: _ when more > 0 ->
+      Printf.sprintf "%s %s and %d more" several (String.concat ", " quoted)
+        more
+  | [ only ] -> one ^ " " ^ only
+  | last :: before ->
+      Printf.sprintf "%s %s and %s" several
+        (String.concat ", " (List.rev before))
+        last
+  | [] -> invalid_arg "Expressions.listed: nothing to name"
+
+(* What reads a value where its type refuses it, as the message names
+   it. *)
+type operation =
+  | Operator of string  (** An operator as written, or a builtin. *)
+  | Operand of string  (** The operand's role, as "an index". *)
+  | Unnamed_operation
+
+(* The refusal of [operation] on a value of [what], a type as a message
+   names it, before its fix. *)
+let not_defined operation what =
+  match operation with
+  | Operator spelling ->
+      Printf.sprintf "%s is not defined on %s" (quote spelling) what
+  | Operand role -> Printf.sprintf "%s may not be of %s" role what
+  | Unnamed_operation -> "this operation is not defined on " ^ what
+
+(* The tokens of [span] as a message quotes them. *)
+let excerpt context (span : Tree.span) =
+  Reader.excerpt context.text ~first:span.first ~last:span.last
+
+(* The constructor that a test of a variant in place of a C idiom looks
+   for: one with fields, whose values the idiom meant to read; one
+   without, which [!] asks for; or one with the field that [.] or [->]
+   names. *)
+type sought = Holding_fields | Without_fields | Holding_field of string
+
+(* The operand that a test matches: the variant as written, or the one
+   that a pointer written before [->] points to. *)
+type scrutinee = Written of Tree.expression | Pointed_to of Tree.expression
+
+(* A test that a refusal of a variant suggests in place of a C idiom. *)
+type variant_test = { scrutinee : scrutinee; sought : sought }
+
+(* The scrutinee as a test spells it, parenthesised after [*] unless it
+   is a name. *)
+let scrutinee_text context = function
+  | Written operand -> excerpt context operand.span
+  | Pointed_to { node = Identifier _; span } -> "*" ^ excerpt context span
+  | Pointed_to operand -> "*(" ^ excerpt context operand.span ^ ")"
+
+(* [constructor] as the pattern of a test, its fields bound by their
+   names where [bound] holds and ignored elsewhere. *)
+let test_pattern ~bound (constructor : Ctype.constructor) =
+  let field (member : Ctype.member) =
+    match member.member_name with
+    | Some name when bound name -> name
+    | Some _ | None -> "_"
+  in
+  let name = (constructor.constructor_name :> string) in
+  match constructor.fields with
+  | [] -> name
+  | fields -> name ^ "(" ^ String.concat ", " (List.map field fields) ^ ")"
+
+let single_pattern_test pattern scrutinee =
+  quote (Printf.sprintf "if (case %s = %s)" pattern scrutinee)
+
+let has_fields (constructor : Ctype.constructor) = constructor.fields <> []
+
+let has_field name (constructor : Ctype.constructor) =
+  List.exists
+    (fun (member : Ctype.member) -> member.member_name = Some name)
+    constructor.fields
+
+let is_named spelling (constructor : Ctype.constructor) =
+  (constructor.constructor_name :> string) = spelling
+
+(* Whether a test of a variant seeks [constructor]. A result holds the
+   value that an idiom reads in its Ok, as try reads it, and [!] asks
+   whether it failed, which its Err tells. *)
+let wanted ~result sought =
+  match sought with
+  | Without_fields when result -> is_named Ctype.result_err
+  | Without_fields -> Fun.negate has_fields
+  | Holding_fields when result -> is_named Ctype.result_ok
+  | Holding_fields | Holding_field _ -> has_fields
+
+(* The binding of the field [name] of [holders], the constructors that
+   have it, by a test of the first. *)
+let binding_fix name holders scrutinee =
+  let named, more = Selection.named_first holders in
+  let quoted (c : Ctype.constructor) = quote (c.constructor_name :> string) in
+  match named with
+  | [] -> ""
+  | first :: _ ->
+      Printf.sprintf "; %s is %s; bind it with %s" (quote name)
+        (listed ~one:"a field of" ~several:"a field of" ~more
+           (List.map quoted named))
+        (single_pattern_test
+           (test_pattern ~bound:(String.equal name) first)
+           scrutinee)
+
+(* The fix of a C idiom on a variant of [constructors] by what was
+   written: the binding of the field that a member access names, where
+   a constructor has it, or else a test for the constructor sought, or
+   the first where none is. *)
+let variant_fix ~result constructors sought scrutinee =
+  let holders =
+    match sought with
+    | Holding_field name -> List.filter (has_field name) constructors
+    | Holding_fields | Without_fields -> []
+  in
+  match (sought, holders) with
+  | Holding_field name, _ :: _ -> binding_fix name holders scrutinee
+  | (Holding_fields | Without_fields | Holding_field _), _ -> (
+      match (List.find_opt (wanted ~result sought) constructors, constructors)
+      with
+      | Some tested, _ | None, tested :: _ ->
+          "; test it with "
+          ^ single_pattern_test
+              (test_pattern ~bound:(fun _ -> true) tested)
+              scrutinee
+      | None, [] -> "")
+
+(* Design 3.2 rule 6: a variant's tag and fields are reached only
+   through constructors and matching, so [operation] at [span] on the
+   variant [t], or converting to it, is refused, with [test] as its fix
+   where a test can replace the operand. C text may use the structure
+   that a variant lowers to (design 10.6). The fix is spelt only here,
+   once the refusal is certain, since it quotes the operand. *)
+let refuse_variant ?test context (span : Tree.span) operation (t : Ctype.t) =
   match Ctype.as_variant t with
   | Some name when is_type_c_text context span ->
+      let fix =
+        match (test, Ctype.constructors context.tags t) with
+        | Some test, Some constructors ->
+            variant_fix ~result:(Ctype.as_result t <> None) constructors
+              test.sought
+              (scrutinee_text context test.scrutinee)
+        | Some _, None | None, _ -> ""
+      in
       context.fail span
         (Rule.message Variant_operation
-           (Printf.sprintf
-              "the variant %s takes no such operation; Type-C text reaches \
-               its tag and fields only through constructors and matching%s"
-              (quoted_variant name) remedy))
+           (not_defined operation ("the variant " ^ quoted_variant name)
+           ^ fix))
   | Some _ | None -> ()
 
 (* What a switch on a value of type [t] likely meant in Type-C text: a
@@ -914,19 +1050,6 @@ let switch_remedy context span (t : Ctype.t) =
   | Some _ when is_type_c_text context span ->
       "; a variant is taken apart with match"
   | Some _ | None -> ""
-
-(* The step that likely replaces [op] on a variant: an equality asks
-   which constructor made it, which a test answers. *)
-let variant_remedy (op : Tree.binary_operator) =
-  match op with
-  | Equal_to | Not_equal_to ->
-      "; a single-pattern test, 'if (case Pattern = value)', tells \
-       which constructor made it"
-  | Multiply | Divide | Remainder | Add | Subtract | Shift_left
-  | Shift_right | Less_than | Greater_than | Less_or_equal
-  | Greater_or_equal | Bitwise_and | Bitwise_xor | Bitwise_or
-  | Logical_and | Logical_or ->
-      ""
 
 (* Design 7.1 rule 3: an instance of a generic function is its text with
    each type parameter naming its argument, so a use of a type parameter
@@ -1089,30 +1212,18 @@ let reads_distinct : Tree.expression_node -> bool = function
       true
   | _ -> false
 
-(* What reads a value of a distinct type where the table refuses it, as
-   its message names it. *)
-type distinct_reader =
-  | Operator of string  (** An operator as written, or a builtin. *)
-  | Operand of string  (** The operand's role, as "an index". *)
-  | Unnamed_operation
-
 let refuse_distinct context span reader (distinct : Ctype.distinct) =
   let name = distinct_name distinct in
   let underlying = quote (Type_name.of_ctype distinct.representation) in
-  let refusal =
+  let cast =
     match reader with
-    | Operator spelling ->
-        Printf.sprintf "%s is not defined on the distinct type %s; cast to %s"
-          (quote spelling) name underlying
-    | Operand role ->
-        Printf.sprintf "%s may not be of the distinct type %s; cast it to %s"
-          role name underlying
-    | Unnamed_operation ->
-        Printf.sprintf
-          "this operation is not defined on the distinct type %s; cast to %s"
-          name underlying
+    | Operand _ -> "cast it to "
+    | Operator _ | Unnamed_operation -> "cast to "
   in
-  context.fail span (Rule.message Distinct_operation refusal)
+  context.fail span
+    (Rule.message Distinct_operation
+       (not_defined reader ("the distinct type " ^ name) ^ "; " ^ cast
+      ^ underlying))
 
 (* An operand of an operation at [span], as the operation sees it;
    [reads] says whether the table lets the operation read a value of a
@@ -1540,10 +1651,10 @@ let token_spelling context index =
 
 let spelling context (span : Tree.span) = token_spelling context span.first
 
-(* The operation of [whole], as a refusal of a distinct operand names it:
-   an operator by the token the parser read it from, which begins a
-   prefix operation and ends a postfix one. *)
-let distinct_reader context (whole : Tree.expression) =
+(* The operation of [whole], as a refusal of its operand names it: an
+   operator by the token the parser read it from, which begins a prefix
+   operation and ends a postfix one. *)
+let operation_of context (whole : Tree.expression) =
   let operator token = Operator (token_spelling context token) in
   match whole.node with
   | Binary ({ span; _ }, _, _) | Assignment ({ span; _ }, _, _) ->
@@ -1554,11 +1665,30 @@ let distinct_reader context (whole : Tree.expression) =
   | Pointer_member _ -> Operator "->"
   | Subscript _ -> Operator "[]"
   | Call _ -> Operand "a called function"
+  | Cast _ -> Operand "the operand of a cast"
   | _ -> Unnamed_operation
 
-(* The tokens of [span] as a message quotes them. *)
-let excerpt context (span : Tree.span) =
-  Reader.excerpt context.text ~first:span.first ~last:span.last
+(* The constructor that a test in place of [whole] on a variant looks
+   for, by what was written. *)
+let sought_of (whole : Tree.expression) =
+  match whole.node with
+  | Member { member; _ } | Pointer_member { member; _ } ->
+      Holding_field member.node
+  | Unary (Logical_not, _) -> Without_fields
+  | _ -> Holding_fields
+
+(* The operator of a step of the member path of offsetof. *)
+let offsetof_operation : Tree.designator_node -> operation = function
+  | Member_designator _ -> Operator "."
+  | Index _ | Index_range _ -> Operator "[]"
+
+(* A controlling expression or the first operand of ?:, which C compares
+   with zero, so it may not be a variant; a test replaces it. *)
+let require_condition context ~clause (condition : Tree.expression) typed =
+  refuse_variant context condition.span (Operand "a condition")
+    ~test:{ scrutinee = Written condition; sought = Holding_fields }
+    typed.expression_type;
+  require_scalar context condition.span ~clause typed
 
 let constant_type context span (number : Number.t) =
   match number with
@@ -1889,12 +2019,16 @@ let direct_member context span (record : typed) name =
 
 (* [p->m] reaches into [*p], which may not be a variant (design 3.2 rule
    6). *)
-let pointer_member context span (pointer : typed) name =
-  match operand context pointer with
+let pointer_member context span ~(pointer : Tree.expression)
+    (pointer_typed : typed) (name : Tree.identifier) =
+  match operand context pointer_typed with
   | Pointer_operand
       { referenced = { shape = Record tag; qualifiers; _ } as referenced; _ }
     ->
-      refuse_variant context span referenced;
+      refuse_variant context span (Operator "->")
+        ~test:
+          { scrutinee = Pointed_to pointer; sought = Holding_field name.node }
+        referenced;
       member_of context tag qualifiers name ~category:Lvalue
   | Pointer_operand { referenced = { shape = Unknown_type unknown; _ }; _ }
   | Unknown_operand unknown ->
@@ -4212,10 +4346,18 @@ and expression_node context position (whole : Tree.expression) =
   (* Any other operand, which the operation reaches into, so it may not
      be a variant; it reads a distinct value only where the table of
      design 3.4 says so. *)
-  let operation = distinct_reader context whole in
-  let typed ?remedy ?(reader = operation) operand =
+  let operation = operation_of context whole in
+  let typed ?(reader = operation) operand =
     let operand_typed = whole_value context operand in
-    refuse_variant ?remedy context span operand_typed.expression_type;
+    (* An operator's operand is what a test replaces; an operand of
+       another role, as an index or a called function, is not. *)
+    let test =
+      match reader with
+      | Operator _ ->
+          Some { scrutinee = Written operand; sought = sought_of whole }
+      | Operand _ | Unnamed_operation -> None
+    in
+    refuse_variant ?test context span reader operand_typed.expression_type;
     read_operand context span ~reads:(reads_distinct whole.node) ~reader
       operand_typed
   in
@@ -4268,7 +4410,7 @@ and expression_node context position (whole : Tree.expression) =
   | Member { operand; member } ->
       direct_member context span (typed operand) member
   | Pointer_member { operand; member } ->
-      pointer_member context span (typed operand) member
+      pointer_member context span ~pointer:operand (typed operand) member
   (* The value of a postfix operation is no bit-field in Clang. *)
   | Post_increment operand | Post_decrement operand ->
       increment context span ~clause:"6.5.2.4p1" (typed operand)
@@ -4299,7 +4441,7 @@ and expression_node context position (whole : Tree.expression) =
       value (size_type context span)
   | Cast { type_name; operand } ->
       let cast_type = context.type_name type_name in
-      refuse_variant context span cast_type;
+      refuse_variant context span (Operand "the target of a cast") cast_type;
       if Ctype.is_opaque cast_type then
         refuse_type_parameter context span "a cast to a type parameter";
       Option.iter
@@ -4316,9 +4458,8 @@ and expression_node context position (whole : Tree.expression) =
         ~source:cast_operand.expression_type;
       value (call_or_cast_type context span cast_type)
   | Binary ({ node = op; _ }, left, right) ->
-      let remedy = variant_remedy op in
-      let left_typed = typed ~remedy left in
-      let right_typed = typed ~remedy right in
+      let left_typed = typed left in
+      let right_typed = typed right in
       equality_operands context op (left, left_typed) (right, right_typed);
       value (binary_type context span op left_typed right_typed)
   | Conditional { condition; if_true; if_false } ->
@@ -4890,7 +5031,7 @@ and compound_literal context (whole : Tree.expression) type_name values =
 (* 6.5.15p3 to p6. A GNU [a ?: b] has [a] as its second operand. *)
 and conditional context span position condition if_true if_false =
   let condition_typed = whole_value context condition in
-  require_scalar context condition.span ~clause:"6.5.15p2" condition_typed;
+  require_condition context ~clause:"6.5.15p2" condition condition_typed;
   let branch_typed = positioned context (branch_position position) in
   let second =
     match if_true with
@@ -5100,7 +5241,7 @@ and offsetof_path context span (reached : Ctype.t) path =
   match path with
   | [] -> ()
   | step :: rest ->
-      refuse_variant context span reached;
+      refuse_variant context span (offsetof_operation step) reached;
       Option.iter
         (fun next -> offsetof_path context span next rest)
         (offsetof_step context reached step)
@@ -5465,9 +5606,8 @@ and typed_statement context statement =
    rule 3). The labels of a match arm are no statement's. *)
 and standing_statement context standing labels (statement : Tree.statement) =
   let enclosing = context.typed.enclosing in
-  let scalar ~clause condition =
-    require_scalar context condition.Tree.span ~clause
-      (whole_value context condition)
+  let controlling ~clause tested =
+    require_condition context ~clause tested (whole_value context tested)
   in
   let holder =
     { statement = statement.span; labels; standing }
@@ -5503,7 +5643,7 @@ and standing_statement context standing labels (statement : Tree.statement) =
   | Null_statement | Goto _ | Continue _ | Break _ -> ()
   | If { condition = Controlling condition; then_branch; else_branch } ->
       held_in_parentheses condition (fun () ->
-          scalar ~clause:"6.8.4.1p1" condition);
+          controlling ~clause:"6.8.4.1p1" condition);
       typed_statement context then_branch;
       Option.iter (typed_statement context) else_branch
   | If
@@ -5524,7 +5664,7 @@ and standing_statement context standing labels (statement : Tree.statement) =
       match_statement context statement scrutinee arms
         ~hold:(held_in_parentheses scrutinee)
   | While { condition = Controlling condition; body } ->
-      in_loop (fun () -> scalar ~clause:"6.8.5p2" condition);
+      in_loop (fun () -> controlling ~clause:"6.8.5p2" condition);
       typed_statement context body
   | While
       { condition = Pattern_test { pattern_span; pattern; operand }; body } ->
@@ -5532,11 +5672,11 @@ and standing_statement context standing labels (statement : Tree.statement) =
         ~hold:in_loop body While_test
   | Do { body; condition } ->
       typed_statement context body;
-      in_loop (fun () -> scalar ~clause:"6.8.5p2" condition)
+      in_loop (fun () -> controlling ~clause:"6.8.5p2" condition)
   | For { clause; condition; step; body } ->
       in_loop (fun () ->
           Option.iter (for_clause context) clause;
-          Option.iter (scalar ~clause:"6.8.5p2") condition;
+          Option.iter (controlling ~clause:"6.8.5p2") condition;
           Option.iter (discard context) step);
       typed_statement context body
   (* 6.8.6.4p1 is left to the backend: GCC and Clang refuse a return
@@ -6293,20 +6433,6 @@ and value_list values ~more =
     (List.map
        (fun value -> quote (Selection.spelling value))
        values)
-
-(* The quoted names [quoted], after the noun [one] or [several], and the
-   count of [more] not named. *)
-and listed ~one ~several ~more quoted =
-  match List.rev quoted with
-  | _ :: _ when more > 0 ->
-      Printf.sprintf "%s %s and %d more" several (String.concat ", " quoted)
-        more
-  | [ only ] -> one ^ " " ^ only
-  | last :: before ->
-      Printf.sprintf "%s %s and %s" several
-        (String.concat ", " (List.rev before))
-        last
-  | [] -> invalid_arg "Expressions.listed: nothing to name"
 
 (* An arm and its bindings, which only an arm of one label may declare
    (4.1 rule 6). A binding is a non-modifiable object of its field's
