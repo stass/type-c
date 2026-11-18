@@ -4099,7 +4099,7 @@ differ as well, and the paragraphs after them state how.
   reads for an instance, whether the header declares the instance or
   not, a function instance as a type instance. It is a typedef named
   for the instance of a pointer to a structure that no text defines,
-  whose tag holds a digest of the text of the definition of the
+  whose tag holds the digest of the definitions of the
   instance's generic and of the generics that it applies (13.5). An
   instance of a generic that the step reads declared and not defined,
   as `type list(T);` (3.1 rule 4), or of one that applies such a
@@ -4163,32 +4163,47 @@ whose generic, with each generic that it applies, each header's step
 reads defined.
 
 The digest is BLAKE2b with a 128-bit result, which the OCaml library
-provides as `Digest.BLAKE128`, of the text of the definition of the
-instance's generic followed by the definitions of the generics that it
-applies. The definition of a generic is its tokens from the first to
-the last: the declaration of a generic type that defines it, which is
-the variant that completes an incomplete one where one does, or the
-text of a generic function from its `generic`. Each token is spelled
-as lowering spells it, an identifier in UTF-8 whatever universal
-character names spell it, and is followed by one space, so the white
-space between the tokens changes nothing, and a line break, which no
-token holds, ends the definition, so the definitions part the text in
-one way only. After the instance's generic come, each once, the
-generics that a definition already in the text applies, as the step's
-reading resolved each application: the definition of each, then those
-that it applies, in the order in which their applications first
-stand, so a generic that applies itself, as `list(T)` holding a
-`list(T) *`, or a cycle of generics through pointers ends where it
-meets a definition in the text. Where the step reads one of these
-generics declared alone, there is no text, and the header writes no
-layout typedef, as for an instance whose own generic it reads declared
-alone: the step can define the instance only where that generic stands
-behind a pointer, so its layout rests on no definition of the generic,
-and a step that reads the generic defined, as an interface that
-completes it does, writes the typedef alone. The text is thus every
-generic that the instance's definition depends on, and `outer(T)` applying `inner(T)` gets another
-digest wherever `inner` differs, though the header declares no
-instance of `inner`. A name in the definition that is no application,
+provides as `Digest.BLAKE128`, and it is formed over the *application
+graph* of the step: each generic is a node, with an edge to the generic
+of each application in its definition, as the step's reading resolved
+the application. Generics that apply each other, directly or through
+others, are one strongly connected *component* of the graph, as
+`list(T)` holding a `list(T) *` is alone, or `tree(T)` and `node(T)`
+holding pointers to each other are together, and the digest of an
+instance is that of its generic's component. A component's digest is
+that of a text: the definition of each of its generics, in the order of
+their texts, then the digest of each other component that one of them
+applies, each once and followed by a line break, in the order of the
+digests. Neither order rests on where a definition stands, so steps
+that read one set of definitions in any order write one digest, and a
+generic that applies none digests its definition alone. The definition
+of a generic is its tokens from the first to the last: the declaration
+of a generic type that defines it, which is the variant that completes
+an incomplete one where one does, or the text of a generic function
+from its `generic`. Each token is spelled as lowering spells it, an
+identifier in UTF-8 whatever universal character names spell it, and
+is followed by one space, so the white space between the tokens
+changes nothing, and a line break, which no token holds, ends the
+definition; every definition holds a space and no digest does, so the
+text parts in one way only. A step spells each definition and computes
+each component's digest once, however many instances and generics
+apply it, so the digests take time near linear in the definitions. A text
+that held, for each generic, the definitions of every generic that it
+reaches would spell a definition again for each generic above it,
+quadratic in a chain of generics or in many generics over one, and
+would need a budget that refuses valid headers.
+
+Where the step reads a generic of the component, or of a component that
+it applies, transitively, declared alone, there is no text, and the
+header writes no layout typedef, as for an instance whose own generic
+it reads declared alone: the step can define the instance only where
+that generic stands behind a pointer, so its layout rests on no
+definition of the generic, and a step that reads the generic defined,
+as an interface that completes it does, writes the typedef alone. The
+digest thus rests on every generic that the instance's definition
+depends on, and `outer(T)` applying `inner(T)` gets another digest
+wherever `inner` differs, though the header declares no instance of
+`inner`. A name in the definition that is no application,
 as a member spelt as a generic's name, adds nothing, and neither does
 a typedef name or a tag in the definition: what one holds is no
 parameter's, so the instance in it, as `inner(int)` behind an
@@ -4736,7 +4751,7 @@ all the same: whether a header's text depends on the representation is
 a list that no step keeps. Two headers generated under different
 representations hold assertions of which a client passes at most one,
 so a client never mixes them. The layout typedef needs no part of this:
-its digest is of the text of a definition, which the representation
+its digest is of the text of definitions, which the representation
 does not change, and the assertion covers the representation for the
 whole client. The assertion is one enumeration standing for all,
 provisional as 13.4 states.
@@ -8712,10 +8727,10 @@ the others of its kind:
 - the layout typedef of an instance in an emitted header (9.3):
   `layout`, then the instance name, as in `__tc_layout__vector__i`;
 - the tag of the structure that a layout typedef points to (9.3):
-  `digest`, then the digest of the text of the definition of the
-  instance's generic and of the generics that it applies (9.3) as 32
-  hexadecimal digits in lower case, as in
-  `__tc_digest__5d41402abc4b2a76b9719d911017c592` for a definition of
+  `digest`, then the digest of the component of the instance's generic
+  in the graph of the generics' applications (9.3) as 32 hexadecimal
+  digits in lower case, as in
+  `__tc_digest__5d41402abc4b2a76b9719d911017c592` for a component of
   that digest;
 - the two structures of the packing probe of an emitted header (10.3):
   `pack_probe_1` or `pack_probe_2`, then the module of the header, as
@@ -8737,7 +8752,7 @@ prefix ends the word, and names of different kinds differ: the guard of
 a header never meets the guard of an instance. Within a kind, an
 encoding is one type, an instance name one instance (10.3), and the
 written form of a module that last component alone, since every `_` in
-it begins an escape. A digest is one text of a definition, so two
+it begins an escape. A digest is one text of definitions and digests, so two
 headers that write one definition of an instance write one layout
 typedef, and two that write different ones write two that C refuses
 together; a header whose step reads the generic of an instance

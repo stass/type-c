@@ -298,25 +298,38 @@ let instance_of generic arguments =
   | Ok name -> Spelling.instance name arguments
   | Error _ -> failwith (generic ^ " is no name of a generic")
 
-(* Design 9.3, 13.5: the layout typedef of an instance digests the
-   tokens of its generic's definition, each followed by one space, and
-   a line break after the definition, with BLAKE2b-128, whose digests
-   of "" and "abc" b2sum -l 128 gives. *)
+(* The layout typedef of the instance [name] whose digest is that of
+   [text]. *)
+let digesting name text = Layout.typedef name ~digest:(Layout.digest text)
+
+(* The text that design 9.3 digests for a component: its [members]'
+   definitions in the order of their text, then the digest of each
+   component in [applied] once, each with a line break, in their
+   order. *)
+let component members ~applied =
+  let line digest = digest ^ "\n" in
+  String.concat "" (List.sort compare members)
+  ^ String.concat "" (List.map line (List.sort_uniq compare applied))
+
+(* Design 9.3, 13.5: the layout typedef of an instance of a generic that
+   applies none digests the tokens of its definition, each followed by
+   one space, and a line break after the definition, with BLAKE2b-128,
+   whose digests of "" and "abc" b2sum -l 128 gives. *)
 let layout_typedefs () =
   let of_int generic = instance_of generic [ "i" ] in
   let name = of_int "box" in
-  compares "the digest of no text" (Layout.typedef name ~definition:"")
+  compares "the digest of no text" (digesting name "")
     "typedef struct __tc_digest__cae66941d9efbd404e4d88758ea67670 \
      *__tc_layout__box__i;";
-  compares "the digest of abc" (Layout.typedef name ~definition:"abc")
+  compares "the digest of abc" (digesting name "abc")
     "typedef struct __tc_digest__cf4ab791c62b8d2b2109c90275287816 \
      *__tc_layout__box__i;";
   let box = "type box(T) = struct { T value; };\n" in
   let use = "struct s { box(int) b; };\n" in
   compares "the text that a layout typedef digests"
     (layout_lines (box ^ use))
-    (Layout.typedef name
-       ~definition:"type box ( T ) = struct { T value ; } ; \n");
+    (digesting name
+       "type box ( T ) = struct { T value ; } ; \n");
   compares "a definition spelt with other white space"
     (layout_lines ("type box(T)=struct{T\tvalue;\n\n};\n" ^ use))
     (layout_lines (box ^ use));
@@ -337,14 +350,14 @@ let layout_typedefs () =
     (layout_lines
        "type lst(T);\nstruct s { lst(int) *p; };\n\
         type lst(T) = | No | Cons(T h, lst(T) *t);\n")
-    (Layout.typedef (of_int "lst")
-       ~definition:"type lst ( T ) = | No | Cons ( T h , lst ( T ) * t ) ; \n");
+    (digesting (of_int "lst")
+       "type lst ( T ) = | No | Cons ( T h , lst ( T ) * t ) ; \n");
   compares "a function instance has one"
     (layout_lines
        "generic(T) T twice(T v) { return v; }\n\
         static inline int four(void) { return twice(2); }\n")
-    (Layout.typedef (of_int "twice")
-       ~definition:"generic ( T ) T twice ( T v ) { return v ; } \n");
+    (digesting (of_int "twice")
+       "generic ( T ) T twice ( T v ) { return v ; } \n");
   compares "no layout typedef in a unit"
     (string_of_bool
        (List.exists
@@ -352,58 +365,80 @@ let layout_typedefs () =
           (String.split_on_char '\n' (emitted (box ^ use)))))
     "false"
 
-(* Design 9.3: the text that a layout typedef digests holds after its
-   generic's definition that of each generic which the definition
-   applies, transitively, once each, in the order in which their
-   applications first stand; a generic declared alone among them adds
-   its declaration. Each source declares one instance of an incomplete argument,
-   so that the header declares it alone and names no other. *)
+(* Design 9.3: the digest of a generic is that of its component in the
+   graph of the applications in the generics' definitions: the
+   definitions of the generics that apply each other, then the digests
+   of the components that they apply. Each source declares one instance
+   of an incomplete argument, so that the header declares it alone and
+   names no other. *)
 let transitive_layouts () =
   let of_op generic = instance_of generic [ "T2op" ] in
   let declare generic =
     "struct op;\nstruct s { " ^ generic ^ "(struct op) *p; };\n"
   in
-  compares "the generics that a definition applies, in their order"
+  let a = "type a ( T ) = struct { T x ; } ; \n" in
+  let b = "type b ( T ) = struct { T y ; } ; \n" in
+  compares "the components that a definition applies, each once"
     (layout_lines
        ("type a(T) = struct { T x; };\n\
          type b(T) = struct { T y; };\n\
          type outer(T) = struct { b(T) j; a(T) i; b(T) k; };\n"
        ^ declare "outer"))
-    (Layout.typedef (of_op "outer")
-       ~definition:
-         "type outer ( T ) = struct { b ( T ) j ; a ( T ) i ; b ( T ) k ; } \
-          ; \ntype b ( T ) = struct { T y ; } ; \n\
-          type a ( T ) = struct { T x ; } ; \n");
+    (digesting (of_op "outer")
+       (component
+          [ "type outer ( T ) = struct { b ( T ) j ; a ( T ) i ; b ( T ) k \
+             ; } ; \n" ]
+          ~applied:[ Layout.digest a; Layout.digest b ]));
   compares "a generic that applies itself through a pointer"
     (layout_lines
        ("type list(T) = struct { T h; list(T) *t; };\n" ^ declare "list"))
-    (Layout.typedef (of_op "list")
-       ~definition:"type list ( T ) = struct { T h ; list ( T ) * t ; } ; \n");
-  let tree = "type tree ( T ) = struct { node ( T ) * root ; } ; \n" in
+    (digesting (of_op "list")
+       "type list ( T ) = struct { T h ; list ( T ) * t ; } ; \n");
+  let box = "type box ( T ) = struct { T v ; } ; \n" in
+  let tree = "type tree ( T ) = | Root ( node ( T ) * r ) ; \n" in
   let node =
-    "type node ( T ) = | Leaf ( T v ) | Branch ( tree ( T ) * t ) ; \n"
+    "type node ( T ) = | Leaf ( box ( T ) * v ) | Branch ( tree ( T ) * t \
+     ) ; \n"
   in
-  compares "two generics that apply each other"
-    (layout_lines
-       ("type node(T);\ntype tree(T) = struct { node(T) *root; };\n\
-         type node(T) = | Leaf(T v) | Branch(tree(T) *t);\n"
-       ^ declare "tree"))
+  let cycle = component [ tree; node ] ~applied:[ Layout.digest box ] in
+  let node_first =
+    layout_lines
+      ("type box(T) = struct { T v; };\n\
+        type node(T);\ntype tree(T) = | Root(node(T) *r);\n\
+        type node(T) = | Leaf(box(T) *v) | Branch(tree(T) *t);\n"
+      ^ declare "tree")
+  in
+  compares "two generics that apply each other are one component"
+    node_first
     (String.concat " "
-       [ Layout.typedef (of_op "node") ~definition:(node ^ tree);
-         Layout.typedef (of_op "tree") ~definition:(tree ^ node) ]);
-  compares "a generic that two applied generics apply, once"
+       [ digesting (of_op "node") cycle; digesting (of_op "tree") cycle ]);
+  compares "a component whatever the order of its definitions"
+    (layout_lines
+       ("type box(T) = struct { T v; };\n\
+         type tree(T);\n\
+         type node(T) = | Leaf(box(T) *v) | Branch(tree(T) *t);\n\
+         type tree(T) = | Root(node(T) *r);\n"
+       ^ declare "tree"))
+    node_first;
+  let base = Layout.digest "type base ( T ) = struct { T v ; } ; \n" in
+  let side name =
+    Layout.digest
+      (component
+         [ "type " ^ name ^ " ( T ) = struct { base ( T ) b ; } ; \n" ]
+         ~applied:[ base ])
+  in
+  compares "a generic that two applied generics apply"
     (layout_lines
        ("type base(T) = struct { T v; };\n\
          type left(T) = struct { base(T) b; };\n\
          type right(T) = struct { base(T) b; };\n\
          type top(T) = struct { left(T) l; right(T) r; };\n"
        ^ declare "top"))
-    (Layout.typedef (of_op "top")
-       ~definition:
-         "type top ( T ) = struct { left ( T ) l ; right ( T ) r ; } ; \n\
-          type left ( T ) = struct { base ( T ) b ; } ; \n\
-          type base ( T ) = struct { T v ; } ; \n\
-          type right ( T ) = struct { base ( T ) b ; } ; \n");
+    (digesting (of_op "top")
+       (component
+          [ "type top ( T ) = struct { left ( T ) l ; right ( T ) r ; } ; \n"
+          ]
+          ~applied:[ side "left"; side "right" ]));
   compares "an applied generic declared alone leaves none"
     (layout_lines
        ("type node(T);\ntype tree(T) = struct { node(T) *root; };\n"
@@ -418,20 +453,78 @@ let transitive_layouts () =
        ("type len(T);\ntype vec(T) = struct { T *data; int len; };\n\
          generic(T) int size(T *p) { return 0; }\n"
        ^ declare "vec"))
-    (Layout.typedef (of_op "vec")
-       ~definition:"type vec ( T ) = struct { T * data ; int len ; } ; \n");
+    (digesting (of_op "vec")
+       "type vec ( T ) = struct { T * data ; int len ; } ; \n");
+  let same = "generic ( T ) T same ( T v ) { return v ; } \n" in
   compares "the generic functions that a generic function calls"
     (layout_lines
        "generic(T) T same(T v) { return v; }\n\
         generic(T) T twice(T v) { return same(v); }\n\
         static inline int four(void) { return twice(2); }\n")
     (String.concat " "
-       [ Layout.typedef (instance_of "same" [ "i" ])
-           ~definition:"generic ( T ) T same ( T v ) { return v ; } \n";
-         Layout.typedef (instance_of "twice" [ "i" ])
-           ~definition:
-             "generic ( T ) T twice ( T v ) { return same ( v ) ; } \n\
-              generic ( T ) T same ( T v ) { return v ; } \n" ])
+       [ digesting (instance_of "same" [ "i" ]) same;
+         digesting (instance_of "twice" [ "i" ])
+           (component
+              [ "generic ( T ) T twice ( T v ) { return same ( v ) ; } \n" ]
+              ~applied:[ Layout.digest same ]) ])
+
+(* A chain of generics g0 to g[length], each holding a pointer to an
+   instance of the next, defined from the last, and the declaration of
+   a structure for each of [holders], a pointer member of which applies
+   g0 to a type argument of its own, so that each holder applies an
+   instance over the whole chain. *)
+let chain ~length ~holders =
+  let link index =
+    Printf.sprintf "type g%d(T) = struct { g%d(T) *next; };\n" index
+      (index + 1)
+  in
+  let holder index =
+    Printf.sprintf "struct t%d;\nstruct s%d { g0(struct t%d) *p; };\n" index
+      index index
+  in
+  Printf.sprintf "type g%d(T) = struct { T v; };\n" length
+  ^ String.concat "" (List.rev (List.init length link))
+  ^ String.concat "" (List.init holders holder)
+
+(* A chain of [length] generics as [chain] has it, [fans] generics that
+   each hold a pointer to an instance of its first, and a structure for
+   each of those, a pointer member of which applies it to int, so that
+   every fan's layout rests on the one chain. *)
+let fan_in ~length ~fans =
+  let fan index =
+    Printf.sprintf "type f%d(T) = struct { g0(T) *p; };\n" index
+  in
+  let holder index =
+    Printf.sprintf "struct s%d { f%d(int) *p; };\n" index index
+  in
+  chain ~length ~holders:0
+  ^ String.concat "" (List.init fans fan)
+  ^ String.concat "" (List.init fans holder)
+
+(* Design 9.3: a header spells and digests each generic's definition
+   once, however many instances apply it or the generics that apply it,
+   so the work of a header grows with the generics and the instances,
+   not with their product. *)
+let layout_work () =
+  grows_linearly "the layout typedefs of instances over a chain" ~small:100
+    (fun count -> ignore (header_text (chain ~length:count ~holders:count)));
+  grows_linearly "the layout typedefs of generics over one chain" ~small:100
+    (fun count -> ignore (header_text (fan_in ~length:count ~fans:count)))
+
+(* Design 13.7: no depth bound limits a chain of generics, a run of
+   declarations, so the walk of the application graph keeps its own
+   stack. The stack is the one test_deep_trees gives the stages after
+   the parser; a walk that recursed for each link overflowed it. *)
+let layout_depth () =
+  let source = chain ~length:40_000 ~holders:1 in
+  let outcome =
+    match
+      Small_stack.run_within (256 * 1024) (fun () -> header_text source)
+    with
+    | _ -> "written"
+    | exception Stack_overflow -> "overflowed the stack"
+  in
+  compares "the layout typedefs of a long chain" outcome "written"
 
 (* The words of [text] from the first [first] to the [last] after it,
    inclusive; empty where either is missing. *)
@@ -1055,6 +1148,8 @@ let () =
   header_guards ();
   layout_typedefs ();
   transitive_layouts ();
+  layout_work ();
+  layout_depth ();
   many_void_fields ();
   void_fields ();
   many_tries ();

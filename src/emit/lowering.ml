@@ -2511,19 +2511,11 @@ let edits (text : Reader.t) ~trap declarations =
    name or a tag of an included interface holds is covered too. Each is
    charged to the output limit at its latest application. *)
 let layout_typedefs output declarations =
-  let module Declarations = Typec_sema.Declarations in
-  let unit = Emitter.unit output in
-  let typedef (instance, (application : Tree.span)) =
-    let generic = Declarations.instance_generic declarations instance in
-    match Layout.definition_text declarations unit generic with
-    | None -> None
-    | Some definition ->
-        let name = Typec_sema.Encoding.instance_c_name instance in
-        let location = (tokens_of output).(application.first).location in
-        let text = Layout.typedef name ~definition in
-        Some (Emitter.generated output location text)
+  let piece ((application : Tree.span), typedef) =
+    let location = (tokens_of output).(application.first).location in
+    Emitter.generated output location typedef
   in
-  List.filter_map typedef (Declarations.applications declarations)
+  List.map piece (Layout.typedefs declarations (Emitter.unit output))
 
 let lowered_header output ~target ~header_module declarations =
   (* The edits first, so that the output limit refuses the earliest

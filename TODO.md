@@ -314,16 +314,18 @@ definition under the guard of the trap function, and under the
 dependency options the rule of the header (design 9.3). The rest of
 the package, in the order of its commits:
 
-- [Medium] `Layout.definition_text` walks the closure again for every
-  instance, so a header of M instances over a chain of N generics costs
-  N times M; memoise it per generic and charge the spelt bytes to a
-  budget as `instance_budget` does.
 - [Low] The digested tokens are the `-E` step's, so one generic that two
   headers reach through different backends or macro environments
   (`INT_MAX` spelt `2147483647` by Clang and `0x7fffffff` by GCC,
   `__FILE__` through another include path) gets two digests, and a
   client that includes both is refused. Design 9.3 states the
   assumption; a normal form of constants would lift part of it.
+- [Low] The edges of the layout digests' application graph come from
+  `Declarations.applied_generics`, which `note_application` fills with
+  `Hashtbl.replace`; unchecked is whether a trial or a forgotten
+  reading leaves an edge behind, which would give two headers that
+  read one set of definitions different digests and refuse a valid
+  client. Check the rollback and add a test either way.
 - [Medium] `Lowering.edits`, `Lowering.header_text` and
   `Lowering.header` check at run time
   that their declarations were read for their product
