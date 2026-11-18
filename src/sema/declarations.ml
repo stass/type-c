@@ -96,10 +96,15 @@ let no_placements =
    stands, as nothing later changes what the text names there. *)
 type generic = { declaration : Tree.type_declaration; inexact : bool }
 
-type product = Unit_text | Header_text
+type unit_text = Unit_text_kind
+type header_text = Header_text_kind
 
-type t = {
-  product : product;
+type _ product =
+  | Unit_text : unit_text product
+  | Header_text : header_text product
+
+type 'product t = {
+  product : 'product product;
   tags : Ctype.tags;
   items : item list;
   placements : placements;
@@ -5148,7 +5153,8 @@ let latest_state_pragmas (tokens : Token.t array) declarations =
   done;
   latest
 
-let read target ~product text (scopes : Parser.scopes) =
+let read (type for_product) target ~(product : for_product product) text
+    (scopes : Parser.scopes) =
   let tags = Ctype.create_tags () in
   let state =
     {

@@ -126,20 +126,30 @@ type function_instance = {
   anchor : Tree.anchor;
 }
 
+(** The type parameter of {!t}: the product that it was read for. Each
+    is a distinct variant, so that a match on a {!product} of one is
+    known to need no case for the other. *)
+type unit_text = Unit_text_kind
+type header_text = Header_text_kind
+
 (** What the unit is read for: a C unit, or the header of an interface
     (design 9.3), which lowering writes with the definition of each
-    instance under its guard. *)
-type product = Unit_text | Header_text
+    instance under its guard. The product is the type parameter of
+    {!t}, so declarations read for one product cannot be lowered as the
+    other. *)
+type _ product =
+  | Unit_text : unit_text product
+  | Header_text : header_text product
 
-type t
+type 'product t
 
-val product : t -> product
+val product : 'product t -> 'product product
 (** The product that {!read} was given. *)
 
-val tags : t -> Ctype.tags
-val items : t -> item list
+val tags : _ t -> Ctype.tags
+val items : _ t -> item list
 
-val placements : t -> placement list
+val placements : _ t -> placement list
 (** The texts of the instances (design 10.3), in the order in which
     they stand: a declaration where the instance is first used, and the
     definition of a structure, union or variant instance where a point
@@ -148,49 +158,49 @@ val placements : t -> placement list
     instance uses, which is its declaration, stand before it. A typedef
     instance is whole at its declaration. *)
 
-val instance_names : t -> (Tree.span * string) list
+val instance_names : _ t -> (Tree.span * string) list
 (** The name of the instance that each application of the unit's own
     text, outside the definitions of generics, lowers to (design 13.5).
     Spans may nest, as an application's arguments do. *)
 
-val function_instances : t -> function_instance list
+val function_instances : _ t -> function_instance list
 (** The instances of generic functions that the unit's own text uses,
     outside the definitions of generic functions, in the order of their
     first uses: one for each instance, however many uses name it. *)
 
 val zero_initialisers :
-  t -> Tree.function_definition -> Expressions.zero_initialiser list
+  _ t -> Tree.function_definition -> Expressions.zero_initialiser list
 (** The zero initialisers of design 7.1 rule 3 in the definition of a
     generic function, which every instance writes as lowering does
     (13.5). *)
 
-val instance_text : t -> Ctype.instance -> instance_text option
+val instance_text : _ t -> Ctype.instance -> instance_text option
 (** The definition of an instance as its reading found it, [None] for
     one whose definition no point needed. *)
 
-val entity : t -> Tree.reference -> entity option
+val entity : _ t -> Tree.reference -> entity option
 (** What a declaration that the reader has read declares, as of that
     declaration and its initialiser: a later one of the same entity may
     complete its type. [None] for one in a place that the reader does not
     read, the body of a Clang block literal. *)
 
-val tag : t -> Tree.tag_id -> tag option
+val tag : _ t -> Tree.tag_id -> tag option
 (** The tag that a tag declaration declares, [None] as for {!entity}. *)
 
-val latest_generic : t -> Tree.type_declaration -> Tree.type_declaration
+val latest_generic : _ t -> Tree.type_declaration -> Tree.type_declaration
 (** [latest_generic result generic] is the latest declaration of the
     generic type that [generic] declares: the variant that completes it
     where one does (design 3.1 rule 4), which is its definition. The
     declaration of every application is a generic's. *)
 
-val applied_generic : t -> int -> generic_definition option
+val applied_generic : _ t -> int -> generic_definition option
 (** [applied_generic result index] is the generic of the application
     whose first token is the token [index], wherever the unit's reading
     met it, a definition of a generic included: the latest declaration
     of a generic type, as {!latest_generic} gives it, or the definition
     of a generic function; [None] where no application begins. *)
 
-val applications : t -> (Ctype.instance * Tree.span) list
+val applications : _ t -> (Ctype.instance * Tree.span) list
 (** Each instance that the unit's reading applied, wherever the
     application stands: in the unit's own text, in an included file's,
     or in a definition that the reading of an instance read; a reading
@@ -198,30 +208,31 @@ val applications : t -> (Ctype.instance * Tree.span) list
     parameter. With each, its latest application, in the order of
     {!Ctype.Instances}. *)
 
-val instance_generic : t -> Ctype.instance -> generic_definition
+val instance_generic : _ t -> Ctype.instance -> generic_definition
 (** [instance_generic result instance] is the generic of an instance
     that the unit applied, as {!applied_generic} gives it. *)
 
-val type_declarations : t -> Tree.type_declaration list
+val type_declarations : _ t -> Tree.type_declaration list
 (** The type declarations that the reader has read, in source order:
     those that lowering replaces (design 13.5). *)
 
-val typed : t -> Expressions.t
+val typed : _ t -> Expressions.t
 (** The expressions of the unit's own text that the reader has typed,
     outside the definitions of generics: those whose constructs lowering
     replaces (design 13.5). *)
 
-val slice_checks : t -> (Expressions.slice_check * Expressions.slice_form) list
+val slice_checks :
+  _ t -> (Expressions.slice_check * Expressions.slice_form) list
 (** The slice indexes, [slice_sub]s and conversions typed in the unit's
     own text and in the definition of each instance that it uses, each
     with its form ({!Expressions.slice_checks}). *)
 
-val selection_sizes : t -> Selection.size list
+val selection_sizes : _ t -> Selection.size list
 (** What building the selection tree of each match and test took, in the
     unit's own text and in the definition of each instance that it uses
     ({!Expressions.selection_sizes}). *)
 
-val try_holders : t -> Expressions.try_holder list
+val try_holders : _ t -> Expressions.try_holder list
 (** The holders of a [try] typed in the unit's own text and in the
     definition of each instance that it uses
     ({!Expressions.try_holders}). *)
@@ -230,20 +241,20 @@ val instance_budget : int
 (** The instance budget of design 3.5 rule 7 in bytes: the most that
     {!instance_bytes} may reach before {!read} refuses the unit. *)
 
-val instance_bytes : t -> int
+val instance_bytes : _ t -> int
 (** The bytes that the readings for the unit's instances charged the
     instance budget (design 3.5 rule 7). *)
 
-val copy_bytes : t -> int
+val copy_bytes : _ t -> int
 (** The bytes that the copies of the unit's deferred statements charged
     the output limit in the front end (design 3.5 rule 7): the front
     end's bound on the copies, which lowering charges again. *)
 
-val longest_instance_code : t -> int
+val longest_instance_code : _ t -> int
 (** The most bytes of the code of one instance that the unit encoded,
     those of definition checks included ({!Encoding.code_length}). *)
 
-val linked : t -> string -> entity option
+val linked : _ t -> string -> entity option
 (** The object or function with linkage (6.2.2) of that name: the one
     entity that its declarations with linkage denote in any scope, as of
     the last of them. An overload, which has a symbol of its own, is not
@@ -253,30 +264,34 @@ val linked : t -> string -> entity option
     construct starts, and a message that names the clause of C11. *)
 type error = Reader.error = { location : Location.t; message : string }
 
-val expression : t -> Tree.expression -> Expressions.typed option
+val expression : _ t -> Tree.expression -> Expressions.typed option
 (** The type of an expression that the reader has typed, as
     {!Expressions.find} gives it: every expression of a parsed function
     body and every one that a declaration holds, initialisers included. *)
 
-val constant : t -> Tree.expression -> Expressions.constant option
+val constant : _ t -> Tree.expression -> Expressions.constant option
 (** The class of constant expression of an expression that the reader
     has typed; see {!Expressions.constant}. *)
 
-val selection : t -> Tree.expression -> Tree.expression Unknown.answer option
+val selection : _ t -> Tree.expression -> Tree.expression Unknown.answer option
 (** What a generic selection that the reader has typed selects; see
     {!Expressions.selection}. *)
 
-val types_compatible : t -> Tree.expression -> bool Unknown.answer option
+val types_compatible : _ t -> Tree.expression -> bool Unknown.answer option
 (** The answer of a [__builtin_types_compatible_p] that the reader has
     typed; see {!Expressions.types_compatible}. *)
 
 val read :
-  Target.t -> product:product -> Reader.t -> Parser.scopes -> (t, error) result
+  Target.t ->
+  product:'product product ->
+  Reader.t ->
+  Parser.scopes ->
+  ('product t, error) result
 (** [read target ~product text scopes] reads the unit whose external
     declarations [scopes] holds, parsed from [text], for [target], as
     [product]. *)
 
-val tag_max : t -> Exact_integer.t
+val tag_max : _ t -> Exact_integer.t
 (** The value of the hidden enumerator that ends the enumeration of
     every variant's tags in the unit, [INT_MAX] of its target, so that
     the tag has the size of [int] under either enumeration

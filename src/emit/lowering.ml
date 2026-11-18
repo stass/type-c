@@ -2275,9 +2275,9 @@ let split_type_declarations declarations =
 (* What the texts of the placements are written from: the output of the
    unit, what its reading found, and its type declarations with no type
    parameters. *)
-type instance_context = {
+type 'product instance_context = {
   output : Emitter.output;
-  declarations : Typec_sema.Declarations.t;
+  declarations : 'product Typec_sema.Declarations.t;
   named_types : (Spelling.c_name * Tree.type_declaration) list;
 }
 
@@ -2399,7 +2399,9 @@ let application_location context
 (* C lets a unit define an instance once, and a header guards each
    definition so that two headers that define one can be included
    together (design 9.3); the rest of the texts may be repeated. *)
-let definition_text context instance pieces : Emitter.bracketed_text =
+let definition_text (type for_product)
+    (context : for_product instance_context)
+    instance pieces : Emitter.bracketed_text =
   match Typec_sema.Declarations.product context.declarations with
   | Unit_text -> Unguarded pieces
   | Header_text ->
@@ -2494,15 +2496,7 @@ let all_edits output declarations =
   let context = { output; declarations; named_types } in
   instance_brackets context @ unit_edits context ~generic_types
 
-(* The product was decided when the declarations were read, so an entry
-   given those of the other product is a bug of its caller's. *)
-let check_product ~caller product declarations =
-  if Typec_sema.Declarations.product declarations <> product then
-    invalid_arg (caller ^ ": declarations read for another product")
-
 let edits (text : Reader.t) ~trap declarations =
-  check_product ~caller:"Lowering.edits" Typec_sema.Declarations.Unit_text
-    declarations;
   Emitter.limited text ~trap (fun output -> all_edits output declarations)
 
 (* A header writes the layout typedef of every instance that its step
@@ -2527,8 +2521,6 @@ let lowered_header output ~target ~header_module declarations =
 
 let header_text (text : Reader.t) ~target ~trap ~header_module declarations
     =
-  check_product ~caller:"Lowering.header_text"
-    Typec_sema.Declarations.Header_text declarations;
   Emitter.limited text ~trap (fun output ->
       lowered_header output ~target ~header_module declarations)
 
@@ -2546,8 +2538,6 @@ let read_lowered ~source text =
 (* The header is written for the output that the lowered text was made
    for, so its lines are charged after the lowered text, to one limit. *)
 let header (text : Reader.t) ~target ~trap ~source ~name declarations =
-  check_product ~caller:"Lowering.header" Typec_sema.Declarations.Header_text
-    declarations;
   let header_module = Header.module_name name in
   let write output =
     lowered_header output ~target ~header_module declarations

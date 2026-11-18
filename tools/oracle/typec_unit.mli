@@ -19,7 +19,7 @@ type t = private {
   target : Target.t;
   text : Typec_cpp.Reader.t;
   unit : Typec_syntax.Tree.translation_unit;
-  declarations : Declarations.t;
+  declarations : Declarations.unit_text Declarations.t;
 }
 
 val read :

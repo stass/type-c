@@ -317,11 +317,6 @@ the package, in the order of its commits:
   reading leaves an edge behind, which would give two headers that
   read one set of definitions different digests and refuse a valid
   client. Check the rollback and add a test either way.
-- [Medium] `Lowering.edits`, `Lowering.header_text` and
-  `Lowering.header` check at run time
-  that their declarations were read for their product
-  (`Declarations.product`); a phantom parameter of `Declarations.t`
-  would make the mismatch fail to compile.
 - [Low] `Reader.read_interface` passes over, unchecked, a token or an
   include line at the bottom of the main file before the text of the
   interface begins (before the marker of its line 1). No supported

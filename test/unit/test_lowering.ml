@@ -17,7 +17,7 @@ let lp64 = Canned_targets.target Canned_targets.lp64_macros
 
 (* The text that [source] is read to, its tree and its declarations, read
    for [product]. *)
-let read ?(product = Declarations.Unit_text) source =
+let read ~product source =
   let text =
     let preprocessed = Preprocessed.text ~name:"in.tc" source in
     match Reader.read ~name:"in.tc" preprocessed with
@@ -37,7 +37,7 @@ let read ?(product = Declarations.Unit_text) source =
 
 (* The text that [source] is read to, its tree and its edits. *)
 let lowered source =
-  let text, unit, declarations = read source in
+  let text, unit, declarations = read ~product:Unit_text source in
   match Lowering.edits text ~trap:Trap.builtin declarations with
   | Ok (edits, _) -> (text, unit, edits)
   | Error error -> failwith (Reader.error_message error)
@@ -878,7 +878,7 @@ let goto_defers () =
    Declarations checks them, by its kind and its tokens, or the line of
    its [}]. *)
 let defer_places source =
-  let text, _, declarations = read source in
+  let text, _, declarations = read ~product:Unit_text source in
   let spelled (span : Tree.span) =
     List.init (span.last - span.first + 1) (fun offset ->
         Reader.spelling text text.tokens.(span.first + offset))
@@ -982,7 +982,7 @@ let holds text part =
 (* Design 3.5 rule 7: lowering refuses [source], which the front end's
    count passes, where its C text would pass the output limit. *)
 let over_limit name source =
-  let text, _, declarations = read source in
+  let text, _, declarations = read ~product:Unit_text source in
   match
     Lowering.edits text ~trap:Trap.builtin declarations
   with
@@ -993,7 +993,7 @@ let over_limit name source =
 
 (* The partner of a source that [over_limit] refuses lowers. *)
 let under_limit name source =
-  let text, _, declarations = read source in
+  let text, _, declarations = read ~product:Unit_text source in
   match
     Lowering.edits text ~trap:Trap.builtin declarations
   with
@@ -1078,7 +1078,7 @@ let deep_patterns () =
   grows_linearly "the work to lower a deep pattern" ~small:24 (fun depth ->
       ignore (lowered (source depth)));
   let text, _, declarations =
-    read (Budget_probes.deep_pattern ~length:100_000 120)
+    read ~product:Unit_text (Budget_probes.deep_pattern ~length:100_000 120)
   in
   let before = Gc.allocated_bytes () in
   ignore

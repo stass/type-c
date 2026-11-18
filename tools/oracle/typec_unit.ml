@@ -24,7 +24,7 @@ type t = {
   target : Target.t;
   text : Reader.t;
   unit : Tree.translation_unit;
-  declarations : Declarations.t;
+  declarations : Declarations.unit_text Declarations.t;
 }
 
 let ( let* ) = Result.bind

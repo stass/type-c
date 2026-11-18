@@ -11,7 +11,7 @@
     refuses. *)
 
 val typedefs :
-  Typec_sema.Declarations.t ->
+  Typec_sema.Declarations.header_text Typec_sema.Declarations.t ->
   Typec_cpp.Reader.t ->
   (Typec_syntax.Tree.span * string) list
 (** [typedefs declarations unit] is the layout typedef of each instance

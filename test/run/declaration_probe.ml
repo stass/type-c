@@ -53,7 +53,7 @@ let print_value name (constant : Integer_constant.t) =
         (c_constant value) name
   | Opaque -> ()
 
-let print_enum_integer (result : Declarations.t) name (t : Ctype.t) =
+let print_enum_integer (result : _ Declarations.t) name (t : Ctype.t) =
   match t.shape with
   | Enum tag ->
       Option.iter

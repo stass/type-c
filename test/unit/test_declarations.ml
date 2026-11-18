@@ -2812,7 +2812,7 @@ let generic_placement () =
 (* Reads [source] as Type-C text for lp64, and gives with what it read
    the index of the external declaration that an anchor stands at: the
    number of them for the anchor after the last token. *)
-let read_type_c ?(product = Declarations.Unit_text) source =
+let read_type_c ~product source =
   let file = "in.tc" in
   let text =
     match Reader.read ~name:file (Preprocessed.text ~name:file source) with
@@ -2837,8 +2837,8 @@ let read_type_c ?(product = Declarations.Unit_text) source =
    name, whether the text is the typedefs of its arguments, with the tag
    lines before each, its declaration or its definition, and the index
    of the external declaration whose anchor it stands at. *)
-let placements ?product source =
-  let declaration_at, read = read_type_c ?product source in
+let placements ~product source =
+  let declaration_at, read = read_type_c ~product source in
   match read with
   | Error error ->
       fail_case source (Reader.error_message error);
@@ -2867,7 +2867,7 @@ let placements ?product source =
    uses: each instance name and the index of the external declaration
    that holds its first use. *)
 let function_instances source =
-  let declaration_at, read = read_type_c source in
+  let declaration_at, read = read_type_c ~product:Unit_text source in
   match read with
   | Error error ->
       fail_case source (Reader.error_message error);
@@ -2910,7 +2910,8 @@ let generic_function_instances () =
 
 let placement_indexes () =
   let expect source expected =
-    if placements source <> expected then fail_case source "placements"
+    if placements ~product:Unit_text source <> expected then
+      fail_case source "placements"
   in
   let expect_header source expected =
     if placements ~product:Header_text source <> expected then

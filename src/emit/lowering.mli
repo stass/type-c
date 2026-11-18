@@ -25,7 +25,7 @@
 val edits :
   Typec_cpp.Reader.t ->
   trap:Trap.t ->
-  Typec_sema.Declarations.t ->
+  Typec_sema.Declarations.unit_text Typec_sema.Declarations.t ->
   (Emitter.edit list * int, Typec_cpp.Reader.error) result
 (** [edits text ~trap declarations] lowers the unit [text] that
     [declarations] read: its type declarations, constructor expressions,
@@ -48,7 +48,7 @@ val header_text :
   target:Typec_sema.Target.t ->
   trap:Trap.t ->
   header_module:string ->
-  Typec_sema.Declarations.t ->
+  Typec_sema.Declarations.header_text Typec_sema.Declarations.t ->
   (string * int, Typec_cpp.Reader.error) result
 (** [header_text text ~target ~trap ~header_module declarations] is
     {!edits} for the header of an interface (design 9.3), whose
@@ -57,9 +57,7 @@ val header_text :
     {!Emitter.header_text} writes from them, from which {!header} writes
     the header, for the header's module
     [header_module], with each definition of an instance under its guard
-    ({!Emitter.Guarded}), and the bytes charged. {!edits} takes the
-    declarations of a unit alone, and this function those of a header;
-    [Invalid_argument] for the other. *)
+    ({!Emitter.Guarded}), and the bytes charged. *)
 
 val header :
   Typec_cpp.Reader.t ->
@@ -67,7 +65,7 @@ val header :
   trap:Trap.t ->
   source:string ->
   name:Header.name ->
-  Typec_sema.Declarations.t ->
+  Typec_sema.Declarations.header_text Typec_sema.Declarations.t ->
   (string * int, Typec_cpp.Reader.error) result
 (** [header text ~target ~trap ~source ~name declarations] is the header
     of the interface [name] at the path [source] (design 9.3), which
@@ -76,5 +74,5 @@ val header :
     line of the header, each to the one output limit of [text] (design
     3.5 rule 7). Or the error of {!header_text}, of {!Header.write}, or
     at the first line of the header whose charge would pass the limit.
-    [Invalid_argument] for declarations read for a unit, and where the
-    lowered text does not read again, a bug of typec's. *)
+    [Invalid_argument] where the lowered text does not read again, a bug
+    of typec's. *)
