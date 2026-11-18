@@ -13,8 +13,16 @@
 # the same on both platforms; the key of
 # apt.llvm.org by fingerprint; OCaml and dune by a commit of
 # opam-repository. Their own dependencies follow Debian 13, and Clang's
-# apt.llvm.org. A pinned version that leaves the archive fails the build
+# apt.llvm.org; GCC 16's follow Debian testing. A pinned version that leaves the archive fails the build
 # until it is bumped here.
+#
+# Debian 13 stops at GCC 14, so GCC 16 comes from Debian testing (forky),
+# from which apt takes gcc-16 and the newer runtime libraries of GCC that
+# it depends on, and nothing else. The suite runs with it as
+# TYPEC_TEST_GCC=/usr/bin/gcc-16; the default GCC of the image stays
+# GCC 14, but Clang takes its crt files and libgcc from the newest GCC
+# installation, so from GCC 16, and the sanitizer runtimes of GCC 14's
+# tests are GCC 16's.
 
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
@@ -26,6 +34,20 @@ RUN apt-get update \
       csmith=2.3.0-8 libcsmith-dev=2.3.0-8 m4=1.4.19-8 \
       opam=2.3.0-1+deb13u2 \
       ca-certificates curl gpg git make patch unzip bzip2 \
+ && rm -rf /var/lib/apt/lists/*
+
+# GCC 16 from Debian testing. The C library stays on hold, so that a
+# gcc-16 that needs a newer one fails the build instead of moving the
+# host to testing's glibc. The source list is removed again, so that no
+# later install takes anything from it. Testing keeps one version of a
+# package, so the pin below goes stale and is bumped like the others.
+RUN echo "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg]" \
+      http://deb.debian.org/debian forky main \
+      > /etc/apt/sources.list.d/forky.list \
+ && apt-mark hold libc6 libc6-dev linux-libc-dev \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends -t forky gcc-16=16.2.0-4 \
+ && rm /etc/apt/sources.list.d/forky.list \
  && rm -rf /var/lib/apt/lists/*
 
 # apt checks the repository against the key, and the key is the one
