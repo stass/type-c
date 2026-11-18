@@ -422,6 +422,39 @@ goto in the same arm (4.3 rule 3).
   open.tc:6: error: the arm of 'B(i)' can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
   [1]
 
+An arm of many labels names the first eight, as a missed arm names
+constructors, and counts the others:
+
+  $ cat > many.tc <<'EOF'
+  > type op = | A | B | C | D | E | F | G | H | I | J(int j);
+  > int f(op o) {
+  >   int k = 0;
+  >   match (o) {
+  >   case A: case B: case C: case D: case E: case F: case G: case H: case I:
+  >     k = 1;
+  >   case J(_):
+  >     return 2;
+  >   }
+  >   return k;
+  > }
+  > EOF
+  $ ./golden.exe many.tc
+  many.tc:5: error: the arm of 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H' and 1 more can reach its end; control does not fall out of an arm, so end it with break, return, continue or goto [match-arm-end]
+  [1]
+  $ cat > many_shared.tc <<'EOF'
+  > type op = | A | B | C | D | E | F | G | H | I | J(int j);
+  > int f(op o) {
+  >   match (o) {
+  >   case A: case B: case C: case D: case E: case F: case G: case H: case I:
+  >   case J(j):
+  >     return 2;
+  >   }
+  > }
+  > EOF
+  $ ./golden.exe many_shared.tc
+  many_shared.tc:5: error: the labels 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H' and 2 more share an arm, so 'j' may not be bound in it; give each label its own arm [shared-arm-binding]
+  [1]
+
 A C fall-through into the next arm, and a last arm without its break,
 as a ported switch has them:
 

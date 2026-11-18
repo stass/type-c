@@ -119,6 +119,10 @@ type value =
 val max_named : int
 (** The most missing values that {!missing} names. *)
 
+val named_first : 'a list -> 'a list * int
+(** The first {!max_named} of a list that a message names, and the count
+    of the others, which it does not. *)
+
 (** What a match misses (4.2 rule 1), read from its leaves of nothing:
     nothing; constructors of the scrutinee, where the one such leaf is a
     branch of the root, below which selection reads nothing; or values,

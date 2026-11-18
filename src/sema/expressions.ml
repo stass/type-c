@@ -5810,8 +5810,8 @@ and refuse_open_arm context (arm : Tree.arm) =
          (Printf.sprintf
             "%s can reach its end; control does not fall out of an arm, so \
              end it with break, return, continue or goto"
-            (listed ~one:"the arm of" ~several:"the arm of" ~more:0
-               (quoted_labels context arm))))
+            (listed_labels context arm ~one:"the arm of"
+               ~several:"the arm of")))
 
 (* 4.1 rule 1, 4.2 rule 4: a variant, whose qualifiers are ignored, and
    complete here, so that its constructors are known. [what] names the
@@ -6341,19 +6341,22 @@ and refuse_shared_binding context arm = function
            (Printf.sprintf
               "%s share an arm, so %s may not be bound in it; give each label \
                its own arm"
-              (listed ~one:"the label" ~several:"the labels" ~more:0
-                 (quoted_labels context arm))
+              (listed_labels context arm ~one:"the label"
+                 ~several:"the labels")
               (quote identifier.node)))
   | _, Some { bindings = []; _ } | _, None -> ()
 
-(* The labels of [arm] as written, each without its [case] and colon. *)
-and quoted_labels context (arm : Tree.arm) =
-  List.map
-    (fun (label : Tree.arm_label) ->
-      match label.node with
-      | Pattern_label pattern -> quote (excerpt context pattern.span)
-      | Default_arm_label -> quote "default")
-    arm.node.labels
+(* The labels of [arm] as written, each without its [case] and colon: as
+   many as a coverage message names constructors, and the count of the
+   others, so that an arm of many labels keeps the message short. *)
+and listed_labels context (arm : Tree.arm) ~one ~several =
+  let named, more = Selection.named_first arm.node.labels in
+  listed ~one ~several ~more (List.map (quoted_label context) named)
+
+and quoted_label context (label : Tree.arm_label) =
+  match label.node with
+  | Pattern_label pattern -> quote (excerpt context pattern.span)
+  | Default_arm_label -> quote "default"
 
 and declare_binding context (found : found_binding) =
   context.binding found.identifier found.declared found.object_type;

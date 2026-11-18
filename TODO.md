@@ -133,10 +133,14 @@ The items are ordered by how often real code meets them.
   entry (a switch, a case or enum constant, a designator index, an
   array length, a scrutinee) say "this operation"; each could name its
   role, as an index does.
-- [Medium] The refusals of a shared arm and of a reachable arm end list
-  every label of the arm (`listed ~more:0`), so an arm of many labels
-  makes a long message; bound them as `Selection.max_named` bounds the
-  constructors of a coverage message.
+- [Medium] `Expressions.listed` names every entry it is given, so the
+  bound on a message's list (`Selection.max_named`, through
+  `Selection.named_first`) holds only where each caller cuts the list
+  first. Make an uncut list impossible to pass (an abstract pair that
+  only `named_first` builds), and move the cap, whose comment speaks of
+  coverage alone, next to `Shown.cut` as a bound on message text. The
+  shared-arm refusal may leave out the label that binds when it is past
+  the eighth; name that one first.
 - [Low] A typed binding of a field that is no variant: `case
   Circle(double r)`, written as C declares, gives "expected a
   sub-pattern, found `double`". Proposed: "a field of type 'double' is
